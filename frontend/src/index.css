@@ -8564,41 +8564,17 @@ details[open] > .ew-department-tree-summary::before {
 .ew-list-edit-bar .list-edit-bar,
 .ew-list-edit-bar > :first-child:not(button) { flex: 1 1 auto; }
 
-/* Sprint 157 §2 — the worker/manager choice. Two options with their
-   meanings written out, not two bare words: which of the pair you want
-   is not inferable from the labels alone. */
-.assign-role-choice {
+/* Sprint 159 §2 — both roles at once, side by side. The Sprint 157
+   role TOGGLE is gone with the rules that styled it: choosing between
+   the two was never the operator's question, staffing the job was. Each
+   column keeps its own scroll so a company with sixty staff does not
+   make the dialog taller than the screen. */
+.assign-people-columns {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 4px;
 }
-.assign-role-option {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  color: var(--text);
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.assign-role-option:hover { border-color: var(--green-2); }
-.assign-role-option-active {
-  border-color: var(--green);
-  background: var(--green-faint);
-}
-.assign-role-label {
-  font-family: var(--f-head);
-  font-weight: 700;
-  font-size: 14px;
-}
-.assign-role-desc { font-size: 12.5px; color: var(--text-faint); }
 
 /* Sprint 157 §7 — chip groups (ROLES / ACCESS ROLES) share one
    full-width row of the filter bar, in equal columns, so they line up
@@ -8622,6 +8598,66 @@ details[open] > .ew-department-tree-summary::before {
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--text-faint);
+}
+
+/* Sprint 159 §3 — ONE status filter design for both work lists: the
+   tile IS the filter, it carries its own count, the active one is
+   visibly selected, and clearing is a control (the All tile, or the ×
+   on the active one) rather than a sentence of prose underneath. The
+   Sprint 158 chip rules below are kept only for `status-chip-*` users
+   outside the two work lists. */
+.status-tile-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.status-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 132px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--text-2);
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+.status-tile:hover { border-color: var(--green-2); color: var(--text); }
+.status-tile-active {
+  border-color: var(--green);
+  background: var(--green-faint);
+  color: var(--text);
+}
+.status-tile-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--f-head);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.status-tile-active .status-tile-label { color: var(--green); }
+.status-tile-clear {
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 800;
+}
+.status-tile-count {
+  font-family: var(--f-head);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--text);
 }
 
 /* Sprint 158 §2 — the status chips. Every status visible with its
@@ -8673,66 +8709,91 @@ details[open] > .ew-department-tree-summary::before {
   color: var(--text-faint);
 }
 
-/* Sprint 158 §5b — the GLOBAL row: seven day boxes belonging to no
-   employee, above every block. Tinted and labelled so what it does is
-   legible from where it sits. */
-.hours-week-global-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  padding: 10px 12px;
-  margin-bottom: 14px;
-  border: 1px solid var(--green-2);
-  border-radius: var(--r-md);
-  background: var(--green-faint);
+/* Sprint 159 §1 — the hours page, rebuilt. The rules for the Sprint
+   156/158 accretion (the global fill row, the per-employee fill band,
+   the selected-rows divider, the "set up week" reminder strip and the
+   per-employee blocks) are deleted with the controls they styled. */
+
+/* The four choices in the week modal, SIDE BY SIDE — the owner asked
+   for that explicitly rather than stacked down the page. Each picker
+   keeps its own scroll, so a company with 200 buildings does not make
+   the modal taller than the screen. */
+.week-entry-setup-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
 }
-.hours-week-global-label {
-  font-family: var(--f-head);
-  font-weight: 800;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-  margin-right: 4px;
+@media (max-width: 1100px) {
+  .week-entry-setup-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-.hours-week-global-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  flex-shrink: 0;
-}
-.hours-week-global-day {
-  font-size: 10.5px;
-  color: var(--text-faint);
-  text-transform: uppercase;
-}
-/* Sprint 158 §5e — a divider between the bulk controls and the
-   selected-rows controls, on the same line. */
-.hours-week-bar-sep {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border);
-  flex-shrink: 0;
-  margin: 0 2px;
+@media (max-width: 620px) {
+  .week-entry-setup-row { grid-template-columns: 1fr; }
 }
 
-/* Sprint 157 §1 — the one-line reminder of what the week is set up for,
-   sitting above the grid with the button that changes it. */
-.hours-week-setup-summary {
+/* ONE line of filters (Sprint 156 §6a's rule, applied to the page as
+   well as to the apply bar): it scrolls inside itself rather than
+   wrapping, so the body never scrolls sideways. */
+.hours-filter-line {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.hours-filter-line > * { flex-shrink: 0; }
+.hours-filter-line .field { min-width: 150px; }
+.hours-filter-reset { margin-left: auto; }
+
+/* The stat tiles. Same visual weight as the Extra Work list's KPI
+   strip, because they are the same thing: four numbers describing the
+   rows underneath. */
+.hours-tile-row {
+  display: flex;
+  align-items: stretch;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  border: 1px dashed var(--border);
-  border-radius: var(--r-md);
-  font-size: 13px;
-  color: var(--text-2);
+  margin-bottom: 14px;
 }
+.hours-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.hours-tile-label {
+  font-family: var(--f-head);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.hours-tile-value {
+  font-family: var(--f-head);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--text);
+}
+.hours-tile-export { margin-left: auto; align-self: center; }
+
+/* The inline table editor's cells: sized to the column so switching
+   Edit on does not re-flow the table it is editing. */
+.hours-inline-input {
+  height: 30px;
+  font-size: 12.5px;
+  min-width: 110px;
+}
+.hours-inline-hours { min-width: 80px; }
+
 .week-setup-summary {
   margin: 16px 0 0;
   padding: 10px 12px;
@@ -8763,26 +8824,6 @@ details[open] > .ew-department-tree-summary::before {
 .hours-week-apply-bar > * { flex-shrink: 0; }
 .hours-week-apply-bar select.field-input { max-width: 170px; }
 
-/* Sprint 156 §6d — the "all rows" band. Tinted, labelled and divided
-   from the rows below, so the two levels of entry are visibly two
-   levels rather than two rows of identical boxes. */
-.hours-week-fill-row {
-  background: var(--surface-2);
-}
-.hours-week-fill-row > td {
-  border-bottom: 2px solid var(--border);
-}
-.hours-week-fill-row .td-subject {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.hours-week-fill-row .hours-week-grid-cell {
-  border-style: dashed;
-}
-
 /* Sprint 156 §6c — the per-row hour-type / building selects on an added
    row. Sized to the cell so the grid keeps its column rhythm. */
 .hours-week-row-select {
@@ -8794,23 +8835,6 @@ details[open] > .ew-department-tree-summary::before {
   font-family: var(--f-head);
   font-weight: 700;
   font-size: 12.5px;
-}
-.hours-week-block { margin-bottom: 20px; }
-.hours-week-block-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
-}
-.hours-week-block-name {
-  font-family: var(--f-head);
-  font-weight: 700;
-  font-size: 14px;
-}
-.hours-week-block-total {
-  font-size: 12.5px;
-  color: var(--text-faint);
 }
 .hours-week-grand-total {
   font-family: var(--f-head);

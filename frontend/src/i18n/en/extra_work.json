@@ -469,21 +469,14 @@
   "list.filter_catalog_category": "Catalog category",
   "list.filter_category_group_live": "Current categories",
   "list.filter_category_group_historical": "No longer in the catalog",
-  "assign.title": "Assign people",
-  "assign.summary": "{{people}} selected people will be assigned to {{requests}} selected requests.",
   "assign.role_worker": "Worker",
-  "assign.role_worker_desc": "Does the work on site.",
   "assign.role_manager": "Manager",
-  "assign.role_manager_desc": "Looks after the request and answers for it.",
-  "assign.no_candidates": "No people available for this request's company.",
-  "assign.confirm": "Assign",
   "assign.button": "Assign people",
   "assign.card_title": "People on this request",
   "assign.card_desc": "Who is doing the work and who is looking after it.",
   "assign.empty": "Nobody is assigned yet.",
   "assign.col_role": "On this request",
   "assign.remove": "Remove",
-  "assign.removed": "Removed.",
-  "assign.assigned_one": "{{count}} assignment added.",
-  "assign.assigned_other": "{{count}} assignments added."
+  "assign.summary_requests_one": "Assigning to {{count}} selected request.",
+  "assign.summary_requests_other": "Assigning to {{count}} selected requests."
 }
