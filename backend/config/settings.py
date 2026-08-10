@@ -76,6 +76,11 @@ INSTALLED_APPS = [
     # planned_work. It records how much an employee worked, never what
     # work was performed.
     "timesheets",
+    # Sprint 160 — contracts (the recurring-revenue side). Independent
+    # in the same sense: it carries its OWN prices and never reads
+    # extra_work's CustomerServicePrice, and its invoice forecast is a
+    # pure calculation that writes nothing into invoicing.
+    "contracts",
 ]
 
 MIDDLEWARE = [

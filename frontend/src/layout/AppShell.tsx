@@ -15,6 +15,7 @@ import {
   Contact,
   FilePlus2,
   Files,
+  FileText,
   LayoutGrid,
   Mail,
   MailPlus,
@@ -746,6 +747,22 @@ export function AppShell({ children }: AppShellProps) {
                       {t("nav.hours_admin")}
                     </NavLink>
                   )}
+                  {/* Sprint 160 — contracts. The label itself
+                      navigates (the Sprint 156 rule); BUILDING_MANAGER
+                      gets its own entry below, outside this group, the
+                      way the Employees directory does. The i18n key is
+                      read from the `contracts` NAMESPACE rather than
+                      `common`, so the module owns its own strings. */}
+                  <NavLink
+                    to="/admin/contracts"
+                    className={navClass}
+                    data-testid="sidebar-contracts"
+                  >
+                    <span className="nav-icon">
+                      <FileText size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.contracts", { ns: "contracts" })}
+                  </NavLink>
                   <NavLink to="/admin/users" className={navClass}>
                     <span className="nav-icon">
                       <UserCog size={16} strokeWidth={2} />
@@ -822,6 +839,24 @@ export function AppShell({ children }: AppShellProps) {
                     <Contact size={16} strokeWidth={2} />
                   </span>
                   {t("nav.employees")}
+                </NavLink>
+              )}
+
+              {/* Sprint 160 — contracts, BM read-only entry. A BM does
+                  not see the admin group above, so the link lives here
+                  next to the Employees directory (the other BM-visible
+                  provider surface). The backend narrows them to the
+                  contracts covering their own buildings. */}
+              {isBuildingManager(me?.role) && (
+                <NavLink
+                  to="/admin/contracts"
+                  className={navClass}
+                  data-testid="sidebar-contracts-bm"
+                >
+                  <span className="nav-icon">
+                    <FileText size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.contracts", { ns: "contracts" })}
                 </NavLink>
               )}
 
