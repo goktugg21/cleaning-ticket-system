@@ -2177,5 +2177,7 @@
   "status_chips.all": "All",
   "status_chips.filtered_notice": "Showing {{shown}} of {{total}} — filtered to {{status}}.",
   "status_chips.show_all": "Show all",
-  "status_chips.filtered_notice_simple": "Filtered to {{status}}."
+  "status_chips.filtered_notice_simple": "Filtered to {{status}}.",
+  "users.provider_roles_label": "Provider roles",
+  "users.customer_roles_label": "Customer roles"
 }

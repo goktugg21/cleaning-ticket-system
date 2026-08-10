@@ -111,6 +111,27 @@ export function UsersAdminPage() {
     [isSuperAdmin],
   );
 
+  // Sprint 158 §3 — split by SIDE, not by concept.
+  //
+  // The two rows were labelled ROLES and ACCESS ROLES, and "Customer
+  // user" appeared in BOTH — once as the account role and once as the
+  // access role — which reads as a duplicate rather than as two
+  // different things. The owner's grouping is better: everything on the
+  // provider's side in one group, everything on the customer's side in
+  // the other, and the customer-side account role sits with the access
+  // roles it belongs with.
+  //
+  // Both groups stay fully visible. Sprint 157 §7 and `## NEXT` item 19
+  // rule out collapsing them.
+  const providerRoles = useMemo(
+    () => availableRoles.filter((role) => role !== "CUSTOMER_USER"),
+    [availableRoles],
+  );
+  const customerRoles = useMemo(
+    () => availableRoles.filter((role) => role === "CUSTOMER_USER"),
+    [availableRoles],
+  );
+
   useEffect(() => {
     const handle = window.setTimeout(() => {
       setSearchActive(searchInput.trim());
@@ -335,9 +356,9 @@ export function UsersAdminPage() {
               filter. */}
           <div className="filter-chip-groups">
                     <div className="filter-field">
-            <span className="filter-label">{t("users.roles_label")}</span>
+            <span className="filter-label">{t("users.provider_roles_label")}</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {availableRoles.map((role) => {
+              {providerRoles.map((role) => {
                 const active = roleFilter.includes(role);
                 return (
                   <button
@@ -356,9 +377,27 @@ export function UsersAdminPage() {
           </div>
                     <div className="filter-field">
             <span className="filter-label">
-              {t("users.access_roles_label")}
+              {t("users.customer_roles_label")}
             </span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {/* The customer-side ACCOUNT role first, then the three
+                  access roles. Same group, because they are the same
+                  side — which is the whole point of the regrouping. */}
+              {customerRoles.map((role) => {
+                const active = roleFilter.includes(role);
+                return (
+                  <button
+                    key={role}
+                    type="button"
+                    className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
+                    onClick={() => toggleRole(role)}
+                    aria-pressed={active}
+                    data-role={role}
+                  >
+                    {t(roleLabelKey(role))}
+                  </button>
+                );
+              })}
               {ACCESS_ROLE_OPTIONS.map((role) => {
                 const active = accessRoleFilter === role;
                 return (

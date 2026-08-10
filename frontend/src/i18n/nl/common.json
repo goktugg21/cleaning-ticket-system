@@ -2177,5 +2177,7 @@
   "status_chips.all": "Alle",
   "status_chips.filtered_notice": "{{shown}} van {{total}} getoond — gefilterd op {{status}}.",
   "status_chips.show_all": "Alles tonen",
-  "status_chips.filtered_notice_simple": "Gefilterd op {{status}}."
+  "status_chips.filtered_notice_simple": "Gefilterd op {{status}}.",
+  "users.provider_roles_label": "Rollen aanbieder",
+  "users.customer_roles_label": "Rollen klant"
 }
