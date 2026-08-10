@@ -30,10 +30,24 @@ write surface:
 
 4. **One `transaction.atomic()`** around every pair.
 
+Sprint 158 §1 — WHO may be assigned is now derived from the request's
+BUILDING, not its company, and differs per role:
+
+    GET /api/extra-work/<id>/assignable/?role=WORKER|MANAGER
+
+Sprint 157 used one set `{STAFF, BUILDING_MANAGER, COMPANY_ADMIN}` for
+both roles, so a field worker could be made the MANAGER of a request.
+The rule now lives in `buildings.assignment_eligibility`, and the picker
+READ and the write VALIDATOR both go through it — so "who is offerable"
+equals "who is acceptable" by construction rather than by two lists
+being kept in step (Sprint 152.1 §1a).
+
 Nothing here imports from `tickets`. `TicketStaffAssignment` is the
 model this one is shaped after, but extra work and tickets are separate
 modules and coupling them would make an extra-work change depend on the
-ticket state machine.
+ticket state machine. The shared eligibility helper lives in
+`buildings/` for the same reason — it is a BUILDING rule, and both
+modules already depend on that app.
 """
 from __future__ import annotations
 
@@ -42,10 +56,15 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import User, UserRole
+from django.shortcuts import get_object_or_404
+
+from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
-from accounts.scoping import manageable_user_ids_for
 from audit import context as audit_context
+from buildings.assignment_eligibility import (
+    eligible_users_for_building,
+    resolve_assignable_users,
+)
 
 from .models import ExtraWorkAssignment, ExtraWorkAssignmentRole
 from .scoping import scope_extra_work_for
@@ -60,15 +79,6 @@ _BULK_ASSIGN_INVALID_MESSAGE = (
     "resolved, or cannot be assigned to each other. Nothing was changed."
 )
 
-# The two provider-side roles that can do the work. A COMPANY_ADMIN can
-# be a MANAGER on a request; a SUPER_ADMIN is not a provider employee and
-# is deliberately not assignable, exactly as they cannot have timesheet
-# hours of their own.
-_ASSIGNABLE_ROLES = frozenset(
-    {UserRole.STAFF, UserRole.BUILDING_MANAGER, UserRole.COMPANY_ADMIN}
-)
-
-
 def _reject():
     raise serializers.ValidationError(
         {
@@ -79,54 +89,6 @@ def _reject():
             ]
         }
     )
-
-
-def assignable_users_for(actor, ids):
-    """The people `actor` may put on a request, keyed by id.
-
-    An id missing from the returned mapping is rejected, whatever the
-    reason — out of scope, wrong role, deleted, inactive, or simply not
-    a real id. That collapsing is the point: the caller cannot tell the
-    reasons apart.
-
-    CUSTOMER_* roles can never appear here: the role filter admits only
-    provider-side roles, so a customer user is unassignable even to a
-    request of their own customer.
-    """
-    qs = User.objects.filter(
-        id__in=ids,
-        role__in=_ASSIGNABLE_ROLES,
-        is_active=True,
-        deleted_at__isnull=True,
-    )
-    allowed = manageable_user_ids_for(actor)
-    # `None` means unrestricted (SUPER_ADMIN). Treating it as an empty
-    # set would lock out exactly the role that can do everything — the
-    # trap Sprint 154 documented on this helper.
-    if allowed is not None:
-        qs = qs.filter(id__in=allowed)
-    return {u.id: u for u in qs}
-
-
-def user_is_in_company(user, company_id: int) -> bool:
-    """Is this person reachable within the request's provider company?
-
-    The three attachments a provider-side person can have, same union the
-    company detail page uses (Sprint 156 §1): a COMPANY_ADMIN through
-    `CompanyUserMembership`, a BUILDING_MANAGER through their building
-    assignments, a STAFF member through building visibility. Asking only
-    the membership table would report False for exactly the roles that do
-    the work.
-    """
-    if user.company_memberships.filter(company_id=company_id).exists():
-        return True
-    if user.building_assignments.filter(
-        building__company_id=company_id
-    ).exists():
-        return True
-    return user.building_visibility.filter(
-        building__company_id=company_id
-    ).exists()
 
 
 class _BulkAssignInputSerializer(serializers.Serializer):
@@ -182,20 +144,24 @@ class ExtraWorkBulkAssignView(APIView):
         if len(requests) != len(request_ids):
             _reject()
 
-        # (2) People, through the provider-employee scope.
-        users = assignable_users_for(request.user, user_ids)
-        if len(users) != len(user_ids):
-            _reject()
-
-        # (3) Every pair, before any write. A person who is not reachable
-        # within the request's company would be a cross-tenant
-        # assignment; it is rejected with the SAME body as any invalid
-        # id, and the picker never offers it in the first place.
+        # (2) People, per REQUEST, because eligibility is a property of
+        # the request's BUILDING and not of the batch. Assigning the same
+        # person to two requests at different buildings therefore
+        # requires them to be eligible at BOTH — which is the correct
+        # reading of "the authorised people at that building", and the
+        # reason this loop is not hoisted out.
+        #
+        # An id that is not eligible is rejected with the SAME body as an
+        # id that does not exist. That is not a nicety: a distinguishable
+        # answer here would let a caller enumerate who works where (H-1).
         pairs = []
         for extra_work in requests.values():
-            for user in users.values():
-                if not user_is_in_company(user, extra_work.company_id):
-                    _reject()
+            eligible = resolve_assignable_users(
+                extra_work.building, role, user_ids, request.user
+            )
+            if len(eligible) != len(user_ids):
+                _reject()
+            for user in eligible.values():
                 pairs.append((extra_work, user))
 
         try:
@@ -290,5 +256,57 @@ class ExtraWorkAssignmentListView(APIView):
         )
         return Response(
             _AssignmentRowSerializer(rows, many=True).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class ExtraWorkAssignableUsersView(APIView):
+    """GET /api/extra-work/<id>/assignments/candidates/?role=WORKER|MANAGER
+
+    The picker's source, and the SAME helper the write validator uses.
+
+    Sprint 152.1 §1a is the lesson this exists for: when the list an
+    operator picks from and the list the server accepts are computed
+    separately, they drift, and the operator gets options that always
+    fail. One helper means "offerable" and "acceptable" cannot disagree —
+    and `test_sprint158_assignment_eligibility` walks this endpoint's
+    entire output through the assign endpoint to prove it.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def get(self, request, pk: int, *args, **kwargs):
+        if request.user.role not in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }:
+            return Response(
+                {"detail": "You may not assign people to extra work."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        role = request.query_params.get("role", ExtraWorkAssignmentRole.WORKER)
+        if role not in ExtraWorkAssignmentRole.values:
+            raise serializers.ValidationError(
+                {"role": ["Unknown assignment role."]}
+            )
+        # Scoped resolution: a request the actor may not see is a 404,
+        # never a 403.
+        extra_work = get_object_or_404(
+            scope_extra_work_for(request.user), pk=pk
+        )
+        users = eligible_users_for_building(
+            extra_work.building, role, request.user
+        )
+        return Response(
+            [
+                {
+                    "id": user.id,
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "role": user.role,
+                }
+                for user in users
+            ],
             status=status.HTTP_200_OK,
         )

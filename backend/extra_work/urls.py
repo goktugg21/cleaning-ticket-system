@@ -30,6 +30,7 @@ router.register(r"", ExtraWorkRequestViewSet, basename="extra-work")
 
 
 from .views_assignments import (
+    ExtraWorkAssignableUsersView,
     ExtraWorkAssignmentListView,
     ExtraWorkBulkAssignView,
 )
@@ -56,6 +57,11 @@ urlpatterns = [
         "<int:pk>/assignments/",
         ExtraWorkAssignmentListView.as_view(),
         name="extra-work-assignments",
+    ),
+    path(
+        "<int:pk>/assignments/candidates/",
+        ExtraWorkAssignableUsersView.as_view(),
+        name="extra-work-assignment-candidates",
     ),
     path(
         "<int:ew_id>/pricing-items/",

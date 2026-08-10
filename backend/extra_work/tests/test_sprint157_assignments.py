@@ -88,10 +88,23 @@ class ExtraWorkAssignmentTestBase(TenantFixtureMixin, APITestCase):
 
 class BulkAssignHappyPathTests(ExtraWorkAssignmentTestBase):
     def test_assigns_many_people_to_many_requests(self):
+        """Sprint 158 §1 — both people must be WORKER-eligible now.
+
+        This used to pass `[staff, manager]`, which worked only because
+        Sprint 157 used one role set for both assignment roles. A
+        BUILDING_MANAGER is no longer a worker candidate; the test is
+        about N people x M requests, so it uses two real workers.
+        """
+        second_worker = self.make_user("ew-staff-2@example.com", UserRole.STAFF)
+        BuildingStaffVisibility.objects.create(
+            user=second_worker, building=self.building
+        )
         self.authenticate(self.company_admin)
         response = self.client.post(
             BULK_URL,
-            self._body([self.request_a, self.request_b], [self.staff, self.manager]),
+            self._body(
+                [self.request_a, self.request_b], [self.staff, second_worker]
+            ),
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
@@ -109,35 +122,55 @@ class BulkAssignHappyPathTests(ExtraWorkAssignmentTestBase):
         self.assertEqual(ExtraWorkAssignment.objects.count(), 1)
 
     def test_one_person_can_be_both_worker_and_manager(self):
-        """`role` is part of the unique key, deliberately."""
+        """`role` is part of the unique key, deliberately.
+
+        Sprint 158 §1 — being eligible for both roles is now something
+        you HOLD rather than something the endpoint assumes: this person
+        has staff visibility AND a manager assignment on the building.
+        That combination is legal and is exactly why `role` is in the
+        unique key.
+        """
+        both = self.make_user("ew-both@example.com", UserRole.BUILDING_MANAGER)
+        BuildingStaffVisibility.objects.create(user=both, building=self.building)
+        BuildingManagerAssignment.objects.create(
+            user=both, building=self.building
+        )
         self.authenticate(self.company_admin)
-        self.client.post(
-            BULK_URL, self._body([self.request_a], [self.manager], "WORKER"),
+        first = self.client.post(
+            BULK_URL, self._body([self.request_a], [both], "WORKER"),
             format="json",
         )
+        self.assertEqual(first.status_code, status.HTTP_200_OK, first.data)
         response = self.client.post(
-            BULK_URL, self._body([self.request_a], [self.manager], "MANAGER"),
+            BULK_URL, self._body([self.request_a], [both], "MANAGER"),
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertEqual(
-            ExtraWorkAssignment.objects.filter(user=self.manager).count(), 2
+            ExtraWorkAssignment.objects.filter(user=both).count(), 2
         )
 
     def test_unassign_removes_only_that_role(self):
+        """Sprint 158 §1 — needs somebody eligible for BOTH roles, for
+        the same reason as the test above."""
+        both = self.make_user("ew-both2@example.com", UserRole.BUILDING_MANAGER)
+        BuildingStaffVisibility.objects.create(user=both, building=self.building)
+        BuildingManagerAssignment.objects.create(
+            user=both, building=self.building
+        )
         self.authenticate(self.company_admin)
         for role in ("WORKER", "MANAGER"):
             self.client.post(
-                BULK_URL, self._body([self.request_a], [self.manager], role),
+                BULK_URL, self._body([self.request_a], [both], role),
                 format="json",
             )
         response = self.client.post(
             BULK_URL,
-            self._body([self.request_a], [self.manager], "WORKER", "unassign"),
+            self._body([self.request_a], [both], "WORKER", "unassign"),
             format="json",
         )
         self.assertEqual(response.data["removed"], 1)
-        remaining = ExtraWorkAssignment.objects.filter(user=self.manager)
+        remaining = ExtraWorkAssignment.objects.filter(user=both)
         self.assertEqual([a.role for a in remaining], ["MANAGER"])
 
     def test_unassigning_a_pair_that_is_not_assigned_is_counted(self):

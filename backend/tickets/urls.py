@@ -37,7 +37,25 @@ staff_request_router.register(
     basename="staff-assignment-request",
 )
 
+from .views_bulk_assign import (
+    TicketAssignableUsersView,
+    TicketBulkAssignView,
+)
+
 urlpatterns = [
+    # Sprint 158 §1 — bulk assign, and the picker's candidate read.
+    # Before the router for the same reason `my-slots/` is: the router's
+    # `<pk>` detail pattern would otherwise swallow the literal.
+    path(
+        "bulk-assign/",
+        TicketBulkAssignView.as_view(),
+        name="ticket-bulk-assign",
+    ),
+    path(
+        "<int:pk>/assignments/candidates/",
+        TicketAssignableUsersView.as_view(),
+        name="ticket-assignment-candidates",
+    ),
     # Sprint 14E — STAFF agenda of their own dated assignment slots.
     # Listed before the router so the `my-slots` literal is not eaten by
     # the router's `<pk>` detail pattern.
