@@ -233,6 +233,35 @@ export function canManageTimesheets(role: Role | null | undefined): boolean {
   return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
 }
 
+// Sprint 160 — the contracts module. Two predicates, mirroring the
+// backend's two permission classes (`contracts.permissions`).
+//
+// READ admits BUILDING_MANAGER, unlike the hours module: a BM manages
+// buildings and needs to see what is contracted at them. The backend
+// additionally narrows a BM to the contracts covering THEIR buildings
+// (`contracts.scope.filter_contracts_for`), which no frontend predicate
+// can express — this one only decides whether the route is reachable.
+//
+// STAFF is admitted by neither. A contract carries the customer's
+// negotiated prices, and unlike hours there is no "your own" subset
+// that would make sense to show a field worker.
+//
+// `isProviderAdmin` is deliberately not reused for the manage
+// predicate, for the reason `canManageTimesheets` gives: a future
+// widening of THAT predicate must not silently hand anyone the power to
+// rewrite commercial terms.
+export function canAccessContracts(role: Role | null | undefined): boolean {
+  return (
+    role === "SUPER_ADMIN" ||
+    role === "COMPANY_ADMIN" ||
+    role === "BUILDING_MANAGER"
+  );
+}
+
+export function canManageContracts(role: Role | null | undefined): boolean {
+  return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
+}
+
 // `/agenda` (My Work) — role-adaptive since Sprint 111. Shown to STAFF and
 // BUILDING_MANAGER ONLY; HIDDEN for SUPER_ADMIN + COMPANY_ADMIN (owner
 // decision) and for CUSTOMER_USER. The surface adapts per role:

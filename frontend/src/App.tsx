@@ -76,6 +76,11 @@ import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPag
 import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
 import { HoursAdminPage } from "./pages/admin/HoursAdminPage";
+// Sprint 160 — contracts. Eagerly imported like the other admin
+// pages; the module is small and the route is behind its own guard.
+import { ContractsAdminPage } from "./pages/admin/contracts/ContractsAdminPage";
+import { ContractDetailPage } from "./pages/admin/contracts/ContractDetailPage";
+import { ContractsRoute } from "./components/ContractsRoute";
 import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserDetailPage } from "./pages/admin/UserDetailPage";
@@ -749,6 +754,27 @@ export default function App() {
               <TimesheetsRoute manager>
                 <HoursAdminPage />
               </TimesheetsRoute>
+            }
+          />
+          {/* Sprint 160 — contracts. Its own guard rather than
+              AdminRoute: BUILDING_MANAGER is a READER here (narrowed
+              server-side to the contracts covering their buildings) and
+              AdminRoute would lock them out, while widening AdminRoute
+              would hand them the whole admin group. */}
+          <Route
+            path="/admin/contracts"
+            element={
+              <ContractsRoute>
+                <ContractsAdminPage />
+              </ContractsRoute>
+            }
+          />
+          <Route
+            path="/admin/contracts/:contractId"
+            element={
+              <ContractsRoute>
+                <ContractDetailPage />
+              </ContractsRoute>
             }
           />
           <Route
