@@ -32,7 +32,7 @@ import type {
 import { BoundedList } from "../BoundedList";
 import { EditModeToggle } from "../EditModeToggle";
 import { useEditMode } from "../../lib/useEditMode";
-import { AssignPeopleDialog } from "./AssignPeopleDialog";
+import { AssignPeopleDialog } from "../AssignPeopleDialog";
 
 export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }) {
   const { t } = useTranslation(["extra_work", "common"]);
@@ -42,8 +42,6 @@ export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }
   const [candidates, setCandidates] = useState<
     Partial<Record<ExtraWorkAssignmentRole, AssignmentCandidate[]>>
   >({});
-  const [pickerRole, setPickerRole] =
-    useState<ExtraWorkAssignmentRole>("WORKER");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -94,9 +92,14 @@ export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }
   async function openAdd() {
     setError("");
     setAddOpen(true);
-    await loadCandidates(pickerRole);
+    // Sprint 159 §2 — BOTH lists, because the dialog offers both roles
+    // at once and one confirm assigns them together.
+    await Promise.all([loadCandidates("WORKER"), loadCandidates("MANAGER")]);
   }
 
+  /** The per-row remove. Still the single-role shape: removing one
+   *  person from one role is exactly what it says, and the endpoint
+   *  still speaks it. */
   async function runAssign(
     userIds: number[],
     role: ExtraWorkAssignmentRole,
@@ -120,15 +123,43 @@ export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }
     }
   }
 
-  // Already-assigned people are not offered again. The server would
-  // count a repeat as `already_assigned` rather than failing, so this is
-  // tidiness rather than correctness — but an option that provably does
-  // nothing should not be in the list.
+  /** Sprint 159 §2 — one confirm, one request, both roles. */
+  async function runBothRoles(managerIds: number[], workerIds: number[]) {
+    setBusy(true);
+    setError("");
+    try {
+      await bulkAssignExtraWork({
+        requests: [extraWorkId],
+        managers: managerIds,
+        workers: workerIds,
+        mode: "assign",
+      });
+      setAddOpen(false);
+      reload();
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Already-assigned people are not offered again — per ROLE, because
-  // the same person may legitimately be a worker and a manager.
-  const assignedIdsForRole = new Set(
-    rows.filter((r) => r.role === pickerRole).map((r) => r.user_id),
-  );
+  // the same person may legitimately be a worker AND a manager. The
+  // server would count a repeat as `already_assigned` rather than
+  // failing, so this is tidiness rather than correctness — but an option
+  // that provably does nothing should not be in the list.
+  const offerable = (role: ExtraWorkAssignmentRole) => {
+    const taken = new Set(
+      rows.filter((r) => r.role === role).map((r) => r.user_id),
+    );
+    return (candidates[role] ?? [])
+      .filter((person) => !taken.has(person.id))
+      .map((person) => ({
+        id: person.id,
+        label: person.full_name || person.email,
+        sublabel: person.email,
+      }));
+  };
 
   return (
     <section
@@ -240,23 +271,13 @@ export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }
 
       {addOpen && (
         <AssignPeopleDialog
-          requestCount={1}
-          candidates={(candidates[pickerRole] ?? [])
-            .filter((person) => !assignedIdsForRole.has(person.id))
-            .map((person) => ({
-              id: person.id,
-              label: person.full_name || person.email,
-              sublabel: person.email,
-            }))}
-          role={pickerRole}
-          onRoleChange={(role) => {
-            setPickerRole(role);
-            void loadCandidates(role);
-          }}
+          summary={t("assign.summary_requests", { count: 1 })}
+          managerCandidates={offerable("MANAGER")}
+          workerCandidates={offerable("WORKER")}
           busy={busy}
           error={error}
           onCancel={() => setAddOpen(false)}
-          onConfirm={(userIds, role) => runAssign(userIds, role, "assign")}
+          onConfirm={runBothRoles}
         />
       )}
     </section>

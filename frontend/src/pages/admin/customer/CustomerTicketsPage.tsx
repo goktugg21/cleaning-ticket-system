@@ -10,6 +10,8 @@ import type { CustomerAdmin, TicketList } from "../../../api/types";
 import { ClickableRow } from "../../../components/ClickableRow";
 import { EmptyState } from "../../../components/EmptyState";
 import { StatusBadge } from "../../../components/StatusBadge";
+import { StatusTiles } from "../../../components/StatusTiles";
+import { ticketStatusLabelKey } from "../../../lib/enumLabels";
 import { formatDate } from "../../../lib/intl";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
@@ -53,6 +55,19 @@ const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
 
 type TicketChip = "all" | "tickets" | "meldingen";
 
+/** Sprint 159 §3 — the same statuses the standalone tickets list
+ *  filters by, in the same order, so the two surfaces agree on what a
+ *  status row looks like. */
+const STATUS_OPTIONS = [
+  "OPEN",
+  "IN_PROGRESS",
+  "WAITING_MANAGER_REVIEW",
+  "WAITING_CUSTOMER_APPROVAL",
+  "APPROVED",
+  "REJECTED",
+  "CLOSED",
+] as const;
+
 export function CustomerTicketsPage() {
   const { id } = useParams();
   const { t } = useTranslation(["common", "create_ticket"]);
@@ -84,6 +99,15 @@ export function CustomerTicketsPage() {
   // react-hooks/set-state-in-effect).
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Sprint 159 §3 — the status filter, the SAME tile control the
+  // standalone lists use.
+  //
+  // It opens on "All" rather than on the un-actioned status, unlike
+  // those lists, and that is deliberate: this page is one customer's
+  // history, opened to answer "what has happened here", not a work
+  // queue opened to answer "what needs me". A silent default would hide
+  // most of a customer's rows behind a filter nobody asked for.
+  const [statusFilter, setStatusFilter] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +156,18 @@ export function CustomerTicketsPage() {
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
 
+  // Real counts: this page holds the FULL matching set (the endpoint is
+  // unpaginated for this filter), so a tile can carry a number that is
+  // true rather than one that describes a page.
+  const statusCounts = rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.status] = (acc[row.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const visibleRows =
+    statusFilter === ""
+      ? rows
+      : rows.filter((row) => row.status === statusFilter);
+
   return (
     <div data-testid="customer-tickets-page">
       <CustomerSubPageHeader customerName={customerName} isActive={isActive} />
@@ -172,7 +208,19 @@ export function CustomerTicketsPage() {
             ))}
           </div>
 
-          {rows.length === 0 ? (
+          <StatusTiles
+            tiles={STATUS_OPTIONS.map((value) => ({
+              value,
+              label: t(ticketStatusLabelKey(value)),
+              count: statusCounts[value] ?? 0,
+            }))}
+            active={statusFilter}
+            onChange={setStatusFilter}
+            totalCount={rows.length}
+            testIdPrefix="customer-tickets-status"
+          />
+
+          {visibleRows.length === 0 ? (
             <EmptyState
               icon={chip === "meldingen" ? Megaphone : Ticket}
               title={t(`customer_view.${v}.empty_title`)}
@@ -192,7 +240,7 @@ export function CustomerTicketsPage() {
                   </div>
                   <div className="section-head-sub">
                     {t(`customer_view.${v}.list_subtitle`, {
-                      count: rows.length,
+                      count: visibleRows.length,
                     })}
                   </div>
                 </div>
@@ -210,7 +258,7 @@ export function CustomerTicketsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
+                    {visibleRows.map((row) => (
                       <ClickableRow
                         key={row.id}
                         to={`/tickets/${row.id}`}

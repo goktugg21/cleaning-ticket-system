@@ -15,6 +15,8 @@ import { ClickableRow } from "../../../components/ClickableRow";
 import { EmptyState } from "../../../components/EmptyState";
 import { RouteBadge } from "../../../components/RouteBadge";
 import { StatusBadge } from "../../../components/StatusBadge";
+import { StatusTiles } from "../../../components/StatusTiles";
+import { extraWorkStatusLabelKey } from "../../../lib/enumLabels";
 import { formatDate, formatMoney } from "../../../lib/intl";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
@@ -46,6 +48,19 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
 
 type EwChip = "all" | "quote_requests";
 
+/** Sprint 159 §3 — the same statuses, in the same order, as the
+ *  standalone Extra Work list. */
+const STATUS_OPTIONS = [
+  "REQUESTED",
+  "UNDER_REVIEW",
+  "PRICING_PROPOSED",
+  "CUSTOMER_APPROVED",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "CUSTOMER_REJECTED",
+  "CANCELLED",
+] as const;
+
 export function CustomerExtraWorkPage() {
   const { id } = useParams();
   const { t } = useTranslation(["common", "extra_work"]);
@@ -74,6 +89,11 @@ export function CustomerExtraWorkPage() {
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Sprint 159 §3 — the status filter, the SAME tile control the
+  // standalone lists use. It opens on "All" rather than on the
+  // un-actioned status: this page is one customer's history, not a work
+  // queue, and a silent default would hide most of their rows.
+  const [statusFilter, setStatusFilter] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -118,6 +138,17 @@ export function CustomerExtraWorkPage() {
 
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
+
+  // Real counts: this page holds the FULL matching set, so the tiles
+  // carry true numbers rather than a page's worth.
+  const statusCounts = rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.status] = (acc[row.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const visibleRows =
+    statusFilter === ""
+      ? rows
+      : rows.filter((row) => row.status === statusFilter);
 
   return (
     <div data-testid="customer-extra-work-page">
@@ -167,7 +198,19 @@ export function CustomerExtraWorkPage() {
             ))}
           </div>
 
-          {rows.length === 0 ? (
+          <StatusTiles
+            tiles={STATUS_OPTIONS.map((value) => ({
+              value,
+              label: t(`common:${extraWorkStatusLabelKey(value)}`),
+              count: statusCounts[value] ?? 0,
+            }))}
+            active={statusFilter}
+            onChange={setStatusFilter}
+            totalCount={rows.length}
+            testIdPrefix="customer-extra-work-status"
+          />
+
+          {visibleRows.length === 0 ? (
             <EmptyState
               icon={quoteOnly ? FileText : Sparkles}
               title={t(`customer_view.${v}.empty_title`)}
@@ -187,7 +230,7 @@ export function CustomerExtraWorkPage() {
                   </div>
                   <div className="section-head-sub">
                     {t(`customer_view.${v}.list_subtitle`, {
-                      count: rows.length,
+                      count: visibleRows.length,
                     })}
                   </div>
                 </div>
@@ -212,7 +255,7 @@ export function CustomerExtraWorkPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
+                    {visibleRows.map((row) => (
                       <ClickableRow
                         key={row.id}
                         to={`/extra-work/${row.id}`}

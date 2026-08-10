@@ -42,10 +42,10 @@ import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
 import { ChoiceDialog } from "../components/ChoiceDialog";
-import { StatusFilterChips } from "../components/StatusFilterChips";
+import { StatusTiles } from "../components/StatusTiles";
 import { EditModeToggle } from "../components/EditModeToggle";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
-import { AssignPeopleDialog } from "../components/extra-work/AssignPeopleDialog";
+import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
 import { useEditMode } from "../lib/useEditMode";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
@@ -154,12 +154,12 @@ export function ExtraWorkListPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
   const [assignError, setAssignError] = useState("");
+  // Sprint 159 §2 — BOTH roles at once, so both candidate lists are
+  // held. Keyed by role because eligibility differs between them and one
+  // shared list would offer a worker as a manager.
   const [assignCandidates, setAssignCandidates] = useState<
-    AssignmentCandidate[]
-  >([]);
-  const [assignRole, setAssignRole] = useState<ExtraWorkAssignmentRole>(
-    "WORKER",
-  );
+    Record<ExtraWorkAssignmentRole, AssignmentCandidate[]>
+  >({ WORKER: [], MANAGER: [] });
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -410,46 +410,47 @@ export function ExtraWorkListPage() {
   // would be rejected for the whole batch (the endpoint is
   // all-or-nothing), so offering them would be offering a guaranteed
   // failure.
-  const loadAssignCandidates = useCallback(
-    async (role: ExtraWorkAssignmentRole, requestIds: number[]) => {
-      if (requestIds.length === 0) {
-        setAssignCandidates([]);
-        return;
-      }
-      try {
-        const lists = await Promise.all(
-          requestIds.map((id) => listExtraWorkAssignmentCandidates(id, role)),
-        );
-        const [first, ...rest] = lists;
-        const common = first.filter((person) =>
-          rest.every((list) => list.some((other) => other.id === person.id)),
-        );
-        setAssignCandidates(common);
-      } catch (err) {
-        setAssignError(getApiError(err));
-        setAssignCandidates([]);
-      }
-    },
-    [],
-  );
+  const loadAssignCandidates = useCallback(async (requestIds: number[]) => {
+    if (requestIds.length === 0) {
+      setAssignCandidates({ WORKER: [], MANAGER: [] });
+      return;
+    }
+    const forRole = async (role: ExtraWorkAssignmentRole) => {
+      const lists = await Promise.all(
+        requestIds.map((id) => listExtraWorkAssignmentCandidates(id, role)),
+      );
+      const [first, ...rest] = lists;
+      return first.filter((person) =>
+        rest.every((list) => list.some((other) => other.id === person.id)),
+      );
+    };
+    try {
+      const [workers, managers] = await Promise.all([
+        forRole("WORKER"),
+        forRole("MANAGER"),
+      ]);
+      setAssignCandidates({ WORKER: workers, MANAGER: managers });
+    } catch (err) {
+      setAssignError(getApiError(err));
+      setAssignCandidates({ WORKER: [], MANAGER: [] });
+    }
+  }, []);
 
   async function openAssign() {
     setAssignError("");
     setAssignOpen(true);
-    await loadAssignCandidates(assignRole, edit.selection);
+    await loadAssignCandidates(edit.selection);
   }
 
-  async function runAssign(
-    userIds: number[],
-    role: ExtraWorkAssignmentRole,
-  ) {
+  /** ONE request for both roles — see `AssignPeopleDialog`. */
+  async function runAssign(managerIds: number[], workerIds: number[]) {
     setAssignBusy(true);
     setAssignError("");
     try {
       await bulkAssignExtraWork({
         requests: edit.selection,
-        users: userIds,
-        role,
+        managers: managerIds,
+        workers: workerIds,
         mode: "assign",
       });
       setAssignOpen(false);
@@ -555,17 +556,19 @@ export function ExtraWorkListPage() {
 
       {assignOpen && (
         <AssignPeopleDialog
-          requestCount={edit.selection.length}
-          candidates={assignCandidates.map((person) => ({
+          summary={t("assign.summary_requests", {
+            count: edit.selection.length,
+          })}
+          managerCandidates={assignCandidates.MANAGER.map((person) => ({
             id: person.id,
             label: person.full_name || person.email,
             sublabel: person.email,
           }))}
-          role={assignRole}
-          onRoleChange={(role) => {
-            setAssignRole(role);
-            void loadAssignCandidates(role, edit.selection);
-          }}
+          workerCandidates={assignCandidates.WORKER.map((person) => ({
+            id: person.id,
+            label: person.full_name || person.email,
+            sublabel: person.email,
+          }))}
           busy={assignBusy}
           error={assignError}
           onCancel={() => setAssignOpen(false)}
@@ -651,14 +654,16 @@ export function ExtraWorkListPage() {
         />
       </div>
 
-      {/* Sprint 158 §2 — the statuses as CHIPS, above the filter bar.
-          Every one visible with its count, the active one marked, and a
-          clearable notice underneath so the default filter can never be
-          mistaken for an empty system. The status dropdown below stays:
-          it is the same state, and removing a control an operator may
-          already be using would be hiding a feature. */}
-      <StatusFilterChips
-        chips={STATUS_FILTER_OPTIONS.map((value) => ({
+      {/* Sprint 159 §3 — the statuses as TILES, the design the owner
+          picked for both work lists. Every one visible with its count
+          (real ones: Sprint 120 made this page fetch the full set), the
+          active one visibly selected, and clearing is the All tile or
+          the × on the active one rather than a sentence of prose. The
+          status dropdown below stays: it is the same state, and removing
+          a control an operator may already be using would be hiding a
+          feature. */}
+      <StatusTiles
+        tiles={STATUS_FILTER_OPTIONS.map((value) => ({
           value,
           label: t(STATUS_I18N_KEY[value]),
           count: statusCounts[value] ?? 0,

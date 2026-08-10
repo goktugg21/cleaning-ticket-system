@@ -13,6 +13,7 @@ import {
 import { getInboxUnreadCount } from "../api/inbox";
 import { listNotifications, notificationHref } from "../api/notifications";
 import type {
+  AssignmentCandidate,
   ExtraWorkRequestList,
   ExtraWorkStats,
   Notification,
@@ -23,7 +24,11 @@ import type {
   TicketStatsByBuildingRow,
   TicketStatus,
 } from "../api/types";
-import { bulkConfirmTickets } from "../api/tickets";
+import {
+  bulkAssignTickets,
+  bulkConfirmTickets,
+  listTicketAssignmentCandidates,
+} from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
 import {
   canAccessBilling,
@@ -31,9 +36,12 @@ import {
   isProviderManagementRole,
   isStaffRole,
 } from "../auth/permissions";
+import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
+import { EditModeToggle } from "../components/EditModeToggle";
 import { SLABadge } from "../components/sla/SLABadge";
-import { StatusFilterChips } from "../components/StatusFilterChips";
+import { StatusTiles } from "../components/StatusTiles";
 import { useToast } from "../components/ToastProvider";
+import { useEditMode } from "../lib/useEditMode";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
 
@@ -224,6 +232,17 @@ export function DashboardPage({
   );
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
+  // Sprint 159 §2 — assign managers AND workers to the selected tickets
+  // in one dialog and one request, the same surface the Extra Work list
+  // has had since Sprint 157.
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState("");
+  const [assignCandidates, setAssignCandidates] = useState<{
+    WORKER: AssignmentCandidate[];
+    MANAGER: AssignmentCandidate[];
+  }>({ WORKER: [], MANAGER: [] });
+
   const [searchParams, setSearchParams] = useSearchParams();
   const slaFilter: SLAFilterValue = (() => {
     const raw = searchParams.get("sla") || "";
@@ -333,9 +352,23 @@ export function DashboardPage({
   // WAITING_MANAGER_REVIEW queue. The submittable set is always derived
   // from the currently-visible rows, so changing filters/pages can
   // never bulk-confirm a ticket that is no longer on screen.
-  const bulkMode =
-    isProviderManagementRole(userRole) &&
-    statusFilter === "WAITING_MANAGER_REVIEW";
+  // Sprint 159 §2 — the selection is behind the Sprint 155 §4 Edit gate
+  // now, like every other list. The hook supplies only the MODE: this
+  // page owns `selectedIds` because the set may legitimately span pages,
+  // and adopting the hook's own selection (filtered to the visible rows)
+  // would silently drop the off-screen half.
+  //
+  // The gate also widens what selection is FOR. It used to exist only in
+  // the WAITING_MANAGER_REVIEW queue, because bulk-confirm was the only
+  // thing it fed; assigning people is not queue-specific, so the mode is
+  // now available wherever a provider manager is looking and the
+  // CONFIRM button is what stays queue-specific.
+  const edit = useEditMode(
+    isProviderManagementRole(userRole) ? tickets.map((t) => t.id) : [],
+    { onExit: () => setSelectedIds(new Set<number>()) },
+  );
+  const bulkMode = edit.editMode;
+  const canBulkConfirm = statusFilter === "WAITING_MANAGER_REVIEW";
   const selectedVisibleIds = useMemo(
     () =>
       tickets
@@ -371,6 +404,71 @@ export function DashboardPage({
       return next;
     });
   }, [tickets]);
+
+  /** Sprint 159 §2 — the candidates for BOTH roles, from the server.
+   *
+   *  With several tickets selected the offer is the INTERSECTION:
+   *  somebody eligible at one building but not another would be
+   *  rejected for the whole batch (the endpoint is all-or-nothing), so
+   *  offering them would be offering a guaranteed failure. Same rule the
+   *  Extra Work list applies. */
+  const loadAssignCandidates = useCallback(async (ticketIds: number[]) => {
+    if (ticketIds.length === 0) {
+      setAssignCandidates({ WORKER: [], MANAGER: [] });
+      return;
+    }
+    const forRole = async (role: "WORKER" | "MANAGER") => {
+      const lists = await Promise.all(
+        ticketIds.map((id) => listTicketAssignmentCandidates(id, role)),
+      );
+      const [first, ...rest] = lists;
+      return first.filter((person) =>
+        rest.every((list) => list.some((other) => other.id === person.id)),
+      );
+    };
+    try {
+      const [workers, managers] = await Promise.all([
+        forRole("WORKER"),
+        forRole("MANAGER"),
+      ]);
+      setAssignCandidates({ WORKER: workers, MANAGER: managers });
+    } catch (err) {
+      setAssignError(getApiError(err));
+      setAssignCandidates({ WORKER: [], MANAGER: [] });
+    }
+  }, []);
+
+  const openAssign = useCallback(async () => {
+    setAssignError("");
+    setAssignOpen(true);
+    await loadAssignCandidates(selectedVisibleIds);
+  }, [loadAssignCandidates, selectedVisibleIds]);
+
+  const runAssign = useCallback(
+    async (managerIds: number[], workerIds: number[]) => {
+      setAssignBusy(true);
+      setAssignError("");
+      try {
+        const result = await bulkAssignTickets({
+          tickets: selectedVisibleIds,
+          managers: managerIds,
+          workers: workerIds,
+          mode: "assign",
+        });
+        setAssignOpen(false);
+        edit.exit();
+        push({
+          variant: "success",
+          title: t("common:assign_people.assigned", { count: result.created }),
+        });
+      } catch (err) {
+        setAssignError(getApiError(err));
+      } finally {
+        setAssignBusy(false);
+      }
+    },
+    [selectedVisibleIds, edit, push, t],
+  );
 
   const handleBulkConfirm = useCallback(async () => {
     const ids = tickets
@@ -1566,35 +1664,47 @@ export function DashboardPage({
                   >
                     {t("rows_label", { count: tickets.length })}
                   </span>
+                  {isProviderManagementRole(userRole) && (
+                    <EditModeToggle
+                      editMode={edit.editMode}
+                      onToggle={edit.toggleMode}
+                      disabled={bulkSubmitting || assignBusy}
+                      testId="dashboard-tickets-edit-toggle"
+                    />
+                  )}
                 </div>
 
-                {/* Sprint 158 §2 — the statuses as chips, with the
-                    default visible and clearable in one click.
+                {/* Sprint 159 §3 — the same tiles the Extra Work list
+                    uses. The owner asked for the pair to match and named
+                    which way round.
 
-                    NO per-status counts here, deliberately: this list is
-                    SERVER-filtered and paginated, so the only numbers the
-                    client holds are for the page it is looking at.
-                    Showing those would be worse than showing none — a
-                    chip reading "3" when the status holds ninety is a
-                    number the operator would act on. The Extra Work list
-                    shows real counts because Sprint 120 made it fetch
-                    the full set. Recorded in `## NEXT` with the fix
-                    shape. */}
-                <StatusFilterChips
-                  chips={STATUS_OPTIONS.map((value) => ({
+                    The counts come from the SERVER: `/tickets/stats/`
+                    already returns `by_status`, and the "Status
+                    breakdown" panel in the side column has rendered
+                    exactly these numbers since long before this sprint.
+                    Reusing its source rather than inventing a second one
+                    costs no extra request. Sprint 158's reasoning for
+                    leaving the chips countless was right for the numbers
+                    it had — the client holds one page — and that is
+                    precisely why these come from the stats endpoint and
+                    not from `tickets`. Until it resolves, `-1` renders
+                    an em dash rather than a wrong number. */}
+                <StatusTiles
+                  tiles={STATUS_OPTIONS.map((value) => ({
                     value,
                     // The page's OWN status label helper, the same one
                     // the dropdown below uses — a second labelling path
-                    // here rendered raw enum names on the chips.
+                    // here rendered raw enum names.
                     label: tStatus(value),
-                    count: -1,
+                    count: stats ? (stats.by_status[value] ?? 0) : -1,
                   }))}
                   active={statusFilter}
                   onChange={(value: string) => {
                     setStatusFilter(value as TicketStatus | "");
                     setPage(1);
+                    setSelectedIds(new Set<number>());
                   }}
-                  totalCount={count}
+                  totalCount={stats ? stats.total : count}
                   testIdPrefix="tickets-status"
                 />
 
@@ -1697,6 +1807,30 @@ export function DashboardPage({
                   </div>
                 </form>
 
+                {assignOpen && (
+                  <AssignPeopleDialog
+                    summary={t("common:assign_people.summary_tickets", {
+                      count: selectedVisibleIds.length,
+                    })}
+                    managerCandidates={assignCandidates.MANAGER.map((p) => ({
+                      id: p.id,
+                      label: p.full_name || p.email,
+                      sublabel: p.email,
+                    }))}
+                    workerCandidates={assignCandidates.WORKER.map((p) => ({
+                      id: p.id,
+                      label: p.full_name || p.email,
+                      sublabel: p.email,
+                    }))}
+                    busy={assignBusy}
+                    error={assignError}
+                    onCancel={() => setAssignOpen(false)}
+                    onConfirm={(managerIds, workerIds) =>
+                      void runAssign(managerIds, workerIds)
+                    }
+                  />
+                )}
+
                 {bulkMode && selectedVisibleIds.length > 0 && (
                   <div
                     className="bulk-action-bar"
@@ -1716,19 +1850,32 @@ export function DashboardPage({
                       >
                         {t("bulk_confirm.clear_selection")}
                       </button>
+                      {/* Sprint 159 §2 — one dialog, both roles, one
+                          request. See `AssignPeopleDialog`. */}
                       <button
                         type="button"
-                        className="btn btn-primary btn-sm"
-                        data-testid="dashboard-bulk-confirm-button"
-                        onClick={handleBulkConfirm}
-                        disabled={bulkSubmitting}
+                        className="btn btn-secondary btn-sm"
+                        data-testid="dashboard-bulk-assign-button"
+                        onClick={() => void openAssign()}
+                        disabled={bulkSubmitting || assignBusy}
                       >
-                        {bulkSubmitting
-                          ? t("bulk_confirm.confirming")
-                          : t("bulk_confirm.confirm_action", {
-                              count: selectedVisibleIds.length,
-                            })}
+                        {t("common:assign_people.title")}
                       </button>
+                      {canBulkConfirm && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          data-testid="dashboard-bulk-confirm-button"
+                          onClick={handleBulkConfirm}
+                          disabled={bulkSubmitting}
+                        >
+                          {bulkSubmitting
+                            ? t("bulk_confirm.confirming")
+                            : t("bulk_confirm.confirm_action", {
+                                count: selectedVisibleIds.length,
+                              })}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}

@@ -574,11 +574,19 @@ export async function listExtraWorkAssignments(
  *
  *  All-or-nothing server-side: one unresolvable id rejects the whole
  *  batch with zero writes, so there is no partial state for the caller
- *  to reconcile. */
+ *  to reconcile.
+ *
+ *  Sprint 159 §2 — `managers` + `workers` name BOTH roles in one
+ *  request and one transaction. `users` + `role` is the Sprint 157
+ *  single-role shape, still accepted and still what the per-row remove
+ *  speaks. Naming both halves is the point: an ineligible manager
+ *  rejects the workers with it rather than leaving half a crew on. */
 export async function bulkAssignExtraWork(payload: {
   requests: number[];
-  users: number[];
-  role: ExtraWorkAssignmentRole;
+  users?: number[];
+  role?: ExtraWorkAssignmentRole;
+  managers?: number[];
+  workers?: number[];
   mode: "assign" | "unassign";
 }): Promise<ExtraWorkBulkAssignResult> {
   const response = await api.post<ExtraWorkBulkAssignResult>(

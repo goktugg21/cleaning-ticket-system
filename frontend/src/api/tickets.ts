@@ -5,6 +5,8 @@
 // mounted at `/api/tickets/` (the api client adds the `/api` prefix).
 import { api } from "./client";
 import type {
+  AssignmentCandidate,
+  ExtraWorkBulkAssignResult,
   PaginatedResponse,
   TicketBulkStatusResponse,
   TicketConvertToExtraWorkPayload,
@@ -89,6 +91,43 @@ export async function bulkConfirmTickets(
   const response = await api.post<TicketBulkStatusResponse>(
     "/tickets/bulk-status/",
     { ticket_ids: ticketIds, to_status: "WAITING_CUSTOMER_APPROVAL" },
+  );
+  return response.data;
+}
+
+// ---- Sprint 158/159 — people on a ticket ------------------------------
+
+/** The people who may be assigned to THIS ticket in THIS role, from the
+ *  server's own eligibility helper (`buildings.assignment_eligibility`).
+ *
+ *  Deliberately not "the company's employees": eligibility comes from
+ *  the ticket's BUILDING and differs per role, and the picker must call
+ *  the same helper the write validator uses or it will offer options
+ *  that always fail (Sprint 152.1 §1a). */
+export async function listTicketAssignmentCandidates(
+  ticketId: number,
+  role: "WORKER" | "MANAGER",
+): Promise<AssignmentCandidate[]> {
+  const response = await api.get<AssignmentCandidate[]>(
+    `/tickets/${ticketId}/assignments/candidates/`,
+    { params: { role } },
+  );
+  return response.data;
+}
+
+/** Sprint 159 §2 — assign managers AND workers to many tickets in ONE
+ *  call. All-or-nothing server-side across BOTH roles: an ineligible
+ *  manager rejects the workers with it, so there is no half-staffed
+ *  state for the caller to reconcile. */
+export async function bulkAssignTickets(payload: {
+  tickets: number[];
+  managers?: number[];
+  workers?: number[];
+  mode?: "assign" | "unassign";
+}): Promise<ExtraWorkBulkAssignResult> {
+  const response = await api.post<ExtraWorkBulkAssignResult>(
+    "/tickets/bulk-assign/",
+    payload,
   );
   return response.data;
 }
