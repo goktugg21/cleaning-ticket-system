@@ -13,6 +13,7 @@ break it.
 from django.urls import path
 
 from .views_contracts import (
+    ContractTypeStandardSetView,
     ContractDetailView,
     ContractListCreateView,
     ContractOptionsView,
@@ -32,6 +33,11 @@ from .views_revisions import (
 urlpatterns = [
     path("stats/", ContractStatsView.as_view(), name="contract-stats"),
     path("options/", ContractOptionsView.as_view(), name="contract-options"),
+    path(
+        "types/standard-set/",
+        ContractTypeStandardSetView.as_view(),
+        name="contract-type-standard-set",
+    ),
     path(
         "types/",
         ContractTypeListCreateView.as_view(),

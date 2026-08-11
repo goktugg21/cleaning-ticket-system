@@ -25,13 +25,15 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, When
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Lower, Trim
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from audit import context as audit_context
 from buildings.models import Building
+from companies.models import Company
 from config.pagination import StandardResultsSetPagination
 from customers.models import Customer
 
@@ -428,6 +430,75 @@ class ContractOptionsView(APIView):
                     {"id": row.id, "name": row.name} for row in types
                 ],
             }
+        )
+
+
+# Sprint 168 §5 — the four the reference offers. A company that has
+# none can create no contract at all (the type picker is empty and the
+# field is required), which is the state every new tenant starts in.
+# OFFERED, not imposed: the catalog stays per-company and a company is
+# free to delete these and name its own.
+STANDARD_CONTRACT_TYPES = (
+    ("Schoonmaak", 10),
+    ("Meerwerk", 20),
+    ("Machinewerk", 30),
+    ("Overig", 40),
+)
+
+
+class ContractTypeStandardSetView(APIView):
+    """POST /api/contracts/types/standard-set/ — seed the four for a
+    company that has none.
+
+    The `timesheets/hour-types/standard-set/` shape, and idempotent for
+    the same reason: the skip test is the same `Lower(Trim(...))`
+    comparison the uniqueness constraint uses, so the view and the
+    database agree on what "already there" means. Pressing it twice
+    creates nothing the second time, and the response names what was
+    created and what was skipped rather than returning a bare count.
+    """
+
+    permission_classes = [IsContractManager]
+
+    def post(self, request, *args, **kwargs):
+        supplied = parse_int_param(request.data.get("company"))
+        company_obj = (
+            Company.objects.filter(id=supplied).first()
+            if supplied is not None
+            else None
+        )
+        # One place decides "which company does this write apply to",
+        # for every management write in this app — including the
+        # cross-company 403 a COMPANY_ADMIN must get.
+        company = resolve_target_company(request.user, company_obj)
+        enforce_contract_management(request.user, company)
+
+        existing = set(
+            ContractType.objects.filter(company=company)
+            .annotate(normalised=Lower(Trim("name")))
+            .values_list("normalised", flat=True)
+        )
+
+        created, skipped = [], []
+        audit_context.set_current_reason("contract_type_standard_set")
+        try:
+            with transaction.atomic():
+                for name, sort_order in STANDARD_CONTRACT_TYPES:
+                    if name.strip().lower() in existing:
+                        skipped.append(name)
+                        continue
+                    # save() per row, not bulk_create: the audit
+                    # receivers are post_save (H-10).
+                    ContractType.objects.create(
+                        company=company, name=name, sort_order=sort_order
+                    )
+                    created.append(name)
+        finally:
+            audit_context.set_current_reason(None)
+
+        return Response(
+            {"created": created, "skipped": skipped},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
 

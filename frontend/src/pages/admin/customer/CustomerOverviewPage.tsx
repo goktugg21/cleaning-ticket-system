@@ -315,7 +315,7 @@ export function CustomerOverviewPage() {
               them — icon, count, name and the one-line description —
               so a destination appears exactly once. */}
           <div
-            className="summary-grid summary-grid-chips"
+            className="summary-grid summary-grid-chips summary-grid-chips-one-row"
             data-testid="customer-overview-stat-strip"
           >
             {chips.map((chip) => (

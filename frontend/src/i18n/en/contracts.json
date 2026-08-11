@@ -246,5 +246,22 @@
   "header": {
     "perMonth": "{{amount}} / month",
     "perYear": "{{amount}} / year"
+  },
+  "types": {
+    "title": "Contract types",
+    "desc": "Per company. A new company starts empty and then cannot create a contract.",
+    "tabsAria": "Contracts view",
+    "standardSet": "Add standard types",
+    "name": "Name",
+    "inUse": "In use",
+    "state": "Status",
+    "active": "Active",
+    "archived": "Archived",
+    "archive": "Archive",
+    "reactivate": "Reactivate",
+    "empty": "No contract types yet.",
+    "newName": "New type",
+    "newPlaceholder": "e.g. Cleaning",
+    "add": "Add"
   }
 }

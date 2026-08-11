@@ -5054,6 +5054,21 @@ a.attn-row:hover {
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 
+/* Sprint 168 §6 — ONE row, whatever the count.
+   `.summary-grid-chips` is shared by five strips and its auto-fit rule
+   is right for them, so this is a MODIFIER rather than a change to the
+   shared class: loosening something five callers depend on to fix one
+   of them is the mistake Sprint 134 made and Sprint 135 had to undo.
+   Removing the eighth chip alone did not restore the single row —
+   measured, seven chips still wrapped to two at 1440 — because
+   auto-fit is width-driven, not count-driven. Columns instead of
+   auto-fit is what actually answers "one row". */
+.summary-grid-chips-one-row {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
 .summary-stat-chip {
   gap: 4px;
 }

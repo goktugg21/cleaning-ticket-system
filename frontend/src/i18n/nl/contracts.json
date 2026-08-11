@@ -246,5 +246,22 @@
   "header": {
     "perMonth": "{{amount}} / maand",
     "perYear": "{{amount}} / jaar"
+  },
+  "types": {
+    "title": "Contracttypes",
+    "desc": "Per bedrijf. Een nieuw bedrijf start leeg en kan dan geen contract aanmaken.",
+    "tabsAria": "Contracten weergave",
+    "standardSet": "Standaardtypes toevoegen",
+    "name": "Naam",
+    "inUse": "In gebruik",
+    "state": "Status",
+    "active": "Actief",
+    "archived": "Gearchiveerd",
+    "archive": "Archiveren",
+    "reactivate": "Heractiveren",
+    "empty": "Nog geen contracttypes.",
+    "newName": "Nieuw type",
+    "newPlaceholder": "Bijv. Schoonmaak",
+    "add": "Toevoegen"
   }
 }

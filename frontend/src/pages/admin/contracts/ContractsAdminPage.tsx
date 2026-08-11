@@ -25,6 +25,7 @@ import { useAuth } from "../../../auth/AuthContext";
 import { canManageContracts } from "../../../auth/permissions";
 import { useEditMode } from "../../../lib/useEditMode";
 import { ContractFormDialog } from "./ContractFormDialog";
+import { ContractTypesTab } from "./ContractTypesTab";
 import {
   MAX_PROJECT_COLUMNS,
   buildProjectColumns,
@@ -104,6 +105,7 @@ export function ContractsAdminPage() {
 
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
+  const [pageTab, setPageTab] = useState<"list" | "types">("list");
   const [statusFilter, setStatusFilter] = useState<ContractStatus | "">("");
   const [customerFilter, setCustomerFilter] = useState<number | "">("");
   const [buildingFilter, setBuildingFilter] = useState<number | "">("");
@@ -333,6 +335,40 @@ export function ContractsAdminPage() {
         </div>
       </div>
 
+      {/* Sprint 168 §5 — the type CATALOG needs a screen, because a new
+          company starts with an empty one and the type field on a
+          contract is required: without this, a new tenant cannot create
+          a single contract. */}
+      <div
+        className="composer-toggle"
+        role="tablist"
+        aria-label={t("types.tabsAria")}
+        style={{ marginBottom: 16 }}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={pageTab === "list"}
+          className={`composer-toggle-btn ${pageTab === "list" ? "active" : ""}`}
+          onClick={() => setPageTab("list")}
+          data-testid="contracts-page-tab-list"
+        >
+          {t("list.title")}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={pageTab === "types"}
+          className={`composer-toggle-btn ${pageTab === "types" ? "active" : ""}`}
+          onClick={() => setPageTab("types")}
+          data-testid="contracts-page-tab-types"
+        >
+          {t("types.title")}
+        </button>
+      </div>
+
+      {pageTab === "types" && <ContractTypesTab />}
+
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
           {error}
@@ -341,8 +377,16 @@ export function ContractsAdminPage() {
 
       {/* Tiles, filters, table and pagination live inside ONE card, so the
           page reads as a single block — the shape BuildingsAdminPage
-          settled on rather than header-gap-filters-gap-table. */}
-      <div className="card" style={{ overflow: "hidden" }}>
+          settled on rather than header-gap-filters-gap-table.
+
+          `hidden` rather than unmounted: the list owns the page's reads
+          and its filter state, and tearing all of that down to look at
+          a catalog would refetch everything on the way back. */}
+      <div
+        className="card"
+        style={{ overflow: "hidden" }}
+        hidden={pageTab !== "list"}
+      >
         <div
           className="summary-grid"
           data-testid="contracts-stats"
