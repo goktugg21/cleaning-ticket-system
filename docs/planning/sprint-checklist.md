@@ -55,65 +55,67 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-165`, cut from `feat/sprint-164` (`8d01e05`).
-**CC did NOT open a PR and did NOT deploy.**
+**Branch:** `feat/sprint-166`, cut from `feat/sprint-165` (`18c2d72`).
+It is the single branch being merged — #153 → … → #166 are ONE chain,
+one PR, not one per sprint.
 
-**THE MERGE IS ONE PR, NOT ONE PER SPRINT.** This branch continues the
-single line that carries every sprint from #153 onward — #153 → … →
-#164 → #165 are one chain, and `feat/sprint-165` is its tip. It is the
-branch to merge to `main`; there is no per-sprint PR to open and none
-should be.
+**Deployed to crmtest at the owner's instruction** (the prompt said not
+to; the owner overrode it in the same session).
 
-**All five items shipped. Nothing carried to `## NEXT`.**
+### The standard this sprint was held to, and why it was fair
 
-### The owner-visible changes, in plain words
-
-- **The hours tiles fill the row.** Asked three times; this time the
-  columns are computed from the number of tiles rather than from the
-  window width, so they always divide the whole row. Export CSV is not
-  a tile and has moved out beside the title.
-- **The wizard no longer pre-ticks "No building".** Nothing is chosen
-  until you choose it.
-- **"Fill all rows" fills the rows that are there**, and a row added
-  afterwards starts empty — the behaviour asked for three times.
-- **Contracts:** the tiles now follow the Prices/Hours toggle, each view
-  ends in a grand total, and the summary groups expand and collapse.
-- **The system can now say a worker is contracted for 15 hours at a
-  building and worked 13.**
+Two Sprint 165 items were reported as delivered and could not be reached
+by a user: a reporting endpoint with no screen, and a page with no link.
+An endpoint returning 401 proves a route exists, not that a feature
+does. Every item below was reached by CLICKING from the sidebar, and the
+report says which entry.
 
 ### Per item
 
-- **§1 — DONE, and the arithmetic is exact.** Tiles plus gaps equal the
-  container at every width: `171x4 + 3x10 = 712`, `235x4 + 3x10 = 968`,
-  `275x4 + 3x10 = 1128`. Export is out of the grid (verified
-  `exportInsideGrid=false`) and in the section header. 0 horizontal
-  overflow.
-- **§2 — DONE.** 0 building chips pre-selected on open.
-- **§3 — DONE, reversing Sprint 164.** The contradiction is solved in
-  the DISPLAY: the all-rows inputs CLEAR once applied, so they read as
-  an action performed rather than a state in force, and the label is a
-  verb ("Vul alle regels" / "Fill all rows"). Verified: input `""`
-  after applying; cells `6,6,6,6,6`; after `+ Add type` →
-  `6,6,6,"",6,6` — the new row empty.
-- **§4 — DONE.** Already existed from Sprint 160: the three views as
-  tabs, both toggles, per-service columns with the top-N-plus-Other
-  bound and folded caption, and the per-company type catalog. ADDED:
-  tiles follow Prices/Hours, a grand-total row, expandable groups.
-- **§5 — DONE.** 14 tests. Lives in `reports/` because neither
-  `timesheets` nor `contracts` may import the other; a test scans both
-  apps' source to keep it that way.
+- **§1 fill rule — DONE, third statement and the first correct one.**
+  The rule is about WHERE a row came from, not WHEN. Both earlier
+  attempts reached for timing because the row carried no way to tell the
+  wizard's rows from the operator's — `added` is true for both. The row
+  is now MARKED at creation (`manual: true`) and the fill skips it.
+  Verified in the failing order: add a type FIRST, then fill →
+  `7,7,7,"",7,7`, the added row untouched.
+- **§2 modal size — DONE.** `width: min(96vw, 1180px)` plus a
+  min-height; it had a cap and no floor, so it collapsed to its
+  content. 1024 → 983x741, 1280/1440 → 1180x741, page overflow 0.
+- **§3 sideways scroll — DIAGNOSED and fixed.** Two rounds "measured as
+  fixed" because they measured only the OUTER modal. All four levels
+  with the grid POPULATED found it: modal 0, inner 0, **gridWrap
+  258/61/61**, table 0. Day cells 64px → 54px takes 70px out across
+  seven days: gridWrap now **195/0/0** — nothing scrolls at 1280 or
+  1440, and at 1024 the container scrolls, which is the documented
+  fallback. The modal itself never scrolled.
+- **§4 hours comparison — HAS A SCREEN.** Sidebar → **Contract vs
+  worked** (under Reports) → `/reports/hours-comparison`. Period
+  selector, a row per building with contracted / worked / difference,
+  the sign carried by an under/over/on-target tag, a grand total, and
+  the per-worker breakdown expandable on the WORKED side. The page
+  states the asymmetry instead of hiding it.
+- **§5 customer contracts link — DONE.** Sidebar → Customers → a
+  customer → **Contracten** in the submenu →
+  `/admin/customers/3/contracts`. The route has existed since Sprint 162
+  with no way to reach it.
 
-### §5's shape, recorded because it will be asked again
+### The §5 sweep
 
-The two sides are NOT symmetrical. A contract says "40 hours a month at
-this building" and has no employee dimension; a time entry has one. So
-the comparison is per BUILDING and the employee breakdown is the WORKED
-side only — a per-employee "contracted" figure would be an allocation
-nobody agreed. The period is a calendar month, the only basis both
-share. A missing side is zero, never a dropped row: a building with
-contracted hours and nobody on site is the row that matters most.
+66 routes checked by trailing segment (a prefix match would not have
+caught the very defect §5 names). Three with no in-app link:
+
+  * `/admin/customers/:id/quote-requests` — a genuine orphan, and
+    almost certainly superseded: the IA note of 2026-06-25 merged
+    Meldingen and Offerteaanvragen into Extra Work as filter chips. Left
+    unlinked deliberately rather than re-exposed against that decision;
+    it should probably be DELETED, which is a decision not a fix.
+  * `/invite/accept` and `/password/reset/confirm` — reached from
+    emailed links. Correct as they are.
 
 ---
+
+
 
 
 
@@ -136,6 +138,20 @@ item has moved to `## SHIPPED` or been resolved below instead.
 
 
 
+
+0. **A CONTRACT-TYPE CATALOG SCREEN.** Sprint 166 §6 asked whether
+   creating a contract type is reachable. It is NOT: the backend has
+   full CRUD at `/api/contracts/types/` and the contract form offers
+   the company's own types, but there is no UI to add one — so a
+   company with an empty catalog cannot fill it without the API. Small
+   screen, endpoints already exist. Recorded rather than bolted onto
+   this sprint's last hour.
+
+0. **DELETE OR RE-EXPOSE `/admin/customers/:id/quote-requests`.** Found
+   by the §5 sweep: routed, no link anywhere. The 2026-06-25 IA note
+   merged Meldingen and Offerteaanvragen into Extra Work as filter
+   chips, so this looks superseded — but deleting a route is a
+   decision, not a cleanup, and it was not this sprint's to make.
 0. **CONTRACT PLANNING — the reference's full-screen week grid.** Out of
    scope for Sprint 165 §4 and recorded rather than forgotten.
 

@@ -9450,3 +9450,11 @@ details[open] > .ew-department-tree-summary::before {
      container rather than making the dialog wide. */
   min-width: max-content;
 }
+
+/* Sprint 166 §4 — the per-worker rows under a building in the hours
+   comparison. Quieter than the building row they hang off, because they
+   are a breakdown of ONE side (worked) and not a comparison. */
+.hours-comparison-employee-row td {
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
