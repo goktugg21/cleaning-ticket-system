@@ -55,65 +55,67 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-164`, cut from `feat/sprint-163-fixes`
-(`70dee40`). **CC did NOT open a PR and did NOT deploy.**
+**Branch:** `feat/sprint-165`, cut from `feat/sprint-164` (`8d01e05`).
+**CC did NOT open a PR and did NOT deploy.**
 
-**All eight items shipped. Nothing carried to `## NEXT`.**
+**THE MERGE IS ONE PR, NOT ONE PER SPRINT.** This branch continues the
+single line that carries every sprint from #153 onward — #153 → … →
+#164 → #165 are one chain, and `feat/sprint-165` is its tip. It is the
+branch to merge to `main`; there is no per-sprint PR to open and none
+should be.
+
+**All five items shipped. Nothing carried to `## NEXT`.**
 
 ### The owner-visible changes, in plain words
 
-- **Contract invoices are real now.** A contract period whose invoice
-  date has arrived becomes an actual DRAFT invoice, priced from what was
-  agreed for THAT period. It is run by hand for now, deliberately.
-- Clicking anywhere on a contracts row opens it.
-- The hours page's stat chips use the whole width.
-- The "all rows" line now covers rows added afterwards — it used to
-  silently miss them while still showing the number.
-- The worker/building pickers open when you click them, stay open while
-  you pick several, and work from the keyboard.
-- The set-up window no longer scrolls sideways, and its three controls
-  use the width instead of leaving a gap.
-
-### §8, and the one thing worth reading
-
-Idempotency is a DATABASE constraint, not a check:
-`ContractInvoice(contract, period_start)` is unique, the generator
-attempts the insert and treats the violation as "already invoiced". Two
-concurrent runs make one invoice. The alternative — read, decide,
-write — is the shape `ensure_default_labels` already shipped as a race.
-
-The narrow catch earned itself immediately: the first version wrapped
-the write in a broad `except IntegrityError` and swallowed a NOT NULL
-violation on `Invoice.created_by`, reporting "nothing was due". The
-generator now requires an explicit actor.
-
-DRAFT only, no number (numbering is at SEND). Lines come from the
-revision in force on the PERIOD's date. `invoicing` gained no column —
-the dependency runs one way, and a test asserts it.
+- **The hours tiles fill the row.** Asked three times; this time the
+  columns are computed from the number of tiles rather than from the
+  window width, so they always divide the whole row. Export CSV is not
+  a tile and has moved out beside the title.
+- **The wizard no longer pre-ticks "No building".** Nothing is chosen
+  until you choose it.
+- **"Fill all rows" fills the rows that are there**, and a row added
+  afterwards starts empty — the behaviour asked for three times.
+- **Contracts:** the tiles now follow the Prices/Hours toggle, each view
+  ends in a grand total, and the summary groups expand and collapse.
+- **The system can now say a worker is contracted for 15 hours at a
+  building and worked 13.**
 
 ### Per item
 
-- **§1 clickable rows — DONE.** Clicking a row navigated to
-  `/admin/contracts/1`.
-- **§2 hours strip — DONE.** 1024/1280/1440: 4 tiles, 1 row, box
-  712/968/1128, tiles equal at 171/186/218, padding 12px 16px, 0
+- **§1 — DONE, and the arithmetic is exact.** Tiles plus gaps equal the
+  container at every width: `171x4 + 3x10 = 712`, `235x4 + 3x10 = 968`,
+  `275x4 + 3x10 = 1128`. Export is out of the grid (verified
+  `exportInsideGrid=false`) and in the section header. 0 horizontal
   overflow.
-- **§3 apply-to-all — DONE**, reproduced first. New rows now inherit;
-  after typing 5 and adding a type, all nine Monday cells read 5.
-- **§4 chip multi-select — DONE.** Found two real defects by driving it:
-  Escape closed the whole modal (the handler sat on the control while
-  the list is its sibling, so the key went to the dialog's window
-  listener), and the chip's remove button re-opened the list.
-- **§5 no sideways scroll — DONE.** Modal horizontal overflow 0 at all
-  three widths.
-- **§6 three columns — DONE.** 304/304/304 at 1024, 367/367/367 at 1280
-  and 1440, without widening the modal.
-- **§7 no regressions — DONE.** First three columns Medewerker | Gebouw
-  | Uursoort, 0 per-row dropdowns, chips present, 7 apply inputs.
-- **§8 contract invoices — DONE.** 17 generator tests; `contracts` +
-  `invoicing` together 309 tests OK, exit 0.
+- **§2 — DONE.** 0 building chips pre-selected on open.
+- **§3 — DONE, reversing Sprint 164.** The contradiction is solved in
+  the DISPLAY: the all-rows inputs CLEAR once applied, so they read as
+  an action performed rather than a state in force, and the label is a
+  verb ("Vul alle regels" / "Fill all rows"). Verified: input `""`
+  after applying; cells `6,6,6,6,6`; after `+ Add type` →
+  `6,6,6,"",6,6` — the new row empty.
+- **§4 — DONE.** Already existed from Sprint 160: the three views as
+  tabs, both toggles, per-service columns with the top-N-plus-Other
+  bound and folded caption, and the per-company type catalog. ADDED:
+  tiles follow Prices/Hours, a grand-total row, expandable groups.
+- **§5 — DONE.** 14 tests. Lives in `reports/` because neither
+  `timesheets` nor `contracts` may import the other; a test scans both
+  apps' source to keep it that way.
+
+### §5's shape, recorded because it will be asked again
+
+The two sides are NOT symmetrical. A contract says "40 hours a month at
+this building" and has no employee dimension; a time entry has one. So
+the comparison is per BUILDING and the employee breakdown is the WORKED
+side only — a per-employee "contracted" figure would be an allocation
+nobody agreed. The period is a calendar month, the only basis both
+share. A missing side is zero, never a dropped row: a building with
+contracted hours and nobody on site is the row that matters most.
 
 ---
+
+
 
 
 
@@ -132,6 +134,30 @@ item has moved to `## SHIPPED` or been resolved below instead.
 
 
 
+
+
+0. **CONTRACT PLANNING — the reference's full-screen week grid.** Out of
+   scope for Sprint 165 §4 and recorded rather than forgotten.
+
+   What it appears to do, from the reference: a full-screen planning
+   surface per contract, laid out as a week, where the contract's
+   services are scheduled across days — the bridge between "this
+   contract buys 40 hours a month" and "here is when they happen". It is
+   adjacent to both the hours grid (which records what WAS worked) and
+   the §5 comparison (which now scores one against the other), and
+   whoever builds it should read both first: the three would otherwise
+   grow three different ideas of what a planned hour is.
+
+0. **WORKER HOUR REPORTS**, still open, and **SCHEDULE — the GAP
+   ANALYSIS FIRST**: compare `frontend/src/pages/AgendaPage.tsx` against
+   the reference and report the gap BEFORE building. The owner has
+   stated that ordering twice.
+
+0. **WIRING THE INVOICE GENERATOR TO BEAT** (from Sprint 164 §8). The
+   code is ready — one `CELERY_BEAT_SCHEDULE` entry calling
+   `generate_invoices()`. What it needs is a decision: how often, at
+   what hour, and whether a run spanning midnight may bill a period a
+   day early.
 
 0. **WHAT REMAINS AFTER SPRINT 164**, in the order the owner set:
 
