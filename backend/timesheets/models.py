@@ -406,3 +406,218 @@ class WeekLock(models.Model):
 
     def __str__(self):
         return f"{self.company_id} {self.iso_year}-W{self.iso_week:02d}"
+
+
+class ContractHoursStatus(models.TextChoices):
+    """Sprint 167 §4 — where a standing agreement is in its review.
+
+    Three states, and the transitions are written down here because
+    "what does Saved mean" is the question a reviewer asks first:
+
+      * **DRAFT** — being written. The operator who owns the row may
+        change anything on it. Nothing downstream reads a DRAFT row as
+        an agreement.
+      * **SAVED** — submitted for review. Still editable by a manager
+        (SA / CA), because the point of review is to correct before
+        approving; a reviewer who cannot fix a typo sends the row back
+        for one character.
+      * **APPROVED** — agreed. **Not editable.** A change to an approved
+        agreement is a NEW row from a new `valid_from`, which is the
+        same discipline `CustomerServicePrice` and `ContractRevision`
+        already use: history is not edited, it is superseded.
+
+    Who may move a row: DRAFT -> SAVED, anyone who may write timesheet
+    rows for that company. SAVED -> APPROVED and APPROVED -> SAVED
+    (reopening), SA / CA only — approving is the management act, and
+    so is undoing it.
+
+    An approved week CAN be reopened, deliberately: the alternative is
+    that one wrong approval is permanent and the only escape is a
+    superseding row with a date that lies about when the agreement
+    changed. Reopening is recorded like every other transition.
+
+    Every transition writes an `AuditLog` row (H-10) — the model is
+    registered for the full CRUD trio, so a status change lands as an
+    UPDATE with a before/after diff naming the two states.
+    """
+
+    DRAFT = "DRAFT", "Draft"
+    SAVED = "SAVED", "Saved"
+    APPROVED = "APPROVED", "Approved"
+
+
+class ContractHours(models.Model):
+    """
+    Sprint 167 §3 — the hours a worker is CONTRACTED for: a standing
+    weekly pattern at one building, from a date.
+
+    The counterpart to `TimeEntry`, which records hours actually
+    WORKED. Together they answer "agreed 15, worked 13", which is what
+    the comparison in `reports/hours_comparison.py` exists to say.
+
+    ## Why this lives in `timesheets` and has no FK to a Contract
+
+    It is an HOURS concept, and `timesheets` is the hours module. The
+    word "contract" here is the operator's word for a standing
+    agreement about a worker's hours — it is NOT a row of
+    `contracts.Contract`, and there is deliberately no foreign key to
+    one.
+
+    That is not a shortcut. `timesheets` imports nothing from
+    `contracts` and must keep working for a company that uses nothing
+    else (Sprint 152's founding rule, restated every sprint since). An
+    FK here would make the hours module unusable without the contracts
+    module and would be the exact import the architecture forbids. A
+    company that runs contracts AND hours gets the join in `reports`,
+    which is the app allowed to read both.
+
+    ## Versioning
+
+    `valid_from` / `valid_to` give the discipline
+    `extra_work.CustomerServicePrice` already uses, and the resolution
+    shape is the same one `resolve_price` applies: the row in force on
+    a date is the one with the latest `valid_from` at or before it,
+    ties broken by `-id`. Changing an agreement writes a NEW row from a
+    date; it never edits history, because last month's comparison must
+    keep saying what it said last month.
+
+    `valid_to` NULL means open-ended, which is the normal case.
+
+    ## Scoping
+
+    Through `timesheets/scope.py`, exactly like `TimeEntry`.
+    CUSTOMER_* roles get NOTHING, ever: this is personnel and
+    wage-adjacent data and no customer-side role has any business
+    reading it.
+    """
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.PROTECT,
+        related_name="contract_hours",
+        help_text=(
+            "Denormalized tenant anchor, resolved from the employee's "
+            "provider-company membership at write time — the same shape "
+            "TimeEntry.company uses, and for the same reason."
+        ),
+    )
+    employee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="contract_hours",
+        help_text=(
+            "The provider-side employee this agreement is about. Never "
+            "a customer-side user, never a SUPER_ADMIN."
+        ),
+    )
+    building = models.ForeignKey(
+        "buildings.Building",
+        on_delete=models.PROTECT,
+        related_name="contract_hours",
+        null=True,
+        blank=True,
+        help_text=(
+            "Where the agreed hours are worked. NULL is allowed for an "
+            "agreement not tied to one location, and reads as 'no "
+            "building' rather than being dropped from a report."
+        ),
+    )
+    hour_type = models.ForeignKey(
+        HourType,
+        on_delete=models.PROTECT,
+        related_name="contract_hours",
+        help_text="PROTECT: a type in use can be archived, never deleted.",
+    )
+
+    valid_from = models.DateField(
+        help_text="First day this agreement is in force."
+    )
+    valid_to = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Last day in force. NULL means open-ended.",
+    )
+
+    # Seven weekday values. Separate columns rather than a JSON blob:
+    # they are aggregated (SUM per building, per employee) by the
+    # comparison report, and a JSON field cannot be summed in the
+    # database — which would turn a constant-cost report into a
+    # per-row one.
+    monday = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    tuesday = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    wednesday = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    thursday = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    friday = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    saturday = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    sunday = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+
+    status = models.CharField(
+        max_length=16,
+        choices=ContractHoursStatus.choices,
+        default=ContractHoursStatus.DRAFT,
+        help_text="See ContractHoursStatus for the transitions and who may make them.",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_contract_hours",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_contract_hours",
+        help_text="Who approved it. Cleared when a row is reopened.",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "contract hours"
+        verbose_name_plural = "contract hours"
+        ordering = ["building__name", "employee__full_name", "-valid_from", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(valid_to__isnull=True)
+                | models.Q(valid_to__gte=models.F("valid_from")),
+                name="contract_hours_valid_to_after_from",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["company", "-valid_from"],
+                name="ch_company_valid_idx",
+            ),
+            models.Index(
+                fields=["employee", "building", "-valid_from"],
+                name="ch_employee_building_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.employee_id}@{self.building_id} from {self.valid_from}"
+
+    @property
+    def weekly_total(self) -> Decimal:
+        """The seven days summed. A property, not a stored column: a
+        stored total is a second copy of numbers that already exist,
+        and the copy is what drifts."""
+        return (
+            self.monday
+            + self.tuesday
+            + self.wednesday
+            + self.thursday
+            + self.friday
+            + self.saturday
+            + self.sunday
+        )
+
+    @property
+    def is_locked(self) -> bool:
+        """APPROVED rows are not editable — a change is a new row from a
+        new date. See the status docstring."""
+        return self.status == ContractHoursStatus.APPROVED

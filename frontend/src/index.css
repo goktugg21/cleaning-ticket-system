@@ -9354,7 +9354,14 @@ details[open] > .ew-department-tree-summary::before {
 }
 /* The GRID scrolls inside its own container, never the modal. */
 .hours-week-table-wrap {
-  max-height: 46vh;
+  /* Sprint 167 §1 — the grid is what scrolls once the modal has
+     stopped growing at 85vh. `flex: 1 1 auto` + `min-height: 0` is what
+     makes that work inside a column flex modal: without the zero
+     min-height a flex child refuses to shrink below its content and
+     pushes the dialog taller instead of scrolling. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 52vh;
   overflow-y: auto;
 }
 .hours-week-identity {

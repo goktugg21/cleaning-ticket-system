@@ -78,7 +78,7 @@ from tickets.models import (
     TicketMessage,
     TicketStaffAssignment,
 )
-from timesheets.models import HourType, TimeEntry, WeekLock
+from timesheets.models import ContractHours, HourType, TimeEntry, WeekLock
 from contracts.models import (
     Contract,
     ContractBuilding,
@@ -1545,6 +1545,13 @@ def _connect():
         HourType,
         TimeEntry,
         WeekLock,
+        # Sprint 167 §3/§4 — the standing hours agreement. The full CRUD
+        # trio, and the UPDATE half is the point: a status move
+        # (DRAFT -> SAVED -> APPROVED, and a reopen back) lands as a
+        # diff naming both states, which is the audit trail §4 requires
+        # for every transition. The seven weekday columns diff too, so
+        # "who changed Tuesday from 4 to 8" is answerable.
+        ContractHours,
         # Sprint 160 — contracts. Four of the five models take the full
         # CRUD trio; the fifth (`ContractBuilding`) is membership-shaped
         # and is registered below.

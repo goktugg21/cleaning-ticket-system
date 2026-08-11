@@ -31,6 +31,7 @@ import { WeekEntryDialog } from "../../components/timesheets/WeekEntryDialog";
 import { hourTypeLabel, hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { HourTypesTab } from "./HourTypesTab";
 import { HoursFilterRow } from "./HoursFilterRow";
+import { ContractHoursTab } from "./ContractHoursTab";
 import { HoursOverviewTab } from "./HoursOverviewTab";
 
 // Sprint 152.2 — "weeks" became the OVERVIEW tab: the read-only
@@ -38,7 +39,7 @@ import { HoursOverviewTab } from "./HoursOverviewTab";
 // still owns week close/reopen because a lock acts on a PERIOD, not
 // on an entry. The tab KEY is unchanged so the stored value stays
 // stable; only the label and the content moved.
-type Tab = "entries" | "hour_types" | "weeks";
+type Tab = "entries" | "hour_types" | "weeks" | "contract_hours";
 
 // Sprint 152 — the SUPER_ADMIN's provider company, remembered across
 // visits. Its OWN key, not shared with the catalog's
@@ -617,7 +618,31 @@ export function HoursAdminPage() {
         >
           {t("hours_admin.tab_overview")}
         </button>
+        {/* Sprint 167 §3 — the standing agreement, beside the hours
+            actually worked. */}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "contract_hours"}
+          className={`composer-toggle-btn ${tab === "contract_hours" ? "active" : ""}`}
+          data-testid="hours-tab-contract-hours"
+          onClick={() => setTab("contract_hours")}
+        >
+          {t("contract_hours.tab")}
+        </button>
       </div>
+
+      {tab === "contract_hours" && (
+        <ContractHoursTab
+          companyId={company}
+          buildings={buildings.map((b) => ({ id: b.id, name: b.name }))}
+          employees={employees.map((e) => ({
+            id: e.id,
+            name: e.full_name || e.email,
+          }))}
+          hourTypes={hourTypes.map((h) => ({ id: h.id, name: h.name }))}
+        />
+      )}
 
       {tab === "entries" && (
         <>

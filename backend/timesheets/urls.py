@@ -11,6 +11,12 @@ change to a converter cannot quietly break it.
 """
 from django.urls import path
 
+from .views_contract_hours import (
+    ContractHoursBulkView,
+    ContractHoursDetailView,
+    ContractHoursListCreateView,
+    ContractHoursStatusView,
+)
 from .views_employees import TimesheetEmployeeListView
 from .views_entries import TimeEntryDetailView, TimeEntryListCreateView
 from .views_hour_types import (
@@ -29,6 +35,28 @@ from .views_weeks import (
 
 
 urlpatterns = [
+    # Sprint 167 §3/§4 — the standing hours agreement. Literal segments
+    # before the <int:> detail route, the convention this file states.
+    path(
+        "contract-hours/bulk/",
+        ContractHoursBulkView.as_view(),
+        name="timesheet-contract-hours-bulk",
+    ),
+    path(
+        "contract-hours/<int:pk>/status/",
+        ContractHoursStatusView.as_view(),
+        name="timesheet-contract-hours-status",
+    ),
+    path(
+        "contract-hours/<int:pk>/",
+        ContractHoursDetailView.as_view(),
+        name="timesheet-contract-hours-detail",
+    ),
+    path(
+        "contract-hours/",
+        ContractHoursListCreateView.as_view(),
+        name="timesheet-contract-hours-list",
+    ),
     path(
         "hour-types/standard-set/",
         HourTypeStandardSetView.as_view(),

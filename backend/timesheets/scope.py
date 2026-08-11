@@ -333,3 +333,15 @@ def eligible_employees_queryset(user):
     # `user_ids_in_companies` so the picker endpoint and this validator
     # queryset share ONE definition. See that helper's docstring.
     return base.filter(pk__in=user_ids_in_companies(scope))
+
+
+def filter_contract_hours_for(user, queryset):
+    """Scope a `ContractHours` queryset to the actor's companies.
+
+    Sprint 167 §3. Company-level, exactly like `filter_time_entries_for`
+    — and like it, CUSTOMER_USER resolves to an empty frozenset and
+    therefore to no rows. A standing agreement about a worker's hours is
+    personnel data; no customer-side role has any business reading it,
+    and the view layer 403s them before this is even reached.
+    """
+    return _apply(user, queryset)

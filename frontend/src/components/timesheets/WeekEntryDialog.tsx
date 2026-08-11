@@ -202,28 +202,42 @@ export function WeekEntryDialog({
         inset: 0,
         background: "rgba(0,0,0,0.4)",
         display: "flex",
-        alignItems: "center",
+        // Sprint 167 §1 — anchored to the TOP, not centred. A centred
+        // dialog that grows moves its own header upward, so every row
+        // the operator adds slides the controls out from under their
+        // cursor. Growing downward from a fixed top edge is the
+        // behaviour asked for, and centring cannot give it.
+        alignItems: "flex-start",
         justifyContent: "center",
         zIndex: 100,
         padding: 16,
+        paddingTop: "6vh",
+        overflowY: "auto",
       }}
     >
       <div
         className="card week-entry-modal"
         style={{
-          // Sprint 166 §2 — opens LARGE enough to do its job. It was
-          // capped at 1180 but had no width floor, so on a smaller
-          // viewport it collapsed to whatever its content asked for and
-          // read as a cramped box with the page around it. `min(96vw,
-          // 1180px)` fills the space that exists and still fits 1024
-          // without the page scrolling; `minHeight` stops it opening
-          // short when the grid is empty.
+          // Sprint 167 §1 — sized to its CONTENT.
+          //
+          // Sprint 166 was told to make this "large enough to work in"
+          // and gave it a min-height, which is how an empty dialog
+          // became a vast white box holding one line of text. That was
+          // my overcorrection and the instruction behind it was wrong:
+          // a dialog should be as tall as what is in it.
+          //
+          // So there is NO height floor. Empty it is three pickers and
+          // a hint and stands about that tall; it grows as rows appear;
+          // at 85vh it stops growing and the GRID scrolls inside it
+          // (`.hours-week-table-wrap`, which owns the wide/tall thing).
+          // The width keeps Sprint 166's rule, which was the half of
+          // that change that was right.
           width: "min(96vw, 1180px)",
-          minHeight: "min(78vh, 720px)",
           maxWidth: 1180,
           padding: 24,
-          maxHeight: "92vh",
-          overflowY: "auto",
+          maxHeight: "85vh",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         <h3 style={{ marginTop: 0, marginBottom: 4 }}>
