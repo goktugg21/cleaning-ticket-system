@@ -55,66 +55,67 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-163-fixes`, cut from `feat/sprint-162-fixes`
-(`db6b77b`). **CC did NOT open a PR and did NOT deploy.**
+**Branch:** `feat/sprint-164`, cut from `feat/sprint-163-fixes`
+(`70dee40`). **CC did NOT open a PR and did NOT deploy.**
 
-**All four items shipped. Nothing was carried to `## NEXT`** — including
-§4, which had been deferred three sprints running.
+**All eight items shipped. Nothing carried to `## NEXT`.**
 
 ### The owner-visible changes, in plain words
 
-- **The hours set-up modal looks like the reference now.** The two tall
-  checkbox lists are one-line chip pickers, and the grid is one table
-  whose first three columns are Worker, Building and Hour type — so
-  everything lines up instead of the eye re-anchoring at every block
-  heading.
-- **The status tiles use the whole width and have room to breathe.**
-- **The contract page's cards no longer run their text to the border.**
-- **The company's employees, buildings and customers can be edited from
-  the edit page too**, not only the detail page.
+- **Contract invoices are real now.** A contract period whose invoice
+  date has arrived becomes an actual DRAFT invoice, priced from what was
+  agreed for THAT period. It is run by hand for now, deliberately.
+- Clicking anywhere on a contracts row opens it.
+- The hours page's stat chips use the whole width.
+- The "all rows" line now covers rows added afterwards — it used to
+  silently miss them while still showing the number.
+- The worker/building pickers open when you click them, stay open while
+  you pick several, and work from the keyboard.
+- The set-up window no longer scrolls sideways, and its three controls
+  use the width instead of leaving a gap.
+
+### §8, and the one thing worth reading
+
+Idempotency is a DATABASE constraint, not a check:
+`ContractInvoice(contract, period_start)` is unique, the generator
+attempts the insert and treats the violation as "already invoiced". Two
+concurrent runs make one invoice. The alternative — read, decide,
+write — is the shape `ensure_default_labels` already shipped as a race.
+
+The narrow catch earned itself immediately: the first version wrapped
+the write in a broad `except IntegrityError` and swallowed a NOT NULL
+violation on `Invoice.created_by`, reporting "nothing was due". The
+generator now requires an explicit actor.
+
+DRAFT only, no number (numbering is at SEND). Lines come from the
+revision in force on the PERIOD's date. `invoicing` gained no column —
+the dependency runs one way, and a test asserts it.
 
 ### Per item
 
-- **§1 hours modal — DONE, driven at 1280.** Chip multi-selects = 2;
-  columns `Medewerker | Gebouw | Uursoort | ma..zo | Totaal`; 6 groups
-  with worker and building in their own columns, blank on continuation
-  rows; `+ Add type` took the grid 7 → 8 rows; the apply row's 7 inputs
-  filled all 8 Monday cells; save clean; **API read-back 8 rows at
-  3.00**. Modal 743px in a 900px viewport, the GRID scrolls in its own
-  container, no console errors. The document scrolls 981/900 with the
-  modal open **and closed — delta 0**, so that is the admin page behind
-  the overlay, measured rather than assumed.
-- **§2 status tiles — DONE.** The strip lived inside `.dash-main`, which
-  `work-layout` sizes at 610px against a 340px side panel; nine readable
-  tiles never fit there at any padding, which is why Sprint 161's scroll
-  and this sprint's first attempt (wrap) were both treating the symptom.
-  It now sits ABOVE the two-column section.
-  `before tickets 1024/1280/1440 rows 2/3/2, box 710/608/768`
-  `after  tickets and extra work: rows 2/1/1, box 712/968/1128`
-  Tile width 112/100/118, padding 7px/10px → 10px/14px, 0 clipped
-  labels, 0 horizontal overflow. One row at 1280 and 1440 as required;
-  at 1024 it wraps to two rather than shrinking to 72px.
-- **§3 contract cards — DONE.** Which rule was responsible: **none.**
-  `.card` carries no padding at all, deliberately, and the building,
-  customer and company pages each add `20px 22px` inline. The contracts
-  page simply never did. Named once as `.card-detail-pad`.
-  `contract tile 16px 18px / card 20px 22px` — identical to `building`.
-- **§4 company cards on both pages — DONE.**
-  `components/CompanyRelationCards.tsx` owns the three cards and
-  everything behind them; the detail page drops ~460 lines and renders
-  one line, the edit page gains the same line on its `!isCreate` branch.
-  Verified by USING both: three cards on each, three Edit buttons on
-  each, and entering edit on the buildings card gives 3 row checkboxes
-  and the Add control on both.
-
-### The gate keeps paying for itself
-
-Two more pre-existing holes this sprint: `CompanyFormPage`'s admins
-heading used a class with no rule behind it, so it rendered as a bare
-`h3` while every other section head is styled. Seven catches in four
-sprints.
+- **§1 clickable rows — DONE.** Clicking a row navigated to
+  `/admin/contracts/1`.
+- **§2 hours strip — DONE.** 1024/1280/1440: 4 tiles, 1 row, box
+  712/968/1128, tiles equal at 171/186/218, padding 12px 16px, 0
+  overflow.
+- **§3 apply-to-all — DONE**, reproduced first. New rows now inherit;
+  after typing 5 and adding a type, all nine Monday cells read 5.
+- **§4 chip multi-select — DONE.** Found two real defects by driving it:
+  Escape closed the whole modal (the handler sat on the control while
+  the list is its sibling, so the key went to the dialog's window
+  listener), and the chip's remove button re-opened the list.
+- **§5 no sideways scroll — DONE.** Modal horizontal overflow 0 at all
+  three widths.
+- **§6 three columns — DONE.** 304/304/304 at 1024, 367/367/367 at 1280
+  and 1440, without widening the modal.
+- **§7 no regressions — DONE.** First three columns Medewerker | Gebouw
+  | Uursoort, 0 per-row dropdowns, chips present, 7 apply inputs.
+- **§8 contract invoices — DONE.** 17 generator tests; `contracts` +
+  `invoicing` together 309 tests OK, exit 0.
 
 ---
+
+
 
 
 
@@ -130,6 +131,29 @@ item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
 
 
+
+
+0. **WHAT REMAINS AFTER SPRINT 164**, in the order the owner set:
+
+   - **CONTRACT HOURS vs WORKED HOURS — the COMPARISON.** The owner has
+     confirmed he wants the two compared, not two independent lists. The
+     groundwork is deliberately in place: `ContractLine.hours` is a
+     per-billing-period budget and carries an optional `building`, so
+     the comparison has a period basis and something to group by without
+     a schema change. The worked side is `timesheets.TimeEntry`. Both
+     apps are module-independent by design, so this belongs in a
+     reporting surface that reads both — not an FK between them.
+   - **WORKER HOUR REPORTS.**
+   - **SCHEDULE — the GAP ANALYSIS FIRST.** Compare
+     `frontend/src/pages/AgendaPage.tsx` against the reference and
+     report the gap BEFORE building anything. That ordering is the
+     owner's and has been stated twice.
+
+   Also open, from §8 and recorded rather than assumed: wiring the
+   invoice generator to Celery beat. The code is ready — one
+   `CELERY_BEAT_SCHEDULE` entry calling `generate_invoices()`. What it
+   needs is a decision nobody has made: how often, at what hour, and
+   whether a run spanning midnight may bill a period a day early.
 
 0. **COMPANY CARDS ON THE EDIT PAGE — CLOSED by Sprint 163 §4.**
    Extracted into `components/CompanyRelationCards.tsx` and mounted on
