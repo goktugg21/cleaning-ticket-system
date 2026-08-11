@@ -171,7 +171,10 @@
     "empty": "No projects on this revision yet.",
     "lockedNotice": "\"{{label}}\" is in force and can no longer be changed. Create a new revision to change anything.",
     "deleteTitle": "Remove project",
-    "deleteBody": "Remove \"{{name}}\" from this revision?"
+    "deleteBody": "Remove \"{{name}}\" from this revision?",
+    "groupCount": "{{count}} lines",
+    "noBuilding": "No location",
+    "totalPerMonth": "Total per month"
   },
   "revisions": {
     "title": "Revision history",
@@ -239,5 +242,9 @@
   "billing": {
     "title": "Billing",
     "desc": "How and when this contract is invoiced."
+  },
+  "header": {
+    "perMonth": "{{amount}} / month",
+    "perYear": "{{amount}} / year"
   }
 }

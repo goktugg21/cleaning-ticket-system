@@ -58,7 +58,7 @@ export function perPeriodValue(
   );
 }
 
-function lineValue(
+export function lineValue(
   contract: Contract,
   line: { amount: string; hours: string },
   measure: Measure,

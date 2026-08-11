@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -26,7 +26,12 @@ import { canManageContracts } from "../../../auth/permissions";
 import { useEditMode } from "../../../lib/useEditMode";
 import { ContractFormDialog } from "./ContractFormDialog";
 import { ContractInvoicePreview } from "./ContractInvoicePreview";
-import { formatDate, formatMoney, formatNumber } from "./contractTables";
+import {
+  formatDate,
+  formatMoney,
+  formatNumber,
+  lineValue,
+} from "./contractTables";
 
 type Tab = "general" | "projects" | "billing" | "revisions";
 
@@ -115,10 +120,68 @@ export function ContractDetailPage() {
   // revision, and only while that revision has not taken effect.
   const editableRevision =
     activeRevision && !activeRevision.is_locked ? activeRevision : null;
-  const lines = activeRevision?.lines ?? [];
+  // Memoised because the grouping below depends on it: a fresh `[]`
+  // literal on every render would re-run the grouping on every render.
+  const lines = useMemo(() => activeRevision?.lines ?? [], [activeRevision]);
 
   const lineEdit = useEditMode<number>(
     editableRevision ? lines.map((line) => line.id) : [],
+  );
+
+  /**
+   * Sprint 167 §2 — the lines, grouped by LOCATION.
+   *
+   * A line's `amount` is one BILLING PERIOD's money, so a group's money
+   * and the footer's are both put through `lineValue`, the same rule the
+   * list page uses to scale a quarterly or yearly contract down to a
+   * month. Two surfaces expressing the same figure by two rules is how
+   * they end up disagreeing.
+   *
+   * Hours are NOT scaled: an hours budget answers "how much work per
+   * billing period", and multiplying it by twelve would invent a figure
+   * the contract never states.
+   */
+  const lineGroups = useMemo(() => {
+    if (!contract) return [];
+    const byKey = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        lines: typeof lines;
+        count: number;
+        hours: number;
+        amount: number;
+      }
+    >();
+    for (const line of lines) {
+      const key = line.building_name ?? "__none__";
+      let group = byKey.get(key);
+      if (!group) {
+        group = {
+          key,
+          label: line.building_name ?? t("projects.noBuilding"),
+          lines: [],
+          count: 0,
+          hours: 0,
+          amount: 0,
+        };
+        byKey.set(key, group);
+      }
+      group.lines.push(line);
+      group.count += 1;
+      group.hours += lineValue(contract, line, "hours", "monthly");
+      group.amount += lineValue(contract, line, "prices", "monthly");
+    }
+    return [...byKey.values()];
+  }, [contract, lines, t]);
+
+  const lineTotals = useMemo(
+    () => ({
+      hours: lineGroups.reduce((sum, group) => sum + group.hours, 0),
+      amount: lineGroups.reduce((sum, group) => sum + group.amount, 0),
+    }),
+    [lineGroups],
   );
 
   if (!Number.isFinite(id)) {
@@ -133,7 +196,9 @@ export function ContractDetailPage() {
             <Link to="/admin/contracts">{t("list.title")}</Link>
           </nav>
           <h2 className="page-title">{contract?.contract_no ?? "…"}</h2>
-          <p className="page-sub">
+          {/* Sprint 167 §2 — customer, number, status, LOCATION and the
+              two money figures on one line, above the tiles. */}
+          <p className="page-sub" data-testid="contract-header-line">
             {contract?.customer_name ?? ""}
             {contract && (
               <>
@@ -141,6 +206,24 @@ export function ContractDetailPage() {
                 <span className={`cell-tag ${STATUS_TAG[contract.status]}`}>
                   {t(`status.${contract.status}`)}
                 </span>
+                {contract.buildings.length > 0 && (
+                  <>
+                    {" · "}
+                    {contract.buildings.map((b) => b.name).join(", ")}
+                  </>
+                )}
+                {" · "}
+                <strong data-testid="contract-header-monthly">
+                  {t("header.perMonth", {
+                    amount: formatMoney(contract.monthly_amount, locale),
+                  })}
+                </strong>
+                {" · "}
+                <strong data-testid="contract-header-yearly">
+                  {t("header.perYear", {
+                    amount: formatMoney(contract.yearly_amount, locale),
+                  })}
+                </strong>
               </>
             )}
           </p>
@@ -331,7 +414,33 @@ export function ContractDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {lines.map((line) => (
+                {lineGroups.map((group) => (
+                  <Fragment key={group.key}>
+                    {/* One row per LOCATION, carrying that location's own
+                        count, hours and money — the reference groups the
+                        projects this way because a contract is read
+                        building by building. */}
+                    <tr
+                      className="contract-group-row"
+                      data-testid={`contract-line-group-${group.key}`}
+                    >
+                      <td colSpan={2}>
+                        <strong>{group.label}</strong>
+                        <span className="muted small" style={{ marginLeft: 8 }}>
+                          {t("projects.groupCount", { count: group.count })}
+                        </span>
+                      </td>
+                      <td className="contract-num">
+                        <strong>{formatNumber(String(group.hours), locale)}</strong>
+                      </td>
+                      <td className="contract-num" />
+                      <td className="contract-num">
+                        <strong>{formatMoney(String(group.amount), locale)}</strong>
+                      </td>
+                      <td className="contract-num" />
+                      {lineEdit.editMode && <td />}
+                    </tr>
+                    {group.lines.map((line) => (
                   <tr key={line.id}>
                     <td>{line.name}</td>
                     <td>{line.building_name ?? "—"}</td>
@@ -357,12 +466,33 @@ export function ContractDetailPage() {
                       </td>
                     )}
                   </tr>
+                    ))}
+                  </Fragment>
                 ))}
                 {lines.length === 0 && (
                   <tr>
                     <td colSpan={7} className="muted">
                       {t("projects.empty")}
                     </td>
+                  </tr>
+                )}
+                {lines.length > 0 && (
+                  <tr
+                    className="contract-grand-total"
+                    data-testid="contract-lines-total"
+                  >
+                    <td colSpan={2}>
+                      <strong>{t("projects.totalPerMonth")}</strong>
+                    </td>
+                    <td className="contract-num">
+                      <strong>{formatNumber(String(lineTotals.hours), locale)}</strong>
+                    </td>
+                    <td className="contract-num" />
+                    <td className="contract-num">
+                      <strong>{formatMoney(String(lineTotals.amount), locale)}</strong>
+                    </td>
+                    <td className="contract-num" />
+                    {lineEdit.editMode && <td />}
                   </tr>
                 )}
               </tbody>
