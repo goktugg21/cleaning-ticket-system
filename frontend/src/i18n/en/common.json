@@ -2174,5 +2174,15 @@
   "hours_week_grid.add_type": "+ Add type",
   "hours_week_grid.remove_type": "Remove {{hourType}}",
   "customer_view.overview.stat_contracts": "Contracts",
-  "customer_view.overview.quicklink_contracts_desc": "Recurring agreements and their prices."
+  "customer_view.overview.quicklink_contracts_desc": "Recurring agreements and their prices.",
+  "hours_week_grid.worker": "Worker",
+  "hours_week_grid.building": "Building",
+  "hours_week_grid.table_title": "Weekly hours",
+  "hours_week_grid.assignment_count_one": "{{count}} assignment",
+  "hours_week_grid.assignment_count_other": "{{count}} assignments",
+  "hours_week_grid.empty_hint": "Leave empty to fill in later; a row with no hours is not saved.",
+  "week_setup.select_workers": "Select workers",
+  "week_setup.select_buildings": "Select buildings",
+  "week_setup.remove_worker": "Remove {{name}}",
+  "week_setup.remove_building": "Remove {{name}}"
 }

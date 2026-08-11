@@ -509,10 +509,30 @@ export function HoursWeekGrid({
           row) that between them could not do the one thing an operator
           wants: put a number on a weekday for everybody. Typing in a day
           cell here does exactly that and nothing else. */}
-      <div className="table-wrap">
+      {/* Sprint 163 §1 — the table's own head, the way the reference
+          labels it: what this is, how many rows it holds, and what an
+          empty grid does. The caption describes OUR behaviour — a row
+          left blank is simply not written — rather than borrowing the
+          reference's sentence about seeding one hour on Monday, which
+          is not what ours does. */}
+      <div className="hours-week-table-head">
+        <span className="hours-week-table-title">
+          {t("hours_week_grid.table_title")}
+        </span>
+        <span className="cell-tag cell-tag-muted">
+          {t("hours_week_grid.assignment_count", { count: rows.length })}
+        </span>
+        <span className="muted small hours-week-table-hint">
+          {t("hours_week_grid.empty_hint")}
+        </span>
+      </div>
+
+      <div className="table-wrap hours-week-table-wrap">
         <table className="data-table data-table-dense hours-week-grid-table">
           <thead>
             <tr>
+              <th>{t("hours_week_grid.worker")}</th>
+              <th>{t("hours_week_grid.building")}</th>
               <th>{t("hours_week_grid.hour_type")}</th>
               {days.map((day, index) => (
                 <th key={dayKeys[index]} style={{ textAlign: "right" }}>
@@ -528,7 +548,7 @@ export function HoursWeekGrid({
               className="hours-week-apply-row"
               data-testid="hours-week-apply-row"
             >
-              <th scope="row" className="hours-week-apply-label">
+              <th scope="row" colSpan={3} className="hours-week-apply-label">
                 {t("hours_week_grid.apply_all_label")}
               </th>
               {dayKeys.map((dayKey, dayIndex) => (
@@ -556,42 +576,32 @@ export function HoursWeekGrid({
           <tbody>
             {blocks.length === 0 && (
               <tr>
-                <td colSpan={dayKeys.length + 3} className="muted small">
+                <td colSpan={dayKeys.length + 5} className="muted small">
                   {t("hours_week_grid.empty_block")}
                 </td>
               </tr>
             )}
             {blocks.map((block) => (
               <Fragment key={block.id}>
-                {/* One block per (worker, building), the reference's
-                    shape. The BUILDING is a property of the block and is
-                    a label here, never a control: if the work happened
-                    somewhere else it is a different block, which is
-                    chosen in the setup. */}
-                <tr
-                  className="hours-week-block-head"
-                  data-testid={`hours-week-block-${block.id}`}
-                >
-                  <th scope="rowgroup" colSpan={dayKeys.length + 1}>
-                    <span className="hours-week-block-person">
-                      {block.employeeName}
-                    </span>
-                    <span className="hours-week-block-building">
-                      {buildingName(block.buildingId)}
-                    </span>
-                  </th>
-                  <th
-                    style={{ textAlign: "right" }}
-                    data-testid={`hours-week-block-total-${block.id}`}
-                  >
-                    {formatTotal(
-                      block.rows.reduce((sum, row) => sum + rowTotal(row), 0),
-                    )}
-                  </th>
-                  <th />
-                </tr>
                 {block.rows.map((row, dayRowIndex) => (
-                  <tr key={row.id} data-testid={`hours-week-row-${row.id}`}>
+                  <tr
+                    key={row.id}
+                    data-testid={`hours-week-row-${row.id}`}
+                    className={
+                      dayRowIndex === 0 ? "hours-week-group-first" : undefined
+                    }
+                  >
+                    {/* Sprint 163 §1 — worker and building are COLUMNS,
+                        printed on the group's first row and left blank
+                        on its continuation rows. They used to be a
+                        block-header banner, which meant nothing lined
+                        up and the eye had to re-anchor at every group. */}
+                    <td className="td-subject hours-week-identity">
+                      {dayRowIndex === 0 ? block.employeeName : ""}
+                    </td>
+                    <td className="hours-week-identity">
+                      {dayRowIndex === 0 ? buildingName(block.buildingId) : ""}
+                    </td>
                     <td className="td-subject">
                       {/* A chip, not a dropdown. The dropdown only ever
                           existed on rows added in this session, so the
@@ -673,6 +683,15 @@ export function HoursWeekGrid({
                       }
                     />
                   </td>
+                  <td
+                    className="hours-week-group-total"
+                    data-testid={`hours-week-block-total-${block.id}`}
+                  >
+                    {formatTotal(
+                      block.rows.reduce((sum, row) => sum + rowTotal(row), 0),
+                    )}
+                  </td>
+                  <td />
                 </tr>
               </Fragment>
             ))}

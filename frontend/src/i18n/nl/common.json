@@ -2174,5 +2174,15 @@
   "hours_week_grid.add_type": "+ Uursoort toevoegen",
   "hours_week_grid.remove_type": "{{hourType}} verwijderen",
   "customer_view.overview.stat_contracts": "Contracten",
-  "customer_view.overview.quicklink_contracts_desc": "Terugkerende afspraken en hun prijzen."
+  "customer_view.overview.quicklink_contracts_desc": "Terugkerende afspraken en hun prijzen.",
+  "hours_week_grid.worker": "Medewerker",
+  "hours_week_grid.building": "Gebouw",
+  "hours_week_grid.table_title": "Weekuren",
+  "hours_week_grid.assignment_count_one": "{{count}} regel",
+  "hours_week_grid.assignment_count_other": "{{count}} regels",
+  "hours_week_grid.empty_hint": "Laat leeg om later in te vullen; een regel zonder uren wordt niet opgeslagen.",
+  "week_setup.select_workers": "Kies medewerkers",
+  "week_setup.select_buildings": "Kies gebouwen",
+  "week_setup.remove_worker": "{{name}} verwijderen",
+  "week_setup.remove_building": "{{name}} verwijderen"
 }

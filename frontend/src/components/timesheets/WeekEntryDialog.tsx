@@ -43,7 +43,7 @@ import type {
   TimesheetEmployee,
 } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
-import { EntityPicker } from "../EntityPicker";
+import { ChipMultiSelect } from "../ChipMultiSelect";
 import { formatIsoWeek, parseIsoWeek } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { HoursWeekGrid } from "./HoursWeekGrid";
@@ -227,7 +227,7 @@ export function WeekEntryDialog({
             <span className="field-label">
               {t("week_setup.employees_label")}
             </span>
-            <EntityPicker
+            <ChipMultiSelect
               options={employees.map((employee) => ({
                 id: employee.id,
                 label: employee.full_name || employee.email,
@@ -235,6 +235,10 @@ export function WeekEntryDialog({
               }))}
               selectedIds={employeeIds}
               onChange={setEmployeeIds}
+              placeholder={t("week_setup.select_workers")}
+              removeLabel={(label) =>
+                t("week_setup.remove_worker", { name: label })
+              }
               emptyText={t("hours_week_grid.no_employees")}
               testIdPrefix="week-setup-employees"
             />
@@ -244,10 +248,14 @@ export function WeekEntryDialog({
             <span className="field-label">
               {t("week_setup.buildings_label")}
             </span>
-            <EntityPicker
+            <ChipMultiSelect
               options={buildingOptions}
               selectedIds={buildingIds}
               onChange={setBuildingIds}
+              placeholder={t("week_setup.select_buildings")}
+              removeLabel={(label) =>
+                t("week_setup.remove_building", { name: label })
+              }
               emptyText={t("week_setup.no_buildings")}
               testIdPrefix="week-setup-buildings"
             />

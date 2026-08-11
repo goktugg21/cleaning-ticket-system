@@ -9193,3 +9193,105 @@ details[open] > .ew-department-tree-summary::before {
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ------------------------------------------------------------------
+   Sprint 163 §1 — the one-line chip multi-select.
+
+   The week-entry modal used two tall scrolling checkbox lists that ate
+   its upper half and pushed the grid below the fold. The reference puts
+   Workers and Buildings on one compact line each, with the chosen
+   people as removable chips; this is that control.
+   ------------------------------------------------------------------ */
+.chip-multiselect {
+  min-width: 0;
+}
+.chip-multiselect-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.chip-multiselect-placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.chip-multiselect-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.chip-multiselect-remove,
+.chip-multiselect-caret {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  font-family: inherit;
+}
+.chip-multiselect-remove:hover,
+.chip-multiselect-caret:hover {
+  color: var(--text);
+}
+.chip-multiselect-caret {
+  margin-left: auto;
+}
+.chip-multiselect-select {
+  flex: 1 1 160px;
+  min-width: 160px;
+  height: 26px;
+  font-size: 12.5px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Sprint 163 §1 — the grid's own head, and the identity columns. */
+.hours-week-table-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.hours-week-table-title {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+}
+.hours-week-table-hint {
+  margin-left: auto;
+  text-align: right;
+}
+/* The GRID scrolls inside its own container, never the modal. */
+.hours-week-table-wrap {
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.hours-week-identity {
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.hours-week-group-first td {
+  border-top: 1px solid var(--border);
+}
+.hours-week-group-total {
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
