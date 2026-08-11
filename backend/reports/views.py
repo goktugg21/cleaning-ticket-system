@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.db.models import Count
 from django.db.models.functions import TruncDate
@@ -811,4 +812,97 @@ class ExtraWorkByDepartmentPDFView(APIView):
         return _pdf_response(
             f"extra-work-by-department_{payload['from']}_{payload['to']}.pdf",
             build_extra_work_by_department_pdf(payload),
+        )
+
+
+class HoursComparisonView(APIView):
+    """
+    Sprint 165 §5 — contracted hours against worked hours, per building.
+
+        GET /api/reports/hours-comparison/?year=&month=&company=
+
+    Read-only. Provider-side only: `IsRevenueReportConsumer` is reused
+    rather than a new class, because this report answers the same
+    question about who may see it — it puts a company's contracted
+    commitments beside its people's hours, which is provider-internal
+    on both counts. STAFF and every CUSTOMER_* role are 403'd.
+
+    The computation lives in `reports/hours_comparison.py`; see that
+    module for why it is here and not in `contracts` or `timesheets`.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        from .hours_comparison import build_comparison, month_bounds
+        from .scoping import _allowed_company_ids
+
+        today = timezone.localdate()
+        try:
+            year = int(request.query_params.get("year") or today.year)
+            month = int(request.query_params.get("month") or today.month)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "year and month must be integers."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= month <= 12:
+            return Response(
+                {"detail": "month must be between 1 and 12."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        # `None` from the scoping helper means SUPER_ADMIN — no company
+        # filter. Everyone else gets their own set, and a `?company=`
+        # narrows WITHIN it and can never widen it.
+        allowed = _allowed_company_ids(request.user)
+        if allowed is None:
+            from companies.models import Company
+
+            company_ids = list(Company.objects.values_list("id", flat=True))
+        else:
+            company_ids = list(allowed)
+
+        requested = request.query_params.get("company")
+        if requested:
+            try:
+                requested_id = int(requested)
+            except (TypeError, ValueError):
+                company_ids = []
+            else:
+                company_ids = [c for c in company_ids if c == requested_id]
+
+        rows = build_comparison(company_ids, year, month)
+        first, last = month_bounds(year, month)
+        return Response(
+            {
+                "year": year,
+                "month": month,
+                "from": first.isoformat(),
+                "to": last.isoformat(),
+                "rows": [
+                    {
+                        "building": row.building_id,
+                        "building_name": row.building_name,
+                        "contracted_hours": row.contracted_hours,
+                        "worked_hours": row.worked_hours,
+                        "difference": row.difference,
+                        # Worked only. A contract has no employee
+                        # dimension — see the module docstring.
+                        "employees": row.employees,
+                    }
+                    for row in rows
+                ],
+                "totals": {
+                    "contracted_hours": sum(
+                        (row.contracted_hours for row in rows), Decimal("0.00")
+                    ),
+                    "worked_hours": sum(
+                        (row.worked_hours for row in rows), Decimal("0.00")
+                    ),
+                    "difference": sum(
+                        (row.difference for row in rows), Decimal("0.00")
+                    ),
+                },
+            }
         )

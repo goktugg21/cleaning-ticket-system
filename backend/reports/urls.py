@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    HoursComparisonView,
     AgeBucketsView,
     ExtraWorkByDepartmentCSVView,
     ExtraWorkByDepartmentPDFView,
@@ -32,6 +33,14 @@ from .views import (
 
 
 urlpatterns = [
+    # Sprint 165 §5 — contracted vs worked hours. Lives in `reports`
+    # because it reads BOTH `contracts` and `timesheets`, neither of
+    # which may import the other.
+    path(
+        "hours-comparison/",
+        HoursComparisonView.as_view(),
+        name="reports-hours-comparison",
+    ),
     path(
         "status-distribution/",
         StatusDistributionView.as_view(),
