@@ -2,7 +2,151 @@
 
 **Purpose.** The living plan to close every remaining gap between the
 system and the Ramazan transcripts + Source of Truth, ending with a
-premium UI/UX polish. **CC updates `## NOW` / `## NEXT` / `## SHIPPED`
+premium UI/UX polish. **CC updates `## NOW
+
+**Branch:** `feat/sprint-167`, cut from `feat/sprint-166` (`ce37418`).
+It is the single branch being merged — #153 -> ... -> #167 are ONE
+chain, one PR, not one per sprint.
+
+Sprint 166 was deployed to crmtest at the owner's instruction (the
+prompt said not to; the owner overrode it in the same session). The same
+instruction covers this sprint.
+
+### The standard this sprint was held to
+
+Sprint 166's standard stands: nothing counts as done unless it was
+reached by CLICKING from the sidebar, and the report says which entry.
+Every item below was.
+
+### Per item
+
+- **§1 wizard sized to its content — DONE, and it undoes my own
+  overcorrection.** Sprint 166 was told to make the modal "large enough
+  to work in" and I gave it a min-height, which turned an empty dialog
+  into a vast white box holding one line. No height floor now: it grows
+  with its rows, stops at 85vh, and the GRID scrolls inside it. The
+  backdrop is anchored to the TOP, not centred, because a centred dialog
+  that grows moves its own header upward and slides the controls out
+  from under the cursor. Measured at 1280: nothing selected 1180x268,
+  five rows 1180x765, eleven rows 1180x765 with the grid scrolling —
+  `top=54` in all three, so the header does not move.
+- **§2 contracts closing list — DONE, two gaps not four.** Checked all
+  four against the built page first. The Billing summary strip and its
+  "N facturen — totaal: EUR X" caption with the year stepper already
+  existed; so did the Revisions Current Status card and empty state.
+  What was actually missing and is now closed: the Projects tab groups
+  by LOCATION with per-group count/hours/amount and foots with Totaal
+  per maand, and the header carries the location alongside customer,
+  number, status and both money figures. Group and footer money goes
+  through the exported `lineValue`, the same rule the list page uses, so
+  a quarterly contract cannot read differently on two screens.
+- **§3 contract hours — DONE.** `timesheets.ContractHours`: employee,
+  building, hour type, `valid_from`/`valid_to` and seven weekday
+  columns. NO FK to `contracts` and no import of it — two tests pin
+  that, because tying the hours module to the contracts app would make
+  it useless to a company that has no contracts. Seven columns rather
+  than a JSON blob so the comparison report can SUM them in the
+  database. Resolution follows `resolve_price` (latest `valid_from` at
+  or before the date, `-id` tie-break); a date before any window
+  resolves to None, not zero — "no agreement" and "an agreement of zero"
+  are different facts. Screen: a Contracturen tab on /admin/hours with
+  four filters, four tiles and one inline-editable table behind one Edit
+  gate, approved rows disabled.
+- **§4 approval — DONE.** A Goedkeuring tab: week stepper,
+  Draft/Saved/Approved as tabs with counts, building and employee
+  filters, per-row action and a bulk action. States and transitions are
+  in the model docstring; an APPROVED row is not editable and reopening
+  clears the approval, because otherwise one wrong approval is permanent
+  and the only escape is a superseding row whose date lies about when
+  the agreement changed. The Extra work tile says "Niet vastgelegd"
+  rather than 0.00 — we hold no such figure, and a zero in a tile reads
+  as a measurement.
+- **§5 Work Plan gap — ANALYSED, not built** (the prompt asked for the
+  analysis only). See NEXT.
+
+### Not done
+
+- **§3's `+ Add type` per pair and the Bulk assignment dialog.** The
+  backend bulk endpoint exists and is tested (one row per pair, existing
+  rows skipped rather than raising); the dialog that would drive it is
+  not built. It is the one piece of §3 that did not land.
+
+### Gates
+
+`python manage.py test timesheets` — **242 tests, OK** (isolated
+database, own worktree). `makemigrations --dry-run --check` — no changes
+detected; `timesheets.0004_contracthours` applied to dev. Frontend: tsc
+clean, eslint **44 (42 errors, 2 warnings)** — baseline, none added —
+build OK. i18n `common` 2233 keys per side, `contracts` 202 per side,
+both in lockstep. The undefined-CSS-class gate caught seven invented
+class names in the approval tab before it shipped; all seven are gone.
+
+## NEXT
+
+### Sprint 167 §5 — Work Plan vs the AgendaPage we have (analysis only)
+
+The reference's Work Plan is a week view Mon-Sun with the week's items
+as cards, count chips (Total / Overdue / New / In Progress / Completed /
+Archived), Type and Status filters, and an Overdue button opening every
+overdue item with how long it has been overdue.
+
+**What `frontend/src/pages/AgendaPage.tsx` already does** (478 lines,
+two audiences in one file):
+
+- The STAFF agenda: the signed-in worker's own planned slots, fetched
+  as `MySlot[]`, grouped under date headings with an explicit
+  `__undated__` bucket for slots with no date. Each slot is already a
+  CARD (`agenda-slot-card`) carrying its status badge, and each card
+  carries the two actions that matter — Mark done, and Unable to
+  complete with a reason dialog that writes `UNABLE_TO_COMPLETE`.
+  Completion notes and unable-reasons render back onto the card.
+- The MANAGER agenda: a separate read-only table of the tickets the
+  signed-in manager manages, via the ticket list's `?my_managed=1`
+  filter, each row deep-linking to the ticket.
+- A role guard, and empty states for both audiences.
+
+**What it does not do:**
+
+1. **No week.** The grouping is by date over whatever the endpoint
+   returns — there is no Mon-Sun frame, no week stepper, and no notion
+   of "this week" at all. This is the largest single gap and everything
+   else depends on it: chips count "the week's items", and there is no
+   week to count.
+2. **No count chips.** Nothing aggregates. Total / Overdue / New / In
+   Progress / Completed / Archived do not exist in any form.
+3. **No Type or Status filters.** The staff list is unfiltered; the
+   manager table is filtered server-side to `my_managed` only.
+4. **No Overdue concept.** Nothing computes overdue-ness, so there is
+   no button and no list, and "how long it has been overdue" is not a
+   figure the page holds.
+5. **Archived is not a state we have.** The reference's sixth chip has
+   no counterpart in our slot model — a chip for it would have to be
+   dropped or redefined, and redefining it silently is the wrong move.
+
+**What closing it would cost.** The honest estimate is that this is a
+sprint of its own, not a section of one:
+
+- *Backend, small but real.* The slots endpoint takes no week
+  parameter today. A week window (`iso_year`/`iso_week`, the same
+  parameters `/timesheets/entries/` already accepts) plus the six
+  counts computed server-side over the same scoped queryset — counting
+  client-side would count only the page the client happens to hold.
+  Overdue needs a definition first: a dated slot in the past that is
+  neither COMPLETED nor UNABLE_TO_COMPLETE is the obvious one, and it
+  needs the owner's word before it is coded, because everything on the
+  screen keys off it.
+- *Frontend, the bulk of it.* A Mon-Sun frame the cards sit inside;
+  the chip row wired to the server counts; Type and Status filters; and
+  the Overdue drawer. The card itself, its actions and its dialogs are
+  already written and would be reused unchanged — that is the part
+  that is genuinely already done.
+- *The trap to avoid.* The manager table and the staff agenda are two
+  different screens sharing one file. A week frame belongs to the staff
+  agenda; bolting it onto the manager table too, because they live
+  together, would be the same mistake as the reference-copying that
+  produced the headerless permission column.
+
+ / `## SHIPPED`
 for a sprint as part of that sprint's own commit(s)** — not in a later
 docs-only pass — so this file always reflects where we actually are.
 
