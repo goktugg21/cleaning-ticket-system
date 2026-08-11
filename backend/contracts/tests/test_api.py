@@ -17,6 +17,8 @@ from customers.models import Customer
 
 from contracts.models import Contract, ContractLifecycle, ContractRevision, ContractType
 
+from .test_query_counts import CaptureQueries
+
 from .fixtures import (
     CONTRACTS_URL,
     OPTIONS_URL,
@@ -28,6 +30,7 @@ from .fixtures import (
     contract_revisions_url,
     line_detail_url,
     revision_detail_url,
+    make_contract,
     revision_lines_url,
 )
 
@@ -597,3 +600,80 @@ class ForecastEndpointTests(ContractsFixture):
         self.assertEqual(
             response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED
         )
+
+
+class CustomerFilterTests(ContractsFixture):
+    """Sprint 162 §4 — a customer's own contracts, through the EXISTING
+    list endpoint.
+
+    No new endpoint was added, so what needs pinning is that the filter
+    the new customer-detail section relies on behaves like every other
+    read here: scoped first, filtered second, and invisible to every
+    customer-side role.
+    """
+
+    def test_the_customer_filter_narrows_to_that_customer(self):
+        response = self.api(self.ca_a).get(
+            CONTRACTS_URL, {"customer": self.customer_a.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        returned = {row["customer"] for row in response.json()["results"]}
+        self.assertEqual(returned, {self.customer_a.id})
+        self.assertEqual(len(response.json()["results"]), 2)
+
+    def test_a_foreign_customer_id_yields_nothing_rather_than_their_rows(self):
+        """The filter NARROWS; it cannot widen. Naming another tenant's
+        customer returns an empty page, not their contracts."""
+        response = self.api(self.ca_a).get(
+            CONTRACTS_URL, {"customer": self.customer_b.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json()["results"], [])
+
+    def test_customer_roles_cannot_read_a_customers_contracts(self):
+        """Including their OWN customer's. A contract carries negotiated
+        prices, and this sprint opens no customer-facing surface for
+        them — the section is provider-side only."""
+        response = self.api(self.customer_user).get(
+            CONTRACTS_URL, {"customer": self.customer_a.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_staff_cannot_either(self):
+        response = self.api(self.staff_a).get(
+            CONTRACTS_URL, {"customer": self.customer_a.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_a_building_manager_sees_only_their_own_buildings_contracts(self):
+        """The customer filter is applied ON TOP of the BM narrowing,
+        not instead of it."""
+        response = self.api(self.bm_a).get(
+            CONTRACTS_URL, {"customer": self.customer_a.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in response.json()["results"]}
+        self.assertEqual(ids, {self.contract_a.id})
+
+    def test_the_filtered_read_costs_a_constant_number_of_queries(self):
+        """Same property the unfiltered list has: the customer section
+        must not become the one caller that fans out per row."""
+        client = self.api(self.ca_a)
+        with CaptureQueries(self) as few:
+            client.get(CONTRACTS_URL, {"customer": self.customer_a.id})
+
+        for index in range(6):
+            make_contract(
+                company=self.company_a,
+                customer=self.customer_a,
+                contract_type=self.type_a,
+                contract_no=f"CNT-2026-91{index:02d}",
+                buildings=[self.building_a, self.building_a2],
+                lines=[("A", "100.00", "1.00"), ("B", "200.00", "2.00")],
+            )
+
+        with self.assertNumQueries(few.count):
+            response = client.get(
+                CONTRACTS_URL, {"customer": self.customer_a.id}
+            )
+        self.assertEqual(len(response.json()["results"]), 8)
