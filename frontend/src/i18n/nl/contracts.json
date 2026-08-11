@@ -222,5 +222,18 @@
     "customerAndStartRequired": "Kies een klant en een startdatum.",
     "notFound": "Dit contract bestaat niet.",
     "companyLoadFailed": "Bedrijven konden niet worden geladen."
+  },
+  "customerSection": {
+    "empty": "Deze klant heeft nog geen contracten.",
+    "showing": "{{shown}} van {{count}} getoond",
+    "seeAll": "Alle contracten van deze klant"
+  },
+  "general": {
+    "title": "Algemeen",
+    "desc": "Wie, waar en wanneer dit contract geldt."
+  },
+  "billing": {
+    "title": "Facturatie",
+    "desc": "Hoe en wanneer er gefactureerd wordt."
   }
 }

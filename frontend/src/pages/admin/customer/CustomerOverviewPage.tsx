@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  FileText,
   Mail,
   MapPin,
   Receipt,
@@ -253,6 +254,18 @@ export function CustomerOverviewPage() {
           label: t("customer_view.overview.stat_pricing"),
           description: t("customer_view.overview.quicklink_pricing_desc"),
           value: summary?.pricing_rule_count,
+        },
+        {
+          testId: "customer-overview-stat-contracts",
+          path: "contracts",
+          Icon: FileText,
+          label: t("customer_view.overview.stat_contracts"),
+          description: t("customer_view.overview.quicklink_contracts_desc"),
+          // No count: the overview summary endpoint does not carry one,
+          // and inventing a second request for a chip number is not
+          // worth a round trip. `undefined` is the established "this
+          // chip has no count" value.
+          value: undefined,
         },
         {
           testId: "customer-overview-stat-extra-work",

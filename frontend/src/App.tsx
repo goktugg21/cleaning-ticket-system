@@ -65,6 +65,8 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // (`/admin/customers/:id/edit`).
 import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
+// Sprint 162 §4 — one customer's contracts, beside their other sections.
+import { CustomerContractsPage } from "./pages/admin/customer/CustomerContractsPage";
 import { CustomerInvoicesPage } from "./pages/admin/customer/CustomerInvoicesPage";
 import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage";
 import { CustomerDocumentsPage } from "./pages/admin/customer/CustomerDocumentsPage";
@@ -561,6 +563,14 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerExtraWorkPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/contracts"
+            element={
+              <AdminRoute>
+                <CustomerContractsPage />
               </AdminRoute>
             }
           />

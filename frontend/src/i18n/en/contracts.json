@@ -222,5 +222,18 @@
     "customerAndStartRequired": "Choose a customer and a start date.",
     "notFound": "This contract does not exist.",
     "companyLoadFailed": "Companies could not be loaded."
+  },
+  "customerSection": {
+    "empty": "This customer has no contracts yet.",
+    "showing": "Showing {{shown}} of {{count}}",
+    "seeAll": "All contracts for this customer"
+  },
+  "general": {
+    "title": "General info",
+    "desc": "Who, where and when this contract applies."
+  },
+  "billing": {
+    "title": "Billing",
+    "desc": "How and when this contract is invoiced."
   }
 }

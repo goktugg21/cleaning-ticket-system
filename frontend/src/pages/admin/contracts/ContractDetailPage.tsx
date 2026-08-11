@@ -213,7 +213,13 @@ export function ContractDetailPage() {
 
       {tab === "general" && contract && (
         <section className="card" data-testid="contract-general">
-          <dl className="contract-detail-grid">
+          <div className="section-head" style={{ marginBottom: 8 }}>
+            <div>
+              <div className="section-head-title">{t("general.title")}</div>
+              <div className="section-head-sub">{t("general.desc")}</div>
+            </div>
+          </div>
+          <dl className="detail-field-grid">
             <Field label={t("fields.contractNo")} value={contract.contract_no} />
             <Field
               label={t("fields.customer")}
@@ -376,7 +382,13 @@ export function ContractDetailPage() {
 
       {tab === "billing" && contract && (
         <section className="card" data-testid="contract-billing">
-          <dl className="contract-detail-grid">
+          <div className="section-head" style={{ marginBottom: 8 }}>
+            <div>
+              <div className="section-head-title">{t("billing.title")}</div>
+              <div className="section-head-sub">{t("billing.desc")}</div>
+            </div>
+          </div>
+          <dl className="detail-field-grid">
             <Field
               label={t("fields.billingPeriod")}
               value={t(`billingPeriod.${contract.billing_period}`)}
@@ -563,8 +575,8 @@ function Field({
 }) {
   return (
     <div className="detail-field-row">
-      <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dt className="detail-field-label">{label}</dt>
+      <dd className="detail-field-value">{value}</dd>
     </div>
   );
 }
