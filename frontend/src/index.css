@@ -9491,3 +9491,21 @@ details[open] > .ew-department-tree-summary::before {
   background: var(--surface-2);
   font-size: 12.5px;
 }
+
+/* Sprint 168 §7 — the Work Plan's Mon-Sun frame. Seven columns wide,
+   two on a tablet, one on a phone. Always all seven day sections,
+   empty ones included: a week with nothing on Thursday must SHOW an
+   empty Thursday rather than close the gap and leave the reader
+   counting columns. */
+.agenda-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+@media (max-width: 1200px) {
+  .agenda-week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .agenda-week-grid { grid-template-columns: 1fr; }
+}

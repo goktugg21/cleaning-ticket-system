@@ -3,7 +3,6 @@
   "slot_status.COMPLETED": "Completed",
   "slot_status.UNABLE_TO_COMPLETE": "Unable to complete",
   "slot_status.CANCELLED": "Cancelled",
-
   "editor.title": "Staff slots",
   "editor.desc": "Split this ticket into dated work slots — one per staff member (e.g. morning and evening).",
   "editor.loading": "Loading slots…",
@@ -33,7 +32,6 @@
   "editor.toast_added": "Staff slot added",
   "editor.toast_saved": "Slot updated",
   "editor.toast_removed": "Slot removed",
-
   "agenda.page_title": "My Work",
   "agenda.page_subtitle": "Your dated work slots. Mark each one done or report if you can't complete it.",
   "agenda.empty_title": "No work assigned",
@@ -42,7 +40,6 @@
   "agenda.no_time": "No time set",
   "agenda.mark_done": "Mark done",
   "agenda.cant_complete": "Can't complete",
-
   "agenda.manager_title": "My tickets",
   "agenda.manager_subtitle": "Tickets assigned to you.",
   "agenda.manager_empty_title": "No tickets assigned",
@@ -52,7 +49,6 @@
   "agenda.manager_list_subtitle_other": "{{count}} tickets",
   "agenda.role_guard_title": "Not available for your role",
   "agenda.role_guard_desc": "My Work is only available to field staff and building managers.",
-
   "complete.dialog_title": "Mark slot as done",
   "complete.dialog_desc": "Add a completion note and/or photos as proof of work. At least one is required. This does not close the ticket — your manager reviews it.",
   "complete.note_label": "Completion note",
@@ -66,13 +62,11 @@
   "complete.submit": "Mark done",
   "complete.submitting": "Saving…",
   "complete.toast_done": "Slot marked done",
-
   "unable.dialog_title": "Can't complete this slot",
   "unable.dialog_desc": "Tell your manager why this slot can't be completed. A reason is required.",
   "unable.dialog_placeholder": "Why can't this be completed?",
   "unable.dialog_confirm": "Report unable",
   "unable.toast_done": "Reported as unable to complete",
-
   "subtasks.section_title": "Sub-tasks",
   "subtasks.add": "Add sub-task",
   "subtasks.adding": "Adding…",
@@ -98,5 +92,20 @@
   "subtasks.auto_complete_desc": "When every sub-task is done, the ticket auto-advances to manager review.",
   "subtasks.auto_complete_pa_only": "Only a provider admin can change this setting.",
   "subtasks.slot_count_one": "{{count}} work block",
-  "subtasks.slot_count_other": "{{count}} work blocks"
+  "subtasks.slot_count_other": "{{count}} work blocks",
+  "agenda.week_title": "Work plan",
+  "agenda.prev_week": "Previous week",
+  "agenda.next_week": "Next week",
+  "agenda.this_week": "This week",
+  "agenda.chip_total": "Total",
+  "agenda.chip_overdue": "Overdue",
+  "agenda.chip_new": "New",
+  "agenda.chip_unable": "Unable",
+  "agenda.chip_completed": "Completed",
+  "agenda.filter_type": "Type",
+  "agenda.filter_status": "Status",
+  "agenda.all_types": "All types",
+  "agenda.all_statuses": "All statuses",
+  "agenda.missing_chips_note": "Two of the reference chips are deliberately absent: a staff slot has no In Progress and no Archived state in this system.",
+  "agenda.undated_count": "{{count}} slot(s) with no date, outside this week."
 }

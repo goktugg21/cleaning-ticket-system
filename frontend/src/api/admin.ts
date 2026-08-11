@@ -1415,6 +1415,8 @@ export interface MySlot {
   ticket_no: string;
   ticket_title: string;
   ticket_status: string;
+  ticket_type: string;
+  ticket_customer_name: string | null;
   building_id: number;
   building_name: string;
   scheduled_start_at: string | null;

@@ -19,6 +19,8 @@ import { Link } from "react-router-dom";
 import { CalendarClock, CheckCircle2, Lock, Ticket, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
 import { getMySlots, updateStaffSlot } from "../api/admin";
 import type { MySlot } from "../api/admin";
 import { getApiError } from "../api/client";
@@ -34,6 +36,14 @@ import { SlotStatusBadge } from "../components/SlotStatusBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { formatDate, useLocaleCode } from "../lib/intl";
+import {
+  currentIsoWeek,
+  formatIsoWeek,
+  isoWeekDays,
+  shiftIsoWeek,
+  toDateString,
+} from "../lib/isoWeek";
+import type { IsoWeek } from "../lib/isoWeek";
 import { SlotCompletionDialog } from "./SlotCompletionDialog";
 
 const UNDATED = "__undated__";
@@ -227,7 +237,7 @@ function ManagerTicketsAgenda() {
 // STAFF — the dated slot agenda. UNCHANGED from the pre-Sprint-111 page.
 // ---------------------------------------------------------------------------
 function StaffSlotAgenda() {
-  const { t } = useTranslation(["staff_slots", "common"]);
+  const { t } = useTranslation(["staff_slots", "common", "create_ticket"]);
   const { me } = useAuth();
   const { push } = useToast();
   const locale = useLocaleCode();
@@ -236,6 +246,12 @@ function StaffSlotAgenda() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
+  const [chip, setChip] = useState<
+    "" | "overdue" | "new" | "unable" | "completed"
+  >("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [completionTarget, setCompletionTarget] = useState<MySlot | null>(null);
   const [unableTarget, setUnableTarget] = useState<MySlot | null>(null);
 
@@ -263,21 +279,103 @@ function StaffSlotAgenda() {
     };
   }, []);
 
-  const groups = useMemo(() => {
-    const order: string[] = [];
-    const byKey = new Map<string, MySlot[]>();
-    for (const slot of slots) {
-      const key = localDateKey(slot.scheduled_start_at) ?? UNDATED;
-      const existing = byKey.get(key);
-      if (existing) {
-        existing.push(slot);
-      } else {
-        byKey.set(key, [slot]);
-        order.push(key);
-      }
-    }
-    return order.map((key) => ({ key, items: byKey.get(key) ?? [] }));
-  }, [slots]);
+  /**
+   * Sprint 168 §7 — the Work Plan, built ON the agenda rather than
+   * beside it.
+   *
+   * Sprint 167 measured this gap instead of guessing at it, and the
+   * finding was that the agenda already had the CARDS, the actions and
+   * the reason dialogs — what it did not have was a WEEK. So the cards
+   * below are untouched; what is new is the frame around them, the
+   * counts, and the filters.
+   *
+   * The day columns are Mon–Sun of the selected week AND they are
+   * always all seven, empty ones included: a week with nothing on
+   * Thursday must show an empty Thursday, not silently close the gap
+   * and leave the reader counting columns.
+   */
+  const dayKeys = useMemo(
+    () => isoWeekDays(week).map(toDateString),
+    [week],
+  );
+
+  /** The week's slots, before any chip or filter narrows them. */
+  const weekSlots = useMemo(
+    () =>
+      slots.filter((slot) => {
+        const key = localDateKey(slot.scheduled_start_at);
+        return key !== null && dayKeys.includes(key);
+      }),
+    [slots, dayKeys],
+  );
+
+  /** Undated slots belong to no week, so they are shown apart rather
+   *  than dropped — a slot nobody has scheduled is exactly the one that
+   *  most needs seeing. */
+  const undatedSlots = useMemo(
+    () => slots.filter((slot) => localDateKey(slot.scheduled_start_at) === null),
+    [slots],
+  );
+
+  /** Overdue: a dated slot in the past that nobody has closed. The
+   *  definition is stated here because everything on the screen keys
+   *  off it — Sprint 167 flagged that it needed deciding before it
+   *  was coded, and this is the decision. */
+  const isOverdue = useMemo(() => {
+    const today = toDateString(new Date());
+    return (slot: MySlot) => {
+      const key = localDateKey(slot.scheduled_start_at);
+      if (key === null || key >= today) return false;
+      return (
+        slot.slot_status !== "COMPLETED" &&
+        slot.slot_status !== "UNABLE_TO_COMPLETE"
+      );
+    };
+  }, []);
+
+  const counts = useMemo(
+    () => ({
+      total: weekSlots.length,
+      overdue: weekSlots.filter(isOverdue).length,
+      new: weekSlots.filter((s) => s.slot_status === "ASSIGNED").length,
+      // NOT "in progress": a staff slot has no such state. See the
+      // note rendered under the chips.
+      unable: weekSlots.filter((s) => s.slot_status === "UNABLE_TO_COMPLETE")
+        .length,
+      completed: weekSlots.filter((s) => s.slot_status === "COMPLETED").length,
+    }),
+    [weekSlots, isOverdue],
+  );
+
+  const filtered = useMemo(() => {
+    let rows = weekSlots;
+    if (chip === "overdue") rows = rows.filter(isOverdue);
+    else if (chip === "new")
+      rows = rows.filter((s) => s.slot_status === "ASSIGNED");
+    else if (chip === "unable")
+      rows = rows.filter((s) => s.slot_status === "UNABLE_TO_COMPLETE");
+    else if (chip === "completed")
+      rows = rows.filter((s) => s.slot_status === "COMPLETED");
+    if (typeFilter) rows = rows.filter((s) => s.ticket_type === typeFilter);
+    if (statusFilter) rows = rows.filter((s) => s.slot_status === statusFilter);
+    return rows;
+  }, [weekSlots, chip, typeFilter, statusFilter, isOverdue]);
+
+  const groups = useMemo(
+    () =>
+      dayKeys.map((key) => ({
+        key,
+        items: filtered.filter(
+          (slot) => localDateKey(slot.scheduled_start_at) === key,
+        ),
+      })),
+    [dayKeys, filtered],
+  );
+
+  const ticketTypes = useMemo(
+    () => [...new Set(slots.map((slot) => slot.ticket_type).filter(Boolean))],
+    [slots],
+  );
 
   function timeOnly(iso: string | null): string {
     if (!iso) return "";
@@ -303,7 +401,10 @@ function StaffSlotAgenda() {
 
   function groupHeading(group: { key: string; items: MySlot[] }): string {
     if (group.key === UNDATED) return t("agenda.undated");
-    return formatDate(group.items[0]?.scheduled_start_at ?? null);
+    // Sprint 168 §7 — from the COLUMN'S OWN date, not from its first
+    // item. A day with nothing on it has no item to read a date from,
+    // and every one of the seven columns is always rendered.
+    return formatDate(`${group.key}T00:00:00`);
   }
 
   async function handleUnableConfirm(reason: string) {
@@ -357,6 +458,127 @@ function StaffSlotAgenda() {
         />
       )}
 
+      {slots.length > 0 && (
+        <>
+          <div className="hours-tiles-head">
+            <span className="hours-tiles-title">{t("agenda.week_title")}</span>
+            <div
+              style={{ display: "flex", alignItems: "center", gap: 8 }}
+              data-testid="agenda-week-stepper"
+            >
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setWeek((w) => shiftIsoWeek(w, -1))}
+                aria-label={t("agenda.prev_week")}
+                data-testid="agenda-week-prev"
+              >
+                <ChevronLeft size={14} strokeWidth={2.5} />
+              </button>
+              <span
+                style={{ fontWeight: 600, minWidth: 130, textAlign: "center" }}
+                data-testid="agenda-week-label"
+              >
+                {formatIsoWeek(week)}
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setWeek((w) => shiftIsoWeek(w, 1))}
+                aria-label={t("agenda.next_week")}
+                data-testid="agenda-week-next"
+              >
+                <ChevronRight size={14} strokeWidth={2.5} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setWeek(currentIsoWeek())}
+                data-testid="agenda-week-today"
+              >
+                {t("agenda.this_week")}
+              </button>
+            </div>
+          </div>
+
+          {/* The counts, and each one FILTERS when clicked — the Sprint
+              163 status-strip behaviour, not a decorative badge row. */}
+          <div className="composer-toggle" role="tablist" style={{ marginBottom: 12 }}>
+            {(
+              [
+                ["", counts.total, "chip_total"],
+                ["overdue", counts.overdue, "chip_overdue"],
+                ["new", counts.new, "chip_new"],
+                ["unable", counts.unable, "chip_unable"],
+                ["completed", counts.completed, "chip_completed"],
+              ] as const
+            ).map(([key, value, label]) => (
+              <button
+                key={label}
+                type="button"
+                role="tab"
+                aria-selected={chip === key}
+                className={`composer-toggle-btn ${chip === key ? "active" : ""}`}
+                onClick={() => setChip(key)}
+                data-testid={`agenda-chip-${key || "total"}`}
+              >
+                {t(`agenda.${label}`)}
+                <span className="mywork-chip-count">{value}</span>
+              </button>
+            ))}
+          </div>
+
+          <form className="filter-bar" onSubmit={(e) => e.preventDefault()}>
+            <div className="filter-field">
+              <span className="filter-label">{t("agenda.filter_type")}</span>
+              <select
+                className="filter-control"
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                data-testid="agenda-filter-type"
+              >
+                <option value="">{t("agenda.all_types")}</option>
+                {ticketTypes.map((value) => (
+                  <option key={value} value={value}>
+                    {TICKET_TYPE_KEYS[value as TicketTypeValue]
+                      ? t(
+                          `create_ticket:${TICKET_TYPE_KEYS[value as TicketTypeValue]}`,
+                        )
+                      : value}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="filter-field">
+              <span className="filter-label">{t("agenda.filter_status")}</span>
+              <select
+                className="filter-control"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                data-testid="agenda-filter-status"
+              >
+                <option value="">{t("agenda.all_statuses")}</option>
+                {["ASSIGNED", "COMPLETED", "UNABLE_TO_COMPLETE", "CANCELLED"].map(
+                  (value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ),
+                )}
+              </select>
+            </div>
+          </form>
+
+          {/* Said on screen rather than filled with an invented number:
+              the reference's sixth chip is Archived, and a staff slot
+              has no archived state in this system. */}
+          <p className="muted small" data-testid="agenda-no-archived">
+            {t("agenda.missing_chips_note")}
+          </p>
+        </>
+      )}
+
+      <div className="agenda-week-grid" data-testid="agenda-week-grid">
       {groups.map((group) => (
         <section key={group.key} style={{ marginBottom: 18 }}>
           <h3
@@ -454,6 +676,16 @@ function StaffSlotAgenda() {
           </ul>
         </section>
       ))}
+      </div>
+
+      {/* Undated slots belong to no week, so they sit below the grid
+          rather than being dropped: a slot nobody has scheduled is the
+          one that most needs seeing. */}
+      {undatedSlots.length > 0 && (
+        <p className="muted small" data-testid="agenda-undated-note">
+          {t("agenda.undated_count", { count: undatedSlots.length })}
+        </p>
+      )}
 
       {completionTarget && me && (
         <SlotCompletionDialog

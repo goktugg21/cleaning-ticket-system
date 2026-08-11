@@ -269,6 +269,13 @@ class _MySlotSerializer(serializers.ModelSerializer):
     ticket_no = serializers.CharField(source="ticket.ticket_no", read_only=True)
     ticket_title = serializers.CharField(source="ticket.title", read_only=True)
     ticket_status = serializers.CharField(source="ticket.status", read_only=True)
+    # Sprint 168 §7 — the Work Plan filters by TYPE, and a card that
+    # already carries the ticket's title and status may as well carry
+    # the one more field that saves a detail fetch per card.
+    ticket_type = serializers.CharField(source="ticket.type", read_only=True)
+    ticket_customer_name = serializers.CharField(
+        source="ticket.customer.name", read_only=True, default=None
+    )
     building_id = serializers.IntegerField(
         source="ticket.building_id", read_only=True
     )
@@ -284,6 +291,8 @@ class _MySlotSerializer(serializers.ModelSerializer):
             "ticket_no",
             "ticket_title",
             "ticket_status",
+            "ticket_type",
+            "ticket_customer_name",
             "building_id",
             "building_name",
             "scheduled_start_at",
