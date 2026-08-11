@@ -31,6 +31,7 @@ import { WeekEntryDialog } from "../../components/timesheets/WeekEntryDialog";
 import { hourTypeLabel, hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { HourTypesTab } from "./HourTypesTab";
 import { HoursFilterRow } from "./HoursFilterRow";
+import { ContractHoursApprovalTab } from "./ContractHoursApprovalTab";
 import { ContractHoursTab } from "./ContractHoursTab";
 import { HoursOverviewTab } from "./HoursOverviewTab";
 
@@ -39,7 +40,12 @@ import { HoursOverviewTab } from "./HoursOverviewTab";
 // still owns week close/reopen because a lock acts on a PERIOD, not
 // on an entry. The tab KEY is unchanged so the stored value stays
 // stable; only the label and the content moved.
-type Tab = "entries" | "hour_types" | "weeks" | "contract_hours";
+type Tab =
+  | "entries"
+  | "hour_types"
+  | "weeks"
+  | "contract_hours"
+  | "contract_approval";
 
 // Sprint 152 — the SUPER_ADMIN's provider company, remembered across
 // visits. Its OWN key, not shared with the catalog's
@@ -630,7 +636,30 @@ export function HoursAdminPage() {
         >
           {t("contract_hours.tab")}
         </button>
+        {/* Sprint 167 §4 — where a week's agreement is reviewed against
+            what was worked, and approved. */}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "contract_approval"}
+          className={`composer-toggle-btn ${tab === "contract_approval" ? "active" : ""}`}
+          data-testid="hours-tab-contract-approval"
+          onClick={() => setTab("contract_approval")}
+        >
+          {t("contract_hours.tab_approval")}
+        </button>
       </div>
+
+      {tab === "contract_approval" && (
+        <ContractHoursApprovalTab
+          companyId={company}
+          buildings={buildings.map((b) => ({ id: b.id, name: b.name }))}
+          employees={employees.map((e) => ({
+            id: e.id,
+            name: e.full_name || e.email,
+          }))}
+        />
+      )}
 
       {tab === "contract_hours" && (
         <ContractHoursTab
