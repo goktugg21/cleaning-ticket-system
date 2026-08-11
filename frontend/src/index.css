@@ -290,6 +290,24 @@ p { line-height: 1.6; }
   box-shadow: var(--shadow-sm);
 }
 
+/* Sprint 163 §3 — the padding every detail card needs, named once.
+
+   `.card` deliberately carries none, because plenty of cards hold a
+   full-bleed table or filter bar. The detail pages that hold FIELDS all
+   want the same inset, and the building, customer and company pages
+   each repeat it as `style={{ padding: "20px 22px" }}`. The contracts
+   page simply never did, which is the whole of this defect: no rule was
+   overriding anything, the padding was just absent, so the fields and
+   the section head sat flush against the border.
+
+   Adding it as a class rather than a fourth inline copy. The three
+   existing pages are left on their inline style: they render correctly
+   today, and converting four working pages for tidiness is risk with
+   no visible benefit in a sprint that has four items to land. */
+.card-detail-pad {
+  padding: 20px 22px;
+}
+
 /* Section head */
 .section-head {
   display: flex;
@@ -8634,23 +8652,40 @@ details[open] > .ew-department-tree-summary::before {
    is the standing rule that a feature must not become hard to find
    (## NEXT item 19). No status is ever collapsed behind a "more"
    control. */
+/* Sprint 163 §2 — the strip SHARES the row instead of scrolling in it.
+   Sprint 161 got the tiles onto one line by refusing to wrap, but the
+   strip stayed 840px of fixed-width tiles inside a 608-768px container,
+   so it overflowed and scrolled. A grid divides the width available
+   instead: nine tiles at 1440 are nine equal columns.
+
+   `auto-fit` + `minmax` is what makes the fallback honest. Above the
+   width where a column would be unreadably narrow the row holds nine
+   columns; below it the grid wraps to a second row rather than
+   shrinking further, which is the behaviour the brief asks for and is
+   not something `flex-wrap: nowrap` could express. */
 .status-tile-row {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
+  display: grid;
+  /* 96px is chosen against the MEASURED container, not by eye: the
+     strip is 968px at 1280 and 1128px at 1440, so nine tiles plus eight
+     8px gaps need a floor of 100px and 118px respectively. 96 clears
+     both and still wraps at 1024, where the 712px container would give
+     each tile 72px — narrower than a wrapped label reads. */
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
   margin-bottom: 14px;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  padding-bottom: 2px;
 }
 .status-tile {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 1px;
-  min-width: 88px;
-  flex: 0 1 auto;
-  padding: 7px 10px;
+  justify-content: center;
+  gap: 2px;
+  /* Sprint 163 §2 — room for the text. The label and the count were
+     touching the border at 7px/10px. `min-width: 0` lets a grid column
+     shrink below its content's intrinsic width, which is what allows
+     the longest label to wrap instead of forcing the track wider. */
+  min-width: 0;
+  padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -8672,7 +8707,14 @@ details[open] > .ew-department-tree-summary::before {
   gap: 4px;
   font-family: var(--f-head);
   font-size: 10px;
-  white-space: nowrap;
+  /* Sprint 163 §2 — WRAPS rather than being clipped or overflowing.
+     "Waiting Manager Review" is the longest label in the system and
+     does not fit one line in an equal column; two clean lines with the
+     tile growing to match is the answer, and `nowrap` was what made it
+     spill. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;

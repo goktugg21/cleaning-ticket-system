@@ -212,7 +212,7 @@ export function ContractDetailPage() {
       </div>
 
       {tab === "general" && contract && (
-        <section className="card" data-testid="contract-general">
+        <section className="card card-detail-pad" data-testid="contract-general">
           <div className="section-head" style={{ marginBottom: 8 }}>
             <div>
               <div className="section-head-title">{t("general.title")}</div>
@@ -299,7 +299,7 @@ export function ContractDetailPage() {
       )}
 
       {tab === "projects" && (
-        <section className="card" data-testid="contract-projects">
+        <section className="card card-detail-pad" data-testid="contract-projects">
           <header className="section-head">
             <span className="section-head-title">{t("projects.title")}</span>
             {canManage && editableRevision && (
@@ -381,7 +381,7 @@ export function ContractDetailPage() {
       )}
 
       {tab === "billing" && contract && (
-        <section className="card" data-testid="contract-billing">
+        <section className="card card-detail-pad" data-testid="contract-billing">
           <div className="section-head" style={{ marginBottom: 8 }}>
             <div>
               <div className="section-head-title">{t("billing.title")}</div>
@@ -417,7 +417,7 @@ export function ContractDetailPage() {
       )}
 
       {tab === "revisions" && (
-        <section className="card" data-testid="contract-revisions">
+        <section className="card card-detail-pad" data-testid="contract-revisions">
           <header className="section-head">
             <span className="section-head-title">{t("revisions.title")}</span>
             {canManage && (

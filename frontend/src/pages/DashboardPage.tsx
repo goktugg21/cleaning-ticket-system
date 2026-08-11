@@ -1608,6 +1608,51 @@ export function DashboardPage({
         )}
 
         {isTicketsPage && (
+          <>
+        {/* Sprint 163 §2 — the status strip sits ABOVE the two-column
+            work-layout, not inside its narrow left column.
+
+            It used to live in `.dash-main`, which `work-layout`
+            sizes at 610px against a 340px side panel. Nine readable
+            tiles do not fit 610px at any padding, so the strip could
+            only ever wrap or scroll there however the tiles were
+            styled — Sprint 161 made it scroll, Sprint 163's grid
+            made it wrap, and both were treating the symptom. Full
+            content width was the actual instruction. */}
+        {/* Sprint 159 §3 — the same tiles the Extra Work list
+            uses. The owner asked for the pair to match and named
+            which way round.
+
+            The counts come from the SERVER: `/tickets/stats/`
+            already returns `by_status`, and the "Status
+            breakdown" panel in the side column has rendered
+            exactly these numbers since long before this sprint.
+            Reusing its source rather than inventing a second one
+            costs no extra request. Sprint 158's reasoning for
+            leaving the chips countless was right for the numbers
+            it had — the client holds one page — and that is
+            precisely why these come from the stats endpoint and
+            not from `tickets`. Until it resolves, `-1` renders
+            an em dash rather than a wrong number. */}
+        <StatusTiles
+          tiles={STATUS_OPTIONS.map((value) => ({
+            value,
+            // The page's OWN status label helper, the same one
+            // the dropdown below uses — a second labelling path
+            // here rendered raw enum names.
+            label: tStatus(value),
+            count: stats ? (stats.by_status[value] ?? 0) : -1,
+          }))}
+          active={statusFilter}
+          onChange={(value: string) => {
+            setStatusFilter(value as TicketStatus | "");
+            setPage(1);
+            setSelectedIds(new Set<number>());
+          }}
+          totalCount={stats ? stats.total : count}
+          testIdPrefix="tickets-status"
+        />
+
           <section
             className="work-layout"
             data-testid="dashboard-tickets-section"
@@ -1673,40 +1718,6 @@ export function DashboardPage({
                     />
                   )}
                 </div>
-
-                {/* Sprint 159 §3 — the same tiles the Extra Work list
-                    uses. The owner asked for the pair to match and named
-                    which way round.
-
-                    The counts come from the SERVER: `/tickets/stats/`
-                    already returns `by_status`, and the "Status
-                    breakdown" panel in the side column has rendered
-                    exactly these numbers since long before this sprint.
-                    Reusing its source rather than inventing a second one
-                    costs no extra request. Sprint 158's reasoning for
-                    leaving the chips countless was right for the numbers
-                    it had — the client holds one page — and that is
-                    precisely why these come from the stats endpoint and
-                    not from `tickets`. Until it resolves, `-1` renders
-                    an em dash rather than a wrong number. */}
-                <StatusTiles
-                  tiles={STATUS_OPTIONS.map((value) => ({
-                    value,
-                    // The page's OWN status label helper, the same one
-                    // the dropdown below uses — a second labelling path
-                    // here rendered raw enum names.
-                    label: tStatus(value),
-                    count: stats ? (stats.by_status[value] ?? 0) : -1,
-                  }))}
-                  active={statusFilter}
-                  onChange={(value: string) => {
-                    setStatusFilter(value as TicketStatus | "");
-                    setPage(1);
-                    setSelectedIds(new Set<number>());
-                  }}
-                  totalCount={stats ? stats.total : count}
-                  testIdPrefix="tickets-status"
-                />
 
                 <form className="filter-bar" onSubmit={handleSearchSubmit}>
                   <div className="filter-field">
@@ -2340,6 +2351,7 @@ export function DashboardPage({
               </div>
             </div>
           </section>
+          </>
         )}
 
       </div>
