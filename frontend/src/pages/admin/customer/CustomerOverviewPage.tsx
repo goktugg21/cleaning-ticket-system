@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  FileText,
   Mail,
   MapPin,
   Receipt,
@@ -255,18 +254,13 @@ export function CustomerOverviewPage() {
           description: t("customer_view.overview.quicklink_pricing_desc"),
           value: summary?.pricing_rule_count,
         },
-        {
-          testId: "customer-overview-stat-contracts",
-          path: "contracts",
-          Icon: FileText,
-          label: t("customer_view.overview.stat_contracts"),
-          description: t("customer_view.overview.quicklink_contracts_desc"),
-          // No count: the overview summary endpoint does not carry one,
-          // and inventing a second request for a chip number is not
-          // worth a round trip. `undefined` is the established "this
-          // chip has no count" value.
-          value: undefined,
-        },
+        // Sprint 168 §6 — the Contracts chip is GONE. It made eight
+        // chips, and eight wrap onto a second row, which broke the
+        // single-row strip this component exists to keep. The owner
+        // asked for a contracts PAGE for the customer, not a chip: the
+        // page and its sidebar entry both stay, and this strip is back
+        // to seven on one row. A chip with no count was the weakest of
+        // the eight anyway — it carried a link and nothing else.
         {
           testId: "customer-overview-stat-extra-work",
           path: "extra-work",

@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Plus } from "lucide-react";
+
 import { api, getApiError } from "../../api/client";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EditModeToggle } from "../../components/EditModeToggle";
+import { ContractHoursBulkDialog } from "../../components/timesheets/ContractHoursBulkDialog";
+import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
+import type { BuildingAdmin } from "../../api/types";
 import { useEditMode } from "../../lib/useEditMode";
 
 const DAYS = [
@@ -25,6 +32,8 @@ interface ContractHoursRow {
   building_name: string | null;
   hour_type: number;
   hour_type_name: string;
+  work_type: number | null;
+  work_type_name: string | null;
   valid_from: string;
   valid_to: string | null;
   status: "DRAFT" | "SAVED" | "APPROVED";
@@ -63,9 +72,13 @@ export function ContractHoursTab({
   hourTypes,
 }: {
   companyId: number | "";
-  buildings: { id: number; name: string }[];
-  employees: { id: number; name: string }[];
-  hourTypes: { id: number; name: string }[];
+  /** The FULL records: the picker in the bulk dialog shows a building's
+   *  city and address, and an employee's email, so a name collision is
+   *  resolvable. Trimming them to {id,name} here would push that
+   *  problem onto the operator. */
+  buildings: BuildingAdmin[];
+  employees: TimesheetEmployee[];
+  hourTypes: HourType[];
 }) {
   const { t } = useTranslation("common");
   const [rows, setRows] = useState<ContractHoursRow[]>([]);
@@ -74,9 +87,17 @@ export function ContractHoursTab({
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
+  const [workTypes, setWorkTypes] = useState<{ id: number; name: string }[]>(
+    [],
+  );
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [rowToDelete, setRowToDelete] = useState<ContractHoursRow | null>(null);
+  const deleteRef = useRef<ConfirmDialogHandle>(null);
+
   const [building, setBuilding] = useState<number | "">("");
   const [employee, setEmployee] = useState<number | "">("");
   const [hourType, setHourType] = useState<number | "">("");
+  const [workTypeFilter, setWorkTypeFilter] = useState<number | "">("");
   const [validOn, setValidOn] = useState("");
 
   const filters = useMemo(
@@ -85,9 +106,10 @@ export function ContractHoursTab({
       building: building || undefined,
       employee: employee || undefined,
       hour_type: hourType || undefined,
+      work_type: workTypeFilter || undefined,
       valid_on: validOn || undefined,
     }),
-    [companyId, building, employee, hourType, validOn],
+    [companyId, building, employee, hourType, workTypeFilter, validOn],
   );
 
   const requestKey = `${JSON.stringify(filters)}:${reloadKey}`;
@@ -113,6 +135,36 @@ export function ContractHoursTab({
       cancelled = true;
     };
   }, [filters, requestKey]);
+
+  // The work-type catalog for the column, the filter and the bulk
+  // dialog. Its own read, not folded into the rows request: a catalog
+  // changes when someone edits the catalog, not when a filter moves.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get("/timesheets/work-types/", {
+        params: { company: companyId || undefined, is_active: true },
+      })
+      .then((response) => {
+        if (cancelled) return;
+        const list = response.data.results ?? response.data;
+        setWorkTypes(
+          (list as { id: number; name: string }[]).map((row) => ({
+            id: row.id,
+            name: row.name,
+          })),
+        );
+      })
+      .catch(() => {
+        // A missing catalog is not an error the operator can act on —
+        // the picker simply offers "no work type", which is a legal
+        // value. Failing the whole tab over it would be worse.
+        if (!cancelled) setWorkTypes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, reloadKey]);
 
   // Only the rows that MAY be edited are selectable — an approved row
   // is not one of them, so it never enters a selection that a bulk
@@ -178,6 +230,20 @@ export function ContractHoursTab({
     }
   }
 
+  async function remove(row: ContractHoursRow) {
+    setBusy(true);
+    setError("");
+    try {
+      await api.delete(`/timesheets/contract-hours/${row.id}/`);
+      setRowToDelete(null);
+      setReloadKey((n) => n + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const statusTag = (row: ContractHoursRow) =>
     row.status === "APPROVED"
       ? "cell-tag-open"
@@ -195,11 +261,22 @@ export function ContractHoursTab({
 
       <div className="hours-tiles-head">
         <span className="hours-tiles-title">{t("contract_hours.title")}</span>
-        <EditModeToggle
-          editMode={edit.editModeRequested}
-          onToggle={edit.toggleMode}
-          testId="contract-hours-edit-toggle"
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <EditModeToggle
+            editMode={edit.editModeRequested}
+            onToggle={edit.toggleMode}
+            testId="contract-hours-edit-toggle"
+          />
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setBulkOpen(true)}
+            data-testid="contract-hours-bulk-open"
+          >
+            <Plus size={14} strokeWidth={2.5} />
+            {t("contract_hours.bulk_open")}
+          </button>
+        </div>
       </div>
 
       <div
@@ -247,9 +324,9 @@ export function ContractHoursTab({
             data-testid="contract-hours-filter-employee"
           >
             <option value="">{t("contract_hours.all_employees")}</option>
-            {employees.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
+            {employees.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.full_name || person.email}
               </option>
             ))}
           </select>
@@ -268,6 +345,26 @@ export function ContractHoursTab({
             {hourTypes.map((h) => (
               <option key={h.id} value={h.id}>
                 {h.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="filter-field">
+          <span className="filter-label">{t("contract_hours.work_type")}</span>
+          <select
+            className="filter-control"
+            value={workTypeFilter}
+            onChange={(e) =>
+              setWorkTypeFilter(
+                e.target.value === "" ? "" : Number(e.target.value),
+              )
+            }
+            data-testid="contract-hours-filter-work-type"
+          >
+            <option value="">{t("contract_hours.all_work_types")}</option>
+            {workTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.name}
               </option>
             ))}
           </select>
@@ -298,6 +395,7 @@ export function ContractHoursTab({
               <th>{t("contract_hours.employee")}</th>
               <th>{t("contract_hours.validity")}</th>
               <th>{t("contract_hours.hour_type")}</th>
+              <th>{t("contract_hours.work_type")}</th>
               {DAYS.map((day) => (
                 <th key={day} className="contract-num">
                   {t(`contract_hours.day_${day}`)}
@@ -305,6 +403,7 @@ export function ContractHoursTab({
               ))}
               <th className="contract-num">{t("contract_hours.total")}</th>
               <th>{t("status")}</th>
+              <th>{t("contract_hours.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -325,6 +424,13 @@ export function ContractHoursTab({
                   <span className="cell-tag cell-tag-normal">
                     {row.hour_type_name}
                   </span>
+                </td>
+                <td>
+                  {row.work_type_name ?? (
+                    <span className="muted-empty">
+                      {t("contract_hours.no_work_type")}
+                    </span>
+                  )}
                 </td>
                 {DAYS.map((day) => (
                   <td key={day} className="contract-num">
@@ -351,11 +457,35 @@ export function ContractHoursTab({
                     {t(`contract_hours.status_${row.status}`)}
                   </span>
                 </td>
+                <td>
+                  {/* An APPROVED agreement is not deleted from here.
+                      Correcting one writes a NEW row from a date — the
+                      validity-window rule — because deleting it would
+                      rewrite what last month's comparison said. */}
+                  {row.is_locked ? (
+                    <span className="muted-empty">
+                      {t("contract_hours.locked_hint")}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        setRowToDelete(row);
+                        deleteRef.current?.open();
+                      }}
+                      disabled={busy}
+                      data-testid={`contract-hours-delete-${row.id}`}
+                    >
+                      {t("contract_hours.delete")}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={13} className="muted">
+                <td colSpan={15} className="muted">
                   {t("contract_hours.empty")}
                 </td>
               </tr>
@@ -363,6 +493,36 @@ export function ContractHoursTab({
           </tbody>
         </table>
       </div>
+
+      {bulkOpen && (
+        <ContractHoursBulkDialog
+          employees={employees}
+          buildings={buildings}
+          hourTypes={hourTypes.filter((type) => type.is_active)}
+          workTypes={workTypes}
+          companyId={companyId || null}
+          onClose={() => setBulkOpen(false)}
+          onSaved={() => {
+            setBulkOpen(false);
+            setReloadKey((n) => n + 1);
+          }}
+        />
+      )}
+
+      {/* Rendered unconditionally and driven entirely through the ref —
+          CLAUDE.md's rule for the native dialog, and the reason a
+          Sprint 118 page went inert. */}
+      <ConfirmDialog
+        ref={deleteRef}
+        title={t("contract_hours.delete_title")}
+        body={t("contract_hours.delete_body", {
+          name: rowToDelete?.employee_name ?? "",
+        })}
+        confirmLabel={t("contract_hours.delete")}
+        onConfirm={() => {
+          if (rowToDelete) void remove(rowToDelete);
+        }}
+      />
 
       {edit.editMode && (
         <div className="filter-actions" style={{ justifyContent: "flex-end" }}>

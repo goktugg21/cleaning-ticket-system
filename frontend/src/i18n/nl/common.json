@@ -2233,5 +2233,17 @@
   "contract_hours.bulk_action": "{{action}} ({{count}})",
   "contract_hours.not_approvable": "Niet goed te keuren",
   "contract_hours.approval_empty": "Geen regels in deze status voor deze week.",
-  "contract_hours.actions": "Acties"
+  "contract_hours.actions": "Acties",
+  "contract_hours.bulk_open": "Bulk toewijzing",
+  "contract_hours.bulk_title": "Contracturen bulk toewijzen",
+  "contract_hours.bulk_subtitle": "Kies medewerkers en gebouwen; per combinatie wordt een regel geopend.",
+  "contract_hours.bulk_week_hint": "De week van deze datum wordt als raster getoond; opgeslagen wordt het weekpatroon.",
+  "contract_hours.valid_from": "Geldig vanaf",
+  "contract_hours.work_type": "Werksoort",
+  "contract_hours.no_work_type": "Geen werksoort",
+  "contract_hours.all_work_types": "Alle werksoorten",
+  "contract_hours.delete": "Verwijderen",
+  "contract_hours.delete_title": "Contracturen verwijderen",
+  "contract_hours.delete_body": "Regel van {{name}} verwijderen?",
+  "contract_hours.locked_hint": "Goedgekeurd"
 }

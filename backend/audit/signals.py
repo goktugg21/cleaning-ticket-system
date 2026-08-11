@@ -78,7 +78,18 @@ from tickets.models import (
     TicketMessage,
     TicketStaffAssignment,
 )
-from timesheets.models import ContractHours, HourType, TimeEntry, WeekLock
+from timesheets.models import (
+    ContractHours,
+    HourType,
+    TimeEntry,
+    WeekLock,
+)
+# ALIASED, and it has to be: `customers.WorkType` (the per-customer
+# Extra Work label list, Sprint 127) is already imported flat above, and
+# a second bare `WorkType` here would shadow it silently — registering
+# the timesheets one twice and the customers one not at all. Two
+# different nouns that happen to share a word.
+from timesheets.models import WorkType as TimesheetWorkType
 from contracts.models import (
     Contract,
     ContractBuilding,
@@ -1545,6 +1556,12 @@ def _connect():
         HourType,
         TimeEntry,
         WeekLock,
+        # Sprint 168 §3 — the timesheets work-type catalog, registered
+        # for the same reason `HourType` is: a RENAME is the change
+        # worth auditing. Every contract-hours row points at the type by
+        # id, so renaming "Vast werk" silently restates what every one
+        # of those agreements says. Aliased at the import — see there.
+        TimesheetWorkType,
         # Sprint 167 §3/§4 — the standing hours agreement. The full CRUD
         # trio, and the UPDATE half is the point: a status move
         # (DRAFT -> SAVED -> APPROVED, and a reopen back) lands as a

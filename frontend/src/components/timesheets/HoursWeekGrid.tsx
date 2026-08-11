@@ -76,6 +76,17 @@ import { isoWeekDays, toDateString } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 
 /** One person the grid writes for. */
+/** One changed cell the grid collected. Exported because a caller that
+ *  supplies `onSaveCells` receives these and decides where they go —
+ *  see the prop's own comment for why that indirection exists. */
+export interface GridCell {
+  employee: number;
+  hour_type: number;
+  building: number | null;
+  date: string;
+  hours: string;
+}
+
 export interface GridEmployee {
   id: number;
   name: string;
@@ -157,6 +168,7 @@ export function HoursWeekGrid({
   weekClosed,
   onSaved,
   onCancel,
+  onSaveCells,
 }: {
   week: IsoWeek;
   /** Whose weeks this grid writes. Empty = nothing chosen yet. */
@@ -176,6 +188,20 @@ export function HoursWeekGrid({
    *  active type. */
   weekClosed: boolean;
   onSaved: (changed: number) => void | Promise<void>;
+  /** Sprint 168 §1 — where the collected cells GO.
+   *
+   *  Left out, they go to `saveWeekGrid` and become TimeEntry rows,
+   *  which is what every existing caller wants. Supplied, the caller
+   *  writes them itself and returns how many changed.
+   *
+   *  This exists so the contract-hours bulk dialog can use THIS grid
+   *  rather than a second one that looks the same. The two are the same
+   *  shape — same blocks, same fill line, same `+ Add type`, same
+   *  Sprint 166 rule that a manually added row is never touched by the
+   *  fill — and a copy is how those four behaviours drift apart. What
+   *  genuinely differs between them is only the destination, so only
+   *  the destination is a parameter. */
+  onSaveCells?: (cells: GridCell[]) => Promise<number>;
   /** Rendered next to Save when given. The modal supplies it so the
    *  footer reads "Cancel / Save"; My hours does not. */
   onCancel?: () => void;
@@ -453,13 +479,7 @@ export function HoursWeekGrid({
     // Send only the cells that CHANGED. Resending every cell would
     // rewrite untouched rows — pointless writes, each one re-snapshotting
     // the multiplier for no reason.
-    const cells: {
-      employee: number;
-      hour_type: number;
-      building: number | null;
-      date: string;
-      hours: string;
-    }[] = [];
+    const cells: GridCell[] = [];
     for (const row of rows) {
       if (row.hourTypeId === "") continue;
       for (const dayKey of dayKeys) {
@@ -488,13 +508,21 @@ export function HoursWeekGrid({
       // ONE request for the whole grid, however many people are in it.
       // The endpoint is all-or-nothing, so a week that half-saved across
       // three employees is not a state this can reach.
-      const result = await saveWeekGrid({
-        company: companyId ?? undefined,
-        iso_year: week.isoYear,
-        iso_week: week.isoWeek,
-        cells,
-      });
-      const changed = result.created + result.updated + result.deleted;
+      let changed: number;
+      if (onSaveCells) {
+        changed = await onSaveCells(cells);
+      } else {
+        // ONE request for the whole grid, however many people are in
+        // it. The endpoint is all-or-nothing, so a week that half-saved
+        // across three employees is not a state this can reach.
+        const result = await saveWeekGrid({
+          company: companyId ?? undefined,
+          iso_year: week.isoYear,
+          iso_week: week.isoWeek,
+          cells,
+        });
+        changed = result.created + result.updated + result.deleted;
+      }
       setEdits({});
       setExtraRows({});
       setBanner(t("hours_week_grid.saved", { count: changed }));

@@ -10,15 +10,17 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.db import transaction
 from rest_framework import serializers
 
 from buildings.models import Building
 
-from .models import ContractHours, HourType
+from .models import ContractHours, HourType, WorkType
 from .scope import (
     eligible_employees_queryset,
     filter_buildings_for_timesheets,
     filter_hour_types_for,
+    filter_work_types_for,
     scope_company_ids_for_timesheets,
 )
 
@@ -42,6 +44,9 @@ class ContractHoursSerializer(serializers.ModelSerializer):
     hour_type_name = serializers.CharField(
         source="hour_type.name", read_only=True, default=None
     )
+    work_type_name = serializers.CharField(
+        source="work_type.name", read_only=True, default=None
+    )
     weekly_total = serializers.DecimalField(
         max_digits=6, decimal_places=2, read_only=True
     )
@@ -58,6 +63,8 @@ class ContractHoursSerializer(serializers.ModelSerializer):
             "building_name",
             "hour_type",
             "hour_type_name",
+            "work_type",
+            "work_type_name",
             "valid_from",
             "valid_to",
             *WEEKDAYS,
@@ -93,6 +100,11 @@ class ContractHoursSerializer(serializers.ModelSerializer):
         )
         self.fields["hour_type"].queryset = filter_hour_types_for(
             user, HourType.objects.all()
+        )
+        # Sprint 168 §3 — the sibling catalog, scoped the same way. A
+        # foreign work type must read as nonexistent, not as forbidden.
+        self.fields["work_type"].queryset = filter_work_types_for(
+            user, WorkType.objects.all()
         )
 
     def get_employee_name(self, obj):
@@ -140,23 +152,61 @@ class ContractHoursSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-class ContractHoursBulkSerializer(serializers.Serializer):
-    """The Bulk assignment dialog: several workers x several buildings,
-    one valid-from, one weekly pattern.
+class ContractHoursRowSerializer(serializers.Serializer):
+    """One explicit row the bulk grid produced.
 
-    Produces one row per PAIR, skipping a pair that already has a row
-    with the same `valid_from` rather than raising — a bulk assignment
-    re-run must be safe, and the operator's intent is "make sure these
-    exist", not "fail if one does".
+    Sprint 168 §1 — the dialog does not send a cross-product any more.
+    The operator picks workers and buildings, the grid OPENS one row per
+    pair, and then they edit it: a different hour type here, an extra
+    row added there with `+ Add type`. What comes back is therefore a
+    LIST of rows that were actually on screen, not the inputs that
+    generated them. Sending the cross-product would silently discard
+    every per-row edit.
     """
 
+    employee = serializers.IntegerField()
+    building = serializers.IntegerField(required=False, allow_null=True)
+    hour_type = serializers.IntegerField()
+    work_type = serializers.IntegerField(required=False, allow_null=True)
+    monday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    tuesday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    wednesday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    thursday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    friday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    saturday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+    sunday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
+
+
+class ContractHoursBulkSerializer(serializers.Serializer):
+    """The Bulk assignment dialog.
+
+    TWO accepted shapes, and the richer one wins when both are present:
+
+      `rows`  the grid's own rows, each with its own hour type, work
+              type and weekly pattern. This is what the dialog sends.
+      the cross-product fields (`employees` x `buildings` + one
+              `hour_type` + one pattern), kept because it is a sane API
+              on its own and Sprint 167's tests pin it.
+
+    Either way the write is ONE transaction: an operator who filled in
+    twelve rows and got eight saved would have no way to tell which
+    four are missing. A pair that already has a row with the same
+    `valid_from` is SKIPPED rather than raising — a bulk assignment
+    re-run must be safe, and the intent is "make sure these exist", not
+    "fail if one does". Skipping is not failing, so it does not roll the
+    transaction back.
+    """
+
+    rows = ContractHoursRowSerializer(many=True, required=False)
+
     employees = serializers.ListField(
-        child=serializers.IntegerField(), allow_empty=False
+        child=serializers.IntegerField(), allow_empty=False, required=False
     )
     buildings = serializers.ListField(
-        child=serializers.IntegerField(), allow_empty=True
+        child=serializers.IntegerField(), allow_empty=True, required=False
     )
-    hour_type = serializers.IntegerField()
+    hour_type = serializers.IntegerField(required=False)
+    work_type = serializers.IntegerField(required=False, allow_null=True)
     valid_from = serializers.DateField()
     valid_to = serializers.DateField(required=False, allow_null=True)
     monday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
@@ -169,13 +219,35 @@ class ContractHoursBulkSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         user = self.context["request"].user
+        rows = attrs.get("rows") or []
+        if not rows and not attrs.get("employees"):
+            raise serializers.ValidationError(
+                {"rows": "Send either rows or employees."}
+            )
+        if not rows and not attrs.get("hour_type"):
+            raise serializers.ValidationError(
+                {"hour_type": "An hour type is required."}
+            )
+
+        # Every id that appears in EITHER shape is checked against the
+        # actor's own scope, in one pass — an id the actor may not see
+        # must read as nonexistent, never as "exists but forbidden".
+        employee_ids = set(attrs.get("employees") or [])
+        building_ids = {b for b in (attrs.get("buildings") or []) if b}
+        hour_type_ids = {attrs["hour_type"]} if attrs.get("hour_type") else set()
+        work_type_ids = {attrs["work_type"]} if attrs.get("work_type") else set()
+        for row in rows:
+            employee_ids.add(row["employee"])
+            if row.get("building"):
+                building_ids.add(row["building"])
+            hour_type_ids.add(row["hour_type"])
+            if row.get("work_type"):
+                work_type_ids.add(row["work_type"])
+
         allowed_employees = set(
             eligible_employees_queryset(user).values_list("id", flat=True)
         )
-        unknown = [e for e in attrs["employees"] if e not in allowed_employees]
-        if unknown:
-            # Out of scope reads as nonexistent, never as "exists but
-            # forbidden" — the difference is an existence oracle.
+        if employee_ids - allowed_employees:
             raise serializers.ValidationError(
                 {"employees": "One or more employees do not exist."}
             )
@@ -184,64 +256,112 @@ class ContractHoursBulkSerializer(serializers.Serializer):
                 user, Building.objects.all()
             ).values_list("id", flat=True)
         )
-        unknown_b = [b for b in attrs["buildings"] if b not in allowed_buildings]
-        if unknown_b:
+        if building_ids - allowed_buildings:
             raise serializers.ValidationError(
                 {"buildings": "One or more buildings do not exist."}
             )
-        if not filter_hour_types_for(user, HourType.objects.all()).filter(
-            id=attrs["hour_type"]
-        ).exists():
+        allowed_hour_types = set(
+            filter_hour_types_for(user, HourType.objects.all()).values_list(
+                "id", flat=True
+            )
+        )
+        if hour_type_ids - allowed_hour_types:
             raise serializers.ValidationError(
                 {"hour_type": "This hour type does not exist."}
+            )
+        allowed_work_types = set(
+            filter_work_types_for(user, WorkType.objects.all()).values_list(
+                "id", flat=True
+            )
+        )
+        if work_type_ids - allowed_work_types:
+            raise serializers.ValidationError(
+                {"work_type": "This work type does not exist."}
             )
         return attrs
 
     def create(self, validated_data):
-        from .scope import employee_company_ids
-
         actor = self.context["request"].user
         scope = scope_company_ids_for_timesheets(actor)
         created_by = validated_data.pop("created_by")
-        employees = validated_data.pop("employees")
+        explicit_rows = validated_data.pop("rows", None) or []
+        employees = validated_data.pop("employees", None) or []
         # An empty buildings list means "no building", which is a
         # legitimate agreement rather than an error.
-        buildings = validated_data.pop("buildings") or [None]
-        hour_type_id = validated_data.pop("hour_type")
+        buildings = validated_data.pop("buildings", None) or [None]
+        hour_type_id = validated_data.pop("hour_type", None)
+        work_type_id = validated_data.pop("work_type", None)
+        valid_from = validated_data["valid_from"]
+        valid_to = validated_data.get("valid_to")
 
-        rows = []
-        for employee_id in employees:
-            candidates = employee_company_ids_for(employee_id)
-            if scope is not None:
-                candidates = candidates & scope
-            if not candidates:
-                continue
-            company_id = sorted(candidates)[0]
-            for building_id in buildings:
-                existing = ContractHours.objects.filter(
-                    employee_id=employee_id,
-                    building_id=building_id,
-                    hour_type_id=hour_type_id,
-                    valid_from=validated_data["valid_from"],
-                ).first()
-                if existing is not None:
-                    # Re-running a bulk assignment must be safe.
-                    continue
-                rows.append(
-                    ContractHours(
-                        company_id=company_id,
-                        employee_id=employee_id,
-                        building_id=building_id,
-                        hour_type_id=hour_type_id,
-                        created_by=created_by,
-                        **validated_data,
-                    )
+        # Normalise BOTH shapes into one list of intended rows, so the
+        # write path below exists once. The cross-product is just a
+        # shorthand for a list of rows sharing a pattern.
+        intended = []
+        if explicit_rows:
+            for row in explicit_rows:
+                intended.append(
+                    {
+                        "employee_id": row["employee"],
+                        "building_id": row.get("building") or None,
+                        "hour_type_id": row["hour_type"],
+                        "work_type_id": row.get("work_type") or None,
+                        "days": {day: row.get(day, Decimal("0.00")) for day in WEEKDAYS},
+                    }
                 )
-        # `save()` per row, not `bulk_create`: the audit rows come from
-        # post_save receivers and a bulk insert fires none of them.
-        for row in rows:
-            row.save()
-        return rows
+        else:
+            pattern = {day: validated_data.get(day, Decimal("0.00")) for day in WEEKDAYS}
+            for employee_id in employees:
+                for building_id in buildings:
+                    intended.append(
+                        {
+                            "employee_id": employee_id,
+                            "building_id": building_id,
+                            "hour_type_id": hour_type_id,
+                            "work_type_id": work_type_id,
+                            "days": dict(pattern),
+                        }
+                    )
+
+        created = []
+        # ONE transaction for the whole assignment: an operator who
+        # filled in twelve rows and got eight saved would have no way to
+        # tell which four are missing.
+        with transaction.atomic():
+            for row in intended:
+                candidates = employee_company_ids_for(row["employee_id"])
+                if scope is not None:
+                    candidates = candidates & scope
+                if not candidates:
+                    continue
+                company_id = sorted(candidates)[0]
+                exists = ContractHours.objects.filter(
+                    employee_id=row["employee_id"],
+                    building_id=row["building_id"],
+                    hour_type_id=row["hour_type_id"],
+                    valid_from=valid_from,
+                ).exists()
+                if exists:
+                    # Re-running a bulk assignment must be safe. A skip
+                    # is not a failure and does not roll anything back.
+                    continue
+                instance = ContractHours(
+                    company_id=company_id,
+                    employee_id=row["employee_id"],
+                    building_id=row["building_id"],
+                    hour_type_id=row["hour_type_id"],
+                    work_type_id=row["work_type_id"],
+                    valid_from=valid_from,
+                    valid_to=valid_to,
+                    created_by=created_by,
+                    **row["days"],
+                )
+                # `save()` per row, not `bulk_create`: the audit rows
+                # come from post_save receivers and a bulk insert fires
+                # none of them.
+                instance.save()
+                created.append(instance)
+        return created
 
 
 def employee_company_ids_for(employee_id):

@@ -664,12 +664,9 @@ export function HoursAdminPage() {
       {tab === "contract_hours" && (
         <ContractHoursTab
           companyId={company}
-          buildings={buildings.map((b) => ({ id: b.id, name: b.name }))}
-          employees={employees.map((e) => ({
-            id: e.id,
-            name: e.full_name || e.email,
-          }))}
-          hourTypes={hourTypes.map((h) => ({ id: h.id, name: h.name }))}
+          buildings={buildings}
+          employees={employees}
+          hourTypes={hourTypes}
         />
       )}
 

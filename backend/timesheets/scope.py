@@ -142,6 +142,14 @@ def filter_hour_types_for(user, queryset):
     return _apply(user, queryset)
 
 
+def filter_work_types_for(user, queryset):
+    """Scope a `WorkType` queryset — the `filter_hour_types_for` shape,
+    for the sibling catalog Sprint 168 added. One named helper per noun,
+    so a call site reads as what it filters.
+    """
+    return _apply(user, queryset)
+
+
 def filter_time_entries_for(user, queryset):
     """Scope a `TimeEntry` queryset to the actor's companies.
 

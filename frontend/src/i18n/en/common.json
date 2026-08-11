@@ -2233,5 +2233,17 @@
   "contract_hours.bulk_action": "{{action}} ({{count}})",
   "contract_hours.not_approvable": "Not approvable",
   "contract_hours.approval_empty": "No rows in this state for this week.",
-  "contract_hours.actions": "Actions"
+  "contract_hours.actions": "Actions",
+  "contract_hours.bulk_open": "Bulk assignment",
+  "contract_hours.bulk_title": "Bulk assign contract hours",
+  "contract_hours.bulk_subtitle": "Pick workers and buildings; one row opens per combination.",
+  "contract_hours.bulk_week_hint": "The week of this date is shown as the grid; what is saved is the weekly pattern.",
+  "contract_hours.valid_from": "Valid from",
+  "contract_hours.work_type": "Work type",
+  "contract_hours.no_work_type": "No work type",
+  "contract_hours.all_work_types": "All work types",
+  "contract_hours.delete": "Delete",
+  "contract_hours.delete_title": "Delete contract hours",
+  "contract_hours.delete_body": "Delete the row for {{name}}?",
+  "contract_hours.locked_hint": "Approved"
 }

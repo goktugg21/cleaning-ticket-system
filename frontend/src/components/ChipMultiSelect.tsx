@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * Sprint 163 §1 — a one-line multi-select: the chosen items sit in the
@@ -58,13 +59,81 @@ export function ChipMultiSelect({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  /** Where the portalled list is drawn. Null until it has been
+   *  measured, which is why the list renders nothing before then. */
+  const [rect, setRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    flipped: boolean;
+  } | null>(null);
+
+  /**
+   * Sprint 168 §4 — the list is PORTALLED to `document.body`.
+   *
+   * Inside the week/bulk modal it used to be cut off after about three
+   * names. Measured, the clipping ancestor is
+   * `.week-entry-modal { overflow-x: hidden }` — and a box with
+   * `overflow-x: hidden` and `overflow-y: visible` computes its
+   * overflow-y to `auto`, so the rule that stopped sideways scroll
+   * quietly started clipping vertically too.
+   *
+   * Two ways out: make the modal tall enough that the open list fits,
+   * or let the list escape. The second is what a native `<select>`
+   * does, and it does not make an EMPTY modal tall — which is the
+   * whole point of the Sprint 167 sizing. So the list is drawn at the
+   * control's viewport rect, outside every ancestor's overflow, and
+   * flips above the control when there is not room below.
+   */
+  useLayoutEffect(() => {
+    // Deliberately does NOT clear `rect` on close: a synchronous
+    // setState in an effect body is banned (CLAUDE.md), and a stale
+    // rect costs nothing because the list renders only while `open`.
+    // Re-opening re-measures in a LAYOUT effect, so the new position is
+    // in place before the browser paints — no flash at the old spot.
+    if (!open) return;
+    const measure = () => {
+      const control = wrapRef.current?.querySelector(
+        ".chip-multiselect-control",
+      );
+      if (!control) return;
+      const box = control.getBoundingClientRect();
+      const below = window.innerHeight - box.bottom;
+      // 232 = the list's own 220 max-height plus its border and the
+      // 4px it sits off the control.
+      const flipped = below < 232 && box.top > below;
+      setRect({
+        left: box.left,
+        top: flipped ? box.top - 4 : box.bottom + 4,
+        width: box.width,
+        flipped,
+      });
+    };
+    measure();
+    // `true` for the capture phase: the modal body is itself a
+    // scrolling box, and a scroll inside it does not bubble.
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [open]);
 
   // Close on a click outside. Bound only while open, so the document
-  // carries no listener for a control nobody is using.
+  // carries no listener for a control nobody is using. The LIST is
+  // checked separately now that it is portalled — it is no longer a
+  // descendant of the wrapper, so `wrapRef.contains` says false for a
+  // click on an option and the list would close before the click
+  // landed.
   useEffect(() => {
     if (!open) return;
     const onDocDown = (event: MouseEvent) => {
-      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (listRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDocDown);
     return () => document.removeEventListener("mousedown", onDocDown);
@@ -164,12 +233,27 @@ export function ChipMultiSelect({
         </span>
       </div>
 
-      {open && (
+      {open &&
+        rect &&
+        createPortal(
         <ul
-          className="chip-multiselect-list"
+          ref={listRef}
+          className="chip-multiselect-list chip-multiselect-list-floating"
           role="listbox"
           aria-multiselectable="true"
           aria-label={placeholder}
+          // Keyboard handling still belongs to the wrapper, and a
+          // portalled node keeps React's tree for events — but a real
+          // DOM keydown here would escape to the modal's window
+          // listener, so Escape is handled on the list as well.
+          onKeyDown={onKeyDown}
+          style={{
+            left: rect.left,
+            width: rect.width,
+            ...(rect.flipped
+              ? { bottom: window.innerHeight - rect.top }
+              : { top: rect.top }),
+          }}
           data-testid={`${testIdPrefix}-list`}
         >
           {/* Chosen entries stay IN the list, marked. Hiding them would
@@ -202,8 +286,9 @@ export function ChipMultiSelect({
               </li>
             );
           })}
-        </ul>
-      )}
+        </ul>,
+          document.body,
+        )}
     </div>
   );
 }

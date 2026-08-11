@@ -19,6 +19,11 @@ from .views_contract_hours import (
 )
 from .views_employees import TimesheetEmployeeListView
 from .views_entries import TimeEntryDetailView, TimeEntryListCreateView
+from .views_work_types import (
+    WorkTypeDetailView,
+    WorkTypeListCreateView,
+    WorkTypeStandardSetView,
+)
 from .views_hour_types import (
     HourTypeDetailView,
     HourTypeListCreateView,
@@ -56,6 +61,24 @@ urlpatterns = [
         "contract-hours/",
         ContractHoursListCreateView.as_view(),
         name="timesheet-contract-hours-list",
+    ),
+    # Literal segments before the <int:...> one, the ordering this file
+    # keeps deliberately so a converter change cannot let the detail
+    # route swallow "standard-set".
+    path(
+        "work-types/standard-set/",
+        WorkTypeStandardSetView.as_view(),
+        name="timesheet-work-type-standard-set",
+    ),
+    path(
+        "work-types/",
+        WorkTypeListCreateView.as_view(),
+        name="timesheet-work-type-list",
+    ),
+    path(
+        "work-types/<int:work_type_id>/",
+        WorkTypeDetailView.as_view(),
+        name="timesheet-work-type-detail",
     ),
     path(
         "hour-types/standard-set/",

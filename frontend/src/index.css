@@ -9308,6 +9308,17 @@ details[open] > .ew-department-tree-summary::before {
   border-radius: var(--r-md);
   box-shadow: var(--shadow-md);
 }
+/* Sprint 168 §4 — the portalled list. It is drawn on `document.body`
+   at the control's viewport rect, so no ancestor's overflow can clip
+   it; `position: fixed` rather than absolute because it no longer has
+   a positioned parent to be absolute to. */
+.chip-multiselect-list-floating {
+  position: fixed;
+  top: auto;
+  left: auto;
+  right: auto;
+  z-index: 200;
+}
 .chip-multiselect-option {
   display: flex;
   align-items: center;

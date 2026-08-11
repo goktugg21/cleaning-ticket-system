@@ -446,6 +446,86 @@ class ContractHoursStatus(models.TextChoices):
     APPROVED = "APPROVED", "Approved"
 
 
+class WorkType(models.Model):
+    """A company's own catalog of work kinds — "Vast werk", "Meerwerk".
+
+    Sprint 168 §3. The reference system carries a *work type* on a
+    contract-hours row, and it is NOT the same axis as `HourType`:
+
+      HourType  answers "how is this hour WEIGHTED" — normal, overtime,
+                sick leave. It carries a multiplier.
+      WorkType  answers "what KIND of work is agreed" — fixed recurring
+                work, extra work, machine work. It carries no weight and
+                never touches money.
+
+    Two axes, so two catalogs. Folding the second into the first would
+    force every company to spell out the cross-product ("Overwerk
+    meerwerk") and would give a work type a multiplier it has no
+    business having.
+
+    ## Why a per-company catalog and not an enum
+
+    The same reason `HourType` is one: another tenant's work types will
+    differ. This repo has made the hardcoded-enum mistake before, and a
+    tenant that cannot name its own categories ends up filing everything
+    under "Other". The four reference names are OFFERED to a company
+    that has none (`work_types/standard-set/`, the shape
+    `hour_types/standard-set/` already uses) — offered, not imposed.
+
+    Uniqueness is per-company and case/whitespace-insensitive, created
+    WITH the table rather than added later, so no two rows can race in
+    before the constraint exists.
+    """
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.PROTECT,
+        related_name="work_types",
+        help_text=(
+            "Provider company that owns this work type. PROTECT mirrors "
+            "HourType.company: a Company cannot be hard-deleted while it "
+            "still owns work types."
+        ),
+    )
+    # NOT `unique=True`: uniqueness is per-company, expressed below.
+    name = models.CharField(
+        max_length=128,
+        help_text='Operator-facing name, e.g. "Vast werk", "Meerwerk".',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "Archived types stay on existing rows but are not offerable "
+            "for new ones — the HourType rule, for the same reason: "
+            "deleting one would rewrite what an agreement said."
+        ),
+    )
+    sort_order = models.PositiveIntegerField(
+        default=0,
+        help_text="Ascending display order in the pickers; ties break on name.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "name", "id"]
+        verbose_name = "work type"
+        verbose_name_plural = "work types"
+        constraints = [
+            # Trim() first so leading/trailing whitespace cannot bypass a
+            # Lower()-only dedupe — the HourType shape exactly.
+            models.UniqueConstraint(
+                Lower(Trim("name")),
+                "company",
+                name="uniq_work_type_name_per_company_ci",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class ContractHours(models.Model):
     """
     Sprint 167 §3 — the hours a worker is CONTRACTED for: a standing
@@ -527,6 +607,22 @@ class ContractHours(models.Model):
         on_delete=models.PROTECT,
         related_name="contract_hours",
         help_text="PROTECT: a type in use can be archived, never deleted.",
+    )
+    # Sprint 168 §3 — nullable, and deliberately so: every row written
+    # before this column existed has no work type, and inventing one for
+    # them would be a fact the operator never stated.
+    work_type = models.ForeignKey(
+        WorkType,
+        on_delete=models.PROTECT,
+        related_name="contract_hours",
+        null=True,
+        blank=True,
+        help_text=(
+            "What KIND of work is agreed. NULL for rows written before "
+            "the catalog existed, and for a company that keeps no work "
+            "types — not a default, because a default here would be a "
+            "claim nobody made."
+        ),
     )
 
     valid_from = models.DateField(
