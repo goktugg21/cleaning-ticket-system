@@ -26,7 +26,9 @@
     "draft": "Concept",
     "expired": "Verlopen",
     "monthlyTotal": "Per maand",
-    "yearlyTotal": "Per jaar"
+    "yearlyTotal": "Per jaar",
+    "hoursPerMonth": "Uren per maand (getoond)",
+    "hoursPerYear": "Uren per jaar (getoond)"
   },
   "filters": {
     "search": "Zoeken",
@@ -75,7 +77,8 @@
     "countLabel_other": "{{count}} contracten",
     "empty": "Er zijn nog geen contracten.",
     "emptyFiltered": "Geen contracten die aan dit filter voldoen.",
-    "selectPage": "Alles op deze pagina selecteren"
+    "selectPage": "Alles op deze pagina selecteren",
+    "grandTotal": "Eindtotaal"
   },
   "status": {
     "DRAFT": "Concept",

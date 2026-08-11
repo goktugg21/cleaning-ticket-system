@@ -26,7 +26,9 @@
     "draft": "Draft",
     "expired": "Expired",
     "monthlyTotal": "Per month",
-    "yearlyTotal": "Per year"
+    "yearlyTotal": "Per year",
+    "hoursPerMonth": "Hours/Month (shown)",
+    "hoursPerYear": "Hours/Year (shown)"
   },
   "filters": {
     "search": "Search",
@@ -75,7 +77,8 @@
     "countLabel_other": "{{count}} contracts",
     "empty": "There are no contracts yet.",
     "emptyFiltered": "No contracts match this filter.",
-    "selectPage": "Select all on this page"
+    "selectPage": "Select all on this page",
+    "grandTotal": "Grand total"
   },
   "status": {
     "DRAFT": "Draft",

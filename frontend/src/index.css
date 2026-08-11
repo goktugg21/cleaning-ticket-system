@@ -8830,12 +8830,27 @@ details[open] > .ew-department-tree-summary::before {
    full content width, rather than flex items bunched at the left with
    dead space beside them. Four tiles plus the Export button, so five
    tracks; the export cell is the last one and is aligned to it. */
+/* Sprint 165 §1 — the columns come from the COMPONENT (`repeat(N, 1fr)`
+   inline, N = tile count), because only it knows how many tiles there
+   are. The `auto-fit` + `minmax` here was width-dependent: it packed as
+   many fixed tracks as fitted and left the rest of the row empty. */
 .hours-tile-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   align-items: stretch;
   gap: 10px;
   margin-bottom: 14px;
+}
+.hours-tiles-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.hours-tiles-title {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
 }
 .hours-tile {
   display: flex;
@@ -8850,10 +8865,6 @@ details[open] > .ew-department-tree-summary::before {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-}
-.hours-tile-export {
-  align-self: center;
-  justify-self: stretch;
 }
 .hours-tile-label {
   font-family: var(--f-head);
@@ -9390,4 +9401,18 @@ details[open] > .ew-department-tree-summary::before {
 }
 .hours-week-table-wrap {
   overflow-x: auto;
+}
+
+/* Sprint 165 §4 — the grand total closing each contracts view. */
+.contract-grand-total td {
+  border-top: 2px solid var(--border);
+  background: var(--surface-2);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.contract-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
 }

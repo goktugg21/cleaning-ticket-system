@@ -116,6 +116,11 @@ export function ContractsAdminPage() {
   const [measure, setMeasure] = useState<Measure>("prices");
   const [timeframe, setTimeframe] = useState<Timeframe>("monthly");
 
+  /** Sprint 165 §4 — which summary groups are COLLAPSED. Collapsed
+   *  rather than expanded is the stored state, so the default (all
+   *  open) needs no seeding when the grouping changes and a group that
+   *  appears later is not silently hidden. */
+  const [collapsed, setCollapsed] = useState<string[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   // Bumped by Refresh and after a mutation. It is part of the request
@@ -223,6 +228,17 @@ export function ContractsAdminPage() {
   );
 
   const locale = i18n.language;
+
+  /** Hours totals for the contracts ON SCREEN, for the Hours tiles.
+   *  `/contracts/stats/` answers in money only; scaling to a year uses
+   *  the same MONTHS_PER_PERIOD rule the row values do. */
+  const shownHours = useMemo(() => {
+    const monthly = contracts.reduce(
+      (sum, row) => sum + perPeriodValue(row, "hours", "monthly"),
+      0,
+    );
+    return { monthly, yearly: monthly * 12 };
+  }, [contracts]);
 
   const removeSelected = async () => {
     setBusy(true);
@@ -351,18 +367,39 @@ export function ContractsAdminPage() {
             <span className="summary-stat-label">{t("stats.expired")}</span>
             <span className="summary-stat-value">{stats?.expired ?? 0}</span>
           </div>
+          {/* Sprint 165 §4 — the two money tiles follow the
+              Prices / Hours toggle. They used to be money whatever the
+              table showed, which left a euro figure sitting above a
+              column of hours. The reference switches both together.
+
+              The hours figures come from the ROWS on screen rather than
+              from `/stats/`: that endpoint answers in money only, and
+              adding an hours aggregate to it is a backend change this
+              sprint's scope does not include. The tile labels say
+              "shown" so the difference from the money tiles — which are
+              tenant-wide — is stated rather than hidden. */}
           <div className="summary-stat">
             <span className="summary-stat-label">
-              {t("stats.monthlyTotal")}
+              {measure === "prices"
+                ? t("stats.monthlyTotal")
+                : t("stats.hoursPerMonth")}
             </span>
             <span className="summary-stat-value">
-              {formatMoney(stats?.monthly_total ?? "0", locale)}
+              {measure === "prices"
+                ? formatMoney(stats?.monthly_total ?? "0", locale)
+                : formatNumber(shownHours.monthly, locale)}
             </span>
           </div>
           <div className="summary-stat">
-            <span className="summary-stat-label">{t("stats.yearlyTotal")}</span>
+            <span className="summary-stat-label">
+              {measure === "prices"
+                ? t("stats.yearlyTotal")
+                : t("stats.hoursPerYear")}
+            </span>
             <span className="summary-stat-value">
-              {formatMoney(stats?.yearly_total ?? "0", locale)}
+              {measure === "prices"
+                ? formatMoney(stats?.yearly_total ?? "0", locale)
+                : formatNumber(shownHours.yearly, locale)}
             </span>
           </div>
         </div>
@@ -689,9 +726,50 @@ export function ContractsAdminPage() {
                   statusTag={STATUS_TAG}
                   totalColumnCount={totalColumnCount}
                   onOpen={(id) => navigate(`/admin/contracts/${id}`)}
+                  collapsed={collapsed.includes(group.key)}
+                  onToggleCollapse={() =>
+                    setCollapsed((current) =>
+                      current.includes(group.key)
+                        ? current.filter((key) => key !== group.key)
+                        : [...current, group.key],
+                    )
+                  }
                   t={t}
                 />
               ))}
+              {/* Sprint 165 §4 — the GRAND TOTAL the reference ends
+                  each view with. It totals the rows ON SCREEN, which is
+                  what the operator is looking at; the tenant-wide
+                  figures are the tiles above. */}
+              {contracts.length > 0 && (
+                <tr className="contract-grand-total">
+                  <td colSpan={totalColumnCount - 2}>
+                    <strong>{t("table.grandTotal")}</strong>
+                  </td>
+                  <td className="contract-num">
+                    <strong>
+                      {measure === "prices"
+                        ? formatMoney(
+                            contracts.reduce(
+                              (sum, row) =>
+                                sum + perPeriodValue(row, "prices", timeframe),
+                              0,
+                            ),
+                            locale,
+                          )
+                        : formatNumber(
+                            contracts.reduce(
+                              (sum, row) =>
+                                sum + perPeriodValue(row, "hours", timeframe),
+                              0,
+                            ),
+                            locale,
+                          )}
+                    </strong>
+                  </td>
+                  <td />
+                </tr>
+              )}
               {!loading && contracts.length === 0 && (
                 <tr>
                   <td colSpan={totalColumnCount} className="muted">
@@ -817,6 +895,8 @@ function ContractGroup({
   statusTag,
   totalColumnCount,
   onOpen,
+  collapsed,
+  onToggleCollapse,
   t,
 }: {
   group: ContractGroupRow;
@@ -829,6 +909,8 @@ function ContractGroup({
   statusTag: Record<ContractStatus, string>;
   totalColumnCount: number;
   onOpen: (id: number) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const format = measure === "prices" ? formatMoney : formatNumber;
@@ -840,10 +922,23 @@ function ContractGroup({
           data-testid={`contracts-group-${group.key}`}
         >
           <td colSpan={totalColumnCount - 2}>
-            <strong>{group.label}</strong>{" "}
-            <span className="muted small">
-              {t("table.groupCount", { count: group.rows.length })}
-            </span>
+            {/* The whole header toggles the group — the reference's
+                expandable summary rows. A button rather than a click
+                handler on the cell, so it is keyboard reachable and
+                announces its state. */}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm contract-group-toggle"
+              aria-expanded={!collapsed}
+              onClick={onToggleCollapse}
+              data-testid={`contracts-group-toggle-${group.key}`}
+            >
+              <span aria-hidden="true">{collapsed ? "\u25b8" : "\u25be"}</span>
+              <strong>{group.label}</strong>
+              <span className="muted small">
+                {t("table.groupCount", { count: group.rows.length })}
+              </span>
+            </button>
           </td>
           <td className="contract-num">
             <strong>{format(group.total, locale)}</strong>
@@ -851,7 +946,7 @@ function ContractGroup({
           <td />
         </tr>
       )}
-      {group.rows.map((row) => (
+      {(groupBy === "none" || !collapsed) && group.rows.map((row) => (
         <tr
           key={`${group.key}-${row.id}`}
           className="admin-row-clickable"

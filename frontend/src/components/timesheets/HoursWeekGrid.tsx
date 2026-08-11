@@ -339,22 +339,43 @@ export function HoursWeekGrid({
    * "4" — the grid claiming one thing and showing another, with nothing
    * on screen to say which rows were covered.
    *
-   * CHOSEN: the all-rows value applies to rows added AFTERWARDS too. A
-   * new row inherits it at the moment it is created (see
-   * `addTypeToBlock`), so the line stays TRUE for as long as it is
-   * filled in. The alternative — freeze at the moment of typing — is
-   * defensible in isolation but leaves exactly the contradiction above,
-   * and the brief rules out any state where the operator cannot tell
-   * which rows were affected. The label says so.
+   * Sprint 165 §3 REVERSES Sprint 164's answer, on the owner's
+   * instruction (his third time asking): the all-rows line fills the
+   * rows that exist AT THE MOMENT IT IS TYPED, and a row added
+   * afterwards through `+ Add type` starts EMPTY.
    *
-   * A cell the operator edits by hand afterwards is not touched again:
-   * inheritance happens once, when the row appears.
+   * Sprint 164's objection to that was real and is answered in the
+   * DISPLAY rather than by bending the behaviour: the inputs CLEAR
+   * themselves once applied. They read as a button that has been
+   * pressed, not as a state still in force, so there is no longer a
+   * line showing "4" above a blank row. The label says what it does —
+   * "Vul alle regels" / "Fill all rows" — rather than naming a state.
+   *
+   * A cell the operator edits by hand afterwards is never touched
+   * again: the fill happens once, on the rows present at that moment.
    */
   function applyToAllDay(dayKey: string, value: string) {
+    // Echoed while typing so the operator can see the digits they are
+    // entering; cleared by `commitApplyDay` the moment it lands.
     setApplyRow((current) => ({ ...current, [dayKey]: value }));
     setEdits((current) => {
       const next = { ...current };
       for (const row of rows) next[cellKey(row.id, dayKey)] = value;
+      return next;
+    });
+  }
+
+  /** Clear the all-rows input once its value has been applied.
+   *
+   *  This is the display half of §3: an input that keeps showing "4"
+   *  is a claim about the grid's current state, and that claim stops
+   *  being true the moment a row is added. An input that empties itself
+   *  is a record of an ACTION, which stays true forever. */
+  function commitApplyDay(dayKey: string) {
+    setApplyRow((current) => {
+      if (!current[dayKey]) return current;
+      const next = { ...current };
+      delete next[dayKey];
       return next;
     });
   }
@@ -374,17 +395,11 @@ export function HoursWeekGrid({
       return;
     }
     setError("");
-    // Sprint 164 §3 — the new row inherits whatever the all-rows line
-    // currently holds, so that line does not become a lie the moment a
-    // type is added.
+    // Sprint 165 §3 — a row added AFTER the fill starts empty. Sprint
+    // 164 had it inherit; the owner has asked three times for the other
+    // behaviour, and the contradiction that inheritance was solving is
+    // handled in the display instead (the all-rows inputs clear).
     const newRowId = rowId(block.employeeId, key);
-    const inherited: Record<string, string> = {};
-    for (const [dayKey, value] of Object.entries(applyRow)) {
-      if (value !== "") inherited[cellKey(newRowId, dayKey)] = value;
-    }
-    if (Object.keys(inherited).length > 0) {
-      setEdits((current) => ({ ...current, ...inherited }));
-    }
     setExtraRows((current) => ({
       ...current,
       [block.employeeId]: [
@@ -592,6 +607,13 @@ export function HoursWeekGrid({
                     onChange={(event) =>
                       applyToAllDay(dayKey, event.target.value)
                     }
+                    onBlur={() => commitApplyDay(dayKey)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitApplyDay(dayKey);
+                      }
+                    }}
                     disabled={busy || weekClosed}
                     aria-label={t("hours_week_grid.apply_all_day", {
                       day: dayLabel(days[dayIndex]),

@@ -77,7 +77,11 @@ export function WeekEntryDialog({
   const { t } = useTranslation("common");
 
   const [employeeIds, setEmployeeIds] = useState<number[]>([]);
-  const [buildingIds, setBuildingIds] = useState<number[]>([NO_BUILDING_ID]);
+  // Sprint 165 §2 — nothing is chosen until the operator chooses. This
+  // opened with NO_BUILDING already ticked, which made it easy to save
+  // a week of hours against no location without noticing. "No building"
+  // stays AVAILABLE in the list; it is simply not picked for them.
+  const [buildingIds, setBuildingIds] = useState<number[]>([]);
   const [week, setWeek] = useState<IsoWeek>(initialWeek);
 
   const [entriesByEmployee, setEntriesByEmployee] = useState<

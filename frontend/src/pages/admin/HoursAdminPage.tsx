@@ -733,7 +733,39 @@ export function HoursAdminPage() {
 
           {/* The tiles. They describe the filtered set, because they are
               computed from the same filter object as the table. */}
-          <div className="hours-tile-row" data-testid="hours-tiles">
+          {/* Sprint 165 §1 — Export is an ACTION, not a tile. It used to
+              be a child of the tile grid, so it took a column and skewed
+              the division; four tiles across five tracks is why they
+              read as bunched. It belongs beside the section title. */}
+          <div className="hours-tiles-head">
+            <span className="hours-tiles-title">
+              {t("hours_admin.summary_title")}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              data-testid="hours-export-csv"
+              onClick={() => void handleExport()}
+              disabled={exportBusy || loading}
+            >
+              {exportBusy
+                ? t("hours_admin.export_busy")
+                : t("hours_admin.export_csv")}
+            </button>
+          </div>
+          {/* `repeat(N, 1fr)` with N the tile count, set inline because
+              only the component knows N. `auto-fit` + `minmax` was
+              width-dependent: it packed as many 150px tracks as fitted
+              and left the remainder empty, which is exactly the bunching
+              the owner reported three times. This is the Sprint 163 §2
+              solution, not a third one. */}
+          <div
+            className="hours-tile-row"
+            data-testid="hours-tiles"
+            style={{
+              gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`,
+            }}
+          >
             {tiles.map((tile) => (
               <div
                 key={tile.key}
@@ -744,17 +776,6 @@ export function HoursAdminPage() {
                 <span className="hours-tile-value">{tile.value}</span>
               </div>
             ))}
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm hours-tile-export"
-              data-testid="hours-export-csv"
-              onClick={() => void handleExport()}
-              disabled={exportBusy || loading}
-            >
-              {exportBusy
-                ? t("hours_admin.export_busy")
-                : t("hours_admin.export_csv")}
-            </button>
           </div>
 
           {loadError && (
