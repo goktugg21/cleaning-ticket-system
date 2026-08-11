@@ -357,8 +357,13 @@ export function MyHoursPage() {
     }
   }
 
+  // Sprint 162 — this wrapper used to carry a `page` class that had no
+  // rule behind it and never has; the other pages use a bare wrapper.
+  // Found by the Sprint 161 undefined-class gate while this file was
+  // open for §1c. (The gate greps for class literals textually, so
+  // naming the class here would make it report itself.)
   return (
-    <div className="page">
+    <div>
       <PageHeader
         title={t("my_hours.title")}
         subtitle={t("my_hours.subtitle")}
