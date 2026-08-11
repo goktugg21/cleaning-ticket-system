@@ -2,7 +2,6 @@
   "eyebrow": "Reports",
   "title": "Operations reports",
   "subtitle": "Status mix, throughput, aged backlog, and SLA. Filters apply to all charts.",
-
   "filter_date_range": "Date range",
   "filter_from": "From",
   "filter_to": "To",
@@ -14,57 +13,47 @@
   "preset_last_30": "Last 30 days",
   "preset_last_90": "Last 90 days",
   "preset_custom": "Custom",
-
   "retry": "Retry",
   "granularity_prefix": "Granularity · {{value}}",
   "granularity_daily": "daily",
   "granularity_weekly": "weekly",
   "granularity_monthly": "monthly",
   "tick_week_suffix": "(wk)",
-
   "status_dist_title": "Status distribution",
   "status_dist_subtitle": "Snapshot of all tickets in scope. Not affected by date range.",
   "status_dist_total": "Total: {{count}}",
   "status_dist_empty": "No tickets in this scope.",
-
   "tickets_over_time_title": "Tickets created over time",
   "tickets_over_time_total": "Total: {{count}}",
   "tickets_over_time_empty": "No tickets in this range.",
-
   "manager_throughput_title": "Approved tickets per assignee",
   "manager_throughput_subtitle": "In the selected date range. Includes Building Managers and Company Admins with at least one assignment in scope.",
   "manager_throughput_empty": "No managers in scope.",
   "manager_throughput_tooltip_label": "Approved",
-
   "age_buckets_title": "Open tickets by age",
   "age_buckets_subtitle": "Open = not yet {{approved}} or {{rejected}}. Includes {{waiting}} and {{reopened}}.",
   "age_buckets_total": "Total open: {{count}}",
   "age_buckets_empty": "No open tickets in this scope.",
   "age_buckets_tooltip_label": "Open tickets",
-
   "sla_dist_title": "SLA distribution",
   "sla_dist_subtitle": "Snapshot of all tickets in scope by SLA state. Not affected by date range.",
   "sla_dist_total": "Total: {{count}}",
   "sla_dist_empty": "No tickets in this scope.",
-
   "sla_breach_title": "SLA breach rate over time",
   "sla_breach_subtitle": "share of tickets created in each bucket that ever breached",
   "sla_breach_total": "Tickets in range: {{count}}",
   "sla_breach_empty": "No tickets in this range.",
   "sla_breach_tooltip_label": "Breach rate",
-
   "tickets_by_type_title": "Tickets by type",
   "tickets_by_type_subtitle": "Number of tickets created in the selected range, grouped by type.",
   "tickets_by_type_total": "Total: {{count}}",
   "tickets_by_type_empty": "No tickets in this range.",
   "tickets_by_type_tooltip_label": "Tickets",
-
   "tickets_by_origin_title": "Tickets by origin",
   "tickets_by_origin_subtitle": "Tickets created in the selected range, grouped by how they originated: normal, extra work, converted, or planned.",
   "tickets_by_origin_total": "Total: {{count}}",
   "tickets_by_origin_empty": "No tickets in this range.",
   "tickets_by_origin_tooltip_label": "Tickets",
-
   "ew_revenue_title": "Extra Work revenue",
   "ew_revenue_subtitle": "Billable value of Extra Work requested in the selected range, grouped by revenue state. Earned = the spawned ticket is closed; in progress = spawned but not yet closed.",
   "ew_revenue_empty": "No Extra Work in this range.",
@@ -81,7 +70,6 @@
   "ew_revenue_by_building_empty": "No Extra Work revenue in this range.",
   "ew_revenue_by_building_total": "Total billable: {{amount}}",
   "ew_revenue_by_building_tooltip_amount": "Billable",
-
   "ew_by_department_title": "Extra Work by department",
   "ew_by_department_subtitle": "This customer's billable Extra Work, grouped by building, department and work type.",
   "ew_by_department_empty": "No Extra Work in this range.",
@@ -89,26 +77,38 @@
   "ew_by_department_item_count": "{{count}} works",
   "ew_by_department_untagged_department": "No department",
   "ew_by_department_untagged_work_type": "No work type",
-
   "ew_by_building_title": "Extra Work by building",
   "ew_by_building_subtitle": "Extra Work-origin tickets only, grouped by building in the selected range.",
   "ew_by_customer_title": "Extra Work by customer",
   "ew_by_customer_subtitle": "Extra Work-origin tickets only, grouped by customer location in the selected range.",
-
   "tickets_by_customer_title": "Tickets by customer",
   "tickets_by_customer_subtitle": "Tickets per customer location. Customers with the same name at different buildings are kept distinct.",
   "tickets_by_customer_total": "Total: {{count}}",
   "tickets_by_customer_empty": "No tickets in this range.",
   "tickets_by_customer_tooltip_label": "Tickets",
-
   "tickets_by_building_title": "Tickets by building",
   "tickets_by_building_subtitle": "Tickets per building in the selected date range.",
   "tickets_by_building_total": "Total: {{count}}",
   "tickets_by_building_empty": "No tickets in this range.",
   "tickets_by_building_tooltip_label": "Tickets",
-
   "export_csv": "Export CSV",
   "export_pdf": "Export PDF",
   "export_busy": "Working…",
-  "export_error": "Export failed. Please try again."
+  "export_error": "Export failed. Please try again.",
+  "hours_comparison.title": "Contracted hours vs worked hours",
+  "hours_comparison.subtitle": "Per building: what was agreed, what was worked, and the difference.",
+  "hours_comparison.month": "Month",
+  "hours_comparison.year": "Year",
+  "hours_comparison.col_building": "Building",
+  "hours_comparison.col_contracted": "Contracted",
+  "hours_comparison.col_worked": "Worked",
+  "hours_comparison.col_difference": "Difference",
+  "hours_comparison.col_state": "State",
+  "hours_comparison.under": "Under",
+  "hours_comparison.over": "Over",
+  "hours_comparison.on_target": "On target",
+  "hours_comparison.no_building": "No building",
+  "hours_comparison.total": "Total",
+  "hours_comparison.empty": "No contracted and no worked hours in this month.",
+  "hours_comparison.asymmetry_note": "A contract fixes hours per BUILDING, not per worker. The per-worker breakdown below is therefore WORKED hours only; there is no agreed figure per person."
 }

@@ -2,7 +2,6 @@
   "eyebrow": "Rapporten",
   "title": "Operationele rapporten",
   "subtitle": "Statusverdeling, doorvoer, achterstand en SLA. Filters gelden voor alle grafieken.",
-
   "filter_date_range": "Periode",
   "filter_from": "Van",
   "filter_to": "Tot",
@@ -14,57 +13,47 @@
   "preset_last_30": "Laatste 30 dagen",
   "preset_last_90": "Laatste 90 dagen",
   "preset_custom": "Aangepast",
-
   "retry": "Opnieuw proberen",
   "granularity_prefix": "Granulariteit · {{value}}",
   "granularity_daily": "dagelijks",
   "granularity_weekly": "wekelijks",
   "granularity_monthly": "maandelijks",
   "tick_week_suffix": "(wk)",
-
   "status_dist_title": "Statusverdeling",
   "status_dist_subtitle": "Momentopname van alle tickets in scope. Niet beïnvloed door periode.",
   "status_dist_total": "Totaal: {{count}}",
   "status_dist_empty": "Geen tickets in deze scope.",
-
   "tickets_over_time_title": "Aangemaakte tickets in de tijd",
   "tickets_over_time_total": "Totaal: {{count}}",
   "tickets_over_time_empty": "Geen tickets in deze periode.",
-
   "manager_throughput_title": "Goedgekeurde tickets per uitvoerder",
   "manager_throughput_subtitle": "In de geselecteerde periode. Inclusief gebouwbeheerders en bedrijfsbeheerders met minstens één toewijzing in scope.",
   "manager_throughput_empty": "Geen uitvoerders in scope.",
   "manager_throughput_tooltip_label": "Goedgekeurd",
-
   "age_buckets_title": "Open tickets op leeftijd",
   "age_buckets_subtitle": "Open = nog niet {{approved}} of {{rejected}}. Inclusief {{waiting}} en {{reopened}}.",
   "age_buckets_total": "Totaal open: {{count}}",
   "age_buckets_empty": "Geen open tickets in deze scope.",
   "age_buckets_tooltip_label": "Open tickets",
-
   "sla_dist_title": "SLA-verdeling",
   "sla_dist_subtitle": "Momentopname van alle tickets in scope per SLA-status. Niet beïnvloed door periode.",
   "sla_dist_total": "Totaal: {{count}}",
   "sla_dist_empty": "Geen tickets in deze scope.",
-
   "sla_breach_title": "SLA-overschrijdingspercentage in de tijd",
   "sla_breach_subtitle": "Aandeel van in elke periode aangemaakte tickets dat ooit is overschreden",
   "sla_breach_total": "Tickets in periode: {{count}}",
   "sla_breach_empty": "Geen tickets in deze periode.",
   "sla_breach_tooltip_label": "Overschrijdingspercentage",
-
   "tickets_by_type_title": "Tickets per categorie",
   "tickets_by_type_subtitle": "Aantal tickets aangemaakt in de periode, gegroepeerd op type.",
   "tickets_by_type_total": "Totaal: {{count}}",
   "tickets_by_type_empty": "Geen tickets in deze periode.",
   "tickets_by_type_tooltip_label": "Tickets",
-
   "tickets_by_origin_title": "Tickets per oorsprong",
   "tickets_by_origin_subtitle": "Aantal tickets aangemaakt in de periode, gegroepeerd op herkomst: normaal, meerwerk, geconverteerd of gepland.",
   "tickets_by_origin_total": "Totaal: {{count}}",
   "tickets_by_origin_empty": "Geen tickets in deze periode.",
   "tickets_by_origin_tooltip_label": "Tickets",
-
   "ew_revenue_title": "Meerwerk-omzet",
   "ew_revenue_subtitle": "Facturabele waarde van meerwerk aangevraagd in de geselecteerde periode, gegroepeerd op omzetstatus. Verdiend = het aangemaakte ticket is gesloten; onderhanden = aangemaakt maar nog niet gesloten.",
   "ew_revenue_empty": "Geen meerwerk in deze periode.",
@@ -81,7 +70,6 @@
   "ew_revenue_by_building_empty": "Geen meerwerk-omzet in deze periode.",
   "ew_revenue_by_building_total": "Totaal facturabel: {{amount}}",
   "ew_revenue_by_building_tooltip_amount": "Facturabel",
-
   "ew_by_department_title": "Meerwerk per afdeling",
   "ew_by_department_subtitle": "Facturabel meerwerk van deze klant, gegroepeerd per gebouw, afdeling en werktype.",
   "ew_by_department_empty": "Geen meerwerk in deze periode.",
@@ -89,26 +77,38 @@
   "ew_by_department_item_count": "{{count}} werkzaamheden",
   "ew_by_department_untagged_department": "Geen afdeling",
   "ew_by_department_untagged_work_type": "Geen werktype",
-
   "ew_by_building_title": "Meerwerk per gebouw",
   "ew_by_building_subtitle": "Alleen tickets met oorsprong meerwerk, gegroepeerd per gebouw in de geselecteerde periode.",
   "ew_by_customer_title": "Meerwerk per klant",
   "ew_by_customer_subtitle": "Alleen tickets met oorsprong meerwerk, gegroepeerd per klantlocatie in de geselecteerde periode.",
-
   "tickets_by_customer_title": "Tickets per klant",
   "tickets_by_customer_subtitle": "Aantal tickets per klantlocatie. Klanten met dezelfde naam in verschillende gebouwen worden apart getoond.",
   "tickets_by_customer_total": "Totaal: {{count}}",
   "tickets_by_customer_empty": "Geen tickets in deze periode.",
   "tickets_by_customer_tooltip_label": "Tickets",
-
   "tickets_by_building_title": "Tickets per gebouw",
   "tickets_by_building_subtitle": "Aantal tickets per gebouw in de geselecteerde periode.",
   "tickets_by_building_total": "Totaal: {{count}}",
   "tickets_by_building_empty": "Geen tickets in deze periode.",
   "tickets_by_building_tooltip_label": "Tickets",
-
   "export_csv": "Exporteer CSV",
   "export_pdf": "Exporteer PDF",
   "export_busy": "Bezig…",
-  "export_error": "Export is mislukt. Probeer het opnieuw."
+  "export_error": "Export is mislukt. Probeer het opnieuw.",
+  "hours_comparison.title": "Contracturen versus gewerkte uren",
+  "hours_comparison.subtitle": "Per gebouw: wat is afgesproken, wat is gewerkt, en het verschil.",
+  "hours_comparison.month": "Maand",
+  "hours_comparison.year": "Jaar",
+  "hours_comparison.col_building": "Gebouw",
+  "hours_comparison.col_contracted": "Afgesproken",
+  "hours_comparison.col_worked": "Gewerkt",
+  "hours_comparison.col_difference": "Verschil",
+  "hours_comparison.col_state": "Status",
+  "hours_comparison.under": "Te weinig",
+  "hours_comparison.over": "Meer",
+  "hours_comparison.on_target": "Op schema",
+  "hours_comparison.no_building": "Geen gebouw",
+  "hours_comparison.total": "Totaal",
+  "hours_comparison.empty": "Geen contracturen en geen gewerkte uren in deze maand.",
+  "hours_comparison.asymmetry_note": "Een contract legt uren vast per gebouw, niet per medewerker. De uitsplitsing per medewerker hieronder gaat dus alleen over GEWERKTE uren; er is geen afgesproken aantal per persoon."
 }

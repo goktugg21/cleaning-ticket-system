@@ -102,10 +102,19 @@ interface GridRow {
   key: string;
   hourTypeId: number | "";
   buildingId: number | "";
-  /** True for a row the SETUP or Add row created, which has no saved
-   *  entry behind it: those are the only rows that may be retargeted or
-   *  simply dropped. */
+  /** True for a row the SETUP or `+ Add type` created, which has no
+   *  saved entry behind it: those are the only rows that may simply be
+   *  dropped. */
   added?: boolean;
+  /** Sprint 166 §1 — TRUE only for a row the operator added with
+   *  `+ Add type`.
+   *
+   *  `added` cannot answer this: it is true for the wizard's seeded
+   *  rows as well, which is exactly why two previous attempts at the
+   *  fill rule got it wrong by reaching for timing instead. The owner's
+   *  rule is about WHERE a row came from, not WHEN, so the row is
+   *  marked at creation rather than inferred later. */
+  manual?: boolean;
   /** "YYYY-MM-DD" -> the raw text of the saved entry. Text, not number,
    *  so a half-typed "1." survives a re-render. */
   cells: Record<string, string>;
@@ -331,28 +340,25 @@ export function HoursWeekGrid({
    * the owner asked us not to build.
    */
   /**
-   * Sprint 164 §3 — what it does today, and what it does now.
+   * Sprint 166 §1 — the fill rule, third statement and the final one.
    *
-   * REPRODUCED: this wrote `edits` for the rows that existed at the
-   * moment of typing. A row added afterwards through `+ Add type` had
-   * no entry, so it rendered empty while the all-rows line still read
-   * "4" — the grid claiming one thing and showing another, with nothing
-   * on screen to say which rows were covered.
+   * **Rows added with `+ Add type` are NEVER filled. Not the ones added
+   * afterwards, and not the ones added beforehand.** Timing does not
+   * enter into it, which is precisely what the two earlier attempts got
+   * wrong: Sprint 164 filled new rows, Sprint 165 filled the rows that
+   * existed at the moment of typing — and that still filled a manual
+   * row created BEFORE the operator typed.
    *
-   * Sprint 165 §3 REVERSES Sprint 164's answer, on the owner's
-   * instruction (his third time asking): the all-rows line fills the
-   * rows that exist AT THE MOMENT IT IS TYPED, and a row added
-   * afterwards through `+ Add type` starts EMPTY.
+   * So the fill applies to the rows the WIZARD created (and to the
+   * saved rows behind them), never to the operator's own additions. The
+   * distinction is recorded on the row at creation as `manual`, because
+   * `added` is true for both kinds and inferring it from ordering is
+   * how this went wrong twice.
    *
-   * Sprint 164's objection to that was real and is answered in the
-   * DISPLAY rather than by bending the behaviour: the inputs CLEAR
-   * themselves once applied. They read as a button that has been
-   * pressed, not as a state still in force, so there is no longer a
-   * line showing "4" above a blank row. The label says what it does —
-   * "Vul alle regels" / "Fill all rows" — rather than naming a state.
-   *
-   * A cell the operator edits by hand afterwards is never touched
-   * again: the fill happens once, on the rows present at that moment.
+   * The inputs still CLEAR once applied (Sprint 165's display fix): an
+   * input that keeps reading "4" is a claim about the grid's state,
+   * which stops being true the moment anything changes; one that empties
+   * itself is the record of an action, which stays true.
    */
   function applyToAllDay(dayKey: string, value: string) {
     // Echoed while typing so the operator can see the digits they are
@@ -360,7 +366,14 @@ export function HoursWeekGrid({
     setApplyRow((current) => ({ ...current, [dayKey]: value }));
     setEdits((current) => {
       const next = { ...current };
-      for (const row of rows) next[cellKey(row.id, dayKey)] = value;
+      for (const row of rows) {
+        // Sprint 166 §1 — a row the operator added with `+ Add type` is
+        // NEVER filled. Not the ones added afterwards, and not the ones
+        // added beforehand: timing is irrelevant, which is what both
+        // earlier attempts got wrong.
+        if (row.manual) continue;
+        next[cellKey(row.id, dayKey)] = value;
+      }
       return next;
     });
   }
@@ -413,6 +426,9 @@ export function HoursWeekGrid({
           buildingId: block.buildingId,
           cells: {},
           added: true,
+          // Sprint 166 §1 — the mark that keeps this row out of the
+          // fill, forever and regardless of when it was added.
+          manual: true,
         },
       ],
     }));

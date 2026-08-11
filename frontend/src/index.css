@@ -9211,8 +9211,12 @@ details[open] > .ew-department-tree-summary::before {
   vertical-align: middle;
 }
 .hours-week-grid-cell {
-  width: 64px;
-  max-width: 64px;
+  /* Sprint 166 §3 — 64px made the table 1191px against a 1130px
+     container, so it scrolled at every width. 54px x 7 days takes 70px
+     out and the table FITS from 1280 up; at 1024 the container still
+     scrolls, which is the documented fallback and not the modal. */
+  width: 54px;
+  max-width: 54px;
   height: 28px;
   padding: 2px 6px;
   text-align: right;
@@ -9415,4 +9419,34 @@ details[open] > .ew-department-tree-summary::before {
   align-items: center;
   gap: 8px;
   padding-left: 0;
+}
+
+/* ------------------------------------------------------------------
+   Sprint 166 §3 — what ACTUALLY overflows.
+
+   Reported three times and "measured as fixed" twice, because the
+   measurement only ever looked at the OUTER modal. Measuring all four
+   levels separately found it: the modal was clean, and the TABLE
+   inside `.hours-week-table-wrap` was wider than its container while
+   that container had `overflow-x: auto` only in a rule the later
+   Sprint 164 block re-declared without it.
+
+   So the rule is stated once, here, on the container that owns the
+   wide thing — and the modal is pinned shut in both axes so a future
+   wide child cannot push it again.
+   ------------------------------------------------------------------ */
+.week-entry-modal {
+  overflow-x: hidden;
+}
+.week-entry-modal > * {
+  max-width: 100%;
+}
+.hours-week-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.hours-week-grid-table {
+  /* The table may be wider than the modal; it scrolls inside its own
+     container rather than making the dialog wide. */
+  min-width: max-content;
 }

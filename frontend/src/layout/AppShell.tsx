@@ -46,6 +46,7 @@ import {
   canAccessExtraWork,
   canAccessPlannedWork,
   canAccessBilling,
+  canAccessContracts,
   canAccessReports,
   canAccessStaffRequestReview,
   canAccessTimesheets,
@@ -371,6 +372,25 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.customer_submenu.pricing")}
                   </NavLink>
+                  {/* Sprint 166 §5 — Contracts. The page and its route
+                      have existed since Sprint 162 and there was NO way
+                      to reach them: no sidebar entry, so only a typed
+                      URL. Placed next to Pricing and Extra Work because
+                      all three are the customer's money. Gated the same
+                      way the page is — provider-side only; a contract
+                      carries negotiated prices. */}
+                  {canAccessContracts(me?.role) && (
+                    <NavLink
+                      to={`/admin/customers/${sidebar.customerId}/contracts`}
+                      className={navClass}
+                      data-testid="sidebar-customer-contracts"
+                    >
+                      <span className="nav-icon">
+                        <FileText size={16} strokeWidth={2} />
+                      </span>
+                      {t("nav.customer_submenu.contracts")}
+                    </NavLink>
+                  )}
                   {/* IA 2026-06-25 — Meldingen and Offerteaanvragen merged
                       into these two as filter chips (4 content tabs -> 2). */}
                   <NavLink
@@ -679,6 +699,23 @@ export function AppShell({ children }: AppShellProps) {
                     <BarChart3 size={16} strokeWidth={2} />
                   </span>
                   {t("nav.reports")}
+                </NavLink>
+              )}
+              {/* Sprint 166 §4 — the hours comparison has a screen now,
+                  and it is reachable the way every other report is.
+                  Sprint 165 built the endpoint and called it a feature;
+                  an endpoint returning 401 proves a route exists, not
+                  that a user can get to anything. */}
+              {canAccessReports(me?.role) && (
+                <NavLink
+                  to="/reports/hours-comparison"
+                  className={navChildClass}
+                  data-testid="sidebar-hours-comparison"
+                >
+                  <span className="nav-icon">
+                    <Timer size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.hours_comparison")}
                 </NavLink>
               )}
               {canAccessBilling(me?.role) && (

@@ -67,6 +67,9 @@ import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsP
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
 // Sprint 162 §4 — one customer's contracts, beside their other sections.
 import { CustomerContractsPage } from "./pages/admin/customer/CustomerContractsPage";
+// Sprint 166 §4 — the SCREEN for the hours comparison. Sprint 165
+// shipped the endpoint and no interface.
+import { HoursComparisonPage } from "./pages/reports/HoursComparisonPage";
 import { CustomerInvoicesPage } from "./pages/admin/customer/CustomerInvoicesPage";
 import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage";
 import { CustomerDocumentsPage } from "./pages/admin/customer/CustomerDocumentsPage";
@@ -800,6 +803,14 @@ export default function App() {
                 >
                   <ReportsPage />
                 </Suspense>
+              </ReportsRoute>
+            }
+          />
+          <Route
+            path="/reports/hours-comparison"
+            element={
+              <ReportsRoute>
+                <HoursComparisonPage />
               </ReportsRoute>
             }
           />

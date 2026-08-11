@@ -2169,7 +2169,7 @@
   "users": {
     "customer_role_all": "All customer users"
   },
-  "hours_week_grid.apply_all_label": "Fill all rows",
+  "hours_week_grid.apply_all_label": "Fill the default rows",
   "hours_week_grid.apply_all_day": "{{day}} for everyone",
   "hours_week_grid.add_type": "+ Add type",
   "hours_week_grid.remove_type": "Remove {{hourType}}",
@@ -2185,5 +2185,7 @@
   "week_setup.select_buildings": "Select buildings",
   "week_setup.remove_worker": "Remove {{name}}",
   "week_setup.remove_building": "Remove {{name}}",
-  "hours_admin.summary_title": "Summary"
+  "hours_admin.summary_title": "Summary",
+  "nav.customer_submenu.contracts": "Contracts",
+  "nav.hours_comparison": "Contracted vs worked"
 }

@@ -211,8 +211,16 @@ export function WeekEntryDialog({
       <div
         className="card week-entry-modal"
         style={{
+          // Sprint 166 §2 — opens LARGE enough to do its job. It was
+          // capped at 1180 but had no width floor, so on a smaller
+          // viewport it collapsed to whatever its content asked for and
+          // read as a cramped box with the page around it. `min(96vw,
+          // 1180px)` fills the space that exists and still fits 1024
+          // without the page scrolling; `minHeight` stops it opening
+          // short when the grid is empty.
+          width: "min(96vw, 1180px)",
+          minHeight: "min(78vh, 720px)",
           maxWidth: 1180,
-          width: "100%",
           padding: 24,
           maxHeight: "92vh",
           overflowY: "auto",

@@ -2169,7 +2169,7 @@
   "users": {
     "customer_role_all": "Alle klantgebruikers"
   },
-  "hours_week_grid.apply_all_label": "Vul alle regels",
+  "hours_week_grid.apply_all_label": "Vul de standaardregels",
   "hours_week_grid.apply_all_day": "{{day}} voor iedereen",
   "hours_week_grid.add_type": "+ Uursoort toevoegen",
   "hours_week_grid.remove_type": "{{hourType}} verwijderen",
@@ -2185,5 +2185,7 @@
   "week_setup.select_buildings": "Kies gebouwen",
   "week_setup.remove_worker": "{{name}} verwijderen",
   "week_setup.remove_building": "{{name}} verwijderen",
-  "hours_admin.summary_title": "Samenvatting"
+  "hours_admin.summary_title": "Samenvatting",
+  "nav.customer_submenu.contracts": "Contracten",
+  "nav.hours_comparison": "Contract vs gewerkt"
 }
