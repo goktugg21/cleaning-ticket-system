@@ -55,93 +55,68 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-161-fixes`, cut from `integ/159-160` (`ca324d3`,
-the local merge of #159 and #160 that is deployed to crmtest). **CC did
-NOT open a PR and did NOT deploy.**
+**Branch:** `feat/sprint-162-fixes`, cut from `feat/sprint-161-fixes`
+(`4883180`). **CC did NOT open a PR and did NOT deploy.**
 
-A fix list, not a design sprint. Two of its items are Sprint 160's own
-defects and are recorded as such.
-
-**This file was BROKEN at `integ/159-160` and is repaired here.** The
-merge of #159's and #160's checklist edits truncated the header sentence
-mid-word (`**CC updates \`## NOW`) and spliced #159's NOW body in above
-the maintenance section, leaving the real `## NOW` further down holding
-#160's. The Sprint 160 prompt predicted this conflict and asked for a
-trivial resolution; the resolution was not trivial and nobody re-read
-the result. Rebuilt from #158's preamble, this NOW, and the NEXT /
-SHIPPED that #159 and #160 left.
+The backend image was rebuilt with `pypdf` before this sprint, and the
+`ModuleNotFoundError` that broke the last two isolated gate runs is
+genuinely gone — confirmed, not assumed.
 
 ### The owner-visible changes, in plain words
 
-- **The contracts pages have styling now.** They shipped rendering as
-  unstyled text because they were written against class names that do
-  not exist. They look like the other admin pages again.
-- **A contract can actually be created.** The form had no company field
-  while the backend refuses to guess one, so on a deployment with more
-  than one company every save failed and the locations list was empty.
-- **The company page is dense again**, without losing any field Sprint
-  157 added.
-- **The status tiles sit on one row** on Tickets and Extra Work.
-- **The people on an extra-work request follow it onto the ticket** —
-  workers as well as managers, and dated, so the agenda shows them where
-  the work actually is.
-- Old assignment rows that today's rules would refuse are cleaned up.
-- The Users page no longer shows "Customer user" twice.
-
-### The lesson this sprint adds to the gates
-
-**A whole feature shipped rendering as raw text and every gate passed
-it.** TypeScript, ESLint and Vite cannot know a CSS class is undefined,
-so nothing caught 41 invented class names. The undefined-class check is
-now a standing gate (recorded in `## NEXT`), and it earned its place
-immediately: it caught `cell-tag-waiting`, which does not exist — only
-`cell-tag-waiting_customer_approval` does.
+- **The hours grid works the way the reference does.** Clicking a row's
+  hour type used to do nothing, because the dropdown was only ever there
+  on rows added by hand in the same session — every row the wizard made
+  rendered plain text. Both row controls are gone: the building is now a
+  label on the block, and the hour type is a chip with `+ Add type`
+  under the block.
+- **One "all rows" line at the top of the grid.** Type a number under a
+  weekday and it lands in that weekday for everybody. It replaces six
+  controls that between them could not do that.
+- **The setup no longer asks for hour types.** With `+ Add type` in the
+  grid, asking up front was asking twice.
+- **A customer's contracts** now sit beside their Buildings, Users,
+  Pricing and Extra Work.
+- **The contracts detail page reads like the other detail pages.**
 
 ### Per item
 
-- **§1 contracts styling — DONE.** Rewritten onto `page-header` / `card`
-  / `filter-bar` / `summary-grid` / `data-table` / `admin-card-list` /
-  `pagination`, `status-tabs` for the toggles, `cell-tag` for statuses.
-  Nine prefixed rules remain where the system had no equivalent. Class
-  check clean on all four files. Measured on the BUILT app at 1024 /
-  1280 / 1440: 6 stat tiles in a grid, filter bar, 3 tab groups, real
-  table, **zero horizontal overflow at every width**, no console errors.
-- **§5b contract form — DONE.** Company field on the Sprint 149/150
-  model (`osius.contracts.company`); pickers narrow to it; changing
-  company clears the now-foreign selections. **Created a contract end to
-  end against the dev database**: 4 companies offered, saved as
-  CNT-2027-0001, project line added, reopened and persisted, forecast
-  computed 9 invoices / EUR 124.200 for 2027.
-- **§2 company detail density — DONE.** About block is a two-column
-  grid: 9 fields in 5 visual rows instead of 9, block height 417 → 261,
-  page height 1837 → 1681. Every field kept.
-- **§4 status tiles — DONE.** One row at every width (was 2–3). The tile
-  shrank; nothing hid behind a "more" control. The strip is 840px and
-  scrolls sideways where a container is narrower — which on the Tickets
-  page it is (608–768px), a property of that page's own layout.
-- **§5 worker carry-over — DONE.** The slot inherits the TICKET's
-  schedule, so nothing is invented; no schedule means the slot's dates
-  stay None; an ineligible worker is skipped and logged. All three spawn
-  paths go through one entry point. 23 tests OK.
-- **§6 eligibility cleanup — DONE.** Data migration importing the
-  eligibility helper rather than restating it, logging every removal.
-  Applied to dev: "examined 2 assignment rows, removed 0" — both are
-  legitimate there; the rows the brief names are on crmtest, untouched.
-  6 tests OK.
-- **§7 duplicate chip — DONE.** The two chips filter different things
-  (`?role=` vs `?access_role=`), so the label changed and no filter was
-  dropped.
-- **§3 company detail EDIT — ALREADY SHIPPED, VERIFIED.** The brief says
-  the cards are still read-only. They are not: Sprint 159 landed it and
-  it works. Driven in a browser — three Edit buttons, each revealing row
-  checkboxes and an Add control on Medewerkers, Gebouwen and Klanten.
-  Nothing to finish. Only the affordance was exercised, not a full
-  add-then-remove round trip.
-- **§8 Hours — NOT DONE.** The hour-type selector is still in the setup
-  wizard and the non-working in-grid dropdown was not investigated. Ran
-  out of sprint; carried to `## NEXT` rather than quietly dropped.
+- **§1 / §1b / §1c hours — DONE, and verified BY USING IT.** Driven on
+  the built app against the dev database: wizard hour-type pickers = 0;
+  four blocks, one per (employee, building); per-row selects = 0;
+  hour-type chips = 4; `+ Add type` on every block, offering 5 types;
+  adding one took the grid from 4 rows to 5; the apply row has exactly 7
+  day inputs; typing `4` into Monday-for-everyone put "4" in all five
+  Monday cells; row totals 13/4/13/13/13, block totals 17/13/13/13.
+  Read back from the database afterwards: **five 4.00 rows on Monday
+  2026-08-10**, across both employees, both buildings and both hour
+  types — including the type added through the new control. No console
+  errors.
+- **§3 contracts typography — DONE.** The fields were bare `<dt>`/`<dd>`
+  with NO classes, so labels and values were the same body text at the
+  same weight. Measured after the fix, the contract detail page's type
+  is IDENTICAL to the building and customer detail pages on all five
+  properties (label 12px/700/0.72px/uppercase, value 14px/400,
+  section-head 15px/700, tile label 10.5px/800/0.84px/uppercase, tile
+  value 24px/800/-0.48px). Zero horizontal overflow at 1024/1280/1440.
+- **§4 customer contracts — DONE.** No new endpoint: `?customer=`
+  already filtered and already scoped. Six tests pin it, including that
+  a CUSTOMER_* role is 403'd for their OWN customer and an
+  `assertNumQueries` that holds an eight-row read to a two-row budget.
+- **§2 company cards on the EDIT page — NOT DONE.** Deliberately not
+  half-done: see `## NEXT`.
+
+### One defect found by the Sprint 161 gate, in passing
+
+`hours-week-grid-cell` and `hours-week-grid-table` were referenced by
+the hours grid and defined NOWHERE, since before this sprint — the same
+defect as the contracts pages, smaller blast radius, invisible to every
+other check. Both defined now. The gate has earned its place twice in
+two sprints.
 
 ---
+
+
 
 
 ## NEXT
@@ -152,6 +127,32 @@ milestones", "Deferred"). All four are now retired; every genuinely-open
 item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
 
+
+
+0. **COMPANY CARDS ON THE EDIT PAGE — Sprint 162 §2, NOT DONE.**
+
+   The detail page has the three editable cards (employees, buildings,
+   customers) and works; `CompanyFormPage.tsx` has none of them. §2 is
+   right that both pages should carry them.
+
+   It was not done because the brief also rules out the only cheap way
+   to do it: "If the two ever diverge, one shared component is the
+   answer — not a second copy of the markup." The three cards are ~460
+   lines of stateful JSX on the detail page, wired to three
+   `useEditMode` controllers, several `ConfirmDialog` refs, the
+   `bulkLinkBuildings` handlers and their own fetches. Doing it properly
+   means extracting all of that into one component that owns its data
+   and mounting it on both pages.
+
+   That is the right shape and it is a sprint item, not a corner of one.
+   Shipping the copy-paste instead would have put a second copy of the
+   company-boundary rule into the codebase, which is the specific
+   failure mode this file keeps recording.
+
+   Shape for whoever picks it up: a `CompanyRelationCards({ companyId })`
+   that fetches its own employees / buildings / customers, so mounting
+   it on the form page is one line and the detail page's rendered output
+   does not change.
 
 0. **THE GATE LIST NOW INCLUDES AN UNDEFINED-CSS-CLASS CHECK.** Run it
    over every file a sprint touches, and paste its output:
