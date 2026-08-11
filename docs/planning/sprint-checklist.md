@@ -55,66 +55,68 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-162-fixes`, cut from `feat/sprint-161-fixes`
-(`4883180`). **CC did NOT open a PR and did NOT deploy.**
+**Branch:** `feat/sprint-163-fixes`, cut from `feat/sprint-162-fixes`
+(`db6b77b`). **CC did NOT open a PR and did NOT deploy.**
 
-The backend image was rebuilt with `pypdf` before this sprint, and the
-`ModuleNotFoundError` that broke the last two isolated gate runs is
-genuinely gone — confirmed, not assumed.
+**All four items shipped. Nothing was carried to `## NEXT`** — including
+§4, which had been deferred three sprints running.
 
 ### The owner-visible changes, in plain words
 
-- **The hours grid works the way the reference does.** Clicking a row's
-  hour type used to do nothing, because the dropdown was only ever there
-  on rows added by hand in the same session — every row the wizard made
-  rendered plain text. Both row controls are gone: the building is now a
-  label on the block, and the hour type is a chip with `+ Add type`
-  under the block.
-- **One "all rows" line at the top of the grid.** Type a number under a
-  weekday and it lands in that weekday for everybody. It replaces six
-  controls that between them could not do that.
-- **The setup no longer asks for hour types.** With `+ Add type` in the
-  grid, asking up front was asking twice.
-- **A customer's contracts** now sit beside their Buildings, Users,
-  Pricing and Extra Work.
-- **The contracts detail page reads like the other detail pages.**
+- **The hours set-up modal looks like the reference now.** The two tall
+  checkbox lists are one-line chip pickers, and the grid is one table
+  whose first three columns are Worker, Building and Hour type — so
+  everything lines up instead of the eye re-anchoring at every block
+  heading.
+- **The status tiles use the whole width and have room to breathe.**
+- **The contract page's cards no longer run their text to the border.**
+- **The company's employees, buildings and customers can be edited from
+  the edit page too**, not only the detail page.
 
 ### Per item
 
-- **§1 / §1b / §1c hours — DONE, and verified BY USING IT.** Driven on
-  the built app against the dev database: wizard hour-type pickers = 0;
-  four blocks, one per (employee, building); per-row selects = 0;
-  hour-type chips = 4; `+ Add type` on every block, offering 5 types;
-  adding one took the grid from 4 rows to 5; the apply row has exactly 7
-  day inputs; typing `4` into Monday-for-everyone put "4" in all five
-  Monday cells; row totals 13/4/13/13/13, block totals 17/13/13/13.
-  Read back from the database afterwards: **five 4.00 rows on Monday
-  2026-08-10**, across both employees, both buildings and both hour
-  types — including the type added through the new control. No console
-  errors.
-- **§3 contracts typography — DONE.** The fields were bare `<dt>`/`<dd>`
-  with NO classes, so labels and values were the same body text at the
-  same weight. Measured after the fix, the contract detail page's type
-  is IDENTICAL to the building and customer detail pages on all five
-  properties (label 12px/700/0.72px/uppercase, value 14px/400,
-  section-head 15px/700, tile label 10.5px/800/0.84px/uppercase, tile
-  value 24px/800/-0.48px). Zero horizontal overflow at 1024/1280/1440.
-- **§4 customer contracts — DONE.** No new endpoint: `?customer=`
-  already filtered and already scoped. Six tests pin it, including that
-  a CUSTOMER_* role is 403'd for their OWN customer and an
-  `assertNumQueries` that holds an eight-row read to a two-row budget.
-- **§2 company cards on the EDIT page — NOT DONE.** Deliberately not
-  half-done: see `## NEXT`.
+- **§1 hours modal — DONE, driven at 1280.** Chip multi-selects = 2;
+  columns `Medewerker | Gebouw | Uursoort | ma..zo | Totaal`; 6 groups
+  with worker and building in their own columns, blank on continuation
+  rows; `+ Add type` took the grid 7 → 8 rows; the apply row's 7 inputs
+  filled all 8 Monday cells; save clean; **API read-back 8 rows at
+  3.00**. Modal 743px in a 900px viewport, the GRID scrolls in its own
+  container, no console errors. The document scrolls 981/900 with the
+  modal open **and closed — delta 0**, so that is the admin page behind
+  the overlay, measured rather than assumed.
+- **§2 status tiles — DONE.** The strip lived inside `.dash-main`, which
+  `work-layout` sizes at 610px against a 340px side panel; nine readable
+  tiles never fit there at any padding, which is why Sprint 161's scroll
+  and this sprint's first attempt (wrap) were both treating the symptom.
+  It now sits ABOVE the two-column section.
+  `before tickets 1024/1280/1440 rows 2/3/2, box 710/608/768`
+  `after  tickets and extra work: rows 2/1/1, box 712/968/1128`
+  Tile width 112/100/118, padding 7px/10px → 10px/14px, 0 clipped
+  labels, 0 horizontal overflow. One row at 1280 and 1440 as required;
+  at 1024 it wraps to two rather than shrinking to 72px.
+- **§3 contract cards — DONE.** Which rule was responsible: **none.**
+  `.card` carries no padding at all, deliberately, and the building,
+  customer and company pages each add `20px 22px` inline. The contracts
+  page simply never did. Named once as `.card-detail-pad`.
+  `contract tile 16px 18px / card 20px 22px` — identical to `building`.
+- **§4 company cards on both pages — DONE.**
+  `components/CompanyRelationCards.tsx` owns the three cards and
+  everything behind them; the detail page drops ~460 lines and renders
+  one line, the edit page gains the same line on its `!isCreate` branch.
+  Verified by USING both: three cards on each, three Edit buttons on
+  each, and entering edit on the buildings card gives 3 row checkboxes
+  and the Add control on both.
 
-### One defect found by the Sprint 161 gate, in passing
+### The gate keeps paying for itself
 
-`hours-week-grid-cell` and `hours-week-grid-table` were referenced by
-the hours grid and defined NOWHERE, since before this sprint — the same
-defect as the contracts pages, smaller blast radius, invisible to every
-other check. Both defined now. The gate has earned its place twice in
-two sprints.
+Two more pre-existing holes this sprint: `CompanyFormPage`'s admins
+heading used a class with no rule behind it, so it rendered as a bare
+`h3` while every other section head is styled. Seven catches in four
+sprints.
 
 ---
+
+
 
 
 
@@ -129,7 +131,12 @@ item has moved to `## SHIPPED` or been resolved below instead.
 
 
 
-0. **COMPANY CARDS ON THE EDIT PAGE — Sprint 162 §2, NOT DONE.**
+0. **COMPANY CARDS ON THE EDIT PAGE — CLOSED by Sprint 163 §4.**
+   Extracted into `components/CompanyRelationCards.tsx` and mounted on
+   both pages. The entry below is kept for the reasoning, not as an
+   open item.
+
+0. ~~**COMPANY CARDS ON THE EDIT PAGE — Sprint 162 §2, NOT DONE.**~~
 
    The detail page has the three editable cards (employees, buildings,
    customers) and works; `CompanyFormPage.tsx` has none of them. §2 is
@@ -177,7 +184,11 @@ item has moved to `## SHIPPED` or been resolved below instead.
    and conditional class names are invisible to it, so it is a floor,
    not a proof.
 
-0. **HOURS — Sprint 161 §8, NOT DONE.** Carried forward whole rather
+0. **HOURS — CLOSED.** Sprint 162 removed the wizard's hour-type step
+   and made the in-grid control work; Sprint 163 §1 rebuilt the modal's
+   layout to the reference. Kept below for the reasoning only.
+
+0. ~~**HOURS — Sprint 161 §8, NOT DONE.**~~ Carried forward whole rather
    than half-reported:
    - **Remove the hour-type selector from the setup wizard.** The owner:
      it complicates matters. The grid should start with a sensible
