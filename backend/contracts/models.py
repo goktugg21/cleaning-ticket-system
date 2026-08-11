@@ -648,3 +648,92 @@ class ContractNumberSequence(models.Model):
 
     def __str__(self):
         return f"{self.company_id}/{self.year}: {self.last_number}"
+
+
+class ContractInvoice(models.Model):
+    """
+    Sprint 164 §8 — the claim that ONE period of ONE contract has been
+    invoiced.
+
+    This is the idempotency mechanism, and it is a database constraint
+    rather than a check in code. `UniqueConstraint(contract,
+    period_start)` means a second generator run — or a concurrent one —
+    asks Postgres for a row that already exists and is refused. Nothing
+    is inferred from amounts, dates or invoice contents, and there is no
+    read-then-write window for two processes to both pass. This codebase
+    already shipped one check-then-act race (`ensure_default_labels`);
+    that shape is not repeated here.
+
+    It also keeps the dependency ONE-WAY. `invoicing` knows nothing
+    about contracts: no column was added to `Invoice`, no behaviour of
+    it changed. This table lives in `contracts`, which is the app that
+    grew the new need, and `contracts.invoice_generation` is the only
+    module that imports `invoicing` at all.
+
+    `invoice_date` lives here rather than on `Invoice` because `Invoice`
+    has no such field — it carries `period_year` / `period_month` and
+    the issue/send timestamps. Adding one would have been a change to
+    the invoicing schema, which this sprint is explicitly not making.
+
+    `revision` records WHICH agreed scope priced the period, so a later
+    reader can answer "why is this invoice this amount" without
+    re-deriving it from dates.
+    """
+
+    contract = models.ForeignKey(
+        Contract,
+        on_delete=models.CASCADE,
+        related_name="generated_invoices",
+    )
+    invoice = models.OneToOneField(
+        "invoicing.Invoice",
+        on_delete=models.CASCADE,
+        related_name="contract_period",
+        help_text=(
+            "CASCADE: this row is a CLAIM about an invoice, so it must "
+            "not outlive it. A deleted invoice releases its period to be "
+            "generated again, which is the behaviour a hard delete "
+            "should have."
+        ),
+    )
+    revision = models.ForeignKey(
+        ContractRevision,
+        on_delete=models.PROTECT,
+        related_name="generated_invoices",
+        help_text="The agreed scope this period was priced from.",
+    )
+
+    period_start = models.DateField(
+        help_text="First day of the billed period. Half of the uniqueness key."
+    )
+    period_end = models.DateField()
+    invoice_date = models.DateField(
+        help_text=(
+            "The forecast's date for this period. Kept here because "
+            "`invoicing.Invoice` has no invoice_date column and this "
+            "sprint does not change its schema."
+        ),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "contract invoice"
+        verbose_name_plural = "contract invoices"
+        ordering = ["-period_start", "-id"]
+        constraints = [
+            # THE idempotency mechanism. See the class docstring.
+            models.UniqueConstraint(
+                fields=["contract", "period_start"],
+                name="uniq_contract_invoice_per_period",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["contract", "-period_start"],
+                name="contract_invoice_period_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.contract_id}@{self.period_start}"
