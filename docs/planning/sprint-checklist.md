@@ -4,84 +4,113 @@
 system and the Ramazan transcripts + Source of Truth, ending with a
 premium UI/UX polish. **CC updates `## NOW
 
-**Branch:** `feat/sprint-167`, cut from `feat/sprint-166` (`ce37418`).
-It is the single branch being merged — #153 -> ... -> #167 are ONE
+**Branch:** `feat/sprint-168`, cut from `feat/sprint-167` (`fbf0554`).
+It is the single branch being merged — #153 -> ... -> #168 are ONE
 chain, one PR, not one per sprint.
-
-Sprint 166 was deployed to crmtest at the owner's instruction (the
-prompt said not to; the owner overrode it in the same session). The same
-instruction covers this sprint.
 
 ### The standard this sprint was held to
 
-Sprint 166's standard stands: nothing counts as done unless it was
-reached by CLICKING from the sidebar, and the report says which entry.
-Every item below was.
+Nothing counts as done unless it was reached by CLICKING, and the
+report says which entry. Sprint 168 is partly the bill for not holding
+Sprint 167 to it hard enough: §1 below is a feature I reported as
+shipped that could not be used at all.
 
 ### Per item
 
-- **§1 wizard sized to its content — DONE, and it undoes my own
-  overcorrection.** Sprint 166 was told to make the modal "large enough
-  to work in" and I gave it a min-height, which turned an empty dialog
-  into a vast white box holding one line. No height floor now: it grows
-  with its rows, stops at 85vh, and the GRID scrolls inside it. The
-  backdrop is anchored to the TOP, not centred, because a centred dialog
-  that grows moves its own header upward and slides the controls out
-  from under the cursor. Measured at 1280: nothing selected 1180x268,
-  five rows 1180x765, eleven rows 1180x765 with the grid scrolling —
-  `top=54` in all three, so the header does not move.
-- **§2 contracts closing list — DONE, two gaps not four.** Checked all
-  four against the built page first. The Billing summary strip and its
-  "N facturen — totaal: EUR X" caption with the year stepper already
-  existed; so did the Revisions Current Status card and empty state.
-  What was actually missing and is now closed: the Projects tab groups
-  by LOCATION with per-group count/hours/amount and foots with Totaal
-  per maand, and the header carries the location alongside customer,
-  number, status and both money figures. Group and footer money goes
-  through the exported `lineValue`, the same rule the list page uses, so
-  a quarterly contract cannot read differently on two screens.
-- **§3 contract hours — DONE.** `timesheets.ContractHours`: employee,
-  building, hour type, `valid_from`/`valid_to` and seven weekday
-  columns. NO FK to `contracts` and no import of it — two tests pin
-  that, because tying the hours module to the contracts app would make
-  it useless to a company that has no contracts. Seven columns rather
-  than a JSON blob so the comparison report can SUM them in the
-  database. Resolution follows `resolve_price` (latest `valid_from` at
-  or before the date, `-id` tie-break); a date before any window
-  resolves to None, not zero — "no agreement" and "an agreement of zero"
-  are different facts. Screen: a Contracturen tab on /admin/hours with
-  four filters, four tiles and one inline-editable table behind one Edit
-  gate, approved rows disabled.
-- **§4 approval — DONE.** A Goedkeuring tab: week stepper,
-  Draft/Saved/Approved as tabs with counts, building and employee
-  filters, per-row action and a bulk action. States and transitions are
-  in the model docstring; an APPROVED row is not editable and reopening
-  clears the approval, because otherwise one wrong approval is permanent
-  and the only escape is a superseding row whose date lies about when
-  the agreement changed. The Extra work tile says "Niet vastgelegd"
-  rather than 0.00 — we hold no such figure, and a zero in a tile reads
-  as a measurement.
-- **§5 Work Plan gap — ANALYSED, not built** (the prompt asked for the
-  analysis only). See NEXT.
+- **§1 contract hours could not be CREATED — fixed, and this is the
+  correction of a false report.** Sprint 167 shipped the model, the
+  tab, the tiles, the filters and the table, and no way to add a row.
+  The tab could only ever say "no contract hours recorded yet", which
+  also made the approval screen decoration. The Bulk assignment dialog
+  now exists and REUSES `HoursWeekGrid` rather than copying it: the
+  grid already owns the blocks, the fill line, `+ Add type` and the
+  Sprint 166 rule that a manually added row is never filled, and only
+  the DESTINATION is passed (`onSaveCells`). Walked through by
+  clicking: 2 workers x 2 buildings, 4 hours a day, tiles went
+  0.00/0/0/0 to 112.00/2/2/4. The table also gained a per-row Delete,
+  refused for an APPROVED row.
+- **§2 approval is connected — and the bug was the WEEK question.** It
+  asked `valid_on = <the week's Monday>`, so four rows created on a
+  Wednesday were invisible in the week containing that Wednesday.
+  `in_force_between` is an OVERLAP test and `in_force_on` stays for
+  the question it answers correctly. Measured: Concept 4 rows / 112.00
+  contracted / 60.00 worked; submit moved 4->3 and 0->1; approve moved
+  1->0 and 0->1.
+  **Extra work hours stays "Niet vastgelegd"** — checked rather than
+  assumed. `ExtraWorkAssignment` carries who/role/when-assigned, never
+  a duration, and extra work has no slot concept at all.
+- **§3 work type — DONE.** `timesheets.WorkType`, the `HourType`
+  pattern exactly. Two axes on purpose: HourType weights an hour,
+  WorkType names the kind of work and carries no multiplier. The FK on
+  `ContractHours` is NULLABLE and stays so. The audit import is
+  ALIASED because `customers.WorkType` already existed there and a
+  second bare name would have shadowed it.
+- **§4 the picker is no longer clipped.** Measured cause:
+  `.week-entry-modal { overflow-x: hidden }` — overflow-x hidden with
+  overflow-y visible computes to `auto`, so the rule that stopped
+  sideways scroll started clipping vertically. The list is PORTALLED to
+  document.body now (the offered option 2), which is what a native
+  select does and keeps an empty modal short. 1280: empty+closed
+  1180x391, empty+open 1180x391 (the modal does not grow), six rows
+  1180x765 with the grid scrolling.
+- **§5 contracts — status compared, types given a screen.** Concept =
+  DRAFT, Actief = ACTIVE, Verlopen = EXPIRED; "ExtraWorks" is not a
+  status but a TYPE, and adding it as one would put a single concept on
+  two axes. We keep CANCELLED, which the reference has no counterpart
+  for. The type catalog now has a management tab with add / archive /
+  reactivate / delete and a standard-set button offering four kinds to
+  a company that has none — the gap Sprint 166 recorded.
+- **§6 the chip strip — and removing the chip was NOT enough.** Seven
+  chips still wrapped, because `repeat(auto-fit, minmax(210px, 1fr))`
+  is width-driven, not count-driven. A MODIFIER class (columns instead
+  of auto-fit) fixes it without touching the class five other strips
+  share. 1024 / 1280 / 1440: 7 chips, 1 row, no page overflow.
+- **§7 the Work Plan — EXTENDED the agenda, did not add a page.**
+  Mon-Sun frame, week stepper, "this week", chips that filter, Type and
+  Status filters. The cards, actions and dialogs are Sprint 111's and
+  are untouched.
 
-### Not done
+### What is NOT done, and why
 
-- **§3's `+ Add type` per pair and the Bulk assignment dialog.** The
-  backend bulk endpoint exists and is tested (one row per pair, existing
-  rows skipped rather than raising); the dialog that would drive it is
-  not built. It is the one piece of §3 that did not land.
+- **Extra-work items in the Work Plan.** It shows tickets only. No
+  endpoint returns dated extra work for a viewer, and extra work has no
+  schedule at all — `ExtraWorkAssignment` records who, never when.
+  Putting it in the week means giving extra work a schedule, which is a
+  feature, not a view.
+- **The In Progress and Archived chips.** A staff slot has neither
+  state. The screen SAYS both are missing rather than showing two
+  chips permanently reading 0.
+- **Overdue is a filter, not a modal** — a deliberate choice: the cards
+  carry Mark done and Unable to complete, and a modal would need a
+  second copy of the card or would strip its actions.
 
 ### Gates
 
-`python manage.py test timesheets` — **242 tests, OK** (isolated
-database, own worktree). `makemigrations --dry-run --check` — no changes
-detected; `timesheets.0004_contracthours` applied to dev. Frontend: tsc
-clean, eslint **44 (42 errors, 2 warnings)** — baseline, none added —
-build OK. i18n `common` 2233 keys per side, `contracts` 202 per side,
-both in lockstep. The undefined-CSS-class gate caught seven invented
-class names in the approval tab before it shipped; all seven are gone.
+`test timesheets contracts` — **373 tests, OK** (isolated database, own
+worktree), including **18 new** for the work-type catalog, the
+explicit-rows bulk shape and `in_force_between`. `test tickets` run
+separately. `makemigrations --dry-run --check` — no changes detected;
+`timesheets.0005_worktype_contracthours_work_type_and_more` applied to
+dev. Frontend: tsc clean, eslint **44 (42 errors, 2 warnings)** —
+baseline, none added — build OK. i18n lockstep: `common` 2245,
+`staff_slots` 109, `contracts` 217, each side equal.
 
 ## NEXT
+
+### From Sprint 168 — the Work Plan's unbuilt half
+
+- **Extra work in the week view.** Requires giving extra work a
+  schedule (a date, and probably a slot), not just a query. That is a
+  product decision, not a screen.
+- **The manager Work Plan.** The agenda holds two audiences in one
+  file; the week frame was given to the STAFF half only. Bolting it
+  onto the manager table because they share a file would be the
+  reference-copying mistake, so it was not done.
+- **Counts are computed client-side over the viewer's own slots.** That
+  is correct today because `my-slots` returns the viewer's whole set
+  unpaginated. If that ever paginates, the counts must move to the
+  server or they will silently count one page.
+
 
 ### Sprint 167 §5 — Work Plan vs the AgendaPage we have (analysis only)
 
