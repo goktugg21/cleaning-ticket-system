@@ -8842,33 +8842,11 @@ details[open] > .ew-department-tree-summary::before {
    horizontal scroll on the bar itself: if the viewport genuinely cannot
    hold six controls, the bar scrolls rather than the page (CLAUDE.md —
    wide content scrolls inside its own container, the body never does). */
-.hours-week-apply-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 8px;
-  padding: 10px 12px;
-  margin-bottom: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-}
-.hours-week-apply-bar > * { flex-shrink: 0; }
-.hours-week-apply-bar select.field-input { max-width: 170px; }
-
-/* Sprint 156 §6c — the per-row hour-type / building selects on an added
-   row. Sized to the cell so the grid keeps its column rhythm. */
-.hours-week-row-select {
-  max-width: 150px;
-  height: 28px;
-  font-size: 12.5px;
-}
-.hours-week-apply-label {
-  font-family: var(--f-head);
-  font-weight: 700;
-  font-size: 12.5px;
-}
+/* Sprint 162 §1 — `.hours-week-apply-bar` and `.hours-week-row-select`
+   were deleted with the controls they styled: the six-control bulk bar
+   and the per-row hour-type / building selects that only ever appeared
+   on rows added in the same session. `.hours-week-apply-label` moved to
+   the Sprint 162 block below, where it labels a table header cell. */
 .hours-week-grand-total {
   font-family: var(--f-head);
   font-weight: 800;
@@ -9082,20 +9060,10 @@ details[open] > .ew-department-tree-summary::before {
   min-width: 0;
 }
 
-/* The contract detail General Info grid: two columns of compact
-   label/value rows, so the tab reads as a dense card rather than a
-   column of full-width lines. Collapses to one column on phones. */
-.contract-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 24px;
-  margin: 0;
-}
-@media (max-width: 720px) {
-  .contract-detail-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
+/* Sprint 162 §3 — `.contract-detail-grid` is GONE. It was a second copy
+   of `.detail-field-grid`, which already existed for the same job, and
+   the contracts detail page now uses that one. A duplicated primitive
+   is how two pages end up disagreeing about their own type scale. */
 
 /* The locations list inside a BoundedList on the detail page. */
 .contract-plain-list {
@@ -9105,4 +9073,81 @@ details[open] > .ew-department-tree-summary::before {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* ------------------------------------------------------------------
+   Sprint 162 §1 — the hours grid as BLOCKS, the reference's shape.
+
+   One block per (worker, building): the building is a property of the
+   block and is printed once as a label, so there is no per-row building
+   control. Inside a block each row is one hour type, shown as a chip,
+   and `+ Add type` is the only way to reach another one.
+   ------------------------------------------------------------------ */
+
+/* The apply-to-all row sits in the head, in the data's own columns, so
+   a number typed under a weekday is visibly under that weekday. */
+.hours-week-apply-row th {
+  background: var(--surface-2);
+  border-bottom: 2px solid var(--border);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.hours-week-apply-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* The block header: who, where, and the block's own total. */
+.hours-week-block-head th {
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-weight: 600;
+}
+.hours-week-block-person {
+  font-weight: 700;
+}
+.hours-week-block-building {
+  margin-left: 10px;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.hours-week-add-type-row td {
+  padding-top: 4px;
+  padding-bottom: 10px;
+}
+.hours-week-add-type-select {
+  max-width: 220px;
+}
+
+/* Sprint 162 §1 — these two were REFERENCED by the hours grid and
+   defined nowhere, since before this sprint. The undefined-class gate
+   Sprint 161 added is what surfaced them: same defect as the contracts
+   pages, smaller blast radius, invisible to every other check. */
+.hours-week-grid-table {
+  table-layout: auto;
+}
+.hours-week-grid-table th,
+.hours-week-grid-table td {
+  vertical-align: middle;
+}
+.hours-week-grid-cell {
+  width: 64px;
+  max-width: 64px;
+  height: 28px;
+  padding: 2px 6px;
+  text-align: right;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }

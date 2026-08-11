@@ -78,7 +78,6 @@ export function WeekEntryDialog({
 
   const [employeeIds, setEmployeeIds] = useState<number[]>([]);
   const [buildingIds, setBuildingIds] = useState<number[]>([NO_BUILDING_ID]);
-  const [hourTypeIds, setHourTypeIds] = useState<number[]>([]);
   const [week, setWeek] = useState<IsoWeek>(initialWeek);
 
   const [entriesByEmployee, setEntriesByEmployee] = useState<
@@ -254,21 +253,12 @@ export function WeekEntryDialog({
             />
           </div>
 
-          <div className="field">
-            <span className="field-label">
-              {t("week_setup.hour_types_label")}
-            </span>
-            <EntityPicker
-              options={hourTypes.map((hourType) => ({
-                id: hourType.id,
-                label: hourType.name,
-              }))}
-              selectedIds={hourTypeIds}
-              onChange={setHourTypeIds}
-              emptyText={t("week_setup.no_hour_types")}
-              testIdPrefix="week-setup-hour-types"
-            />
-          </div>
+          {/* Sprint 162 §1c — the hour-type step is GONE. The grid now
+              carries `+ Add type` per block, which is the only way a
+              type is chosen, so asking for types up front was asking
+              the same question twice and pre-committing the answer.
+              Removing it was unsafe before that control existed and is
+              safe now, which is why it waited. */}
 
           <div className="field">
             <span className="field-label">{t("week_setup.week_label")}</span>
@@ -290,13 +280,14 @@ export function WeekEntryDialog({
               data-testid="week-setup-summary"
               role="status"
             >
+              {/* One BLOCK per (employee, building) now, each opening
+                  with a single default hour-type row. The old count
+                  multiplied by the chosen types, which no longer
+                  exist as a setup choice. */}
               {t("week_setup.summary", {
                 employees: employeeIds.length,
                 buildings: buildingIds.length,
-                rows:
-                  employeeIds.length *
-                  buildingIds.length *
-                  Math.max(1, hourTypeIds.length),
+                rows: employeeIds.length * buildingIds.length,
               })}
             </p>
           </div>
@@ -310,7 +301,6 @@ export function WeekEntryDialog({
           buildings={buildings}
           entriesByEmployee={entriesByEmployee}
           seedBuildingIds={seedBuildingIds}
-          seedHourTypeIds={hourTypeIds}
           weekClosed={weekClosed}
           onSaved={onSaved}
           onCancel={onClose}
