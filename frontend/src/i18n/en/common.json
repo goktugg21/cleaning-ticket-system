@@ -2169,7 +2169,7 @@
   "users": {
     "customer_role_all": "All customer users"
   },
-  "hours_week_grid.apply_all_label": "All rows",
+  "hours_week_grid.apply_all_label": "All rows (incl. new)",
   "hours_week_grid.apply_all_day": "{{day}} for everyone",
   "hours_week_grid.add_type": "+ Add type",
   "hours_week_grid.remove_type": "Remove {{hourType}}",

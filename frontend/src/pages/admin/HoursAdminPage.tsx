@@ -549,8 +549,12 @@ export function HoursAdminPage() {
       ]
     : [];
 
+  // Sprint 164 — the wrapper used to carry a class with no rule behind
+  // it, the same hole the gate found on MyHoursPage last sprint. A JS
+  // comment, not a JSX one: a JSX comment cannot sit between `return (`
+  // and the element, which is a mistake I have now made twice.
   return (
-    <div className="page">
+    <div>
       <PageHeader
         title={t("hours_admin.title")}
         subtitle={t("hours_admin.subtitle")}

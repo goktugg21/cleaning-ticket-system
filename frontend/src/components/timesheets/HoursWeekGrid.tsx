@@ -330,6 +330,26 @@ export function HoursWeekGrid({
    * skipped the cells already filled would be the confusing behaviour
    * the owner asked us not to build.
    */
+  /**
+   * Sprint 164 §3 — what it does today, and what it does now.
+   *
+   * REPRODUCED: this wrote `edits` for the rows that existed at the
+   * moment of typing. A row added afterwards through `+ Add type` had
+   * no entry, so it rendered empty while the all-rows line still read
+   * "4" — the grid claiming one thing and showing another, with nothing
+   * on screen to say which rows were covered.
+   *
+   * CHOSEN: the all-rows value applies to rows added AFTERWARDS too. A
+   * new row inherits it at the moment it is created (see
+   * `addTypeToBlock`), so the line stays TRUE for as long as it is
+   * filled in. The alternative — freeze at the moment of typing — is
+   * defensible in isolation but leaves exactly the contradiction above,
+   * and the brief rules out any state where the operator cannot tell
+   * which rows were affected. The label says so.
+   *
+   * A cell the operator edits by hand afterwards is not touched again:
+   * inheritance happens once, when the row appears.
+   */
   function applyToAllDay(dayKey: string, value: string) {
     setApplyRow((current) => ({ ...current, [dayKey]: value }));
     setEdits((current) => {
@@ -354,12 +374,23 @@ export function HoursWeekGrid({
       return;
     }
     setError("");
+    // Sprint 164 §3 — the new row inherits whatever the all-rows line
+    // currently holds, so that line does not become a lie the moment a
+    // type is added.
+    const newRowId = rowId(block.employeeId, key);
+    const inherited: Record<string, string> = {};
+    for (const [dayKey, value] of Object.entries(applyRow)) {
+      if (value !== "") inherited[cellKey(newRowId, dayKey)] = value;
+    }
+    if (Object.keys(inherited).length > 0) {
+      setEdits((current) => ({ ...current, ...inherited }));
+    }
     setExtraRows((current) => ({
       ...current,
       [block.employeeId]: [
         ...(current[block.employeeId] ?? []),
         {
-          id: rowId(block.employeeId, key),
+          id: newRowId,
           employeeId: block.employeeId,
           employeeName: block.employeeName,
           key,

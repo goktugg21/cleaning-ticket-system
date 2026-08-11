@@ -17,7 +17,8 @@
     "cancel": "Annuleren",
     "save": "Opslaan",
     "saving": "Bezig met opslaan…",
-    "remove": "Verwijderen"
+    "remove": "Verwijderen",
+    "open": "Openen"
   },
   "stats": {
     "total": "Contracten",

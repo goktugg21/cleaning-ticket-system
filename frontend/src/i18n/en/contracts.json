@@ -17,7 +17,8 @@
     "cancel": "Cancel",
     "save": "Save",
     "saving": "Saving…",
-    "remove": "Remove"
+    "remove": "Remove",
+    "open": "Open"
   },
   "stats": {
     "total": "Contracts",

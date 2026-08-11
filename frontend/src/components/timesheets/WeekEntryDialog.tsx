@@ -205,7 +205,7 @@ export function WeekEntryDialog({
       }}
     >
       <div
-        className="card"
+        className="card week-entry-modal"
         style={{
           maxWidth: 1180,
           width: "100%",

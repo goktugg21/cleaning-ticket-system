@@ -8825,26 +8825,41 @@ details[open] > .ew-department-tree-summary::before {
 /* The stat tiles. Same visual weight as the Extra Work list's KPI
    strip, because they are the same thing: four numbers describing the
    rows underneath. */
+/* Sprint 164 §2 — the same treatment Sprint 163 §2 settled on for the
+   ticket and extra-work status tiles: a grid whose columns divide the
+   full content width, rather than flex items bunched at the left with
+   dead space beside them. Four tiles plus the Export button, so five
+   tracks; the export cell is the last one and is aligned to it. */
 .hours-tile-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   align-items: stretch;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 14px;
 }
 .hours-tile {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 2px;
-  min-width: 140px;
+  /* `min-width: 0` lets a grid track shrink below its content's
+     intrinsic width, which is what allows a long label to wrap rather
+     than force the track wider. Sprint 163 §2's lesson. */
+  min-width: 0;
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
 }
+.hours-tile-export {
+  align-self: center;
+  justify-self: stretch;
+}
 .hours-tile-label {
   font-family: var(--f-head);
   font-size: 11.5px;
+  white-space: normal;
+  overflow-wrap: anywhere;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -9249,16 +9264,60 @@ details[open] > .ew-department-tree-summary::before {
 .chip-multiselect-caret {
   margin-left: auto;
 }
-.chip-multiselect-select {
-  flex: 1 1 160px;
-  min-width: 160px;
-  height: 26px;
-  font-size: 12.5px;
-  font-family: inherit;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+/* Sprint 164 §4 — the list is a real listbox that stays open, not a
+   native select that closes after one pick. Absolutely positioned so
+   opening it never reflows the modal's top row. */
+.chip-multiselect {
+  position: relative;
+}
+.chip-multiselect-control {
+  cursor: pointer;
+}
+.chip-multiselect-control:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.chip-multiselect-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
   background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+}
+.chip-multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
   color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.chip-multiselect-option.is-active {
+  background: var(--surface-2);
+}
+.chip-multiselect-option.is-selected {
+  font-weight: 600;
+}
+.chip-multiselect-check {
+  width: 12px;
+  flex: 0 0 12px;
+  color: var(--green);
 }
 
 /* Sprint 163 §1 — the grid's own head, and the identity columns. */
@@ -9294,4 +9353,41 @@ details[open] > .ew-department-tree-summary::before {
   text-align: right;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+
+/* ------------------------------------------------------------------
+   Sprint 164 §5 / §6 — the week-entry modal.
+
+   §5: a modal never scrolls sideways. The grid is the wide thing, so
+   the GRID gets `overflow-x: auto` and the modal is pinned to
+   `overflow-x: hidden`. `min-width: 0` on the flex/grid children is the
+   part that actually does the work: without it a wide table forces its
+   ancestors wider than the dialog, and no amount of overflow on the
+   dialog helps.
+
+   §6: the three top controls share the width in three columns on a wide
+   modal and stack when narrow, instead of two pickers on the left with
+   dead space beside them. The modal is NOT made wider to fill it.
+   ------------------------------------------------------------------ */
+.week-entry-modal {
+  overflow-x: hidden;
+}
+.week-entry-modal * {
+  min-width: 0;
+}
+.week-entry-setup-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+@media (max-width: 900px) {
+  .week-entry-setup-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.hours-week-table-wrap {
+  overflow-x: auto;
 }

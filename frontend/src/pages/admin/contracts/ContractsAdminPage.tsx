@@ -688,6 +688,7 @@ export function ContractsAdminPage() {
                   editMode={editMode}
                   statusTag={STATUS_TAG}
                   totalColumnCount={totalColumnCount}
+                  onOpen={(id) => navigate(`/admin/contracts/${id}`)}
                   t={t}
                 />
               ))}
@@ -815,6 +816,7 @@ function ContractGroup({
   editMode,
   statusTag,
   totalColumnCount,
+  onOpen,
   t,
 }: {
   group: ContractGroupRow;
@@ -826,6 +828,7 @@ function ContractGroup({
   editMode: ReturnType<typeof useEditMode<number>>;
   statusTag: Record<ContractStatus, string>;
   totalColumnCount: number;
+  onOpen: (id: number) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const format = measure === "prices" ? formatMoney : formatNumber;
@@ -849,9 +852,25 @@ function ContractGroup({
         </tr>
       )}
       {group.rows.map((row) => (
-        <tr key={`${group.key}-${row.id}`}>
+        <tr
+          key={`${group.key}-${row.id}`}
+          className="admin-row-clickable"
+          role="link"
+          tabIndex={0}
+          aria-label={`${t("actions.open")}: ${row.contract_no}`}
+          onClick={() => onOpen(row.id)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onOpen(row.id);
+            }
+          }}
+        >
           {editMode.editMode && (
-            <td className="td-select">
+            <td
+              className="td-select"
+              onClick={(event) => event.stopPropagation()}
+            >
               <input
                 type="checkbox"
                 checked={editMode.isSelected(row.id)}
@@ -861,9 +880,7 @@ function ContractGroup({
               />
             </td>
           )}
-          <td className="td-subject">
-            <Link to={`/admin/contracts/${row.id}`}>{row.contract_no}</Link>
-          </td>
+          <td className="td-subject">{row.contract_no}</td>
           <td>{row.customer_name ?? <span className="muted-empty">—</span>}</td>
           <td>
             {row.buildings.length === 0 ? (
