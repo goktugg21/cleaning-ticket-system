@@ -44,7 +44,17 @@ class _DeptReportBase(TenantFixtureMixin, APITestCase):
         CustomerBuildingMembership.objects.create(
             customer=self.customer, building=self.building_2
         )
-        self.dept_general = Department.objects.create(
+        # Sprint 154 §I.7 auto-provisions an "Algemeen" Department on every
+        # customer, so creating a second one violates
+        # `uniq_customers_department_name_per_customer_ci` and takes the whole
+        # class down in setUp. Reuse the provisioned row — this test is about
+        # the department REPORT, not about who created the label.
+        #
+        # Sprint 154 fixed seven tests in
+        # `customers.tests.test_sprint127_labels_api` the same way; this module
+        # was missed because `reports` was not in that sprint's gate list, and
+        # it has been failing silently ever since.
+        self.dept_general, _ = Department.objects.get_or_create(
             customer=self.customer, name="Algemeen"
         )
         self.dept_event = Department.objects.create(
