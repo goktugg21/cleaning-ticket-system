@@ -17,6 +17,8 @@ module, different entity, same discipline.
 """
 from __future__ import annotations
 
+from django.db import models
+
 from datetime import date
 from typing import Optional
 
@@ -57,4 +59,23 @@ def active_contract_hours(employee, building, hour_type, on=None):
         )
         .order_by("-valid_from", "-id")
         .first()
+    )
+
+
+def in_force_between(queryset, start, end):
+    """Rows in force at ANY point in `[start, end]`.
+
+    Sprint 168 §2 — the approval screen reviews a WEEK, and asking
+    `in_force_on(monday)` was the wrong question: an agreement that
+    starts on Tuesday is genuinely part of that week's picture, and the
+    Monday test silently dropped it. That is exactly what happened -
+    four rows created on a Wednesday were invisible on the approval
+    screen of the week containing that Wednesday.
+
+    The test is an OVERLAP, not a point: the row starts on or before the
+    end of the window, and either never ends or ends on or after its
+    start.
+    """
+    return queryset.filter(valid_from__lte=end).filter(
+        models.Q(valid_to__isnull=True) | models.Q(valid_to__gte=start)
     )

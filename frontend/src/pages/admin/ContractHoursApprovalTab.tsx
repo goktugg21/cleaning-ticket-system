@@ -120,6 +120,7 @@ export function ContractHoursApprovalTab({
 
   const days = useMemo(() => isoWeekDays(week), [week]);
   const monday = toDateString(days[0]);
+  const sunday = toDateString(days[6]);
 
   const filters = useMemo(
     () => ({
@@ -130,7 +131,7 @@ export function ContractHoursApprovalTab({
     [companyId, building, employee],
   );
 
-  const requestKey = `${monday}:${JSON.stringify(filters)}:${reloadKey}`;
+  const requestKey = `${monday}:${sunday}:${JSON.stringify(filters)}:${reloadKey}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const loading = loadedKey !== requestKey;
 
@@ -166,8 +167,17 @@ export function ContractHoursApprovalTab({
     }
 
     Promise.all([
+      // Sprint 168 §2 — the WEEK, not its Monday. `valid_on: monday`
+      // asked "what was agreed on the Monday", which silently dropped
+      // an agreement that starts on the Tuesday - and that is exactly
+      // what happened: four rows created mid-week were invisible on the
+      // approval screen for the week containing that day.
       api.get("/timesheets/contract-hours/", {
-        params: { ...filters, valid_on: monday },
+        params: {
+          ...filters,
+          valid_between_start: monday,
+          valid_between_end: sunday,
+        },
       }),
       loadEntries(),
     ])
@@ -187,7 +197,7 @@ export function ContractHoursApprovalTab({
     return () => {
       cancelled = true;
     };
-  }, [filters, monday, week.isoYear, week.isoWeek, requestKey]);
+  }, [filters, monday, sunday, week.isoYear, week.isoWeek, requestKey]);
 
   const counts = useMemo(() => {
     const out: Record<Status, number> = { DRAFT: 0, SAVED: 0, APPROVED: 0 };

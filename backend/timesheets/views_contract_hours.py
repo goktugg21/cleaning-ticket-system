@@ -26,7 +26,7 @@ from rest_framework.views import APIView
 
 from config.pagination import UnboundedPagination
 
-from .contract_hours import in_force_on
+from .contract_hours import in_force_between, in_force_on
 from .models import ContractHours, ContractHoursStatus
 from .permissions import IsTimesheetManager, IsTimesheetUser
 from .scope import filter_contract_hours_for
@@ -100,6 +100,23 @@ class ContractHoursListCreateView(generics.ListCreateAPIView):
 
             try:
                 qs = in_force_on(qs, date.fromisoformat(valid_on))
+            except ValueError:
+                return qs.none()
+
+        # Sprint 168 §2 — a WINDOW, not a point. The approval screen
+        # reviews a week, and an agreement starting on the Tuesday
+        # belongs to that week; `valid_on=<monday>` dropped it.
+        window_start = params.get("valid_between_start")
+        window_end = params.get("valid_between_end")
+        if window_start and window_end:
+            from datetime import date
+
+            try:
+                qs = in_force_between(
+                    qs,
+                    date.fromisoformat(window_start),
+                    date.fromisoformat(window_end),
+                )
             except ValueError:
                 return qs.none()
         return qs
