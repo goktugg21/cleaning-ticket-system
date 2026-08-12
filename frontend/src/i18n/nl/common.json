@@ -2245,5 +2245,12 @@
   "contract_hours.delete": "Verwijderen",
   "contract_hours.delete_title": "Contracturen verwijderen",
   "contract_hours.delete_body": "Regel van {{name}} verwijderen?",
-  "contract_hours.locked_hint": "Goedgekeurd"
+  "contract_hours.locked_hint": "Goedgekeurd",
+  "contract_hours.section_contract": "Contracturen — {{state}} ({{count}})",
+  "contract_hours.section_actual": "Werkelijke uren ({{count}})",
+  "contract_hours.section_actual_hint": "Uit de urenregistratie; niet goed te keuren.",
+  "contract_hours.empty_for_state": "Geen contracturen met status {{state}} in deze week.",
+  "contract_hours.empty_hint_DRAFT": "Voeg regels toe via Contracturen › Bulk toewijzing.",
+  "contract_hours.empty_hint_SAVED": "Dien een conceptregel in om er hier een te krijgen.",
+  "contract_hours.empty_hint_APPROVED": "Keur een opgeslagen regel goed om er hier een te krijgen."
 }

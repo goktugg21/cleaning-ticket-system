@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -107,7 +107,11 @@ export function ContractHoursApprovalTab({
 }) {
   const { t } = useTranslation("common");
   const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
-  const [tab, setTab] = useState<Status>("SAVED");
+  // Sprint 169 §3 — NULL means "nobody has chosen yet", and the tab is
+  // then DERIVED from where the rows actually are. The screen opened
+  // hard-coded on SAVED, which in practice is the state with the fewest
+  // rows in it, so a reviewer arrived at an empty tab.
+  const [chosenTab, setChosenTab] = useState<Status | null>(null);
   const [building, setBuilding] = useState<number | "">("");
   const [employee, setEmployee] = useState<number | "">("");
 
@@ -204,6 +208,14 @@ export function ContractHoursApprovalTab({
     for (const row of contractRows) out[row.status] += 1;
     return out;
   }, [contractRows]);
+
+  /** The tab in force: the operator's choice, or — before they make one
+   *  — the first state that HAS rows. Derived rather than seeded through
+   *  an effect (a setState in an effect body is banned), which also
+   *  means the landing tab follows a reload that changes the data. */
+  const tab: Status =
+    chosenTab ?? STATUSES.find((status) => counts[status] > 0) ?? "DRAFT";
+  const setTab = setChosenTab;
 
   /** Worked hours bucketed onto weekdays, per building+employee+type. */
   const actualRows = useMemo(() => {
@@ -500,9 +512,58 @@ export function ContractHoursApprovalTab({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, index) => (
+              <Fragment key={row.key}>
+              {/* Sprint 169 §3 — the two blocks are LABELLED and
+                  counted, inside the one map so the row markup is not
+                  copied. Without these headings the eight unchanged
+                  "worked" rows sat in the same undifferentiated list as
+                  the three the tab actually controls, and switching
+                  tabs looked like nothing happened. */}
+              {index === 0 && (
+                <tr
+                  className="contract-group-row"
+                  data-testid="approval-section-contract"
+                >
+                  <td colSpan={14}>
+                    <strong>
+                      {t("contract_hours.section_contract", {
+                        state: t(`contract_hours.status_${tab}`),
+                        count: visibleContract.length,
+                      })}
+                    </strong>
+                  </td>
+                </tr>
+              )}
+              {visibleContract.length === 0 && index === 0 && (
+                <tr data-testid="approval-empty-state">
+                  <td colSpan={14} className="muted">
+                    {t("contract_hours.empty_for_state", {
+                      state: t(`contract_hours.status_${tab}`),
+                    })}{" "}
+                    {t(`contract_hours.empty_hint_${tab}`)}
+                  </td>
+                </tr>
+              )}
+              {row.source === "ACTUAL" &&
+                index === visibleContract.length && (
+                  <tr
+                    className="contract-group-row"
+                    data-testid="approval-section-actual"
+                  >
+                    <td colSpan={14}>
+                      <strong>
+                        {t("contract_hours.section_actual", {
+                          count: actualRows.length,
+                        })}
+                      </strong>{" "}
+                      <span className="muted small">
+                        {t("contract_hours.section_actual_hint")}
+                      </span>
+                    </td>
+                  </tr>
+                )}
               <tr
-                key={row.key}
                 className={
                   row.source === "ACTUAL" ? "hours-comparison-employee-row" : ""
                 }
@@ -587,11 +648,17 @@ export function ContractHoursApprovalTab({
                   )}
                 </td>
               </tr>
+              </Fragment>
             ))}
+            {/* The all-empty case: no contract rows AND no worked rows,
+                so neither heading above ever rendered. */}
             {!loading && rows.length === 0 && (
-              <tr>
+              <tr data-testid="approval-empty-state">
                 <td colSpan={14} className="muted">
-                  {t("contract_hours.approval_empty")}
+                  {t("contract_hours.empty_for_state", {
+                    state: t(`contract_hours.status_${tab}`),
+                  })}{" "}
+                  {t(`contract_hours.empty_hint_${tab}`)}
                 </td>
               </tr>
             )}

@@ -2245,5 +2245,12 @@
   "contract_hours.delete": "Delete",
   "contract_hours.delete_title": "Delete contract hours",
   "contract_hours.delete_body": "Delete the row for {{name}}?",
-  "contract_hours.locked_hint": "Approved"
+  "contract_hours.locked_hint": "Approved",
+  "contract_hours.section_contract": "Contract hours — {{state}} ({{count}})",
+  "contract_hours.section_actual": "Actual hours ({{count}})",
+  "contract_hours.section_actual_hint": "From the time entries; not approvable.",
+  "contract_hours.empty_for_state": "No contract hours in state {{state}} this week.",
+  "contract_hours.empty_hint_DRAFT": "Add rows through Contract hours › Bulk assignment.",
+  "contract_hours.empty_hint_SAVED": "Submit a draft row to get one here.",
+  "contract_hours.empty_hint_APPROVED": "Approve a saved row to get one here."
 }

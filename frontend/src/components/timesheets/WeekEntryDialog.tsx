@@ -44,6 +44,7 @@ import type {
 } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
 import { ChipMultiSelect } from "../ChipMultiSelect";
+import { usePickerReserve } from "../../lib/usePickerReserve";
 import { formatIsoWeek, parseIsoWeek } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { HoursWeekGrid } from "./HoursWeekGrid";
@@ -88,6 +89,11 @@ export function WeekEntryDialog({
     Record<number, TimeEntry[]>
   >({});
   const [weekClosed, setWeekClosed] = useState(false);
+
+  // Sprint 169 §1 — the modal grows to CONTAIN an open picker list,
+  // and shrinks back when it closes. See `usePickerReserve` for why a
+  // portalled list cannot be contained by CSS alone.
+  const { modalRef, reserve, onPickerOpenChange } = usePickerReserve();
 
   // Escape closes. One effect, and it touches only a listener — no
   // setState in an effect body.
@@ -216,6 +222,7 @@ export function WeekEntryDialog({
       }}
     >
       <div
+        ref={modalRef}
         className="card week-entry-modal"
         style={{
           // Sprint 167 §1 — sized to its CONTENT.
@@ -238,6 +245,10 @@ export function WeekEntryDialog({
           maxHeight: "85vh",
           display: "flex",
           flexDirection: "column",
+          // The reserved space for an open picker list. Below
+          // everything else, so growing pushes only the modal's own
+          // bottom edge down and nothing on screen moves upward.
+          paddingBottom: 24 + reserve,
         }}
       >
         <h3 style={{ marginTop: 0, marginBottom: 4 }}>
@@ -266,6 +277,7 @@ export function WeekEntryDialog({
                 t("week_setup.remove_worker", { name: label })
               }
               emptyText={t("hours_week_grid.no_employees")}
+              onOpenChange={onPickerOpenChange}
               testIdPrefix="week-setup-employees"
             />
           </div>
@@ -283,6 +295,7 @@ export function WeekEntryDialog({
                 t("week_setup.remove_building", { name: label })
               }
               emptyText={t("week_setup.no_buildings")}
+              onOpenChange={onPickerOpenChange}
               testIdPrefix="week-setup-buildings"
             />
           </div>

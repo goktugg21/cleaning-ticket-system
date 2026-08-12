@@ -45,6 +45,7 @@ export function ChipMultiSelect({
   emptyText,
   disabled,
   testIdPrefix,
+  onOpenChange,
 }: {
   options: { id: number; label: string; sublabel?: string }[];
   selectedIds: number[];
@@ -55,6 +56,17 @@ export function ChipMultiSelect({
   emptyText: string;
   disabled?: boolean;
   testIdPrefix: string;
+  /** Sprint 169 §1 — reports the open list's REAL bottom edge in
+   *  viewport coordinates, so a containing dialog can grow to hold it.
+   *  Called with `null` when the list closes.
+   *
+   *  Sprint 168 stopped the list being CLIPPED by portalling it out of
+   *  the modal. That was a correct fix for clipping and the wrong
+   *  answer to the question: the owner is looking at a short modal with
+   *  a long list hanging out of its bottom over the page. The list has
+   *  to be INSIDE the modal's box, which only the modal can arrange —
+   *  so the picker reports where its list ends and lets it. */
+  onOpenChange?: (listBottom: number | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -120,6 +132,22 @@ export function ChipMultiSelect({
       window.removeEventListener("resize", measure);
     };
   }, [open]);
+
+  /** Report the list's real bottom once it has been laid out. A second
+   *  effect rather than folding it into the measure above: that one
+   *  computes where the list WILL go, this one reads where it landed,
+   *  and the difference matters when the list is shorter than its
+   *  max-height. */
+  useEffect(() => {
+    if (!onOpenChange) return;
+    if (!open || !rect) {
+      onOpenChange(null);
+      return;
+    }
+    const node = listRef.current;
+    onOpenChange(node ? node.getBoundingClientRect().bottom : null);
+    return () => onOpenChange(null);
+  }, [open, rect, onOpenChange]);
 
   // Close on a click outside. Bound only while open, so the document
   // carries no listener for a control nobody is using. The LIST is
