@@ -4,70 +4,107 @@
 system and the Ramazan transcripts + Source of Truth, ending with a
 premium UI/UX polish. **CC updates `## NOW
 
-**Branch:** `feat/sprint-171`, cut from `feat/sprint-170` (`37dbd59`).
-It is the single branch being merged — #153 -> ... -> #171 are ONE
+**Branch:** `feat/sprint-172`, cut from `feat/sprint-171` (`27b0468`).
+It is the single branch being merged — #153 -> ... -> #172 are ONE
 chain, one PR, not one per sprint.
+
+The theme was CONNECTION: most of what was asked for already existed
+somewhere and was not wired up.
 
 ### Per item
 
-- **§1 the nav CHILD was the whole problem.** The card and the modal
-  were already right; `/reports/hours-comparison` was still a child
-  entry under Reports, and a nav child is a sub-page as far as an
-  operator is concerned. Entry deleted, route kept. The card moved into
-  the chart grid after Tickets-by-building, built like its neighbours,
-  with a grouped bar per building (contracted beside worked) BOUNDED to
-  the top 8 plus one "Overige" bar — the modal's table keeps every row.
-  **The table's real defect was width distribution, not alignment.**
-  Sprint 170 measured header-to-value offset, got 0, and was measuring
-  the wrong property: the gap between the end of the building NAME and
-  the start of CONTRACTED was 199–404px and GREW with the viewport. Now
-  a constant 105px at every width, building column pinned at 233px.
-- **§2a the per-row explanation was in the Actions column**, so it
-  wrapped into a tall block down the right edge. That one choice was
-  most of why the screen looked broken. It is a section-level fact, said
-  once in the section header. Rows are 34–51px now.
-- **§2b the empty state links** to the screen that creates rows. My
-  first attempt put the link in the all-empty branch, which fires only
-  when there are no contract hours AND no time entries — driven from an
-  empty system it never ran. Fixed and re-demonstrated.
-- **§3 the Work Plan against the reference**, item by item: added the
-  week RANGE in the header, a refresh, a separate Overdue button opening
-  the list (title / customer / building / scheduled date / how long
-  overdue / status / type), a today marker and an empty-day marker. Two
-  reference chips (In Progress, Archived) have no counterpart in the
-  slot model and the screen says so. Seven columns on ONE row at
-  1024/1280/1440 with no sideways scroll — the breakpoint had been
-  dropping to two columns at 1200, and my own today-marker's negative
-  margin was lifting one column 6px above its neighbours.
-- **§4 the Worker Hour Report — NEW.** A card opening a modal, no nav
-  child. Year + first week + span, four tiles, a tab per week, a row per
-  (week, worker, building, hour type) with Mon–Sun and a total, CSV
-  (Excel) and PDF export. ONE aggregate for the whole period —
-  `assertNumQueries(2)`, measured rather than guessed.
+- **§1 the fill row keeps its values — REVERSING Sprint 165.** That
+  sprint cleared the boxes deliberately, because a box reading "4" was
+  a claim about the GRID and stopped being true when a row was added.
+  Sprint 166 then settled that the fill only touches the rows the
+  WIZARD created, and the label says so — the contradiction cannot
+  occur any more, and the clearing cost the owner his typing.
+- **§2 the contract was unstarted, not broken.** Every figure comes
+  from the project LINES. The Projects empty state now says so with the
+  add control under it; Billing and General Info say it and link to
+  Projects instead of showing € 0,00 as an answer. Measured on
+  CNT-2027-0003, adding ONE line: month 0 -> 2500, year 0 -> 30000,
+  hours 0 -> 40, lines 0 -> 1, forecast nothing -> 11 invoices /
+  € 27.500.
+- **§3 the two hours tabs** carry a one-line subtitle each in the
+  owner's words, and every button, empty state and dialog title on both
+  follows.
+- **§4 the Worker hour card** shows the four figures the modal computes
+  over the same span, rather than a title and a button.
+- **§5 every reference column — half were WIRED, half ADDED.** Wired:
+  cost-centre name (`Building.name`), place (`Building.city`), action
+  (`ContractHours.work_type`), debtor (the customer behind the
+  building), contracted hours. Added: personnel number
+  (`StaffProfile`), cost-centre code and order number (`Building`),
+  hour code (`HourType`), MACHT and travel costs (`TimeEntry`).
 
-### §4 — the reference columns we cannot fill
+### §5 — three choices worth defending
 
-These are a decision for the owner; each is a new field on a model, and
-none is invented here or shown as an empty column:
+- **Order number on the Building**, not the contract: the reference
+  prints one per report ROW, and a row is (week, worker, building, hour
+  type). It varies with the building, and a building sits under more
+  than one contract over time.
+- **Travel costs on the TimeEntry**, not on ContractHours: it is a cost
+  incurred on a specific day by a specific person, and a standing
+  weekly agreement cannot know somebody drove on Tuesday. Decimal,
+  never a float.
+- **MACHT as a boolean, FLAGGED for correction.** Its meaning is not
+  evident from the screenshots; a flag is the narrowest honest reading
+  of a tick, and a wrong guess is cheap to widen and expensive to
+  narrow.
 
-  personnel number · contract hours · cost-centre name · cost-centre
-  code · order number · place · action · debtor · authorisation · hour
-  code · travel costs
+### §7 — the connection check, and the one disagreement found
 
-Nothing was renamed-and-mapped: there is no figure under a different
-name. The four dimensions we hold — week, worker, building, hour type —
-are the reference's own leftmost columns.
+- a contract's projects feed its money, hours, invoice preview and
+  revision card — verified with the before/after above;
+- contract hours feed the approval screen and now the worker hour
+  report's Contr. uren column;
+- work types appear on the contract-hours row, its filter, the bulk
+  dialog and the report's Handeling column;
+- **DISAGREEMENT:** the forecast card's "Current Monthly" reads 0.00
+  while the contract header reads € 2.500 for the same contract. Not a
+  computation bug — the forecast figure is deliberately "as of TODAY"
+  and CNT-2027-0003 starts 2027-01-01, so today no revision is in
+  force. The definition is sound and documented in `billing.py`. What
+  is missing is that the SCREEN never says "as of today", so two
+  numbers meaning different things look like one number disagreeing.
+  Recorded rather than changed: changing the definition would break the
+  case it was written for.
+
+### NOT done this sprint
+
+- **§6 the Work Plan demo seeder.** Not built. The page itself was
+  finished in Sprint 171 (seven columns, chips, overdue list, today and
+  empty-day markers, all measured); what is missing is repeatable demo
+  DATA in `seed_demo_data` so the week is not empty. It is the one item
+  of this sprint left undone and it is carried in NEXT.
 
 ### Gates
 
-`test timesheets reports tickets` isolated in this worktree. New this
-sprint: 11 tests for the worker-hour report (grain, weekday placement,
-tiles, the span including the last week's Sunday, the scoping floor,
-the query count, both exports). `makemigrations --dry-run --check`
-clean — no new migrations this sprint. Frontend: tsc clean, eslint **44
-(42 errors, 2 warnings)**, build OK, every i18n namespace in lockstep.
+`test timesheets contracts reports accounts buildings` isolated in this
+worktree. `makemigrations --dry-run --check` clean; four migrations
+applied to dev (accounts.0010, buildings.0006, timesheets.0008). The
+worker-hours suite is 11 tests, OK, with `assertNumQueries` now
+asserting CONSTANCY as well as a number. Frontend: tsc clean, eslint
+**44 (42 errors, 2 warnings)**, build OK, every i18n namespace in
+lockstep.
 
 ## NEXT
+
+### Carried from Sprint 172
+
+- **§6 the Work Plan demo seeder.** Add scheduled tickets and extra
+  work across several days, states and buildings to `seed_demo_data`,
+  IDEMPOTENT so running it twice does not double the data, so every
+  count chip has a non-zero number and the overdue list has entries.
+- **The forecast's "Current Monthly" needs an as-of-today label** — see
+  the §7 disagreement in NOW. The figure is right; the screen does not
+  say what it is measuring.
+- **`section-title` is still undefined in CSS** (recorded in Sprint
+  171): every chart card in `pages/reports/charts/` uses it and no CSS
+  file defines it. One line to fix whenever the owner wants those
+  headings styled; not done unasked because it restyles ten cards.
+
 
 ### Found in Sprint 171's CSS sweep, not fixed
 
