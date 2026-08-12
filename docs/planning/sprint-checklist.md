@@ -4,103 +4,102 @@
 system and the Ramazan transcripts + Source of Truth, ending with a
 premium UI/UX polish. **CC updates `## NOW
 
-**Branch:** `feat/sprint-169`, cut from `feat/sprint-168` (`1ca3a0e`).
-It is the single branch being merged — #153 -> ... -> #169 are ONE
+**Branch:** `feat/sprint-170`, cut from `feat/sprint-169` (`7d6ab13`).
+It is the single branch being merged — #153 -> ... -> #170 are ONE
 chain, one PR, not one per sprint.
+
+crmtest is running Sprint 169, checked before starting: the deployed
+bundle contains `report-card-hours-comparison`, `hours-tab-work-types`,
+`contract-hours-bulk-open` and `agenda-week-grid`. So this sprint's
+reports are against current code, not against a stale deployment.
 
 ### Per item
 
-- **§1 the modal contains its open list — DONE, and it took four
-  sprints to answer the question actually asked.** 166 gave it a height
-  floor; 167 removed it; 168 stopped the list being CLIPPED by
-  portalling it to `document.body`. Each was a real fix and none was
-  the request: the owner was looking at a short modal with a long list
-  hanging out of its bottom. A portalled list is `position: fixed` and
-  contributes nothing to the modal's layout, so no CSS on the modal can
-  make it grow — the height has to be RESERVED. The picker reports its
-  list's real bottom edge; the dialog reserves the difference. ONE
-  measurement suffices because the reserve is additive at the bottom.
-  Measured at 1280, modal bottom against list bottom: closed
-  1180x268/322; workers open 1180x268/322 with the list at 202..296
-  (inside, so no growth — the rule is not "always grow"); buildings
-  open 1180x384/438 with the list at 202..422 (inside); closed again
-  1180x268. The 85vh cap and the grid's own scrolling are untouched.
-- **§2 work types — the endpoints existed and no screen called them.**
-  Sprint 168 shipped the model, CRUD, standard-set and a column; the
-  frontend never called any of it, so the picker was empty everywhere
-  with nothing able to fill it. Now a Werksoorten tab on /admin/hours.
-  It is NOT a copy of the contract-types screen: the shape moved into
-  `CatalogTab` and both are thin wrappers. Both gained Rename, which
-  neither had.
-- **§3 the approval tabs — REPRODUCED first, and they worked.** The
-  active class moved and the rows changed on every click. Two things
-  made that invisible: the screen opened hard-coded on SAVED (in
-  practice the emptiest state), and the three rows a tab controls sat
-  in the same undifferentiated list as eight "worked" rows that never
-  change. The landing tab is DERIVED from where the rows are, and the
-  table has two labelled, counted sections plus an empty state naming
-  the state you are on.
-- **§4 contract types read in the reader's language — the 152.3
-  pattern, mirrored.** `standard_slot` derived in `save()`, read-only
-  on the serializer, one frontend helper, every call site through it.
-  The three consequences (rename detaches, rename back re-attaches, a
-  custom name matching a standard one reads as standard) each have a
-  test. Backfill migration required because `""` means "custom".
-- **§5 statuses — mapped, not duplicated.** Concept=DRAFT,
-  Actief=ACTIVE, Verlopen=EXPIRED (derived from end_date).
-  "ExtraWorks" is not a status: it names what the contract is about,
-  which is the TYPE axis, and as of §4 it is a recognised slot. The
-  real gap was that `cancelled` was COMPUTED and never rendered — the
-  tiles counted three of the four statuses the filter offers. There is
-  a Geannuleerd tile now.
-- **§6 the comparison is on the Reports page — as a card opening a
-  MODAL**, with the standalone route kept. Both render the same
-  component. The alignment cause was not widths: `.data-table th` sets
-  left-align at a specificity `.contract-num` cannot beat, so numbers
-  were right-aligned under left-aligned headers and the gap GREW with
-  the viewport (-53/-73/-104px at 1024/1280/1440 for Afgesproken). Now
-  0 at every width, each numeric column a fixed 144px.
-- **§7 create a contract from inside the customer — DONE**, using the
-  SAME dialog with `fixedCustomerId`. The fixed id is what gets
-  SUBMITTED, not merely displayed: a disabled `<select>` shows a value
-  but `form.customer` is never set, because the onChange that would set
-  it cannot fire.
-- **§8 one list, mounted twice — DONE for both.** The customer-scoped
-  pages were 296- and 295-line read-only re-implementations of a
-  1202-line list and the Tickets variant. Both now mount the real
-  component with `customerId` fixed. Verified: identical edit toggle,
-  checkboxes and bulk toolbar from both entry points; only the row
-  counts differ.
+- **§1 the Work Plan was invisible to the person who asked for it.**
+  Sprint 168 built it into `AgendaPage` and the nav entry was gated by
+  `canAccessAgenda`, which admitted STAFF and BUILDING_MANAGER only.
+  The owner is a SUPER_ADMIN. Opening the gate alone would NOT have
+  been enough — SA/CA hold no assignment slots, so the page would have
+  rendered a permanently empty week, which is the same defect as a 403
+  and fails more quietly. So `/api/tickets/my-slots/` answers
+  `?scope=company` for a provider-management role, expressed through
+  `scope_tickets_for` so it cannot show a ticket the actor could not
+  already open. Renamed to the owner's word: **Werkplanning / Work
+  plan**. Verified as SUPER_ADMIN: sidebar → Werkplanning → seven day
+  columns, and stepping back to 2026-W30 shows 3 cards where the staff
+  member sees 2.
+- **§2 the Entries Edit button — REPRODUCED, and it worked.** Edit
+  turns 25 rows into 125 inputs, typing 5.50 moves the counter 0 → 1,
+  Save posts cleanly and the value survives a reload. What was broken:
+  Save sat ENABLED reading "Alles bewaren (0)", so pressing it before
+  changing anything did nothing — indistinguishable from a dead button.
+  Disabled at zero now, reading "Nog niets gewijzigd", plus a line
+  saying what edit mode is (the owner expected row SELECTION).
+- **§3 tab order — DONE.** Urenoverzicht · Contracturen · Overzicht ·
+  Goedkeuring · Uursoorten · Werksoorten.
+- **§4 approval is demonstrable.** Each state carries a one-line
+  explanation; "Not approvable" says WHY on the row; and the screen
+  states that closing or reopening a WEEK acts on the time entries and
+  not on this, because that is what the owner tested. Demonstrated:
+  3/0/1 → submit → 2/1/1 → approve → 2/0/2 → reopen → 2/1/1.
+- **§5 every standard set translates, through ONE rule.** Audit:
+  HourType had it (152.3), ContractType had it (169 §4), **WorkType did
+  not** — I shipped that catalog in 168 without applying the rule. It
+  now derives a slot in `save()`, with a required backfill. The three
+  two-line copies of the rendering rule became one
+  (`lib/standardSlotLabel.ts`) with a wrapper per catalog.
+- **§6 Expired.** It was already the filter, the tiles and the badge —
+  verified with a contract genuinely past its end date. The three the
+  owner counted are the create/edit dialog's, and that list is correct:
+  Expired is DERIVED, so offering it would let a stored status
+  contradict the dates. What was missing is that nothing said so. The
+  dialog is the only file §6 needed.
+- **§7 the comparison card.** Present and working; measured in BOTH
+  places at 1024/1280/1440, all three numeric columns offset **0**,
+  each a fixed 144px.
+- **§8 the modal reversion — REPRODUCED, and it was not intermittent.**
+  The first open of a picker grew the modal; every open after a close
+  did nothing, until a scroll re-ran the measurement. Cause: Sprint 169
+  derived the un-reserved bottom by subtracting the current reserve
+  from a live rect, so each measurement depended on the last. My first
+  fix (remember it in a ref) still failed two of five triggers, because
+  the ref was written on close while the reserve was still applied. The
+  working fix measures against a SPACER whose top does not move when
+  its own height changes. All eleven measured states now INSIDE.
 
-### What §8's required test found
+### What was NOT touched, deliberately
 
-`?customer=<nonexistent>` returned **400** while `?customer=<exists but
-out of your scope>` returned **200 with no rows**. That difference
-answers "is there a customer 812?" to anyone who can reach the list —
-an existence oracle, and it matters more now that the customer-scoped
-page supplies the id from the URL. The generated `ModelChoiceFilter`
-was validating against every customer; it is a plain `NumberFilter`
-now, so both cases are 200-and-empty.
+- **§9** — customer scoping was verified correct in the prompt and left
+  alone.
+- **`/my-hours` excludes SUPER_ADMIN** and stays that way: it is a
+  worker's own timesheet, an SA is not an employee of the provider
+  company, and /admin/hours is their surface. Called out in the sweep
+  rather than silently skipped.
 
-### Not done
+### The §1 sweep — every nav entry and the roles it admits
 
-- **Buildings and Users were not redirected.** The owner allows those
-  two to send the operator to the main list with the customer
-  pre-filtered. They were not broken by this sprint and the change was
-  not asked for as work — if it is done later, the destination must
-  arrive with the filter visibly set, because a silent redirect that
-  looks like an unfiltered list is worse than the page it replaced.
+  /                                everyone
+  /admin/audit-logs                SUPER_ADMIN                correct
+  /admin/hours                     SA, CA                     correct
+  /admin/staff-assignment-requests SA, CA, BM                 correct
+  /agenda                          was STAFF, BM -> + SA, CA  FIXED
+  /extra-work, /tickets, /inbox    everyone
+  /invoices                        SA, CA, BM                 correct
+  /my-hours                        STAFF, BM, CA              see above
+  /planned-work                    SA, CA, BM                 correct
+  /reports, /reports/hours-comparison  SA, CA, BM             correct
+  /settings, /notifications        everyone
+  the /admin/* and /my/* families  provider / customer blocks correct
 
 ### Gates
 
-`test timesheets contracts reports` and `test tickets` (the customer
-filter suites) run isolated in this worktree. New this sprint: 12 tests
-for the contract-type slot derivation, 4 for customer-scoped list
-safety. `makemigrations --dry-run --check` clean;
-`contracts.0003`/`0004` applied to dev. Frontend: tsc clean, eslint
-**44 (42 errors, 2 warnings)**, build OK, every i18n namespace in
-lockstep, and the undefined-CSS-class sweep over all ten touched files
-found none.
+`test timesheets contracts reports tickets` isolated in this worktree.
+New this sprint: 4 tests for the Work Plan's `?scope=company` (the
+param is not an escalation) and 5 for the work-type slot derivation.
+`makemigrations --dry-run --check` clean; `timesheets.0006`/`0007`
+applied to dev. Frontend: tsc clean, eslint **44 (42 errors, 2
+warnings)**, build OK, every i18n namespace in lockstep, and the
+undefined-CSS-class sweep over all 11 touched `.tsx` files found none.
 
 ## NEXT
 
