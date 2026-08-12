@@ -69,6 +69,23 @@ class TicketFilter(df.FilterSet):
     # scope_tickets_for like the other filters here.
     exclude_type = df.CharFilter(method="filter_exclude_type")
 
+    # Sprint 169 §8 — `customer` as a NUMBER, not a model choice.
+    #
+    # The generated ModelChoiceFilter validated the id against EVERY
+    # customer, so an id that does not exist produced a 400 while an id
+    # that exists but is out of the actor's scope produced a 200 with no
+    # rows. That difference is an existence oracle: it answers "is there
+    # a customer 812?" to anyone who can reach the list.
+    #
+    # It matters more from this sprint on, because the customer-scoped
+    # Tickets page now supplies the id from the URL — it is a
+    # client-controlled value on a page where it used to be implicit.
+    #
+    # As a plain number both cases behave identically: filter, no match,
+    # empty list, 200. The filter still only NARROWS what
+    # `scope_tickets_for` already allowed.
+    customer = df.NumberFilter(field_name="customer_id")
+
     class Meta:
         model = Ticket
         fields = {
@@ -77,7 +94,6 @@ class TicketFilter(df.FilterSet):
             "type": ["exact", "in"],
             "company": ["exact"],
             "building": ["exact"],
-            "customer": ["exact"],
             "assigned_to": ["exact", "isnull"],
             "created_by": ["exact"],
         }

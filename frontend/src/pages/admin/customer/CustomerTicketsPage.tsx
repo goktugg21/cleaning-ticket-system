@@ -1,172 +1,57 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Megaphone, Ticket } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 
-import { getApiError } from "../../../api/client";
 import { getCustomer } from "../../../api/admin";
-import { listAllTickets } from "../../../api/tickets";
-import type { CustomerAdmin, TicketList } from "../../../api/types";
-import { ClickableRow } from "../../../components/ClickableRow";
-import { EmptyState } from "../../../components/EmptyState";
-import { StatusBadge } from "../../../components/StatusBadge";
-import { StatusTiles } from "../../../components/StatusTiles";
-import { ticketStatusLabelKey } from "../../../lib/enumLabels";
-import { formatDate } from "../../../lib/intl";
-
+import { getApiError } from "../../../api/client";
+import { DashboardPage } from "../../DashboardPage";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
- * M6.1 / IA 2026-06-25 — the customer Tickets tab, now the SINGLE
- * ticket-content surface for a customer (the separate Meldingen tab
- * merged into it — they were one model sliced two ways). A filter-chip
- * strip narrows the same list:
- *   * Alle      → GET /api/tickets/?customer=<id>
- *   * Tickets   → GET /api/tickets/?customer=<id>&exclude_type=REPORT
- *   * Meldingen → GET /api/tickets/?customer=<id>&type=REPORT
- * The chip state lives in the `?filter=` search param so the retired
- * /meldingen route can redirect here with the chip pre-applied and deep
- * links stay shareable. Scope is enforced server-side by
- * `scope_tickets_for` BEFORE the filterset narrows, so a caller without
- * access to this customer gets zero rows rather than a 403. View-first:
- * each row links to the existing `/tickets/<id>` detail page.
+ * Sprint 169 §8 — one customer's tickets, using THE ticket list.
+ *
+ * This file used to be a 295-line read-only re-implementation of the
+ * Tickets page: no checkbox column, no `MultiSelectToolbar`, no
+ * `useEditMode`, no bulk assignment, no bulk status action. Everything
+ * Sprints 158-164 built on the standalone list was missing here.
+ *
+ * Copying the features across would have produced two copies that drift
+ * again, which is exactly how this pair got here. The Tickets list is
+ * `DashboardPage`'s `tickets-page` variant, so the page now mounts that
+ * with the customer fixed.
+ *
+ * Tickets are deliberately NOT one of the pages that redirects to the
+ * main list with a filter applied — that option is on the table for
+ * Buildings and Users, where the customer-scoped view really is just a
+ * filtered look. Tickets are where the daily work happens and must
+ * carry their full function in place, inside the customer.
  */
-
-// Ticket sub-type label keys — the canonical map lives in the create
-// ticket flow (`create_ticket:type_*`); reuse those exact keys here so
-// the labels stay in lockstep rather than printing the raw enum.
-type TicketTypeValue =
-  | "REPORT"
-  | "COMPLAINT"
-  | "REQUEST"
-  | "SUGGESTION"
-  | "QUOTE_REQUEST"
-  // Sprint 143 §2 — the catch-all operators asked for.
-  | "OTHER";
-
-const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
-  REPORT: "type_report",
-  COMPLAINT: "type_complaint",
-  REQUEST: "type_request",
-  SUGGESTION: "type_suggestion",
-  QUOTE_REQUEST: "type_quote_request",
-  OTHER: "type_other",
-};
-
-type TicketChip = "all" | "tickets" | "meldingen";
-
-/** Sprint 159 §3 — the same statuses the standalone tickets list
- *  filters by, in the same order, so the two surfaces agree on what a
- *  status row looks like. */
-const STATUS_OPTIONS = [
-  "OPEN",
-  "IN_PROGRESS",
-  "WAITING_MANAGER_REVIEW",
-  "WAITING_CUSTOMER_APPROVAL",
-  "APPROVED",
-  "REJECTED",
-  "CLOSED",
-] as const;
-
 export function CustomerTicketsPage() {
-  const { id } = useParams();
-  const { t } = useTranslation(["common", "create_ticket"]);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { id: customerId } = useParams<{ id: string }>();
+  const id = Number(customerId);
 
-  const numericId = useMemo(() => {
-    if (!id) return null;
-    const parsed = Number(id);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  }, [id]);
-
-  // Chip state rides in ?filter= so the retired /meldingen route (and
-  // any old bookmark) can land here with the chip pre-applied.
-  const raw = searchParams.get("filter");
-  const chip: TicketChip =
-    raw === "meldingen" || raw === "tickets" ? raw : "all";
-  const setChip = (next: TicketChip) => {
-    setSearchParams(next === "all" ? {} : { filter: next }, { replace: true });
-  };
-
-  // i18n variant key: the "Alle" view reuses the tickets copy (the chips
-  // themselves communicate the narrowing); Meldingen keeps its own.
-  const v = chip === "meldingen" ? "meldingen" : "tickets";
-
-  const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
-  const [rows, setRows] = useState<TicketList[]>([]);
-  // Starts true so the initial render shows the loading bar without a
-  // synchronous setState in the effect body (keeps the page clear of
-  // react-hooks/set-state-in-effect).
-  const [loading, setLoading] = useState(true);
+  const [customerName, setCustomerName] = useState("");
+  const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState("");
-  // Sprint 159 §3 — the status filter, the SAME tile control the
-  // standalone lists use.
-  //
-  // It opens on "All" rather than on the un-actioned status, unlike
-  // those lists, and that is deliberate: this page is one customer's
-  // history, opened to answer "what has happened here", not a work
-  // queue opened to answer "what needs me". A silent default would hide
-  // most of a customer's rows behind a filter nobody asked for.
-  const [statusFilter, setStatusFilter] = useState("");
 
   useEffect(() => {
+    if (!Number.isFinite(id)) return;
     let cancelled = false;
-    if (numericId === null) {
-      queueMicrotask(() => {
-        if (!cancelled) {
-          setError(t("bm_customer_detail.invalid_id"));
-          setLoading(false);
-        }
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-    // Two parallel fetches: the customer (header name + active pill) and
-    // the scoped ticket list. The list is filtered server-side; the
-    // scope-respecting queryset runs before the filter so an
-    // out-of-scope caller gets zero rows rather than a 403.
-    Promise.all([
-      getCustomer(numericId),
-      listAllTickets({
-        customer: numericId,
-        ...(chip === "meldingen"
-          ? { type: "REPORT" }
-          : chip === "tickets"
-            ? { exclude_type: "REPORT" }
-            : {}),
-      }),
-    ])
-      .then(([customerData, ticketRows]) => {
+    getCustomer(id)
+      .then((customer) => {
         if (cancelled) return;
-        setCustomer(customerData);
-        setRows(ticketRows ?? []);
+        setCustomerName(customer.name);
+        setIsActive(customer.is_active);
+        setError("");
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [numericId, chip, t]);
+  }, [id]);
 
-  const customerName = customer?.name ?? "";
-  const isActive = customer?.is_active ?? true;
-
-  // Real counts: this page holds the FULL matching set (the endpoint is
-  // unpaginated for this filter), so a tile can carry a number that is
-  // true rather than one that describes a page.
-  const statusCounts = rows.reduce<Record<string, number>>((acc, row) => {
-    acc[row.status] = (acc[row.status] ?? 0) + 1;
-    return acc;
-  }, {});
-  const visibleRows =
-    statusFilter === ""
-      ? rows
-      : rows.filter((row) => row.status === statusFilter);
+  if (!Number.isFinite(id)) return null;
 
   return (
     <div data-testid="customer-tickets-page">
@@ -178,118 +63,15 @@ export function CustomerTicketsPage() {
         </div>
       )}
 
-      {loading && !customer ? (
-        <div className="loading-bar">
-          <div className="loading-bar-fill" />
-        </div>
-      ) : customer ? (
-        <>
-          <p className="section-explainer" data-testid={`customer-${v}-explainer`}>
-            {t(`customer_view.${v}.explainer`, { customer: customerName })}
-          </p>
-
-          {/* IA — the merged filter strip (Alle / Tickets / Meldingen). */}
-          <div
-            className="work-strip-toggle"
-            style={{ marginBottom: 14 }}
-            data-testid="customer-tickets-chips"
-          >
-            {(["all", "tickets", "meldingen"] as TicketChip[]).map((c) => (
-              <button
-                key={c}
-                type="button"
-                className="btn btn-secondary btn-sm"
-                aria-pressed={chip === c}
-                onClick={() => setChip(c)}
-                data-testid={`customer-tickets-chip-${c}`}
-              >
-                {t(`customer_view.chip_${c}`)}
-              </button>
-            ))}
-          </div>
-
-          <StatusTiles
-            tiles={STATUS_OPTIONS.map((value) => ({
-              value,
-              label: t(ticketStatusLabelKey(value)),
-              count: statusCounts[value] ?? 0,
-            }))}
-            active={statusFilter}
-            onChange={setStatusFilter}
-            totalCount={rows.length}
-            testIdPrefix="customer-tickets-status"
-          />
-
-          {visibleRows.length === 0 ? (
-            <EmptyState
-              icon={chip === "meldingen" ? Megaphone : Ticket}
-              title={t(`customer_view.${v}.empty_title`)}
-              description={t(`customer_view.${v}.empty_desc`)}
-              testId={`customer-${v}-empty`}
-            />
-          ) : (
-            <section
-              className="card"
-              data-testid={`customer-${v}-section`}
-              style={{ padding: "20px 22px", overflow: "hidden" }}
-            >
-              <div className="section-head" style={{ marginBottom: 12 }}>
-                <div>
-                  <div className="section-head-title">
-                    {t(`customer_view.${v}.list_title`)}
-                  </div>
-                  <div className="section-head-sub">
-                    {t(`customer_view.${v}.list_subtitle`, {
-                      count: visibleRows.length,
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="table-wrap">
-                <table className="data-table" data-testid={`customer-${v}-table`}>
-                  <thead>
-                    <tr>
-                      <th>{t("customer_view.ticket_table.col_subject")}</th>
-                      <th>{t("customer_view.ticket_table.col_type")}</th>
-                      <th>{t("customer_view.ticket_table.col_status")}</th>
-                      <th>{t("customer_view.ticket_table.col_building")}</th>
-                      <th>{t("customer_view.ticket_table.col_created")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleRows.map((row) => (
-                      <ClickableRow
-                        key={row.id}
-                        to={`/tickets/${row.id}`}
-                        testId={`customer-${v}-row`}
-                      >
-                        <td className="td-subject">
-                          <Link to={`/tickets/${row.id}`}>{row.title}</Link>
-                        </td>
-                        <td>
-                          {TICKET_TYPE_KEYS[row.type as TicketTypeValue]
-                            ? t(
-                                `create_ticket:${TICKET_TYPE_KEYS[row.type as TicketTypeValue]}`,
-                              )
-                            : row.type}
-                        </td>
-                        <td>
-                          <StatusBadge
-                            status={{ kind: "ticket", value: row.status }}
-                          />
-                        </td>
-                        <td>{row.building_name}</td>
-                        <td>{formatDate(row.created_at)}</td>
-                      </ClickableRow>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-        </>
-      ) : null}
+      {/* Keyed by customer id: navigating between two customers remounts
+          the list rather than syncing a changed prop into its state
+          through an effect. */}
+      <DashboardPage
+        key={id}
+        variant="tickets-page"
+        customerId={id}
+        hideHeader
+      />
     </div>
   );
 }

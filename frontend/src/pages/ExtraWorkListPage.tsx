@@ -136,7 +136,39 @@ function KpiCard({
   );
 }
 
-export function ExtraWorkListPage() {
+/**
+ * Sprint 169 §8 — ONE extra-work list, mounted twice.
+ *
+ * `CustomerExtraWorkPage` was a 296-line read-only re-implementation of
+ * this 1202-line page: no checkbox column, no `MultiSelectToolbar`, no
+ * `useEditMode`, no bulk assignment, no bulk status action. Everything
+ * Sprints 158-164 built here was missing there, because they were two
+ * independently-maintained copies of the same list — the failure mode
+ * CLAUDE.md names explicitly.
+ *
+ * Copying the features across would have produced two copies that drift
+ * again. So the list is this component, and the difference between the
+ * two entry points is ONE prop:
+ *
+ *   from the sidebar        no customer fixed, the customer filter is
+ *                           offered;
+ *   from inside a customer  the customer is fixed and its filter is not
+ *                           offered. Everything else is identical.
+ *
+ * Fixing the customer is a UI convenience and nothing more. The request
+ * carries `customer=<id>` exactly as the picker would have set it, and
+ * the SERVER still decides what the actor may see — a customer id the
+ * actor has no access to returns their own rows, not that customer's.
+ */
+export function ExtraWorkList({
+  customerId,
+  hideHeader = false,
+}: {
+  customerId?: number;
+  /** The customer page draws its own header, so this one is suppressed
+   *  rather than stacked under it. */
+  hideHeader?: boolean;
+}) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { me } = useAuth();
   // M6.3 — additive "my work" deep-link reads. With both params absent
@@ -202,7 +234,13 @@ export function ExtraWorkListPage() {
   // per-customer, so they are disabled until a customer is chosen and cleared
   // when it changes. Provider-only: a CUSTOMER_USER is already scoped to one
   // customer, so a customer picker is meaningless for them.
-  const [customerFilter, setCustomerFilter] = useState("");
+  // Seeded from the fixed customer when there is one. A plain initial
+  // value, not an effect: syncing a prop into state through an effect is
+  // the pattern CLAUDE.md bans, and the component is keyed by customer
+  // id at the mount site so a change remounts it.
+  const [customerFilter, setCustomerFilter] = useState(
+    customerId === undefined ? "" : String(customerId),
+  );
   const [buildingFilter, setBuildingFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [workTypeFilter, setWorkTypeFilter] = useState("");
@@ -533,6 +571,7 @@ export function ExtraWorkListPage() {
 
   return (
     <div data-testid="extra-work-list-page">
+      {!hideHeader && (
       <PageHeader
         backLink={{ to: "/", label: t("back_to_dashboard") }}
         eyebrow={t("common:ops")}
@@ -553,6 +592,7 @@ export function ExtraWorkListPage() {
           </button>
         }
       />
+      )}
 
       {assignOpen && (
         <AssignPeopleDialog
@@ -747,7 +787,7 @@ export function ExtraWorkListPage() {
             )}
           </select>
         </div>
-        {isProvider && (
+        {isProvider && customerId === undefined && (
           <>
             {/* Sprint 128 — the label cascade: Customer -> Building ->
                 Department -> Work Type. The last three are per-customer, so
@@ -1199,4 +1239,10 @@ export function ExtraWorkListPage() {
   );
 }
 
-
+/**
+ * The sidebar route. A wrapper, so the route keeps its own name while
+ * the list itself is the shared component above.
+ */
+export function ExtraWorkListPage() {
+  return <ExtraWorkList />;
+}

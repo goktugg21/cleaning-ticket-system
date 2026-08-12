@@ -155,8 +155,25 @@ function ExtraWorkOriginPill({
  */
 export function DashboardPage({
   variant = "dashboard",
+  customerId,
+  hideHeader = false,
 }: {
   variant?: "dashboard" | "tickets-page";
+  /** Sprint 169 §8 — mounted INSIDE a customer: the list is narrowed to
+   *  that customer and everything else is identical.
+   *
+   *  `CustomerTicketsPage` was a 295-line read-only re-implementation of
+   *  this list with no selection, no `MultiSelectToolbar` and no bulk
+   *  actions, because the two were independently maintained copies. The
+   *  owner's rule is that a list behaves the same whether you reach it
+   *  from the sidebar or from inside a customer, so the customer page
+   *  now mounts THIS list rather than keeping a second one.
+   *
+   *  Narrowing is a UI convenience: the request carries `customer=<id>`
+   *  and the SERVER still decides what the actor may see. */
+  customerId?: number;
+  /** The customer page draws its own header. */
+  hideHeader?: boolean;
 } = {}) {
   const isTicketsPage = variant === "tickets-page";
   const navigate = useNavigate();
@@ -301,6 +318,8 @@ export function DashboardPage({
     if (unassignedFilter) params.assigned_to__isnull = "true";
     // M6.3 — "my work" deep-links. Only applied on the Tickets page
     // (where the clear chip is shown).
+    // The fixed customer, when this list is mounted inside one.
+    if (customerId !== undefined) params.customer = customerId;
     if (isTicketsPage) {
       if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
       const typeParam = searchParams.get("type");
@@ -310,6 +329,7 @@ export function DashboardPage({
     }
     return params;
   }, [
+    customerId,
     page,
     statusFilter,
     priorityFilter,
@@ -858,6 +878,7 @@ export function DashboardPage({
 
   return (
     <div>
+      {!hideHeader && (
       <div className="page-header">
         <div>
           <nav className="breadcrumb" aria-label="Breadcrumb">
@@ -930,6 +951,7 @@ export function DashboardPage({
           </Link>
         </div>
       </div>
+      )}
 
       {adminRequiredBanner && (
         <div
