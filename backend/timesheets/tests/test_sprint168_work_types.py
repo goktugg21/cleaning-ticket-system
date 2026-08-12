@@ -312,3 +312,72 @@ class WindowFilterTests(WorkTypeFixture):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data["results"]), 1)
+
+
+class StandardSlotTests(WorkTypeFixture):
+    """Sprint 170 §5 — the work-type catalog derives a slot too.
+
+    Sprint 168 shipped this standard set with names and NO slot, so an
+    English operator saw four Dutch words and nothing could translate
+    them. The owner's instruction covers every standard set, not only
+    the one that was asked about.
+    """
+
+    def test_a_standard_name_gets_its_slot_in_either_language(self):
+        self.assertEqual(self.mk(name="Vast werk").standard_slot, "fixed_work")
+        other = WorkType.objects.create(
+            company=self.company_b, name="Fixed work"
+        )
+        self.assertEqual(other.standard_slot, "fixed_work")
+
+    def test_a_companys_own_name_has_no_slot(self):
+        self.assertEqual(self.mk(name="Gevelreiniging").standard_slot, "")
+
+    def test_renaming_detaches_and_renaming_back_re_attaches(self):
+        row = self.mk(name="Machinewerk")
+        self.assertEqual(row.standard_slot, "machine")
+        row.name = "Onze machines"
+        row.save()
+        row.refresh_from_db()
+        self.assertEqual(row.standard_slot, "")
+        row.name = "Machine work"  # back, in the OTHER language
+        row.save()
+        row.refresh_from_db()
+        self.assertEqual(row.standard_slot, "machine")
+
+    def test_the_standard_set_is_idempotent_across_languages(self):
+        """Pressing the button under an English profile on a
+        Dutch-seeded company must create nothing. The uniqueness
+        constraint would NOT catch it — "Meerwerk" and "Extra work" are
+        different strings."""
+        client = self.api(self.ca_a)
+        self.ca_a.language = "nl"
+        self.ca_a.save(update_fields=["language"])
+        first = client.post(
+            STANDARD_SET_URL, {"company": self.company_a.id}, format="json"
+        )
+        self.assertEqual(len(first.data["created"]), 4)
+
+        self.ca_a.language = "en"
+        self.ca_a.save(update_fields=["language"])
+        second = client.post(
+            STANDARD_SET_URL, {"company": self.company_a.id}, format="json"
+        )
+        self.assertEqual(second.data["created"], [])
+        self.assertEqual(
+            WorkType.objects.filter(company=self.company_a).count(), 4
+        )
+
+    def test_the_payload_carries_the_slot_and_refuses_a_client_set_one(self):
+        client = self.api(self.ca_a)
+        created = client.post(
+            URL,
+            {
+                "company": self.company_a.id,
+                "name": "Gevelreiniging",
+                "standard_slot": "machine",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(created.data["standard_slot"], "")

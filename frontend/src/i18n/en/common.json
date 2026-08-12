@@ -2270,5 +2270,9 @@
   "work_types.rename": "Rename",
   "work_types.none_yet": "This company has no work types yet. Add them under Hours › Work types.",
   "hours_admin.save_all_none": "Nothing changed yet",
-  "hours_admin.edit_hint": "Type in the cells; changes are written only when you press Save all."
+  "hours_admin.edit_hint": "Type in the cells; changes are written only when you press Save all.",
+  "work_type_slot.fixed_work": "Fixed work",
+  "work_type_slot.extra_work": "Extra work",
+  "work_type_slot.machine": "Machine work",
+  "work_type_slot.other": "Other"
 }

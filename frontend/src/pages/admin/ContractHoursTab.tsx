@@ -11,6 +11,7 @@ import { ContractHoursBulkDialog } from "../../components/timesheets/ContractHou
 import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
 import { useEditMode } from "../../lib/useEditMode";
+import { workTypeLabel } from "../../lib/workTypeLabel";
 
 const DAYS = [
   "monday",
@@ -34,6 +35,7 @@ interface ContractHoursRow {
   hour_type_name: string;
   work_type: number | null;
   work_type_name: string | null;
+  work_type_standard_slot: string | null;
   valid_from: string;
   valid_to: string | null;
   status: "DRAFT" | "SAVED" | "APPROVED";
@@ -87,9 +89,9 @@ export function ContractHoursTab({
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const [workTypes, setWorkTypes] = useState<{ id: number; name: string }[]>(
-    [],
-  );
+  const [workTypes, setWorkTypes] = useState<
+    { id: number; name: string; standard_slot: string }[]
+  >([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [rowToDelete, setRowToDelete] = useState<ContractHoursRow | null>(null);
   const deleteRef = useRef<ConfirmDialogHandle>(null);
@@ -149,10 +151,13 @@ export function ContractHoursTab({
         if (cancelled) return;
         const list = response.data.results ?? response.data;
         setWorkTypes(
-          (list as { id: number; name: string }[]).map((row) => ({
-            id: row.id,
-            name: row.name,
-          })),
+          (list as { id: number; name: string; standard_slot?: string }[]).map(
+            (row) => ({
+              id: row.id,
+              name: row.name,
+              standard_slot: row.standard_slot ?? "",
+            }),
+          ),
         );
       })
       .catch(() => {
@@ -371,7 +376,7 @@ export function ContractHoursTab({
             <option value="">{t("contract_hours.all_work_types")}</option>
             {workTypes.map((type) => (
               <option key={type.id} value={type.id}>
-                {type.name}
+                {workTypeLabel(type.name, type.standard_slot, t)}
               </option>
             ))}
           </select>
@@ -433,7 +438,13 @@ export function ContractHoursTab({
                   </span>
                 </td>
                 <td>
-                  {row.work_type_name ?? (
+                  {row.work_type_name ? (
+                    workTypeLabel(
+                      row.work_type_name,
+                      row.work_type_standard_slot,
+                      t,
+                    )
+                  ) : (
                     <span className="muted-empty">
                       {t("contract_hours.no_work_type")}
                     </span>

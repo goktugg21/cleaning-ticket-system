@@ -2270,5 +2270,9 @@
   "work_types.rename": "Hernoemen",
   "work_types.none_yet": "Dit bedrijf heeft nog geen werksoorten. Voeg ze toe via Uren › Werksoorten.",
   "hours_admin.save_all_none": "Nog niets gewijzigd",
-  "hours_admin.edit_hint": "Typ in de cellen; wijzigingen worden pas met Alles bewaren opgeslagen."
+  "hours_admin.edit_hint": "Typ in de cellen; wijzigingen worden pas met Alles bewaren opgeslagen.",
+  "work_type_slot.fixed_work": "Vast werk",
+  "work_type_slot.extra_work": "Meerwerk",
+  "work_type_slot.machine": "Machinewerk",
+  "work_type_slot.other": "Overig"
 }

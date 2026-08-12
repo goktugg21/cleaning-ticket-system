@@ -12,11 +12,8 @@
 // has one operator-typed `name` column, and the API sends the stored
 // name PLUS the slot on every payload and lets this decide.
 
-/** The minimum this helper needs. Narrower than `TFunction` on
- *  purpose: the list page passes a deliberately narrowed translator
- *  down to its row renderer, and widening THAT to satisfy a helper
- *  would be the tail wagging the dog. Any `TFunction` satisfies this. */
-type Translate = (key: string, options?: Record<string, unknown>) => string;
+import { standardSlotLabel } from "./standardSlotLabel";
+import type { Translate } from "./standardSlotLabel";
 
 /**
  * The four slot keys, mirroring
@@ -58,11 +55,8 @@ export function contractTypeLabel(
   standardSlot: string | null | undefined,
   t: Translate,
 ): string {
-  const stored = name ?? "";
-  const slot = standardSlot ?? "";
-  if (!slot || !KNOWN.has(slot)) return stored;
-  const key = standardContractTypeKey(slot);
-  const translated = t(key);
-  // i18next returns the KEY itself when a translation is missing.
-  return translated === key ? stored : translated;
+  // Sprint 170 §5 — the rule lives in `standardSlotLabel`; this keeps
+  // the slot list beside the catalog it mirrors and gives the call
+  // sites a name that says what they render.
+  return standardSlotLabel(name, standardSlot, "contract_type_slot", KNOWN, t);
 }

@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CatalogTab } from "../../components/CatalogTab";
+import { workTypeLabel } from "../../lib/workTypeLabel";
 import type { CatalogRow } from "../../components/CatalogTab";
 
 /**
@@ -25,10 +26,18 @@ export function WorkTypesTab() {
     (raw: Record<string, unknown>): CatalogRow => ({
       id: raw.id as number,
       name: raw.name as string,
+      // Sprint 170 §5 — a recognised standard kind renders in the
+      // reader's language; a company's own name renders verbatim. The
+      // STORED name above is what Rename edits.
+      displayName: workTypeLabel(
+        raw.name as string,
+        (raw.standard_slot as string) ?? "",
+        t,
+      ),
       is_active: raw.is_active as boolean,
       usage: (raw.usage_count as number) ?? 0,
     }),
-    [],
+    [t],
   );
 
   return (

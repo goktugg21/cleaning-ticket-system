@@ -37,6 +37,7 @@ import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
 import { ChipMultiSelect } from "../ChipMultiSelect";
 import { usePickerReserve } from "../../lib/usePickerReserve";
+import { workTypeLabel } from "../../lib/workTypeLabel";
 import { fromDateString, isoWeekOf, toDateString } from "../../lib/isoWeek";
 import { HoursWeekGrid } from "./HoursWeekGrid";
 import type { GridCell } from "./HoursWeekGrid";
@@ -55,6 +56,7 @@ const DAYS = [
 interface WorkTypeOption {
   id: number;
   name: string;
+  standard_slot?: string;
 }
 
 /** One row as the bulk endpoint wants it: a pair, a type, seven days. */
@@ -320,7 +322,7 @@ export function ContractHoursBulkDialog({
               <option value="">{t("contract_hours.no_work_type")}</option>
               {workTypes.map((type) => (
                 <option key={type.id} value={type.id}>
-                  {type.name}
+                  {workTypeLabel(type.name, type.standard_slot, t)}
                 </option>
               ))}
             </select>

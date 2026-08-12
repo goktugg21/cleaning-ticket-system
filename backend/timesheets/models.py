@@ -504,9 +504,33 @@ class WorkType(models.Model):
         default=0,
         help_text="Ascending display order in the pickers; ties break on name.",
     )
+    # Sprint 170 §5 — which standard kind this row IS, or "" for a
+    # company's own type. DERIVED from `name` in save(); never client-set.
+    # The `HourType.standard_slot` pattern: it lets the UI show a
+    # standard name in each reader's language while `name` stays one
+    # operator-typed column.
+    standard_slot = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text=(
+            "Derived from `name`: the standard kind this row is "
+            "recognised as, or blank for a custom type."
+        ),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        """Derive `standard_slot` on EVERY save — here rather than in a
+        serializer, because a management command, a data migration and a
+        shell write all go through save() and none goes through a
+        serializer."""
+        from .serializers_work_types import slot_for_name
+
+        self.standard_slot = slot_for_name(self.name)
+        super().save(*args, **kwargs)
 
     class Meta:
         ordering = ["sort_order", "name", "id"]

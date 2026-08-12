@@ -7,7 +7,16 @@ import type { CompanyAdmin } from "../api/types";
 
 export interface CatalogRow {
   id: number;
+  /** The STORED name — what a rename starts from and writes back. */
   name: string;
+  /** What the table SHOWS. Differs from `name` only for a recognised
+   *  standard kind, which renders in the reader's language.
+   *
+   *  Sprint 170 §5 — kept separate deliberately. Seeding the rename
+   *  field from the translated label would mean an operator who opened
+   *  Rename in English, changed nothing and pressed Save silently
+   *  rewrote a Dutch-seeded row's stored name to English. */
+  displayName?: string;
   is_active: boolean;
   /** How many things point at this row. Non-zero means Delete is not
    *  offerable, because every one of these catalogs is referenced by a
@@ -233,7 +242,7 @@ export function CatalogTab({
                       data-testid={`${testIdPrefix}-rename-input-${row.id}`}
                     />
                   ) : (
-                    row.name
+                    (row.displayName ?? row.name)
                   )}
                 </td>
                 <td className="contract-num">{row.usage}</td>

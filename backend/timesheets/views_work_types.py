@@ -35,10 +35,11 @@ from .permissions import (
 from .scope import filter_work_types_for
 from .serializers_work_types import (
     ERR_WORK_TYPE_NAME_NOT_UNIQUE,
-    STANDARD_WORK_TYPES,
     WorkTypeSerializer,
     WorkTypeStandardSetSerializer,
     normalise_work_type_name,
+    slot_aliases,
+    standard_work_types,
 )
 from .views_common import parse_bool_param, resolve_target_company
 
@@ -190,18 +191,29 @@ class WorkTypeStandardSetView(APIView):
         )
         _enforce_timesheet_management(request.user, target_company)
 
-        existing = set(
-            WorkType.objects.filter(company=target_company)
-            .annotate(normalised=Lower(Trim("name")))
-            .values_list("normalised", flat=True)
+        # Sprint 170 §5 — the skip test asks the SLOT first, then the
+        # name aliases. Idempotent ACROSS languages: comparing only the
+        # name about to be created would hand a Dutch-seeded company
+        # four English duplicates, and the per-company uniqueness
+        # constraint would not object because "Meerwerk" and "Extra
+        # work" genuinely are different strings.
+        rows = list(
+            WorkType.objects.filter(company=target_company).values_list(
+                "name", "standard_slot"
+            )
         )
+        taken_slots = {slot for _name, slot in rows if slot}
+        existing = {normalise_work_type_name(name) for name, _slot in rows}
+
+        wanted = standard_work_types(getattr(request.user, "language", None))
+        aliases = slot_aliases()
 
         created, skipped = [], []
         audit_context.set_current_reason("work_type_standard_set")
         try:
             with transaction.atomic():
-                for name, sort_order in STANDARD_WORK_TYPES:
-                    if normalise_work_type_name(name) in existing:
+                for (slot, name, sort_order), slot_names in zip(wanted, aliases):
+                    if slot in taken_slots or (slot_names & existing):
                         skipped.append(name)
                         continue
                     # save() per row, not bulk_create: the audit

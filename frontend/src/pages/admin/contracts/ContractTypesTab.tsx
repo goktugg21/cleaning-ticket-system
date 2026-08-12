@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CatalogTab } from "../../../components/CatalogTab";
+import { contractTypeLabel } from "../../../lib/contractTypeLabel";
 import type { CatalogRow } from "../../../components/CatalogTab";
 
 /**
@@ -25,10 +26,17 @@ export function ContractTypesTab() {
     (raw: Record<string, unknown>): CatalogRow => ({
       id: raw.id as number,
       name: raw.name as string,
+      // Sprint 170 §5 — the same treatment as work types: the table
+      // shows the reader's language, Rename edits the stored name.
+      displayName: contractTypeLabel(
+        raw.name as string,
+        (raw.standard_slot as string) ?? "",
+        t,
+      ),
       is_active: raw.is_active as boolean,
       usage: (raw.contract_count as number) ?? 0,
     }),
-    [],
+    [t],
   );
 
   return (
