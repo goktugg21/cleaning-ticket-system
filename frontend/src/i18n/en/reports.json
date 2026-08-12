@@ -110,5 +110,6 @@
   "hours_comparison.no_building": "No building",
   "hours_comparison.total": "Total",
   "hours_comparison.empty": "No contracted and no worked hours in this month.",
-  "hours_comparison.asymmetry_note": "A contract fixes hours per BUILDING, not per worker. The per-worker breakdown below is therefore WORKED hours only; there is no agreed figure per person."
+  "hours_comparison.asymmetry_note": "A contract fixes hours per BUILDING, not per worker. The per-worker breakdown below is therefore WORKED hours only; there is no agreed figure per person.",
+  "hours_comparison.open": "Open"
 }

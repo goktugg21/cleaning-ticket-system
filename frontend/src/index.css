@@ -9070,6 +9070,22 @@ details[open] > .ew-department-tree-summary::before {
   white-space: nowrap;
 }
 
+/* Sprint 169 §6 — the HEADER of a numeric column, right-aligned above
+   its values.
+   `.data-table th` sets `text-align: left` at a specificity the class
+   above cannot beat, so every numeric column had right-aligned numbers
+   under a left-aligned header. Measured on the comparison table, the
+   header's ink ended 53px left of the values' at 1024 and 104px at
+   1440 — the gap GREW with the viewport, which is exactly the "numbers
+   drifting in very wide columns" that was reported.
+   The width cap is the other half: an auto-sized numeric column takes
+   whatever the table has spare, so two figures that belong together end
+   up an inch apart. */
+.data-table th.contract-num {
+  text-align: right;
+  width: 9rem;
+}
+
 /* The Customer / Building summary group header row. */
 .contract-group-row td {
   background: var(--surface-2);

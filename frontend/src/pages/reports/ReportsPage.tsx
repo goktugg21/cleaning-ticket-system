@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
+
+import { HoursComparisonView } from "./HoursComparisonView";
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import type { ReportFilters } from "../../api/reports";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
@@ -28,6 +30,7 @@ const RANGE_PRESETS: Array<{
 ];
 
 export function ReportsPage() {
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const { me } = useAuth();
   const { t } = useTranslation(["reports", "common"]);
   const { filters, setFilter, setRangePreset } = useReportsFilters();
@@ -245,6 +248,87 @@ export function ReportsPage() {
         </div>
 
       </section>
+
+      {/* Sprint 169 §6 — the contracted-vs-worked comparison, ON the
+          Reports page. It had a sidebar entry and no presence here,
+          which is where an operator goes looking for a report. The card
+          opens it in a MODAL; the standalone route stays for a direct
+          link, and both render the SAME component. */}
+      <section
+        className="card card-detail-pad"
+        style={{ marginBottom: 16 }}
+        data-testid="report-card-hours-comparison"
+      >
+        <div className="section-head">
+          <div>
+            <div className="section-head-title">
+              {t("hours_comparison.title")}
+            </div>
+            <div className="section-head-sub">
+              {t("hours_comparison.subtitle")}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setComparisonOpen(true)}
+            data-testid="open-hours-comparison"
+          >
+            {t("hours_comparison.open")}
+          </button>
+        </div>
+      </section>
+
+      {comparisonOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("hours_comparison.title")}
+          data-testid="hours-comparison-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setComparisonOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+            paddingTop: "6vh",
+            overflowY: "auto",
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              width: "min(96vw, 1180px)",
+              padding: 24,
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+              overflowY: "auto",
+            }}
+          >
+            <div className="section-head" style={{ marginBottom: 12 }}>
+              <div className="section-head-title">
+                {t("hours_comparison.title")}
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setComparisonOpen(false)}
+                data-testid="hours-comparison-close"
+              >
+                {t("common:cancel")}
+              </button>
+            </div>
+            <HoursComparisonView />
+          </div>
+        </div>
+      )}
 
       {/* Extra Work revenue is its own report (SoT §7.2), not a generic
           ticket count — render it FIRST and full-width, above the grid of
