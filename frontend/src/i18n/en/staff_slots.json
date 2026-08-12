@@ -107,5 +107,14 @@
   "agenda.all_types": "All types",
   "agenda.all_statuses": "All statuses",
   "agenda.missing_chips_note": "Two of the reference chips are deliberately absent: a staff slot has no In Progress and no Archived state in this system.",
-  "agenda.undated_count": "{{count}} slot(s) with no date, outside this week."
+  "agenda.undated_count": "{{count}} slot(s) with no date, outside this week.",
+  "agenda.today": "Today",
+  "agenda.day_empty": "Nothing planned",
+  "agenda.overdue_button": "Overdue ({{count}})",
+  "agenda.overdue_title": "Overdue work",
+  "agenda.overdue_none": "Nothing overdue.",
+  "agenda.col_item": "Item",
+  "agenda.col_deadline": "Scheduled for",
+  "agenda.col_overdue_by": "Overdue by",
+  "agenda.overdue_days": "{{count}} day(s)"
 }

@@ -16,7 +16,14 @@
 //     hidden for them (permissions.ts::canAccessAgenda).
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarClock, CheckCircle2, Lock, Ticket, XCircle } from "lucide-react";
+import {
+  CalendarClock,
+  CheckCircle2,
+  Lock,
+  RefreshCw,
+  Ticket,
+  XCircle,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -39,6 +46,7 @@ import { formatDate, useLocaleCode } from "../lib/intl";
 import {
   currentIsoWeek,
   formatIsoWeek,
+  fromDateString,
   isoWeekDays,
   shiftIsoWeek,
   toDateString,
@@ -252,6 +260,8 @@ function StaffSlotAgenda() {
   >("");
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [overdueOpen, setOverdueOpen] = useState(false);
   const [completionTarget, setCompletionTarget] = useState<MySlot | null>(null);
   const [unableTarget, setUnableTarget] = useState<MySlot | null>(null);
 
@@ -281,7 +291,7 @@ function StaffSlotAgenda() {
     };
     // The role decides WHICH week is fetched, so it belongs in the deps
     // — a role that resolves after the first render must re-fetch.
-  }, [me?.role]);
+  }, [me?.role, refreshKey]);
 
   /**
    * Sprint 168 §7 — the Work Plan, built ON the agenda rather than
@@ -336,6 +346,37 @@ function StaffSlotAgenda() {
       );
     };
   }, []);
+
+  /** "10 – 16 aug 2026", the reference header's shape. */
+  const todayKey = toDateString(new Date());
+
+  /** How long a slot has been overdue, in whole days. The reference
+   *  shows this and it is the only figure on the list that is not
+   *  already on the card — "late" without "how late" does not rank. */
+  function overdueByLabel(slot: MySlot): string {
+    const key = localDateKey(slot.scheduled_start_at);
+    if (key === null) return "—";
+    const days = Math.round(
+      (fromDateString(todayKey).getTime() - fromDateString(key).getTime()) /
+        86_400_000,
+    );
+    return t("agenda.overdue_days", { count: Math.max(0, days) });
+  }
+
+  const weekRangeLabel = useMemo(() => {
+    const days = isoWeekDays(week);
+    return `${formatDate(toDateString(days[0]))} – ${formatDate(
+      toDateString(days[6]),
+    )}`;
+  }, [week]);
+
+  /** Every overdue slot the viewer holds, not only this week's — the
+   *  Overdue button answers "what is late, anywhere", which is a
+   *  different question from the week chip. */
+  const overdueAll = useMemo(
+    () => slots.filter(isOverdue),
+    [slots, isOverdue],
+  );
 
   const counts = useMemo(
     () => ({
@@ -479,11 +520,17 @@ function StaffSlotAgenda() {
               >
                 <ChevronLeft size={14} strokeWidth={2.5} />
               </button>
+              {/* Sprint 171 §3 — the week RANGE, which is what the
+                  reference header shows and what an operator reads.
+                  "2026-W33" is precise and tells nobody which days. */}
               <span
-                style={{ fontWeight: 600, minWidth: 130, textAlign: "center" }}
+                style={{ fontWeight: 600, minWidth: 210, textAlign: "center" }}
                 data-testid="agenda-week-label"
               >
-                {formatIsoWeek(week)}
+                {weekRangeLabel}
+                <span className="muted small" style={{ marginLeft: 6 }}>
+                  {formatIsoWeek(week)}
+                </span>
               </span>
               <button
                 type="button"
@@ -501,6 +548,28 @@ function StaffSlotAgenda() {
                 data-testid="agenda-week-today"
               >
                 {t("agenda.this_week")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setRefreshKey((n) => n + 1)}
+                data-testid="agenda-refresh"
+              >
+                <RefreshCw size={14} strokeWidth={2.5} />
+                {t("common:refresh")}
+              </button>
+              {/* Sprint 171 §3 — a separate Overdue BUTTON, as the
+                  reference has, opening the list. The chip filters the
+                  week; this answers "what is late, anywhere", which is
+                  a different question and the reason the reference has
+                  both. */}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setOverdueOpen(true)}
+                data-testid="agenda-overdue-open"
+              >
+                {t("agenda.overdue_button", { count: overdueAll.length })}
               </button>
             </div>
           </div>
@@ -584,14 +653,40 @@ function StaffSlotAgenda() {
 
       <div className="agenda-week-grid" data-testid="agenda-week-grid">
       {groups.map((group) => (
-        <section key={group.key} style={{ marginBottom: 18 }}>
+        <section
+          key={group.key}
+          /* Sprint 171 §3 — TODAY is marked, as the reference marks it.
+             Seven identical columns give the reader nothing to anchor
+             on, and "which one is today" is the first thing anybody
+             looks for in a week view. */
+          className={
+            group.key === todayKey ? "agenda-day agenda-day-today" : "agenda-day"
+          }
+          data-testid={
+            group.key === todayKey ? "agenda-day-today" : "agenda-day"
+          }
+          style={{ marginBottom: 18 }}
+        >
           <h3
             className="section-head-title"
             style={{ marginBottom: 8 }}
             data-testid="agenda-group-heading"
           >
             {groupHeading(group)}
+            {group.key === todayKey && (
+              <span className="cell-tag cell-tag-open" style={{ marginLeft: 6 }}>
+                {t("agenda.today")}
+              </span>
+            )}
           </h3>
+          {/* An empty day gets a MARKER, not blank space: a column with
+              nothing in it should say so, or the reader cannot tell it
+              apart from one that failed to load. */}
+          {group.items.length === 0 && (
+            <p className="muted small" data-testid="agenda-day-empty">
+              {t("agenda.day_empty")}
+            </p>
+          )}
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {group.items.map((slot) => (
               <li
@@ -689,6 +784,106 @@ function StaffSlotAgenda() {
         <p className="muted small" data-testid="agenda-undated-note">
           {t("agenda.undated_count", { count: undatedSlots.length })}
         </p>
+      )}
+
+      {/* Sprint 171 §3 — the overdue LIST, as the reference has it:
+          per item the title, customer, building, the deadline, HOW LONG
+          it has been overdue, its status and its type. */}
+      {overdueOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("agenda.overdue_title")}
+          data-testid="agenda-overdue-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setOverdueOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+            paddingTop: "6vh",
+            overflowY: "auto",
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              width: "min(96vw, 980px)",
+              padding: 24,
+              maxHeight: "85vh",
+              overflowY: "auto",
+            }}
+          >
+            <div className="section-head" style={{ marginBottom: 12 }}>
+              <span className="section-head-title">
+                {t("agenda.overdue_title")}
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setOverdueOpen(false)}
+                data-testid="agenda-overdue-close"
+              >
+                {t("common:cancel")}
+              </button>
+            </div>
+            <div className="table-wrap">
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("agenda.col_item")}</th>
+                    <th>{t("common:customer")}</th>
+                    <th>{t("common:building")}</th>
+                    <th>{t("agenda.col_deadline")}</th>
+                    <th>{t("agenda.col_overdue_by")}</th>
+                    <th>{t("common:status")}</th>
+                    <th>{t("agenda.filter_type")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {overdueAll.map((slot) => (
+                    <tr key={slot.id} data-testid="agenda-overdue-row">
+                      <td className="td-subject">
+                        <Link to={`/tickets/${slot.ticket_id}`}>
+                          #{slot.ticket_no} · {slot.ticket_title}
+                        </Link>
+                      </td>
+                      <td>{slot.ticket_customer_name ?? "—"}</td>
+                      <td>{slot.building_name}</td>
+                      <td className="td-date">
+                        {formatDate(slot.scheduled_start_at)}
+                      </td>
+                      <td>{overdueByLabel(slot)}</td>
+                      <td>
+                        <SlotStatusBadge status={slot.slot_status} />
+                      </td>
+                      <td>
+                        {TICKET_TYPE_KEYS[slot.ticket_type as TicketTypeValue]
+                          ? t(
+                              `create_ticket:${TICKET_TYPE_KEYS[slot.ticket_type as TicketTypeValue]}`,
+                            )
+                          : slot.ticket_type}
+                      </td>
+                    </tr>
+                  ))}
+                  {overdueAll.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="muted">
+                        {t("agenda.overdue_none")}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
 
       {completionTarget && me && (

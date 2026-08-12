@@ -9519,7 +9519,13 @@ details[open] > .ew-department-tree-summary::before {
   gap: 10px;
   align-items: start;
 }
-@media (max-width: 1200px) {
+/* Sprint 171 §3 — seven columns hold down to 1024, which is the
+   narrowest width the owner measures at and what the reference shows.
+   The old breakpoint dropped to two columns at 1200, so a 1024 viewport
+   got a four-row block rather than a week. Below 1000 the cards are
+   genuinely too narrow to read, and two columns is better than seven
+   unreadable ones. */
+@media (max-width: 1000px) {
   .agenda-week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
@@ -9548,4 +9554,17 @@ details[open] > .ew-department-tree-summary::before {
 .hours-comparison-table th:last-child,
 .hours-comparison-table td:last-child {
   width: auto;
+}
+
+/* Sprint 171 §3 — TODAY, marked. Seven identical columns give the
+   reader nothing to anchor on, and "which one is today" is the first
+   thing anybody looks for in a week view. */
+/* No negative margin: it shifted the column 6px up, which is both a
+   visual misalignment against its six neighbours and — measured — a
+   different `top` value, so a row-count check reads seven columns as
+   two rows. An inset outline marks the day without moving it. */
+.agenda-day-today {
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--border);
 }

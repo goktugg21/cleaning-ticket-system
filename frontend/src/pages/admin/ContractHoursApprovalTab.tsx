@@ -563,6 +563,24 @@ export function ContractHoursApprovalTab({
                       state: t(`contract_hours.status_${tab}`),
                     })}{" "}
                     {t(`contract_hours.empty_hint_${tab}`)}
+                    {/* Sprint 171 §2b — the link belongs HERE too, not
+                        only on the all-empty case. Measured: with time
+                        entries present but no contract hours, `rows` is
+                        non-empty, so the all-empty branch never fired
+                        and the operator got prose with no way out. "No
+                        contract hours" is the state that needs the
+                        link, whether or not anybody logged hours. */}
+                    {contractRows.length === 0 && onGoToContractHours && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        style={{ marginLeft: 8 }}
+                        onClick={onGoToContractHours}
+                        data-testid="approval-go-to-contract-hours"
+                      >
+                        {t("contract_hours.go_create")}
+                      </button>
+                    )}
                   </td>
                 </tr>
               )}

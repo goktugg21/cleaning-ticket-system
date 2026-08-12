@@ -107,5 +107,14 @@
   "agenda.all_types": "Alle types",
   "agenda.all_statuses": "Alle statussen",
   "agenda.missing_chips_note": "Twee chips uit het referentiesysteem ontbreken hier met opzet: een taakblok kent in dit systeem geen In behandeling en geen Gearchiveerd.",
-  "agenda.undated_count": "{{count}} taakblok(ken) zonder datum, buiten deze week."
+  "agenda.undated_count": "{{count}} taakblok(ken) zonder datum, buiten deze week.",
+  "agenda.today": "Vandaag",
+  "agenda.day_empty": "Niets gepland",
+  "agenda.overdue_button": "Te laat ({{count}})",
+  "agenda.overdue_title": "Te late taken",
+  "agenda.overdue_none": "Niets te laat.",
+  "agenda.col_item": "Taak",
+  "agenda.col_deadline": "Gepland op",
+  "agenda.col_overdue_by": "Te laat sinds",
+  "agenda.overdue_days": "{{count}} dag(en)"
 }
