@@ -89,6 +89,9 @@ export interface Contract {
   customer_name: string | null;
   contract_type: number | null;
   contract_type_name: string | null;
+  /** Sprint 169 §4 — pairs with the name; render through
+   *  `lib/contractTypeLabel.ts`, never on its own. */
+  contract_type_standard_slot: string;
   contract_no: string;
   start_date: string;
   end_date: string | null;
@@ -169,7 +172,7 @@ export interface ContractOptions {
   company: { id: number; name: string };
   customers: { id: number; name: string }[];
   buildings: { id: number; name: string }[];
-  contract_types: { id: number; name: string }[];
+  contract_types: { id: number; name: string; standard_slot?: string }[];
 }
 
 export interface ContractFilters {

@@ -48,6 +48,11 @@ from .models import (
 )
 from .permissions import IsContractManager, IsContractReader, enforce_contract_management
 from .revisions import annotate_revision_totals, display_revision_ids
+from .standard_types import (
+    normalise_name as normalise_type_name,
+    slot_aliases,
+    standard_contract_types,
+)
 from .scope import (
     filter_buildings_for_contracts,
     filter_contract_types_for,
@@ -426,24 +431,20 @@ class ContractOptionsView(APIView):
                 "buildings": [
                     {"id": row.id, "name": row.name} for row in buildings
                 ],
+                # Sprint 169 §4 — the slot travels with the name so the
+                # picker reads in the operator's language too. A dialog
+                # that offers "Schoonmaak" while the list shows
+                # "Cleaning" is the drift this exists to prevent.
                 "contract_types": [
-                    {"id": row.id, "name": row.name} for row in types
+                    {
+                        "id": row.id,
+                        "name": row.name,
+                        "standard_slot": row.standard_slot,
+                    }
+                    for row in types
                 ],
             }
         )
-
-
-# Sprint 168 §5 — the four the reference offers. A company that has
-# none can create no contract at all (the type picker is empty and the
-# field is required), which is the state every new tenant starts in.
-# OFFERED, not imposed: the catalog stays per-company and a company is
-# free to delete these and name its own.
-STANDARD_CONTRACT_TYPES = (
-    ("Schoonmaak", 10),
-    ("Meerwerk", 20),
-    ("Machinewerk", 30),
-    ("Overig", 40),
-)
 
 
 class ContractTypeStandardSetView(APIView):
@@ -473,22 +474,36 @@ class ContractTypeStandardSetView(APIView):
         company = resolve_target_company(request.user, company_obj)
         enforce_contract_management(request.user, company)
 
-        existing = set(
-            ContractType.objects.filter(company=company)
-            .annotate(normalised=Lower(Trim("name")))
-            .values_list("normalised", flat=True)
+        # Sprint 169 §4 — the skip test asks the SLOT first, then falls
+        # back to the name ALIASES. Idempotent across languages, which
+        # is the part that needs saying: comparing only the name about
+        # to be created would hand a Dutch-seeded company four English
+        # duplicates the first time an English-profile operator pressed
+        # the button, and the per-company uniqueness constraint would
+        # not object because "Meerwerk" and "Extra Works" genuinely are
+        # different strings.
+        rows = list(
+            ContractType.objects.filter(company=company).values_list(
+                "name", "standard_slot"
+            )
         )
+        taken_slots = {slot for _name, slot in rows if slot}
+        existing_names = {normalise_type_name(name) for name, _slot in rows}
+
+        wanted = standard_contract_types(getattr(request.user, "language", None))
+        aliases = slot_aliases()
 
         created, skipped = [], []
         audit_context.set_current_reason("contract_type_standard_set")
         try:
             with transaction.atomic():
-                for name, sort_order in STANDARD_CONTRACT_TYPES:
-                    if name.strip().lower() in existing:
+                for (slot, name, sort_order), slot_names in zip(wanted, aliases):
+                    if slot in taken_slots or (slot_names & existing_names):
                         skipped.append(name)
                         continue
                     # save() per row, not bulk_create: the audit
-                    # receivers are post_save (H-10).
+                    # receivers are post_save (H-10), and `save()` is
+                    # also where `standard_slot` is derived.
                     ContractType.objects.create(
                         company=company, name=name, sort_order=sort_order
                     )

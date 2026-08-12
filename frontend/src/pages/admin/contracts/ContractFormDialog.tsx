@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { contractTypeLabel } from "../../../lib/contractTypeLabel";
+
 import { listAllCompanies } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
 import {
@@ -383,7 +385,7 @@ export function ContractFormDialog({
               <option value="">{t("form.none")}</option>
               {(options?.contract_types ?? []).map((row) => (
                 <option key={row.id} value={row.id}>
-                  {row.name}
+                  {contractTypeLabel(row.name, row.standard_slot, t)}
                 </option>
               ))}
             </select>

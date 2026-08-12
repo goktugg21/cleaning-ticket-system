@@ -26,6 +26,7 @@ import { canManageContracts } from "../../../auth/permissions";
 import { useEditMode } from "../../../lib/useEditMode";
 import { ContractFormDialog } from "./ContractFormDialog";
 import { ContractTypesTab } from "./ContractTypesTab";
+import { contractTypeLabel } from "../../../lib/contractTypeLabel";
 import {
   MAX_PROJECT_COLUMNS,
   buildProjectColumns,
@@ -391,7 +392,7 @@ export function ContractsAdminPage() {
           className="summary-grid"
           data-testid="contracts-stats"
           style={{
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
             margin: "14px 18px 4px",
           }}
         >
@@ -410,6 +411,15 @@ export function ContractsAdminPage() {
           <div className="summary-stat">
             <span className="summary-stat-label">{t("stats.expired")}</span>
             <span className="summary-stat-value">{stats?.expired ?? 0}</span>
+          </div>
+          {/* Sprint 169 §5 — Geannuleerd was COMPUTED by the stats
+              endpoint and never shown, so the tiles counted three of
+              the four statuses the filter offers. A cancelled contract
+              existed, was filterable, had a badge on its detail page,
+              and was in none of the totals above the table. */}
+          <div className="summary-stat" data-testid="contracts-stat-cancelled">
+            <span className="summary-stat-label">{t("stats.cancelled")}</span>
+            <span className="summary-stat-value">{stats?.cancelled ?? 0}</span>
           </div>
           {/* Sprint 165 §4 — the two money tiles follow the
               Prices / Hours toggle. They used to be money whatever the
@@ -557,7 +567,11 @@ export function ContractsAdminPage() {
                   .filter((row) => row.contract_type !== null)
                   .map((row) => ({
                     id: row.contract_type as number,
-                    name: row.contract_type_name ?? "",
+                    name: contractTypeLabel(
+                      row.contract_type_name,
+                      row.contract_type_standard_slot,
+                      t,
+                    ),
                   })),
               ).map((row) => (
                 <option key={row.id} value={row.id}>
@@ -1032,7 +1046,15 @@ function ContractGroup({
             )}
           </td>
           <td>
-            {row.contract_type_name ?? <span className="muted-empty">—</span>}
+            {row.contract_type_name ? (
+              contractTypeLabel(
+                row.contract_type_name,
+                row.contract_type_standard_slot,
+                t,
+              )
+            ) : (
+              <span className="muted-empty">—</span>
+            )}
           </td>
           {columns.columns.map((column) => (
             <td key={column.key} className="contract-num">

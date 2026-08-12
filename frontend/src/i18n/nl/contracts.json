@@ -264,5 +264,10 @@
     "newPlaceholder": "Bijv. Schoonmaak",
     "add": "Toevoegen"
   },
-  "types.rename": "Hernoemen"
+  "types.rename": "Hernoemen",
+  "contract_type_slot.cleaning": "Schoonmaak",
+  "contract_type_slot.extra_work": "Meerwerk",
+  "contract_type_slot.machine": "Machinewerk",
+  "contract_type_slot.other": "Overig",
+  "stats.cancelled": "Geannuleerd"
 }

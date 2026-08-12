@@ -83,13 +83,17 @@ class ContractTypeSerializer(serializers.ModelSerializer):
             "id",
             "company",
             "name",
+            "standard_slot",
             "is_active",
             "sort_order",
             "contract_count",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        # `standard_slot` is DERIVED in save() and never client-set —
+        # accepting it would let a caller claim a row is a standard kind
+        # whose name says otherwise.
+        read_only_fields = ["id", "standard_slot", "created_at", "updated_at"]
         extra_kwargs = {"company": {"required": False}}
 
     def get_contract_count(self, obj) -> int:
@@ -284,6 +288,13 @@ class ContractSerializer(serializers.ModelSerializer):
     contract_type_name = serializers.CharField(
         source="contract_type.name", read_only=True, default=None
     )
+    # Sprint 169 §4 — the name PLUS the slot, so the client can render a
+    # standard kind in the reader's language. The JSON is never
+    # translated server-side; that decision belongs to one frontend
+    # helper, `lib/contractTypeLabel.ts`.
+    contract_type_standard_slot = serializers.CharField(
+        source="contract_type.standard_slot", read_only=True, default=""
+    )
     contract_no = serializers.CharField(read_only=True)
     status = serializers.SerializerMethodField()
 
@@ -324,6 +335,7 @@ class ContractSerializer(serializers.ModelSerializer):
             "customer_name",
             "contract_type",
             "contract_type_name",
+            "contract_type_standard_slot",
             "contract_no",
             "start_date",
             "end_date",

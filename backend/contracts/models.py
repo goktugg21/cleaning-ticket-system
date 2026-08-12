@@ -50,6 +50,8 @@ from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.db.models.functions import Lower, Trim
+
+from .standard_types import STANDARD_CONTRACT_TYPE_CHOICES, slot_for_name
 from django.utils import timezone
 
 
@@ -166,8 +168,40 @@ class ContractType(models.Model):
         default=0,
         help_text="Ascending display order in the pickers; ties break on name.",
     )
+    # Sprint 169 §4 — which of the standard kinds this row IS, or "" for
+    # a company's own type. DERIVED from `name` in `save()`; never set
+    # by a client, never hand-edited. The `HourType.standard_slot`
+    # pattern, for the same reason: it lets the UI show a standard name
+    # in each reader's own language while `name` stays a single
+    # operator-typed column.
+    standard_slot = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        choices=STANDARD_CONTRACT_TYPE_CHOICES,
+        help_text=(
+            "Derived from `name`: the standard kind this row is "
+            "recognised as, or blank for a custom type."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        """Derive `standard_slot` from `name` on EVERY save.
+
+        Here rather than in the serializer, exactly as
+        `HourType.save()` does it: a management command, a data
+        migration and a shell write all go through `save()`, and none
+        of them goes through a serializer. Deriving it anywhere else
+        means a stored slot that contradicts the name beside it.
+
+        The consequence is the intended one: renaming a standard type
+        to the company's own wording DETACHES it (slot -> ""), and
+        renaming it back, in either language, re-attaches it.
+        """
+        self.standard_slot = slot_for_name(self.name)
+        super().save(*args, **kwargs)
 
     class Meta:
         verbose_name = "contract type"

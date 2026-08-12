@@ -24,6 +24,7 @@ import { EditModeToggle } from "../../../components/EditModeToggle";
 import { useAuth } from "../../../auth/AuthContext";
 import { canManageContracts } from "../../../auth/permissions";
 import { useEditMode } from "../../../lib/useEditMode";
+import { contractTypeLabel } from "../../../lib/contractTypeLabel";
 import { ContractFormDialog } from "./ContractFormDialog";
 import { ContractInvoicePreview } from "./ContractInvoicePreview";
 import {
@@ -342,7 +343,15 @@ export function ContractDetailPage() {
             />
             <Field
               label={t("fields.type")}
-              value={contract.contract_type_name ?? "—"}
+              value={
+                contract.contract_type_name
+                  ? contractTypeLabel(
+                      contract.contract_type_name,
+                      contract.contract_type_standard_slot,
+                      t,
+                    )
+                  : "—"
+              }
             />
             <Field
               label={t("fields.status")}

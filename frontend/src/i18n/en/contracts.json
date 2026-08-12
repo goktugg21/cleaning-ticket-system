@@ -264,5 +264,10 @@
     "newPlaceholder": "e.g. Cleaning",
     "add": "Add"
   },
-  "types.rename": "Rename"
+  "types.rename": "Rename",
+  "contract_type_slot.cleaning": "Cleaning",
+  "contract_type_slot.extra_work": "Extra Works",
+  "contract_type_slot.machine": "Machine",
+  "contract_type_slot.other": "Other",
+  "stats.cancelled": "Cancelled"
 }
