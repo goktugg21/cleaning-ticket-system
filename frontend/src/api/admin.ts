@@ -1543,12 +1543,22 @@ export async function removeTicketStaffAssignment(
 const _MY_SLOTS_PAGE_SIZE = 200;
 const _MY_SLOTS_MAX_PAGES = 25; // 25 * 200 = 5000 slots — far beyond any agenda.
 
-export async function getMySlots(): Promise<MySlot[]> {
+/** Sprint 170 §1 — `teamWeek` asks for every slot the actor may see
+ *  rather than only their own. The server admits it for a
+ *  provider-management role and ignores it otherwise, so passing it is
+ *  never a way to widen what a STAFF user gets. */
+export async function getMySlots(teamWeek = false): Promise<MySlot[]> {
   const results: MySlot[] = [];
   for (let page = 1; page <= _MY_SLOTS_MAX_PAGES; page += 1) {
     const response = await api.get<PaginatedResponse<MySlot>>(
       "/tickets/my-slots/",
-      { params: { page_size: _MY_SLOTS_PAGE_SIZE, page } },
+      {
+        params: {
+          page_size: _MY_SLOTS_PAGE_SIZE,
+          page,
+          ...(teamWeek ? { scope: "company" } : {}),
+        },
+      },
     );
     const data = response.data;
     results.push(...data.results);

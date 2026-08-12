@@ -27,7 +27,7 @@ import { getApiError } from "../api/client";
 import { listAllTickets } from "../api/tickets";
 import type { TicketList } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
-import { canAccessAgenda } from "../auth/permissions";
+import { agendaShowsTeamWeek, canAccessAgenda } from "../auth/permissions";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -265,7 +265,9 @@ function StaffSlotAgenda() {
     async function load() {
       setError("");
       try {
-        const data = await getMySlots();
+        // A provider admin sees the TEAM's week; a worker sees
+        // their own. The server decides whether to honour it.
+        const data = await getMySlots(agendaShowsTeamWeek(me?.role));
         if (!cancelled) setSlots(data);
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
@@ -277,7 +279,9 @@ function StaffSlotAgenda() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // The role decides WHICH week is fetched, so it belongs in the deps
+    // — a role that resolves after the first render must re-fetch.
+  }, [me?.role]);
 
   /**
    * Sprint 168 §7 — the Work Plan, built ON the agenda rather than

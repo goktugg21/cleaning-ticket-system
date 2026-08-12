@@ -609,12 +609,12 @@ export function HoursAdminPage() {
         <button
           type="button"
           role="tab"
-          aria-selected={tab === "hour_types"}
-          className={`composer-toggle-btn ${tab === "hour_types" ? "active" : ""}`}
-          data-testid="hours-tab-hour-types"
-          onClick={() => setTab("hour_types")}
+          aria-selected={tab === "contract_hours"}
+          className={`composer-toggle-btn ${tab === "contract_hours" ? "active" : ""}`}
+          data-testid="hours-tab-contract-hours"
+          onClick={() => setTab("contract_hours")}
         >
-          {t("hours_admin.tab_hour_types")}
+          {t("contract_hours.tab")}
         </button>
         <button
           type="button"
@@ -626,20 +626,6 @@ export function HoursAdminPage() {
         >
           {t("hours_admin.tab_overview")}
         </button>
-        {/* Sprint 167 §3 — the standing agreement, beside the hours
-            actually worked. */}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "contract_hours"}
-          className={`composer-toggle-btn ${tab === "contract_hours" ? "active" : ""}`}
-          data-testid="hours-tab-contract-hours"
-          onClick={() => setTab("contract_hours")}
-        >
-          {t("contract_hours.tab")}
-        </button>
-        {/* Sprint 167 §4 — where a week's agreement is reviewed against
-            what was worked, and approved. */}
         <button
           type="button"
           role="tab"
@@ -650,9 +636,16 @@ export function HoursAdminPage() {
         >
           {t("contract_hours.tab_approval")}
         </button>
-        {/* Sprint 169 §2 — the work-type catalog had endpoints and no
-            screen, so the dropdown that uses it was empty everywhere
-            with nothing anywhere able to fill it. */}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "hour_types"}
+          className={`composer-toggle-btn ${tab === "hour_types" ? "active" : ""}`}
+          data-testid="hours-tab-hour-types"
+          onClick={() => setTab("hour_types")}
+        >
+          {t("hours_admin.tab_hour_types")}
+        </button>
         <button
           type="button"
           role="tab"
@@ -880,9 +873,19 @@ export function HoursAdminPage() {
                     })}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   {editing ? (
                     <>
+                      {/* Sprint 170 §2 — say what edit mode IS. The
+                          table looks similar either way at a glance,
+                          and the operator arrived here expecting row
+                          selection. */}
+                      <span
+                        className="muted small"
+                        data-testid="hours-edit-hint"
+                      >
+                        {t("hours_admin.edit_hint")}
+                      </span>
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
@@ -896,14 +899,30 @@ export function HoursAdminPage() {
                         type="button"
                         className="btn btn-primary btn-sm"
                         onClick={() => void saveAll()}
-                        disabled={saveBusy}
+                        // Sprint 170 §2 — DISABLED when there is
+                        // nothing to save.
+                        //
+                        // Reproduced first: Edit already turns all 25
+                        // rows into 125 inputs, typing 5.50 moves the
+                        // counter 0 -> 1, Save posts cleanly and the
+                        // value survives a reload. The mechanism was
+                        // never broken. What was broken is that Save
+                        // sat ENABLED reading "Alles bewaren (0)", so
+                        // an operator who pressed it before changing
+                        // anything got no request, no toast and no
+                        // change - which is indistinguishable from a
+                        // button that does not work, and teaches them
+                        // not to trust it.
+                        disabled={saveBusy || changedEntries.length === 0}
                         data-testid="hours-edit-save-all"
                       >
                         {saveBusy
                           ? t("admin_form.saving")
-                          : t("hours_admin.save_all", {
-                              count: changedEntries.length,
-                            })}
+                          : changedEntries.length === 0
+                            ? t("hours_admin.save_all_none")
+                            : t("hours_admin.save_all", {
+                                count: changedEntries.length,
+                              })}
                       </button>
                     </>
                   ) : (

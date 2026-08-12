@@ -278,7 +278,32 @@ export function canManageContracts(role: Role | null | undefined): boolean {
 // them. NOTE: `isStaffRole` is intentionally NOT reused here — it still
 // admits SA + CA (it drives PROVIDER_INTERNAL note access etc.).
 export function canAccessAgenda(role: Role | null | undefined): boolean {
-  return role === "STAFF" || role === "BUILDING_MANAGER";
+  // Sprint 170 §1 — SUPER_ADMIN and COMPANY_ADMIN admitted.
+  //
+  // Sprint 168 built the Work Plan into this page and the gate above
+  // excluded exactly the person who had been asking for it for three
+  // sprints: the owner is a SUPER_ADMIN, so the nav entry never
+  // rendered and the whole feature was invisible to him.
+  //
+  // The gate was not wrong when it was written — SA/CA hold no
+  // assignment slots of their own, so the page had nothing to show
+  // them. What changed is that the endpoint now answers
+  // `?scope=company` for a provider-management role, so an admin sees
+  // the TEAM's week rather than their own empty one. Opening the gate
+  // without that would have swapped an invisible page for a
+  // permanently empty one, which is the same defect.
+  return (
+    role === "STAFF" ||
+    role === "BUILDING_MANAGER" ||
+    role === "SUPER_ADMIN" ||
+    role === "COMPANY_ADMIN"
+  );
+}
+
+/** True for the roles that see the TEAM's week rather than their own
+ *  slots. Kept beside the gate above so the two cannot drift. */
+export function agendaShowsTeamWeek(role: Role | null | undefined): boolean {
+  return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
 }
 
 // `/admin/staff-assignment-requests` — backend admits the BM for the

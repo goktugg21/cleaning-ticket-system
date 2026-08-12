@@ -18,7 +18,7 @@
   "nav.new_ticket": "New ticket",
   "nav.tickets": "Tickets",
   "nav.new_melding": "New report",
-  "nav.my_work": "My Work",
+  "nav.my_work": "Work plan",
   "nav.notifications": "Notifications",
   "image_upload.upload": "Upload",
   "image_upload.replace": "Replace",
@@ -2268,5 +2268,7 @@
   "work_types.new_placeholder": "e.g. Fixed work",
   "work_types.add": "Add",
   "work_types.rename": "Rename",
-  "work_types.none_yet": "This company has no work types yet. Add them under Hours › Work types."
+  "work_types.none_yet": "This company has no work types yet. Add them under Hours › Work types.",
+  "hours_admin.save_all_none": "Nothing changed yet",
+  "hours_admin.edit_hint": "Type in the cells; changes are written only when you press Save all."
 }

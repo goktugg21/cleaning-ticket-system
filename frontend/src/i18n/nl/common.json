@@ -18,7 +18,7 @@
   "nav.new_ticket": "Nieuw ticket",
   "nav.tickets": "Tickets",
   "nav.new_melding": "Nieuwe melding",
-  "nav.my_work": "Mijn werk",
+  "nav.my_work": "Werkplanning",
   "nav.notifications": "Notificaties",
   "image_upload.upload": "Uploaden",
   "image_upload.replace": "Vervangen",
@@ -2268,5 +2268,7 @@
   "work_types.new_placeholder": "Bijv. Vast werk",
   "work_types.add": "Toevoegen",
   "work_types.rename": "Hernoemen",
-  "work_types.none_yet": "Dit bedrijf heeft nog geen werksoorten. Voeg ze toe via Uren › Werksoorten."
+  "work_types.none_yet": "Dit bedrijf heeft nog geen werksoorten. Voeg ze toe via Uren › Werksoorten.",
+  "hours_admin.save_all_none": "Nog niets gewijzigd",
+  "hours_admin.edit_hint": "Typ in de cellen; wijzigingen worden pas met Alles bewaren opgeslagen."
 }
