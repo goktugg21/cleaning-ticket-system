@@ -882,3 +882,139 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
         )
 
     return _pdf_bytes(pdf)
+
+
+# ---- Sprint 171 §4 — the Worker Hour Report --------------------------------
+
+WORKER_HOURS_CSV_COLUMNS = (
+    "iso_week",
+    "employee",
+    "building",
+    "hour_type",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "total",
+)
+
+
+def build_worker_hours_csv(payload: dict) -> bytes:
+    """The report's rows, as CSV.
+
+    CSV rather than a real xlsx: every other export in this module is
+    CSV, Excel opens it without a prompt, and adding an xlsx writer for
+    one report would be a dependency to carry forever. The column order
+    matches the on-screen table so a downloaded file reads like the
+    screen it came from.
+
+    A row with no building writes an EMPTY cell, not the word "none":
+    the reader is a spreadsheet, and a sentinel string would sort and
+    filter as data.
+    """
+    buffer, writer = _csv_writer(WORKER_HOURS_CSV_COLUMNS)
+    for row in payload["rows"]:
+        writer.writerow(
+            {
+                "iso_week": row["iso_week"],
+                "employee": row["employee_name"],
+                "building": row["building_name"] or "",
+                "hour_type": row["hour_type_name"],
+                "monday": row["monday"],
+                "tuesday": row["tuesday"],
+                "wednesday": row["wednesday"],
+                "thursday": row["thursday"],
+                "friday": row["friday"],
+                "saturday": row["saturday"],
+                "sunday": row["sunday"],
+                "total": row["total"],
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_worker_hours_pdf(payload: dict) -> bytes:
+    """The same rows, branded, through the shared PDF header.
+
+    Landscape, because twelve columns on A4 portrait would be
+    unreadable — the one place this differs from its neighbours, and it
+    differs because the table is wider, not because it wants to.
+    """
+    pdf = _ReportPDF(orientation="L", unit="mm", format="A4")
+    register_fonts(pdf)
+    pdf.generated_on = f"{payload['from']} — {payload['to']}"
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    logo_bottom = draw_logo(pdf, None, y=10.0)
+    pdf.set_xy(pdf.l_margin + LOGO_WIDTH_MM + 8.0, 12.0)
+    pdf.set_font(FONT_FAMILY, "B", 15)
+    pdf.cell(0, 8, "Worker hours")
+    rule_y = max(logo_bottom, 25.0) + 3.0
+    accent_rule(pdf, rule_y, NEUTRAL_ACCENT_RGB)
+    pdf.set_y(rule_y + 5.0)
+
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0,
+        6,
+        f"Weeks {payload['first_week']}–"
+        f"{payload['first_week'] + payload['week_count'] - 1} "
+        f"({payload['from']} — {payload['to']})",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    totals = payload["totals"]
+    pdf.cell(
+        0,
+        6,
+        f"Rows {totals['rows']} · Hours {totals['hours']} · "
+        f"Weeks {totals['weeks']} · Workers {totals['workers']}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+
+    headers = (
+        ("Wk", 12),
+        ("Worker", 46),
+        ("Building", 46),
+        ("Hour type", 34),
+        ("Mo", 15),
+        ("Tu", 15),
+        ("We", 15),
+        ("Th", 15),
+        ("Fr", 15),
+        ("Sa", 15),
+        ("Su", 15),
+        ("Total", 18),
+    )
+    pdf.set_font(FONT_FAMILY, "B", 8.5)
+    for label, width in headers:
+        pdf.cell(width, 7, label, border="B")
+    pdf.ln(7)
+
+    pdf.set_font(FONT_FAMILY, "", 8.5)
+    for row in payload["rows"]:
+        values = (
+            str(row["iso_week"]),
+            (row["employee_name"] or "")[:28],
+            (row["building_name"] or "—")[:28],
+            (row["hour_type_name"] or "")[:20],
+            row["monday"],
+            row["tuesday"],
+            row["wednesday"],
+            row["thursday"],
+            row["friday"],
+            row["saturday"],
+            row["sunday"],
+            row["total"],
+        )
+        for (_, width), value in zip(headers, values):
+            pdf.cell(width, 6, str(value))
+        pdf.ln(6)
+
+    return bytes(pdf.output())

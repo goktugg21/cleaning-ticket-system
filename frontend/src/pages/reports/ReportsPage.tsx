@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { HoursComparisonView } from "./HoursComparisonView";
 import { HoursComparisonChart } from "./charts/HoursComparisonChart";
+import { WorkerHoursView } from "./WorkerHoursView";
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import type { ReportFilters } from "../../api/reports";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
@@ -32,6 +33,7 @@ const RANGE_PRESETS: Array<{
 
 export function ReportsPage() {
   const [comparisonOpen, setComparisonOpen] = useState(false);
+  const [workerHoursOpen, setWorkerHoursOpen] = useState(false);
   const { me } = useAuth();
   const { t } = useTranslation(["reports", "common"]);
   const { filters, setFilter, setRangePreset } = useReportsFilters();
@@ -305,6 +307,55 @@ export function ReportsPage() {
         </div>
       )}
 
+      {workerHoursOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("worker_hours.title")}
+          data-testid="worker-hours-modal"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setWorkerHoursOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+            paddingTop: "6vh",
+            overflowY: "auto",
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              width: "min(96vw, 1320px)",
+              padding: 24,
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+              overflowY: "auto",
+            }}
+          >
+            <div className="section-head" style={{ marginBottom: 12 }}>
+              <div className="section-head-title">{t("worker_hours.title")}</div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setWorkerHoursOpen(false)}
+                data-testid="worker-hours-close"
+              >
+                {t("common:cancel")}
+              </button>
+            </div>
+            <WorkerHoursView />
+          </div>
+        </div>
+      )}
+
       {/* Extra Work revenue is its own report (SoT §7.2), not a generic
           ticket count — render it FIRST and full-width, above the grid of
           ticket-count charts. */}
@@ -367,6 +418,31 @@ export function ReportsPage() {
           refreshKey={refreshKey}
           onOpen={() => setComparisonOpen(true)}
         />
+        {/* Sprint 171 §4 — the Worker Hour Report, as a card opening a
+            modal, the shape §1 settled for the comparison. No nav
+            child: a nav child is a sub-page as far as an operator is
+            concerned, which is the thing §1 removed. */}
+        <section
+          className="card"
+          style={{ padding: "20px 22px", minHeight: 360 }}
+          data-testid="chart-card-worker-hours"
+        >
+          <h3 className="section-title">{t("worker_hours.title")}</h3>
+          <p className="muted small" style={{ marginBottom: 8 }}>
+            {t("worker_hours.subtitle")}
+          </p>
+          <p className="muted small">{t("worker_hours.card_hint")}</p>
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setWorkerHoursOpen(true)}
+              data-testid="open-worker-hours"
+            >
+              {t("worker_hours.open")}
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   );

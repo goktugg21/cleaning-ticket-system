@@ -906,3 +906,108 @@ class HoursComparisonView(APIView):
                 },
             }
         )
+
+
+class WorkerHoursReportView(APIView):
+    """
+    Sprint 171 §4 — the Worker Hour Report.
+
+        GET /api/reports/worker-hours/?year=&week=&weeks=
+
+    One row per (ISO week, worker, building, hour type) with Mon-Sun and
+    a total, plus the four tiles the reference shows.
+
+    `IsRevenueReportConsumer` is reused rather than a new class: this is
+    a per-PERSON breakdown of hours worked, which is provider-internal
+    on the same grounds the comparison is — STAFF must not read the
+    whole team's hours, and no customer-side role reads personnel data
+    at all. A new class answering the same question differently is how
+    two gates drift.
+
+    The computation lives in `reports/worker_hours.py`.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        from .worker_hours import build_worker_hours
+
+        today = timezone.localdate()
+        default_year, default_week, _ = today.isocalendar()
+        try:
+            iso_year = int(request.query_params.get("year") or default_year)
+            first_week = int(request.query_params.get("week") or default_week)
+            # Four at a time is the reference's span; capped at 13 so a
+            # hand-edited URL cannot ask for a five-year table.
+            week_count = min(
+                13, max(1, int(request.query_params.get("weeks") or 4))
+            )
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "year, week and weeks must be integers."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= first_week <= 53:
+            return Response(
+                {"detail": "week must be between 1 and 53."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            build_worker_hours(request.user, iso_year, first_week, week_count)
+        )
+
+
+class WorkerHoursExportView(APIView):
+    """
+    GET /api/reports/worker-hours/export.csv  (Excel opens it directly)
+    GET /api/reports/worker-hours/export.pdf
+
+    Same permission and same computation as the report above — the
+    export renders the payload the screen shows, so a downloaded file
+    can never disagree with the table it came from.
+
+    CSV rather than a real xlsx: `reports/exports.py` already builds
+    CSV for every other report here and Excel opens it without a
+    prompt, so this adds no dependency. The PDF goes through
+    `config/pdf_branding.py`, which the invoicing app already uses.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request, fmt: str):
+        from .exports import (
+            build_worker_hours_csv,
+            build_worker_hours_pdf,
+        )
+        from .worker_hours import build_worker_hours
+
+        today = timezone.localdate()
+        default_year, default_week, _ = today.isocalendar()
+        try:
+            iso_year = int(request.query_params.get("year") or default_year)
+            first_week = int(request.query_params.get("week") or default_week)
+            week_count = min(
+                13, max(1, int(request.query_params.get("weeks") or 4))
+            )
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "year, week and weeks must be integers."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = build_worker_hours(
+            request.user, iso_year, first_week, week_count
+        )
+        stem = f"worker-hours-{iso_year}-W{first_week}"
+        if fmt == "pdf":
+            body = build_worker_hours_pdf(payload)
+            content_type = "application/pdf"
+            name = f"{stem}.pdf"
+        else:
+            body = build_worker_hours_csv(payload)
+            content_type = "text/csv; charset=utf-8"
+            name = f"{stem}.csv"
+        response = HttpResponse(body, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{name}"'
+        return response

@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    WorkerHoursExportView,
+    WorkerHoursReportView,
     HoursComparisonView,
     AgeBucketsView,
     ExtraWorkByDepartmentCSVView,
@@ -33,6 +35,19 @@ from .views import (
 
 
 urlpatterns = [
+    # Sprint 171 §4 — the export literals BEFORE the report route, the
+    # ordering this repo keeps so a later converter change cannot let
+    # one swallow the other.
+    path(
+        "worker-hours/export.<str:fmt>",
+        WorkerHoursExportView.as_view(),
+        name="report-worker-hours-export",
+    ),
+    path(
+        "worker-hours/",
+        WorkerHoursReportView.as_view(),
+        name="report-worker-hours",
+    ),
     # Sprint 165 §5 — contracted vs worked hours. Lives in `reports`
     # because it reads BOTH `contracts` and `timesheets`, neither of
     # which may import the other.
