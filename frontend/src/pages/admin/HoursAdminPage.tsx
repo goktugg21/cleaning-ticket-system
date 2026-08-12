@@ -662,6 +662,7 @@ export function HoursAdminPage() {
 
       {tab === "contract_approval" && (
         <ContractHoursApprovalTab
+          onGoToContractHours={() => setTab("contract_hours")}
           companyId={company}
           buildings={buildings.map((b) => ({ id: b.id, name: b.name }))}
           employees={employees.map((e) => ({

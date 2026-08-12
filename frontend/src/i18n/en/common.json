@@ -2279,5 +2279,7 @@
   "contract_hours.explain_SAVED": "Saved: submitted and still correctable. Approving makes it final, or send it back to draft.",
   "contract_hours.explain_APPROVED": "Approved: agreed and no longer editable. Reopening puts it back to Saved and clears the approval.",
   "contract_hours.week_lock_note": "Note: closing or reopening a week (Overview tab) affects the time entries, not this approval. Contract hours are approved per row, not per week.",
-  "contract_hours.not_approvable_why": "Actual hours worked — these come from the time entries and are not approved here."
+  "contract_hours.not_approvable_why": "Actual hours worked — these come from the time entries and are not approved here.",
+  "contract_hours.nothing_this_week": "No contract hours and no time entries for this week yet. Contract hours are created on the Contract hours tab, with Bulk assignment.",
+  "contract_hours.go_create": "Go to Contract hours"
 }

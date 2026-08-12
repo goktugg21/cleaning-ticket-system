@@ -111,5 +111,7 @@
   "hours_comparison.total": "Totaal",
   "hours_comparison.empty": "Geen contracturen en geen gewerkte uren in deze maand.",
   "hours_comparison.asymmetry_note": "Een contract legt uren vast per gebouw, niet per medewerker. De uitsplitsing per medewerker hieronder gaat dus alleen over GEWERKTE uren; er is geen afgesproken aantal per persoon.",
-  "hours_comparison.open": "Openen"
+  "hours_comparison.open": "Openen",
+  "hours_comparison.other_bar": "Overige",
+  "hours_comparison.folded": "{{count}} gebouw(en) samengevoegd in Overige; de tabel toont ze allemaal."
 }

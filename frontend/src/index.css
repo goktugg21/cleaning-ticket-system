@@ -9525,3 +9525,27 @@ details[open] > .ew-department-tree-summary::before {
 @media (max-width: 700px) {
   .agenda-week-grid { grid-template-columns: 1fr; }
 }
+
+/* Sprint 171 §1 — the comparison table's WIDTH DISTRIBUTION.
+   Sprint 170 measured header-to-value offset and got 0 at every width.
+   That measurement was correct and it was of the wrong property: the
+   BUILDING column was taking every pixel the table had spare, so the
+   numbers sat pinned at the far right with a 199-404px desert between
+   a row's label and its first figure. The eye reads a number that far
+   from its label as drifting, and it effectively is.
+   So: the building column shrinks to its content (capped, with an
+   ellipsis for a very long name), STATE absorbs the slack instead, and
+   the numeric columns sit next to the name where a row can be read
+   across in one glance. */
+.hours-comparison-table th:first-child,
+.hours-comparison-table td:first-child {
+  width: 1%;
+  max-width: 24rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hours-comparison-table th:last-child,
+.hours-comparison-table td:last-child {
+  width: auto;
+}

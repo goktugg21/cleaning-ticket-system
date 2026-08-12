@@ -2279,5 +2279,7 @@
   "contract_hours.explain_SAVED": "Opgeslagen: ingediend en nog te corrigeren. Goedkeuren maakt hem definitief, of stuur hem terug naar concept.",
   "contract_hours.explain_APPROVED": "Goedgekeurd: akkoord en niet meer te wijzigen. Heropenen zet hem terug op Opgeslagen en wist de goedkeuring.",
   "contract_hours.week_lock_note": "Let op: een week sluiten of heropenen (tab Overzicht) raakt de urenregistratie, niet deze goedkeuring. Contracturen worden per regel goedgekeurd, niet per week.",
-  "contract_hours.not_approvable_why": "Werkelijk gewerkte uren — die komen uit de urenregistratie en worden hier niet goedgekeurd."
+  "contract_hours.not_approvable_why": "Werkelijk gewerkte uren — die komen uit de urenregistratie en worden hier niet goedgekeurd.",
+  "contract_hours.nothing_this_week": "Deze week zijn er nog geen contracturen en geen geregistreerde uren. Contracturen maak je aan op het tabblad Contracturen, met Bulk toewijzing.",
+  "contract_hours.go_create": "Naar Contracturen"
 }

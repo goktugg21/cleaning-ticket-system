@@ -188,7 +188,7 @@ export function HoursComparisonView() {
         )}
 
         <div className="table-wrap admin-list-wrap">
-          <table className="data-table data-table-dense">
+          <table className="data-table data-table-dense hours-comparison-table">
             <thead>
               <tr>
                 <th>{t("hours_comparison.col_building")}</th>

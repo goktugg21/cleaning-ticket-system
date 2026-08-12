@@ -100,10 +100,16 @@ export function ContractHoursApprovalTab({
   companyId,
   buildings,
   employees,
+  onGoToContractHours,
 }: {
   companyId: number | "";
   buildings: { id: number; name: string }[];
   employees: { id: number; name: string }[];
+  /** Sprint 171 §2b — takes the operator to the tab that CREATES
+   *  contract hours. With none, this screen is three empty tabs and
+   *  nothing on it says the rows come from somewhere else, so it reads
+   *  as a page with no function. A link beats describing a path. */
+  onGoToContractHours?: () => void;
 }) {
   const { t } = useTranslation("common");
   const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
@@ -573,7 +579,7 @@ export function ContractHoursApprovalTab({
                         })}
                       </strong>{" "}
                       <span className="muted small">
-                        {t("contract_hours.section_actual_hint")}
+                        {t("contract_hours.not_approvable_why")}
                       </span>
                     </td>
                   </tr>
@@ -657,16 +663,20 @@ export function ContractHoursApprovalTab({
                       )}
                     </div>
                   ) : (
-                    /* Sprint 170 §4 — say WHY, on the row. "Not
-                       approvable" told the operator that something was
-                       refused without telling him what would change
-                       it, so it read as a defect rather than as a
-                       fact about the row. */
+                    /* Sprint 171 §2a — a DASH, not a sentence.
+                       Sprint 170 put the reason on every row, inside
+                       the narrow Actions column, so it wrapped into a
+                       tall block of words down the right edge and each
+                       row grew to several hundred pixels. That one
+                       choice is most of why the screen looked broken.
+                       The reason is a fact about the SECTION and is
+                       said once in its header; repeating it per row was
+                       noise with a layout cost. */
                     <span
                       className="muted-empty"
                       title={t("contract_hours.not_approvable_why")}
                     >
-                      {t("contract_hours.not_approvable_why")}
+                      —
                     </span>
                   )}
                 </td>
@@ -678,10 +688,18 @@ export function ContractHoursApprovalTab({
             {!loading && rows.length === 0 && (
               <tr data-testid="approval-empty-state">
                 <td colSpan={14} className="muted">
-                  {t("contract_hours.empty_for_state", {
-                    state: t(`contract_hours.status_${tab}`),
-                  })}{" "}
-                  {t(`contract_hours.empty_hint_${tab}`)}
+                  {t("contract_hours.nothing_this_week")}{" "}
+                  {onGoToContractHours && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      style={{ marginLeft: 8 }}
+                      onClick={onGoToContractHours}
+                      data-testid="approval-go-to-contract-hours"
+                    >
+                      {t("contract_hours.go_create")}
+                    </button>
+                  )}
                 </td>
               </tr>
             )}

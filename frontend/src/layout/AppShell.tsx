@@ -701,23 +701,12 @@ export function AppShell({ children }: AppShellProps) {
                   {t("nav.reports")}
                 </NavLink>
               )}
-              {/* Sprint 166 §4 — the hours comparison has a screen now,
-                  and it is reachable the way every other report is.
-                  Sprint 165 built the endpoint and called it a feature;
-                  an endpoint returning 401 proves a route exists, not
-                  that a user can get to anything. */}
-              {canAccessReports(me?.role) && (
-                <NavLink
-                  to="/reports/hours-comparison"
-                  className={navChildClass}
-                  data-testid="sidebar-hours-comparison"
-                >
-                  <span className="nav-icon">
-                    <Timer size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.hours_comparison")}
-                </NavLink>
-              )}
+              {/* Sprint 171 §1 — the hours comparison has NO nav child.
+                  It is a card on the Reports page that opens a modal,
+                  which is what the owner asked for three times; a nav
+                  CHILD is a sub-page as far as an operator is
+                  concerned, and this entry is what he kept seeing. The
+                  ROUTE stays, so an existing link still works. */}
               {canAccessBilling(me?.role) && (
                 <NavLink to="/invoices" className={navClass}>
                   <span className="nav-icon">

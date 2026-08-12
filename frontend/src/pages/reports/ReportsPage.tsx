@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { HoursComparisonView } from "./HoursComparisonView";
+import { HoursComparisonChart } from "./charts/HoursComparisonChart";
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import type { ReportFilters } from "../../api/reports";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
@@ -249,36 +250,10 @@ export function ReportsPage() {
 
       </section>
 
-      {/* Sprint 169 §6 — the contracted-vs-worked comparison, ON the
-          Reports page. It had a sidebar entry and no presence here,
-          which is where an operator goes looking for a report. The card
-          opens it in a MODAL; the standalone route stays for a direct
-          link, and both render the SAME component. */}
-      <section
-        className="card card-detail-pad"
-        style={{ marginBottom: 16 }}
-        data-testid="report-card-hours-comparison"
-      >
-        <div className="section-head">
-          <div>
-            <div className="section-head-title">
-              {t("hours_comparison.title")}
-            </div>
-            <div className="section-head-sub">
-              {t("hours_comparison.subtitle")}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => setComparisonOpen(true)}
-            data-testid="open-hours-comparison"
-          >
-            {t("hours_comparison.open")}
-          </button>
-        </div>
-      </section>
-
+      {/* Sprint 171 §1 — the comparison is a CHART CARD in the grid
+          below, immediately after Tickets-by-building, rather than the
+          full-width banner it was. It read as one odd thing above the
+          reports instead of one OF them. */}
       {comparisonOpen && (
         <div
           role="dialog"
@@ -388,6 +363,10 @@ export function ReportsPage() {
         <TicketsByOriginChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByCustomerChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByBuildingChart filters={apiFilters} refreshKey={refreshKey} />
+        <HoursComparisonChart
+          refreshKey={refreshKey}
+          onOpen={() => setComparisonOpen(true)}
+        />
       </div>
     </div>
   );
