@@ -297,6 +297,19 @@ export function ContractDetailPage() {
 
       {tab === "general" && contract && (
         <section className="card card-detail-pad" data-testid="contract-general">
+          {lines.length === 0 && (
+            <p className="alert-info" data-testid="contract-general-no-lines">
+              {t("general.noLines")}{" "}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setTab("projects")}
+                data-testid="contract-general-go-projects"
+              >
+                {t("billing.goProjects")}
+              </button>
+            </p>
+          )}
           <div className="section-head" style={{ marginBottom: 8 }}>
             <div>
               <div className="section-head-title">{t("general.title")}</div>
@@ -479,9 +492,16 @@ export function ContractDetailPage() {
                   </Fragment>
                 ))}
                 {lines.length === 0 && (
-                  <tr>
+                  <tr data-testid="contract-projects-empty">
                     <td colSpan={7} className="muted">
-                      {t("projects.empty")}
+                      {/* Sprint 172 §2 — a contract with no lines shows
+                          zeros everywhere, and nothing said WHY. Every
+                          figure on this contract is computed from these
+                          rows, so the empty state says so and the add
+                          control sits directly under it. */}
+                      <strong>{t("projects.emptyTitle")}</strong>
+                      <br />
+                      {t("projects.emptyWhy")}
                     </td>
                   </tr>
                 )}
@@ -527,6 +547,19 @@ export function ContractDetailPage() {
               <div className="section-head-sub">{t("billing.desc")}</div>
             </div>
           </div>
+          {lines.length === 0 && (
+            <p className="alert-info" data-testid="contract-billing-no-lines">
+              {t("billing.noLines")}{" "}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setTab("projects")}
+                data-testid="contract-billing-go-projects"
+              >
+                {t("billing.goProjects")}
+              </button>
+            </p>
+          )}
           <dl className="detail-field-grid">
             <Field
               label={t("fields.billingPeriod")}

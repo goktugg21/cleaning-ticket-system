@@ -265,7 +265,13 @@ export function ContractHoursTab({
       )}
 
       <div className="hours-tiles-head">
-        <span className="hours-tiles-title">{t("contract_hours.title")}</span>
+        <div>
+          <span className="hours-tiles-title">{t("contract_hours.title")}</span>
+          {/* Sprint 172 §3 — the counterpart line to the Entries tab's. */}
+          <div className="section-head-sub">
+            {t("contract_hours.subtitle")}
+          </div>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <EditModeToggle
             editMode={edit.editModeRequested}

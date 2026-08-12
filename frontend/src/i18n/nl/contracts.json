@@ -271,5 +271,10 @@
   "contract_type_slot.other": "Overig",
   "stats.cancelled": "Geannuleerd",
   "form.statusDerivedHint": "Verlopen is geen keuze: die volgt uit de einddatum.",
-  "form.statusNow": "Huidige status: {{status}}"
+  "form.statusNow": "Huidige status: {{status}}",
+  "projects.emptyTitle": "Nog geen projectregels",
+  "projects.emptyWhy": "De maand- en jaarbedragen, de uren en de factuurvoorspelling van dit contract worden allemaal uit deze regels berekend. Zolang er geen regel is, staat overal € 0,00.",
+  "billing.noLines": "Dit contract heeft nog geen projectregels, dus elk bedrag hieronder is € 0,00.",
+  "billing.goProjects": "Naar Projecten",
+  "general.noLines": "Dit contract heeft nog geen projectregels; de bedragen en uren hieronder blijven nul totdat er één is."
 }

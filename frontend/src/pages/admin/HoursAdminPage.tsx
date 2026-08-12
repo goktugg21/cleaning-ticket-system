@@ -867,6 +867,12 @@ export function HoursAdminPage() {
                   <div className="section-head-title">
                     {t("hours_admin.list_title")}
                   </div>
+                  {/* Sprint 172 §3 — the two tabs record DIFFERENT
+                      things and the owner could not tell which from the
+                      buttons. Said in one line, in his words. */}
+                  <div className="section-head-sub">
+                    {t("hours_admin.entries_subtitle")}
+                  </div>
                   <div className="section-head-sub">
                     {t("hours_admin.pagination_summary", {
                       shown: entries.length,

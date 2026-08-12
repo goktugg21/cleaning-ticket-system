@@ -271,5 +271,10 @@
   "contract_type_slot.other": "Other",
   "stats.cancelled": "Cancelled",
   "form.statusDerivedHint": "Expired is not a choice: it follows from the end date.",
-  "form.statusNow": "Current status: {{status}}"
+  "form.statusNow": "Current status: {{status}}",
+  "projects.emptyTitle": "No project lines yet",
+  "projects.emptyWhy": "This contract's monthly and yearly amounts, its hours and its invoice forecast are all computed from these lines. With none, everything reads € 0.00.",
+  "billing.noLines": "This contract has no project lines yet, so every amount below is € 0.00.",
+  "billing.goProjects": "Go to Projects",
+  "general.noLines": "This contract has no project lines yet; the amounts and hours below stay zero until there is one."
 }

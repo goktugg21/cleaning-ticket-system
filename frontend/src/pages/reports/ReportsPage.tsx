@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { HoursComparisonView } from "./HoursComparisonView";
 import { HoursComparisonChart } from "./charts/HoursComparisonChart";
 import { WorkerHoursView } from "./WorkerHoursView";
+import { WorkerHoursCardTiles } from "./charts/WorkerHoursCardTiles";
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import type { ReportFilters } from "../../api/reports";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
@@ -431,7 +432,15 @@ export function ReportsPage() {
           <p className="muted small" style={{ marginBottom: 8 }}>
             {t("worker_hours.subtitle")}
           </p>
-          <p className="muted small">{t("worker_hours.card_hint")}</p>
+          {/* Sprint 172 §4 — the card was a title, two lines and a
+              button while every neighbour carried a chart. It shows the
+              four figures the modal computes for the current span, so
+              the grid reads as one set of tiles and the card answers
+              something on its own. */}
+          <WorkerHoursCardTiles refreshKey={refreshKey} />
+          <p className="muted small" style={{ marginTop: 10 }}>
+            {t("worker_hours.card_hint")}
+          </p>
           <div style={{ marginTop: 10 }}>
             <button
               type="button"
