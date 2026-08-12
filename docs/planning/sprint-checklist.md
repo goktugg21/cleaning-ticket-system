@@ -4,96 +4,103 @@
 system and the Ramazan transcripts + Source of Truth, ending with a
 premium UI/UX polish. **CC updates `## NOW
 
-**Branch:** `feat/sprint-168`, cut from `feat/sprint-167` (`fbf0554`).
-It is the single branch being merged — #153 -> ... -> #168 are ONE
+**Branch:** `feat/sprint-169`, cut from `feat/sprint-168` (`1ca3a0e`).
+It is the single branch being merged — #153 -> ... -> #169 are ONE
 chain, one PR, not one per sprint.
-
-### The standard this sprint was held to
-
-Nothing counts as done unless it was reached by CLICKING, and the
-report says which entry. Sprint 168 is partly the bill for not holding
-Sprint 167 to it hard enough: §1 below is a feature I reported as
-shipped that could not be used at all.
 
 ### Per item
 
-- **§1 contract hours could not be CREATED — fixed, and this is the
-  correction of a false report.** Sprint 167 shipped the model, the
-  tab, the tiles, the filters and the table, and no way to add a row.
-  The tab could only ever say "no contract hours recorded yet", which
-  also made the approval screen decoration. The Bulk assignment dialog
-  now exists and REUSES `HoursWeekGrid` rather than copying it: the
-  grid already owns the blocks, the fill line, `+ Add type` and the
-  Sprint 166 rule that a manually added row is never filled, and only
-  the DESTINATION is passed (`onSaveCells`). Walked through by
-  clicking: 2 workers x 2 buildings, 4 hours a day, tiles went
-  0.00/0/0/0 to 112.00/2/2/4. The table also gained a per-row Delete,
-  refused for an APPROVED row.
-- **§2 approval is connected — and the bug was the WEEK question.** It
-  asked `valid_on = <the week's Monday>`, so four rows created on a
-  Wednesday were invisible in the week containing that Wednesday.
-  `in_force_between` is an OVERLAP test and `in_force_on` stays for
-  the question it answers correctly. Measured: Concept 4 rows / 112.00
-  contracted / 60.00 worked; submit moved 4->3 and 0->1; approve moved
-  1->0 and 0->1.
-  **Extra work hours stays "Niet vastgelegd"** — checked rather than
-  assumed. `ExtraWorkAssignment` carries who/role/when-assigned, never
-  a duration, and extra work has no slot concept at all.
-- **§3 work type — DONE.** `timesheets.WorkType`, the `HourType`
-  pattern exactly. Two axes on purpose: HourType weights an hour,
-  WorkType names the kind of work and carries no multiplier. The FK on
-  `ContractHours` is NULLABLE and stays so. The audit import is
-  ALIASED because `customers.WorkType` already existed there and a
-  second bare name would have shadowed it.
-- **§4 the picker is no longer clipped.** Measured cause:
-  `.week-entry-modal { overflow-x: hidden }` — overflow-x hidden with
-  overflow-y visible computes to `auto`, so the rule that stopped
-  sideways scroll started clipping vertically. The list is PORTALLED to
-  document.body now (the offered option 2), which is what a native
-  select does and keeps an empty modal short. 1280: empty+closed
-  1180x391, empty+open 1180x391 (the modal does not grow), six rows
-  1180x765 with the grid scrolling.
-- **§5 contracts — status compared, types given a screen.** Concept =
-  DRAFT, Actief = ACTIVE, Verlopen = EXPIRED; "ExtraWorks" is not a
-  status but a TYPE, and adding it as one would put a single concept on
-  two axes. We keep CANCELLED, which the reference has no counterpart
-  for. The type catalog now has a management tab with add / archive /
-  reactivate / delete and a standard-set button offering four kinds to
-  a company that has none — the gap Sprint 166 recorded.
-- **§6 the chip strip — and removing the chip was NOT enough.** Seven
-  chips still wrapped, because `repeat(auto-fit, minmax(210px, 1fr))`
-  is width-driven, not count-driven. A MODIFIER class (columns instead
-  of auto-fit) fixes it without touching the class five other strips
-  share. 1024 / 1280 / 1440: 7 chips, 1 row, no page overflow.
-- **§7 the Work Plan — EXTENDED the agenda, did not add a page.**
-  Mon-Sun frame, week stepper, "this week", chips that filter, Type and
-  Status filters. The cards, actions and dialogs are Sprint 111's and
-  are untouched.
+- **§1 the modal contains its open list — DONE, and it took four
+  sprints to answer the question actually asked.** 166 gave it a height
+  floor; 167 removed it; 168 stopped the list being CLIPPED by
+  portalling it to `document.body`. Each was a real fix and none was
+  the request: the owner was looking at a short modal with a long list
+  hanging out of its bottom. A portalled list is `position: fixed` and
+  contributes nothing to the modal's layout, so no CSS on the modal can
+  make it grow — the height has to be RESERVED. The picker reports its
+  list's real bottom edge; the dialog reserves the difference. ONE
+  measurement suffices because the reserve is additive at the bottom.
+  Measured at 1280, modal bottom against list bottom: closed
+  1180x268/322; workers open 1180x268/322 with the list at 202..296
+  (inside, so no growth — the rule is not "always grow"); buildings
+  open 1180x384/438 with the list at 202..422 (inside); closed again
+  1180x268. The 85vh cap and the grid's own scrolling are untouched.
+- **§2 work types — the endpoints existed and no screen called them.**
+  Sprint 168 shipped the model, CRUD, standard-set and a column; the
+  frontend never called any of it, so the picker was empty everywhere
+  with nothing able to fill it. Now a Werksoorten tab on /admin/hours.
+  It is NOT a copy of the contract-types screen: the shape moved into
+  `CatalogTab` and both are thin wrappers. Both gained Rename, which
+  neither had.
+- **§3 the approval tabs — REPRODUCED first, and they worked.** The
+  active class moved and the rows changed on every click. Two things
+  made that invisible: the screen opened hard-coded on SAVED (in
+  practice the emptiest state), and the three rows a tab controls sat
+  in the same undifferentiated list as eight "worked" rows that never
+  change. The landing tab is DERIVED from where the rows are, and the
+  table has two labelled, counted sections plus an empty state naming
+  the state you are on.
+- **§4 contract types read in the reader's language — the 152.3
+  pattern, mirrored.** `standard_slot` derived in `save()`, read-only
+  on the serializer, one frontend helper, every call site through it.
+  The three consequences (rename detaches, rename back re-attaches, a
+  custom name matching a standard one reads as standard) each have a
+  test. Backfill migration required because `""` means "custom".
+- **§5 statuses — mapped, not duplicated.** Concept=DRAFT,
+  Actief=ACTIVE, Verlopen=EXPIRED (derived from end_date).
+  "ExtraWorks" is not a status: it names what the contract is about,
+  which is the TYPE axis, and as of §4 it is a recognised slot. The
+  real gap was that `cancelled` was COMPUTED and never rendered — the
+  tiles counted three of the four statuses the filter offers. There is
+  a Geannuleerd tile now.
+- **§6 the comparison is on the Reports page — as a card opening a
+  MODAL**, with the standalone route kept. Both render the same
+  component. The alignment cause was not widths: `.data-table th` sets
+  left-align at a specificity `.contract-num` cannot beat, so numbers
+  were right-aligned under left-aligned headers and the gap GREW with
+  the viewport (-53/-73/-104px at 1024/1280/1440 for Afgesproken). Now
+  0 at every width, each numeric column a fixed 144px.
+- **§7 create a contract from inside the customer — DONE**, using the
+  SAME dialog with `fixedCustomerId`. The fixed id is what gets
+  SUBMITTED, not merely displayed: a disabled `<select>` shows a value
+  but `form.customer` is never set, because the onChange that would set
+  it cannot fire.
+- **§8 one list, mounted twice — DONE for both.** The customer-scoped
+  pages were 296- and 295-line read-only re-implementations of a
+  1202-line list and the Tickets variant. Both now mount the real
+  component with `customerId` fixed. Verified: identical edit toggle,
+  checkboxes and bulk toolbar from both entry points; only the row
+  counts differ.
 
-### What is NOT done, and why
+### What §8's required test found
 
-- **Extra-work items in the Work Plan.** It shows tickets only. No
-  endpoint returns dated extra work for a viewer, and extra work has no
-  schedule at all — `ExtraWorkAssignment` records who, never when.
-  Putting it in the week means giving extra work a schedule, which is a
-  feature, not a view.
-- **The In Progress and Archived chips.** A staff slot has neither
-  state. The screen SAYS both are missing rather than showing two
-  chips permanently reading 0.
-- **Overdue is a filter, not a modal** — a deliberate choice: the cards
-  carry Mark done and Unable to complete, and a modal would need a
-  second copy of the card or would strip its actions.
+`?customer=<nonexistent>` returned **400** while `?customer=<exists but
+out of your scope>` returned **200 with no rows**. That difference
+answers "is there a customer 812?" to anyone who can reach the list —
+an existence oracle, and it matters more now that the customer-scoped
+page supplies the id from the URL. The generated `ModelChoiceFilter`
+was validating against every customer; it is a plain `NumberFilter`
+now, so both cases are 200-and-empty.
+
+### Not done
+
+- **Buildings and Users were not redirected.** The owner allows those
+  two to send the operator to the main list with the customer
+  pre-filtered. They were not broken by this sprint and the change was
+  not asked for as work — if it is done later, the destination must
+  arrive with the filter visibly set, because a silent redirect that
+  looks like an unfiltered list is worse than the page it replaced.
 
 ### Gates
 
-`test timesheets contracts` — **373 tests, OK** (isolated database, own
-worktree), including **18 new** for the work-type catalog, the
-explicit-rows bulk shape and `in_force_between`. `test tickets` run
-separately. `makemigrations --dry-run --check` — no changes detected;
-`timesheets.0005_worktype_contracthours_work_type_and_more` applied to
-dev. Frontend: tsc clean, eslint **44 (42 errors, 2 warnings)** —
-baseline, none added — build OK. i18n lockstep: `common` 2245,
-`staff_slots` 109, `contracts` 217, each side equal.
+`test timesheets contracts reports` and `test tickets` (the customer
+filter suites) run isolated in this worktree. New this sprint: 12 tests
+for the contract-type slot derivation, 4 for customer-scoped list
+safety. `makemigrations --dry-run --check` clean;
+`contracts.0003`/`0004` applied to dev. Frontend: tsc clean, eslint
+**44 (42 errors, 2 warnings)**, build OK, every i18n namespace in
+lockstep, and the undefined-CSS-class sweep over all ten touched files
+found none.
 
 ## NEXT
 
