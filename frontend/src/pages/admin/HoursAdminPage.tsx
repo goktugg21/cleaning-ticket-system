@@ -33,6 +33,7 @@ import { HourTypesTab } from "./HourTypesTab";
 import { HoursFilterRow } from "./HoursFilterRow";
 import { ContractHoursApprovalTab } from "./ContractHoursApprovalTab";
 import { ContractHoursTab } from "./ContractHoursTab";
+import { WorkTypesTab } from "./WorkTypesTab";
 import { HoursOverviewTab } from "./HoursOverviewTab";
 
 // Sprint 152.2 — "weeks" became the OVERVIEW tab: the read-only
@@ -45,7 +46,8 @@ type Tab =
   | "hour_types"
   | "weeks"
   | "contract_hours"
-  | "contract_approval";
+  | "contract_approval"
+  | "work_types";
 
 // Sprint 152 — the SUPER_ADMIN's provider company, remembered across
 // visits. Its OWN key, not shared with the catalog's
@@ -648,7 +650,22 @@ export function HoursAdminPage() {
         >
           {t("contract_hours.tab_approval")}
         </button>
+        {/* Sprint 169 §2 — the work-type catalog had endpoints and no
+            screen, so the dropdown that uses it was empty everywhere
+            with nothing anywhere able to fill it. */}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "work_types"}
+          className={`composer-toggle-btn ${tab === "work_types" ? "active" : ""}`}
+          data-testid="hours-tab-work-types"
+          onClick={() => setTab("work_types")}
+        >
+          {t("work_types.tab")}
+        </button>
       </div>
+
+      {tab === "work_types" && <WorkTypesTab />}
 
       {tab === "contract_approval" && (
         <ContractHoursApprovalTab

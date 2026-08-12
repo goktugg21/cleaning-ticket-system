@@ -263,5 +263,6 @@
     "newName": "Nieuw type",
     "newPlaceholder": "Bijv. Schoonmaak",
     "add": "Toevoegen"
-  }
+  },
+  "types.rename": "Hernoemen"
 }

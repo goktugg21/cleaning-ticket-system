@@ -306,6 +306,10 @@ export function ContractHoursBulkDialog({
             <span className="field-label">
               {t("contract_hours.work_type")}
             </span>
+            {/* Sprint 169 §2 — an empty catalog SAYS so. An empty
+                dropdown with no explanation reads as broken, and until
+                this sprint there was no screen anywhere that could put
+                a row in it. */}
             <select
               className="field-input"
               value={workType}
@@ -323,6 +327,11 @@ export function ContractHoursBulkDialog({
                 </option>
               ))}
             </select>
+            {workTypes.length === 0 && (
+              <p className="muted small" data-testid="bulk-no-work-types">
+                {t("work_types.none_yet")}
+              </p>
+            )}
             <p
               className="week-setup-summary"
               data-testid="bulk-summary"

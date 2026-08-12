@@ -294,6 +294,13 @@ export function ContractHoursTab({
         ))}
       </div>
 
+      {/* Sprint 169 §2 — said, not left blank. */}
+      {workTypes.length === 0 && (
+        <p className="muted small" data-testid="contract-hours-no-work-types">
+          {t("work_types.none_yet")}
+        </p>
+      )}
+
       <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
         <div className="filter-field">
           <span className="filter-label">{t("building")}</span>

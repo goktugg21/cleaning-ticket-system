@@ -2252,5 +2252,21 @@
   "contract_hours.empty_for_state": "No contract hours in state {{state}} this week.",
   "contract_hours.empty_hint_DRAFT": "Add rows through Contract hours › Bulk assignment.",
   "contract_hours.empty_hint_SAVED": "Submit a draft row to get one here.",
-  "contract_hours.empty_hint_APPROVED": "Approve a saved row to get one here."
+  "contract_hours.empty_hint_APPROVED": "Approve a saved row to get one here.",
+  "work_types.tab": "Work types",
+  "work_types.title": "Work types",
+  "work_types.desc": "Per company. With no work types the contract-hours picker stays empty.",
+  "work_types.standard_set": "Add standard set",
+  "work_types.name": "Name",
+  "work_types.in_use": "In use",
+  "work_types.active": "Active",
+  "work_types.archived": "Archived",
+  "work_types.archive": "Archive",
+  "work_types.reactivate": "Reactivate",
+  "work_types.empty": "No work types yet.",
+  "work_types.new_name": "New work type",
+  "work_types.new_placeholder": "e.g. Fixed work",
+  "work_types.add": "Add",
+  "work_types.rename": "Rename",
+  "work_types.none_yet": "This company has no work types yet. Add them under Hours › Work types."
 }

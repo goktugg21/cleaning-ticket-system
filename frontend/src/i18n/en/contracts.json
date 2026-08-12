@@ -263,5 +263,6 @@
     "newName": "New type",
     "newPlaceholder": "e.g. Cleaning",
     "add": "Add"
-  }
+  },
+  "types.rename": "Rename"
 }

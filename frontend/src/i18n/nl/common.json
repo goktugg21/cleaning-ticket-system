@@ -2252,5 +2252,21 @@
   "contract_hours.empty_for_state": "Geen contracturen met status {{state}} in deze week.",
   "contract_hours.empty_hint_DRAFT": "Voeg regels toe via Contracturen › Bulk toewijzing.",
   "contract_hours.empty_hint_SAVED": "Dien een conceptregel in om er hier een te krijgen.",
-  "contract_hours.empty_hint_APPROVED": "Keur een opgeslagen regel goed om er hier een te krijgen."
+  "contract_hours.empty_hint_APPROVED": "Keur een opgeslagen regel goed om er hier een te krijgen.",
+  "work_types.tab": "Werksoorten",
+  "work_types.title": "Werksoorten",
+  "work_types.desc": "Per bedrijf. Zonder werksoorten blijft de keuzelijst bij contracturen leeg.",
+  "work_types.standard_set": "Standaardset toevoegen",
+  "work_types.name": "Naam",
+  "work_types.in_use": "In gebruik",
+  "work_types.active": "Actief",
+  "work_types.archived": "Gearchiveerd",
+  "work_types.archive": "Archiveren",
+  "work_types.reactivate": "Heractiveren",
+  "work_types.empty": "Nog geen werksoorten.",
+  "work_types.new_name": "Nieuwe werksoort",
+  "work_types.new_placeholder": "Bijv. Vast werk",
+  "work_types.add": "Toevoegen",
+  "work_types.rename": "Hernoemen",
+  "work_types.none_yet": "Dit bedrijf heeft nog geen werksoorten. Voeg ze toe via Uren › Werksoorten."
 }
