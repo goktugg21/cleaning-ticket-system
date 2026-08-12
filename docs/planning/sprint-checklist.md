@@ -4,104 +4,84 @@
 system and the Ramazan transcripts + Source of Truth, ending with a
 premium UI/UX polish. **CC updates `## NOW
 
-**Branch:** `feat/sprint-170`, cut from `feat/sprint-169` (`7d6ab13`).
-It is the single branch being merged — #153 -> ... -> #170 are ONE
+**Branch:** `feat/sprint-171`, cut from `feat/sprint-170` (`37dbd59`).
+It is the single branch being merged — #153 -> ... -> #171 are ONE
 chain, one PR, not one per sprint.
-
-crmtest is running Sprint 169, checked before starting: the deployed
-bundle contains `report-card-hours-comparison`, `hours-tab-work-types`,
-`contract-hours-bulk-open` and `agenda-week-grid`. So this sprint's
-reports are against current code, not against a stale deployment.
 
 ### Per item
 
-- **§1 the Work Plan was invisible to the person who asked for it.**
-  Sprint 168 built it into `AgendaPage` and the nav entry was gated by
-  `canAccessAgenda`, which admitted STAFF and BUILDING_MANAGER only.
-  The owner is a SUPER_ADMIN. Opening the gate alone would NOT have
-  been enough — SA/CA hold no assignment slots, so the page would have
-  rendered a permanently empty week, which is the same defect as a 403
-  and fails more quietly. So `/api/tickets/my-slots/` answers
-  `?scope=company` for a provider-management role, expressed through
-  `scope_tickets_for` so it cannot show a ticket the actor could not
-  already open. Renamed to the owner's word: **Werkplanning / Work
-  plan**. Verified as SUPER_ADMIN: sidebar → Werkplanning → seven day
-  columns, and stepping back to 2026-W30 shows 3 cards where the staff
-  member sees 2.
-- **§2 the Entries Edit button — REPRODUCED, and it worked.** Edit
-  turns 25 rows into 125 inputs, typing 5.50 moves the counter 0 → 1,
-  Save posts cleanly and the value survives a reload. What was broken:
-  Save sat ENABLED reading "Alles bewaren (0)", so pressing it before
-  changing anything did nothing — indistinguishable from a dead button.
-  Disabled at zero now, reading "Nog niets gewijzigd", plus a line
-  saying what edit mode is (the owner expected row SELECTION).
-- **§3 tab order — DONE.** Urenoverzicht · Contracturen · Overzicht ·
-  Goedkeuring · Uursoorten · Werksoorten.
-- **§4 approval is demonstrable.** Each state carries a one-line
-  explanation; "Not approvable" says WHY on the row; and the screen
-  states that closing or reopening a WEEK acts on the time entries and
-  not on this, because that is what the owner tested. Demonstrated:
-  3/0/1 → submit → 2/1/1 → approve → 2/0/2 → reopen → 2/1/1.
-- **§5 every standard set translates, through ONE rule.** Audit:
-  HourType had it (152.3), ContractType had it (169 §4), **WorkType did
-  not** — I shipped that catalog in 168 without applying the rule. It
-  now derives a slot in `save()`, with a required backfill. The three
-  two-line copies of the rendering rule became one
-  (`lib/standardSlotLabel.ts`) with a wrapper per catalog.
-- **§6 Expired.** It was already the filter, the tiles and the badge —
-  verified with a contract genuinely past its end date. The three the
-  owner counted are the create/edit dialog's, and that list is correct:
-  Expired is DERIVED, so offering it would let a stored status
-  contradict the dates. What was missing is that nothing said so. The
-  dialog is the only file §6 needed.
-- **§7 the comparison card.** Present and working; measured in BOTH
-  places at 1024/1280/1440, all three numeric columns offset **0**,
-  each a fixed 144px.
-- **§8 the modal reversion — REPRODUCED, and it was not intermittent.**
-  The first open of a picker grew the modal; every open after a close
-  did nothing, until a scroll re-ran the measurement. Cause: Sprint 169
-  derived the un-reserved bottom by subtracting the current reserve
-  from a live rect, so each measurement depended on the last. My first
-  fix (remember it in a ref) still failed two of five triggers, because
-  the ref was written on close while the reserve was still applied. The
-  working fix measures against a SPACER whose top does not move when
-  its own height changes. All eleven measured states now INSIDE.
+- **§1 the nav CHILD was the whole problem.** The card and the modal
+  were already right; `/reports/hours-comparison` was still a child
+  entry under Reports, and a nav child is a sub-page as far as an
+  operator is concerned. Entry deleted, route kept. The card moved into
+  the chart grid after Tickets-by-building, built like its neighbours,
+  with a grouped bar per building (contracted beside worked) BOUNDED to
+  the top 8 plus one "Overige" bar — the modal's table keeps every row.
+  **The table's real defect was width distribution, not alignment.**
+  Sprint 170 measured header-to-value offset, got 0, and was measuring
+  the wrong property: the gap between the end of the building NAME and
+  the start of CONTRACTED was 199–404px and GREW with the viewport. Now
+  a constant 105px at every width, building column pinned at 233px.
+- **§2a the per-row explanation was in the Actions column**, so it
+  wrapped into a tall block down the right edge. That one choice was
+  most of why the screen looked broken. It is a section-level fact, said
+  once in the section header. Rows are 34–51px now.
+- **§2b the empty state links** to the screen that creates rows. My
+  first attempt put the link in the all-empty branch, which fires only
+  when there are no contract hours AND no time entries — driven from an
+  empty system it never ran. Fixed and re-demonstrated.
+- **§3 the Work Plan against the reference**, item by item: added the
+  week RANGE in the header, a refresh, a separate Overdue button opening
+  the list (title / customer / building / scheduled date / how long
+  overdue / status / type), a today marker and an empty-day marker. Two
+  reference chips (In Progress, Archived) have no counterpart in the
+  slot model and the screen says so. Seven columns on ONE row at
+  1024/1280/1440 with no sideways scroll — the breakpoint had been
+  dropping to two columns at 1200, and my own today-marker's negative
+  margin was lifting one column 6px above its neighbours.
+- **§4 the Worker Hour Report — NEW.** A card opening a modal, no nav
+  child. Year + first week + span, four tiles, a tab per week, a row per
+  (week, worker, building, hour type) with Mon–Sun and a total, CSV
+  (Excel) and PDF export. ONE aggregate for the whole period —
+  `assertNumQueries(2)`, measured rather than guessed.
 
-### What was NOT touched, deliberately
+### §4 — the reference columns we cannot fill
 
-- **§9** — customer scoping was verified correct in the prompt and left
-  alone.
-- **`/my-hours` excludes SUPER_ADMIN** and stays that way: it is a
-  worker's own timesheet, an SA is not an employee of the provider
-  company, and /admin/hours is their surface. Called out in the sweep
-  rather than silently skipped.
+These are a decision for the owner; each is a new field on a model, and
+none is invented here or shown as an empty column:
 
-### The §1 sweep — every nav entry and the roles it admits
+  personnel number · contract hours · cost-centre name · cost-centre
+  code · order number · place · action · debtor · authorisation · hour
+  code · travel costs
 
-  /                                everyone
-  /admin/audit-logs                SUPER_ADMIN                correct
-  /admin/hours                     SA, CA                     correct
-  /admin/staff-assignment-requests SA, CA, BM                 correct
-  /agenda                          was STAFF, BM -> + SA, CA  FIXED
-  /extra-work, /tickets, /inbox    everyone
-  /invoices                        SA, CA, BM                 correct
-  /my-hours                        STAFF, BM, CA              see above
-  /planned-work                    SA, CA, BM                 correct
-  /reports, /reports/hours-comparison  SA, CA, BM             correct
-  /settings, /notifications        everyone
-  the /admin/* and /my/* families  provider / customer blocks correct
+Nothing was renamed-and-mapped: there is no figure under a different
+name. The four dimensions we hold — week, worker, building, hour type —
+are the reference's own leftmost columns.
 
 ### Gates
 
-`test timesheets contracts reports tickets` isolated in this worktree.
-New this sprint: 4 tests for the Work Plan's `?scope=company` (the
-param is not an escalation) and 5 for the work-type slot derivation.
-`makemigrations --dry-run --check` clean; `timesheets.0006`/`0007`
-applied to dev. Frontend: tsc clean, eslint **44 (42 errors, 2
-warnings)**, build OK, every i18n namespace in lockstep, and the
-undefined-CSS-class sweep over all 11 touched `.tsx` files found none.
+`test timesheets reports tickets` isolated in this worktree. New this
+sprint: 11 tests for the worker-hour report (grain, weekday placement,
+tiles, the span including the last week's Sunday, the scoping floor,
+the query count, both exports). `makemigrations --dry-run --check`
+clean — no new migrations this sprint. Frontend: tsc clean, eslint **44
+(42 errors, 2 warnings)**, build OK, every i18n namespace in lockstep.
 
 ## NEXT
+
+### Found in Sprint 171's CSS sweep, not fixed
+
+`section-title` is used by EVERY chart card in `pages/reports/charts/`
+and is defined in no CSS file — those headings have been rendering as a
+default `<h3>` for as long as the cards have existed. My two new cards
+use it because they were asked to match their neighbours exactly, so
+the sweep now flags 12 usages instead of 10.
+
+Not fixed here deliberately: defining it would restyle ten existing
+cards in a sprint that did not ask for it, and a silent visual change
+across the reports page is worse than a recorded one. It is a
+one-line CSS addition whenever the owner wants those headings styled.
+
 
 ### From Sprint 168 — the Work Plan's unbuilt half
 
