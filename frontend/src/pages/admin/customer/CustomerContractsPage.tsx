@@ -6,6 +6,11 @@ import { getCustomer } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
 import { listContracts } from "../../../api/contracts";
 import type { Contract } from "../../../api/contracts.types";
+import { Plus } from "lucide-react";
+
+import { useAuth } from "../../../auth/AuthContext";
+import { canManageContracts } from "../../../auth/permissions";
+import { ContractFormDialog } from "../contracts/ContractFormDialog";
 import { formatDate, formatMoney } from "../contracts/contractTables";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
@@ -43,6 +48,7 @@ export function CustomerContractsPage() {
   const [isActive, setIsActive] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
 
   const load = useCallback(() => {
     if (!Number.isFinite(id)) return undefined;
@@ -70,6 +76,8 @@ export function CustomerContractsPage() {
   useEffect(() => load(), [load]);
 
   const locale = i18n.language;
+  const { me } = useAuth();
+  const canManage = canManageContracts(me?.role);
 
   return (
     <div data-testid="customer-contracts-page">
@@ -83,10 +91,27 @@ export function CustomerContractsPage() {
 
       <div className="card" style={{ overflow: "hidden" }}>
         <div className="section-head">
-          <span className="section-head-title">{t("list.title")}</span>
-          <span className="section-head-sub">
-            {t("table.countLabel", { count })}
-          </span>
+          <div>
+            <span className="section-head-title">{t("list.title")}</span>{" "}
+            <span className="section-head-sub">
+              {t("table.countLabel", { count })}
+            </span>
+          </div>
+          {/* Sprint 169 §7 — the SAME gate the contracts list uses, not
+              a role list written again here: a role that can see this
+              page but not create gets no button at all, rather than one
+              that 403s. */}
+          {canManage && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setFormOpen(true)}
+              data-testid="customer-contracts-new"
+            >
+              <Plus size={14} strokeWidth={2.5} />
+              {t("actions.newContract")}
+            </button>
+          )}
         </div>
 
         {!loaded && (
@@ -172,6 +197,20 @@ export function CustomerContractsPage() {
           </div>
         )}
       </div>
+      {/* The SAME create dialog the main contracts list opens, with
+          the customer fixed. A second form here is how two screens end
+          up disagreeing about what a contract needs. */}
+      <ContractFormDialog
+        open={formOpen}
+        fixedCustomerId={id}
+        onClose={() => setFormOpen(false)}
+        onCreated={() => {
+          setFormOpen(false);
+          // The row appears without a page reload: the page's own
+          // loader is re-run rather than the browser reloading.
+          load();
+        }}
+      />
     </div>
   );
 }

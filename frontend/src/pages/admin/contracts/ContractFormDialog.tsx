@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { contractTypeLabel } from "../../../lib/contractTypeLabel";
 
-import { listAllCompanies } from "../../../api/admin";
+import { listAllCompanies, listCustomerBuildings } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
 import {
   createContract,
@@ -98,6 +98,7 @@ function initialState(contract?: Contract | null): FormState {
 export function ContractFormDialog({
   open,
   contract,
+  fixedCustomerId,
   onClose,
   onCreated,
   onSaved,
@@ -105,6 +106,12 @@ export function ContractFormDialog({
   open: boolean;
   /** Present for edit, absent for create. */
   contract?: Contract | null;
+  /** Sprint 169 §7 — opened from INSIDE a customer: that customer is
+   *  pre-filled and not changeable, and the location picker offers only
+   *  their buildings. The SAME dialog as the main list uses, not a
+   *  second form — a second create form is how two screens end up
+   *  disagreeing about what a contract needs. */
+  fixedCustomerId?: number;
   onClose: () => void;
   onCreated?: (contract: Contract) => void;
   onSaved?: (contract: Contract) => void;
@@ -115,6 +122,12 @@ export function ContractFormDialog({
 
   const [form, setForm] = useState<FormState>(() => initialState(contract));
   const [options, setOptions] = useState<ContractOptions | null>(null);
+  /** `null` until the customer's buildings are known — until then the
+   *  picker offers the unnarrowed list rather than an empty one, which
+   *  would read as "this customer has no locations". */
+  const [customerBuildingIds, setCustomerBuildingIds] = useState<Set<
+    number
+  > | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -192,6 +205,47 @@ export function ContractFormDialog({
     };
   }, [open, company, companyPending, contract]);
 
+  /**
+   * The locations on offer. With a fixed customer that is THEIR
+   * buildings only — you are standing inside one customer, and offering
+   * another customer's locations there is an invitation to a mistake
+   * the server would not catch, because a provider admin may legitimately
+   * link either.
+   *
+   * The narrowing is a UI convenience and nothing more: the server
+   * decides what may be linked, and this dialog posts the same payload
+   * from both entry points.
+   */
+  useEffect(() => {
+    if (!open || fixedCustomerId === undefined) return;
+    let cancelled = false;
+    listCustomerBuildings(fixedCustomerId)
+      .then((page) => {
+        if (cancelled) return;
+        setCustomerBuildingIds(
+          new Set(page.results.map((row) => row.building_id)),
+        );
+      })
+      .catch(() => {
+        // A failed narrowing falls back to the unnarrowed list rather
+        // than to an empty picker: the server is the authority on what
+        // may be linked, and an empty picker would look like "this
+        // customer has no locations".
+        if (!cancelled) setCustomerBuildingIds(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, fixedCustomerId]);
+
+  const buildings = useMemo(() => {
+    const all = options?.buildings ?? [];
+    if (fixedCustomerId === undefined || customerBuildingIds === null) {
+      return all;
+    }
+    return all.filter((row) => customerBuildingIds.has(row.id));
+  }, [options, fixedCustomerId, customerBuildingIds]);
+
   if (!open) return null;
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -217,7 +271,11 @@ export function ContractFormDialog({
   };
 
   const submit = async () => {
-    if (form.customer === "" || !form.start_date) {
+    // The fixed customer is what gets SUBMITTED, not merely what is
+    // displayed: a disabled <select> shows a value but `form.customer`
+    // was never set by an onChange that cannot fire.
+    const customerId = fixedCustomerId ?? form.customer;
+    if (customerId === "" || !form.start_date) {
       setError(t("errors.customerAndStartRequired"));
       return;
     }
@@ -225,7 +283,7 @@ export function ContractFormDialog({
     setError("");
     try {
       const payload = {
-        customer: form.customer as number,
+        customer: customerId as number,
         contract_type: form.contract_type === "" ? null : form.contract_type,
         start_date: form.start_date,
         end_date: form.end_date || null,
@@ -262,7 +320,6 @@ export function ContractFormDialog({
     }
   };
 
-  const buildings = options?.buildings ?? [];
 
   return (
     <div
@@ -346,8 +403,13 @@ export function ContractFormDialog({
             <select
               id="contract-customer"
               className="field-select"
-              value={form.customer}
-              disabled={Boolean(contract) || busy || companyPending}
+              value={fixedCustomerId ?? form.customer}
+              disabled={
+                Boolean(contract) ||
+                fixedCustomerId !== undefined ||
+                busy ||
+                companyPending
+              }
               onChange={(event) =>
                 set(
                   "customer",
