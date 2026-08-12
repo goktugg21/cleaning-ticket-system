@@ -434,6 +434,21 @@ export function ContractHoursApprovalTab({
         ))}
       </div>
 
+      {/* Sprint 170 §4 — what THIS state means and what moves a row on.
+          The three tabs were legible as counts and opaque as a
+          mechanism: the operator could see 3/0/1 and still not know
+          what would turn a 3 into a 2. */}
+      <p className="muted small" data-testid="approval-state-explainer">
+        {t(`contract_hours.explain_${tab}`)}
+      </p>
+
+      {/* The owner reopened a closed WEEK and expected approval to
+          change. It does not, and saying so where he looked is cheaper
+          than him testing it again. */}
+      <p className="muted small" data-testid="approval-week-lock-note">
+        {t("contract_hours.week_lock_note")}
+      </p>
+
       <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
         <div className="filter-field">
           <span className="filter-label">{t("building")}</span>
@@ -642,8 +657,16 @@ export function ContractHoursApprovalTab({
                       )}
                     </div>
                   ) : (
-                    <span className="muted-empty">
-                      {t("contract_hours.not_approvable")}
+                    /* Sprint 170 §4 — say WHY, on the row. "Not
+                       approvable" told the operator that something was
+                       refused without telling him what would change
+                       it, so it read as a defect rather than as a
+                       fact about the row. */
+                    <span
+                      className="muted-empty"
+                      title={t("contract_hours.not_approvable_why")}
+                    >
+                      {t("contract_hours.not_approvable_why")}
                     </span>
                   )}
                 </td>

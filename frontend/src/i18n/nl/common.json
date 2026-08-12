@@ -2274,5 +2274,10 @@
   "work_type_slot.fixed_work": "Vast werk",
   "work_type_slot.extra_work": "Meerwerk",
   "work_type_slot.machine": "Machinewerk",
-  "work_type_slot.other": "Overig"
+  "work_type_slot.other": "Overig",
+  "contract_hours.explain_DRAFT": "Concept: nog in bewerking. Dien een regel in om hem ter beoordeling te zetten.",
+  "contract_hours.explain_SAVED": "Opgeslagen: ingediend en nog te corrigeren. Goedkeuren maakt hem definitief, of stuur hem terug naar concept.",
+  "contract_hours.explain_APPROVED": "Goedgekeurd: akkoord en niet meer te wijzigen. Heropenen zet hem terug op Opgeslagen en wist de goedkeuring.",
+  "contract_hours.week_lock_note": "Let op: een week sluiten of heropenen (tab Overzicht) raakt de urenregistratie, niet deze goedkeuring. Contracturen worden per regel goedgekeurd, niet per week.",
+  "contract_hours.not_approvable_why": "Werkelijk gewerkte uren — die komen uit de urenregistratie en worden hier niet goedgekeurd."
 }

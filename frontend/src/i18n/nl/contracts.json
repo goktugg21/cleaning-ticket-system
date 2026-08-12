@@ -269,5 +269,7 @@
   "contract_type_slot.extra_work": "Meerwerk",
   "contract_type_slot.machine": "Machinewerk",
   "contract_type_slot.other": "Overig",
-  "stats.cancelled": "Geannuleerd"
+  "stats.cancelled": "Geannuleerd",
+  "form.statusDerivedHint": "Verlopen is geen keuze: die volgt uit de einddatum.",
+  "form.statusNow": "Huidige status: {{status}}"
 }

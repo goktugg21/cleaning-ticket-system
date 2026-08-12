@@ -2274,5 +2274,10 @@
   "work_type_slot.fixed_work": "Fixed work",
   "work_type_slot.extra_work": "Extra work",
   "work_type_slot.machine": "Machine work",
-  "work_type_slot.other": "Other"
+  "work_type_slot.other": "Other",
+  "contract_hours.explain_DRAFT": "Draft: still being written. Submit a row to put it up for review.",
+  "contract_hours.explain_SAVED": "Saved: submitted and still correctable. Approving makes it final, or send it back to draft.",
+  "contract_hours.explain_APPROVED": "Approved: agreed and no longer editable. Reopening puts it back to Saved and clears the approval.",
+  "contract_hours.week_lock_note": "Note: closing or reopening a week (Overview tab) affects the time entries, not this approval. Contract hours are approved per row, not per week.",
+  "contract_hours.not_approvable_why": "Actual hours worked — these come from the time entries and are not approved here."
 }

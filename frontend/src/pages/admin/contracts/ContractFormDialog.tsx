@@ -502,6 +502,24 @@ export function ContractFormDialog({
               <option value="ACTIVE">{t("status.ACTIVE")}</option>
               <option value="CANCELLED">{t("status.CANCELLED")}</option>
             </select>
+            {/* Sprint 170 §6 — why this list has three entries and the
+                filter has four. Expired is DERIVED from the end date
+                and is deliberately not choosable: a stored EXPIRED
+                could contradict the dates, and then the list, the
+                tiles and the badge would each be able to answer
+                differently about the same contract. */}
+            <p className="muted small" style={{ margin: "6px 0 0" }}>
+              {t("form.statusDerivedHint")}
+            </p>
+            {contract && (
+              <p
+                className="muted small"
+                style={{ margin: "2px 0 0" }}
+                data-testid="contract-form-derived-status"
+              >
+                {t("form.statusNow", { status: t(`status.${contract.status}`) })}
+              </p>
+            )}
             {/* EXPIRED is deliberately absent: it follows from the end
                 date and is not a choice. */}
             <span className="muted small">{t("form.statusHint")}</span>

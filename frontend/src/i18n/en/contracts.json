@@ -269,5 +269,7 @@
   "contract_type_slot.extra_work": "Extra Works",
   "contract_type_slot.machine": "Machine",
   "contract_type_slot.other": "Other",
-  "stats.cancelled": "Cancelled"
+  "stats.cancelled": "Cancelled",
+  "form.statusDerivedHint": "Expired is not a choice: it follows from the end date.",
+  "form.statusNow": "Current status: {{status}}"
 }
