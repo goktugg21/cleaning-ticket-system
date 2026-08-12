@@ -93,7 +93,8 @@ export function WeekEntryDialog({
   // Sprint 169 §1 — the modal grows to CONTAIN an open picker list,
   // and shrinks back when it closes. See `usePickerReserve` for why a
   // portalled list cannot be contained by CSS alone.
-  const { modalRef, reserve, onPickerOpenChange } = usePickerReserve();
+  const { modalRef, spacerRef, reserve, onPickerOpenChange } =
+    usePickerReserve();
 
   // Escape closes. One effect, and it touches only a listener — no
   // setState in an effect body.
@@ -245,10 +246,6 @@ export function WeekEntryDialog({
           maxHeight: "85vh",
           display: "flex",
           flexDirection: "column",
-          // The reserved space for an open picker list. Below
-          // everything else, so growing pushes only the modal's own
-          // bottom edge down and nothing on screen moves upward.
-          paddingBottom: 24 + reserve,
         }}
       >
         <h3 style={{ marginTop: 0, marginBottom: 4 }}>
@@ -351,6 +348,13 @@ export function WeekEntryDialog({
           weekClosed={weekClosed}
           onSaved={onSaved}
           onCancel={onClose}
+        />
+        {/* Sprint 170 §8 — see `usePickerReserve`. */}
+        <div
+          ref={spacerRef}
+          style={{ flex: "0 0 auto", height: reserve }}
+          aria-hidden="true"
+          data-testid="picker-reserve-spacer"
         />
       </div>
     </div>

@@ -102,7 +102,8 @@ export function ContractHoursBulkDialog({
   // Sprint 169 §1 — the modal grows to CONTAIN an open picker list,
   // and shrinks back when it closes. See `usePickerReserve` for why a
   // portalled list cannot be contained by CSS alone.
-  const { modalRef, reserve, onPickerOpenChange } = usePickerReserve();
+  const { modalRef, spacerRef, reserve, onPickerOpenChange } =
+    usePickerReserve();
 
   // Escape closes. One effect, and it touches only a listener.
   useEffect(() => {
@@ -232,10 +233,6 @@ export function ContractHoursBulkDialog({
           maxHeight: "85vh",
           display: "flex",
           flexDirection: "column",
-          // The reserved space for an open picker list. Below
-          // everything else, so growing pushes only the modal's own
-          // bottom edge down and nothing on screen moves upward.
-          paddingBottom: 24 + reserve,
         }}
       >
         <h3 style={{ marginTop: 0, marginBottom: 4 }}>
@@ -361,6 +358,16 @@ export function ContractHoursBulkDialog({
           onSaved={onClose}
           onCancel={onClose}
           onSaveCells={saveCells}
+        />
+        {/* Sprint 170 §8 — the reserve, as a real element. Its TOP is
+            where the modal's content ends and does not move when its
+            own height changes, which is what makes the measurement
+            self-consistent. */}
+        <div
+          ref={spacerRef}
+          style={{ flex: "0 0 auto", height: reserve }}
+          aria-hidden="true"
+          data-testid="picker-reserve-spacer"
         />
       </div>
     </div>

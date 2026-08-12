@@ -146,7 +146,13 @@ export function ChipMultiSelect({
     }
     const node = listRef.current;
     onOpenChange(node ? node.getBoundingClientRect().bottom : null);
-    return () => onOpenChange(null);
+    // Sprint 170 §8 — NO cleanup that reports `null`.
+    //
+    // There was one, and it made the report order-dependent: the
+    // cleanup fires whenever the effect re-runs, so a re-measure
+    // (`rect` changing on scroll or resize) zeroed the reserve before
+    // re-reporting it. Closing already reports `null` through the
+    // branch above, which is the one place that should.
   }, [open, rect, onOpenChange]);
 
   // Close on a click outside. Bound only while open, so the document
