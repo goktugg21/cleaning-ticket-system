@@ -135,5 +135,17 @@
   "worker_hours.empty": "Geen uren in deze periode.",
   "worker_hours.export_excel": "Excel",
   "worker_hours.export_pdf": "PDF",
-  "worker_hours.missing_columns": "Het referentierapport toont ook personeelsnummer, contracturen, kostenplaats en -code, ordernummer, plaats, actie, debiteur, autorisatie, uurcode en reiskosten. Die gegevens houden wij niet bij; ze worden hier bewust niet als lege kolom getoond."
+  "worker_hours.missing_columns": "Het referentierapport toont ook personeelsnummer, contracturen, kostenplaats en -code, ordernummer, plaats, actie, debiteur, autorisatie, uurcode en reiskosten. Die gegevens houden wij niet bij; ze worden hier bewust niet als lege kolom getoond.",
+  "worker_hours.col_personnel": "Personeelsnr.",
+  "worker_hours.col_cost_centre": "Kostenplaats",
+  "worker_hours.col_cost_code": "KP-code",
+  "worker_hours.col_order": "Ordernr.",
+  "worker_hours.col_place": "Plaats",
+  "worker_hours.col_action": "Handeling",
+  "worker_hours.col_debtor": "Debiteur",
+  "worker_hours.col_authorised": "Macht",
+  "worker_hours.col_hour_code": "Urencode",
+  "worker_hours.col_contracted": "Contr. uren",
+  "worker_hours.col_travel": "Reiskosten",
+  "worker_hours.yes": "Ja"
 }

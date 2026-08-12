@@ -135,5 +135,17 @@
   "worker_hours.empty": "No hours in this period.",
   "worker_hours.export_excel": "Excel",
   "worker_hours.export_pdf": "PDF",
-  "worker_hours.missing_columns": "The reference report also shows personnel number, contract hours, cost centre and code, order number, place, action, debtor, authorisation, hour code and travel costs. We hold none of that data; it is deliberately not shown here as an empty column."
+  "worker_hours.missing_columns": "The reference report also shows personnel number, contract hours, cost centre and code, order number, place, action, debtor, authorisation, hour code and travel costs. We hold none of that data; it is deliberately not shown here as an empty column.",
+  "worker_hours.col_personnel": "Personnel no.",
+  "worker_hours.col_cost_centre": "Cost centre",
+  "worker_hours.col_cost_code": "CC code",
+  "worker_hours.col_order": "Order no.",
+  "worker_hours.col_place": "Place",
+  "worker_hours.col_action": "Action",
+  "worker_hours.col_debtor": "Debtor",
+  "worker_hours.col_authorised": "Auth.",
+  "worker_hours.col_hour_code": "Hour code",
+  "worker_hours.col_contracted": "Contr. hours",
+  "worker_hours.col_travel": "Travel costs",
+  "worker_hours.yes": "Yes"
 }

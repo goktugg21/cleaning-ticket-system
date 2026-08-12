@@ -168,6 +168,21 @@ class StaffProfile(models.Model):
         related_name="staff_profile",
     )
     phone = models.CharField(max_length=64, blank=True)
+    # Sprint 172 §5 — the reference report's "Personeelsnr." column.
+    # On the PROFILE and not on User: it is a provider-side employment
+    # fact about a field worker, and a customer-side user has no
+    # personnel number to hold. Blank rather than null so "not filled
+    # in" has ONE representation, the convention this model follows.
+    personnel_number = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text=(
+            "The employer's own number for this worker, as it appears "
+            "on the payroll. Free text: every payroll numbers its "
+            "people differently."
+        ),
+    )
     internal_note = models.TextField(blank=True)
     can_request_assignment = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)

@@ -28,14 +28,40 @@ by weekday. Not one query per week and not one per worker: the
 reference shows four weeks at a time and a company can have fifty
 workers, which is 200 queries for a table. `assertNumQueries` pins it.
 
-## What we do NOT hold
+## Every reference column, and where each comes from
 
-The reference also shows personnel number, contract hours, cost-centre
-name and code, order number, place, action, debtor, authorisation, hour
-code and travel costs. We hold none of them, and this module invents
-none — an empty column that looks like data is worse than an absent
-one. They are listed in the sprint report as a decision for the owner:
-each is a new field on a model.
+Sprint 172 §5 — the owner chose to build them all. Half already
+existed and needed WIRING, not inventing; the theme of that sprint is
+that features sit beside each other without touching.
+
+  Personeelsnr.       StaffProfile.personnel_number      ADDED
+  Medewerker          User.full_name                     had it
+  Kostenplaats naam   Building.name — in the reference
+                      the cost centre IS the building    WIRED
+  Kostenplaats code   Building.cost_centre_code          ADDED
+  Ordernr.            Building.order_number              ADDED
+  Plaats              Building.city                      WIRED
+  Handeling           ContractHours.work_type            WIRED
+  Debiteur            the Customer behind the building   WIRED
+  MACHT               TimeEntry.is_authorised            ADDED (flag —
+                      meaning unconfirmed, see the model)
+  Urencode            HourType.code                      ADDED
+  Uursoort            HourType.name                      had it
+  Contr. uren         ContractHours weekly total         WIRED
+  Reiskosten          TimeEntry.travel_costs             ADDED
+
+A value that cannot exist for a row is NULL here and an em dash on
+screen — never a blank cell and never a zero standing in for
+"unknown". A zero travel cost is a claim that nobody travelled; an
+absent one is a claim that nobody said.
+
+## The contract-hours column, and why this module may read it
+
+`timesheets` may not import `contracts` and vice versa. Neither rule is
+in play here: `ContractHours` lives in `timesheets`, and this module is
+in `reports`, the app that exists to read across. The contracted figure
+beside the worked one is the whole point of the accounting report, and
+it is the same join `hours_comparison.py` already makes.
 """
 from __future__ import annotations
 
@@ -44,8 +70,9 @@ from decimal import Decimal
 
 from django.db.models import Sum
 
-from timesheets.models import TimeEntry
-from timesheets.scope import filter_time_entries_for
+from timesheets.contract_hours import in_force_between
+from timesheets.models import ContractHours, TimeEntry
+from timesheets.scope import filter_contract_hours_for, filter_time_entries_for
 
 
 WEEKDAY_KEYS = (
@@ -99,11 +126,22 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
             "employee_id",
             "employee__full_name",
             "employee__email",
+            # Sprint 172 §5 — every reference column, joined in the ONE
+            # aggregate rather than fetched per row. A per-row lookup of
+            # the customer behind a building is exactly the N+1 the
+            # query-count test exists to catch.
+            "employee__staff_profile__personnel_number",
             "building_id",
             "building__name",
+            "building__city",
+            "building__cost_centre_code",
+            "building__order_number",
             "hour_type_id",
             "hour_type__name",
+            "hour_type__code",
             "hour_type__standard_slot",
+            "is_authorised",
+            "travel_costs",
             "date",
         )
         .annotate(hours=Sum("hours"))
@@ -132,7 +170,29 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
                 "building_name": row["building__name"],
                 "hour_type_id": row["hour_type_id"],
                 "hour_type_name": row["hour_type__name"],
+                "hour_type_code": row["hour_type__code"] or None,
                 "hour_type_standard_slot": row["hour_type__standard_slot"],
+                # An empty string in the database is "nobody filled it
+                # in", and the screen shows an em dash for it. Coercing
+                # to None here means the UI has ONE absent-value test
+                # rather than one per column.
+                "personnel_number": row[
+                    "employee__staff_profile__personnel_number"
+                ]
+                or None,
+                "cost_centre_name": row["building__name"],
+                "cost_centre_code": row["building__cost_centre_code"] or None,
+                "order_number": row["building__order_number"] or None,
+                "place": row["building__city"] or None,
+                # Filled after the loop: both need a second, BOUNDED
+                # query rather than one per row.
+                "debtor": None,
+                "action": None,
+                "contracted_hours": None,
+                "is_authorised": row["is_authorised"],
+                "travel_costs": Decimal("0.00")
+                if row["travel_costs"] is not None
+                else None,
                 **{day: Decimal("0.00") for day in WEEKDAY_KEYS},
                 "total": Decimal("0.00"),
             }
@@ -141,6 +201,56 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
         hours = row["hours"] or Decimal("0.00")
         bucket[weekday] += hours
         bucket["total"] += hours
+        # Travel costs SUM across the row's days: the report row is a
+        # week, and two trips in one week are two costs. NULL stays NULL
+        # until something is actually claimed — an absent claim is not a
+        # claim of zero.
+        if row["travel_costs"] is not None:
+            bucket["travel_costs"] = (
+                bucket["travel_costs"] or Decimal("0.00")
+            ) + row["travel_costs"]
+
+    # ---- the two columns that need a second read -------------------
+    #
+    # BOTH are bounded: one query for every building in the report and
+    # one for every contract-hours row in the window, joined in Python.
+    # A per-row lookup would be N+1 twice over, which is exactly what
+    # `assertNumQueries` is there to catch.
+    building_ids = {b["building_id"] for b in buckets.values() if b["building_id"]}
+    debtors: dict[int, str] = {}
+    if building_ids:
+        from customers.models import CustomerBuildingMembership
+
+        for membership in CustomerBuildingMembership.objects.filter(
+            building_id__in=building_ids
+        ).select_related("customer"):
+            # First customer wins where a building serves several: the
+            # reference prints ONE debtor per row, and picking the
+            # lowest id is at least stable between runs. Recorded rather
+            # than hidden — a building under two customers is a real
+            # shape in this system.
+            debtors.setdefault(membership.building_id, membership.customer.name)
+
+    contracted: dict[tuple, Decimal] = {}
+    actions: dict[tuple, str] = {}
+    agreements = in_force_between(
+        filter_contract_hours_for(user, ContractHours.objects.all()),
+        start,
+        end,
+    ).select_related("work_type")
+    for agreement in agreements:
+        key = (agreement.employee_id, agreement.building_id)
+        contracted[key] = contracted.get(key, Decimal("0.00")) + (
+            agreement.weekly_total or Decimal("0.00")
+        )
+        if agreement.work_type_id and key not in actions:
+            actions[key] = agreement.work_type.name
+
+    for bucket in buckets.values():
+        bucket["debtor"] = debtors.get(bucket["building_id"])
+        pair = (bucket["employee_id"], bucket["building_id"])
+        bucket["contracted_hours"] = contracted.get(pair)
+        bucket["action"] = actions.get(pair)
 
     ordered = sorted(
         buckets.values(),
@@ -163,6 +273,20 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
                 **row,
                 **{day: str(row[day]) for day in WEEKDAY_KEYS},
                 "total": str(row["total"]),
+                # Decimals as STRINGS, never floats: money and hours in
+                # this codebase do not go through binary floating point,
+                # and JSON has no decimal type. `None` stays `None` so
+                # the UI can tell "nothing claimed" from "0.00 claimed".
+                "contracted_hours": (
+                    str(row["contracted_hours"])
+                    if row["contracted_hours"] is not None
+                    else None
+                ),
+                "travel_costs": (
+                    str(row["travel_costs"])
+                    if row["travel_costs"] is not None
+                    else None
+                ),
             }
             for row in ordered
         ],

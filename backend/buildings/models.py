@@ -15,6 +15,32 @@ class Building(models.Model):
     country = models.CharField(max_length=120, blank=True)
     postal_code = models.CharField(max_length=32, blank=True)
 
+    # Sprint 172 §5 — the reference report's "Kostenplaats" pair. In
+    # that system the cost centre IS the building, so the NAME column is
+    # `Building.name` (already here) and only the CODE was missing.
+    cost_centre_code = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text=(
+            "The accounting code for this building as a cost centre. "
+            "Free text: it is the customer's own coding scheme."
+        ),
+    )
+    # The reference's "Ordernr.". Put on the BUILDING rather than on the
+    # contract because the reference prints one per report ROW, and a
+    # row is (week, worker, building, hour type) — it varies with the
+    # building, not with the contract, and a building can be under more
+    # than one contract over time.
+    order_number = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text=(
+            "The customer's order or work-order number for this "
+            "location, printed on the hour report."
+        ),
+    )
     is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

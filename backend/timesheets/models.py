@@ -90,6 +90,19 @@ class HourType(models.Model):
         max_length=128,
         help_text='Operator-facing name, e.g. "Normale uren", "Overwerk".',
     )
+    # Sprint 172 §5 — the reference report's "Urencode" (e.g. GU),
+    # printed in one column with the NAME in the next. We had the name.
+    # Blank-by-default and NOT unique: a company that does not use codes
+    # leaves it empty, and two companies may well use the same letters.
+    code = models.CharField(
+        max_length=16,
+        blank=True,
+        default="",
+        help_text=(
+            'Short payroll code for this hour type, e.g. "GU". Printed '
+            "beside the name on the worker hour report."
+        ),
+    )
     multiplier = models.DecimalField(
         max_digits=4,
         decimal_places=2,
@@ -280,6 +293,40 @@ class TimeEntry(models.Model):
             "Optional: where the hours were worked. Must belong to the "
             "entry's own company. SET_NULL so retiring a building never "
             "destroys an hours record."
+        ),
+    )
+    # Sprint 172 §5 — the reference's "Reiskosten", a money amount per
+    # REPORT ROW. It goes on the time entry rather than on the
+    # contract-hours row because it is an actual cost incurred on a
+    # specific day by a specific person: a standing weekly agreement
+    # cannot know that somebody drove to a site on Tuesday. The
+    # contract-hours row is a plan; this is a fact.
+    #
+    # Decimal, never a float — money in this codebase never goes through
+    # binary floating point.
+    travel_costs = models.DecimalField(
+        max_digits=9,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=(
+            "Travel costs claimed for this entry, in euros. NULL means "
+            "none was claimed, which is different from a claim of 0.00."
+        ),
+    )
+    # The reference's "MACHT". Its meaning is not evident from the
+    # screenshots — it could be an authorisation flag, a mandate
+    # reference or a payroll switch. A BOOLEAN is the narrowest honest
+    # reading of a column that shows a tick, and a wrong guess here is
+    # cheap to widen (bool -> char) and expensive to narrow. FLAGGED for
+    # the owner to correct: if MACHT is a reference number rather than a
+    # yes/no, this becomes a CharField and the migration is additive
+    # again.
+    is_authorised = models.BooleanField(
+        default=False,
+        help_text=(
+            "Reference column MACHT. Meaning unconfirmed — modelled as "
+            "a flag until the owner says otherwise."
         ),
     )
     note = models.TextField(blank=True, default="")

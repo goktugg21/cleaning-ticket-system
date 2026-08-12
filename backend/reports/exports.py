@@ -886,11 +886,24 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
 
 # ---- Sprint 171 §4 — the Worker Hour Report --------------------------------
 
+# Sprint 172 §5 — the reference's column ORDER, so a downloaded file
+# reads like the screen and like the report it is replacing.
 WORKER_HOURS_CSV_COLUMNS = (
     "iso_week",
+    "personnel_number",
     "employee",
-    "building",
+    "cost_centre_name",
+    "cost_centre_code",
+    "order_number",
+    "place",
+    "action",
+    "debtor",
+    "authorised",
+    "hour_code",
     "hour_type",
+    "contracted_hours",
+    "travel_costs",
+    "building",
     "monday",
     "tuesday",
     "wednesday",
@@ -920,7 +933,21 @@ def build_worker_hours_csv(payload: dict) -> bytes:
         writer.writerow(
             {
                 "iso_week": row["iso_week"],
+                # An absent value writes an EMPTY cell, never a zero and
+                # never a sentinel word: the reader is a spreadsheet,
+                # where "unknown" would sort and filter as data.
+                "personnel_number": row["personnel_number"] or "",
                 "employee": row["employee_name"],
+                "cost_centre_name": row["cost_centre_name"] or "",
+                "cost_centre_code": row["cost_centre_code"] or "",
+                "order_number": row["order_number"] or "",
+                "place": row["place"] or "",
+                "action": row["action"] or "",
+                "debtor": row["debtor"] or "",
+                "authorised": "yes" if row["is_authorised"] else "",
+                "hour_code": row["hour_type_code"] or "",
+                "contracted_hours": row["contracted_hours"] or "",
+                "travel_costs": row["travel_costs"] or "",
                 "building": row["building_name"] or "",
                 "hour_type": row["hour_type_name"],
                 "monday": row["monday"],
@@ -979,18 +1006,26 @@ def build_worker_hours_pdf(payload: dict) -> bytes:
     pdf.ln(2)
 
     headers = (
-        ("Wk", 12),
-        ("Worker", 46),
-        ("Building", 46),
-        ("Hour type", 34),
-        ("Mo", 15),
-        ("Tu", 15),
-        ("We", 15),
-        ("Th", 15),
-        ("Fr", 15),
-        ("Sa", 15),
-        ("Su", 15),
-        ("Total", 18),
+        ("Wk", 10),
+        ("Pers.", 16),
+        ("Worker", 34),
+        ("Cost centre", 34),
+        ("Code", 16),
+        ("Order", 18),
+        ("Place", 22),
+        ("Debtor", 30),
+        ("Code", 12),
+        ("Hour type", 26),
+        ("Contr.", 14),
+        ("Travel", 14),
+        ("Mo", 11),
+        ("Tu", 11),
+        ("We", 11),
+        ("Th", 11),
+        ("Fr", 11),
+        ("Sa", 11),
+        ("Su", 11),
+        ("Total", 14),
     )
     pdf.set_font(FONT_FAMILY, "B", 8.5)
     for label, width in headers:
@@ -1001,9 +1036,17 @@ def build_worker_hours_pdf(payload: dict) -> bytes:
     for row in payload["rows"]:
         values = (
             str(row["iso_week"]),
-            (row["employee_name"] or "")[:28],
-            (row["building_name"] or "—")[:28],
-            (row["hour_type_name"] or "")[:20],
+            (row["personnel_number"] or "-")[:9],
+            (row["employee_name"] or "")[:20],
+            (row["cost_centre_name"] or "-")[:20],
+            (row["cost_centre_code"] or "-")[:9],
+            (row["order_number"] or "-")[:10],
+            (row["place"] or "-")[:13],
+            (row["debtor"] or "-")[:18],
+            (row["hour_type_code"] or "-")[:6],
+            (row["hour_type_name"] or "")[:15],
+            (row["contracted_hours"] or "-"),
+            (row["travel_costs"] or "-"),
             row["monday"],
             row["tuesday"],
             row["wednesday"],

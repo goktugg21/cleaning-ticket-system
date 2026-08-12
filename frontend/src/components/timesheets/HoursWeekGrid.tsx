@@ -381,14 +381,29 @@ export function HoursWeekGrid({
    * `added` is true for both kinds and inferring it from ordering is
    * how this went wrong twice.
    *
-   * The inputs still CLEAR once applied (Sprint 165's display fix): an
-   * input that keeps reading "4" is a claim about the grid's state,
-   * which stops being true the moment anything changes; one that empties
-   * itself is the record of an action, which stays true.
+   * Sprint 172 §1 — the inputs KEEP their typed values, reversing
+   * Sprint 165's display fix.
+   *
+   * That fix was sound when it was made and its premise has since gone.
+   * It cleared the box because an input reading "4" was a claim about
+   * the GRID's state, and that claim stopped being true the moment a
+   * row was added — the box said 4 while a new row sat empty.
+   *
+   * Sprint 166 settled that the fill only ever touches the rows the
+   * WIZARD created, and the label says exactly that ("Fill the default
+   * rows"). So the box no longer claims anything about rows it never
+   * touches: 4 in the box means "the default rows carry 4", which stays
+   * true when a manual row is added beside them. The contradiction the
+   * clearing existed to avoid cannot occur any more.
+   *
+   * And the clearing had a cost the owner hit immediately: typing into
+   * one day's box and clicking the next one wiped the first, so filling
+   * a week meant watching your own work disappear.
    */
   function applyToAllDay(dayKey: string, value: string) {
-    // Echoed while typing so the operator can see the digits they are
-    // entering; cleared by `commitApplyDay` the moment it lands.
+    // Kept until the dialog closes or the operator clears it. Applying
+    // is still immediate — this is a record of what was filled, not a
+    // pending edit waiting on a commit.
     setApplyRow((current) => ({ ...current, [dayKey]: value }));
     setEdits((current) => {
       const next = { ...current };
@@ -400,21 +415,6 @@ export function HoursWeekGrid({
         if (row.manual) continue;
         next[cellKey(row.id, dayKey)] = value;
       }
-      return next;
-    });
-  }
-
-  /** Clear the all-rows input once its value has been applied.
-   *
-   *  This is the display half of §3: an input that keeps showing "4"
-   *  is a claim about the grid's current state, and that claim stops
-   *  being true the moment a row is added. An input that empties itself
-   *  is a record of an ACTION, which stays true forever. */
-  function commitApplyDay(dayKey: string) {
-    setApplyRow((current) => {
-      if (!current[dayKey]) return current;
-      const next = { ...current };
-      delete next[dayKey];
       return next;
     });
   }
@@ -651,12 +651,10 @@ export function HoursWeekGrid({
                     onChange={(event) =>
                       applyToAllDay(dayKey, event.target.value)
                     }
-                    onBlur={() => commitApplyDay(dayKey)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        commitApplyDay(dayKey);
-                      }
+                      // Enter must not submit the surrounding form; the
+                      // value is already applied as it is typed.
+                      if (event.key === "Enter") event.preventDefault();
                     }}
                     disabled={busy || weekClosed}
                     aria-label={t("hours_week_grid.apply_all_day", {

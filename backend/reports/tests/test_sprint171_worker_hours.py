@@ -137,17 +137,26 @@ class QueryCountTests(WorkerHoursFixture):
                 self.entry(worker, day, "4.00", building=self.building_a)
 
         client = self.api(self.ca_a)
-        # TWO: the actor lookup the auth layer does, and the single
-        # aggregate. Measured, not guessed — I asserted 6 as a ceiling
-        # and it came back 2, and `assertNumQueries` is exact anyway, so
-        # the honest number is the one that will catch a regression.
-        # Four weeks and two workers cost the same two queries as one
-        # week and one worker, which is the property under test.
-        with self.assertNumQueries(2):
+        # FIVE, and the number is not the point — CONSTANCY is.
+        #
+        # The actor lookup, the main aggregate, the debtor lookup, and
+        # the contract-hours read with its scope check. Sprint 171 had
+        # two; Sprint 172 §5 added the debtor and contracted-hours
+        # columns, and both are ONE bounded query for the whole report
+        # rather than one per row. A per-row lookup of the customer
+        # behind a building is the N+1 this test exists to catch.
+        with self.assertNumQueries(5):
             response = client.get(
                 URL, {"year": 2026, "week": 10, "weeks": 4}
             )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Same count with twice the rows and a second building dimension: that is the property.
+        for day in (MONDAY, TUESDAY):
+            for worker in (self.staff_a, self.staff_a2):
+                self.entry(worker, day, "1.00", building=None)
+        with self.assertNumQueries(5):
+            client.get(URL, {"year": 2026, "week": 10, "weeks": 4})
 
 
 class ExportTests(WorkerHoursFixture):

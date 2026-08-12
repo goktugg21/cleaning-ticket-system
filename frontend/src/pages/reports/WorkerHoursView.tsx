@@ -20,6 +20,20 @@ interface WorkerHoursRow {
   iso_week: number;
   employee_id: number;
   employee_name: string;
+  // Sprint 172 §5 — every reference column. `null` means "we hold no
+  // value", which the table renders as an em dash; a zero would be a
+  // claim, and a blank cell would be indistinguishable from a bug.
+  personnel_number: string | null;
+  cost_centre_name: string | null;
+  cost_centre_code: string | null;
+  order_number: string | null;
+  place: string | null;
+  action: string | null;
+  debtor: string | null;
+  is_authorised: boolean;
+  hour_type_code: string | null;
+  contracted_hours: string | null;
+  travel_costs: string | null;
   building_id: number | null;
   building_name: string | null;
   hour_type_id: number;
@@ -60,6 +74,17 @@ interface Payload {
  * the payload covers the whole span, so switching weeks is free and the
  * tiles stay about the period rather than flickering per tab.
  */
+/** An absent value is an em dash, never a blank cell and never a zero
+ *  standing in for "unknown" — a blank reads as a bug and a zero reads
+ *  as a measurement. */
+function dash(value: string | null | undefined) {
+  return value ? (
+    value
+  ) : (
+    <span className="muted-empty">—</span>
+  );
+}
+
 export function WorkerHoursView() {
   const { t } = useTranslation(["reports", "common"]);
   const start = currentIsoWeek();
@@ -262,9 +287,21 @@ export function WorkerHoursView() {
           <thead>
             <tr>
               <th>{t("worker_hours.col_week")}</th>
+              <th>{t("worker_hours.col_personnel")}</th>
               <th>{t("worker_hours.col_worker")}</th>
-              <th>{t("common:building")}</th>
+              <th>{t("worker_hours.col_cost_centre")}</th>
+              <th>{t("worker_hours.col_cost_code")}</th>
+              <th>{t("worker_hours.col_order")}</th>
+              <th>{t("worker_hours.col_place")}</th>
+              <th>{t("worker_hours.col_action")}</th>
+              <th>{t("worker_hours.col_debtor")}</th>
+              <th>{t("worker_hours.col_authorised")}</th>
+              <th>{t("worker_hours.col_hour_code")}</th>
               <th>{t("worker_hours.col_hour_type")}</th>
+              <th className="contract-num">
+                {t("worker_hours.col_contracted")}
+              </th>
+              <th className="contract-num">{t("worker_hours.col_travel")}</th>
               {DAYS.map((day) => (
                 <th key={day} className="contract-num">
                   {t(`common:contract_hours.day_${day}`)}
@@ -280,14 +317,22 @@ export function WorkerHoursView() {
                 data-testid="worker-hours-row"
               >
                 <td>W{row.iso_week}</td>
+                <td>{dash(row.personnel_number)}</td>
                 <td className="td-subject">{row.employee_name}</td>
+                <td>{dash(row.cost_centre_name)}</td>
+                <td>{dash(row.cost_centre_code)}</td>
+                <td>{dash(row.order_number)}</td>
+                <td>{dash(row.place)}</td>
+                <td>{dash(row.action)}</td>
+                <td>{dash(row.debtor)}</td>
                 <td>
-                  {row.building_name ?? (
-                    <span className="muted-empty">
-                      {t("worker_hours.no_building")}
-                    </span>
+                  {row.is_authorised ? (
+                    t("worker_hours.yes")
+                  ) : (
+                    <span className="muted-empty">—</span>
                   )}
                 </td>
+                <td>{dash(row.hour_type_code)}</td>
                 <td>
                   {hourTypeLabelFrom(
                     row.hour_type_name,
@@ -295,6 +340,8 @@ export function WorkerHoursView() {
                     t,
                   )}
                 </td>
+                <td className="contract-num">{dash(row.contracted_hours)}</td>
+                <td className="contract-num">{dash(row.travel_costs)}</td>
                 {DAYS.map((day) => (
                   <td key={day} className="contract-num">
                     {row[day]}
@@ -307,7 +354,7 @@ export function WorkerHoursView() {
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={12} className="muted">
+                <td colSpan={22} className="muted">
                   {t("worker_hours.empty")}
                 </td>
               </tr>
