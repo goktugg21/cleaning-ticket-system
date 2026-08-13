@@ -360,13 +360,100 @@ class ExtraWorkRequest(models.Model):
         choices=ExtraWorkUrgency.choices,
         default=ExtraWorkUrgency.NORMAL,
     )
+    # Sprint 173 §4 — the PLANNED WINDOW, not a single date.
+    #
+    # `preferred_date` keeps its name deliberately: everything that
+    # reads it today keeps working, and renaming it would be a
+    # migration's worth of risk for a word. Read the pair as
+    # start -> end; an end with no start is not a window and the
+    # serializer refuses it.
+    #
+    # A window is what lets a week view place a job that spans days,
+    # which is the whole reason the reference holds two.
     preferred_date = models.DateField(null=True, blank=True)
+    planned_end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Last planned day. With `preferred_date` this is the "
+            "planned WINDOW; NULL means the job is planned for the one "
+            "day rather than for a span."
+        ),
+    )
+    # "By when this must be finished." Distinct from the planned window:
+    # a job can be planned for next week and due at the end of the
+    # month, and only the deadline decides whether it is late.
+    deadline = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "The date by which this must be finished. A record past it "
+            "and not finished is marked overdue."
+        ),
+    )
 
     status = models.CharField(
         max_length=32,
         choices=ExtraWorkStatus.choices,
         default=ExtraWorkStatus.REQUESTED,
     )
+
+    @property
+    def is_overdue(self) -> bool:
+        """Past its deadline and not finished.
+
+        Sprint 173 §4. One rule, here, so the list badge, the detail
+        page and the Work Plan cannot disagree about what "late" means —
+        three copies of a date comparison is how two screens end up
+        marking different rows.
+
+        A record with no deadline is never overdue: nobody said when it
+        was due, and inventing a due date to call something late is
+        worse than not marking it.
+        """
+        from django.utils import timezone
+
+        if self.deadline is None:
+            return False
+        # Finished work is never late, whatever its deadline says.
+        if self.status in {
+            ExtraWorkStatus.COMPLETED,
+            ExtraWorkStatus.CANCELLED,
+            ExtraWorkStatus.CUSTOMER_REJECTED,
+        }:
+            return False
+        return self.deadline < timezone.localdate()
+
+    @property
+    def started_before_plan(self) -> bool:
+        """Work began before its planned window opened.
+
+        The father's own example: a job entered today, started today,
+        and planned for September. That is not blocked — he was explicit
+        that people do it deliberately — but it IS shown, so it can be
+        found and cleaned up rather than discovered months later.
+
+        Derived from the STATUS HISTORY rather than a started_at column,
+        for the reason recorded in the product docs: eleven date columns
+        are that history flattened, and a flattened history cannot say
+        who did something or whether it went backwards.
+        """
+        if self.preferred_date is None:
+            return False
+        first_start = (
+            self.status_history.filter(
+                new_status__in=[
+                    ExtraWorkStatus.IN_PROGRESS,
+                    ExtraWorkStatus.COMPLETED,
+                ]
+            )
+            .order_by("created_at")
+            .values_list("created_at", flat=True)
+            .first()
+        )
+        if first_start is None:
+            return False
+        return first_start.date() < self.preferred_date
 
     # Sprint 28 Batch 6 — routing taxonomy computed at submission time
     # by `ExtraWorkRequestCreateSerializer.create()` from the cart's

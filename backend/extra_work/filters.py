@@ -16,6 +16,7 @@ way without redesigning the surface.
 """
 from __future__ import annotations
 
+from django.db.models import F, Q
 from django_filters import rest_framework as df
 
 from .billing import billing_month, build_ticket_map, is_earned
@@ -43,6 +44,20 @@ class ExtraWorkRequestFilter(df.FilterSet):
     # live-FK join would silently drop exactly those requests.
     category = df.CharFilter(method="filter_category")
 
+    # Sprint 173 §4 — find the late work and the work started early.
+    #
+    # Both are DERIVED, so both filter in the database rather than by
+    # calling the model property per row: a property filter would
+    # materialise the whole table to answer one question. The rule the
+    # queries express is the same one `is_overdue` /
+    # `started_before_plan` express in Python, and a test pins that the
+    # two agree — two definitions of "late" is exactly the drift this
+    # sprint is meant to remove.
+    overdue = df.BooleanFilter(method="filter_overdue")
+    started_early = df.BooleanFilter(method="filter_started_early")
+    deadline_before = df.DateFilter(field_name="deadline", lookup_expr="lte")
+    deadline_after = df.DateFilter(field_name="deadline", lookup_expr="gte")
+
     billing_period = df.CharFilter(method="filter_billing_period")
     invoice_status = df.ChoiceFilter(
         method="filter_invoice_status",
@@ -65,6 +80,54 @@ class ExtraWorkRequestFilter(df.FilterSet):
             "request_intent": ["exact", "in"],
             "created_by": ["exact"],
         }
+
+    def filter_overdue(self, queryset, name, value):
+        from django.utils import timezone
+
+        from .models import ExtraWorkStatus
+
+        if value is None:
+            return queryset
+        finished = [
+            ExtraWorkStatus.COMPLETED,
+            ExtraWorkStatus.CANCELLED,
+            ExtraWorkStatus.CUSTOMER_REJECTED,
+        ]
+        late = Q(deadline__isnull=False, deadline__lt=timezone.localdate()) & ~Q(
+            status__in=finished
+        )
+        return queryset.filter(late) if value else queryset.exclude(late)
+
+    def filter_started_early(self, queryset, name, value):
+        """Work that began before its planned window opened.
+
+        NOT blocked, only findable — the father was explicit that people
+        do this deliberately. The point is that it can be cleaned up
+        rather than discovered months later.
+        """
+        from django.db.models import Min
+
+        from .models import ExtraWorkStatus
+
+        if value is None:
+            return queryset
+        annotated = queryset.annotate(
+            first_start=Min(
+                "status_history__created_at",
+                filter=Q(
+                    status_history__new_status__in=[
+                        ExtraWorkStatus.IN_PROGRESS,
+                        ExtraWorkStatus.COMPLETED,
+                    ]
+                ),
+            )
+        )
+        early = Q(preferred_date__isnull=False, first_start__date__lt=F(
+            "preferred_date"
+        ))
+        return (
+            annotated.filter(early) if value else annotated.exclude(early)
+        )
 
     def filter_category(self, queryset, name, value):
         """`?category=<name>` — requests holding at least one line

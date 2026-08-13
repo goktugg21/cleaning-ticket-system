@@ -623,6 +623,9 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
 # Extra Work — list (lean)
 # ---------------------------------------------------------------------------
 class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
+    is_overdue = serializers.BooleanField(read_only=True)
+    started_before_plan = serializers.BooleanField(read_only=True)
+
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -801,6 +804,14 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "category_other_text",
             "urgency",
             "preferred_date",
+            # Sprint 173 §4 — the planned WINDOW and the deadline, plus
+            # the two derived facts. Derived server-side so the list,
+            # the detail page and the Work Plan cannot disagree about
+            # what "late" or "started early" means.
+            "planned_end_date",
+            "deadline",
+            "is_overdue",
+            "started_before_plan",
             "status",
             # Sprint 28 Batch 6 — cart routing taxonomy + nested line
             # items. routing_decision is computed at submission time by
@@ -1229,6 +1240,14 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "work_type",
             "urgency",
             "preferred_date",
+            # Sprint 173 §4 — the planned WINDOW and the deadline, plus
+            # the two derived facts. Derived server-side so the list,
+            # the detail page and the Work Plan cannot disagree about
+            # what "late" or "started early" means.
+            "planned_end_date",
+            "deadline",
+            "is_overdue",
+            "started_before_plan",
             "request_intent",
             "line_items",
         ]
