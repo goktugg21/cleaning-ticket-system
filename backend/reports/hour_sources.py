@@ -115,8 +115,35 @@ def available_sources(user, *, query: str = "", limit: int = 50) -> list[dict]:
     query = (query or "").strip()
     results: list[dict] = []
 
-    # Extra work first: it is the reason this exists — §5's third report
-    # asks "who worked on this extra work, and how much".
+    # Sprint 178 §4b — the TYPE-ONLY sources, offered first.
+    #
+    # `source_label` has always been able to render a source that is a
+    # type with no id ("render from their type alone"), and the model has
+    # always had CONTRACT in its enum — but nothing could ever SET one.
+    # The display supported a value no path could produce, which is how
+    # `CONTRACT` came to appear in exactly one place in the backend: its
+    # own enum declaration.
+    #
+    # So they are offered here, with a null `source_id`. An operator can
+    # now say "these were contract hours" or "other" deliberately, which
+    # is different from an untouched row that is OTHER because nobody
+    # said. That default is unchanged: nothing existing is backfilled
+    # with a guess.
+    for source_type in (HourSource.CONTRACT, HourSource.OTHER):
+        label = str(HourSource(source_type).label)
+        if query and query.lower() not in label.lower():
+            continue
+        results.append(
+            {
+                "source_type": source_type,
+                "source_id": None,
+                "title": label,
+                "building": None,
+            }
+        )
+
+    # Extra work next: it is the reason this exists — the "employee hours
+    # by extra work" report asks "who worked on this, and how much".
     extra = scope_extra_work_for(user).exclude(
         status__in=(
             ExtraWorkStatus.COMPLETED,

@@ -259,3 +259,57 @@ class DateSanityTests(TimesheetsFixture):
         self.assertNotEqual(self.company_a.id, self.company_b.id)
         self.assertTrue(Building.objects.filter(company=self.company_b).exists())
         self.assertIsInstance(date(2026, 3, 2), date)
+
+
+class TypeOnlySourceTests(TimesheetsFixture):
+    """Sprint 178 §4b — CONTRACT and OTHER, offered at last.
+
+    `source_label` has always been able to render a source that is a TYPE
+    with no id — "CONTRACT and OTHER ... render from their type alone" is
+    in this module's own docstring — and `HourSource.CONTRACT` has always
+    been in the enum. But nothing could ever SET one: the picker offered
+    tickets and extra work, and `CONTRACT` appeared in exactly one place
+    in the whole backend, its own declaration.
+
+    That gap is what these close. Note what does NOT change: `OTHER`
+    stays the default for an untouched row, so nothing existing is
+    backfilled with a guess. "OTHER because nobody said" and "OTHER
+    because an operator chose it" store the same value, and that is
+    fine — the difference matters to nobody downstream.
+    """
+
+    def api(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_contract_and_other_are_offered(self):
+        response = self.api(self.ca_a).get(URL)
+        self.assertEqual(response.status_code, 200, response.data)
+        types = [
+            row["source_type"]
+            for row in response.data["results"]
+            if row["source_id"] is None
+        ]
+        self.assertIn("CONTRACT", types)
+        self.assertIn("OTHER", types)
+
+    def test_a_type_only_source_carries_a_null_id(self):
+        """The shape the display layer already expected."""
+        response = self.api(self.ca_a).get(URL)
+        row = next(
+            r for r in response.data["results"] if r["source_type"] == "CONTRACT"
+        )
+        self.assertIsNone(row["source_id"])
+        self.assertTrue(row["title"])
+
+    def test_they_come_first(self):
+        """Ahead of the job list: they are the two an operator reaches
+        for when the hours belong to no particular job."""
+        response = self.api(self.ca_a).get(URL)
+        first_two = [r["source_type"] for r in response.data["results"][:2]]
+        self.assertEqual(first_two, ["CONTRACT", "OTHER"])
+
+    def test_the_search_narrows_them_too(self):
+        response = self.api(self.ca_a).get(URL, {"q": "zzz-no-such-thing"})
+        self.assertEqual(response.data["results"], [])

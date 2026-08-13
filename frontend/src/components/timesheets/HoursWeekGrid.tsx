@@ -208,7 +208,7 @@ export function HoursWeekGrid({
    *  its own seeded row so the hours land already attributed. Empty (the
    *  default, and what every pre-177 caller passes) seeds one untagged
    *  row exactly as before, so no existing screen changes shape. */
-  seedSources?: { source_type: string; source_id: number }[];
+  seedSources?: { source_type: string; source_id: number | null }[];
   /** The hour types chosen in the setup. Empty falls back to the first
    *  active type. */
   weekClosed: boolean;

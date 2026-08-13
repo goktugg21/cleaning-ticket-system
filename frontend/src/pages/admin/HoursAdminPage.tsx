@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import { getApiError } from "../../api/client";
+import { decodeSource, encodeSource } from "../../lib/hourSource";
+import { listHourSources } from "../../api/reports";
+import type { HourSourceOption } from "../../api/reports";
 import {
   deleteTimeEntry,
   downloadTimesheetSummaryCsv,
@@ -83,6 +86,8 @@ interface EntryDraft {
   hours: string;
   building: string;
   note: string;
+  /** Sprint 178 §4a — "TYPE:id", or "TYPE" for a type-only source. */
+  source: string;
 }
 
 function draftOf(entry: TimeEntry): EntryDraft {
@@ -92,6 +97,7 @@ function draftOf(entry: TimeEntry): EntryDraft {
     hours: entry.hours,
     building: entry.building === null ? "" : String(entry.building),
     note: entry.note,
+    source: encodeSource(entry.source_type, entry.source_id),
   };
 }
 
@@ -101,7 +107,8 @@ function draftsDiffer(a: EntryDraft, b: EntryDraft): boolean {
     a.hour_type !== b.hour_type ||
     a.hours.trim() !== b.hours.trim() ||
     a.building !== b.building ||
-    a.note !== b.note
+    a.note !== b.note ||
+    a.source !== b.source
   );
 }
 
@@ -393,6 +400,26 @@ export function HoursAdminPage() {
    *  saved values otherwise. Read at the point of USE rather than
    *  seeded into state on entering edit mode — a draft per row for a
    *  page nobody edited is state that can go stale against a refresh. */
+  /** Sprint 178 §4a — the sources the source column may be corrected to.
+   *
+   *  The SAME endpoint the week-setup picker uses, so the two paths
+   *  cannot disagree about what a valid source is. Non-fatal: an
+   *  unreachable picker must not stop somebody fixing a row's hours. */
+  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    listHourSources()
+      .then((options) => {
+        if (!cancelled) setSourceOptions(options);
+      })
+      .catch(() => {
+        /* non-fatal: the rest of the row is still editable */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const draftFor = (entry: TimeEntry): EntryDraft =>
     drafts[entry.id] ?? draftOf(entry);
 
@@ -447,6 +474,10 @@ export function HoursAdminPage() {
           hours: draft.hours.trim(),
           building: draft.building === "" ? null : Number(draft.building),
           note: draft.note.trim(),
+          // Sprint 178 §4a — the source, corrected from the edit path.
+          // `source_type` / `source_id` were already writable on this
+          // serializer; nothing on any screen had ever sent them.
+          ...decodeSource(draft.source),
         }).then(() => entry.id);
       }),
     );
@@ -1053,8 +1084,64 @@ export function HoursAdminPage() {
                               by the flow that logged the hour, not
                               retyped by hand. */}
                           <td>
-                            {entry.source_type &&
-                            entry.source_type !== "OTHER" ? (
+                            {/* Sprint 178 §4a — EDITABLE now. Sprint 177
+                                put the picker in the week SETUP only, so
+                                a source could be chosen once and never
+                                corrected. Hours get fixed a week later
+                                all the time, and a source on the wrong
+                                job is exactly that kind of thing.
+
+                                Same option list as the setup dialog
+                                (`listHourSources`), so the two paths
+                                cannot drift on what a valid source is. */}
+                            {cellsEditable ? (
+                              <select
+                                className="field-select"
+                                value={draft.source}
+                                onChange={(event) =>
+                                  patchDraft(entry, {
+                                    source: event.target.value,
+                                  })
+                                }
+                                disabled={saveBusy}
+                                aria-label={t("hours_admin.col_source")}
+                                data-testid={`hours-entry-source-${entry.id}`}
+                              >
+                                <option value="">—</option>
+                                {/* The row's CURRENT source stays
+                                    offerable even if the job has since
+                                    closed and left the picker: otherwise
+                                    editing the hours of a finished job
+                                    would silently retag it. */}
+                                {draft.source &&
+                                  !sourceOptions.some(
+                                    (option) =>
+                                      encodeSource(
+                                        option.source_type,
+                                        option.source_id,
+                                      ) === draft.source,
+                                  ) && (
+                                    <option value={draft.source}>
+                                      {draft.source}
+                                    </option>
+                                  )}
+                                {sourceOptions.map((option) => (
+                                  <option
+                                    key={encodeSource(
+                                      option.source_type,
+                                      option.source_id,
+                                    )}
+                                    value={encodeSource(
+                                      option.source_type,
+                                      option.source_id,
+                                    )}
+                                  >
+                                    {option.title}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : entry.source_type &&
+                              entry.source_type !== "OTHER" ? (
                               <span className="cell-tag cell-tag-muted">
                                 {t(`hour_source.${entry.source_type}`)}
                                 {entry.source_id ? ` #${entry.source_id}` : ""}

@@ -268,7 +268,11 @@ export async function downloadDimensionExport(
  *  resolves neither. */
 export interface HourSourceOption {
   source_type: string;
-  source_id: number;
+  /** Sprint 178 §4b — NULL for a type-only source ("Contract hours",
+   *  "Other"), which names a kind of work rather than pointing at a
+   *  record. The display layer has always supported this; until now
+   *  nothing could set one. */
+  source_id: number | null;
   title: string;
   building: number | null;
 }
