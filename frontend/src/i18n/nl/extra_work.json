@@ -491,5 +491,11 @@
   "detail.plannedEnd": "Gepland einde",
   "detail.plannedStart": "Gepland begin",
   "create.plannedEndHint": "Laat leeg als het werk op een dag gepland staat.",
-  "create.deadlineHint": "Wanneer het klaar moet zijn. Los van de planning."
+  "create.deadlineHint": "Wanneer het klaar moet zijn. Los van de planning.",
+  "detail.card_count": "{{count}}",
+  "detail.labels_card_title": "Afdeling en werksoort",
+  "detail.preview_card_title": "Voorbeeld",
+  "detail.preview_card_hint": "Haalt de offerte-PDF op.",
+  "detail.proposal_pdf": "Offerte-PDF",
+  "detail.proposal_pdf_busy": "Bezig…"
 }

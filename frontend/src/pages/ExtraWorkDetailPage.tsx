@@ -2132,10 +2132,16 @@ export function ExtraWorkDetailPage() {
               B8 polishes the visuals. The backend chokepoint filters which
               messages this viewer receives; the composer offers only the
               tiers the backend will accept. */}
+          {/* Sprint 175 §1 — the SECOND two-column row. Messages on
+              the left at the Details card's width, and the right column
+              takes four COLLAPSED cards. A collapsed card is only its
+              header bar, so four of them sit under Workflow without the
+              right column growing taller than Messages — which is the
+              question the owner asked and the reason they fit. */}
+          <div className="ew-detail-second-row">
           <section
             className="card ew-messages-card"
             data-testid="extra-work-messages-panel"
-            style={{ marginBottom: 16 }}
           >
             <div className="form-section">
               <div className="form-section-title">{t("messages.title")}</div>
@@ -2292,21 +2298,24 @@ export function ExtraWorkDetailPage() {
             </div>
           </section>
 
+          <aside className="ew-detail-aside" data-testid="ew-detail-aside">
           {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
               Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the
               backend gate; other roles never see this card). Pure
               informational — full management lives on
               /admin/customers/:id/contacts. */}
           {canSeeCustomerContacts && (
-            <div
-              className="card"
-              data-testid="extra-work-customer-contacts-panel"
-              style={{ marginBottom: 16 }}
+            <CollapsibleCard
+              key={`contacts-${ew.id}`}
+              title={t("customer_contacts.panel_title", { ns: "common" })}
+              /* Collapsed is not HIDDEN: the count rides in the header,
+                 so the operator knows whether there is anything inside
+                 without opening it. */
+              meta={t("detail.card_count", { count: customerContacts.length })}
+              defaultOpen={false}
+              testId="extra-work-customer-contacts-panel"
             >
               <div className="form-section">
-                <div className="form-section-title">
-                  {t("customer_contacts.panel_title", { ns: "common" })}
-                </div>
                 {customerContacts.length === 0 ? (
                   <div
                     className="muted small"
@@ -2361,8 +2370,74 @@ export function ExtraWorkDetailPage() {
                   </ul>
                 )}
               </div>
-            </div>
+            </CollapsibleCard>
           )}
+
+          {/* Sprint 175 §1 — Department & work type. NEW card: both are
+              per-customer labels the request already carries and neither
+              had anywhere to be read on this page. */}
+          <CollapsibleCard
+            key={`labels-${ew.id}`}
+            title={t("detail.labels_card_title")}
+            meta={t("detail.card_count", {
+              count: [ew.department_name, ew.work_type_name].filter(Boolean)
+                .length,
+            })}
+            defaultOpen={false}
+            testId="extra-work-labels-panel"
+          >
+            <div className="form-section">
+              <div className="field">
+                <div className="muted small">{t("detail.field_department")}</div>
+                <div>{ew.department_name ?? t("detail.empty_dash")}</div>
+              </div>
+              <div className="field">
+                <div className="muted small">{t("detail.field_work_type")}</div>
+                <div>{ew.work_type_name ?? t("detail.empty_dash")}</div>
+              </div>
+            </div>
+          </CollapsibleCard>
+
+          {/* Sprint 157 §2 — who is on this request, MOVED here by
+              Sprint 175 §1. Provider-side only: assignment is a provider
+              operation end to end and the endpoint refuses a customer
+              user at the door. */}
+          {isProvider && ew !== null && (
+            <ExtraWorkAssignmentCard extraWorkId={ew.id} />
+          )}
+
+          {/* Sprint 175 §1 — Preview. The proposal PDF was a button
+              inside the Workflow card, where an operator looking for
+              "the document" would not think to look. Collapsed by
+              default: it fetches a PDF, and the operator usually does
+              not want one. */}
+          {hasActiveProposal && canViewProposalPdf && (
+            <CollapsibleCard
+              key={`preview-${ew.id}`}
+              title={t("detail.preview_card_title")}
+              defaultOpen={false}
+              testId="extra-work-preview-panel"
+            >
+              <div className="form-section">
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.preview_card_hint")}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => void handleDownloadPdf()}
+                  disabled={pdfBusy}
+                  data-testid="extra-work-preview-pdf"
+                >
+                  {pdfBusy
+                    ? t("detail.proposal_pdf_busy")
+                    : t("detail.proposal_pdf")}
+                </button>
+              </div>
+            </CollapsibleCard>
+          )}
+          </aside>
+          </div>{/* end .ew-detail-second-row */}
 
           {/* ----- Cart line items (Sprint 28 Batch 6; RF-14 collapsible:
               open while the request is still pre-decision, collapsed once
@@ -2544,13 +2619,6 @@ export function ExtraWorkDetailPage() {
                 </div>
               </div>
             )}
-
-          {/* Sprint 157 §2 — who is on this request. Provider-side
-              only: assignment is a provider operation end to end, and
-              the endpoint refuses a customer user at the door. */}
-          {isProvider && ew !== null && (
-            <ExtraWorkAssignmentCard extraWorkId={ew.id} />
-          )}
 
           {/* Sprint 29 Batch 29.8 — spawned tickets panel. Renders
               read-only when the EW has at least one ticket spawned

@@ -3660,7 +3660,13 @@ a.attn-row:hover {
 }
 .mywork-chip-count {
   font-family: var(--f-head);
-  font-weight: 800;
+  /* Sprint 175 §3 — the count no longer touches the word. "Draft0" is
+     what the owner saw: the chip had no left margin, so the number ran
+     straight into the label on the Approval tabs. 800 was also heavier
+     than anything else in a tab strip; 700 matches the label it sits
+     beside. */
+  margin-left: 6px;
+  font-weight: 700;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
@@ -7127,6 +7133,58 @@ a.attn-row:hover {
    stack. The Workflow card stays at least 240px wide so its full-
    width buttons stay readable; on viewports <=1024px the grid
    collapses to a single column (Workflow card drops below Details). */
+/* Sprint 175 §1 — the SECOND two-column row: Messages on the left at
+   the Details card's width, four collapsed cards on the right. Same
+   template as the top row so the two columns line up down the page;
+   `align-items: start` rather than the grid default so the collapsed
+   cards stack at their own height instead of stretching to Messages. */
+.ew-detail-second-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+@media (max-width: 1000px) {
+  .ew-detail-second-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Sprint 175 §5 — the six classes the sweep has flagged for two
+   sprints, defined here because §1 rebuilds the pages that use them.
+   Each matches what its neighbours already do rather than introducing
+   a new look. */
+.ew-workflow-card {
+  display: flex;
+  flex-direction: column;
+}
+.ew-auto-start {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ew-intent-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.ew-agreed-price-item-label {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.form-control {
+  width: 100%;
+}
+.link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .ew-detail-top-row {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);

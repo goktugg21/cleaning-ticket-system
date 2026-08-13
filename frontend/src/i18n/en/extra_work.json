@@ -491,5 +491,11 @@
   "detail.plannedEnd": "Planned end",
   "detail.plannedStart": "Planned start",
   "create.plannedEndHint": "Leave empty when the work is planned for a single day.",
-  "create.deadlineHint": "When it must be finished. Separate from the planning."
+  "create.deadlineHint": "When it must be finished. Separate from the planning.",
+  "detail.card_count": "{{count}}",
+  "detail.labels_card_title": "Department and work type",
+  "detail.preview_card_title": "Preview",
+  "detail.preview_card_hint": "Fetches the proposal PDF.",
+  "detail.proposal_pdf": "Proposal PDF",
+  "detail.proposal_pdf_busy": "Working…"
 }
