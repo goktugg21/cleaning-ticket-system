@@ -1406,6 +1406,129 @@ Actions that must be audited:
 
 ---
 
+## 12A. Where an hour came from, and why there is no date column per transition
+
+Sprint 173. Two decisions that the next person to touch hours or extra
+work must not re-derive.
+
+### An hour carries a SOURCE, as a type and an id
+
+`TimeEntry` records hours, a date, an employee, an hour type and an
+optional building. Since Sprint 173 it also records **which job
+produced it**: `source_type` (`CONTRACT` / `EXTRA_WORK` / `TICKET` /
+`OTHER`) plus a nullable `source_id`.
+
+**It is a type + id pair and NOT four nullable foreign keys.** That is
+not a shortcut, it is the module rule: `timesheets` imports nothing
+from `tickets` or `extra_work`, because the hours module has to keep
+working for a company that uses nothing else. Four FKs would make it
+depend on both. A test scans the package for those imports and fails on
+either.
+
+Resolving an id into a title therefore belongs in `reports/`, the app
+that may read across — `reports/hour_sources.py`, beside
+`hours_comparison.py`, which reaches into two modules for the same
+reason.
+
+Two consequences, handled rather than discovered:
+
+* **An id can stop resolving.** A ticket can be soft-deleted after its
+  hours were logged. The resolver returns no title and the caller
+  renders `Ticket #41` — never blank (reads as a bug) and never an
+  exception (turns a deleted ticket into a broken screen).
+* **A title must not leak.** The id sits on a row the actor may read,
+  but the title is another module's data. Resolution goes through the
+  same scoping helpers the ticket and extra-work lists use, so an actor
+  who could not open the ticket gets exactly what a fictional id gives.
+  Out of scope is indistinguishable from nonexistent (H-1).
+
+`OTHER` is the default because every row written before the column
+existed has a real source nobody recorded. Backfilling them as
+`CONTRACT` would be inventing an answer.
+
+### There is NO date column per transition, and none is to be added
+
+The reference system carries eleven date columns on an extra work —
+created, planned start, planned end, started, completed, approved,
+archived/rejected, deadline and more — and its own users report that
+date queries keep breaking as a result.
+
+**Those eleven columns are a status history, flattened.** We hold the
+history itself: `ExtraWorkStatusHistory` records `old_status`,
+`new_status`, `changed_by`, `note` and `created_at` for every
+transition. That answers questions a flattened column cannot — who
+approved it, whether it went backwards, how long it sat in a state.
+
+So: **"when was it approved" is a QUERY over the history, not a
+column.** Do not add `approved_at`, `started_at`, `completed_at` or
+their siblings. Sprint 173 added exactly two date fields and they are
+not transition stamps:
+
+* `deadline` — by when the work must be finished. A promise, not an
+  event.
+* `planned_end_date` — beside the existing `preferred_date`, forming
+  the planned WINDOW. A plan, not an event.
+
+`preferred_date` KEEPS its name: everything that reads it keeps
+working, and renaming it would be a migration's worth of risk for a
+word.
+
+### Started early is shown, never blocked
+
+A job entered today, started today and planned for September is the
+father's own example of the inconsistency that made date queries
+useless. It is **not blocked** — he was explicit that people do it
+deliberately — but `started_before_plan` is derived from the status
+history and is filterable, so it can be found and cleaned up rather
+than discovered months later.
+
+`is_overdue` and `started_before_plan` are each defined ONCE, on the
+model, and the list filters express the same rule in SQL. A test
+asserts the query and the property return the same set: two definitions
+of "late" is precisely the drift that rule exists to prevent.
+
+## 12B. Which week does a job appear in? (DECIDED, not yet implemented)
+
+Sprint 173 §5. The owner and his father disagreed about this and the
+rule was settled; it is recorded here so the next person to touch the
+week view does not re-derive it. **The Work Plan does not implement
+points 2 to 4 yet** — only planned placement exists today. This section
+is the decision, not a description of the code.
+
+His example: a job is entered today, started today, and planned for
+September. Today it is nowhere; in September it is nowhere either.
+
+Two obvious rules are each wrong alone:
+
+* **By planned dates only** — a job started today is invisible today,
+  and nobody can see what is actually being worked on.
+* **By status only** — starting it drags it into this week and it
+  vanishes from September, which is what the father objects to.
+
+**The rule: a job appears in every week it legitimately belongs to,
+because "what is planned for September" and "what is happening now" are
+different questions.**
+
+1. **Planned placement.** A job appears in the week(s) its planned
+   window (`preferred_date` -> `planned_end_date`) covers. That is its
+   home and it stays there whatever its status, so September shows
+   September's work.
+2. **Active placement.** A job that has been STARTED also appears in the
+   current week, whatever its planned dates say. A week view that hides
+   live work is useless.
+3. **Overdue placement.** A job past its `deadline` and unfinished also
+   appears in the current week, marked overdue. An overdue job needs
+   attention today, not on the date somebody once hoped for.
+4. **Untouched future work does NOT clutter today.** A job planned for
+   September and not started appears only in September, plus under a
+   "planned / upcoming" filter for anyone looking ahead.
+
+**A card shown outside its planned week must say why** — a short marker
+reading started early or overdue, with its planned date on the card.
+Otherwise the operator meets the same job in two weeks and cannot tell
+why. That marker is also how a job started before its planned window
+stays visible (see 12A).
+
 ## 13. Non-negotiable privacy rules
 
 Customers must not see:

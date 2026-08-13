@@ -4,92 +4,109 @@
 system and the Ramazan transcripts + Source of Truth, ending with a
 premium UI/UX polish. **CC updates `## NOW
 
-**Branch:** `feat/sprint-172`, cut from `feat/sprint-171` (`27b0468`).
-It is the single branch being merged — #153 -> ... -> #172 are ONE
+**Branch:** `feat/sprint-173`, cut from `feat/sprint-172` (`24e2132`).
+It is the single branch being merged — #153 -> ... -> #173 are ONE
 chain, one PR, not one per sprint.
 
-The theme was CONNECTION: most of what was asked for already existed
-somewhere and was not wired up.
+Sprint 173's prompt was replaced mid-sprint: the first version added
+Rooms and billed hours, and the owner's father ruled both out. This
+records the SECOND prompt.
 
-### Per item
+### Done
 
-- **§1 the fill row keeps its values — REVERSING Sprint 165.** That
-  sprint cleared the boxes deliberately, because a box reading "4" was
-  a claim about the GRID and stopped being true when a row was added.
-  Sprint 166 then settled that the fill only touches the rows the
-  WIZARD created, and the label says so — the contradiction cannot
-  occur any more, and the clearing cost the owner his typing.
-- **§2 the contract was unstarted, not broken.** Every figure comes
-  from the project LINES. The Projects empty state now says so with the
-  add control under it; Billing and General Info say it and link to
-  Projects instead of showing € 0,00 as an answer. Measured on
-  CNT-2027-0003, adding ONE line: month 0 -> 2500, year 0 -> 30000,
-  hours 0 -> 40, lines 0 -> 1, forecast nothing -> 11 invoices /
-  € 27.500.
-- **§3 the two hours tabs** carry a one-line subtitle each in the
-  owner's words, and every button, empty state and dialog title on both
-  follows.
-- **§4 the Worker hour card** shows the four figures the modal computes
-  over the same span, rather than a title and a button.
-- **§5 every reference column — half were WIRED, half ADDED.** Wired:
-  cost-centre name (`Building.name`), place (`Building.city`), action
-  (`ContractHours.work_type`), debtor (the customer behind the
-  building), contracted hours. Added: personnel number
-  (`StaffProfile`), cost-centre code and order number (`Building`),
-  hour code (`HourType`), MACHT and travel costs (`TimeEntry`).
+- **§1 an hour now knows which job produced it — the priority, and
+  done in full.** `TimeEntry` carries `source_type` +
+  `source_id`. A type + id pair and NOT four foreign keys, because
+  `timesheets` imports nothing from `tickets` or `extra_work`; a test
+  SCANS the package for those imports and fails on either. Resolution
+  lives in `reports/hour_sources.py`, the layer that may read across.
+  An unresolvable id renders `Ticket #41`; a FOREIGN id yields no title
+  and a test asserts that response EQUALS a fictional id's (H-1).
+  Source is a column and a filter on Entries, a column and part of the
+  row GRAIN on the worker hour report, and travels in both exports.
+  Verified on real data: `TCK-2026-000001 — Lekkage sanitair 3e etage`.
+- **§4 the extra-work deadline and planned window.** `deadline` and
+  `planned_end_date` beside the existing `preferred_date`, which keeps
+  its name. `is_overdue` and `started_before_plan` each defined ONCE,
+  derived — the second from the STATUS HISTORY, not a `started_at`
+  column. Filters express the same rule in SQL and a test asserts the
+  query and the property return the same set.
+- **§6 both leftovers, measured.** `section-title` defined at last: 15
+  chart-card headings went 16.38px/margin 0 -> 15px/margin 0 0 2px,
+  matching `.section-head-title`. The forecast's Current Monthly now
+  reads "Nog niet van kracht / Stand van vandaag" instead of € 0,00
+  beside a header saying € 2.500.
 
-### §5 — three choices worth defending
+### NOT done — and this is most of the sprint
 
-- **Order number on the Building**, not the contract: the reference
-  prints one per report ROW, and a row is (week, worker, building, hour
-  type). It varies with the building, and a building sits under more
-  than one contract over time.
-- **Travel costs on the TimeEntry**, not on ContractHours: it is a cost
-  incurred on a specific day by a specific person, and a standing
-  weekly agreement cannot know somebody drove on Tuesday. Decimal,
-  never a float.
-- **MACHT as a boolean, FLAGGED for correction.** Its meaning is not
-  evident from the screenshots; a flag is the narrowest honest reading
-  of a tick, and a wrong guess is cheap to widen and expensive to
-  narrow.
+The prompt carried nine sections. Three substantial ones were not
+reached and are NOT partially built — nothing half-finished was left
+behind:
 
-### §7 — the connection check, and the one disagreement found
+- **§2 the Catalogs area** and the generic per-company building-type
+  catalog. Nothing built.
+- **§3 the four reports** (employee hours by building, employee hours
+  weekly, employee hours by extra work, ticket report). Nothing built.
+  §1 is the prerequisite for the third of them and §1 is now done, so
+  the blocker is cleared.
+- **§5 the Work Plan finishing** — extra work in the week view, the
+  BUILDING_MANAGER scope, server-side counts, the idempotent seeder.
+  Nothing built. The week-placement RULE was decided and is recorded in
+  the product docs (§12B) marked as decided-not-implemented, so the
+  decision is not lost.
 
-- a contract's projects feed its money, hours, invoice preview and
-  revision card — verified with the before/after above;
-- contract hours feed the approval screen and now the worker hour
-  report's Contr. uren column;
-- work types appear on the contract-hours row, its filter, the bulk
-  dialog and the report's Handeling column;
-- **DISAGREEMENT:** the forecast card's "Current Monthly" reads 0.00
-  while the contract header reads € 2.500 for the same contract. Not a
-  computation bug — the forecast figure is deliberately "as of TODAY"
-  and CNT-2027-0003 starts 2027-01-01, so today no revision is in
-  force. The definition is sound and documented in `billing.py`. What
-  is missing is that the SCREEN never says "as of today", so two
-  numbers meaning different things look like one number disagreeing.
-  Recorded rather than changed: changing the definition would break the
-  case it was written for.
-
-### NOT done this sprint
-
-- **§6 the Work Plan demo seeder.** Not built. The page itself was
-  finished in Sprint 171 (seven columns, chips, overdue list, today and
-  empty-day markers, all measured); what is missing is repeatable demo
-  DATA in `seed_demo_data` so the week is not empty. It is the one item
-  of this sprint left undone and it is carried in NEXT.
+Also not done from §1: the Approval tab's source grouping with a
+per-source approve and an approve-all, and the automatic source when
+logging hours from a ticket or extra work. The model and the read
+surfaces carry the source; the write flows do not set it yet.
 
 ### Gates
 
-`test timesheets contracts reports accounts buildings` isolated in this
-worktree. `makemigrations --dry-run --check` clean; four migrations
-applied to dev (accounts.0010, buildings.0006, timesheets.0008). The
-worker-hours suite is 11 tests, OK, with `assertNumQueries` now
-asserting CONSTANCY as well as a number. Frontend: tsc clean, eslint
-**44 (42 errors, 2 warnings)**, build OK, every i18n namespace in
-lockstep.
+`test timesheets reports extra_work buildings tickets contracts`
+isolated in this worktree. New this sprint: 11 hour-source tests and 8
+deadline tests, both OK. `makemigrations --dry-run --check` clean; two
+migrations applied to dev (`timesheets.0009`, `extra_work.0030`).
+Frontend: tsc clean, eslint **44 (42 errors, 2 warnings)**, build OK,
+i18n in lockstep, and the undefined-CSS-class sweep is CLEAN for the
+first time in three sprints — `section-title` was the last hole.
 
 ## NEXT
+
+### Carried from Sprint 173 — not built, nothing half-done
+
+- **§2 Catalogs area** — one admin home for hour types, work types,
+  contract types, services, managed units, reusing `CatalogTab`; plus a
+  generic per-company building-type catalog with a Building FK and a
+  list FILTER (the filter is the owner's whole example). Then write
+  down what adding the NEXT catalog costs; if it still means touching
+  six places, generalise further. Adding a type must never require a
+  deployment.
+- **§3 the four reports** — employee hours by building, employee hours
+  weekly, employee hours by extra work, ticket report (duration from
+  the status history, not a column). Cards opening modals, no nav
+  children, CSV + PDF, `assertNumQueries` each, provider-only.
+- **§5 the Work Plan** — extra work in the week view, BUILDING_MANAGER
+  scope through `scope_tickets_for` (not a second scoping path),
+  server-side counts, the idempotent `seed_demo_data` seeder, and the
+  week-placement rule from docs §12B. Acceptance test: an overdue extra
+  work assigned to Ahmet appears as overdue in Ahmet's Work Plan.
+- **§1's remaining half** — the Approval tab grouped by source with a
+  per-source approve and an approve-all-for-this-employee action, and
+  setting the source automatically when hours are logged from a ticket
+  or an extra work.
+
+### Noted by the owner for later — NOT to be built now
+
+Contract projects as first-class records; customer locations with their
+own page; richer employee records; the reference's second-generation
+invoices.
+
+### Considered and DECLINED — do not propose again
+
+Rooms; quality inspections; the project/task planning subsystem;
+products; continuous extra work. The owner's father ruled all five out
+after the first Sprint 173 prompt was written against them.
+
 
 ### Carried from Sprint 172
 
