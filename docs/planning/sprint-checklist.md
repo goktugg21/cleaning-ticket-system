@@ -4,73 +4,107 @@
 system and the Ramazan transcripts + Source of Truth, ending with a
 premium UI/UX polish. **CC updates `## NOW
 
-**Branch:** `feat/sprint-173`, cut from `feat/sprint-172` (`24e2132`).
-It is the single branch being merged — #153 -> ... -> #173 are ONE
-chain, one PR, not one per sprint.
+**Branch:** `feat/sprint-174`, cut from `feat/sprint-173`'s HOTFIX
+(`98b7c44`). It is the single branch being merged — #153 -> ... -> #174
+are ONE chain, one PR, not one per sprint.
 
-Sprint 173's prompt was replaced mid-sprint: the first version added
-Rooms and billed hours, and the owner's father ruled both out. This
-records the SECOND prompt.
+### The live break that opened this sprint, and the rule it produced
+
+Sprint 173 declared `is_overdue` and `started_before_plan` on the LIST
+serializer and added them to the DETAIL serializer's `fields` only. DRF
+asserts on that mismatch, so **every call to `/api/extra-work/`
+returned 500** and the page read "The server is having trouble right
+now". The owner found it on the live site; no gate did.
+
+Why nothing caught it: that sprint's tests exercised the model
+PROPERTIES and the list FILTER. **A filter test issues a query; it
+never serialises a row.** A frontend gate cannot see a server-side
+assertion.
+
+**The rule from now on: a field is not done until a test RENDERS the
+endpoint carrying it.** Three such tests exist now — list, detail, and
+one asserting the list must not 500 — and they earned their place
+immediately: adding `preferred_date` to the list this sprint, the first
+attempt put it in the wrong `fields` block and the LIST test failed
+with `key='preferred_date'`. Seconds, not a live site.
 
 ### Done
 
-- **§1 an hour now knows which job produced it — the priority, and
-  done in full.** `TimeEntry` carries `source_type` +
-  `source_id`. A type + id pair and NOT four foreign keys, because
-  `timesheets` imports nothing from `tickets` or `extra_work`; a test
-  SCANS the package for those imports and fails on either. Resolution
-  lives in `reports/hour_sources.py`, the layer that may read across.
-  An unresolvable id renders `Ticket #41`; a FOREIGN id yields no title
-  and a test asserts that response EQUALS a fictional id's (H-1).
-  Source is a column and a filter on Entries, a column and part of the
-  row GRAIN on the worker hour report, and travels in both exports.
-  Verified on real data: `TCK-2026-000001 — Lekkage sanitair 3e etage`.
-- **§4 the extra-work deadline and planned window.** `deadline` and
-  `planned_end_date` beside the existing `preferred_date`, which keeps
-  its name. `is_overdue` and `started_before_plan` each defined ONCE,
-  derived — the second from the STATUS HISTORY, not a `started_at`
-  column. Filters express the same rule in SQL and a test asserts the
-  query and the property return the same set.
-- **§6 both leftovers, measured.** `section-title` defined at last: 15
-  chart-card headings went 16.38px/margin 0 -> 15px/margin 0 0 2px,
-  matching `.section-head-title`. The forecast's Current Monthly now
-  reads "Nog niet van kracht / Stand van vandaag" instead of € 0,00
-  beside a header saying € 2.500.
+- **§0** the render tests, above.
+- **§1 Sprint 173 put on the screen.** The owner was right that two of
+  three were missing. Added: the SOURCE FILTER on the entries tab
+  (optional on the shared filter row, so the Overview tab that shares
+  it does not grow a control it has no use for); the DEADLINE and
+  PLANNED END on the create form; the deadline as a SORTABLE column
+  (rows with no deadline sort LAST both ways — "nobody said when" is
+  not earlier or later than a date); and the OVERDUE and STARTED-EARLY
+  markers on the list row and in the detail HEADER, in the status
+  colours this app already has.
+- **§2 approval grouped by source**, with a per-worker "approve
+  everything this week" button, and the source now SET when hours are
+  logged (`entries/bulk-week/` takes it per cell, validated against the
+  enum).
+- **§4d planned extra work is a FILTER, never a mode** — default
+  "Alles", visible and clearable.
 
-### NOT done — and this is most of the sprint
+### NOT done
 
-The prompt carried nine sections. Three substantial ones were not
-reached and are NOT partially built — nothing half-finished was left
-behind:
+Four items, none partially built:
 
-- **§2 the Catalogs area** and the generic per-company building-type
-  catalog. Nothing built.
-- **§3 the four reports** (employee hours by building, employee hours
-  weekly, employee hours by extra work, ticket report). Nothing built.
-  §1 is the prerequisite for the third of them and §1 is now done, so
-  the blocker is cleared.
-- **§5 the Work Plan finishing** — extra work in the week view, the
-  BUILDING_MANAGER scope, server-side counts, the idempotent seeder.
-  Nothing built. The week-placement RULE was decided and is recorded in
-  the product docs (§12B) marked as decided-not-implemented, so the
-  decision is not lost.
-
-Also not done from §1: the Approval tab's source grouping with a
-per-source approve and an approve-all, and the automatic source when
-logging hours from a ticket or extra work. The model and the read
-surfaces carry the source; the write flows do not set it yet.
+- **§3 the Extra Work detail redesign.** The header pills from §1 are
+  in, but the two-column layout, the four collapsed right-hand cards
+  and the full-width Requested services / Pricing proposal are not.
+- **§4a the Catalogs area** and the building-type catalog.
+- **§4b the four reports.**
+- **§4c the Work Plan** — the week-placement rule is still recorded in
+  the product docs (§12B) as decided-not-implemented.
 
 ### Gates
 
-`test timesheets reports extra_work buildings tickets contracts`
-isolated in this worktree. New this sprint: 11 hour-source tests and 8
-deadline tests, both OK. `makemigrations --dry-run --check` clean; two
-migrations applied to dev (`timesheets.0009`, `extra_work.0030`).
-Frontend: tsc clean, eslint **44 (42 errors, 2 warnings)**, build OK,
-i18n in lockstep, and the undefined-CSS-class sweep is CLEAN for the
-first time in three sprints — `section-title` was the last hole.
+`test extra_work timesheets reports` isolated in this worktree.
+`makemigrations --dry-run --check` clean — no new migrations this
+sprint. Frontend: tsc clean, eslint **44 (42 errors, 2 warnings)**,
+build OK, i18n in lockstep.
+
+The undefined-CSS-class sweep flags six classes in files this sprint
+touched — `ew-agreed-price-item-label`, `ew-intent-option`,
+`ew-auto-start`, `ew-workflow-card`, `form-control`, `link`. **None
+were added by this sprint** (checked against the diff); they are
+pre-existing holes in the Extra Work pages that these edits brought
+into the sweep's scope. Recorded in NEXT rather than fixed unasked.
 
 ## NEXT
+
+### Carried from Sprint 174 — not built, nothing half-done
+
+- **§3 the Extra Work detail redesign** to the owner's specified
+  layout: Details and Workflow untouched on the top row; Messages moved
+  left and matched to the Details card's height; four COLLAPSED cards
+  filling the right (Customer contacts, Department & work type, People
+  on this request, Preview); Requested services and Pricing proposal
+  full width beneath. Collapsed is not hidden — every collapsed card
+  keeps its header and shows a COUNT. The page remembers nothing. The
+  deadline and started-early markers stay in the header (already done).
+- **§4a the Catalogs area** + the per-company building-type catalog
+  with a buildings-list FILTER, plus the cost-of-the-next-catalog note.
+- **§4b the four reports** (employee hours by building / weekly / by
+  extra work, and the ticket report with duration from the status
+  history).
+- **§4c the Work Plan**, implementing docs §12B's week-placement rule,
+  extra work in the week view, BUILDING_MANAGER scope through the
+  existing `scope_tickets_for`, server-side counts, and the idempotent
+  seeder. Acceptance test: an overdue extra work assigned to a worker
+  appears as overdue in that worker's Work Plan.
+
+### Six undefined CSS classes in the Extra Work pages
+
+`ew-agreed-price-item-label`, `ew-intent-option`, `ew-auto-start`,
+`ew-workflow-card`, `form-control`, `link` — all used and none defined,
+all pre-existing. The sweep only surfaced them because Sprint 174
+touched those files. Same treatment as `section-title` got: fix them
+deliberately, not as a side effect, because defining them changes how
+those pages look.
+
 
 ### Carried from Sprint 173 — not built, nothing half-done
 
