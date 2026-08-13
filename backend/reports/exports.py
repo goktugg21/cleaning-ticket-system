@@ -1063,3 +1063,271 @@ def build_worker_hours_pdf(payload: dict) -> bytes:
         pdf.ln(6)
 
     return bytes(pdf.output())
+
+
+# ---- Sprint 178 §2 — the four new reports -----------------------------------
+#
+# Each gets a CSV and a PDF built from the SAME payload the JSON endpoint
+# returns, so the three can never disagree about a number. No new library:
+# `_csv_writer`, `_branded_pdf` and `_draw_table` above are the whole
+# toolkit, which is what "via reports/exports.py and config/pdf_branding.py"
+# means.
+
+
+def _flat_pdf(title: str, payload: dict) -> FPDF:
+    """`_new_pdf` without the scope/total block.
+
+    The Sprint 14A reports carry a `scope` dict and an integer `total`;
+    these four carry neither shape (their totals are decimal strings, and
+    they have no dimension filters), so they get the branded header and
+    the period line and nothing that would have to be faked.
+    """
+    pdf = _branded_pdf(title, payload.get("generated_at"))
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0, 6, f"Period: {payload['from']} -- {payload['to']}",
+        new_x="LMARGIN", new_y="NEXT",
+    )
+    pdf.ln(2)
+    return pdf
+
+
+EMPLOYEE_HOURS_BUILDING_CSV_COLUMNS = (
+    "building",
+    "building_name",
+    "employee",
+    "employee_name",
+    "hours",
+    "building_total",
+    "period_from",
+    "period_to",
+)
+
+
+def build_employee_hours_by_building_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(EMPLOYEE_HOURS_BUILDING_CSV_COLUMNS)
+    for bucket in payload["buildings"]:
+        for employee in bucket["employees"]:
+            writer.writerow(
+                {
+                    "building": bucket["building"] or "",
+                    "building_name": bucket["building_name"] or "",
+                    "employee": employee["employee"],
+                    "employee_name": employee["employee_name"],
+                    "hours": employee["hours"],
+                    "building_total": bucket["total"],
+                    "period_from": payload["from"],
+                    "period_to": payload["to"],
+                }
+            )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_employee_hours_by_building_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Employee hours by building", payload)
+    for bucket in payload["buildings"]:
+        pdf.set_font(FONT_FAMILY, "B", 10)
+        name = bucket["building_name"] or "(no building)"
+        pdf.cell(
+            0, 6, f"{name} -- {bucket['total']}",
+            new_x="LMARGIN", new_y="NEXT",
+        )
+        pdf.set_font(FONT_FAMILY, "", 10)
+        _draw_table(
+            pdf,
+            ["Employee", "Hours"],
+            [130, 40],
+            [[e["employee_name"], e["hours"]] for e in bucket["employees"]],
+        )
+        pdf.ln(2)
+    pdf.set_font(FONT_FAMILY, "B", 10)
+    pdf.cell(0, 6, f"Total: {payload['total']}", new_x="LMARGIN", new_y="NEXT")
+    return _pdf_bytes(pdf)
+
+
+EMPLOYEE_HOURS_WEEKLY_CSV_COLUMNS = (
+    "iso_year",
+    "iso_week",
+    "employee",
+    "employee_name",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "total",
+)
+
+
+def build_employee_hours_weekly_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(EMPLOYEE_HOURS_WEEKLY_CSV_COLUMNS)
+    for week in payload["weeks"]:
+        for employee in week["employees"]:
+            row = {
+                "iso_year": week["iso_year"],
+                "iso_week": week["iso_week"],
+                "employee": employee["employee"],
+                "employee_name": employee["employee_name"],
+                "total": employee["total"],
+            }
+            row.update(employee["days"])
+            writer.writerow(row)
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_employee_hours_weekly_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Employee hours per week", payload)
+    for week in payload["weeks"]:
+        pdf.set_font(FONT_FAMILY, "B", 10)
+        pdf.cell(
+            0,
+            6,
+            f"{week['iso_year']} week {week['iso_week']} -- {week['total']}",
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+        pdf.set_font(FONT_FAMILY, "", 9)
+        _draw_table(
+            pdf,
+            ["Employee", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su", "Total"],
+            [62, 14, 14, 14, 14, 14, 14, 14, 20],
+            [
+                [
+                    e["employee_name"],
+                    e["days"]["monday"],
+                    e["days"]["tuesday"],
+                    e["days"]["wednesday"],
+                    e["days"]["thursday"],
+                    e["days"]["friday"],
+                    e["days"]["saturday"],
+                    e["days"]["sunday"],
+                    e["total"],
+                ]
+                for e in week["employees"]
+            ],
+        )
+        pdf.ln(2)
+    pdf.set_font(FONT_FAMILY, "B", 10)
+    pdf.cell(0, 6, f"Total: {payload['total']}", new_x="LMARGIN", new_y="NEXT")
+    return _pdf_bytes(pdf)
+
+
+EMPLOYEE_HOURS_EXTRA_WORK_CSV_COLUMNS = (
+    "source_id",
+    "title",
+    "employee",
+    "employee_name",
+    "hours",
+    "extra_work_total",
+    "period_from",
+    "period_to",
+)
+
+
+def build_employee_hours_by_extra_work_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(EMPLOYEE_HOURS_EXTRA_WORK_CSV_COLUMNS)
+    for job in payload["extra_work"]:
+        for employee in job["employees"]:
+            writer.writerow(
+                {
+                    "source_id": job["source_id"],
+                    "title": job["title"] or "",
+                    "employee": employee["employee"],
+                    "employee_name": employee["employee_name"],
+                    "hours": employee["hours"],
+                    "extra_work_total": job["total"],
+                    "period_from": payload["from"],
+                    "period_to": payload["to"],
+                }
+            )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_employee_hours_by_extra_work_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Employee hours by extra work", payload)
+    for job in payload["extra_work"]:
+        pdf.set_font(FONT_FAMILY, "B", 10)
+        pdf.cell(
+            0, 6, f"{job['title'] or job['source_id']} -- {job['total']}",
+            new_x="LMARGIN", new_y="NEXT",
+        )
+        pdf.set_font(FONT_FAMILY, "", 10)
+        _draw_table(
+            pdf,
+            ["Employee", "Hours"],
+            [130, 40],
+            [[e["employee_name"], e["hours"]] for e in job["employees"]],
+        )
+        pdf.ln(2)
+    pdf.set_font(FONT_FAMILY, "B", 10)
+    pdf.cell(0, 6, f"Total: {payload['total']}", new_x="LMARGIN", new_y="NEXT")
+    return _pdf_bytes(pdf)
+
+
+TICKET_REPORT_CSV_COLUMNS = (
+    "ticket_no",
+    "title",
+    "status",
+    "building_name",
+    "customer_name",
+    "created_at",
+    "finished_at",
+    "duration_days",
+)
+
+
+def build_ticket_report_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(TICKET_REPORT_CSV_COLUMNS)
+    for row in payload["rows"]:
+        writer.writerow(
+            {
+                "ticket_no": row["ticket_no"],
+                "title": row["title"],
+                "status": row["status"],
+                "building_name": row["building_name"] or "",
+                "customer_name": row["customer_name"] or "",
+                "created_at": row["created_at"],
+                "finished_at": row["finished_at"] or "",
+                # Empty, not 0: an unfinished ticket has no duration, and
+                # a zero would read as "took no time".
+                "duration_days": (
+                    "" if row["duration_days"] is None else row["duration_days"]
+                ),
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_ticket_report_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Ticket report", payload)
+    pdf.set_font(FONT_FAMILY, "", 10)
+    average = payload.get("average_duration_days")
+    pdf.cell(
+        0,
+        6,
+        f"Tickets: {payload['total']} -- finished: {payload['finished']} -- "
+        f"average: {'--' if average is None else str(average) + ' days'}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+    pdf.set_font(FONT_FAMILY, "", 8)
+    _draw_table(
+        pdf,
+        ["No.", "Title", "Status", "Building", "Customer", "Days"],
+        [22, 52, 34, 34, 34, 14],
+        [
+            [
+                row["ticket_no"],
+                row["title"],
+                row["status"],
+                row["building_name"] or "",
+                row["customer_name"] or "",
+                "" if row["duration_days"] is None else str(row["duration_days"]),
+            ]
+            for row in payload["rows"]
+        ],
+    )
+    return _pdf_bytes(pdf)

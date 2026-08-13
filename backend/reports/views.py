@@ -18,6 +18,16 @@ from tickets.models import TicketStatus
 from timesheets.permissions import IsTimesheetUser
 
 from .hour_sources import available_sources
+from .employee_hours import (
+    build_employee_hours_by_building,
+    build_employee_hours_by_extra_work,
+    build_employee_hours_weekly,
+    default_period as employee_hours_default_period,
+)
+from .ticket_report import (
+    build_ticket_report,
+    default_period as ticket_report_default_period,
+)
 from .dimensions import (
     DimensionFilters,
     OriginInvalid,
@@ -32,6 +42,14 @@ from .dimensions import (
     compute_tickets_by_type,
 )
 from .exports import (
+    build_employee_hours_by_building_csv,
+    build_employee_hours_by_building_pdf,
+    build_employee_hours_by_extra_work_csv,
+    build_employee_hours_by_extra_work_pdf,
+    build_employee_hours_weekly_csv,
+    build_employee_hours_weekly_pdf,
+    build_ticket_report_csv,
+    build_ticket_report_pdf,
     build_extra_work_by_department_csv,
     build_extra_work_by_department_pdf,
     build_extra_work_revenue_by_building_csv,
@@ -1064,3 +1082,140 @@ class HourSourceOptionsView(APIView):
         return Response(
             {"results": available_sources(request.user, query=query)}
         )
+
+
+# ---- Sprint 178 §2 — the four reports ---------------------------------------
+
+
+def _report_period(request, default_fn):
+    """`?from=&to=` as dates, or the module default.
+
+    A malformed date is a 400 rather than a silent fallback to the
+    default period: a report that quietly answers a different question
+    than the one asked is worse than one that refuses.
+    """
+    from datetime import date as _date
+
+    raw_from = _first_param(request.query_params, "from")
+    raw_to = _first_param(request.query_params, "to")
+    if not raw_from and not raw_to:
+        return default_fn(), None
+    try:
+        default_from, default_to = default_fn()
+        date_from = _date.fromisoformat(raw_from) if raw_from else default_from
+        date_to = _date.fromisoformat(raw_to) if raw_to else default_to
+    except ValueError:
+        return None, Response(
+            {
+                "detail": "from and to must be ISO dates (YYYY-MM-DD).",
+                "code": "invalid_period",
+            },
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    return (date_from, date_to), None
+
+
+class _PeriodReportView(APIView):
+    """Shared plumbing for the Sprint 178 reports.
+
+    `IsRevenueReportConsumer` on every one of them — SUPER_ADMIN,
+    COMPANY_ADMIN, BUILDING_MANAGER. STAFF and every CUSTOMER_* role are
+    denied. These are per-PERSON hour breakdowns and whole-period ticket
+    durations: provider-internal management figures on exactly the
+    grounds the worker-hour report is.
+
+    Subclasses set `build`, `csv_builder`, `pdf_builder`, `stem` and
+    `default_period`. One class rather than four near-identical ones,
+    because four copies of a permission gate is how two of them drift.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    build = None
+    csv_builder = None
+    pdf_builder = None
+    stem = "report"
+    default_period = None
+
+    def get(self, request, fmt=None):
+        period, error = _report_period(request, self.default_period)
+        if error is not None:
+            return error
+        date_from, date_to = period
+        payload = self.build(request.user, date_from, date_to)
+        payload["generated_at"] = timezone.now()
+
+        if fmt is None:
+            # `generated_at` is for the documents; the JSON keeps the
+            # ISO string so the client never has to parse a datetime
+            # object rendered by DRF's default encoder.
+            payload["generated_at"] = payload["generated_at"].isoformat()
+            return Response(payload)
+
+        name = f"{self.stem}-{payload['from']}-to-{payload['to']}"
+        if fmt == "pdf":
+            body = self.pdf_builder(payload)
+            content_type = "application/pdf"
+            filename = f"{name}.pdf"
+        elif fmt == "csv":
+            body = self.csv_builder(payload)
+            content_type = "text/csv; charset=utf-8"
+            filename = f"{name}.csv"
+        else:
+            return Response(
+                {"detail": "Unsupported format.", "code": "invalid_format"},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        response = HttpResponse(body, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+
+class EmployeeHoursByBuildingView(_PeriodReportView):
+    """GET /api/reports/employee-hours-by-building/[export.<fmt>]"""
+
+    build = staticmethod(build_employee_hours_by_building)
+    csv_builder = staticmethod(build_employee_hours_by_building_csv)
+    pdf_builder = staticmethod(build_employee_hours_by_building_pdf)
+    stem = "employee-hours-by-building"
+    default_period = staticmethod(employee_hours_default_period)
+
+
+class EmployeeHoursWeeklyView(_PeriodReportView):
+    """GET /api/reports/employee-hours-weekly/[export.<fmt>]"""
+
+    build = staticmethod(build_employee_hours_weekly)
+    csv_builder = staticmethod(build_employee_hours_weekly_csv)
+    pdf_builder = staticmethod(build_employee_hours_weekly_pdf)
+    stem = "employee-hours-weekly"
+    default_period = staticmethod(employee_hours_default_period)
+
+
+class EmployeeHoursByExtraWorkView(_PeriodReportView):
+    """GET /api/reports/employee-hours-by-extra-work/[export.<fmt>]
+
+    Answerable for the first time in Sprint 178: it reads the
+    `(source_type, source_id)` pair, which nothing filled until Sprint
+    177's job picker. On data entered before that, this returns an empty
+    list — a correct report with an empty answer, not a broken screen.
+    """
+
+    build = staticmethod(build_employee_hours_by_extra_work)
+    csv_builder = staticmethod(build_employee_hours_by_extra_work_csv)
+    pdf_builder = staticmethod(build_employee_hours_by_extra_work_pdf)
+    stem = "employee-hours-by-extra-work"
+    default_period = staticmethod(employee_hours_default_period)
+
+
+class TicketReportView(_PeriodReportView):
+    """GET /api/reports/ticket-report/[export.<fmt>]
+
+    Duration comes from `TicketStatusHistory`, never from a column — see
+    `reports/ticket_report.py` for why.
+    """
+
+    build = staticmethod(build_ticket_report)
+    csv_builder = staticmethod(build_ticket_report_csv)
+    pdf_builder = staticmethod(build_ticket_report_pdf)
+    stem = "ticket-report"
+    default_period = staticmethod(ticket_report_default_period)

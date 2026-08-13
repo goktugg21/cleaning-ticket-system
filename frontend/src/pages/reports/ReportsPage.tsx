@@ -5,6 +5,12 @@ import { useTranslation } from "react-i18next";
 import { HoursComparisonView } from "./HoursComparisonView";
 import { HoursComparisonChart } from "./charts/HoursComparisonChart";
 import { WorkerHoursView } from "./WorkerHoursView";
+import {
+  EmployeeHoursByBuildingView,
+  EmployeeHoursByExtraWorkView,
+  EmployeeHoursWeeklyView,
+  TicketReportView,
+} from "./EmployeeHoursViews";
 import { WorkerHoursCardTiles } from "./charts/WorkerHoursCardTiles";
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import type { ReportFilters } from "../../api/reports";
@@ -32,9 +38,56 @@ const RANGE_PRESETS: Array<{
   { key: "last_90", labelKey: "preset_last_90" },
 ];
 
+/**
+ * Sprint 178 §2 — the four reports, as ONE list that both the cards and
+ * the modals iterate.
+ *
+ * A second, independently maintained array for the modals is exactly the
+ * defect CLAUDE.md records from Sprint 126: the `documents` permission
+ * group rendered a headerless column and stayed invisible for three
+ * sprints because two consumers each had their own list. One constant,
+ * two consumers, and the compiler sees every entry.
+ */
+const REPORT_CARDS = [
+  {
+    key: "hours_building" as const,
+    testId: "employee-hours-building",
+    titleKey: "employee_hours_building_title",
+    subtitleKey: "employee_hours_building_subtitle",
+    View: EmployeeHoursByBuildingView,
+  },
+  {
+    key: "hours_weekly" as const,
+    testId: "employee-hours-weekly",
+    titleKey: "employee_hours_weekly_title",
+    subtitleKey: "employee_hours_weekly_subtitle",
+    View: EmployeeHoursWeeklyView,
+  },
+  {
+    key: "hours_extra_work" as const,
+    testId: "employee-hours-extra-work",
+    titleKey: "employee_hours_extra_work_title",
+    subtitleKey: "employee_hours_extra_work_subtitle",
+    View: EmployeeHoursByExtraWorkView,
+  },
+  {
+    key: "tickets" as const,
+    testId: "ticket-report",
+    titleKey: "ticket_report_title",
+    subtitleKey: "ticket_report_subtitle",
+    View: TicketReportView,
+  },
+];
+
 export function ReportsPage() {
   const [comparisonOpen, setComparisonOpen] = useState(false);
   const [workerHoursOpen, setWorkerHoursOpen] = useState(false);
+  /** Sprint 178 §2 — the four new reports. ONE piece of state naming
+   *  which is open, rather than four booleans: two cannot be open at
+   *  once, and four booleans is four chances for them to be. */
+  const [openReport, setOpenReport] = useState<
+    null | "hours_building" | "hours_weekly" | "hours_extra_work" | "tickets"
+  >(null);
   const { me } = useAuth();
   const { t } = useTranslation(["reports", "common"]);
   const { filters, setFilter, setRangePreset } = useReportsFilters();
@@ -452,7 +505,88 @@ export function ReportsPage() {
             </button>
           </div>
         </section>
+
+        {/* Sprint 178 §2 — four more reports, the SAME card-opens-a-modal
+            shape Sprint 171 settled. No new nav children: a nav child is
+            a sub-page as far as an operator is concerned. Iterating a
+            constant rather than repeating four near-identical sections,
+            for the reason CLAUDE.md records about second render lists. */}
+        {REPORT_CARDS.map((card) => (
+          <section
+            key={card.key}
+            className="card"
+            style={{ padding: "20px 22px", minHeight: 220 }}
+            data-testid={`chart-card-${card.testId}`}
+          >
+            <h3 className="section-title">{t(card.titleKey)}</h3>
+            <p className="muted small" style={{ marginBottom: 8 }}>
+              {t(card.subtitleKey)}
+            </p>
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setOpenReport(card.key)}
+                data-testid={`open-${card.testId}`}
+              >
+                {t("open_report")}
+              </button>
+            </div>
+          </section>
+        ))}
       </div>
+
+      {REPORT_CARDS.map((card) =>
+        openReport === card.key ? (
+          <div
+            key={card.key}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t(card.titleKey)}
+            data-testid={`${card.testId}-modal`}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) setOpenReport(null);
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "center",
+              zIndex: 100,
+              padding: 16,
+              paddingTop: "6vh",
+              overflowY: "auto",
+            }}
+          >
+            <div
+              className="card"
+              style={{
+                width: "min(96vw, 1320px)",
+                padding: 24,
+                maxHeight: "85vh",
+                display: "flex",
+                flexDirection: "column",
+                overflowY: "auto",
+              }}
+            >
+              <div className="section-head" style={{ marginBottom: 12 }}>
+                <div className="section-head-title">{t(card.titleKey)}</div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setOpenReport(null)}
+                  data-testid={`${card.testId}-close`}
+                >
+                  {t("common:cancel")}
+                </button>
+              </div>
+              <card.View />
+            </div>
+          </div>
+        ) : null,
+      )}
     </div>
   );
 }

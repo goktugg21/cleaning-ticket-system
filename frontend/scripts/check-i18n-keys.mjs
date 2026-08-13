@@ -52,7 +52,18 @@ for (const file of files) {
   for (const m of src.matchAll(/useTranslation\(\s*(\[[^\]]*\]|"[^"]+")/g)) {
     for (const n of m[1].matchAll(/"([^"]+)"/g)) declared.add(n[1]);
   }
-  const namespaces = declared.size ? [...declared] : Object.keys(bundles);
+  // Sprint 178 §2 — only the FIRST declared namespace is the default.
+  //
+  // `useTranslation(["reports", "common"])` sets the default namespace to
+  // "reports" and does NOT fall through to "common" — this app configures
+  // no `fallbackNS`. Searching every declared namespace, which this gate
+  // used to do, let four report titles render as raw keys on the Reports
+  // page: the keys existed, in the wrong bundle, and the gate called that
+  // resolved. A cross-namespace key needs an explicit "common:" prefix or
+  // a `{ ns }` option, and both of those are handled below.
+  const namespaces = declared.size
+    ? [[...declared][0]]
+    : Object.keys(bundles);
 
   skipped += [...src.matchAll(/\bt\(`/g)].length;
 
