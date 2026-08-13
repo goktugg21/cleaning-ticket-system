@@ -7103,20 +7103,39 @@ a.attn-row:hover {
 .ew-detail-main {
   min-width: 0;
 }
-/* Sprint 176 §2 — the right column's two cards SHARE its height rather
-   than one stretching. Chosen over "open them to fit" because a
-   collapsed card stretched to 400px puts its header alone at the top of
-   an empty box, which is the padded look the prompt said not to ship.
-   With `1fr 1fr` each header sits at the top of its own half and the
-   halves divide the column evenly, so the gap beneath is zero. */
+/* Sprint 177 §3 — the right column, as the owner settled it after seeing
+   both options.
+
+   Sprint 176 stretched the two COLLAPSED cards with `1fr 1fr` so the
+   column filled the Messages card's height and the gap beneath was zero.
+   That did not remove the dead space, it moved it INSIDE the cards:
+   ~188px of air under each header. The owner chose the other option, so
+   the cards keep their natural height and the column ends where they end.
+   A short column is fine; a padded one is not. */
 .ew-detail-aside {
-  display: grid;
-  grid-template-rows: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
+  /* `start`, not `stretch` — this is what stops the column being pulled
+     to the height of Messages. It is the whole fix. */
+  align-self: start;
   gap: 12px;
   min-height: 0;
 }
 .ew-detail-aside > * {
   min-height: 0;
+}
+/* Opened, the two cards are the SAME size, so the column reads as a
+   matching pair rather than one large card and one small. Equal bodies +
+   equal headers = equal cards.
+
+   The same rule is the answer to a customer with twenty contacts: the
+   card scrolls inside itself instead of growing, so one long list cannot
+   stretch the column and the PAGE never gains a scrollbar. Collapsed
+   cards render no body at all, so this costs them nothing — they stay
+   exactly as tall as their header. */
+.ew-detail-aside .collapsible-card-body {
+  height: 190px;
+  overflow-y: auto;
 }
 @media (min-width: 1024px) {
   .ew-detail-aside {
@@ -7152,8 +7171,10 @@ a.attn-row:hover {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
   gap: 16px;
-  /* Sprint 176 §2 — `stretch`, not `start`: the right column fills the
-     Messages card's height so there is no dead space beneath it. */
+  /* Sprint 177 §3 — back to `stretch` on the row with `align-self: start`
+     on the aside itself, so Messages still governs the row's height while
+     the right column takes only the height its cards need. Setting
+     `start` here instead would also un-stretch Messages. */
   align-items: stretch;
   margin-bottom: 16px;
 }

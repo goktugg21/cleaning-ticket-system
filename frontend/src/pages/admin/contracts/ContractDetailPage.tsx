@@ -618,6 +618,13 @@ export function ContractDetailPage() {
               <Tile
                 label={t("revisions.currentMonthly")}
                 value={formatMoney(contract?.monthly_amount ?? "0", locale)}
+                /* Sprint 177 §9 — the figure is the amount the revision in
+                   force TODAY bills per month. It is neither a
+                   month-to-date total nor a forecast, and nothing on the
+                   screen said so. */
+                hint={t("revisions.currentMonthlyAsOf", {
+                  date: formatDate(new Date().toISOString(), locale),
+                })}
               />
             </div>
           )}
@@ -729,11 +736,24 @@ export function ContractDetailPage() {
   );
 }
 
-function Tile({ label, value }: { label: string; value: string }) {
+function Tile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  /** Sprint 177 §9 — what the figure MEASURES, when the label alone
+   *  cannot say it. "Current monthly" is a correct number that a reader
+   *  cannot interpret: today, this month so far, or a whole month? The
+   *  hint answers that without lengthening the label. */
+  hint?: string;
+}) {
   return (
     <div className="summary-stat">
       <span className="summary-stat-label">{label}</span>
       <span className="summary-stat-value">{value}</span>
+      {hint && <span className="muted small">{hint}</span>}
     </div>
   );
 }

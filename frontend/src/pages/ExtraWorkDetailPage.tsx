@@ -34,7 +34,7 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { FileSearch, FileText } from "lucide-react";
+import { FileSearch, FileText, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import axios from "axios";
@@ -93,6 +93,7 @@ import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
+import { formatPlannedWindow } from "../lib/plannedWindow";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 import { Avatar } from "../components/Avatar";
 
@@ -460,30 +461,29 @@ const LABELS_ERROR_I18N_KEY: Record<string, string> = {
  *
  *  Provider-only at the call site. The customer's `preferred_date` is
  *  shown right above and is NOT editable here — the customer states a
- *  wish, the provider answers it with a commitment. */
+ *  wish, the provider answers it with a commitment.
+ *
+ *  Sprint 177 §2 — this component is now ONLY the open form. The trigger
+ *  moved up into the deadline cell so it sits beside the date it edits,
+ *  and the parent owns the open/closed state. The component is therefore
+ *  mounted only while open, which is also why the drafts below can seed
+ *  straight from the row in `useState` rather than needing a reset on
+ *  open: a fresh mount IS the reset. */
 function DatesEditor({
   ew,
   onUpdated,
+  onClose,
 }: {
   ew: ExtraWorkRequestDetail;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
+  onClose: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
-  const [open, setOpen] = useState(false);
   const [deadline, setDeadline] = useState(ew.deadline ?? "");
   const [plannedEnd, setPlannedEnd] = useState(ew.planned_end_date ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  function start() {
-    // Seed from the row every time the editor opens, so re-opening after a
-    // save (or after another tab changed it) never shows a stale draft.
-    setDeadline(ew.deadline ?? "");
-    setPlannedEnd(ew.planned_end_date ?? "");
-    setError("");
-    setOpen(true);
-  }
 
   async function save() {
     setSaving(true);
@@ -499,27 +499,12 @@ function DatesEditor({
       });
       onUpdated(updated);
       pushToast({ variant: "success", title: t("detail.dates_saved") });
-      setOpen(false);
+      onClose();
     } catch (err) {
       setError(getApiError(err));
     } finally {
       setSaving(false);
     }
-  }
-
-  if (!open) {
-    return (
-      <div style={{ marginTop: 8 }}>
-        <button
-          type="button"
-          className="btn-secondary btn-sm"
-          onClick={start}
-          data-testid="extra-work-dates-edit"
-        >
-          {t("detail.dates_edit")}
-        </button>
-      </div>
-    );
   }
 
   return (
@@ -557,7 +542,7 @@ function DatesEditor({
         </label>
         <button
           type="button"
-          className="btn-primary btn-sm"
+          className="btn btn-primary btn-sm"
           onClick={save}
           disabled={saving}
           data-testid="extra-work-dates-save"
@@ -566,8 +551,8 @@ function DatesEditor({
         </button>
         <button
           type="button"
-          className="btn-secondary btn-sm"
-          onClick={() => setOpen(false)}
+          className="btn btn-secondary btn-sm"
+          onClick={onClose}
           disabled={saving}
         >
           {t("common:cancel")}
@@ -828,6 +813,10 @@ export function ExtraWorkDetailPage() {
   const messageLocale = useLocaleCode();
 
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
+  // Sprint 177 §2 — the dates editor is opened from a trigger that sits
+  // beside the deadline, so the open state lives here rather than inside
+  // the editor it opens.
+  const [datesOpen, setDatesOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -1852,31 +1841,66 @@ export function ExtraWorkDetailPage() {
                   <div className="muted small">
                     {t("detail.field_preferred_date")}
                   </div>
-                  <div>
-                    {ew.preferred_date
-                      ? formatDate(ew.preferred_date)
-                      : t("detail.empty_dash")}
-                    {/* The planned WINDOW reads as a range when it has
-                        an end, and as one day when it does not. */}
-                    {ew.planned_end_date
-                      ? ` – ${formatDate(ew.planned_end_date)}`
-                      : ""}
+                  <div data-testid="extra-work-planned-window">
+                    {/* Sprint 177 §1 — all FOUR cases, not two ternaries
+                        that read as a range with one end missing. An end
+                        without a start used to print "— – 16 Aug 2026". */}
+                    {formatPlannedWindow(
+                      ew.preferred_date,
+                      ew.planned_end_date,
+                      formatDate,
+                      {
+                        empty: t("detail.empty_dash"),
+                        endOnly: (end) =>
+                          t("detail.planned_window_until", { date: end }),
+                      },
+                    )}
                   </div>
                 </div>
                 <div>
                   <div className="muted small">{t("detail.deadline")}</div>
-                  <div>
-                    {ew.deadline
-                      ? formatDate(ew.deadline)
-                      : t("detail.empty_dash")}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span>
+                      {ew.deadline
+                        ? formatDate(ew.deadline)
+                        : t("detail.empty_dash")}
+                    </span>
+                    {/* Sprint 177 §2 — the trigger sits BESIDE the date it
+                        edits, in the same cell, rather than floating in its
+                        own row under the whole grid where the owner could
+                        not find it. Sprint 176 §3's rule is unchanged:
+                        provider-only, and `preferred_date` (the customer's
+                        wish, one cell to the left) is not editable here. */}
+                    {isProvider && !datesOpen && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setDatesOpen(true)}
+                        data-testid="extra-work-dates-edit"
+                      >
+                        <Pencil size={13} strokeWidth={2} />
+                        {t("detail.dates_edit")}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
-              {/* Sprint 176 §3 — the two dates, editable after creation.
-                  Provider-only: the customer's wish is `preferred_date`
-                  above, which this does not touch. */}
-              {isProvider && (
-                <DatesEditor ew={ew} onUpdated={(detail) => setEw(detail)} />
+              {/* The form itself opens BELOW the grid, where it has room for
+                  two date inputs, the customer's preferred date and an
+                  error, without reflowing the three cells above it. */}
+              {isProvider && datesOpen && (
+                <DatesEditor
+                  ew={ew}
+                  onUpdated={(detail) => setEw(detail)}
+                  onClose={() => setDatesOpen(false)}
+                />
               )}
               <div className="field">
                 <div className="muted small">{t("detail.field_description")}</div>

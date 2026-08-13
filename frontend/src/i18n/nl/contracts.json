@@ -196,7 +196,8 @@
     "activeRevision": "Huidige versie",
     "effectiveSince": "Geldig sinds",
     "currentMonthly": "Bedrag per maand",
-    "empty": "Nog geen versies — wijzigingen in de afspraak komen hier te staan."
+    "empty": "Nog geen versies — wijzigingen in de afspraak komen hier te staan.",
+    "currentMonthlyAsOf": "Per vandaag ({{date}}), volgens de nu geldende revisie"
   },
   "forecast": {
     "title": "Factuurvoorbeeld",

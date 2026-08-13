@@ -507,5 +507,6 @@
   "list.bulk_dates_title": "Set deadline and planned end date",
   "list.bulk_dates_summary_one": "{{count}} request selected.",
   "list.bulk_dates_summary_other": "{{count}} requests selected.",
-  "list.bulk_dates_unchanged_hint": "A blank field is left unchanged: only the dates you fill in here are written to the selected requests."
+  "list.bulk_dates_unchanged_hint": "A blank field is left unchanged: only the dates you fill in here are written to the selected requests.",
+  "detail.planned_window_until": "Until {{date}}"
 }

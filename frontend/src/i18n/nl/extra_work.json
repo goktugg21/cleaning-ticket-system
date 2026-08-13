@@ -507,5 +507,6 @@
   "list.bulk_dates_title": "Deadline en geplande einddatum instellen",
   "list.bulk_dates_summary_one": "{{count}} aanvraag geselecteerd.",
   "list.bulk_dates_summary_other": "{{count}} aanvragen geselecteerd.",
-  "list.bulk_dates_unchanged_hint": "Een leeg veld blijft ongewijzigd: alleen de datums die je hier invult worden op de geselecteerde aanvragen gezet."
+  "list.bulk_dates_unchanged_hint": "Een leeg veld blijft ongewijzigd: alleen de datums die je hier invult worden op de geselecteerde aanvragen gezet.",
+  "detail.planned_window_until": "Tot {{date}}"
 }

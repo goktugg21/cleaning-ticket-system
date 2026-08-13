@@ -246,24 +246,6 @@ after the first Sprint 173 prompt was written against them.
 - **The forecast's "Current Monthly" needs an as-of-today label** — see
   the §7 disagreement in NOW. The figure is right; the screen does not
   say what it is measuring.
-- **`section-title` is still undefined in CSS** (recorded in Sprint
-  171): every chart card in `pages/reports/charts/` uses it and no CSS
-  file defines it. One line to fix whenever the owner wants those
-  headings styled; not done unasked because it restyles ten cards.
-
-
-### Found in Sprint 171's CSS sweep, not fixed
-
-`section-title` is used by EVERY chart card in `pages/reports/charts/`
-and is defined in no CSS file — those headings have been rendering as a
-default `<h3>` for as long as the cards have existed. My two new cards
-use it because they were asked to match their neighbours exactly, so
-the sweep now flags 12 usages instead of 10.
-
-Not fixed here deliberately: defining it would restyle ten existing
-cards in a sprint that did not ask for it, and a silent visual change
-across the reports page is worse than a recorded one. It is a
-one-line CSS addition whenever the owner wants those headings styled.
 
 
 ### From Sprint 168 — the Work Plan's unbuilt half

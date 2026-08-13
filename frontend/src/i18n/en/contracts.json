@@ -196,7 +196,8 @@
     "activeRevision": "Active revision",
     "effectiveSince": "Effective since",
     "currentMonthly": "Current monthly",
-    "empty": "No revisions yet — scope changes will be tracked here."
+    "empty": "No revisions yet — scope changes will be tracked here.",
+    "currentMonthlyAsOf": "As at today ({{date}}), on the revision now in force"
   },
   "forecast": {
     "title": "Invoice preview",
