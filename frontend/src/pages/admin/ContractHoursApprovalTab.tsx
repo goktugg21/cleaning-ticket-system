@@ -50,6 +50,8 @@ interface ContractHoursRow {
 
 interface TimeEntry {
   id: number;
+  source_type: string;
+  source_id: number | null;
   employee: number;
   employee_name: string;
   building: number | null;
@@ -64,6 +66,10 @@ interface TimeEntry {
 interface ReviewRow {
   key: string;
   source: "CONTRACT" | "ACTUAL";
+  /** Sprint 174 §2 — for an ACTUAL row, WHERE the hour came from. The
+   *  reviewer groups by it: "eight hours" is one fact, "six from a
+   *  ticket and two from the contract" is the one they can act on. */
+  sourceType: string;
   id: number | null;
   employee: number;
   employee_name: string;
@@ -227,12 +233,17 @@ export function ContractHoursApprovalTab({
   const actualRows = useMemo(() => {
     const byKey = new Map<string, ReviewRow>();
     for (const entry of entries) {
-      const key = `a:${entry.building ?? 0}:${entry.employee}:${entry.hour_type}`;
+      // The SOURCE is part of the key: hours from a ticket and hours
+      // from the contract are two facts and must not be summed into
+      // one row, which is the same reasoning the worker hour report's
+      // grain uses.
+      const key = `a:${entry.building ?? 0}:${entry.employee}:${entry.hour_type}:${entry.source_type}:${entry.source_id ?? 0}`;
       let row = byKey.get(key);
       if (!row) {
         row = {
           key,
           source: "ACTUAL",
+          sourceType: entry.source_type || "OTHER",
           id: null,
           employee: entry.employee,
           employee_name: entry.employee_name,
@@ -277,6 +288,7 @@ export function ContractHoursApprovalTab({
           return {
             key: `c:${row.id}`,
             source: "CONTRACT",
+            sourceType: "CONTRACT",
             id: row.id,
             employee: row.employee,
             employee_name: row.employee_name,
@@ -291,10 +303,47 @@ export function ContractHoursApprovalTab({
     [contractRows, tab],
   );
 
+  /** Sprint 174 §2 — the worked rows, GROUPED BY SOURCE.
+   *
+   *  "Eight hours this week" is one fact; "six from a ticket and two
+   *  from the contract" is the one a reviewer can act on. The order is
+   *  the enum's, not the data's, so two weeks with different sources
+   *  present still read in the same order. */
+  const actualBySource = useMemo(() => {
+    const order = ["CONTRACT", "EXTRA_WORK", "TICKET", "OTHER"];
+    const groups = new Map<string, ReviewRow[]>();
+    for (const row of actualRows) {
+      const key = row.sourceType || "OTHER";
+      groups.set(key, [...(groups.get(key) ?? []), row]);
+    }
+    return order
+      .filter((key) => groups.has(key))
+      .map((key) => ({ sourceType: key, rows: groups.get(key) ?? [] }));
+  }, [actualRows]);
+
   const rows = useMemo(
     () => [...visibleContract, ...actualRows],
     [visibleContract, actualRows],
   );
+
+  /** Every contract row for one employee in this week, in the tab's
+   *  state — what "approve everything for this employee" acts on. */
+  const approvableByEmployee = useMemo(() => {
+    const groups = new Map<number, { name: string; ids: number[] }>();
+    for (const row of visibleContract) {
+      if (row.id === null) continue;
+      const found = groups.get(row.employee) ?? {
+        name: row.employee_name,
+        ids: [],
+      };
+      found.ids.push(row.id);
+      groups.set(row.employee, found);
+    }
+    return [...groups.entries()].map(([employeeId, value]) => ({
+      employeeId,
+      ...value,
+    }));
+  }, [visibleContract]);
 
   const contractedTotal = visibleContract.reduce((sum, r) => sum + r.total, 0);
   const actualTotal = actualRows.reduce((sum, r) => sum + r.total, 0);
@@ -508,6 +557,33 @@ export function ContractHoursApprovalTab({
         </div>
       </form>
 
+      {/* Sprint 174 §2 — approve EVERYTHING for one employee this
+          week. The reference has exactly this, and without it a
+          reviewer with twelve rows for one worker clicks twelve times. */}
+      {approvableByEmployee.length > 0 && (
+        <div
+          className="filter-bar"
+          style={{ alignItems: "center" }}
+          data-testid="approval-per-employee"
+        >
+          <span className="muted small">
+            {t("contract_hours.per_employee_hint", { action: primary.label })}
+          </span>
+          {approvableByEmployee.map((group) => (
+            <button
+              key={group.employeeId}
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => void move(group.ids, primary.to)}
+              disabled={busy}
+              data-testid={`approval-employee-all-${group.employeeId}`}
+            >
+              {group.name} ({group.ids.length})
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading && (
         <div className="loading-bar" style={{ margin: 0 }}>
           <div className="loading-bar-fill" />
@@ -584,6 +660,30 @@ export function ContractHoursApprovalTab({
                   </td>
                 </tr>
               )}
+              {/* Sprint 174 §2 — one sub-heading per SOURCE, so the
+                  reviewer sees where the week's hours came from rather
+                  than one undifferentiated block. */}
+              {row.source === "ACTUAL" &&
+                actualBySource.some(
+                  (group) => group.rows[0]?.key === row.key,
+                ) && (
+                  <tr
+                    className="contract-group-row"
+                    data-testid={`approval-source-group-${row.sourceType}`}
+                  >
+                    <td colSpan={14}>
+                      <strong>{t(`hour_source.${row.sourceType}`)}</strong>{" "}
+                      <span className="muted small">
+                        {t("contract_hours.source_group_count", {
+                          count:
+                            actualBySource.find(
+                              (group) => group.sourceType === row.sourceType,
+                            )?.rows.length ?? 0,
+                        })}
+                      </span>
+                    </td>
+                  </tr>
+                )}
               {row.source === "ACTUAL" &&
                 index === visibleContract.length && (
                   <tr

@@ -2290,5 +2290,7 @@
   "hour_source.TICKET": "Ticket",
   "hour_source.OTHER": "Other",
   "hours_admin.filter_source": "Source",
-  "hours_admin.filter_all_sources": "All sources"
+  "hours_admin.filter_all_sources": "All sources",
+  "contract_hours.per_employee_hint": "Everything for one worker in this state: {{action}}",
+  "contract_hours.source_group_count": "{{count}} row(s)"
 }

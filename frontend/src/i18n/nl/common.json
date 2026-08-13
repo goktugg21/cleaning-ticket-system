@@ -2290,5 +2290,7 @@
   "hour_source.TICKET": "Ticket",
   "hour_source.OTHER": "Overig",
   "hours_admin.filter_source": "Bron",
-  "hours_admin.filter_all_sources": "Alle bronnen"
+  "hours_admin.filter_all_sources": "Alle bronnen",
+  "contract_hours.per_employee_hint": "Alles van een medewerker in deze status: {{action}}",
+  "contract_hours.source_group_count": "{{count}} regel(s)"
 }

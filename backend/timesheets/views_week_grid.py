@@ -75,6 +75,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .models import HourSource
 from .permissions import (
     ERR_TIMESHEET_EMPLOYEE_FORBIDDEN,
     IsTimesheetUser,
@@ -102,6 +103,17 @@ class _WeekCellSerializer(serializers.Serializer):
     building = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     date = serializers.DateField()
     hours = serializers.DecimalField(max_digits=4, decimal_places=2)
+    # Sprint 174 §2 — the SOURCE, set by the flow that logged the hour
+    # rather than typed by the operator. Optional and validated against
+    # the enum: an unrecognised value is a 400 rather than a silently
+    # stored string, because a source nobody can filter on is worse
+    # than no source.
+    source_type = serializers.ChoiceField(
+        choices=HourSource.choices, required=False, allow_blank=True
+    )
+    source_id = serializers.IntegerField(
+        min_value=1, required=False, allow_null=True
+    )
 
 
 class _WeekGridInputSerializer(serializers.Serializer):
@@ -285,6 +297,11 @@ class TimeEntryWeekGridView(APIView):
         }
         if employee_id is not None:
             body["employee"] = employee_id
+        # Sprint 174 §2 — the source travels with the cell. Set by the
+        # flow that logged the hour, never typed twice by the operator.
+        if cell.get("source_type"):
+            body["source_type"] = cell["source_type"]
+            body["source_id"] = cell.get("source_id")
         if data.get("company") is not None and existing is None:
             # `company` is a disambiguator on create only; the serializer
             # makes it read-only once an instance exists, because the
