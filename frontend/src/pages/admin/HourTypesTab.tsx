@@ -339,7 +339,7 @@ export function HourTypesTab({
                 style={{ padding: "32px 24px", textAlign: "center" }}
                 data-testid="hour-types-empty"
               >
-                <h3 style={{ marginBottom: 8 }}>
+                <h3 className="empty-title" style={{ marginBottom: 8 }}>
                   {t("hour_types.empty_title")}
                 </h3>
                 <p className="muted" style={{ margin: 0 }}>
@@ -479,7 +479,7 @@ export function HourTypesTab({
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {mode === "create"
                 ? t("hour_types.add_modal_title")
                 : t("hour_types.edit_modal_title")}

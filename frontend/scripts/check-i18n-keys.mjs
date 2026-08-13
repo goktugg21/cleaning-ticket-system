@@ -45,13 +45,73 @@ let missing = 0;
 let skipped = 0;
 
 for (const file of files) {
-  let src;
-  try { src = readFileSync(file, "utf8"); } catch { continue; }
+  let raw;
+  try { raw = readFileSync(file, "utf8"); } catch { continue; }
 
-  const declared = new Set();
+  // Sprint 179B §5 — COMMENTS ARE NOT CALLS.
+  //
+  // This scans raw text, so `t("access_role.label")` written inside a
+  // doc comment as an EXAMPLE was reported as a missing key. It is not
+  // a call; nothing renders it. Blanked rather than deleted, so every
+  // offset below still lines up with the real source.
+  const src = raw
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, " "))
+    .replace(/^([^\n"'`]*?)\/\/[^\n]*/gm, (line, before) =>
+      before + " ".repeat(line.length - before.length),
+    );
+
+  // Sprint 179B §5 — the namespace is per COMPONENT, not per FILE.
+  //
+  // Sprint 178 was right that only the FIRST declared namespace resolves
+  // (i18next sets no `fallbackNS` here) and wrong about where "first" is
+  // measured. A file may hold two components, and each `useTranslation`
+  // is its own default: `UnifiedTimeline.tsx` opens with a small
+  // `SeverityBadge` on "common" and then declares
+  // `useTranslation(["ticket_detail", "common"])` for the timeline
+  // itself. Taking the file's first declaration searched "common" for
+  // eleven keys that live in `ticket_detail` and render correctly on
+  // screen today — the byte-identical block in `TicketDetailPage.tsx`
+  // passed only because its hook happens to come first in that file.
+  //
+  // So the file is cut at its TOP-LEVEL declarations (column zero — this
+  // codebase is Prettier-formatted, so a component always starts there)
+  // and each call resolves against the first `useTranslation` inside its
+  // own top-level declaration.
+  //
+  // "Nearest preceding declaration" was tried first and is WRONG: a
+  // helper component defined between an outer component's hook and its
+  // JSX would capture the outer component's calls. Measured — it took
+  // this gate from 30 reports to 179.
+  //
+  // A segment that declares nothing falls back to the file's first
+  // declaration, which is exactly the answer Sprint 178 gave, so no case
+  // is treated more permissively than before.
+  const declarations = [];
   for (const m of src.matchAll(/useTranslation\(\s*(\[[^\]]*\]|"[^"]+")/g)) {
-    for (const n of m[1].matchAll(/"([^"]+)"/g)) declared.add(n[1]);
+    const names = [...m[1].matchAll(/"([^"]+)"/g)].map((n) => n[1]);
+    if (names.length) declarations.push({ index: m.index, ns: names[0] });
   }
+  const declared = new Set(declarations.map((d) => d.ns));
+  const segmentStarts = [0];
+  for (const m of src.matchAll(
+    /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|let|var|class)\b/gm,
+  )) {
+    if (m.index > 0) segmentStarts.push(m.index);
+  }
+  const nsAt = (index) => {
+    let start = 0;
+    let end = src.length;
+    for (let i = 0; i < segmentStarts.length; i += 1) {
+      if (segmentStarts[i] <= index) {
+        start = segmentStarts[i];
+        end = segmentStarts[i + 1] ?? src.length;
+      }
+    }
+    const inSegment = declarations.find(
+      (d) => d.index >= start && d.index < end,
+    );
+    return inSegment?.ns ?? declarations[0]?.ns ?? null;
+  };
   // Sprint 178 §2 — only the FIRST declared namespace is the default.
   //
   // `useTranslation(["reports", "common"])` sets the default namespace to
@@ -61,9 +121,9 @@ for (const file of files) {
   // page: the keys existed, in the wrong bundle, and the gate called that
   // resolved. A cross-namespace key needs an explicit "common:" prefix or
   // a `{ ns }` option, and both of those are handled below.
-  const namespaces = declared.size
-    ? [[...declared][0]]
-    : Object.keys(bundles);
+  //
+  // Sprint 179B §5 — "first" is now resolved per call, through `nsAt`.
+  const everyNamespace = Object.keys(bundles);
 
   skipped += [...src.matchAll(/\bt\(`/g)].length;
 
@@ -80,11 +140,14 @@ for (const file of files) {
     // exists and renders correctly — was reported missing. Same lesson
     // as the plural suffixes below: a gate that cries wolf gets ignored.
     const nsOption = (m[2] || "").match(/\bns\s*:\s*"([^"]+)"/);
+    const declaredHere = declared.size ? nsAt(m.index) : null;
     const search = explicit
       ? [maybeNs]
       : nsOption
         ? [nsOption[1]]
-        : namespaces;
+        : declaredHere
+          ? [declaredHere]
+          : everyNamespace;
     // i18next resolves a COUNTED key to its plural form, so `t("x",
     // {count})` looks up `x_one` / `x_other` and `x` itself never
     // exists. Treating that as missing would make this gate cry wolf on

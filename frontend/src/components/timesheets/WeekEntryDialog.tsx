@@ -302,7 +302,7 @@ export function WeekEntryDialog({
           flexDirection: "column",
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+        <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>
           {t("week_setup.title")}
         </h3>
         <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>
@@ -395,6 +395,22 @@ export function WeekEntryDialog({
               }}
               data-testid="week-setup-week"
             />
+            {/* Sprint 179B §3 — the lock, said where the week is chosen.
+                The grid has always carried a "this week is closed"
+                banner, but the grid returns early with "pick an
+                employee first" until somebody is selected, so an
+                operator could page to a closed week, choose people and
+                buildings, type a whole week and only meet the lock on
+                Save. This renders from the moment the dialog opens. */}
+            {weekClosed && (
+              <p
+                className="muted small week-setup-locked"
+                role="status"
+                data-testid="week-setup-locked"
+              >
+                {t("week_setup.week_closed_hint")}
+              </p>
+            )}
             {/* The live row count. Never omitted: "4 employees x 3
                 buildings = 12 rows" is the difference between a
                 confident confirm and a surprise. */}
@@ -406,16 +422,46 @@ export function WeekEntryDialog({
               {/* One BLOCK per (employee, building) now, each opening
                   with a single default hour-type row. The old count
                   multiplied by the chosen types, which no longer
-                  exist as a setup choice. */}
-              {t("week_setup.summary", {
-                employees: employeeIds.length,
-                buildings: buildingIds.length,
-                rows: employeeIds.length * buildingIds.length,
-              })}
+                  exist as a setup choice.
+
+                  Sprint 179B §3 — and it must multiply by the JOBS.
+                  Sprint 177 §7 seeds one row per job (`seedSources` ->
+                  `seats` in the grid), so with two jobs picked this
+                  line promised two rows and the grid produced four. The
+                  count is the one thing on this screen that claims to
+                  say what is about to happen, so it says it. */}
+              {seedSources.length > 0
+                ? t("week_setup.summary_with_jobs", {
+                    employees: employeeIds.length,
+                    buildings: buildingIds.length,
+                    jobs: seedSources.length,
+                    rows:
+                      employeeIds.length *
+                      buildingIds.length *
+                      seedSources.length,
+                  })
+                : t("week_setup.summary", {
+                    employees: employeeIds.length,
+                    buildings: buildingIds.length,
+                    rows: employeeIds.length * buildingIds.length,
+                  })}
+            </p>
+            {/* Sprint 179B §3 — the reconciliation rule, said once and
+                where the count is. A combination that already has hours
+                this week is NOT given a second, empty row (the grid's
+                `put()` keeps the first row for a key), and an operator
+                who expected the promised number of blank rows and got
+                filled ones has no other way to learn why. */}
+            <p className="muted small week-setup-summary-hint">
+              {t("week_setup.summary_hint")}
             </p>
           </div>
         </div>
 
+        {/* Sprint 179B §2 — `sourceOptions` gives the grid's Job column
+            its titles. The list is already loaded here for the picker,
+            so the grid is handed it rather than fetching it again; and
+            `showSource` is on because these rows CAN belong to a job. */}
         <HoursWeekGrid
           week={week}
           employees={gridEmployees}
@@ -425,6 +471,8 @@ export function WeekEntryDialog({
           entriesByEmployee={entriesByEmployee}
           seedBuildingIds={seedBuildingIds}
           seedSources={seedSources}
+          sourceOptions={sourceOptions}
+          showSource
           weekClosed={weekClosed}
           onSaved={onSaved}
           onCancel={onClose}

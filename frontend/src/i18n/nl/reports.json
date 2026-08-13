@@ -151,6 +151,7 @@
   "worker_hours.col_source": "Bron",
   "period_from": "Van",
   "period_to": "Tot",
+  "period_empty_title": "Geen gegevens in deze periode",
   "open_report": "Rapport openen",
   "employee": "Medewerker",
   "hours": "Uren",

@@ -151,6 +151,7 @@
   "worker_hours.col_source": "Source",
   "period_from": "From",
   "period_to": "To",
+  "period_empty_title": "No data in this period",
   "open_report": "Open report",
   "employee": "Employee",
   "hours": "Hours",

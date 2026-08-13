@@ -375,7 +375,7 @@ export function CustomerEmployeesDirectory({
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>
               {t("customer_employees.edit_modal_title")}
             </h3>
             <p className="muted small" style={{ marginBottom: 16 }}>

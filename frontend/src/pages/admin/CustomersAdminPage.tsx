@@ -1078,7 +1078,7 @@ function CustomerQuickEditDialog({
           overflowY: "auto",
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+        <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>
           {t("customers.edit_dialog_title")}
         </h3>
         <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>

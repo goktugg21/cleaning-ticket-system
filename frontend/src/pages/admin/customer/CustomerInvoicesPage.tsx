@@ -47,7 +47,12 @@ export function CustomerInvoicesPage() {
   if (numericId === null) {
     return (
       <div className="alert-error" role="alert">
-        {t("admin.load_error")}
+        {/* Sprint 179B §5 — `admin.load_error` is in no bundle and this
+            box rendered that string verbatim. The branch is not a load
+            failure at all: it fires only when the `:id` in the URL is
+            not a positive number, which is what the four sibling
+            customer tabs already call `bm_customer_detail.invalid_id`. */}
+        {t("bm_customer_detail.invalid_id")}
       </div>
     );
   }

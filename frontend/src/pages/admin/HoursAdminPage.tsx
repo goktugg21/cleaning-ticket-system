@@ -3,7 +3,11 @@ import { useTranslation } from "react-i18next";
 
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import { getApiError } from "../../api/client";
-import { decodeSource, encodeSource } from "../../lib/hourSource";
+import {
+  decodeSource,
+  encodeSource,
+  hourSourceLabel,
+} from "../../lib/hourSource";
 import { listHourSources } from "../../api/reports";
 import type { HourSourceOption } from "../../api/reports";
 import {
@@ -1003,7 +1007,7 @@ export function HoursAdminPage() {
                     style={{ padding: "32px 24px", textAlign: "center" }}
                     data-testid="hours-entries-empty"
                   >
-                    <h3 style={{ marginBottom: 8 }}>
+                    <h3 className="empty-title" style={{ marginBottom: 8 }}>
                       {t("hours_admin.empty_title")}
                     </h3>
                     <p className="muted" style={{ margin: 0 }}>
@@ -1142,9 +1146,23 @@ export function HoursAdminPage() {
                               </select>
                             ) : entry.source_type &&
                               entry.source_type !== "OTHER" ? (
+                              /* Sprint 179B §2 — the TITLE, the same one
+                                 the select above offers. Reading the row
+                                 printed "Ticket #41" while editing the
+                                 very same row printed the ticket's
+                                 title, so one screen answered "which
+                                 job" two different ways. `#41` remains
+                                 the fallback for a job the picker no
+                                 longer lists, which is where the raw id
+                                 belonged all along. */
                               <span className="cell-tag cell-tag-muted">
-                                {t(`hour_source.${entry.source_type}`)}
-                                {entry.source_id ? ` #${entry.source_id}` : ""}
+                                {hourSourceLabel(
+                                  entry.source_type,
+                                  entry.source_id,
+                                  sourceOptions,
+                                  t,
+                                  "—",
+                                )}
                               </span>
                             ) : (
                               <span className="muted-empty">—</span>

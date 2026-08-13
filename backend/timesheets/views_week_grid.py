@@ -250,11 +250,33 @@ class TimeEntryWeekGridView(APIView):
     def _existing_row(self, request, cell, employee_id):
         """The row this cell addresses, if any.
 
-        Keyed on (employee, date, hour type, building) — the grid's own
-        coordinates. Scoped through the same base queryset the detail
-        endpoint uses, so a row the caller may not touch is simply not
-        found and the cell is treated as a create, which the serializer
-        then refuses on its own terms.
+        Keyed on (employee, date, hour type, building, SOURCE) — the
+        grid's own coordinates. Scoped through the same base queryset the
+        detail endpoint uses, so a row the caller may not touch is simply
+        not found and the cell is treated as a create, which the
+        serializer then refuses on its own terms.
+
+        ## Sprint 179B §2 — why the source is part of the key
+
+        Sprint 177 §7 taught the week wizard to seed one row per JOB, and
+        the grid keys its rows on `(hour_type, building, source_type,
+        source_id)` for a stated reason: hours on the stairwell repaint
+        and hours on nothing in particular are two facts and must not be
+        summed onto one line.
+
+        This lookup did not key on the source, so the two sides disagreed
+        about what a row IS. Pick two jobs at one building in the wizard,
+        put 4 hours on each, press Save: the first cell created a row,
+        the second found that row — same employee, date, hour type and
+        building — and took the UPDATE branch. One `TimeEntry` survived,
+        carrying 4 hours instead of 8 and the second job's source. The
+        operator saw two rows go in and got one row back, silently.
+
+        A cell that names no source addresses the UNTAGGED row: `OTHER`
+        with no id, which is the column's own default and therefore what
+        every row written before Sprint 173 carries. So an untagged cell
+        can still update the row it always updated, and can no longer
+        overwrite a job-tagged one.
         """
         from .views_entries import _base_entry_queryset
 
@@ -268,6 +290,14 @@ class TimeEntryWeekGridView(APIView):
             qs.filter(building_id=building_id)
             if building_id is not None
             else qs.filter(building__isnull=True)
+        )
+        source_type = cell.get("source_type") or HourSource.OTHER
+        source_id = cell.get("source_id") if cell.get("source_type") else None
+        qs = qs.filter(source_type=source_type)
+        qs = (
+            qs.filter(source_id=source_id)
+            if source_id is not None
+            else qs.filter(source_id__isnull=True)
         )
         return qs.first()
 

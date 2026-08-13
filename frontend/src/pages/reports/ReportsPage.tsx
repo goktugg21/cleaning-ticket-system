@@ -515,7 +515,11 @@ export function ReportsPage() {
           <section
             key={card.key}
             className="card"
-            style={{ padding: "20px 22px", minHeight: 220 }}
+            /* Sprint 179B §4 — 360, the height every other card in this
+               grid already uses. At 220 the four new cards sat visibly
+               short inside one auto-fit grid, which reads as a row that
+               did not finish loading rather than as four cards. */
+            style={{ padding: "20px 22px", minHeight: 360 }}
             data-testid={`chart-card-${card.testId}`}
           >
             <h3 className="section-title">{t(card.titleKey)}</h3>
@@ -564,14 +568,27 @@ export function ReportsPage() {
               className="card"
               style={{
                 width: "min(96vw, 1320px)",
-                padding: 24,
+                // Sprint 179B §4 — the house inset (`.card-detail-pad`,
+                // and the inline copy the building and customer detail
+                // pages carry). 24 was this modal's own number.
+                padding: "20px 22px",
                 maxHeight: "85vh",
                 display: "flex",
                 flexDirection: "column",
                 overflowY: "auto",
               }}
             >
-              <div className="section-head" style={{ marginBottom: 12 }}>
+              {/* Sprint 179B §4 — `.section-head` brings its own
+                  16px 20px, so inside an already-padded panel the title
+                  started 42px from the border while the table under it
+                  started at 22px, and its white background over a white
+                  card left only the rule visible. Zeroed here so the
+                  heading sits on the same left edge as its content; the
+                  bottom border, which is the part that does work, stays. */}
+              <div
+                className="section-head"
+                style={{ marginBottom: 12, padding: "0 0 12px" }}
+              >
                 <div className="section-head-title">{t(card.titleKey)}</div>
                 <button
                   type="button"

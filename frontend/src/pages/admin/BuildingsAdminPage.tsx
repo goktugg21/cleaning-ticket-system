@@ -713,6 +713,11 @@ export function BuildingsAdminPage() {
                     column: t("buildings.col_city"),
                   })}
                 />
+                {/* Sprint 179B §1 — the type, as a COLUMN. Sprint 178 added
+                    the catalog and the filter and nothing on this list said
+                    what a building's type was, so the feature read as
+                    absent. Mirrored in the phone card list below. */}
+                <th>{t("buildings.col_building_type")}</th>
                 <th>{t("buildings.col_customers")}</th>
                 <SortableHeader
                   label={t("created")}
@@ -775,6 +780,9 @@ export function BuildingsAdminPage() {
                       {[building.city, building.postal_code]
                         .filter(Boolean)
                         .join(" ") || "—"}
+                    </td>
+                    <td data-testid={`buildings-type-${building.id}`}>
+                      {building.building_type_name || "—"}
                     </td>
                     <td>
                       <CustomerNamesCell
@@ -862,6 +870,14 @@ export function BuildingsAdminPage() {
                         <dd>{address}</dd>
                       </div>
                     )}
+                    {/* Sprint 179B §1 — the same column the table gained,
+                        mirrored here so the phone list does not drift. */}
+                    <div className="admin-card-meta-row">
+                      <dt>{t("buildings.col_building_type")}</dt>
+                      <dd data-testid={`buildings-card-type-${building.id}`}>
+                        {building.building_type_name || "—"}
+                      </dd>
+                    </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("buildings.col_customers")}</dt>
                       <dd>
@@ -1144,7 +1160,7 @@ function BuildingQuickEditDialog({
           overflowY: "auto",
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+        <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>
           {t("buildings.edit_dialog_title")}
         </h3>
         <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>

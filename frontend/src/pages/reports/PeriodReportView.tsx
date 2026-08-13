@@ -171,11 +171,22 @@ export function PeriodReportView<T extends PeriodPayload>({
       {!loading && !error && payload && (
         <>
           {/* An empty report is an ANSWER, and says so. The alternative
-              is a blank panel an operator reads as a broken screen. */}
+              is a blank panel an operator reads as a broken screen.
+
+              Sprint 179B §4 — and it now LOOKS like one. The sentence
+              was a single 14px grey line at the left edge of a 1320px
+              panel: `.muted` sets colour only, so it inherited the body
+              size and sat one step LARGER than every other secondary
+              line on the screen, with no margin, no padding and nothing
+              around it. This is the house empty state — the same
+              `.empty-state` / `.empty-title` / `.empty-sub` the admin
+              lists use — so a report with nothing in it reads as a
+              finished screen rather than a failed one. */}
           {Number(payload.total) === 0 ? (
-            <p className="muted" data-testid={`${testIdPrefix}-empty`}>
-              {emptyHint}
-            </p>
+            <div className="empty-state" data-testid={`${testIdPrefix}-empty`}>
+              <div className="empty-title">{t("period_empty_title")}</div>
+              <p className="empty-sub">{emptyHint}</p>
+            </div>
           ) : (
             children(payload)
           )}
