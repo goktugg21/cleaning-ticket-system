@@ -43,6 +43,8 @@ import type {
   TimesheetEmployee,
 } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
+import { listHourSources } from "../../api/reports";
+import type { HourSourceOption } from "../../api/reports";
 import { ChipMultiSelect } from "../ChipMultiSelect";
 import { usePickerReserve } from "../../lib/usePickerReserve";
 import { formatIsoWeek, parseIsoWeek } from "../../lib/isoWeek";
@@ -83,6 +85,13 @@ export function WeekEntryDialog({
   // a week of hours against no location without noticing. "No building"
   // stays AVAILABLE in the list; it is simply not picked for them.
   const [buildingIds, setBuildingIds] = useState<number[]>([]);
+  // Sprint 177 §7 — the JOB these hours are worked on. Optional: plenty
+  // of hours belong to no particular job, and forcing a choice would be
+  // worse than the untagged rows this is fixing. Chosen, it becomes a
+  // seeded row per job so the source travels with the hours instead of
+  // being typed twice (which is to say: never typed at all).
+  const [sourceKeys, setSourceKeys] = useState<number[]>([]);
+  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
   const [week, setWeek] = useState<IsoWeek>(initialWeek);
 
   const [entriesByEmployee, setEntriesByEmployee] = useState<
@@ -156,6 +165,51 @@ export function WeekEntryDialog({
       cancelled = true;
     };
   }, [week, companyId]);
+
+  /** Sprint 177 §7 — load the pickable jobs once.
+   *
+   *  Non-fatal on failure, like the category options on the extra-work
+   *  list: the source is an OPTIONAL refinement, and a picker that could
+   *  not load must not stop somebody entering their week. */
+  useEffect(() => {
+    let cancelled = false;
+    listHourSources()
+      .then((options) => {
+        if (!cancelled) setSourceOptions(options);
+      })
+      .catch(() => {
+        /* non-fatal: hours can still be entered untagged */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** ChipMultiSelect keys on a NUMBER id, and a source is a (type, id)
+   *  PAIR — so the option list is indexed and the index is the id. The
+   *  pair is recovered on the way out, never reconstructed from a
+   *  parsed string. */
+  const sourceChipOptions = useMemo(
+    () =>
+      sourceOptions.map((option, index) => ({
+        id: index,
+        label: option.title,
+        sublabel: t(`hour_source.${option.source_type}`),
+      })),
+    [sourceOptions, t],
+  );
+
+  const seedSources = useMemo(
+    () =>
+      sourceKeys
+        .map((index) => sourceOptions[index])
+        .filter(Boolean)
+        .map((option) => ({
+          source_type: option.source_type,
+          source_id: option.source_id,
+        })),
+    [sourceKeys, sourceOptions],
+  );
 
   const buildingOptions = useMemo(
     () => [
@@ -297,6 +351,31 @@ export function WeekEntryDialog({
             />
           </div>
 
+          {/* Sprint 177 §7 — WHICH JOB. Optional by design; left empty
+              the grid behaves exactly as it did before this sprint. */}
+          {sourceChipOptions.length > 0 && (
+            <div className="field">
+              <span className="field-label">
+                {t("week_setup.sources_label")}
+              </span>
+              <ChipMultiSelect
+                options={sourceChipOptions}
+                selectedIds={sourceKeys}
+                onChange={setSourceKeys}
+                placeholder={t("week_setup.select_sources")}
+                removeLabel={(label) =>
+                  t("week_setup.remove_source", { name: label })
+                }
+                emptyText={t("week_setup.no_sources")}
+                onOpenChange={onPickerOpenChange}
+                testIdPrefix="week-setup-sources"
+              />
+              <p className="muted small" style={{ marginTop: 4 }}>
+                {t("week_setup.sources_hint")}
+              </p>
+            </div>
+          )}
+
           {/* Sprint 162 §1c — the hour-type step is GONE. The grid now
               carries `+ Add type` per block, which is the only way a
               type is chosen, so asking for types up front was asking
@@ -345,6 +424,7 @@ export function WeekEntryDialog({
           buildings={buildings}
           entriesByEmployee={entriesByEmployee}
           seedBuildingIds={seedBuildingIds}
+          seedSources={seedSources}
           weekClosed={weekClosed}
           onSaved={onSaved}
           onCancel={onClose}

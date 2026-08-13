@@ -2292,5 +2292,10 @@
   "hours_admin.filter_source": "Source",
   "hours_admin.filter_all_sources": "All sources",
   "contract_hours.per_employee_hint": "Everything for one worker in this state: {{action}}",
-  "contract_hours.source_group_count": "{{count}} row(s)"
+  "contract_hours.source_group_count": "{{count}} row(s)",
+  "week_setup.sources_label": "Job (optional)",
+  "week_setup.select_sources": "Pick extra work or tickets",
+  "week_setup.remove_source": "Remove {{name}}",
+  "week_setup.no_sources": "No open work found.",
+  "week_setup.sources_hint": "Pick a job and each one gets its own row, with the hours attributed to it automatically."
 }

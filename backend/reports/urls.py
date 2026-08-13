@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    HourSourceOptionsView,
     WorkerHoursExportView,
     WorkerHoursReportView,
     HoursComparisonView,
@@ -35,6 +36,13 @@ from .views import (
 
 
 urlpatterns = [
+    # Sprint 177 §7 — the source picker. A plain literal path, before the
+    # report routes, in keeping with the ordering rule below.
+    path(
+        "hour-sources/",
+        HourSourceOptionsView.as_view(),
+        name="report-hour-sources",
+    ),
     # Sprint 171 §4 — the export literals BEFORE the report route, the
     # ordering this repo keeps so a later converter change cannot let
     # one swallow the other.

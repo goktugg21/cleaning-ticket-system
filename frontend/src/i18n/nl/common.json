@@ -2292,5 +2292,10 @@
   "hours_admin.filter_source": "Bron",
   "hours_admin.filter_all_sources": "Alle bronnen",
   "contract_hours.per_employee_hint": "Alles van een medewerker in deze status: {{action}}",
-  "contract_hours.source_group_count": "{{count}} regel(s)"
+  "contract_hours.source_group_count": "{{count}} regel(s)",
+  "week_setup.sources_label": "Werk (optioneel)",
+  "week_setup.select_sources": "Kies meerwerk of tickets",
+  "week_setup.remove_source": "{{name}} verwijderen",
+  "week_setup.no_sources": "Geen lopend werk gevonden.",
+  "week_setup.sources_hint": "Kies je een opdracht, dan krijgt elke opdracht een eigen regel en worden de uren er automatisch aan gekoppeld."
 }

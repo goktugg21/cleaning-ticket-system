@@ -15,7 +15,9 @@ from accounts.models import UserRole
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
 from tickets.models import TicketStatus
+from timesheets.permissions import IsTimesheetUser
 
+from .hour_sources import available_sources
 from .dimensions import (
     DimensionFilters,
     OriginInvalid,
@@ -1011,3 +1013,54 @@ class WorkerHoursExportView(APIView):
         response = HttpResponse(body, content_type=content_type)
         response["Content-Disposition"] = f'attachment; filename="{name}"'
         return response
+
+
+class HourSourceOptionsView(APIView):
+    """
+    Sprint 177 §7 — the jobs an operator may log hours AGAINST.
+
+        GET /api/reports/hour-sources/?q=<search>
+
+    Returns `[{source_type, source_id, title, building}]` — open extra
+    work first, then open tickets, each already narrowed to what this
+    actor can see.
+
+    ## Why this endpoint had to exist
+
+    Sprint 173 put `(source_type, source_id)` on `TimeEntry`; Sprint 174
+    added the list filter and taught the week-grid endpoint to ACCEPT a
+    source per cell. Nothing ever SUPPLIED one. So every hour in the
+    system read as untagged, the Source column showed the same value for
+    every row, and "employee hours by extra work" was a report over a
+    column nobody fills. This is the missing half.
+
+    ## Why it lives in `reports/`
+
+    `timesheets` imports nothing from `tickets` or `extra_work` — that is
+    a hard rule in CLAUDE.md, and it is why a `TimeEntry` stores a type
+    and an id and resolves neither. Cross-module reads live here.
+    `hour_sources.resolve_sources` already goes the other way (pair ->
+    title) for exactly this reason; this is its list direction, in the
+    same module, sharing the same scoping.
+
+    ## The permission is deliberately NOT a reports one
+
+    `IsTimesheetUser`, not `IsReportsConsumer`. A STAFF member logs their
+    own hours and must be able to say which job they worked on; the
+    reports classes exclude STAFF because they expose commercial and
+    whole-team figures. Using a reports gate here would lock the picker
+    away from most of the people who need it.
+
+    Safety does not rest on the gate anyway: the two scoping helpers
+    decide what comes back, so an actor is only ever offered work they
+    could already open. An out-of-scope job is absent, exactly as if it
+    did not exist (H-1).
+    """
+
+    permission_classes = [IsAuthenticated, IsTimesheetUser]
+
+    def get(self, request):
+        query = _first_param(request.query_params, "q") or ""
+        return Response(
+            {"results": available_sources(request.user, query=query)}
+        )

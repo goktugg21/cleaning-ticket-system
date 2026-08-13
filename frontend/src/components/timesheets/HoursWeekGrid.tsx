@@ -85,6 +85,12 @@ export interface GridCell {
   building: number | null;
   date: string;
   hours: string;
+  /** Sprint 177 §7 — the JOB these hours were worked on, travelling with
+   *  the cell so the operator never restates it. Omitted entirely when
+   *  the row is not tagged to a job: the endpoint reads key presence, and
+   *  sending an empty string would store a source nobody can filter on. */
+  source_type?: string;
+  source_id?: number | null;
 }
 
 export interface GridEmployee {
@@ -126,13 +132,26 @@ interface GridRow {
    *  rule is about WHERE a row came from, not WHEN, so the row is
    *  marked at creation rather than inferred later. */
   manual?: boolean;
+  /** Sprint 177 §7 — the job this row's hours belong to, or "" for
+   *  untagged work. Part of the row IDENTITY (see `rowKey`), because
+   *  hours on the stairwell repaint and hours on nothing in particular
+   *  are two facts and must not be summed onto one line. */
+  sourceType: string;
+  sourceId: number | null;
   /** "YYYY-MM-DD" -> the raw text of the saved entry. Text, not number,
    *  so a half-typed "1." survives a re-render. */
   cells: Record<string, string>;
 }
 
-function rowKey(hourTypeId: number | "", buildingId: number | "") {
-  return `${hourTypeId}:${buildingId}`;
+function rowKey(
+  hourTypeId: number | "",
+  buildingId: number | "",
+  sourceType: string = "",
+  sourceId: number | null = null,
+) {
+  // The SOURCE is part of the key for the same reason the approval tab
+  // keys on it: two jobs at one building on one hour type are two rows.
+  return `${hourTypeId}:${buildingId}:${sourceType}:${sourceId ?? ""}`;
 }
 
 function rowId(employeeId: number, key: string) {
@@ -165,6 +184,7 @@ export function HoursWeekGrid({
   buildings,
   entriesByEmployee,
   seedBuildingIds,
+  seedSources = [],
   weekClosed,
   onSaved,
   onCancel,
@@ -184,6 +204,11 @@ export function HoursWeekGrid({
    *  that ALREADY have entries this week are reconciled rather than
    *  duplicated. */
   seedBuildingIds: (number | null)[];
+  /** Sprint 177 §7 — the JOBS chosen in the setup, if any. Each becomes
+   *  its own seeded row so the hours land already attributed. Empty (the
+   *  default, and what every pre-177 caller passes) seeds one untagged
+   *  row exactly as before, so no existing screen changes shape. */
+  seedSources?: { source_type: string; source_id: number }[];
   /** The hour types chosen in the setup. Empty falls back to the first
    *  active type. */
   weekClosed: boolean;
@@ -248,7 +273,14 @@ export function HoursWeekGrid({
       };
 
       for (const entry of entriesByEmployee[employee.id] ?? []) {
-        const key = rowKey(entry.hour_type, entry.building ?? "");
+        const entrySourceType = entry.source_type || "";
+        const entrySourceId = entry.source_id ?? null;
+        const key = rowKey(
+          entry.hour_type,
+          entry.building ?? "",
+          entrySourceType,
+          entrySourceId,
+        );
         put({
           id: rowId(employee.id, key),
           employeeId: employee.id,
@@ -256,6 +288,8 @@ export function HoursWeekGrid({
           key,
           hourTypeId: entry.hour_type,
           buildingId: entry.building ?? "",
+          sourceType: entrySourceType,
+          sourceId: entrySourceId,
           cells: {},
         });
         byKey.get(key)!.cells[entry.date] = String(entry.hours);
@@ -268,17 +302,32 @@ export function HoursWeekGrid({
       for (const buildingId of seedBuildingIds) {
         const seat = buildingId ?? "";
         for (const hourType of seedTypes) {
-          const key = rowKey(hourType.id, seat);
-          put({
-            id: rowId(employee.id, key),
-            employeeId: employee.id,
-            employeeName: employee.name,
-            key,
-            hourTypeId: hourType.id,
-            buildingId: seat,
-            cells: {},
-            added: true,
-          });
+          // Sprint 177 §7 — one seeded row per JOB the setup named, and
+          // one untagged row when it named none. An operator who picked
+          // two jobs gets a line for each, so the hours land already
+          // attributed instead of needing a source typed afterwards.
+          const seats: { type: string; id: number | null }[] =
+            seedSources.length > 0
+              ? seedSources.map((source) => ({
+                  type: source.source_type,
+                  id: source.source_id,
+                }))
+              : [{ type: "", id: null }];
+          for (const source of seats) {
+            const key = rowKey(hourType.id, seat, source.type, source.id);
+            put({
+              id: rowId(employee.id, key),
+              employeeId: employee.id,
+              employeeName: employee.name,
+              key,
+              hourTypeId: hourType.id,
+              buildingId: seat,
+              sourceType: source.type,
+              sourceId: source.id,
+              cells: {},
+              added: true,
+            });
+          }
         }
       }
 
@@ -291,6 +340,7 @@ export function HoursWeekGrid({
     entriesByEmployee,
     extraRows,
     seedBuildingIds,
+    seedSources,
     // `hourTypes` is no longer read here: the seed is `defaultHourType`,
     // which is derived from it and is its own dependency. It went with
     // the wizard's hour-type step (§1c).
@@ -423,10 +473,27 @@ export function HoursWeekGrid({
    *  employee and the building, so the type is the only choice left —
    *  which is the whole point of the shape. */
   function addTypeToBlock(
-    block: { employeeId: number; employeeName: string; buildingId: number | "" },
+    block: {
+      employeeId: number;
+      employeeName: string;
+      buildingId: number | "";
+      /** Sprint 177 §7 — an hour type added to a job-tagged block belongs
+       *  to that job. Without this the new row would be untagged and the
+       *  operator would have to say so again, which is the exact thing
+       *  this section exists to stop. */
+      sourceType?: string;
+      sourceId?: number | null;
+    },
     hourTypeId: number,
   ) {
-    const key = rowKey(hourTypeId, block.buildingId);
+    const blockSourceType = block.sourceType ?? "";
+    const blockSourceId = block.sourceId ?? null;
+    const key = rowKey(
+      hourTypeId,
+      block.buildingId,
+      blockSourceType,
+      blockSourceId,
+    );
     if (
       rows.some((r) => r.employeeId === block.employeeId && r.key === key)
     ) {
@@ -450,6 +517,8 @@ export function HoursWeekGrid({
           key,
           hourTypeId,
           buildingId: block.buildingId,
+          sourceType: blockSourceType,
+          sourceId: blockSourceId,
           cells: {},
           added: true,
           // Sprint 166 §1 — the mark that keeps this row out of the
@@ -494,6 +563,12 @@ export function HoursWeekGrid({
           date: dayKey,
           // "0" is meaningful: it CLEARS the cell server-side.
           hours: String(parseHours(edits[key])),
+          // Sprint 177 §7 — only when the row IS tagged. Spread rather
+          // than a null literal so an untagged row omits the keys
+          // entirely; the endpoint reads presence.
+          ...(row.sourceType
+            ? { source_type: row.sourceType, source_id: row.sourceId }
+            : {}),
         });
       }
     }

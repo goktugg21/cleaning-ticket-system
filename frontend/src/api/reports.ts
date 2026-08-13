@@ -255,3 +255,30 @@ export async function downloadDimensionExport(
   document.body.removeChild(link);
   window.URL.revokeObjectURL(blobUrl);
 }
+
+/** Sprint 177 §7 — the jobs this user may log hours against.
+ *
+ *  The list direction of the Sprint 173 source pair. Returns open extra
+ *  work and open tickets, already narrowed server-side to what the actor
+ *  can see, so the picker can never offer another tenant's job.
+ *
+ *  Lives under `reports/` because that is the app allowed to read across
+ *  modules — `timesheets` imports nothing from `tickets` or
+ *  `extra_work`, which is why an hour stores a type and an id and
+ *  resolves neither. */
+export interface HourSourceOption {
+  source_type: string;
+  source_id: number;
+  title: string;
+  building: number | null;
+}
+
+export async function listHourSources(
+  query?: string,
+): Promise<HourSourceOption[]> {
+  const response = await api.get<{ results: HourSourceOption[] }>(
+    "/reports/hour-sources/",
+    { params: query ? { q: query } : undefined },
+  );
+  return response.data.results;
+}
