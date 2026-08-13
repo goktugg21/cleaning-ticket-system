@@ -101,7 +101,7 @@ export function CompanyEmployeeDialog({
           overflowY: "auto",
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+        <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>
           {t("company_detail.employee_add_title")}
         </h3>
         <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>

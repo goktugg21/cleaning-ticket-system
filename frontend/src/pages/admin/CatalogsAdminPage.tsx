@@ -94,7 +94,12 @@ export function CatalogsAdminPage() {
       {tab === "building_types" && <BuildingTypesTab />}
       {tab === "managed_units" && <ManagedUnitsTab />}
 
-      <div className="card" style={{ marginTop: 16 }}>
+      {/* Sprint 179B §4 — `card-detail-pad`, the padding every detail
+          card carries (Sprint 163 §3 named it for exactly this). `.card`
+          deliberately has none, because plenty of cards hold a
+          full-bleed table; this one holds a heading, a sentence and a
+          button, and all three rendered flush against the border. */}
+      <div className="card card-detail-pad" style={{ marginTop: 16 }}>
         <div className="form-section-title">
           {t("catalogs.services_title")}
         </div>

@@ -7335,7 +7335,11 @@ a.attn-row:hover {
 }
 .reject-modal-title {
   margin: 0;
-  font-size: 16px;
+  /* Sprint 179B §4 — same slip as `.contract-forecast-header h3`: 16px
+     bold in the BODY face. The house dialog heading is Plus Jakarta
+     Sans 15/700. */
+  font-family: var(--f-head);
+  font-size: 15px;
   font-weight: 700;
 }
 .reject-modal-desc {
@@ -8668,7 +8672,9 @@ details[open] > .ew-department-tree-summary::before {
 .pricing-category-card-name {
   font-family: var(--f-head);
   font-weight: 700;
-  font-size: 15.5px;
+  /* Sprint 179B §4 — 15px, the house card-heading size. Was 15.5, a
+     half-pixel nobody chose deliberately. */
+  font-size: 15px;
   line-height: 1.25;
   display: flex;
   align-items: center;
@@ -9227,8 +9233,13 @@ details[open] > .ew-department-tree-summary::before {
 }
 .contract-forecast-header h3 {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+  /* Sprint 179B §4 — was 14px/600 with no family, so it rendered in DM
+     Sans while every other card heading is Plus Jakarta Sans 15/700. A
+     heading in the body face is the one typographic slip that reads as
+     "different page" rather than "different size". */
+  font-family: var(--f-head);
+  font-size: 15px;
+  font-weight: 700;
 }
 .contract-forecast-caption {
   margin: 0 0 10px;
@@ -9497,7 +9508,9 @@ details[open] > .ew-department-tree-summary::before {
 }
 .hours-week-table-title {
   font-family: var(--f-head);
-  font-size: 14px;
+  /* Sprint 179B §4 — 15px, the house card-heading size that
+     `.section-title` and `.section-head-title` both carry. Was 14. */
+  font-size: 15px;
   font-weight: 700;
 }
 .hours-week-table-hint {
@@ -9677,4 +9690,81 @@ details[open] > .ew-department-tree-summary::before {
   background: var(--surface-2);
   border-radius: var(--r-md);
   box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* ------------------------------------------------------------------
+   Sprint 179B — design pass
+   ------------------------------------------------------------------
+   One appended block, per this round's split: Agent A is editing this
+   same file in parallel and a whitespace change anywhere above turns a
+   trivial merge into a manual one. Nothing above this line was
+   reformatted; the four value-only edits this sprint made to existing
+   rules (`.hours-week-table-title`, `.contract-forecast-header h3`,
+   `.reject-modal-title`, `.pricing-category-card-name`) are each a
+   single declaration, commented in place.
+
+   Class names are feature-prefixed, per the convention index.css
+   records at the Sprint 160 block: a generic rule every table would
+   inherit is out of scope for a feature sprint.                      */
+
+/* §1 — the Catalogs empty state that has to explain a control which has
+   not appeared yet. Its own line under the "no rows" sentence, at the
+   12px secondary size the rest of the app uses for a hint. */
+.catalog-empty-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-faint);
+  max-width: 62ch;
+  line-height: 1.5;
+}
+
+/* §2 — the JOB column. Same treatment as the worker and building
+   identity cells beside it (`.hours-week-identity`), plus a width cap:
+   an extra-work title can run long and the grid's day columns must not
+   be squeezed off screen by it. */
+.hours-week-job {
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* §3 — the fill rule, under the control it describes. The label is
+   uppercase 11px `nowrap`; the hint below it is a sentence, so it wraps
+   and drops the uppercase. */
+.hours-week-apply-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  color: var(--text-faint);
+  max-width: 46ch;
+  line-height: 1.45;
+}
+
+/* §3 — the two lines under the week setup's row count. */
+.week-setup-summary-hint,
+.week-setup-locked {
+  margin-top: 4px;
+  line-height: 1.45;
+}
+.week-setup-locked {
+  color: var(--amber);
+}
+
+/* §4 — the report modals' group titles and their totals. `.form-section-title`
+   carries no margins at all, so a group title sat 2px above its table
+   and the grand total abutted the one above it. */
+.report-group-title {
+  margin-bottom: 6px;
+}
+.report-grand-total {
+  margin-top: 10px;
+}
+.report-summary-line {
+  margin-bottom: 10px;
 }

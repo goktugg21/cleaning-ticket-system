@@ -44,7 +44,7 @@ export function EmployeeHoursByBuildingView() {
         <div className="table-wrap">
           {payload.buildings.map((bucket) => (
             <div key={bucket.building ?? "none"} style={{ marginBottom: 16 }}>
-              <div className="form-section-title">
+              <div className="form-section-title report-group-title">
                 {/* A null building is a real bucket, not a bug — hours
                     can be logged against no location by design. */}
                 {bucket.building_name ?? t("no_building")} —{" "}
@@ -68,7 +68,7 @@ export function EmployeeHoursByBuildingView() {
               </table>
             </div>
           ))}
-          <p className="muted small">
+          <p className="muted small report-grand-total">
             {t("grand_total")}: {payload.total}
           </p>
         </div>
@@ -107,7 +107,7 @@ export function EmployeeHoursWeeklyView() {
               key={`${week.iso_year}-${week.iso_week}`}
               style={{ marginBottom: 16 }}
             >
-              <div className="form-section-title">
+              <div className="form-section-title report-group-title">
                 {t("week_label", {
                   year: week.iso_year,
                   week: week.iso_week,
@@ -142,7 +142,7 @@ export function EmployeeHoursWeeklyView() {
               </table>
             </div>
           ))}
-          <p className="muted small">
+          <p className="muted small report-grand-total">
             {t("grand_total")}: {payload.total}
           </p>
         </div>
@@ -177,7 +177,7 @@ export function EmployeeHoursByExtraWorkView() {
         <div className="table-wrap">
           {payload.extra_work.map((job) => (
             <div key={job.source_id} style={{ marginBottom: 16 }}>
-              <div className="form-section-title">
+              <div className="form-section-title report-group-title">
                 {job.title ?? `#${job.source_id}`} — {job.total}
               </div>
               <table className="data-table data-table-dense">
@@ -198,7 +198,7 @@ export function EmployeeHoursByExtraWorkView() {
               </table>
             </div>
           ))}
-          <p className="muted small">
+          <p className="muted small report-grand-total">
             {t("grand_total")}: {payload.total}
           </p>
         </div>
@@ -234,7 +234,9 @@ export function TicketReportView() {
     >
       {(payload) => (
         <div className="table-wrap">
-          <p className="muted small">
+          {/* Sprint 179B §4 — this line sat flush against the table it
+              summarises. Same breathing room the group titles now get. */}
+          <p className="muted small report-summary-line">
             {t("ticket_report_summary", {
               total: payload.total,
               finished: payload.finished,

@@ -97,7 +97,7 @@ export function AssignPeopleDialog({
           overflowY: "auto",
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+        <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>
           {t("assign_people.title")}
         </h3>
         {/* The mandatory "N to M" line, same rule as BulkAssignDialog. */}

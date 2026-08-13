@@ -348,7 +348,7 @@ export function ContractFormDialog({
           overflowY: "auto",
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+        <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>
           {contract ? t("form.editTitle") : t("form.createTitle")}
         </h3>
         <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>

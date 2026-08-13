@@ -1612,7 +1612,7 @@ export function CustomerPricingPage() {
                   style={{ padding: "32px 24px", textAlign: "center" }}
                   data-testid="customer-pricing-empty"
                 >
-                  <h3 style={{ marginBottom: 8 }}>
+                  <h3 className="empty-title" style={{ marginBottom: 8 }}>
                     {t("customer_pricing.empty_title")}
                   </h3>
                   <p className="muted" style={{ margin: 0 }}>
@@ -2187,6 +2187,7 @@ export function CustomerPricingPage() {
             }}
           >
             <h3
+              className="section-title"
               style={{ marginTop: 0, marginBottom: 12 }}
               data-testid="customer-pricing-modal-title"
             >
@@ -2521,7 +2522,7 @@ export function CustomerPricingPage() {
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.bulk_raise_button")}
             </h3>
 
@@ -2767,7 +2768,7 @@ export function CustomerPricingPage() {
             style={{ maxWidth: 460, width: "100%", padding: 24 }}
             onSubmit={submitFolder}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {folderEditTarget
                 ? t("customer_pricing.folder_rename_title")
                 : t("customer_pricing.folder_new_title")}
@@ -2841,7 +2842,7 @@ export function CustomerPricingPage() {
             className="card"
             style={{ maxWidth: 520, width: "100%", padding: 24 }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_delete_title", {
                 name: folderDeleteTarget.name,
               })}
@@ -2921,7 +2922,7 @@ export function CustomerPricingPage() {
             }}
             onSubmit={submitFromCategory}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_from_category_title")}
             </h3>
             <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
@@ -3079,7 +3080,7 @@ export function CustomerPricingPage() {
             className="card"
             style={{ maxWidth: 460, width: "100%", padding: 24 }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_move_title", {
                 count: activeBulkSelection.length,
               })}
@@ -3173,7 +3174,7 @@ export function CustomerPricingPage() {
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.copy_from_default_title")}
             </h3>
 

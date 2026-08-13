@@ -85,7 +85,7 @@ export function BulkEditDialog({
       }}
     >
       <div className="card" style={{ maxWidth: 520, width: "100%", padding: 24 }}>
-        <h3 style={{ marginTop: 0, marginBottom: 4 }}>{title}</h3>
+        <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>{title}</h3>
         <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>
           {intro}
         </p>

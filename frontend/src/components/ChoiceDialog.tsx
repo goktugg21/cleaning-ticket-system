@@ -88,7 +88,7 @@ export function ChoiceDialog({
           overflowY: "auto",
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: subtitle ? 4 : 16 }}>
+        <h3 className="section-title" style={{ marginTop: 0, marginBottom: subtitle ? 4 : 16 }}>
           {title}
         </h3>
         {subtitle && (
