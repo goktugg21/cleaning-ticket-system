@@ -159,9 +159,20 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
       </div>
 
       <div className="contract-forecast-summary" data-testid="forecast-summary">
+        {/* Sprint 173 §6 — LABELLED. This figure is the revision in
+            force TODAY, so a contract starting in 2027 reads 0,00
+            beside a header saying EUR 2.500 and the two look like one
+            number disagreeing with itself. The calculation is right;
+            it was the label that was missing. Where nothing is in force
+            yet the card says so rather than showing a zero. */}
         <SummaryItem
           label={t("forecast.monthlyAmount")}
-          value={formatMoney(forecast?.monthly_amount ?? "0", locale)}
+          value={
+            Number(forecast?.monthly_amount ?? 0) === 0
+              ? t("forecast.noneInForce")
+              : formatMoney(forecast?.monthly_amount ?? "0", locale)
+          }
+          hint={t("forecast.asOfToday")}
         />
         <SummaryItem
           label={t("forecast.yearlyAmount")}
