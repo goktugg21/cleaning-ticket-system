@@ -147,5 +147,6 @@
   "worker_hours.col_hour_code": "Urencode",
   "worker_hours.col_contracted": "Contr. uren",
   "worker_hours.col_travel": "Reiskosten",
-  "worker_hours.yes": "Ja"
+  "worker_hours.yes": "Ja",
+  "worker_hours.col_source": "Bron"
 }

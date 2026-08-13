@@ -2283,5 +2283,12 @@
   "contract_hours.nothing_this_week": "Deze week zijn er nog geen contracturen en geen geregistreerde uren. Contracturen maak je aan op het tabblad Contracturen, met Bulk toewijzing.",
   "contract_hours.go_create": "Naar Contracturen",
   "hours_admin.entries_subtitle": "Gewerkte uren, per dag, achteraf ingevoerd.",
-  "contract_hours.subtitle": "De staande weekafspraak, geldig vanaf een datum. Niet wat er gewerkt is."
+  "contract_hours.subtitle": "De staande weekafspraak, geldig vanaf een datum. Niet wat er gewerkt is.",
+  "hours_admin.col_source": "Bron",
+  "hour_source.CONTRACT": "Contract",
+  "hour_source.EXTRA_WORK": "Meerwerk",
+  "hour_source.TICKET": "Ticket",
+  "hour_source.OTHER": "Overig",
+  "hours_admin.filter_source": "Bron",
+  "hours_admin.filter_all_sources": "Alle bronnen"
 }

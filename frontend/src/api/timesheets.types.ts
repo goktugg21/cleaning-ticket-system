@@ -58,7 +58,14 @@ export interface StandardSetResult {
 }
 
 /** One amount of work, one employee, one day. */
+export type HourSourceType = "CONTRACT" | "EXTRA_WORK" | "TICKET" | "OTHER";
+
 export interface TimeEntry {
+  /** Sprint 173 §1 — which job produced this hour. A type + id pair,
+   *  never a foreign key: `timesheets` may not import `tickets` or
+   *  `extra_work`, so resolution happens in the reporting layer. */
+  source_type: HourSourceType;
+  source_id: number | null;
   id: number;
   company: number;
   company_name: string;

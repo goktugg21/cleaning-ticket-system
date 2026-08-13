@@ -2283,5 +2283,12 @@
   "contract_hours.nothing_this_week": "No contract hours and no time entries for this week yet. Contract hours are created on the Contract hours tab, with Bulk assignment.",
   "contract_hours.go_create": "Go to Contract hours",
   "hours_admin.entries_subtitle": "Hours actually worked, per day, entered after the fact.",
-  "contract_hours.subtitle": "The standing weekly agreement, from a date. Not what was worked."
+  "contract_hours.subtitle": "The standing weekly agreement, from a date. Not what was worked.",
+  "hours_admin.col_source": "Source",
+  "hour_source.CONTRACT": "Contract",
+  "hour_source.EXTRA_WORK": "Extra work",
+  "hour_source.TICKET": "Ticket",
+  "hour_source.OTHER": "Other",
+  "hours_admin.filter_source": "Source",
+  "hours_admin.filter_all_sources": "All sources"
 }

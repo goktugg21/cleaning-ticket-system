@@ -59,6 +59,18 @@ def _apply_entry_filters(qs, query_params):
     if hour_type is not None:
         qs = qs.filter(hour_type_id=hour_type)
     building = parse_int_param(query_params.get("building"))
+    # Sprint 173 §1 — filter by WHERE the hour came from. NARROWS an
+    # already-scoped queryset like every other filter here; an
+    # unrecognised value yields nothing rather than being ignored,
+    # because silently returning everything reads as "the filter is
+    # off" when the operator believes it is on.
+    source_type = (query_params.get("source_type") or "").strip().upper()
+    if source_type:
+        from .models import HourSource
+
+        if source_type not in HourSource.values:
+            return qs.none()
+        qs = qs.filter(source_type=source_type)
     if building is not None:
         qs = qs.filter(building_id=building)
     company = parse_int_param(query_params.get("company"))

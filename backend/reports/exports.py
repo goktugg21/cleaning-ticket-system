@@ -890,6 +890,7 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
 # reads like the screen and like the report it is replacing.
 WORKER_HOURS_CSV_COLUMNS = (
     "iso_week",
+    "source",
     "personnel_number",
     "employee",
     "cost_centre_name",
@@ -933,6 +934,7 @@ def build_worker_hours_csv(payload: dict) -> bytes:
         writer.writerow(
             {
                 "iso_week": row["iso_week"],
+                "source": row.get("source_label") or "",
                 # An absent value writes an EMPTY cell, never a zero and
                 # never a sentinel word: the reader is a spreadsheet,
                 # where "unknown" would sort and filter as data.

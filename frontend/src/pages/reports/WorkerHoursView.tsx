@@ -23,6 +23,7 @@ interface WorkerHoursRow {
   // Sprint 172 §5 — every reference column. `null` means "we hold no
   // value", which the table renders as an em dash; a zero would be a
   // claim, and a blank cell would be indistinguishable from a bug.
+  source_label: string | null;
   personnel_number: string | null;
   cost_centre_name: string | null;
   cost_centre_code: string | null;
@@ -287,6 +288,7 @@ export function WorkerHoursView() {
           <thead>
             <tr>
               <th>{t("worker_hours.col_week")}</th>
+              <th>{t("worker_hours.col_source")}</th>
               <th>{t("worker_hours.col_personnel")}</th>
               <th>{t("worker_hours.col_worker")}</th>
               <th>{t("worker_hours.col_cost_centre")}</th>
@@ -317,6 +319,11 @@ export function WorkerHoursView() {
                 data-testid="worker-hours-row"
               >
                 <td>W{row.iso_week}</td>
+                {/* Sprint 173 §1 — WHERE the hour came from. A ticket
+                    or extra work that no longer resolves shows its type
+                    and number rather than a blank, and an hour nobody
+                    attributed shows an em dash. */}
+                <td>{dash(row.source_label)}</td>
                 <td>{dash(row.personnel_number)}</td>
                 <td className="td-subject">{row.employee_name}</td>
                 <td>{dash(row.cost_centre_name)}</td>
@@ -354,7 +361,7 @@ export function WorkerHoursView() {
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={22} className="muted">
+                <td colSpan={23} className="muted">
                   {t("worker_hours.empty")}
                 </td>
               </tr>

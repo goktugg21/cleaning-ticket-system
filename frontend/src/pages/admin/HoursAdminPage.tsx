@@ -983,6 +983,7 @@ export function HoursAdminPage() {
                       <th>{t("hours_admin.col_date")}</th>
                       <th>{t("hours_admin.col_week")}</th>
                       <th>{t("hours_admin.col_employee")}</th>
+                      <th>{t("hours_admin.col_source")}</th>
                       <th>{t("hours_admin.col_hour_type")}</th>
                       <th>{t("hours_admin.col_hours")}</th>
                       <th>{t("hours_admin.col_weighted")}</th>
@@ -1043,6 +1044,21 @@ export function HoursAdminPage() {
                             )}
                           </td>
                           <td>{entry.employee_name}</td>
+                          {/* Sprint 173 §1 — WHERE the hour came from.
+                              Read-only in the table: the source is set
+                              by the flow that logged the hour, not
+                              retyped by hand. */}
+                          <td>
+                            {entry.source_type &&
+                            entry.source_type !== "OTHER" ? (
+                              <span className="cell-tag cell-tag-muted">
+                                {t(`hour_source.${entry.source_type}`)}
+                                {entry.source_id ? ` #${entry.source_id}` : ""}
+                              </span>
+                            ) : (
+                              <span className="muted-empty">—</span>
+                            )}
+                          </td>
                           <td>
                             {cellsEditable ? (
                               <select

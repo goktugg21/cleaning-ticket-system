@@ -136,6 +136,12 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
             "building__city",
             "building__cost_centre_code",
             "building__order_number",
+            # Sprint 173 §1 — the source is part of the row's GRAIN, not
+            # a decoration: two hours on the same day for the same
+            # worker, one from a ticket and one from the contract, are
+            # two different facts and must not be summed into one row.
+            "source_type",
+            "source_id",
             "hour_type_id",
             "hour_type__name",
             "hour_type__code",
@@ -155,6 +161,8 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
             row["employee_id"],
             row["building_id"],
             row["hour_type_id"],
+            row["source_type"],
+            row["source_id"],
         )
         bucket = buckets.get(key)
         if bucket is None:
@@ -168,6 +176,10 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
                 # location — so it reads as "no building" rather than
                 # being dropped from the report.
                 "building_name": row["building__name"],
+                "source_type": row["source_type"],
+                "source_id": row["source_id"],
+                # Filled after the loop, from ONE query per source type.
+                "source_label": None,
                 "hour_type_id": row["hour_type_id"],
                 "hour_type_name": row["hour_type__name"],
                 "hour_type_code": row["hour_type__code"] or None,
@@ -246,7 +258,20 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
         if agreement.work_type_id and key not in actions:
             actions[key] = agreement.work_type.name
 
+    # Sprint 173 §1 — resolve every source in ONE pass. The resolver
+    # scopes through the same helpers the ticket and extra-work lists
+    # use, so an id the actor could not open yields no title.
+    from .hour_sources import resolve_sources, source_label
+
+    source_titles = resolve_sources(
+        user,
+        {(b["source_type"], b["source_id"]) for b in buckets.values()},
+    )
+
     for bucket in buckets.values():
+        bucket["source_label"] = source_label(
+            bucket["source_type"], bucket["source_id"], source_titles
+        )
         bucket["debtor"] = debtors.get(bucket["building_id"])
         pair = (bucket["employee_id"], bucket["building_id"])
         bucket["contracted_hours"] = contracted.get(pair)

@@ -147,5 +147,6 @@
   "worker_hours.col_hour_code": "Hour code",
   "worker_hours.col_contracted": "Contr. hours",
   "worker_hours.col_travel": "Travel costs",
-  "worker_hours.yes": "Yes"
+  "worker_hours.yes": "Yes",
+  "worker_hours.col_source": "Source"
 }

@@ -189,6 +189,41 @@ class HourType(models.Model):
         return f"{self.name} (x{self.multiplier})"
 
 
+class HourSource(models.TextChoices):
+    """Where an hour came from — Sprint 173 §1.
+
+    `TimeEntry` recorded hours, a date, an employee, an hour type and an
+    optional building, and never which JOB produced them. That is why
+    approval, the comparison report, the worker hour report and
+    invoicing could not connect: all four ask questions about work from
+    a record that never referenced any.
+
+    ## Why a type + id, and not four nullable foreign keys
+
+    `timesheets` imports nothing from `tickets` or `extra_work`. That is
+    a hard rule in this repo, not a preference — the hours module has to
+    keep working for a company that uses nothing else, and Sprint 152's
+    docstring says so in as many words. Four FKs would make the module
+    depend on both.
+
+    So an entry carries a TYPE and an ID and resolves nothing itself.
+    Turning an id into a title belongs in `reports/`, the app that may
+    read across, exactly as `hours_comparison.py` already does.
+
+    The consequence is deliberate and handled rather than discovered:
+    an id can stop resolving (its ticket was deleted), and a resolver
+    must render a plain label rather than break a screen.
+    """
+
+    CONTRACT = "CONTRACT", "Contract"
+    EXTRA_WORK = "EXTRA_WORK", "Extra work"
+    TICKET = "TICKET", "Ticket"
+    # The default, and the reason there is one: every row written before
+    # this column existed has a real source that nobody recorded.
+    # Backfilling them as CONTRACT would be inventing an answer.
+    OTHER = "OTHER", "Other"
+
+
 class TimeEntry(models.Model):
     """
     Sprint 152 — one amount of work, one employee, one day.
@@ -295,6 +330,28 @@ class TimeEntry(models.Model):
             "destroys an hours record."
         ),
     )
+    # Sprint 173 §1 — WHICH JOB produced this hour. See `HourSource`
+    # for why this is a type + id rather than four foreign keys.
+    source_type = models.CharField(
+        max_length=16,
+        choices=HourSource.choices,
+        default=HourSource.OTHER,
+        help_text=(
+            "Which kind of work produced this hour. OTHER is the "
+            "default so an existing row keeps its meaning rather than "
+            "being backfilled with a guess."
+        ),
+    )
+    source_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "The id within `source_type`. NOT a foreign key: "
+            "`timesheets` may not import `tickets` or `extra_work`. "
+            "An id that no longer resolves renders as a plain label."
+        ),
+    )
+
     # Sprint 172 §5 — the reference's "Reiskosten", a money amount per
     # REPORT ROW. It goes on the time entry rather than on the
     # contract-hours row because it is an actual cost incurred on a

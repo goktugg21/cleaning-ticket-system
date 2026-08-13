@@ -325,6 +325,8 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             "hour_type_standard_slot",
             "hour_type_multiplier",
             "hours",
+            "source_type",
+            "source_id",
             "multiplier_snapshot",
             "weighted_hours",
             "building",
