@@ -13,9 +13,73 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/sprint-176`, cut from `feat/sprint-175` (`4730d42`).
-It is the single branch being merged — #153 -> ... -> #176 are ONE
+**Branch:** `feat/sprint-177`, cut from `feat/sprint-176` (`4da3bf2`).
+It is the single branch being merged — #153 -> ... -> #177 are ONE
 chain, one PR, not one per sprint.
+
+### Done — Sprint 177
+
+- **§1 the planned window's four cases.** A range with one end missing
+  is not a range: with an end and no start the page printed
+  `— – 16 Aug 2026`, an em dash standing in for the absent start. Four
+  cases now enumerated in `frontend/src/lib/plannedWindow.ts` (both /
+  start only / `Until <date>` / em dash), measured on four rows built
+  for the purpose. In `lib/` because §6's Work Plan cards will render
+  the same window and a second copy would drift.
+- **§2 the Edit dates button was invisible — because of a missing
+  class.** Sprint 176 wrote `btn-secondary btn-sm` without the base
+  `btn`, so it inherited no button styling at all; two more buttons in
+  the same component had the same defect. Now `btn btn-secondary
+  btn-sm` + a 13px Pencil (the contact-permissions / employees house
+  pattern), 150x30, and MOVED into the deadline cell beside the value
+  it edits (measured same-line) instead of floating under the grid.
+- **§3 the right column, settled.** Sprint 176's `1fr 1fr` stretch is
+  gone; `align-self: start` lets the column end where its cards end.
+  Measured at 1024/1280/1440: collapsed [50,50] column 112; expanded
+  [240,240] EQUAL, column 492; contacts body shows 190px of 608px so it
+  SCROLLS rather than stretching the column; 0 page overflow in every
+  state.
+- **§7 the hour source — verified first, then the real gap closed.**
+  Most of this section already existed and was NOT rebuilt: the Source
+  column (173), the filter (174), the approval tab grouped by source
+  with per-group counts (`actualBySource`, 174 §2) and
+  approve-everything-for-this-employee-this-week (`approvableByEmployee`,
+  174 §2). The genuine gap was that NOTHING FILLED the pair — scanned
+  every writer: read, filtered, serialised, accepted as explicit input,
+  never derived. New `GET /api/reports/hour-sources/` (the list
+  direction of `resolve_sources`, in `reports/` because `timesheets`
+  imports neither module) plus an optional Job picker in the week
+  setup, each chosen job seeding its own row. 13 tests; verified by
+  clicking. **A per-source APPROVE action is deliberately still not
+  built** — `TimeEntry` has no status field, so the rows with varied
+  sources are worked hours nothing approves, and the approvable rows
+  are contract hours that all have source CONTRACT. Making it real
+  means giving TimeEntry an approval lifecycle: an owner decision.
+- **§9 both small items.** The forecast's "Current monthly" now carries
+  "As at today (<date>), on the revision now in force" via a new
+  optional `hint` on `Tile`. And the stale `section-title` entries are
+  DELETED — Sprint 173 §6 defined it at `index.css:333` and 39 files
+  use it.
+
+### NOT done in Sprint 177 — carried whole, not started
+
+**§4 (the Catalogs area), §5 (the four reports) and §6 (the Work Plan
+week-placement rule) were not reached, for the sixth round.** They keep
+their full detail in `## NEXT`. **§8 (the typography sweep) was also
+not started.**
+
+The honest reason, stated plainly because the pattern is now the
+problem: §1–§3 were fixing defects this chain shipped, and §7 turned
+out to need a new cross-module endpoint plus a week-grid row-identity
+change rather than the small wiring its description implied. Each of
+§4/§5/§6 is a multi-hour full-stack feature; starting one without
+finishing it would have left the branch half-done, which is worse than
+leaving it untouched and saying so.
+
+**`## NEXT` is therefore NOT empty**, contrary to §11's target. What
+remains is exactly §4, §5, §6 and §8 — nothing new was added to it.
+
+## Historical — Sprint 176
 
 ### Done — Sprint 176
 
