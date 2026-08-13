@@ -1,40 +1,69 @@
-// "My Work" — role-adaptive since Sprint 111. The `/agenda` route is
-// auth-gated only, so this page dispatches on the caller's role:
-//   - STAFF: the dated staff-slot agenda (unchanged). Caller-scoped: GET
-//     /tickets/my-slots/ returns only the viewer's own dated slots. For
-//     slots still ASSIGNED, staff can mark done (note/photo evidence) or
-//     unable-to-complete (reason required). Staff never see schedule
-//     editing here; rescheduling stays with managers, and slot completion
-//     does NOT complete the ticket (manager double-check owns that).
-//   - BUILDING_MANAGER: the caller's assigned tickets — the union of the
-//     legacy primary-manager FK (Ticket.assigned_to) and the responsible-
-//     manager M:N (TicketManagerAssignment) — via the ticket list
-//     `?my_managed=1` filter. Read-only list; each row deep-links to the
-//     ticket detail. Mirrors the CustomerTicketsPage table shape.
-//   - SA / CA (and any role failing `canAccessAgenda`): a role-guard
-//     empty state, NOT the staff-slot copy. The nav entry is already
-//     hidden for them (permissions.ts::canAccessAgenda).
+// "My Work" — the Work Plan. Role-adaptive since Sprint 111, and since
+// Sprint 179A built on ONE composite endpoint rather than on a slot list:
+//
+//   - Every admitted role gets the WEEK (`WorkPlanWeek` below), fed by
+//     GET /api/tickets/work-plan/. The server applies the §12B
+//     week-placement rule, merges dated ticket slots WITH assigned extra
+//     work, and returns the counts — so a chip describes the whole
+//     scope rather than whatever the browser happened to fetch.
+//   - STAFF see their own week and can close their own slots.
+//   - SA / CA / BM pass `?scope=company` and see the TEAM's week, which
+//     the server admits through `scope_tickets_for` / `scope_extra_work_for`
+//     — the same scopes the ticket and extra-work lists use, never a
+//     second path. A team card carries no completion buttons: an admin
+//     reading the week is not working it.
+//   - BUILDING_MANAGER additionally keeps its assigned-tickets table
+//     below the week. The two answer different questions — "what is
+//     dated this week" and "which tickets am I answerable for" — and
+//     dropping the second to make room for the first would lose
+//     information the manager had.
+//   - Any role failing `canAccessAgenda`: a role-guard empty state.
+//
+// The §12B rule, in one paragraph, because every marker on this page is
+// an expression of it: a job appears in the week(s) its planned window
+// covers — its home, whatever its status. A STARTED job ALSO appears in
+// the current week. A job past its deadline and unfinished also appears
+// in the current week, marked overdue. Untouched future work appears
+// only in its own week, plus the Upcoming list. And a card shown outside
+// its planned week SAYS WHY, with its planned date on it — a card that
+// turns up somewhere unexpected without explaining itself is worse than
+// one that does not turn up.
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  AlarmClock,
   CalendarClock,
+  CalendarRange,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Lock,
+  PlayCircle,
   RefreshCw,
   Ticket,
+  Users,
   XCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
-
-import { getMySlots, updateStaffSlot } from "../api/admin";
-import type { MySlot } from "../api/admin";
+import { updateStaffSlot } from "../api/admin";
+import type { SlotStatus } from "../api/admin";
 import { getApiError } from "../api/client";
 import { listAllTickets } from "../api/tickets";
-import type { TicketList } from "../api/types";
+import type { Role, TicketList } from "../api/types";
+import { getWorkPlan } from "../api/workPlan";
+import type {
+  WorkPlanEntry,
+  WorkPlanKind,
+  WorkPlanResponse,
+} from "../api/workPlan";
 import { useAuth } from "../auth/AuthContext";
-import { agendaShowsTeamWeek, canAccessAgenda } from "../auth/permissions";
+import {
+  agendaShowsTeamWeek,
+  canAccessAgenda,
+  canAccessExtraWork,
+} from "../auth/permissions";
+import { BoundedList } from "../components/BoundedList";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -48,21 +77,13 @@ import {
   formatIsoWeek,
   fromDateString,
   isoWeekDays,
+  isoWeekStart,
   shiftIsoWeek,
   toDateString,
 } from "../lib/isoWeek";
 import type { IsoWeek } from "../lib/isoWeek";
+import { formatPlannedWindow } from "../lib/plannedWindow";
 import { SlotCompletionDialog } from "./SlotCompletionDialog";
-
-const UNDATED = "__undated__";
-
-function localDateKey(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 // Ticket sub-type label keys — the canonical map lives in the create
 // ticket flow (`create_ticket:type_*`); reuse those exact keys here so
@@ -86,6 +107,47 @@ const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
   OTHER: "type_other",
 };
 
+/** The chips. `""` is "everything in this week"; the rest narrow it.
+ *  Every one of them has a SERVER-side count behind it. */
+type ChipKey = "" | "overdue" | "open" | "in_progress" | "done" | "blocked";
+
+/**
+ * The chip row, as one exported-shaped constant that both the render
+ * and the filter read.
+ *
+ * Deriving the order from a literal in one place and the behaviour from
+ * a switch in another is exactly the split CLAUDE.md warns about (the
+ * Sprint 126 headerless column): one list, one iteration, and a new chip
+ * cannot be half-added.
+ */
+const CHIPS: { key: ChipKey; label: string; count: (c: WorkPlanCounts) => number }[] =
+  [
+    { key: "", label: "chip_total", count: (c) => c.total },
+    { key: "overdue", label: "chip_overdue", count: (c) => c.overdue },
+    { key: "open", label: "chip_open", count: (c) => c.open },
+    { key: "in_progress", label: "chip_in_progress", count: (c) => c.in_progress },
+    { key: "done", label: "chip_done", count: (c) => c.done },
+    { key: "blocked", label: "chip_blocked", count: (c) => c.blocked },
+  ];
+
+type WorkPlanCounts = WorkPlanResponse["counts"];
+
+function matchesChip(entry: WorkPlanEntry, chip: ChipKey): boolean {
+  if (chip === "") return true;
+  if (chip === "overdue") return entry.is_overdue;
+  if (chip === "open") return entry.state === "OPEN";
+  if (chip === "in_progress") return entry.state === "IN_PROGRESS";
+  if (chip === "done") return entry.state === "DONE";
+  return entry.state === "BLOCKED";
+}
+
+/** A "YYYY-MM-DD" rendered in the viewer's locale. The explicit
+ *  midnight matters: a bare date string parses as UTC, which anywhere
+ *  east of Greenwich can print the previous day. */
+function formatDay(iso: string): string {
+  return formatDate(`${iso}T00:00:00`);
+}
+
 // ---------------------------------------------------------------------------
 // Role dispatcher — see the file-header comment for the per-role surfaces.
 // ---------------------------------------------------------------------------
@@ -96,10 +158,14 @@ export function AgendaPage() {
     return <AgendaRoleGuard />;
   }
   if (role === "BUILDING_MANAGER") {
-    return <ManagerTicketsAgenda />;
+    return (
+      <>
+        <WorkPlanWeek />
+        <ManagerTicketsAgenda embedded />
+      </>
+    );
   }
-  // canAccessAgenda guarantees the only remaining role here is STAFF.
-  return <StaffSlotAgenda />;
+  return <WorkPlanWeek />;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,8 +189,10 @@ function AgendaRoleGuard() {
 // ---------------------------------------------------------------------------
 // BUILDING_MANAGER — assigned tickets (union of Ticket.assigned_to +
 // TicketManagerAssignment) via the ticket list `?my_managed=1` filter.
+// Kept BESIDE the week rather than replaced by it: "what is dated this
+// week" and "which tickets am I answerable for" are different questions.
 // ---------------------------------------------------------------------------
-function ManagerTicketsAgenda() {
+function ManagerTicketsAgenda({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation(["staff_slots", "common", "create_ticket"]);
   const [rows, setRows] = useState<TicketList[]>([]);
   // Starts true so the initial render shows the loading bar without a
@@ -154,12 +222,14 @@ function ManagerTicketsAgenda() {
   }, []);
 
   return (
-    <div data-testid="agenda-manager-page">
-      <PageHeader
-        eyebrow={t("common:ops")}
-        title={t("agenda.manager_title")}
-        subtitle={t("agenda.manager_subtitle")}
-      />
+    <div data-testid="agenda-manager-page" style={embedded ? { marginTop: 24 } : undefined}>
+      {!embedded && (
+        <PageHeader
+          eyebrow={t("common:ops")}
+          title={t("agenda.manager_title")}
+          subtitle={t("agenda.manager_subtitle")}
+        />
+      )}
 
       {error && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
@@ -195,7 +265,16 @@ function ManagerTicketsAgenda() {
             </div>
           </div>
 
-          <div className="table-wrap">
+          {/* CLAUDE.md #8 — a SERVER collection, so bounded. A manager
+              with two hundred managed tickets used to render two hundred
+              rows down the page. */}
+          <BoundedList
+            size="lg"
+            count={rows.length}
+            ariaLabel={t("agenda.manager_list_title")}
+            testIdPrefix="agenda-manager"
+            className="table-wrap"
+          >
             <table className="data-table" data-testid="agenda-manager-table">
               <thead>
                 <tr>
@@ -234,7 +313,7 @@ function ManagerTicketsAgenda() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </BoundedList>
         </section>
       )}
     </div>
@@ -242,43 +321,42 @@ function ManagerTicketsAgenda() {
 }
 
 // ---------------------------------------------------------------------------
-// STAFF — the dated slot agenda. UNCHANGED from the pre-Sprint-111 page.
+// The week. One fetch, one placement rule, one set of counts.
 // ---------------------------------------------------------------------------
-function StaffSlotAgenda() {
+function WorkPlanWeek() {
   const { t } = useTranslation(["staff_slots", "common", "create_ticket"]);
   const { me } = useAuth();
   const { push } = useToast();
   const locale = useLocaleCode();
-
-  const [slots, setSlots] = useState<MySlot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const role = me?.role ?? null;
+  const teamWeek = agendaShowsTeamWeek(role);
 
   const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
-  const [chip, setChip] = useState<
-    "" | "overdue" | "new" | "unable" | "completed"
-  >("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [data, setData] = useState<WorkPlanResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [overdueOpen, setOverdueOpen] = useState(false);
-  const [completionTarget, setCompletionTarget] = useState<MySlot | null>(null);
-  const [unableTarget, setUnableTarget] = useState<MySlot | null>(null);
 
-  async function reload() {
-    const data = await getMySlots();
-    setSlots(data);
-  }
+  const [chip, setChip] = useState<ChipKey>("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState<"" | WorkPlanKind>("");
+  const [overdueOpen, setOverdueOpen] = useState(false);
+  const [upcomingOpen, setUpcomingOpen] = useState(false);
+  const [completionTarget, setCompletionTarget] = useState<WorkPlanEntry | null>(
+    null,
+  );
+  const [unableTarget, setUnableTarget] = useState<WorkPlanEntry | null>(null);
+
+  const weekParam = formatIsoWeek(week);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      setLoading(true);
       setError("");
       try {
-        // A provider admin sees the TEAM's week; a worker sees
-        // their own. The server decides whether to honour it.
-        const data = await getMySlots(agendaShowsTeamWeek(me?.role));
-        if (!cancelled) setSlots(data);
+        const payload = await getWorkPlan(weekParam, teamWeek);
+        if (!cancelled) setData(payload);
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
       } finally {
@@ -291,77 +369,74 @@ function StaffSlotAgenda() {
     };
     // The role decides WHICH week is fetched, so it belongs in the deps
     // — a role that resolves after the first render must re-fetch.
-  }, [me?.role, refreshKey]);
+  }, [weekParam, teamWeek, refreshKey]);
 
-  /**
-   * Sprint 168 §7 — the Work Plan, built ON the agenda rather than
-   * beside it.
-   *
-   * Sprint 167 measured this gap instead of guessing at it, and the
-   * finding was that the agenda already had the CARDS, the actions and
-   * the reason dialogs — what it did not have was a WEEK. So the cards
-   * below are untouched; what is new is the frame around them, the
-   * counts, and the filters.
-   *
-   * The day columns are Mon–Sun of the selected week AND they are
-   * always all seven, empty ones included: a week with nothing on
-   * Thursday must show an empty Thursday, not silently close the gap
-   * and leave the reader counting columns.
-   */
-  const dayKeys = useMemo(
-    () => isoWeekDays(week).map(toDateString),
-    [week],
-  );
-
-  /** The week's slots, before any chip or filter narrows them. */
-  const weekSlots = useMemo(
-    () =>
-      slots.filter((slot) => {
-        const key = localDateKey(slot.scheduled_start_at);
-        return key !== null && dayKeys.includes(key);
-      }),
-    [slots, dayKeys],
-  );
-
-  /** Undated slots belong to no week, so they are shown apart rather
-   *  than dropped — a slot nobody has scheduled is exactly the one that
-   *  most needs seeing. */
-  const undatedSlots = useMemo(
-    () => slots.filter((slot) => localDateKey(slot.scheduled_start_at) === null),
-    [slots],
-  );
-
-  /** Overdue: a dated slot in the past that nobody has closed. The
-   *  definition is stated here because everything on the screen keys
-   *  off it — Sprint 167 flagged that it needed deciding before it
-   *  was coded, and this is the decision. */
-  const isOverdue = useMemo(() => {
-    const today = toDateString(new Date());
-    return (slot: MySlot) => {
-      const key = localDateKey(slot.scheduled_start_at);
-      if (key === null || key >= today) return false;
-      return (
-        slot.slot_status !== "COMPLETED" &&
-        slot.slot_status !== "UNABLE_TO_COMPLETE"
-      );
-    };
-  }, []);
-
-  /** "10 – 16 aug 2026", the reference header's shape. */
-  const todayKey = toDateString(new Date());
-
-  /** How long a slot has been overdue, in whole days. The reference
-   *  shows this and it is the only figure on the list that is not
-   *  already on the card — "late" without "how late" does not rank. */
-  function overdueByLabel(slot: MySlot): string {
-    const key = localDateKey(slot.scheduled_start_at);
-    if (key === null) return "—";
-    const days = Math.round(
-      (fromDateString(todayKey).getTime() - fromDateString(key).getTime()) /
-        86_400_000,
-    );
-    return t("agenda.overdue_days", { count: Math.max(0, days) });
+  function reload() {
+    setRefreshKey((n) => n + 1);
   }
+
+  /** Mon-Sun of the loaded week, ALWAYS all seven — a week with nothing
+   *  on Thursday must show an empty Thursday, not silently close the
+   *  gap and leave the reader counting columns.
+   *
+   *  Taken from the RESPONSE's own week rather than from local state:
+   *  while a week change is in flight the two disagree for a render,
+   *  and columns keyed off the new week would find no entry from the
+   *  old one — seven "nothing planned" columns, mid-fetch, for a week
+   *  that is full. The local week is the fallback for the first paint
+   *  only. */
+  const dayKeys = useMemo(() => {
+    const start = data ? fromDateString(data.week.start) : isoWeekStart(week);
+    return Array.from({ length: 7 }, (_unused, index) =>
+      toDateString(
+        new Date(start.getFullYear(), start.getMonth(), start.getDate() + index),
+      ),
+    );
+  }, [data, week]);
+
+  const entries = useMemo(() => data?.entries ?? [], [data]);
+  const counts = data?.counts ?? null;
+  const todayKey = data?.today ?? toDateString(new Date());
+
+  const ticketTypes = useMemo(
+    () => [
+      ...new Set(
+        entries
+          .map((entry) => entry.ticket_type)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ],
+    [entries],
+  );
+
+  const filtered = useMemo(
+    () =>
+      entries.filter((entry) => {
+        if (!matchesChip(entry, chip)) return false;
+        if (typeFilter && entry.ticket_type !== typeFilter) return false;
+        if (kindFilter && entry.kind !== kindFilter) return false;
+        return true;
+      }),
+    [entries, chip, typeFilter, kindFilter],
+  );
+
+  const groups = useMemo(
+    () =>
+      dayKeys.map((key) => ({
+        key,
+        items: filtered.filter((entry) => entry.day === key),
+      })),
+    [dayKeys, filtered],
+  );
+
+  /** Nothing anywhere — not "nothing this week". The week's own
+   *  emptiness is said by the seven day markers. */
+  const planIsEmpty =
+    counts !== null &&
+    counts.total === 0 &&
+    counts.overdue_all === 0 &&
+    counts.upcoming === 0 &&
+    counts.undated === 0;
 
   const weekRangeLabel = useMemo(() => {
     const days = isoWeekDays(week);
@@ -370,107 +445,25 @@ function StaffSlotAgenda() {
     )}`;
   }, [week]);
 
-  /** Every overdue slot the viewer holds, not only this week's — the
-   *  Overdue button answers "what is late, anywhere", which is a
-   *  different question from the week chip. */
-  const overdueAll = useMemo(
-    () => slots.filter(isOverdue),
-    [slots, isOverdue],
-  );
-
-  const counts = useMemo(
-    () => ({
-      total: weekSlots.length,
-      overdue: weekSlots.filter(isOverdue).length,
-      new: weekSlots.filter((s) => s.slot_status === "ASSIGNED").length,
-      // NOT "in progress": a staff slot has no such state. See the
-      // note rendered under the chips.
-      unable: weekSlots.filter((s) => s.slot_status === "UNABLE_TO_COMPLETE")
-        .length,
-      completed: weekSlots.filter((s) => s.slot_status === "COMPLETED").length,
-    }),
-    [weekSlots, isOverdue],
-  );
-
-  const filtered = useMemo(() => {
-    let rows = weekSlots;
-    if (chip === "overdue") rows = rows.filter(isOverdue);
-    else if (chip === "new")
-      rows = rows.filter((s) => s.slot_status === "ASSIGNED");
-    else if (chip === "unable")
-      rows = rows.filter((s) => s.slot_status === "UNABLE_TO_COMPLETE");
-    else if (chip === "completed")
-      rows = rows.filter((s) => s.slot_status === "COMPLETED");
-    if (typeFilter) rows = rows.filter((s) => s.ticket_type === typeFilter);
-    if (statusFilter) rows = rows.filter((s) => s.slot_status === statusFilter);
-    return rows;
-  }, [weekSlots, chip, typeFilter, statusFilter, isOverdue]);
-
-  const groups = useMemo(
-    () =>
-      dayKeys.map((key) => ({
-        key,
-        items: filtered.filter(
-          (slot) => localDateKey(slot.scheduled_start_at) === key,
-        ),
-      })),
-    [dayKeys, filtered],
-  );
-
-  const ticketTypes = useMemo(
-    () => [...new Set(slots.map((slot) => slot.ticket_type).filter(Boolean))],
-    [slots],
-  );
-
-  function timeOnly(iso: string | null): string {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-  }
-
-  function windowText(slot: MySlot): string {
-    const parts: string[] = [];
-    if (slot.scheduled_start_at) {
-      parts.push(
-        slot.scheduled_end_at
-          ? `${timeOnly(slot.scheduled_start_at)}–${timeOnly(
-              slot.scheduled_end_at,
-            )}`
-          : timeOnly(slot.scheduled_start_at),
-      );
-    }
-    if (slot.time_window_label) parts.push(slot.time_window_label);
-    return parts.length > 0 ? parts.join(" · ") : t("agenda.no_time");
-  }
-
-  function groupHeading(group: { key: string; items: MySlot[] }): string {
-    if (group.key === UNDATED) return t("agenda.undated");
-    // Sprint 168 §7 — from the COLUMN'S OWN date, not from its first
-    // item. A day with nothing on it has no item to read a date from,
-    // and every one of the seven columns is always rendered.
-    return formatDate(`${group.key}T00:00:00`);
-  }
-
   async function handleUnableConfirm(reason: string) {
-    const slot = unableTarget;
+    const entry = unableTarget;
     setUnableTarget(null);
-    if (!slot || !me) return;
+    if (!entry || entry.ticket_id === null) return;
     try {
-      await updateStaffSlot(slot.ticket_id, slot.id, {
+      await updateStaffSlot(entry.ticket_id, entry.source_id, {
         slot_status: "UNABLE_TO_COMPLETE",
         unable_to_complete_reason: reason,
       });
-      await reload();
+      reload();
       push({ variant: "success", title: t("unable.toast_done") });
     } catch (err) {
       push({ variant: "error", title: getApiError(err) });
     }
   }
 
-  async function handleCompletionDone() {
+  function handleCompletionDone() {
     setCompletionTarget(null);
-    await reload();
+    reload();
     push({ variant: "success", title: t("complete.toast_done") });
   }
 
@@ -479,7 +472,9 @@ function StaffSlotAgenda() {
       <PageHeader
         eyebrow={t("common:ops")}
         title={t("agenda.page_title")}
-        subtitle={t("agenda.page_subtitle")}
+        subtitle={
+          teamWeek ? t("agenda.page_subtitle_team") : t("agenda.page_subtitle")
+        }
       />
 
       {loading && (
@@ -494,401 +489,275 @@ function StaffSlotAgenda() {
         </div>
       )}
 
-      {!loading && slots.length === 0 && !error && (
+      <div className="hours-tiles-head">
+        <span className="hours-tiles-title">{t("agenda.week_title")}</span>
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+          data-testid="agenda-week-stepper"
+        >
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setWeek((w) => shiftIsoWeek(w, -1))}
+            aria-label={t("agenda.prev_week")}
+            data-testid="agenda-week-prev"
+          >
+            <ChevronLeft size={14} strokeWidth={2.5} />
+          </button>
+          {/* Sprint 171 §3 — the week RANGE, which is what an operator
+              reads. "2026-W33" is precise and tells nobody which days. */}
+          <span
+            style={{ fontWeight: 600, minWidth: 210, textAlign: "center" }}
+            data-testid="agenda-week-label"
+          >
+            {weekRangeLabel}
+            <span className="muted small" style={{ marginLeft: 6 }}>
+              {weekParam}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setWeek((w) => shiftIsoWeek(w, 1))}
+            aria-label={t("agenda.next_week")}
+            data-testid="agenda-week-next"
+          >
+            <ChevronRight size={14} strokeWidth={2.5} />
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setWeek(currentIsoWeek())}
+            data-testid="agenda-week-today"
+          >
+            {t("agenda.this_week")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={reload}
+            data-testid="agenda-refresh"
+          >
+            <RefreshCw size={14} strokeWidth={2.5} />
+            {t("common:refresh")}
+          </button>
+          {/* Two questions the WEEK cannot answer, so they get their own
+              buttons: "what is late, anywhere" and "what is coming after
+              this week". Both counts are the server's. */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setOverdueOpen(true)}
+            data-testid="agenda-overdue-open"
+          >
+            <AlarmClock size={14} strokeWidth={2.5} />
+            {t("agenda.overdue_button", { count: counts?.overdue_all ?? 0 })}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setUpcomingOpen(true)}
+            data-testid="agenda-upcoming-open"
+          >
+            <CalendarRange size={14} strokeWidth={2.5} />
+            {t("agenda.upcoming_button", { count: counts?.upcoming ?? 0 })}
+          </button>
+        </div>
+      </div>
+
+      {/* The counts, and each one FILTERS when clicked — the Sprint 163
+          status-strip behaviour, not a decorative badge row. Every
+          number comes from the SERVER, over the whole scope. */}
+      <div className="composer-toggle" role="tablist" style={{ marginBottom: 12 }}>
+        {CHIPS.map((entry) => (
+          <button
+            key={entry.label}
+            type="button"
+            role="tab"
+            aria-selected={chip === entry.key}
+            className={`composer-toggle-btn ${chip === entry.key ? "active" : ""}`}
+            onClick={() => setChip(entry.key)}
+            data-testid={`agenda-chip-${entry.key || "total"}`}
+          >
+            {t(`agenda.${entry.label}`)}
+            <span className="mywork-chip-count">
+              {counts ? entry.count(counts) : 0}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <form className="filter-bar" onSubmit={(e) => e.preventDefault()}>
+        <div className="filter-field">
+          <span className="filter-label">{t("agenda.filter_source")}</span>
+          <select
+            className="filter-control"
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value as "" | WorkPlanKind)}
+            data-testid="agenda-filter-kind"
+          >
+            <option value="">{t("agenda.all_sources")}</option>
+            <option value="TICKET_SLOT">{t("agenda.source_ticket")}</option>
+            <option value="EXTRA_WORK">{t("agenda.source_extra_work")}</option>
+          </select>
+        </div>
+        <div className="filter-field">
+          <span className="filter-label">{t("agenda.filter_type")}</span>
+          <select
+            className="filter-control"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            data-testid="agenda-filter-type"
+          >
+            <option value="">{t("agenda.all_types")}</option>
+            {ticketTypes.map((value) => (
+              <option key={value} value={value}>
+                {TICKET_TYPE_KEYS[value as TicketTypeValue]
+                  ? t(
+                      `create_ticket:${TICKET_TYPE_KEYS[value as TicketTypeValue]}`,
+                    )
+                  : value}
+              </option>
+            ))}
+          </select>
+        </div>
+      </form>
+
+      {/* Said on screen rather than filled with an invented number: the
+          reference's sixth chip is Archived, and neither a staff slot
+          nor an extra work has an archived state in this system. */}
+      <p className="muted small" data-testid="agenda-no-archived">
+        {t("agenda.missing_chips_note")}
+      </p>
+
+      {counts !== null && counts.undated > 0 && (
+        <p className="muted small" data-testid="agenda-undated-note">
+          {t("agenda.undated_count", { count: counts.undated })}
+        </p>
+      )}
+
+      {/* A list that silently stops is the same defect as a count that
+          describes one page — so when the bound bites, it says so. */}
+      {data?.truncated.entries && (
+        <p className="wp-notice" role="status" data-testid="agenda-truncated">
+          {t("agenda.truncated_note", { count: data.limits.entries })}
+        </p>
+      )}
+
+      {/* The empty state is about the whole PLAN, not about this week:
+          a week with nothing in it is a normal week and gets seven
+          empty columns, which is information. "No work assigned" is
+          only true when there is nothing anywhere. */}
+      {!loading && !error && planIsEmpty ? (
         <EmptyState
           icon={CalendarClock}
           title={t("agenda.empty_title")}
           description={t("agenda.empty_desc")}
           testId="agenda-empty"
         />
-      )}
-
-      {slots.length > 0 && (
-        <>
-          <div className="hours-tiles-head">
-            <span className="hours-tiles-title">{t("agenda.week_title")}</span>
-            <div
-              style={{ display: "flex", alignItems: "center", gap: 8 }}
-              data-testid="agenda-week-stepper"
+      ) : (
+        <div className="agenda-week-grid" data-testid="agenda-week-grid">
+          {groups.map((group) => (
+            <section
+              key={group.key}
+              /* TODAY is marked. Seven identical columns give the reader
+                 nothing to anchor on, and "which one is today" is the
+                 first thing anybody looks for in a week view. */
+              className={
+                group.key === todayKey
+                  ? "agenda-day agenda-day-today"
+                  : "agenda-day"
+              }
+              data-testid={
+                group.key === todayKey ? "agenda-day-today" : "agenda-day"
+              }
+              style={{ marginBottom: 18 }}
             >
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setWeek((w) => shiftIsoWeek(w, -1))}
-                aria-label={t("agenda.prev_week")}
-                data-testid="agenda-week-prev"
+              <h3
+                className="section-head-title"
+                style={{ marginBottom: 8 }}
+                data-testid="agenda-group-heading"
               >
-                <ChevronLeft size={14} strokeWidth={2.5} />
-              </button>
-              {/* Sprint 171 §3 — the week RANGE, which is what the
-                  reference header shows and what an operator reads.
-                  "2026-W33" is precise and tells nobody which days. */}
-              <span
-                style={{ fontWeight: 600, minWidth: 210, textAlign: "center" }}
-                data-testid="agenda-week-label"
-              >
-                {weekRangeLabel}
-                <span className="muted small" style={{ marginLeft: 6 }}>
-                  {formatIsoWeek(week)}
-                </span>
-              </span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setWeek((w) => shiftIsoWeek(w, 1))}
-                aria-label={t("agenda.next_week")}
-                data-testid="agenda-week-next"
-              >
-                <ChevronRight size={14} strokeWidth={2.5} />
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setWeek(currentIsoWeek())}
-                data-testid="agenda-week-today"
-              >
-                {t("agenda.this_week")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setRefreshKey((n) => n + 1)}
-                data-testid="agenda-refresh"
-              >
-                <RefreshCw size={14} strokeWidth={2.5} />
-                {t("common:refresh")}
-              </button>
-              {/* Sprint 171 §3 — a separate Overdue BUTTON, as the
-                  reference has, opening the list. The chip filters the
-                  week; this answers "what is late, anywhere", which is
-                  a different question and the reason the reference has
-                  both. */}
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setOverdueOpen(true)}
-                data-testid="agenda-overdue-open"
-              >
-                {t("agenda.overdue_button", { count: overdueAll.length })}
-              </button>
-            </div>
-          </div>
-
-          {/* The counts, and each one FILTERS when clicked — the Sprint
-              163 status-strip behaviour, not a decorative badge row. */}
-          <div className="composer-toggle" role="tablist" style={{ marginBottom: 12 }}>
-            {(
-              [
-                ["", counts.total, "chip_total"],
-                ["overdue", counts.overdue, "chip_overdue"],
-                ["new", counts.new, "chip_new"],
-                ["unable", counts.unable, "chip_unable"],
-                ["completed", counts.completed, "chip_completed"],
-              ] as const
-            ).map(([key, value, label]) => (
-              <button
-                key={label}
-                type="button"
-                role="tab"
-                aria-selected={chip === key}
-                className={`composer-toggle-btn ${chip === key ? "active" : ""}`}
-                onClick={() => setChip(key)}
-                data-testid={`agenda-chip-${key || "total"}`}
-              >
-                {t(`agenda.${label}`)}
-                <span className="mywork-chip-count">{value}</span>
-              </button>
-            ))}
-          </div>
-
-          <form className="filter-bar" onSubmit={(e) => e.preventDefault()}>
-            <div className="filter-field">
-              <span className="filter-label">{t("agenda.filter_type")}</span>
-              <select
-                className="filter-control"
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                data-testid="agenda-filter-type"
-              >
-                <option value="">{t("agenda.all_types")}</option>
-                {ticketTypes.map((value) => (
-                  <option key={value} value={value}>
-                    {TICKET_TYPE_KEYS[value as TicketTypeValue]
-                      ? t(
-                          `create_ticket:${TICKET_TYPE_KEYS[value as TicketTypeValue]}`,
-                        )
-                      : value}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="filter-field">
-              <span className="filter-label">{t("agenda.filter_status")}</span>
-              <select
-                className="filter-control"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                data-testid="agenda-filter-status"
-              >
-                <option value="">{t("agenda.all_statuses")}</option>
-                {["ASSIGNED", "COMPLETED", "UNABLE_TO_COMPLETE", "CANCELLED"].map(
-                  (value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ),
-                )}
-              </select>
-            </div>
-          </form>
-
-          {/* Said on screen rather than filled with an invented number:
-              the reference's sixth chip is Archived, and a staff slot
-              has no archived state in this system. */}
-          <p className="muted small" data-testid="agenda-no-archived">
-            {t("agenda.missing_chips_note")}
-          </p>
-        </>
-      )}
-
-      <div className="agenda-week-grid" data-testid="agenda-week-grid">
-      {groups.map((group) => (
-        <section
-          key={group.key}
-          /* Sprint 171 §3 — TODAY is marked, as the reference marks it.
-             Seven identical columns give the reader nothing to anchor
-             on, and "which one is today" is the first thing anybody
-             looks for in a week view. */
-          className={
-            group.key === todayKey ? "agenda-day agenda-day-today" : "agenda-day"
-          }
-          data-testid={
-            group.key === todayKey ? "agenda-day-today" : "agenda-day"
-          }
-          style={{ marginBottom: 18 }}
-        >
-          <h3
-            className="section-head-title"
-            style={{ marginBottom: 8 }}
-            data-testid="agenda-group-heading"
-          >
-            {groupHeading(group)}
-            {group.key === todayKey && (
-              <span className="cell-tag cell-tag-open" style={{ marginLeft: 6 }}>
-                {t("agenda.today")}
-              </span>
-            )}
-          </h3>
-          {/* An empty day gets a MARKER, not blank space: a column with
-              nothing in it should say so, or the reader cannot tell it
-              apart from one that failed to load. */}
-          {group.items.length === 0 && (
-            <p className="muted small" data-testid="agenda-day-empty">
-              {t("agenda.day_empty")}
-            </p>
-          )}
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {group.items.map((slot) => (
-              <li
-                key={slot.id}
-                className="card"
-                data-testid="agenda-slot-card"
-                style={{ padding: 12, marginBottom: 8 }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                  }}
-                >
-                  <Link
-                    to={`/tickets/${slot.ticket_id}`}
-                    className="td-subject"
-                    style={{ fontWeight: 600 }}
+                {formatDay(group.key)}
+                {group.key === todayKey && (
+                  <span
+                    className="cell-tag cell-tag-open"
+                    style={{ marginLeft: 6 }}
                   >
-                    {slot.ticket_no ? `#${slot.ticket_no} · ` : ""}
-                    {slot.ticket_title}
-                  </Link>
-                  <SlotStatusBadge status={slot.slot_status} />
-                </div>
-                <div
-                  className="muted small"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    marginTop: 4,
-                  }}
-                >
-                  <CalendarClock size={13} strokeWidth={2} />
-                  {windowText(slot)}
-                  {slot.building_name ? ` · ${slot.building_name}` : ""}
-                </div>
-                {slot.assignment_note && (
-                  <div className="small" style={{ marginTop: 4 }}>
-                    {slot.assignment_note}
-                  </div>
+                    {t("agenda.today")}
+                  </span>
                 )}
-                {slot.slot_status === "COMPLETED" && slot.completion_note && (
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {slot.completion_note}
-                  </div>
-                )}
-                {slot.slot_status === "UNABLE_TO_COMPLETE" &&
-                  slot.unable_to_complete_reason && (
-                    <div className="muted small" style={{ marginTop: 4 }}>
-                      {t("editor.unable_reason", {
-                        reason: slot.unable_to_complete_reason,
-                      })}
-                    </div>
-                  )}
-
-                {slot.slot_status === "ASSIGNED" && (
-                  <div
-                    style={{ display: "flex", gap: 8, marginTop: 10 }}
-                    data-testid="agenda-slot-actions"
-                  >
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => setCompletionTarget(slot)}
-                      data-testid="agenda-mark-done"
-                    >
-                      <CheckCircle2 size={14} strokeWidth={2} />
-                      {t("agenda.mark_done")}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setUnableTarget(slot)}
-                      data-testid="agenda-mark-unable"
-                    >
-                      <XCircle size={14} strokeWidth={2} />
-                      {t("agenda.cant_complete")}
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-      </div>
-
-      {/* Undated slots belong to no week, so they sit below the grid
-          rather than being dropped: a slot nobody has scheduled is the
-          one that most needs seeing. */}
-      {undatedSlots.length > 0 && (
-        <p className="muted small" data-testid="agenda-undated-note">
-          {t("agenda.undated_count", { count: undatedSlots.length })}
-        </p>
-      )}
-
-      {/* Sprint 171 §3 — the overdue LIST, as the reference has it:
-          per item the title, customer, building, the deadline, HOW LONG
-          it has been overdue, its status and its type. */}
-      {overdueOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("agenda.overdue_title")}
-          data-testid="agenda-overdue-modal"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setOverdueOpen(false);
-          }}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-            paddingTop: "6vh",
-            overflowY: "auto",
-          }}
-        >
-          <div
-            className="card"
-            style={{
-              width: "min(96vw, 980px)",
-              padding: 24,
-              maxHeight: "85vh",
-              overflowY: "auto",
-            }}
-          >
-            <div className="section-head" style={{ marginBottom: 12 }}>
-              <span className="section-head-title">
-                {t("agenda.overdue_title")}
-              </span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setOverdueOpen(false)}
-                data-testid="agenda-overdue-close"
+              </h3>
+              {/* An empty day gets a MARKER, not blank space: a column
+                  with nothing in it should say so, or the reader cannot
+                  tell it apart from one that failed to load. */}
+              <BoundedList
+                size="lg"
+                count={group.items.length}
+                ariaLabel={formatDay(group.key)}
+                testIdPrefix="agenda-day"
+                emptyState={
+                  <p className="muted small" data-testid="agenda-day-empty">
+                    {t("agenda.day_empty")}
+                  </p>
+                }
               >
-                {t("common:cancel")}
-              </button>
-            </div>
-            <div className="table-wrap">
-              <table className="data-table data-table-dense">
-                <thead>
-                  <tr>
-                    <th>{t("agenda.col_item")}</th>
-                    <th>{t("common:customer")}</th>
-                    <th>{t("common:building")}</th>
-                    <th>{t("agenda.col_deadline")}</th>
-                    <th>{t("agenda.col_overdue_by")}</th>
-                    <th>{t("common:status")}</th>
-                    <th>{t("agenda.filter_type")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {overdueAll.map((slot) => (
-                    <tr key={slot.id} data-testid="agenda-overdue-row">
-                      <td className="td-subject">
-                        <Link to={`/tickets/${slot.ticket_id}`}>
-                          #{slot.ticket_no} · {slot.ticket_title}
-                        </Link>
-                      </td>
-                      <td>{slot.ticket_customer_name ?? "—"}</td>
-                      <td>{slot.building_name}</td>
-                      <td className="td-date">
-                        {formatDate(slot.scheduled_start_at)}
-                      </td>
-                      <td>{overdueByLabel(slot)}</td>
-                      <td>
-                        <SlotStatusBadge status={slot.slot_status} />
-                      </td>
-                      <td>
-                        {TICKET_TYPE_KEYS[slot.ticket_type as TicketTypeValue]
-                          ? t(
-                              `create_ticket:${TICKET_TYPE_KEYS[slot.ticket_type as TicketTypeValue]}`,
-                            )
-                          : slot.ticket_type}
-                      </td>
-                    </tr>
+                <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                  {group.items.map((entry) => (
+                    <WorkPlanCard
+                      key={entry.key}
+                      entry={entry}
+                      role={role}
+                      locale={locale}
+                      onComplete={() => setCompletionTarget(entry)}
+                      onUnable={() => setUnableTarget(entry)}
+                    />
                   ))}
-                  {overdueAll.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="muted">
-                        {t("agenda.overdue_none")}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </ul>
+              </BoundedList>
+            </section>
+          ))}
         </div>
       )}
 
-      {completionTarget && me && (
+      {overdueOpen && data && (
+        <EntryTableModal
+          title={t("agenda.overdue_title")}
+          description={t("agenda.overdue_desc")}
+          rows={data.overdue_entries}
+          truncated={data.truncated.overdue_entries}
+          limit={data.limits.overdue_entries}
+          emptyLabel={t("agenda.overdue_none")}
+          dateColumnLabel={t("agenda.col_deadline")}
+          showOverdueBy
+          role={role}
+          onClose={() => setOverdueOpen(false)}
+          testId="agenda-overdue"
+        />
+      )}
+
+      {upcomingOpen && data && (
+        <EntryTableModal
+          title={t("agenda.upcoming_title")}
+          description={t("agenda.upcoming_desc")}
+          rows={data.upcoming_entries}
+          truncated={data.truncated.upcoming_entries}
+          limit={data.limits.upcoming_entries}
+          emptyLabel={t("agenda.upcoming_none")}
+          dateColumnLabel={t("agenda.col_planned")}
+          showOverdueBy={false}
+          role={role}
+          onClose={() => setUpcomingOpen(false)}
+          testId="agenda-upcoming"
+        />
+      )}
+
+      {completionTarget && completionTarget.ticket_id !== null && (
         <SlotCompletionDialog
-          slot={completionTarget}
+          slot={{
+            id: completionTarget.source_id,
+            ticket_id: completionTarget.ticket_id,
+          }}
           onCancel={() => setCompletionTarget(null)}
           onDone={handleCompletionDone}
         />
@@ -904,6 +773,401 @@ function StaffSlotAgenda() {
         onCancel={() => setUnableTarget(null)}
         onConfirm={handleUnableConfirm}
       />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One card. The same shape whichever source it came from.
+// ---------------------------------------------------------------------------
+
+/** Where the card's title points, or null when this viewer may not open
+ *  it. STAFF are gated out of `/extra-work/:id` by `ExtraWorkRoute` and
+ *  by `scope_extra_work_for`, so an extra-work card is a plain title for
+ *  them — a link to a page that 403s is worse than no link. */
+function detailPath(
+  entry: WorkPlanEntry,
+  role: Role | null,
+): string | null {
+  if (entry.kind === "TICKET_SLOT" && entry.ticket_id !== null) {
+    return `/tickets/${entry.ticket_id}`;
+  }
+  if (entry.kind === "EXTRA_WORK" && canAccessExtraWork(role)) {
+    return `/extra-work/${entry.extra_work_id}`;
+  }
+  return null;
+}
+
+function WorkPlanCard({
+  entry,
+  role,
+  locale,
+  onComplete,
+  onUnable,
+}: {
+  entry: WorkPlanEntry;
+  role: Role | null;
+  locale: string;
+  onComplete: () => void;
+  onUnable: () => void;
+}) {
+  const { t } = useTranslation(["staff_slots", "common"]);
+  const to = detailPath(entry, role);
+
+  function timeOnly(iso: string | null): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  }
+
+  /** The clock window for a slot; the planned DAY window for extra
+   *  work, which has no dated slot and never has had one. */
+  function windowText(): string {
+    if (entry.kind === "EXTRA_WORK") {
+      return formatPlannedWindow(
+        entry.planned_start,
+        entry.planned_end,
+        formatDay,
+        {
+          empty: t("agenda.no_date"),
+          endOnly: (end) => t("agenda.until_date", { date: end }),
+        },
+      );
+    }
+    const parts: string[] = [];
+    if (entry.scheduled_start_at) {
+      parts.push(
+        entry.scheduled_end_at
+          ? `${timeOnly(entry.scheduled_start_at)}–${timeOnly(entry.scheduled_end_at)}`
+          : timeOnly(entry.scheduled_start_at),
+      );
+    }
+    if (entry.time_window_label) parts.push(entry.time_window_label);
+    return parts.length > 0 ? parts.join(" · ") : t("agenda.no_time");
+  }
+
+  const heading = (
+    <>
+      {entry.ticket_no ? `#${entry.ticket_no} · ` : ""}
+      {entry.title}
+    </>
+  );
+
+  return (
+    <li
+      className="card"
+      data-testid="agenda-slot-card"
+      data-kind={entry.kind}
+      data-placement={entry.placement}
+      style={{ padding: 12, marginBottom: 8 }}
+    >
+      {/* A class rather than an inline flex row: seven columns on a
+          1440px screen are ~150px wide, and a non-wrapping row put the
+          status badge past the column edge where it was clipped. The
+          rule wraps and lets long words break. */}
+      <div className="wp-card-head">
+        {to ? (
+          <Link to={to} className="td-subject" style={{ fontWeight: 600 }}>
+            {heading}
+          </Link>
+        ) : (
+          <span className="td-subject" style={{ fontWeight: 600 }}>
+            {heading}
+          </span>
+        )}
+        {entry.kind === "EXTRA_WORK" ? (
+          <StatusBadge
+            status={{ kind: "extra-work", value: entry.status }}
+            variant="cell"
+          />
+        ) : (
+          <SlotStatusBadge status={entry.status as SlotStatus} />
+        )}
+      </div>
+
+      {/* §12B — a card shown outside its planned week SAYS WHY, with its
+          planned date on it. */}
+      <PlacementMarker entry={entry} />
+
+      <div
+        className="muted small"
+        style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}
+      >
+        {entry.kind === "EXTRA_WORK" ? (
+          <CalendarRange size={13} strokeWidth={2} />
+        ) : (
+          <CalendarClock size={13} strokeWidth={2} />
+        )}
+        {windowText()}
+        {entry.building_name ? ` · ${entry.building_name}` : ""}
+      </div>
+
+      {entry.kind === "EXTRA_WORK" && (
+        <div className="wp-kind-tag" data-testid="agenda-card-kind">
+          {t("agenda.source_extra_work")}
+        </div>
+      )}
+
+      {entry.assignee_count > 1 && (
+        <div
+          className="muted small"
+          style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}
+          data-testid="agenda-card-assignees"
+        >
+          <Users size={13} strokeWidth={2} />
+          {entry.assignee_names.join(", ")}
+          {entry.assignee_count > entry.assignee_names.length
+            ? ` +${entry.assignee_count - entry.assignee_names.length}`
+            : ""}
+        </div>
+      )}
+
+      {entry.assignment_note && (
+        <div className="small" style={{ marginTop: 4 }}>
+          {entry.assignment_note}
+        </div>
+      )}
+      {entry.state === "DONE" && entry.completion_note && (
+        <div className="muted small" style={{ marginTop: 4 }}>
+          {entry.completion_note}
+        </div>
+      )}
+      {entry.unable_to_complete_reason && (
+        <div className="muted small" style={{ marginTop: 4 }}>
+          {t("editor.unable_reason", {
+            reason: entry.unable_to_complete_reason,
+          })}
+        </div>
+      )}
+
+      {entry.can_complete && (
+        <div className="wp-card-actions" data-testid="agenda-slot-actions">
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={onComplete}
+            data-testid="agenda-mark-done"
+          >
+            <CheckCircle2 size={14} strokeWidth={2} />
+            {t("agenda.mark_done")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onUnable}
+            data-testid="agenda-mark-unable"
+          >
+            <XCircle size={14} strokeWidth={2} />
+            {t("agenda.cant_complete")}
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Why this card is in a week that is not its planned one.
+ *
+ * §12B, verbatim: "A card shown outside its planned week must say why —
+ * a short marker reading started early or overdue, with its planned date
+ * on the card. Otherwise the operator meets the same job in two weeks
+ * and cannot tell why."
+ *
+ * A card at HOME renders nothing here — which is the point. The marker
+ * means "this is a visitor", so putting one on every card would tell the
+ * reader nothing.
+ */
+function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
+  const { t } = useTranslation("staff_slots");
+  if (entry.placement === "PLANNED") return null;
+
+  if (entry.placement === "OVERDUE") {
+    return (
+      <div className="wp-why wp-why-overdue" data-testid="agenda-card-why">
+        <AlarmClock size={13} strokeWidth={2.5} />
+        {entry.due_date
+          ? t("agenda.why_overdue", { date: formatDay(entry.due_date) })
+          : t("agenda.why_overdue_undated")}
+        {entry.overdue_days !== null && (
+          <span>{t("agenda.overdue_days", { count: entry.overdue_days })}</span>
+        )}
+      </div>
+    );
+  }
+
+  const key =
+    entry.placement === "STARTED_EARLY" ? "why_started_early" : "why_started";
+  return (
+    <div className="wp-why wp-why-started" data-testid="agenda-card-why">
+      <PlayCircle size={13} strokeWidth={2.5} />
+      {entry.planned_start
+        ? t(`agenda.${key}`, { date: formatDay(entry.planned_start) })
+        : t("agenda.why_started_undated")}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The two "elsewhere" lists. Same table, two questions.
+// ---------------------------------------------------------------------------
+function EntryTableModal({
+  title,
+  description,
+  rows,
+  truncated,
+  limit,
+  emptyLabel,
+  dateColumnLabel,
+  showOverdueBy,
+  role,
+  onClose,
+  testId,
+}: {
+  title: string;
+  description: string;
+  rows: WorkPlanEntry[];
+  truncated: boolean;
+  limit: number;
+  emptyLabel: string;
+  dateColumnLabel: string;
+  showOverdueBy: boolean;
+  role: Role | null;
+  onClose: () => void;
+  testId: string;
+}) {
+  const { t } = useTranslation(["staff_slots", "common", "create_ticket"]);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      data-testid={`${testId}-modal`}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        zIndex: 100,
+        padding: 16,
+        paddingTop: "6vh",
+        overflowY: "auto",
+      }}
+    >
+      <div
+        className="card"
+        style={{
+          width: "min(96vw, 1040px)",
+          padding: 24,
+          maxHeight: "85vh",
+          overflowY: "auto",
+        }}
+      >
+        <div className="section-head" style={{ marginBottom: 12 }}>
+          <div>
+            <span className="section-head-title">{title}</span>
+            <div className="section-head-sub">{description}</div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onClose}
+            data-testid={`${testId}-close`}
+          >
+            {t("common:cancel")}
+          </button>
+        </div>
+        {truncated && (
+          <p className="wp-notice" role="status">
+            {t("agenda.truncated_note", { count: limit })}
+          </p>
+        )}
+        <BoundedList
+          size="lg"
+          count={rows.length}
+          ariaLabel={title}
+          testIdPrefix={testId}
+          className="table-wrap"
+          emptyState={<p className="muted">{emptyLabel}</p>}
+        >
+          <table className="data-table data-table-dense">
+            <thead>
+              <tr>
+                <th>{t("agenda.col_item")}</th>
+                <th>{t("agenda.filter_source")}</th>
+                <th>{t("common:customer")}</th>
+                <th>{t("common:building")}</th>
+                <th>{dateColumnLabel}</th>
+                {showOverdueBy && <th>{t("agenda.col_overdue_by")}</th>}
+                <th>{t("common:status")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((entry) => {
+                const to = detailPath(entry, role);
+                return (
+                  <tr key={entry.key} data-testid={`${testId}-row`}>
+                    <td className="td-subject">
+                      {to ? (
+                        <Link to={to}>
+                          {entry.ticket_no ? `#${entry.ticket_no} · ` : ""}
+                          {entry.title}
+                        </Link>
+                      ) : (
+                        <>
+                          {entry.ticket_no ? `#${entry.ticket_no} · ` : ""}
+                          {entry.title}
+                        </>
+                      )}
+                    </td>
+                    <td>
+                      {entry.kind === "EXTRA_WORK"
+                        ? t("agenda.source_extra_work")
+                        : t("agenda.source_ticket")}
+                    </td>
+                    <td>{entry.customer_name ?? "—"}</td>
+                    <td>{entry.building_name ?? "—"}</td>
+                    <td className="td-date">
+                      {showOverdueBy
+                        ? entry.due_date
+                          ? formatDay(entry.due_date)
+                          : "—"
+                        : entry.planned_start
+                          ? formatDay(entry.planned_start)
+                          : "—"}
+                    </td>
+                    {showOverdueBy && (
+                      <td>
+                        {entry.overdue_days !== null
+                          ? t("agenda.overdue_days", {
+                              count: entry.overdue_days,
+                            })
+                          : "—"}
+                      </td>
+                    )}
+                    <td>
+                      {entry.kind === "EXTRA_WORK" ? (
+                        <StatusBadge
+                          status={{ kind: "extra-work", value: entry.status }}
+                          variant="cell"
+                        />
+                      ) : (
+                        <SlotStatusBadge status={entry.status as SlotStatus} />
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </BoundedList>
+      </div>
     </div>
   );
 }

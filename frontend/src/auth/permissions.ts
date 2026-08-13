@@ -301,9 +301,19 @@ export function canAccessAgenda(role: Role | null | undefined): boolean {
 }
 
 /** True for the roles that see the TEAM's week rather than their own
- *  slots. Kept beside the gate above so the two cannot drift. */
+ *  slots. Kept beside the gate above so the two cannot drift.
+ *
+ *  Sprint 179A — BUILDING_MANAGER added. The backend has admitted it to
+ *  `?scope=company` since Sprint 170 §1 (`is_provider_management_role`
+ *  covers all three provider-management roles, and the widening runs
+ *  through `scope_tickets_for` / `scope_extra_work_for`), but the page
+ *  never asked for it, so a manager could not reach a scope the server
+ *  was already prepared to serve. A BM holds no assignment slots of
+ *  their own either, so the personal view is as empty for them as it is
+ *  for an admin — which is the exact defect Sprint 170 fixed one role
+ *  short of. */
 export function agendaShowsTeamWeek(role: Role | null | undefined): boolean {
-  return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
+  return isProviderManagementRole(role);
 }
 
 // `/admin/staff-assignment-requests` — backend admits the BM for the

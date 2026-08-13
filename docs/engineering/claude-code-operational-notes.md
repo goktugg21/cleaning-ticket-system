@@ -102,9 +102,11 @@ sg docker -c "docker run --rm -v \"$(pwd)/frontend:/app\" -w /app node:22-alpine
 ```
 
 - `tsc --noEmit -p tsconfig.app.json` (Tier 1) must pass clean.
-- `npx eslint .` must report **exactly 48 problems (46 errors, 2
-  warnings)** — the frozen baseline (was 49 until Sprint 115 deleted an
-  unused hook carrying one violation). Capture it before AND after every
+- `npx eslint .` must report **exactly 44 problems (42 errors, 2
+  warnings)** — the frozen baseline, and the number CLAUDE.md carries.
+  (This line said 48/46 until Sprint 179A; the baseline had moved and
+  the note had not. CLAUDE.md is authoritative when the two disagree.)
+  Capture it before AND after every
   commit and diff the per-file violation counts (`grep -oE
   '^/app/src/[^:]+' | sort | uniq -c`); the set must be identical modulo
   line-number shifts. Zero new violations, and (a standing rule since
@@ -112,6 +114,17 @@ sg docker -c "docker run --rm -v \"$(pwd)/frontend:/app\" -w /app node:22-alpine
   starts-true loading idiom / guarded render-time state reset instead.
 - `npm run build` (Tier 1 too) is the production build; run it before a
   screenshot/measurement pass since the preview server serves `dist/`.
+
+**`tsc --noEmit -p tsconfig.app.json` is NOT a superset of the build's
+type check — run all three, in this order, and treat a green Tier 1 as
+no evidence about the build.** Sprint 179A passed `tsc --noEmit -p
+tsconfig.app.json` clean and then `npm run build` failed on
+`AgendaPage.tsx` with a real `TS2345` (a `string | null` handed to a
+parameter typed `Role | null | undefined`). The two are different
+invocations over different project graphs: `npm run build` runs
+`tsc -b`, which builds the referenced projects in `tsconfig.json`, and
+the `--noEmit -p` form checks one project on its own. Skipping the build
+because "typecheck passed" is how a type error reaches a branch.
 
 Two eslint rules from the React-Compiler plugin bite easily and are NOT
 suppressible without a disable comment:

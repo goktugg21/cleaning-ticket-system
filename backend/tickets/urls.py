@@ -18,6 +18,7 @@ from .views_staff_assignments import (
     TicketStaffAssignmentListCreateView,
 )
 from .views_staff_requests import StaffAssignmentRequestViewSet
+from .views_work_plan import WorkPlanView
 from .views_sub_tasks import (
     TicketSubTaskDetailView,
     TicketSubTaskListCreateView,
@@ -63,6 +64,14 @@ urlpatterns = [
         "my-slots/",
         StaffAssignmentSlotAgendaView.as_view(),
         name="ticket-my-slots",
+    ),
+    # Sprint 179A — the Work Plan: one week, both sources, the §12B
+    # placement rule and server-side counts. Before the router for the
+    # same reason `my-slots/` is.
+    path(
+        "work-plan/",
+        WorkPlanView.as_view(),
+        name="ticket-work-plan",
     ),
     path(
         "<int:ticket_id>/attachments/<int:attachment_id>/download/",

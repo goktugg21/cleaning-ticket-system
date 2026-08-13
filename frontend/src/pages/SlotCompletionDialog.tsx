@@ -26,7 +26,12 @@ export function SlotCompletionDialog({
   onCancel,
   onDone,
 }: {
-  slot: MySlot;
+  // Sprint 179A — the two ids are the WHOLE dependency: the dialog
+  // uploads against `ticket_id` and PATCHes `id`, and nothing else on a
+  // slot row reaches it. Narrowing the prop to those two lets the Work
+  // Plan (whose entries are a merged shape, not `MySlot` rows) reuse
+  // this dialog without either side inventing a conversion.
+  slot: Pick<MySlot, "id" | "ticket_id">;
   onCancel: () => void;
   onDone: () => void;
 }) {

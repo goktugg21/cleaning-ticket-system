@@ -1487,13 +1487,34 @@ model, and the list filters express the same rule in SQL. A test
 asserts the query and the property return the same set: two definitions
 of "late" is precisely the drift that rule exists to prevent.
 
-## 12B. Which week does a job appear in? (DECIDED, not yet implemented)
+## 12B. Which week does a job appear in? (IMPLEMENTED, Sprint 179A)
 
 Sprint 173 §5. The owner and his father disagreed about this and the
 rule was settled; it is recorded here so the next person to touch the
-week view does not re-derive it. **The Work Plan does not implement
-points 2 to 4 yet** — only planned placement exists today. This section
-is the decision, not a description of the code.
+week view does not re-derive it.
+
+**Sprint 179A implements all four points.** The rule lives in
+`backend/tickets/work_plan.py` as pure functions over dates — one
+`Job` (planned window, due date, state) that BOTH sources are flattened
+onto, so a dated ticket slot and an extra work request are placed by the
+same code rather than by two copies of the same date arithmetic. The
+HTTP surface is `GET /api/tickets/work-plan/`
+(`backend/tickets/views_work_plan.py`); the screen is
+`frontend/src/pages/AgendaPage.tsx`.
+
+Two properties of that implementation are worth stating here because
+they are decisions, not details:
+
+* **Rules 2 and 3 only ever add to the CURRENT week.** Looking at any
+  other week shows planned placement alone. That is what makes rule 4
+  fall out for free in both directions — future work does not clutter
+  today, and today does not clutter September.
+* **The counts are the server's.** Every chip is a `COUNT(*)` over the
+  scoped queryset, not a length of whatever the browser fetched. The
+  rule is therefore expressed twice — as Python over a `Job` and as
+  querysets for the counts — and `WorkPlanRuleParityTests` asserts the
+  two agree over a fixture built to hit every branch. That is the same
+  discipline §12A already demands of `is_overdue`.
 
 His example: a job is entered today, started today, and planned for
 September. Today it is nowhere; in September it is nowhere either.

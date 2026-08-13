@@ -13,9 +13,96 @@ update was left for a later docs-only pass.
 
 ## NOW
 
+**Branch:** `feat/sprint-179a`, cut from `feat/sprint-178` (`56c0740`).
+Still ONE chain, one PR — #153 -> ... -> #179 are not one PR per sprint.
+
+Sprint 179 was split across two agents on two branches, both cut from
+`56c0740` and neither rebased onto the other. **Agent A owns this file**;
+Agent B hands its checklist lines to web-Claude at integration, so the
+Sprint 179B entries below this line are expected to arrive later rather
+than to be missing.
+
+### Done — Sprint 179A: the Work Plan, seventh round
+
+- **The §12B week-placement rule, implemented — all four points.** It
+  had been recorded as DECIDED and unimplemented for five sprints. The
+  rule now lives ONCE, in `backend/tickets/work_plan.py`, as pure
+  functions over dates: a `Job` (planned window, due date, state) that
+  both sources are flattened onto, so a dated ticket slot and an extra
+  work request are placed by the same code. A job appears in the week
+  its planned window covers, whatever its status; a STARTED job also
+  appears in the current week; a job past its deadline and unfinished
+  also appears in the current week, marked overdue; untouched future
+  work appears only in its own week plus an Upcoming list. Rules 2 and 3
+  add to the CURRENT week only, which is what makes point 4 fall out in
+  both directions. **A card outside its planned week says why** — a red
+  "Overdue — due <date>" or an amber "Started early — planned for
+  <date>" marker, carrying the planned date, so the operator who meets
+  the same job in two weeks can tell them apart.
+- **Extra work in the week view.** Sprint 168 recorded this as blocked
+  on "giving extra work a schedule … a product decision, not a screen".
+  That decision has since been made and shipped: Sprint 173 §4 gave
+  extra work a planned WINDOW (`preferred_date` -> `planned_end_date`)
+  and a `deadline`, and Sprint 157 §2 gave it people
+  (`ExtraWorkAssignment`). So no new product decision was needed — the
+  week view now reads both. Extra work is **assignment-driven**: a
+  request with nobody on it is not yet anybody's work and does not
+  appear.
+- **Server-side counts.** New composite endpoint
+  `GET /api/tickets/work-plan/?week=YYYY-Www[&scope=company]` returns
+  the week's cards, an Overdue list, an Upcoming list, and every count
+  as a `COUNT(*)` over the scoped queryset. The chips used to be
+  computed in the browser over whatever had been fetched. Because the
+  rule is now expressed twice — Python for placement, querysets for the
+  counts — `WorkPlanRuleParityTests` asserts the two agree over a
+  fixture built to hit every branch. All three lists are bounded
+  (300 / 100 / 100) and the response says out loud when a bound bit.
+- **STAFF can see the extra work they are assigned to, and only that.**
+  `scope_extra_work_for` still returns `.none()` for STAFF — the
+  post-2026-05-20 privacy fix is NOT reopened. What is new is the shape
+  `Ticket.extra_work_origin` already uses: a caller-scoped read of the
+  worker's own assignment rows through a narrow OPERATIONAL serializer
+  (title, building, customer name, planned window, deadline, urgency,
+  status). No commercial field exists on it, and the test pins its key
+  set exactly plus a named list of the fields that must never appear.
+- **The idempotent demo seeder.** `seed_demo_data` now seeds eight dated
+  ticket slots and five assigned extra-work requests for Ahmet, across
+  several days, three buildings and every state the chips count.
+  Running it twice creates nothing new — and it **re-stamps its dates
+  relative to today on every run**, which is the difference between an
+  idempotent seeder and a frozen one: a fixture pinned to the day it was
+  first seeded shows an empty week a fortnight later.
+- **The owner's acceptance test, as data and as a test.** An extra work
+  assigned to Ahmet as a WORKER, past its deadline, appears as overdue
+  in Ahmet's Work Plan. Pinned twice: once against a directly-written
+  assignment, and once through the real
+  `POST /api/extra-work/bulk-assign/` so the eligibility gate and this
+  read are proven to line up.
+- **The BUILDING_MANAGER scope was already covered — and is now
+  reachable.** Sprint 170 §1 admitted all three provider-management
+  roles to `?scope=company` (`is_provider_management_role` includes
+  BUILDING_MANAGER), so no new scoping path was written. But the page
+  never asked for it: `agendaShowsTeamWeek` listed only SA and CA, so a
+  manager reached a personal view that is as empty for them as it was
+  for an admin — the exact defect Sprint 170 fixed one role short of.
+  One-line fix, and the manager's assigned-tickets table is kept BELOW
+  the week rather than replaced by it (two different questions).
+
+### Two changes of behaviour worth flagging
+
+- **The completion buttons now appear only on your OWN slot.** In team
+  scope an admin previously got "Mark done" on a worker's card; a
+  mis-click there writes a false completion record against somebody
+  else's name. `can_complete` is now the server's answer.
+- **The raw Status select is gone from the Work Plan filters.** It
+  listed untranslated enum strings and duplicated what the chips say in
+  normalised form. The chips (Total / Overdue / Open / In progress /
+  Completed / Can't complete) replace it, and a new "Kind of work"
+  filter separates tickets from extra work.
+
+## Historical — Sprint 178
+
 **Branch:** `feat/sprint-178`, cut from `feat/sprint-177` (`feb4ead`).
-It is the single branch being merged — #153 -> ... -> #178 are ONE
-chain, one PR, not one per sprint.
 
 ### Done — Sprint 178
 
@@ -293,23 +380,45 @@ clean**.
 
 ## NEXT
 
-**After Sprint 178 this holds three things.** §1, §2 and the four
-reports left it this round; what is below is what is actually left.
+**The Work Plan has left this list.** It was item 1 for six rounds and
+Sprint 179A built it; the detail is under NOW. What is left below is
+what Sprint 179A did not touch, plus room for Sprint 179B.
 
-1. **The Work Plan (§3, sixth round).** The §12B week-placement rule,
-   extra work in the week view, server-side counts, the idempotent
-   `seed_demo_data` seeder, and the acceptance test: an extra work
-   assigned to a worker, past its deadline, showing as overdue in that
-   worker's Work Plan. The manager-view sub-item is already done
-   (Sprint 170 §1, `?scope=company` through `scope_tickets_for`).
-2. **The typography sweep.** Owed since Sprint 175; dropped in 178 by
-   the prompt's own instruction.
-3. **The 30 pre-existing raw i18n keys** listed under NOW, in eight
-   files across UnifiedTimeline, ChangeDiff, the BuildingManager
-   customer pages and two customer sub-pages.
+**Sprint 179B's lines go here.** Agent B owns the building type's
+visibility, the hours wizard's Job column and help text, the design
+pass, the 30 raw i18n keys and the contract-hours analysis; it does not
+edit this file, and web-Claude folds its report's lines in at
+integration. This list is NOT empty — it is waiting on that half.
+
+1. **The typography sweep.** Owed since Sprint 175; dropped in 178 by
+   the prompt's own instruction, and out of Sprint 179A's scope by its
+   own (Agent B holds the design pass).
+2. **The 30 pre-existing raw i18n keys** listed under Sprint 178, in
+   eight files across UnifiedTimeline, ChangeDiff, the BuildingManager
+   customer pages and two customer sub-pages. **Agent B's item** —
+   Sprint 179A touched none of those files.
+3. **Six undefined CSS classes in the Extra Work pages** — see the
+   section below. Unchanged; Sprint 179A defined `.agenda-day`, which
+   was the seventh, because it was in a file this sprint rewrote.
+
+Left over from the Work Plan itself, deliberately and stated rather than
+quietly dropped:
+
+4. **Extra work with nobody assigned never reaches the Work Plan.** The
+   week answers "who is doing what, when", so an unassigned request is
+   not yet anybody's work. That is a defensible reading and it is the
+   one shipped — but an operator looking for "what is planned this week
+   that nobody has picked up" will not find it here. If the owner wants
+   that, it is a second list beside Upcoming, not a change to this rule.
+5. **A slot has no deadline column, so "late" for a ticket slot means
+   "past its last planned day".** That is the definition the agenda has
+   used since Sprint 168 and it was kept rather than redefined. Extra
+   work uses its real `deadline`. The two are different questions
+   wearing one word, and if that ever matters the fix is a deadline on
+   the slot, not a new rule in the week view.
 
 Everything below this line is the older carried detail, kept for the
-wording of items 1 and 2.
+wording of the items above.
 
 ### Carried from Sprint 175
 

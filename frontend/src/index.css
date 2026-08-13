@@ -9678,3 +9678,122 @@ details[open] > .ew-department-tree-summary::before {
   border-radius: var(--r-md);
   box-shadow: inset 0 0 0 1px var(--border);
 }
+
+/* Sprint 179A — work plan
+   ------------------------------------------------------------------
+   Appended as ONE block at the end of the file, opened by this
+   comment, because Sprint 179B is editing the same 9,680-line file in
+   parallel. Nothing above this line is touched, reordered or
+   reindented: a whitespace-only change anywhere in here turns a
+   trivial merge into a manual one. */
+
+/* The seven day columns had no rule of their own — only the
+   `.agenda-day-today` highlight did. `min-width: 0` is the load-bearing
+   half: a grid item defaults to `min-width: auto`, so one long
+   unbreakable building name pushes its column wider than its 1fr share
+   and drags the other six narrower. */
+.agenda-day {
+  min-width: 0;
+}
+
+/* WHY a card is in a week that is not its planned one (docs §12B). A
+   card at HOME renders none of this, which is the point — the marker
+   means "this is a visitor", so putting one on every card would tell
+   the reader nothing. */
+.wp-why {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.wp-why svg {
+  flex: 0 0 auto;
+}
+/* Late reads red, running reads amber: the same two tones the status
+   badges already use for rejected / waiting, so a reader who has learnt
+   the palette anywhere else in the app has learnt it here. */
+.wp-why-overdue {
+  background: var(--red-soft);
+  border-color: var(--red-border);
+  color: var(--red);
+}
+.wp-why-started {
+  background: var(--amber-soft);
+  border-color: var(--amber-border);
+  color: var(--amber);
+}
+/* The "{{n}} days" tail inside an overdue marker — present, not shouted. */
+.wp-why-overdue span {
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+/* "Extra work" on a card, so the two sources are distinguishable at a
+   glance without reading the title. Teal rather than green: green is
+   the app's primary-action colour and this is a label, not a control. */
+.wp-kind-tag {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* A list that hit its bound says so. Deliberately not `.alert-error` —
+   nothing has gone wrong; the reader is being told the difference
+   between what is listed and what is counted. */
+.wp-notice {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--amber-border);
+  border-radius: var(--r-sm);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 12px;
+}
+
+/* A card in a seven-column week is ~150px wide at 1440. The header row
+   used to be a non-wrapping flex row, so the status badge sat past the
+   column edge and was CLIPPED — measured on the rendered page, not
+   guessed. It wraps now, and long unbreakable strings (a ticket number,
+   a building name) break rather than widening the column. */
+.wp-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wp-card-head > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Same reason: two buttons side by side do not fit a narrow column. */
+.wp-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* `.cell-tag` is `white-space: nowrap` app-wide, which is right in a
+   table cell and wrong in a 150px week column — "Unable to complete"
+   and "Customer approved" ran past the card's edge (measured). Scoped
+   to the work-plan card header ONLY: the shared class is not touched,
+   because every table in the app depends on its nowrap. */
+.wp-card-head .cell-tag {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
