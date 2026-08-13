@@ -4,76 +4,93 @@
 system and the Ramazan transcripts + Source of Truth, ending with a
 premium UI/UX polish. **CC updates `## NOW
 
-**Branch:** `feat/sprint-174`, cut from `feat/sprint-173`'s HOTFIX
-(`98b7c44`). It is the single branch being merged — #153 -> ... -> #174
-are ONE chain, one PR, not one per sprint.
-
-### The live break that opened this sprint, and the rule it produced
-
-Sprint 173 declared `is_overdue` and `started_before_plan` on the LIST
-serializer and added them to the DETAIL serializer's `fields` only. DRF
-asserts on that mismatch, so **every call to `/api/extra-work/`
-returned 500** and the page read "The server is having trouble right
-now". The owner found it on the live site; no gate did.
-
-Why nothing caught it: that sprint's tests exercised the model
-PROPERTIES and the list FILTER. **A filter test issues a query; it
-never serialises a row.** A frontend gate cannot see a server-side
-assertion.
-
-**The rule from now on: a field is not done until a test RENDERS the
-endpoint carrying it.** Three such tests exist now — list, detail, and
-one asserting the list must not 500 — and they earned their place
-immediately: adding `preferred_date` to the list this sprint, the first
-attempt put it in the wrong `fields` block and the LIST test failed
-with `key='preferred_date'`. Seconds, not a live site.
+**Branch:** `feat/sprint-175`, cut from `feat/sprint-174` (`1fe1489`).
+It is the single branch being merged — #153 -> ... -> #175 are ONE
+chain, one PR, not one per sprint.
 
 ### Done
 
-- **§0** the render tests, above.
-- **§1 Sprint 173 put on the screen.** The owner was right that two of
-  three were missing. Added: the SOURCE FILTER on the entries tab
-  (optional on the shared filter row, so the Overview tab that shares
-  it does not grow a control it has no use for); the DEADLINE and
-  PLANNED END on the create form; the deadline as a SORTABLE column
-  (rows with no deadline sort LAST both ways — "nobody said when" is
-  not earlier or later than a date); and the OVERDUE and STARTED-EARLY
-  markers on the list row and in the detail HEADER, in the status
-  colours this app already has.
-- **§2 approval grouped by source**, with a per-worker "approve
-  everything this week" button, and the source now SET when hours are
-  logged (`entries/bulk-week/` takes it per cell, validated against the
-  enum).
-- **§4d planned extra work is a FILTER, never a mode** — default
-  "Alles", visible and clearable.
+- **§1 the Extra Work detail redesign — the item owed for three
+  rounds.** Details and Workflow keep their content and stay open on
+  the top row, untouched. Messages moved into a SECOND two-column row;
+  the right column takes Customer contacts (new, collapsed, with its
+  count), Department & work type (new, collapsed), People on this
+  request (moved), and Preview (new, collapsed — the proposal PDF was a
+  button inside Workflow). Requested services and Pricing proposal stay
+  full width beneath, both collapsed. Nothing removed.
+  Measured — the right column is SHORTER than Messages at every width,
+  which is the question the owner asked:
+  1024 488 vs 389 · 1280 488 vs 373 · 1440 488 vs 338 · overflow 0.
+- **§3 the counts.** `.mywork-chip-count` had no left margin, so
+  "Draft0". It has 6px now and its weight drops 800 -> 700 to match the
+  label beside it.
+- **§5's CSS debt.** The six classes the sweep flagged for two sprints
+  are defined, because §1 rebuilt the files carrying them. **The sweep
+  is clean.**
+
+### Two honest notes on §1
+
+- **People on this request renders OPEN, not collapsed.** It is an
+  existing self-contained card component and wrapping it would nest a
+  card in a card. The right column is still shorter than Messages at
+  every width, so the acceptance criterion holds — but it is not
+  collapsed as the sketch drew it.
+- **Preview renders only where a proposal exists.** On a request
+  without one there is no PDF to preview and an empty card would be
+  furniture.
 
 ### NOT done
 
 Four items, none partially built:
 
-- **§3 the Extra Work detail redesign.** The header pills from §1 are
-  in, but the two-column layout, the four collapsed right-hand cards
-  and the full-width Requested services / Pricing proposal are not.
-- **§4a the Catalogs area** and the building-type catalog.
-- **§4b the four reports.**
-- **§4c the Work Plan** — the week-placement rule is still recorded in
-  the product docs (§12B) as decided-not-implemented.
+- **§2 the deadline's editing surfaces** — editable after creation
+  (2a), in the list's bulk edit (2b), and provider-only with the API
+  refusing it from customer-side roles (2c). §2c is a DECISION awaiting
+  the owner either way, so it is recorded in NEXT with its reasoning
+  intact.
+- **§3's typography sweep** beyond the counts. The count fix landed;
+  the wider "too large and bold" pass over the touched pages did not.
+- **§4a the Catalogs area**, **§4b the four reports**, **§4c the Work
+  Plan** — a third sprint carrying these.
 
 ### Gates
 
-`test extra_work timesheets reports` isolated in this worktree.
-`makemigrations --dry-run --check` clean — no new migrations this
-sprint. Frontend: tsc clean, eslint **44 (42 errors, 2 warnings)**,
-build OK, i18n in lockstep.
-
-The undefined-CSS-class sweep flags six classes in files this sprint
-touched — `ew-agreed-price-item-label`, `ew-intent-option`,
-`ew-auto-start`, `ew-workflow-card`, `form-control`, `link`. **None
-were added by this sprint** (checked against the diff); they are
-pre-existing holes in the Extra Work pages that these edits brought
-into the sweep's scope. Recorded in NEXT rather than fixed unasked.
+`test extra_work` isolated in this worktree — the only app whose
+BACKEND this sprint changed (§1 and §3 are frontend and CSS).
+`timesheets`, `reports`, `buildings` and `tickets` were NOT run and
+nothing in them was touched. `makemigrations --dry-run --check` clean —
+no new migrations. Frontend: tsc clean, eslint **44 (42 errors, 2
+warnings)**, build OK, i18n in lockstep, **undefined-CSS-class sweep
+clean**.
 
 ## NEXT
+
+### Carried from Sprint 175
+
+- **§2a/§2b the deadline's editing surfaces.** Both dates on the EDIT
+  surface and on the detail page behind Edit; both in the list's bulk
+  edit dialog with the "leave unchanged" default every bulk field
+  already has, so a bulk edit never silently overwrites a date nobody
+  touched.
+- **§2c who may set a deadline — a DECISION for the owner.** The
+  reasoning, unchanged and unimplemented: we already hold
+  `preferred_date`, which IS the customer's wish. The `deadline` is
+  what turns a row red and what an operator is measured against — a
+  provider commitment. If a customer could set it unilaterally, a
+  customer could make the provider look late by typing a date. So the
+  customer expresses a wish and the provider decides what it commits
+  to. **Reversible in a sentence** if the owner disagrees.
+- **§3's typography sweep** beyond the Approval counts.
+- **§4a Catalogs area** + per-company building-type catalog with a
+  buildings-list filter + the cost-of-the-next-catalog note.
+- **§4b the four reports** (employee hours by building / weekly / by
+  extra work; ticket report with duration from the status history).
+- **§4c the Work Plan** — docs §12B's week-placement rule, extra work
+  in the week view, BUILDING_MANAGER scope through the existing
+  `scope_tickets_for`, server-side counts, idempotent seeder.
+  Acceptance test: an overdue extra work assigned to a worker appears
+  as overdue in that worker's Work Plan.
+
 
 ### Carried from Sprint 174 — not built, nothing half-done
 
