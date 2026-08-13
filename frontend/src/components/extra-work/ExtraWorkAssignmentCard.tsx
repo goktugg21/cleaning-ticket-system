@@ -34,7 +34,17 @@ import { EditModeToggle } from "../EditModeToggle";
 import { useEditMode } from "../../lib/useEditMode";
 import { AssignPeopleDialog } from "../AssignPeopleDialog";
 
-export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }) {
+export function ExtraWorkAssignmentCard({
+  extraWorkId,
+  bare = false,
+}: {
+  extraWorkId: number;
+  /** Sprint 176 §2 — render the BODY without this component's own card
+   *  shell, so a caller can put it inside a `CollapsibleCard` without
+   *  nesting a card in a card. Sprint 175 left the card open precisely
+   *  to avoid that nesting; a flag is the honest fix. */
+  bare?: boolean;
+}) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [rows, setRows] = useState<ExtraWorkAssignment[]>([]);
   // Keyed by ROLE: the eligible people differ per role, so one
@@ -161,16 +171,16 @@ export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }
       }));
   };
 
-  return (
-    <section
-      className="card"
-      data-testid="extra-work-assignments-card"
-      style={{ padding: "20px 22px", marginBottom: 16 }}
-    >
+  const body = (
+    <>
       <div className="section-head" style={{ marginBottom: 8 }}>
         <div>
-          <div className="section-head-title">{t("assign.card_title")}</div>
-          <div className="section-head-sub">{t("assign.card_desc")}</div>
+          {!bare && (
+            <>
+              <div className="section-head-title">{t("assign.card_title")}</div>
+              <div className="section-head-sub">{t("assign.card_desc")}</div>
+            </>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {(edit.editMode || rows.length === 0) && (
@@ -280,6 +290,18 @@ export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }
           onConfirm={runBothRoles}
         />
       )}
+    </>
+  );
+
+  if (bare) return body;
+
+  return (
+    <section
+      className="card"
+      data-testid="extra-work-assignments-card"
+      style={{ padding: "20px 22px", marginBottom: 16 }}
+    >
+      {body}
     </section>
   );
 }

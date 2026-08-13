@@ -450,10 +450,17 @@ function LabelsCard({
   ew,
   onUpdated,
   onRefresh,
+  collapsible = false,
 }: {
   ew: ExtraWorkRequestDetail;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
   onRefresh: () => void;
+  /** Sprint 176 §2 — render as a COLLAPSIBLE card rather than a plain
+   *  one, for the right column. A flag on the existing component, not a
+   *  wrapper: wrapping would nest a card inside a card, which is what
+   *  Sprint 175 avoided by leaving the card open and is the thing this
+   *  sprint was told to solve properly. */
+  collapsible?: boolean;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
@@ -537,14 +544,13 @@ function LabelsCard({
     }
   }
 
-  return (
-    <div
-      className="card"
-      style={{ marginBottom: 16 }}
-      data-testid="extra-work-labels"
-    >
-      <div className="form-section">
-        <div className="form-section-title">{t("detail.labels_section_title")}</div>
+  const body = (
+    <div className="form-section">
+      {!collapsible && (
+        <div className="form-section-title">
+          {t("detail.labels_section_title")}
+        </div>
+      )}
         {ew.labels_locked ? (
           <div
             className="alert-warning"
@@ -636,8 +642,35 @@ function LabelsCard({
             )}
           </>
         )}
-      </div>
     </div>
+  );
+
+  if (!collapsible) {
+    return (
+      <div
+        className="card"
+        style={{ marginBottom: 16 }}
+        data-testid="extra-work-labels"
+      >
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <CollapsibleCard
+      title={t("detail.labels_section_title")}
+      /* Collapsed is not hidden: the header carries how many of the two
+         labels are actually set, so the operator knows whether there is
+         anything inside without opening it. */
+      meta={t("detail.card_count", {
+        count: [ew.department, ew.work_type].filter(Boolean).length,
+      })}
+      defaultOpen={false}
+      testId="extra-work-labels"
+    >
+      {body}
+    </CollapsibleCard>
   );
 }
 
@@ -2373,37 +2406,21 @@ export function ExtraWorkDetailPage() {
             </CollapsibleCard>
           )}
 
-          {/* Sprint 175 §1 — Department & work type. NEW card: both are
-              per-customer labels the request already carries and neither
-              had anywhere to be read on this page. */}
-          <CollapsibleCard
-            key={`labels-${ew.id}`}
-            title={t("detail.labels_card_title")}
-            meta={t("detail.card_count", {
-              count: [ew.department_name, ew.work_type_name].filter(Boolean)
-                .length,
-            })}
-            defaultOpen={false}
-            testId="extra-work-labels-panel"
-          >
-            <div className="form-section">
-              <div className="field">
-                <div className="muted small">{t("detail.field_department")}</div>
-                <div>{ew.department_name ?? t("detail.empty_dash")}</div>
-              </div>
-              <div className="field">
-                <div className="muted small">{t("detail.field_work_type")}</div>
-                <div>{ew.work_type_name ?? t("detail.empty_dash")}</div>
-              </div>
-            </div>
-          </CollapsibleCard>
-
-          {/* Sprint 157 §2 — who is on this request, MOVED here by
-              Sprint 175 §1. Provider-side only: assignment is a provider
-              operation end to end and the endpoint refuses a customer
-              user at the door. */}
-          {isProvider && ew !== null && (
-            <ExtraWorkAssignmentCard extraWorkId={ew.id} />
+          {/* Sprint 176 §1b — the EDITABLE labels card (Sprint 128)
+              lives here now. Sprint 175 added a READ-ONLY copy above a
+              working one further down, which is two cards claiming the
+              same fact and only one of them able to change it. The
+              read-only copy is gone; this is the real one, moved. */}
+          {isProvider && (
+            <LabelsCard
+              key={`labels-${ew.id}-${ew.department ?? ""}-${
+                ew.work_type ?? ""
+              }-${String(ew.labels_locked)}`}
+              ew={ew}
+              onUpdated={(detail) => setEw(detail)}
+              onRefresh={() => void refresh()}
+              collapsible
+            />
           )}
 
           {/* Sprint 175 §1 — Preview. The proposal PDF was a button
@@ -2438,6 +2455,21 @@ export function ExtraWorkDetailPage() {
           )}
           </aside>
           </div>{/* end .ew-detail-second-row */}
+
+          {/* Sprint 176 §2 — People on this request: FULL WIDTH,
+              collapsed, directly below Messages and above Requested
+              services. Rendered `bare` so its body sits inside the
+              collapsible without a card inside a card. */}
+          {isProvider && ew !== null && (
+            <CollapsibleCard
+              key={`people-${ew.id}`}
+              title={t("assign.card_title")}
+              defaultOpen={false}
+              testId="extra-work-assignments-card"
+            >
+              <ExtraWorkAssignmentCard extraWorkId={ew.id} bare />
+            </CollapsibleCard>
+          )}
 
           {/* ----- Cart line items (Sprint 28 Batch 6; RF-14 collapsible:
               open while the request is still pre-decision, collapsed once
@@ -2535,20 +2567,6 @@ export function ExtraWorkDetailPage() {
             />
           )}
 
-          {/* Sprint 128 — provider relabel (Afdeling / Werktype). Keyed on
-              the label + lock state so the card re-seeds its prop-derived
-              selection after any external EW refresh, per CLAUDE.md §3
-              (no set-state-in-effect resync). */}
-          {isProvider && (
-            <LabelsCard
-              key={`labels-${ew.id}-${ew.department ?? ""}-${
-                ew.work_type ?? ""
-              }-${String(ew.labels_locked)}`}
-              ew={ew}
-              onUpdated={(detail) => setEw(detail)}
-              onRefresh={() => void refresh()}
-            />
-          )}
 
           {/* Draft proposal lines — read-only display of the DRAFT
               proposal's nested `lines` array. Gated on the per-record

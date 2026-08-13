@@ -7103,10 +7103,20 @@ a.attn-row:hover {
 .ew-detail-main {
   min-width: 0;
 }
+/* Sprint 176 §2 — the right column's two cards SHARE its height rather
+   than one stretching. Chosen over "open them to fit" because a
+   collapsed card stretched to 400px puts its header alone at the top of
+   an empty box, which is the padded look the prompt said not to ship.
+   With `1fr 1fr` each header sits at the top of its own half and the
+   halves divide the column evenly, so the gap beneath is zero. */
 .ew-detail-aside {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
   gap: 12px;
+  min-height: 0;
+}
+.ew-detail-aside > * {
+  min-height: 0;
 }
 @media (min-width: 1024px) {
   .ew-detail-aside {
@@ -7142,9 +7152,12 @@ a.attn-row:hover {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
   gap: 16px;
-  align-items: start;
+  /* Sprint 176 §2 — `stretch`, not `start`: the right column fills the
+     Messages card's height so there is no dead space beneath it. */
+  align-items: stretch;
   margin-bottom: 16px;
 }
+
 @media (max-width: 1000px) {
   .ew-detail-second-row {
     grid-template-columns: 1fr;
