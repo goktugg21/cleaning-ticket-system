@@ -69,9 +69,11 @@ import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
+import type { HourSourceOption } from "../../api/reports";
 import { saveWeekGrid } from "../../api/timesheets";
 import type { HourType, TimeEntry } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
+import { hourSourceLabel } from "../../lib/hourSource";
 import { isoWeekDays, toDateString } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 
@@ -143,6 +145,10 @@ interface GridRow {
   cells: Record<string, string>;
 }
 
+/** Stable empty default for `sourceOptions`, so a caller that has none
+ *  does not hand this component a fresh array on every render. */
+const NO_SOURCE_OPTIONS: HourSourceOption[] = [];
+
 function rowKey(
   hourTypeId: number | "",
   buildingId: number | "",
@@ -185,6 +191,8 @@ export function HoursWeekGrid({
   entriesByEmployee,
   seedBuildingIds,
   seedSources = [],
+  sourceOptions = NO_SOURCE_OPTIONS,
+  showSource = false,
   weekClosed,
   onSaved,
   onCancel,
@@ -209,6 +217,24 @@ export function HoursWeekGrid({
    *  default, and what every pre-177 caller passes) seeds one untagged
    *  row exactly as before, so no existing screen changes shape. */
   seedSources?: { source_type: string; source_id: number | null }[];
+  /** Sprint 179B §2 — the jobs the JOB COLUMN reads its titles from.
+   *
+   *  A `TimeEntry` stores `(source_type, source_id)` and resolves
+   *  neither: `timesheets` may not import `tickets` or `extra_work`, so
+   *  turning an id into a title belongs to `reports/`
+   *  (`reports/hour_sources.py` says so at length). This component is on
+   *  the same side of that line — it is handed the resolved list and
+   *  never looks a job up itself. A pair that is not in the list falls
+   *  back to the backend's own shape for an id that no longer resolves,
+   *  "Ticket #41". */
+  sourceOptions?: HourSourceOption[];
+  /** Sprint 179B §2 — whether these rows can belong to a job at all.
+   *
+   *  Time entries can; contract hours cannot (a contract-hours row is a
+   *  weekly pattern with a work type, and has no source column), so the
+   *  bulk dialog leaves this off rather than render a column that is
+   *  "—" on every row for a concept that does not apply to it. */
+  showSource?: boolean;
   /** The hour types chosen in the setup. Empty falls back to the first
    *  active type. */
   weekClosed: boolean;
@@ -366,6 +392,18 @@ export function HoursWeekGrid({
       ? t("hours_week_grid.no_building")
       : (buildings.find((b) => b.id === id)?.name ?? String(id));
 
+  /** Sprint 179B §2 — which JOB a row belongs to, in words. The rule
+   *  itself is in `lib/hourSourceLabel`, because the My hours list needs
+   *  the same three cases and a second copy of them would drift. */
+  const sourceName = (sourceType: string, sourceId: number | null) =>
+    hourSourceLabel(
+      sourceType,
+      sourceId,
+      sourceOptions,
+      t,
+      t("hours_week_grid.no_source"),
+    );
+
   /**
    * Sprint 162 §1 — the grid as BLOCKS, one per (worker, building).
    *
@@ -387,17 +425,39 @@ export function HoursWeekGrid({
         employeeId: number;
         employeeName: string;
         buildingId: number | "";
+        sourceType: string;
+        sourceId: number | null;
         rows: GridRow[];
       }
     >();
     for (const row of rows) {
-      const id = `${row.employeeId}:${row.buildingId === "" ? "none" : row.buildingId}`;
+      // Sprint 179B §2 — the JOB is part of the block, not just of the
+      // row. Two reasons, and the second is a bug this closes:
+      //
+      //  - the block prints its identity once, on its first row, so a
+      //    job that were only a row property would have to repeat on
+      //    every line to be readable;
+      //  - `+ Add type` adds a row to a BLOCK. Sprint 177 §7 wrote that
+      //    "an hour type added to a job-tagged block belongs to that
+      //    job" and read `block.sourceType` to do it — but the block
+      //    object never carried one, so the value was always undefined
+      //    and every added row came out untagged. Grouping by the job
+      //    makes that sentence true instead of aspirational, and there
+      //    is now exactly one job a new row could inherit.
+      const id = [
+        row.employeeId,
+        row.buildingId === "" ? "none" : row.buildingId,
+        row.sourceType || "none",
+        row.sourceId ?? "none",
+      ].join(":");
       if (!byBlock.has(id)) {
         byBlock.set(id, {
           id,
           employeeId: row.employeeId,
           employeeName: row.employeeName,
           buildingId: row.buildingId,
+          sourceType: row.sourceType,
+          sourceId: row.sourceId,
           rows: [],
         });
       }
@@ -698,6 +758,9 @@ export function HoursWeekGrid({
             <tr>
               <th>{t("hours_week_grid.worker")}</th>
               <th>{t("hours_week_grid.building")}</th>
+              {/* Sprint 179B §2 — WHICH JOB. Without it, one row per job
+                  is one row per job that looks identical to the next. */}
+              {showSource && <th>{t("hours_week_grid.job")}</th>}
               <th>{t("hours_week_grid.hour_type")}</th>
               {days.map((day, index) => (
                 <th key={dayKeys[index]} style={{ textAlign: "right" }}>
@@ -713,8 +776,20 @@ export function HoursWeekGrid({
               className="hours-week-apply-row"
               data-testid="hours-week-apply-row"
             >
-              <th scope="row" colSpan={3} className="hours-week-apply-label">
+              <th
+                scope="row"
+                colSpan={showSource ? 4 : 3}
+                className="hours-week-apply-label"
+              >
                 {t("hours_week_grid.apply_all_label")}
+                {/* Sprint 179B §3 — the rule, where the control is.
+                    "Fill the default rows" named the rows it writes to
+                    and never said which those are, so the rows an
+                    operator added themselves looked skipped by accident
+                    rather than by design. */}
+                <span className="hours-week-apply-hint">
+                  {t("hours_week_grid.apply_all_hint")}
+                </span>
               </th>
               {dayKeys.map((dayKey, dayIndex) => (
                 <th key={dayKey} style={{ textAlign: "right" }}>
@@ -746,7 +821,10 @@ export function HoursWeekGrid({
           <tbody>
             {blocks.length === 0 && (
               <tr>
-                <td colSpan={dayKeys.length + 5} className="muted small">
+                <td
+                  colSpan={dayKeys.length + (showSource ? 6 : 5)}
+                  className="muted small"
+                >
                   {t("hours_week_grid.empty_block")}
                 </td>
               </tr>
@@ -772,6 +850,16 @@ export function HoursWeekGrid({
                     <td className="hours-week-identity">
                       {dayRowIndex === 0 ? buildingName(block.buildingId) : ""}
                     </td>
+                    {showSource && (
+                      <td
+                        className="hours-week-identity hours-week-job"
+                        data-testid={`hours-week-row-job-${row.id}`}
+                      >
+                        {dayRowIndex === 0
+                          ? sourceName(block.sourceType, block.sourceId)
+                          : ""}
+                      </td>
+                    )}
                     <td className="td-subject">
                       {/* A chip, not a dropdown. The dropdown only ever
                           existed on rows added in this session, so the
@@ -835,7 +923,7 @@ export function HoursWeekGrid({
                   </tr>
                 ))}
                 <tr className="hours-week-add-type-row">
-                  <td colSpan={dayKeys.length + 3}>
+                  <td colSpan={dayKeys.length + (showSource ? 4 : 3)}>
                     {/* The ONLY way an hour type is chosen, which is how
                         the reference does it — and why the wizard no
                         longer asks for types up front. */}

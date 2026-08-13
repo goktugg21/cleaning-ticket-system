@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../api/client";
 import { listAllBuildings } from "../api/admin";
+import { listHourSources } from "../api/reports";
+import type { HourSourceOption } from "../api/reports";
 import {
   createTimeEntry,
   deleteTimeEntry,
@@ -38,6 +40,7 @@ import {
   toDateString,
 } from "../lib/isoWeek";
 import type { IsoWeek } from "../lib/isoWeek";
+import { hourSourceLabel } from "../lib/hourSource";
 import { HoursWeekGrid } from "../components/timesheets/HoursWeekGrid";
 import { useAuth } from "../auth/AuthContext";
 
@@ -117,6 +120,9 @@ export function MyHoursPage() {
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [weekClosed, setWeekClosed] = useState(false);
+  /** Sprint 179B §2 — the pickable jobs, purely so a stored
+   *  `(source_type, source_id)` can be printed as words. */
+  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
   const [loadError, setLoadError] = useState("");
 
   // `loading` is DERIVED, not stored: it is true exactly while the week
@@ -235,6 +241,29 @@ export function MyHoursPage() {
         // Its own message: without the pickers the FORM is unusable
         // even though the list below it is fine.
         setLoadError(getApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Sprint 179B §2 — the JOB titles, for the Job column below and for
+   * the week grid's own.
+   *
+   * Non-fatal on failure, the same way the week wizard's picker is: the
+   * job is a refinement of an hours row, and a list that could not load
+   * must not stop somebody seeing or entering their week. Without it the
+   * column falls back to "Ticket #41" — a label, not a blank.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    listHourSources()
+      .then((options) => {
+        if (!cancelled) setSourceOptions(options);
+      })
+      .catch(() => {
+        /* non-fatal: the rows still render, from their type and id */
       });
     return () => {
       cancelled = true;
@@ -521,6 +550,11 @@ export function MyHoursPage() {
                  nothing to choose. Rows come from the week's existing
                  entries plus Add row, exactly as before. */
               seedBuildingIds={[]}
+              /* Sprint 179B §2 — this page's rows come from whatever the
+                 week already holds, and those can be tagged to a job by
+                 the admin wizard, so the column belongs here too. */
+              sourceOptions={sourceOptions}
+              showSource
               weekClosed={weekClosed}
               onSaved={refresh}
             />
@@ -539,7 +573,7 @@ export function MyHoursPage() {
                 style={{ padding: "32px 24px", textAlign: "center" }}
                 data-testid="my-hours-empty"
               >
-                <h3 style={{ marginBottom: 8 }}>{t("my_hours.empty_title")}</h3>
+                <h3 className="empty-title" style={{ marginBottom: 8 }}>{t("my_hours.empty_title")}</h3>
                 <p className="muted" style={{ margin: 0 }}>
                   {t("my_hours.empty_description")}
                 </p>
@@ -554,6 +588,10 @@ export function MyHoursPage() {
                   <th>{t("my_hours.col_hours")}</th>
                   <th>{t("my_hours.col_weighted")}</th>
                   <th>{t("my_hours.col_building")}</th>
+                  {/* Sprint 179B §2 — the same column the week grid
+                      gained. A row that belongs to a ticket or an extra
+                      work said so nowhere on this page. */}
+                  <th>{t("my_hours.col_job")}</th>
                   <th>{t("my_hours.col_note")}</th>
                   <th>{t("my_hours.col_actions")}</th>
                 </tr>
@@ -576,6 +614,15 @@ export function MyHoursPage() {
                     <td>{entry.hours}</td>
                     <td className="muted">{entry.weighted_hours}</td>
                     <td className="muted small">{entry.building_name ?? "—"}</td>
+                    <td className="muted small" data-testid="my-hours-job">
+                      {hourSourceLabel(
+                        entry.source_type,
+                        entry.source_id,
+                        sourceOptions,
+                        t,
+                        "—",
+                      )}
+                    </td>
                     <td className="muted small">{entry.note || "—"}</td>
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
@@ -675,7 +722,7 @@ export function MyHoursPage() {
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {mode === "create"
                 ? t("my_hours.add_modal_title")
                 : t("my_hours.edit_modal_title")}

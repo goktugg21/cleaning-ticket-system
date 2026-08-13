@@ -125,11 +125,18 @@ export function BuildingManagerCustomerContactsPage() {
           ) : (
             <table className="admin-table">
               <thead>
+                {/* Sprint 179B §5 — these four headers rendered their KEY
+                    on screen: `customer_contacts.col_*` was never in any
+                    bundle. The `field_*` twins are in `common`, carry the
+                    exact wording this page wants, and are what the admin
+                    twin of this screen already uses as headers — so this
+                    reads word for word like the page it mirrors instead
+                    of adding four synonyms beside four existing keys. */}
                 <tr>
-                  <th>{t("customer_contacts.col_name")}</th>
-                  <th>{t("customer_contacts.col_email")}</th>
-                  <th>{t("customer_contacts.col_phone")}</th>
-                  <th>{t("customer_contacts.col_role_label")}</th>
+                  <th>{t("customer_contacts.field_full_name")}</th>
+                  <th>{t("customer_contacts.field_email")}</th>
+                  <th>{t("customer_contacts.field_phone")}</th>
+                  <th>{t("customer_contacts.field_role_label")}</th>
                 </tr>
               </thead>
               <tbody data-testid="bm-customer-contacts-tbody">
@@ -162,11 +169,11 @@ export function BuildingManagerCustomerContactsPage() {
                 </div>
               </div>
               <dl className="readonly-grid">
-                <dt>{t("customer_contacts.col_email")}</dt>
+                <dt>{t("customer_contacts.field_email")}</dt>
                 <dd>{selectedContact.email || "—"}</dd>
-                <dt>{t("customer_contacts.col_phone")}</dt>
+                <dt>{t("customer_contacts.field_phone")}</dt>
                 <dd>{selectedContact.phone || "—"}</dd>
-                <dt>{t("customer_contacts.col_role_label")}</dt>
+                <dt>{t("customer_contacts.field_role_label")}</dt>
                 <dd>{selectedContact.role_label || "—"}</dd>
                 {selectedContact.notes && (
                   <>

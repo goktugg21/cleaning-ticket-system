@@ -62,6 +62,11 @@ export function BuildingTypesTab() {
         reactivate: t("building_types.reactivate"),
         delete: t("contract_hours.delete"),
         empty: t("building_types.empty"),
+        // Sprint 179B §1 — the buildings list only grows a Building type
+        // filter once this catalog has a row in it, so until then the
+        // feature cannot be found from either screen. This is the one
+        // place that can say so.
+        emptyHint: t("building_types.empty_hint"),
         newName: t("building_types.new_name"),
         newPlaceholder: t("building_types.new_placeholder"),
         add: t("building_types.add"),

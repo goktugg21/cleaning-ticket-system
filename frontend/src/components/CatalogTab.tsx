@@ -39,6 +39,16 @@ export interface CatalogLabels {
   reactivate: string;
   delete: string;
   empty: string;
+  /** Sprint 179B §1 — an OPTIONAL second line under `empty`, for a
+   *  catalog whose whole point is a control that has not appeared yet.
+   *
+   *  The building-type filter on the buildings list renders only when
+   *  the catalog has at least one row (an empty dropdown looks broken),
+   *  so before the first type exists the feature is invisible in both
+   *  places at once. The empty state is the only screen that can say
+   *  what adding a row here will do. Omitted, nothing extra renders and
+   *  the other four catalogs are unchanged. */
+  emptyHint?: string;
   newName: string;
   newPlaceholder: string;
   add: string;
@@ -174,7 +184,10 @@ export function CatalogTab({
       className="card card-detail-pad"
       data-testid={`${testIdPrefix}-tab`}
     >
-      <header className="section-head">
+      {/* Sprint 179B §4 — the 8px the house detail pages put under a
+          section head (`BuildingRelationCard`, `CustomerOverviewPage`).
+          Without it the catalog's title and its table touched. */}
+      <header className="section-head" style={{ marginBottom: 8 }}>
         <div>
           <div className="section-head-title">{labels.title}</div>
           <div className="section-head-sub">{labels.desc}</div>
@@ -347,6 +360,14 @@ export function CatalogTab({
               <tr>
                 <td colSpan={canManage ? 4 : 3} className="muted">
                   {labels.empty}
+                  {labels.emptyHint && (
+                    <span
+                      className="catalog-empty-hint"
+                      data-testid={`${testIdPrefix}-empty-hint`}
+                    >
+                      {labels.emptyHint}
+                    </span>
+                  )}
                 </td>
               </tr>
             )}

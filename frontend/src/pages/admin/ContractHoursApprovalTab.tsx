@@ -3,6 +3,9 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { api, getApiError } from "../../api/client";
+import { listHourSources } from "../../api/reports";
+import type { HourSourceOption } from "../../api/reports";
+import { hourSourceLabel } from "../../lib/hourSource";
 import {
   currentIsoWeek,
   formatIsoWeek,
@@ -70,6 +73,12 @@ interface ReviewRow {
    *  reviewer groups by it: "eight hours" is one fact, "six from a
    *  ticket and two from the contract" is the one they can act on. */
   sourceType: string;
+  /** Sprint 179B §2 — WHICH ticket, not just "a ticket". The grouping
+   *  above was by TYPE, so hours on two different tickets sat under one
+   *  "Ticket" heading and were told apart only by hour type and
+   *  building. The id was already part of the row KEY (`actualRows`);
+   *  it simply never reached the row. */
+  sourceId: number | null;
   id: number | null;
   employee: number;
   employee_name: string;
@@ -129,6 +138,8 @@ export function ContractHoursApprovalTab({
 
   const [contractRows, setContractRows] = useState<ContractHoursRow[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  /** Sprint 179B §2 — job titles for the per-source headings. */
+  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -137,6 +148,23 @@ export function ContractHoursApprovalTab({
   const days = useMemo(() => isoWeekDays(week), [week]);
   const monday = toDateString(days[0]);
   const sunday = toDateString(days[6]);
+
+  /** Sprint 179B §2 — loaded once, and non-fatal: without it a heading
+   *  falls back to "Ticket #41", which is a label, not a blank. This
+   *  screen's own data must never depend on it. */
+  useEffect(() => {
+    let cancelled = false;
+    listHourSources()
+      .then((options) => {
+        if (!cancelled) setSourceOptions(options);
+      })
+      .catch(() => {
+        /* non-fatal: headings fall back to type + id */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filters = useMemo(
     () => ({
@@ -244,6 +272,7 @@ export function ContractHoursApprovalTab({
           key,
           source: "ACTUAL",
           sourceType: entry.source_type || "OTHER",
+          sourceId: entry.source_id ?? null,
           id: null,
           employee: entry.employee,
           employee_name: entry.employee_name,
@@ -289,6 +318,9 @@ export function ContractHoursApprovalTab({
             key: `c:${row.id}`,
             source: "CONTRACT",
             sourceType: "CONTRACT",
+            // The agreement is not a job: contract hours carry no
+            // source pair at all (see §6 of this sprint's report).
+            sourceId: null,
             id: row.id,
             employee: row.employee,
             employee_name: row.employee_name,
@@ -309,17 +341,47 @@ export function ContractHoursApprovalTab({
    *  from the contract" is the one a reviewer can act on. The order is
    *  the enum's, not the data's, so two weeks with different sources
    *  present still read in the same order. */
+  /**
+   * Sprint 179B §2 — one group per JOB, not one per KIND of job.
+   *
+   * Sprint 174 §2 grouped these by `source_type`, so every ticket in the
+   * week landed under a single "Ticket" heading: a reviewer looking at
+   * six rows could see that six were tickets and not which tickets. The
+   * rows were always distinct — `actualRows` keys on `(…, source_type,
+   * source_id)` — so this is a heading that said less than the data
+   * behind it.
+   *
+   * The type order is kept as the OUTER order, so the screen still reads
+   * contract, extra work, tickets, other; within a type the groups follow
+   * the id, which is stable and monotonic.
+   */
   const actualBySource = useMemo(() => {
     const order = ["CONTRACT", "EXTRA_WORK", "TICKET", "OTHER"];
     const groups = new Map<string, ReviewRow[]>();
     for (const row of actualRows) {
-      const key = row.sourceType || "OTHER";
+      const key = `${row.sourceType || "OTHER"}:${row.sourceId ?? ""}`;
       groups.set(key, [...(groups.get(key) ?? []), row]);
     }
-    return order
-      .filter((key) => groups.has(key))
-      .map((key) => ({ sourceType: key, rows: groups.get(key) ?? [] }));
+    return [...groups.entries()]
+      .map(([key, rows]) => ({
+        key,
+        sourceType: rows[0].sourceType || "OTHER",
+        sourceId: rows[0].sourceId,
+        rows,
+      }))
+      .sort((a, b) => {
+        const byType =
+          order.indexOf(a.sourceType) - order.indexOf(b.sourceType);
+        if (byType !== 0) return byType;
+        return (a.sourceId ?? 0) - (b.sourceId ?? 0);
+      });
   }, [actualRows]);
+
+  /** The key `actualBySource` groups on, for a row. Written once so the
+   *  heading's "is this the first row of its group" test and the group
+   *  itself can never disagree. */
+  const sourceGroupKey = (row: ReviewRow) =>
+    `${row.sourceType || "OTHER"}:${row.sourceId ?? ""}`;
 
   const rows = useMemo(
     () => [...visibleContract, ...actualRows],
@@ -669,15 +731,26 @@ export function ContractHoursApprovalTab({
                 ) && (
                   <tr
                     className="contract-group-row"
-                    data-testid={`approval-source-group-${row.sourceType}`}
+                    data-testid={`approval-source-group-${sourceGroupKey(row)}`}
                   >
                     <td colSpan={14}>
-                      <strong>{t(`hour_source.${row.sourceType}`)}</strong>{" "}
+                      {/* Sprint 179B §2 — the JOB, where the kind of job
+                          used to be. "Ticket" three times over told a
+                          reviewer nothing they could act on. */}
+                      <strong>
+                        {hourSourceLabel(
+                          row.sourceType,
+                          row.sourceId,
+                          sourceOptions,
+                          t,
+                          t("hour_source.OTHER"),
+                        )}
+                      </strong>{" "}
                       <span className="muted small">
                         {t("contract_hours.source_group_count", {
                           count:
                             actualBySource.find(
-                              (group) => group.sourceType === row.sourceType,
+                              (group) => group.key === sourceGroupKey(row),
                             )?.rows.length ?? 0,
                         })}
                       </span>
