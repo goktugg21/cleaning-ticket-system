@@ -34,6 +34,7 @@ from .views_assignments import (
     ExtraWorkAssignmentListView,
     ExtraWorkBulkAssignView,
 )
+from .views_dates import ExtraWorkBulkDatesView
 
 urlpatterns = [
     # Sprint 143 §6 — MUST precede the router: the DefaultRouter is
@@ -51,6 +52,13 @@ urlpatterns = [
         "bulk-assign/",
         ExtraWorkBulkAssignView.as_view(),
         name="extra-work-bulk-assign",
+    ),
+    # Sprint 176 §3 — same ordering rule: "bulk-dates" would be read as a
+    # pk by the router's detail route if it came after.
+    path(
+        "bulk-dates/",
+        ExtraWorkBulkDatesView.as_view(),
+        name="extra-work-bulk-dates",
     ),
     path("", include(router.urls)),
     path(

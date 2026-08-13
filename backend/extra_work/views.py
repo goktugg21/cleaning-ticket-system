@@ -58,8 +58,11 @@ from .label_validation import (
     issued_invoice_locking_labels,
     validate_labels_for_customer,
 )
+from .dates import apply_extra_work_dates
 from .serializers import (
+    ERR_DEADLINE_PROVIDER_ONLY,
     ActualHoursEntrySerializer,
+    ExtraWorkDatesSerializer,
     ExtraWorkLabelsSerializer,
     ExtraWorkPreviewSerializer,
     ExtraWorkPricingLineItemCustomerSerializer,
@@ -509,6 +512,90 @@ class ExtraWorkRequestViewSet(
         # ExtraWorkRequest audit handler, which now tracks the label FKs.
         update_fields.append("updated_at")
         extra_work.save(update_fields=update_fields)
+
+        return Response(
+            ExtraWorkRequestDetailSerializer(
+                extra_work, context={"request": request}
+            ).data
+        )
+
+    @action(detail=True, methods=["patch"], url_path="dates")
+    def dates(self, request, pk=None):
+        """Sprint 176 §3 — set / clear `deadline` and `planned_end_date` on
+        an existing Extra Work AFTER creation.
+
+        Until now both were write-once on the create form, which is the
+        wrong shape for a deadline: a deadline is exactly the kind of thing
+        agreed after the fact, on the phone, once someone has looked at the
+        job. Sprint 173 put the fields in the database and Sprint 174 put
+        them on the create form; neither gave anyone a way to change one.
+
+        Deliberately the SAME shape as the `labels` action above rather
+        than a new update mixin — the ViewSet has no update action by
+        design, and adding one just to move two dates would expose every
+        field on the model to PATCH.
+
+        Role gate FIRST (before `get_object`) so customer-side / STAFF get
+        a stable 403 rather than a scope-driven 404, exactly as `labels`
+        and `actual_hours` do. That gate IS the §3 decision: the customer's
+        wish is `preferred_date`; the deadline is the provider's
+        commitment.
+
+        Unlike the labels, an issued invoice does NOT lock these. A date is
+        an operational fact about when the work was due, not a billing fact
+        on the document — moving it changes no amount and no invoice line.
+        """
+        user = request.user
+
+        if user.role not in PROVIDER_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot set Extra Work dates. A "
+                    "deadline is a provider commitment.",
+                    "code": ERR_DEADLINE_PROVIDER_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        extra_work = self.get_object()  # 404 if out-of-scope (cross-tenant)
+
+        # Provider scope, identical to `labels`: SUPER_ADMIN global;
+        # COMPANY_ADMIN / BUILDING_MANAGER need provider-side building
+        # scope on this EW's building.
+        if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+            user,
+            "osius.ticket.view_building",
+            building_id=extra_work.building_id,
+        ):
+            return Response(
+                {
+                    "detail": "You do not have provider-side scope for this "
+                    "Extra Work request.",
+                    "code": ERR_DEADLINE_PROVIDER_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        payload = ExtraWorkDatesSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        # Key presence distinguishes "sent as null" (clear) from "absent"
+        # (leave unchanged) — the convention the bulk dialog's "leave
+        # unchanged" default depends on. An empty body changes nothing.
+        if "deadline" not in data and "planned_end_date" not in data:
+            return Response(
+                {
+                    "detail": "Provide deadline and/or planned_end_date to "
+                    "set or clear.",
+                    "code": "no_dates_provided",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        error = apply_extra_work_dates(extra_work, data)
+        if error is not None:
+            return Response(error, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(
             ExtraWorkRequestDetailSerializer(

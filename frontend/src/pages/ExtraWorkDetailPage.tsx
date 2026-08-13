@@ -55,6 +55,7 @@ import {
   listProposalsForEw,
   listSpawnedTickets,
   relabelExtraWork,
+  updateExtraWorkDates,
   retrySpawnTicketsForExtraWork,
   submitActualHours,
   transitionExtraWork,
@@ -446,6 +447,150 @@ const LABELS_ERROR_I18N_KEY: Record<string, string> = {
 // (`ew.labels_locked`) the labels are read-only text + a reason naming the
 // invoice; otherwise two dropdowns + Save calling PATCH .../labels/. Options
 // always include the CURRENT value so an archived label still shows.
+/** Sprint 176 §3 — the deadline and the planned end, editable after the
+ *  request exists.
+ *
+ *  Until now both were write-once on the create form. That is the wrong
+ *  shape for a deadline in particular: a deadline is exactly the kind of
+ *  thing agreed after the fact, once someone has looked at the job.
+ *
+ *  Behind an explicit Edit affordance rather than always-live inputs, so
+ *  the Details card stays a card you READ and a date cannot be changed by
+ *  a stray click on a page an operator opened to check something else.
+ *
+ *  Provider-only at the call site. The customer's `preferred_date` is
+ *  shown right above and is NOT editable here — the customer states a
+ *  wish, the provider answers it with a commitment. */
+function DatesEditor({
+  ew,
+  onUpdated,
+}: {
+  ew: ExtraWorkRequestDetail;
+  onUpdated: (detail: ExtraWorkRequestDetail) => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const { push: pushToast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [deadline, setDeadline] = useState(ew.deadline ?? "");
+  const [plannedEnd, setPlannedEnd] = useState(ew.planned_end_date ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  function start() {
+    // Seed from the row every time the editor opens, so re-opening after a
+    // save (or after another tab changed it) never shows a stale draft.
+    setDeadline(ew.deadline ?? "");
+    setPlannedEnd(ew.planned_end_date ?? "");
+    setError("");
+    setOpen(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      // Both keys are sent deliberately: this editor SHOWS both fields, so
+      // an operator who emptied one meant to clear it. The absent-key
+      // "leave unchanged" path belongs to the bulk dialog, where the
+      // operator is not looking at the current values.
+      const updated = await updateExtraWorkDates(ew.id, {
+        deadline: deadline || null,
+        planned_end_date: plannedEnd || null,
+      });
+      onUpdated(updated);
+      pushToast({ variant: "success", title: t("detail.dates_saved") });
+      setOpen(false);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div style={{ marginTop: 8 }}>
+        <button
+          type="button"
+          className="btn-secondary btn-sm"
+          onClick={start}
+          data-testid="extra-work-dates-edit"
+        >
+          {t("detail.dates_edit")}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="form-section" data-testid="extra-work-dates-editor">
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "flex-end",
+          gap: 8,
+          marginTop: 4,
+        }}
+      >
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="muted small">{t("detail.deadline")}</span>
+          <input
+            type="date"
+            className="field-input"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            data-testid="extra-work-dates-deadline"
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="muted small">
+            {t("detail.field_planned_end_date")}
+          </span>
+          <input
+            type="date"
+            className="field-input"
+            value={plannedEnd}
+            onChange={(e) => setPlannedEnd(e.target.value)}
+            data-testid="extra-work-dates-planned-end"
+          />
+        </label>
+        <button
+          type="button"
+          className="btn-primary btn-sm"
+          onClick={save}
+          disabled={saving}
+          data-testid="extra-work-dates-save"
+        >
+          {saving ? t("detail.dates_saving") : t("common:save")}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary btn-sm"
+          onClick={() => setOpen(false)}
+          disabled={saving}
+        >
+          {t("common:cancel")}
+        </button>
+      </div>
+      {/* The customer's wish, restated beside the field that answers it —
+          §3 asks for it prominently wherever a deadline is set. */}
+      <div className="muted small" style={{ marginTop: 6 }}>
+        {t("detail.dates_preferred_hint", {
+          date: ew.preferred_date
+            ? formatDate(ew.preferred_date)
+            : t("detail.empty_dash"),
+        })}
+      </div>
+      {error && (
+        <div className="alert-error" style={{ marginTop: 6 }}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LabelsCard({
   ew,
   onUpdated,
@@ -1727,6 +1872,12 @@ export function ExtraWorkDetailPage() {
                   </div>
                 </div>
               </div>
+              {/* Sprint 176 §3 — the two dates, editable after creation.
+                  Provider-only: the customer's wish is `preferred_date`
+                  above, which this does not touch. */}
+              {isProvider && (
+                <DatesEditor ew={ew} onUpdated={(detail) => setEw(detail)} />
+              )}
               <div className="field">
                 <div className="muted small">{t("detail.field_description")}</div>
                 <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>

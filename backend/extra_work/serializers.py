@@ -13,6 +13,7 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from accounts.models import UserRole
+from accounts.permissions import is_customer_side
 from buildings.models import Building
 from companies.models import Company
 from customers.models import (
@@ -62,6 +63,12 @@ from .label_validation import (
 from .pricing import resolve_price
 from .proposal_state_machine import allowed_next_proposal_statuses
 from .state_machine import allowed_next_statuses
+
+
+# Sprint 176 §3 — one error code for "a customer tried to set a deadline",
+# shared by the create serializer and the dates endpoint so the frontend has
+# a single string to map to a localized message.
+ERR_DEADLINE_PROVIDER_ONLY = "deadline_provider_only"
 
 
 def _is_customer(user) -> bool:
@@ -1305,6 +1312,34 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         building = attrs["building"]
         customer = attrs["customer"]
 
+        # Sprint 176 §3 — the deadline is a PROVIDER commitment, so the
+        # create form refuses one from a customer-side actor.
+        #
+        # Customers can and do create Extra Work here
+        # (`customer_users_can_create_extra_work`, default on), and they
+        # already have `preferred_date` — "I would like it around then".
+        # The `deadline` is different in kind: it is what turns a row red
+        # on the list and in the Work Plan, and what an operator is
+        # measured against. A customer who could set it could make the
+        # provider late by typing a date. So the customer states a wish;
+        # the provider decides what it commits to.
+        #
+        # Read from `attrs` (the parsed field) rather than `initial_data`,
+        # so this does not depend on how the serializer was constructed.
+        # An explicit `null` is a no-op, not an attempt to commit the
+        # provider to anything, so truthiness is the right test here.
+        if is_customer_side(user) and attrs.get("deadline"):
+            raise serializers.ValidationError(
+                {
+                    "deadline": (
+                        "Only provider staff can set a deadline. Use "
+                        "preferred_date to say when you would like this "
+                        "done."
+                    ),
+                    "code": ERR_DEADLINE_PROVIDER_ONLY,
+                }
+            )
+
         # Single-company invariant: the customer's company is the
         # only valid `company` for this Extra Work request, and the
         # building must belong to it.
@@ -1927,6 +1962,32 @@ class ExtraWorkLabelsSerializer(serializers.Serializer):
     work_type = serializers.PrimaryKeyRelatedField(
         queryset=WorkType.objects.all(), required=False, allow_null=True
     )
+
+
+class ExtraWorkDatesSerializer(serializers.Serializer):
+    """Sprint 176 §3 — the NARROW date surface for
+    `PATCH /api/extra-work/<id>/dates/`: `deadline` + `planned_end_date`
+    only.
+
+    Same shape and same reasoning as `ExtraWorkLabelsSerializer` above: the
+    EW ViewSet has no update mixin by design, so a date agreed AFTER
+    creation had no way in at all — both fields were write-once on the
+    create form. A general update serializer would expose every model
+    field; this exposes two.
+
+    Both optional, both `allow_null`, so the view can tell "absent" (leave
+    unchanged) from "sent as null" (clear) by key presence — the same
+    convention the relabel action uses, and the same one the bulk dialog's
+    "leave unchanged" default needs.
+
+    `preferred_date` is deliberately NOT here. It is the CUSTOMER's wish,
+    recorded at request time; the provider answers it with a `deadline`
+    rather than editing it. Letting the provider rewrite what the customer
+    asked for would erase the very thing the deadline is judged against.
+    """
+
+    deadline = serializers.DateField(required=False, allow_null=True)
+    planned_end_date = serializers.DateField(required=False, allow_null=True)
 
 
 # ---------------------------------------------------------------------------

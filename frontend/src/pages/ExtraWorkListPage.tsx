@@ -22,6 +22,7 @@ import { listAllCustomers, listCustomerBuildings } from "../api/admin";
 import { listLabels } from "../api/customerLabels";
 import {
   bulkAssignExtraWork,
+  bulkSetExtraWorkDates,
   listAllExtraWork,
   listExtraWorkAssignmentCandidates,
   listExtraWorkCategoryOptions,
@@ -109,6 +110,151 @@ interface ExtraWorkKpis {
   totalValue: string; // decimal-string sum of earned amounts (excludes CANCELLED)
 }
 
+/** Sprint 176 §3 — set the deadline and/or the planned end on a selection.
+ *
+ *  The whole point of this dialog is what it does NOT send. Every field
+ *  starts blank meaning "leave unchanged", exactly like every other bulk
+ *  field in the app, and a blank field is OMITTED from the payload rather
+ *  than sent as null — the server reads key presence, so an omitted key
+ *  leaves the stored date alone. Without that, bulk-setting a deadline
+ *  across ten rows would silently wipe the planned end date on the one row
+ *  that had one.
+ *
+ *  Which means this dialog can SET a date but not CLEAR one: a blank
+ *  field is already spoken for by "leave unchanged", and two different
+ *  intentions cannot share one blank input. Clearing is deliberate,
+ *  per-request work — the Details card's date editor does it. Offering a
+ *  bulk clear would need a third state (a checkbox per field), and the
+ *  operation it enables, wiping a date across a selection, is not one
+ *  worth making easy to reach by accident. */
+function BulkDatesDialog({
+  count,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  busy: boolean;
+  error: string;
+  onCancel: () => void;
+  onConfirm: (payload: {
+    deadline?: string;
+    planned_end_date?: string;
+  }) => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const [deadline, setDeadline] = useState("");
+  const [plannedEnd, setPlannedEnd] = useState("");
+
+  const nothingToDo = !deadline && !plannedEnd;
+
+  function confirm() {
+    const payload: { deadline?: string; planned_end_date?: string } = {};
+    if (deadline) payload.deadline = deadline;
+    if (plannedEnd) payload.planned_end_date = plannedEnd;
+    onConfirm(payload);
+  }
+
+  return (
+    // Same overlay idiom as `AssignPeopleDialog` next door — an inline
+    // positioned backdrop plus a `card`, NOT a native <dialog>. CLAUDE.md
+    // records why the imperative ones are trouble when mounted
+    // conditionally; this one is plain markup and mounts safely.
+    <div
+      role="presentation"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        padding: 16,
+      }}
+    >
+      <div
+        className="card"
+        role="dialog"
+        aria-modal="true"
+        style={{ maxWidth: 520, width: "100%", padding: 24 }}
+        data-testid="extra-work-bulk-dates-dialog"
+      >
+        <h2 className="form-section-title">{t("list.bulk_dates_title")}</h2>
+        <p className="muted small">
+          {t("list.bulk_dates_summary", { count })}
+        </p>
+        <div className="field">
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span className="muted small">{t("detail.deadline")}</span>
+            <input
+              type="date"
+              className="field-input"
+              value={deadline}
+              onChange={(event) => setDeadline(event.target.value)}
+              data-testid="extra-work-bulk-dates-deadline"
+            />
+          </label>
+          <label
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              marginTop: 8,
+            }}
+          >
+            <span className="muted small">
+              {t("detail.field_planned_end_date")}
+            </span>
+            <input
+              type="date"
+              className="field-input"
+              value={plannedEnd}
+              onChange={(event) => setPlannedEnd(event.target.value)}
+              data-testid="extra-work-bulk-dates-planned-end"
+            />
+          </label>
+          <div className="muted small" style={{ marginTop: 8 }}>
+            {t("list.bulk_dates_unchanged_hint")}
+          </div>
+        </div>
+        {error && (
+          <div className="alert-error" style={{ marginTop: 8 }}>
+            {error}
+          </div>
+        )}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            marginTop: 16,
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            {t("common:cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={confirm}
+            disabled={busy || nothingToDo}
+            data-testid="extra-work-bulk-dates-confirm"
+          >
+            {busy ? t("detail.dates_saving") : t("common:save")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function KpiCard({
   icon: Icon,
   label,
@@ -186,6 +332,11 @@ export function ExtraWorkList({
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
   const [assignError, setAssignError] = useState("");
+  // Sprint 176 §3 — bulk deadline / planned end, behind the same edit gate.
+  const [datesOpen, setDatesOpen] = useState(false);
+  const [datesBusy, setDatesBusy] = useState(false);
+  const [datesError, setDatesError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   // Sprint 159 §2 — BOTH roles at once, so both candidate lists are
   // held. Keyed by role because eligibility differs between them and one
   // shared list would offer a worker as a manager.
@@ -311,6 +462,12 @@ export function ExtraWorkList({
     departmentFilter,
     workTypeFilter,
     categoryFilter,
+    // Sprint 176 §3 — a bulk date write changes rows this list is
+    // showing, so it bumps this counter to re-run the load. A counter
+    // rather than a hoisted `load()`: the fetch is guarded by the
+    // effect's own `cancelled` flag, and calling it from outside would
+    // escape that guard.
+    reloadKey,
   ]);
 
   // Sprint 143 §6 — the category dropdown's two groups. Own effect
@@ -532,6 +689,35 @@ export function ExtraWorkList({
     }
   }
 
+  /** Sprint 176 §3 — one date across a selection.
+   *
+   *  The payload is built by OMITTING what the operator left alone, never
+   *  by spreading the dialog's state: a blank field must mean "leave
+   *  unchanged", and sending it as `null` would clear that date on every
+   *  selected row — a data-loss bug that looks like a successful save.
+   *  The dialog therefore hands back only the fields it was actually
+   *  given. */
+  async function runBulkDates(payload: {
+    deadline?: string;
+    planned_end_date?: string;
+  }) {
+    setDatesBusy(true);
+    setDatesError("");
+    try {
+      await bulkSetExtraWorkDates({
+        requests: edit.selection,
+        ...payload,
+      });
+      setDatesOpen(false);
+      edit.exit();
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setDatesError(getApiError(err));
+    } finally {
+      setDatesBusy(false);
+    }
+  }
+
   // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
   // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
   // BOM so Excel reads Dutch characters, CRLF line endings, quoted fields.
@@ -645,6 +831,16 @@ export function ExtraWorkList({
           error={assignError}
           onCancel={() => setAssignOpen(false)}
           onConfirm={runAssign}
+        />
+      )}
+
+      {datesOpen && (
+        <BulkDatesDialog
+          count={edit.selection.length}
+          busy={datesBusy}
+          error={datesError}
+          onCancel={() => setDatesOpen(false)}
+          onConfirm={runBulkDates}
         />
       )}
 
@@ -1076,6 +1272,16 @@ export function ExtraWorkList({
                   key: "assign",
                   label: t("assign.button"),
                   onClick: openAssign,
+                },
+                // Sprint 176 §3 — a batch of jobs agreed for the same
+                // week is the normal case, not an edge one.
+                {
+                  key: "dates",
+                  label: t("list.bulk_dates_button"),
+                  onClick: () => {
+                    setDatesError("");
+                    setDatesOpen(true);
+                  },
                 },
               ]}
               testIdPrefix="extra-work-bulk"

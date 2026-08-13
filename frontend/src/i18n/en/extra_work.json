@@ -497,5 +497,15 @@
   "detail.preview_card_title": "Preview",
   "detail.preview_card_hint": "Fetches the proposal PDF.",
   "detail.proposal_pdf": "Proposal PDF",
-  "detail.proposal_pdf_busy": "Working…"
+  "detail.proposal_pdf_busy": "Working…",
+  "detail.dates_edit": "Edit dates",
+  "detail.dates_saving": "Saving...",
+  "detail.dates_saved": "Dates saved.",
+  "detail.field_planned_end_date": "Planned end date",
+  "detail.dates_preferred_hint": "Customer's preferred date: {{date}}",
+  "list.bulk_dates_button": "Set dates",
+  "list.bulk_dates_title": "Set deadline and planned end date",
+  "list.bulk_dates_summary_one": "{{count}} request selected.",
+  "list.bulk_dates_summary_other": "{{count}} requests selected.",
+  "list.bulk_dates_unchanged_hint": "A blank field is left unchanged: only the dates you fill in here are written to the selected requests."
 }

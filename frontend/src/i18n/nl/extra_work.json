@@ -497,5 +497,15 @@
   "detail.preview_card_title": "Voorbeeld",
   "detail.preview_card_hint": "Haalt de offerte-PDF op.",
   "detail.proposal_pdf": "Offerte-PDF",
-  "detail.proposal_pdf_busy": "Bezig…"
+  "detail.proposal_pdf_busy": "Bezig…",
+  "detail.dates_edit": "Datums bewerken",
+  "detail.dates_saving": "Opslaan...",
+  "detail.dates_saved": "Datums opgeslagen.",
+  "detail.field_planned_end_date": "Geplande einddatum",
+  "detail.dates_preferred_hint": "Gewenste datum van de klant: {{date}}",
+  "list.bulk_dates_button": "Datums instellen",
+  "list.bulk_dates_title": "Deadline en geplande einddatum instellen",
+  "list.bulk_dates_summary_one": "{{count}} aanvraag geselecteerd.",
+  "list.bulk_dates_summary_other": "{{count}} aanvragen geselecteerd.",
+  "list.bulk_dates_unchanged_hint": "Een leeg veld blijft ongewijzigd: alleen de datums die je hier invult worden op de geselecteerde aanvragen gezet."
 }

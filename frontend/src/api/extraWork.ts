@@ -199,6 +199,53 @@ export async function relabelExtraWork(
   return response.data;
 }
 
+/** Sprint 176 §3 — set / clear the deadline and the planned end date on a
+ *  request that already exists.
+ *
+ *  Both fields OPTIONAL, and that is load-bearing rather than
+ *  convenience: the server reads key PRESENCE, so omitting a key leaves
+ *  the stored date alone and sending `null` clears it. Never build this
+ *  payload by spreading a form state object — an untouched field would
+ *  arrive as `null` and wipe a date nobody edited.
+ *
+ *  Provider-only (Sprint 176 §3's decision): a customer-side caller gets
+ *  403 `deadline_provider_only`. 400 codes: `no_dates_provided`,
+ *  `planned_end_before_start`. */
+export interface ExtraWorkDatesPayload {
+  deadline?: string | null;
+  planned_end_date?: string | null;
+}
+
+export async function updateExtraWorkDates(
+  id: number | string,
+  payload: ExtraWorkDatesPayload,
+): Promise<ExtraWorkRequestDetail> {
+  const response = await api.patch<ExtraWorkRequestDetail>(
+    `/extra-work/${id}/dates/`,
+    payload,
+  );
+  return response.data;
+}
+
+/** Sprint 176 §3 — the same two dates across a selection of requests.
+ *
+ *  All-or-nothing server-side, like `bulkAssignExtraWork`: one
+ *  unresolvable id rejects the batch with zero writes, and a row whose
+ *  planned end would fall before its planned start rolls the rest back
+ *  with it. The "leave unchanged" default is the same key-presence rule
+ *  as the single-row call above. */
+export async function bulkSetExtraWorkDates(payload: {
+  requests: number[];
+  deadline?: string | null;
+  planned_end_date?: string | null;
+}): Promise<{ updated: number }> {
+  const response = await api.post<{ updated: number }>(
+    "/extra-work/bulk-dates/",
+    payload,
+  );
+  return response.data;
+}
+
 // Sprint 8A — provider-only entry of actual hours on hourly Extra Work
 // lines. `actual_hours` is a decimal string (DRF parses it server-side).
 // All-or-nothing: any invalid line 400s the whole batch. Returns the EW

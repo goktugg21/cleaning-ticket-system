@@ -2,13 +2,91 @@
 
 **Purpose.** The living plan to close every remaining gap between the
 system and the Ramazan transcripts + Source of Truth, ending with a
-premium UI/UX polish. **CC updates `## NOW
+premium UI/UX polish. **CC updates `## NOW` / `## NEXT` / `## SHIPPED`
+in the SAME branch as the work** — this file drifted twice because the
+update was left for a later docs-only pass.
 
-**Branch:** `feat/sprint-175`, cut from `feat/sprint-174` (`1fe1489`).
-It is the single branch being merged — #153 -> ... -> #175 are ONE
+<!-- Sprint 176 §8: the sentence above was truncated mid-word by Sprint
+     175's own edit ("**CC updates `## NOW" and then straight into the
+     branch line), which also left the file with TWO `## NOW` headings.
+     Restored, and the older section below is now labelled as history. -->
+
+## NOW
+
+**Branch:** `feat/sprint-176`, cut from `feat/sprint-175` (`4730d42`).
+It is the single branch being merged — #153 -> ... -> #176 are ONE
 chain, one PR, not one per sprint.
 
-### Done
+### Done — Sprint 176
+
+- **§1a raw translation keys, and the gate that could not see them.**
+  Sprint 175 rendered `detail.field_department` and
+  `detail.field_work_type` literally on screen; neither key existed in
+  either bundle. Lockstep passes on a key missing from BOTH bundles,
+  which is the same blind spot that hid `employees.open_account` in
+  Sprint 156 — twice now. The read-only card that carried them is gone
+  (§1b), and `frontend/scripts/check-i18n-keys.mjs` now asserts every
+  `t("...")` literal resolves in a namespace the file declares.
+  It caught five genuine missing keys while §3 was being written.
+- **§1b the duplicate Department & work type card.** Sprint 175 added a
+  READ-ONLY one above the EDITABLE Sprint 128 card. The read-only copy
+  is deleted; the editable one moved into the right column behind a
+  `collapsible` prop on the component itself (wrapping would nest a
+  card in a card). Relabel endpoint, invoice-lock state and error codes
+  all intact.
+- **§2 the layout the owner redrew.** People on this request is a
+  full-width collapsed row below Messages —
+  `ExtraWorkAssignmentCard` gained a `bare` prop that renders its body
+  without its own card shell, which is the nesting problem solved
+  rather than avoided. The right column is Customer contacts +
+  Department & work type sharing the height (`grid-template-rows: 1fr
+  1fr`). Measured: Messages 488 / right column 488 / **gap 0** and zero
+  overflow at 1024, 1280 and 1440.
+  **Flagged, not hidden:** filling a 488px column with two collapsed
+  cards means ~188px of empty space under each header. The alternative
+  is opening both by default — a one-word change, left as the owner's
+  call because the sketch says collapsed.
+- **§3 the deadline's editing surfaces.** The EW ViewSet has no update
+  mixin by design, so both dates were write-once on the create form:
+  nothing anywhere could change a deadline after the fact, which is
+  precisely when deadlines get agreed. Added, in the shape of the
+  existing `labels` action rather than a general PATCH:
+  - `PATCH /api/extra-work/<id>/dates/` — set or clear either date, and
+    an Edit affordance on the detail page's Details card that uses it.
+  - `POST /api/extra-work/bulk-dates/` — the same two dates across a
+    selection, all-or-nothing, behind the list's existing edit gate.
+    A blank field is OMITTED from the payload, never sent as null, so a
+    bulk deadline cannot wipe a planned end date nobody touched.
+  - Both write through ONE helper (`extra_work/dates.py`) so the two
+    paths cannot drift on what makes a window valid.
+  - **The DECISION, so the owner can reverse it in a sentence: the
+    deadline is provider-only.** The customer keeps `preferred_date`
+    (their wish, shown beside the deadline field on the provider's
+    editor); the deadline is what turns a row red and what an operator
+    is measured against, so a customer who could set it could make the
+    provider look late by typing a date. Enforced in three places — the
+    create serializer (400), the dates endpoint and the bulk endpoint
+    (403 `deadline_provider_only`).
+  - 18 tests, including the Sprint 174 §0 render test on the endpoint
+    that carries the fields, "absent leaves it alone", "null clears it",
+    the all-or-nothing rollback, and H-1 (a cross-tenant id answers
+    identically to one that does not exist).
+
+### NOT done in Sprint 176 — carried whole, not started
+
+§4 (the Catalogs area), §5 (the four reports) and §6 (the Work Plan
+week-placement rule) were NOT reached. They keep their full detail in
+`## NEXT` below. This is the fifth round they have been carried, and
+the honest reason is that §1, §2 and §3 consumed the sprint: §1 was
+fixing defects this chain shipped, and §3 turned out to need three new
+endpoints rather than a form field, because nothing in the system could
+edit an extra work after creation.
+
+## Historical — Sprint 175
+
+**Branch:** `feat/sprint-175`, cut from `feat/sprint-174` (`1fe1489`).
+
+### Done — Sprint 175
 
 - **§1 the Extra Work detail redesign — the item owed for three
   rounds.** Details and Workflow keep their content and stay open on
@@ -317,7 +395,7 @@ docs-only pass — so this file always reflects where we actually are.
 
 ---
 
-## NOW
+## Historical — Sprint 166
 
 **Branch:** `feat/sprint-166`, cut from `feat/sprint-165` (`18c2d72`).
 It is the single branch being merged — #153 → … → #166 are ONE chain,
