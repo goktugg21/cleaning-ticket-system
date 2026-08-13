@@ -13,9 +13,95 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/sprint-177`, cut from `feat/sprint-176` (`4da3bf2`).
-It is the single branch being merged — #153 -> ... -> #177 are ONE
+**Branch:** `feat/sprint-178`, cut from `feat/sprint-177` (`feb4ead`).
+It is the single branch being merged — #153 -> ... -> #178 are ONE
 chain, one PR, not one per sprint.
+
+### Done — Sprint 178
+
+- **§1 the Catalogs area — SIXTH round, done.** `/admin/catalogs`
+  gathers hour types, work types, contract types, building types and
+  managed units behind five tabs, each rendering the SAME component its
+  old page renders, so the old entry points all still work and the two
+  cannot drift. Services stay a LINK (they carry prices, VAT and
+  per-customer rates — not a name-and-active-flag catalog).
+  Plus the mechanism's proof: a per-company `BuildingType` on the
+  `HourType` shape, an optional `Building.building_type` (SET_NULL), the
+  building form, the building detail, and **a filter on the buildings
+  list**. Measured: created "Health building", tagged ONE of two
+  buildings, filtering returns exactly that one. 20 tests.
+  **Cost of the next catalog: six files** (model, migration, serializer,
+  views, urls, a ~70-line `CatalogTab` wrapper). `standardSetUrl` is now
+  optional so a bespoke catalog needs no fake standard set. NOT
+  generalised: the serializer + views are still ~290 near-identical
+  lines per catalog; a generic `CatalogViewSet` would collapse them to
+  ~30 and is a real refactor across five live catalogs. **Adding a TYPE
+  needs no deployment** — there is a test named for it.
+- **§2 the four reports — SIXTH round, done.** Employee hours by
+  building / weekly / by extra work, and a ticket report whose duration
+  comes from `TicketStatusHistory` (first terminal arrival, so a reopen
+  is a new episode not a longer one). Cards opening modals, no new nav
+  children, CSV + PDF through `reports/exports.py`, `assertNumQueries`
+  on each — measured rather than hardcoded, asserting the count does not
+  GROW with the data. Provider-only; STAFF and CUSTOMER_* get 403.
+  **What each finds on the dev database:** by building 3 groups /
+  125.75h, weekly 2 weeks / 125.75h, **by extra work 0 jobs / 0.00h**,
+  tickets 18 rows / 4 finished / 0 days average. The empty one is
+  correct and says so in words — nothing is tagged to a job yet.
+- **§4 the source's two gaps.** Editable from the entries EDIT path now,
+  using the same `listHourSources` the week setup uses (no backend
+  change needed — the fields were already writable and no screen ever
+  sent them). And CONTRACT / OTHER are offered as type-only sources with
+  a null id, closing a display that supported a value nothing could set.
+  `OTHER` stays the default for untouched rows.
+  **Recommendation, as asked: `ContractHours` should NOT carry a
+  source** — its rows are contract hours by definition, and a column
+  that can hold one value is not information. Stated, not built.
+  Also corrects Sprint 177's report: it claimed contract hours "all have
+  source CONTRACT". They have no `source_type` column at all.
+
+### Found, NOT fixed — 30 pre-existing raw-key bugs
+
+Tightening the i18n gate (it now searches only the FIRST declared
+namespace, which is what i18next does — there is no `fallbackNS` here)
+and running it over the whole frontend for the first time surfaced **30
+keys that render literally today**, none of them from this sprint:
+
+    UnifiedTimeline.tsx                        6
+    BuildingManagerCustomerContactsPage.tsx    7
+    BuildingManagerCustomersPage.tsx           3
+    BuildingManagerCustomerDetailPage.tsx      4
+    ChangeDiff.tsx                             1
+    CustomerInvoicesPage.tsx                   1
+    CustomerReportsPage.tsx                    1
+    (plus repeats of the same keys)
+
+Verified real: `t("loading")` in a component declaring only `common`,
+where `loading` lives in `dashboard.json`. Eight files this sprint did
+not otherwise touch — that deserves its own round rather than a
+footnote, so it is recorded here rather than done quietly.
+
+### NOT done in Sprint 178 — §3 and §5
+
+- **§3 the Work Plan.** Not reached. Verified along the way that ONE
+  part of it already exists: the BUILDING_MANAGER / admin team view
+  through `scope_tickets_for` landed in Sprint 170 §1
+  (`?scope=company` on `my-slots/`), so that sub-item needs nothing.
+  Still outstanding: the §12B week-placement rule (points 2-4), extra
+  work in the week view, server-side counts, the idempotent seeder, and
+  the owner's acceptance test.
+- **§5 the typography sweep.** Not started. The prompt named it the item
+  to drop if something must be dropped, and something had to be.
+
+The reason, plainly: §1 and §2 were each a full-stack feature with a
+migration or four new endpoints, and §4 turned out to need a nullable id
+threaded through the week grid. §3 is a fifth feature of the same size.
+Starting it without finishing it would have left the branch half-done,
+which is worse than leaving it whole and saying so.
+
+## Historical — Sprint 177
+
+**Branch:** `feat/sprint-177`, cut from `feat/sprint-176` (`4da3bf2`).
 
 ### Done — Sprint 177
 
@@ -206,6 +292,24 @@ warnings)**, build OK, i18n in lockstep, **undefined-CSS-class sweep
 clean**.
 
 ## NEXT
+
+**After Sprint 178 this holds three things.** §1, §2 and the four
+reports left it this round; what is below is what is actually left.
+
+1. **The Work Plan (§3, sixth round).** The §12B week-placement rule,
+   extra work in the week view, server-side counts, the idempotent
+   `seed_demo_data` seeder, and the acceptance test: an extra work
+   assigned to a worker, past its deadline, showing as overdue in that
+   worker's Work Plan. The manager-view sub-item is already done
+   (Sprint 170 §1, `?scope=company` through `scope_tickets_for`).
+2. **The typography sweep.** Owed since Sprint 175; dropped in 178 by
+   the prompt's own instruction.
+3. **The 30 pre-existing raw i18n keys** listed under NOW, in eight
+   files across UnifiedTimeline, ChangeDiff, the BuildingManager
+   customer pages and two customer sub-pages.
+
+Everything below this line is the older carried detail, kept for the
+wording of items 1 and 2.
 
 ### Carried from Sprint 175
 
