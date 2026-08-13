@@ -676,6 +676,17 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "category",
             "urgency",
             "status",
+            # Sprint 173 §4 — the deadline, the planned window's end, and
+            # the two derived flags. These were declared on this
+            # serializer but only added to the DETAIL serializer's
+            # `fields`, so DRF asserted on every list call and
+            # /api/extra-work/ returned 500 for everyone. They belong on
+            # the list precisely because the list is where an operator
+            # scans for what is overdue.
+            "deadline",
+            "planned_end_date",
+            "is_overdue",
+            "started_before_plan",
             # Sprint 28 Batch 6 — cart routing taxonomy. Surfaced on
             # the lean list shape so the inbox / overview UIs can
             # branch on INSTANT vs PROPOSAL without a detail fetch.
