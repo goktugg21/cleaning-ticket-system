@@ -1587,6 +1587,32 @@ export function ExtraWorkDetailPage() {
         meta={
           <div className="ew-detail-header-meta">
             <StatusBadge status={{ kind: "extra-work", value: ew.status }} />
+            {/* Sprint 174 §3 — the deadline and started-early markers
+                live in the HEADER, beside the status. A warning you
+                have to open a collapsed card to find is not a warning.
+                Both use the status colours this app already has: a
+                second colour vocabulary for "something is wrong" is how
+                two screens end up disagreeing about severity. */}
+            {ew.deadline && (
+              <span
+                className={`cell-tag ${
+                  ew.is_overdue ? "cell-tag-rejected" : "cell-tag-muted"
+                }`}
+                data-testid="ew-header-deadline"
+              >
+                {t("detail.deadline")}: {formatDate(ew.deadline)}
+                {ew.is_overdue ? ` — ${t("list.overdue")}` : ""}
+              </span>
+            )}
+            {ew.started_before_plan && (
+              <span
+                className="cell-tag cell-tag-open"
+                title={t("list.startedEarlyWhy")}
+                data-testid="ew-header-started-early"
+              >
+                {t("list.startedEarly")}
+              </span>
+            )}
             <RouteBadge value={ew.routing_decision} />
             <span className="muted small">
               {/* Sprint 144 §1 — the real classifier when the request
@@ -1651,6 +1677,19 @@ export function ExtraWorkDetailPage() {
                   <div>
                     {ew.preferred_date
                       ? formatDate(ew.preferred_date)
+                      : t("detail.empty_dash")}
+                    {/* The planned WINDOW reads as a range when it has
+                        an end, and as one day when it does not. */}
+                    {ew.planned_end_date
+                      ? ` – ${formatDate(ew.planned_end_date)}`
+                      : ""}
+                  </div>
+                </div>
+                <div>
+                  <div className="muted small">{t("detail.deadline")}</div>
+                  <div>
+                    {ew.deadline
+                      ? formatDate(ew.deadline)
                       : t("detail.empty_dash")}
                   </div>
                 </div>

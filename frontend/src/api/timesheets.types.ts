@@ -114,6 +114,8 @@ export interface TimeEntryWritePayload {
 
 export interface TimeEntryFilters {
   company?: number | "";
+  /** Sprint 174 §1 — filter by where the hour came from. */
+  source_type?: string;
   employee?: number | "";
   hour_type?: number | "";
   building?: number | "";

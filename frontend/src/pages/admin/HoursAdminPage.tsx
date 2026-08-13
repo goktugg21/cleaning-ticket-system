@@ -60,6 +60,7 @@ interface EntryFilterState {
   employee: number | "";
   hour_type: number | "";
   building: number | "";
+  source_type: string;
   date_from: string;
   date_to: string;
 }
@@ -68,6 +69,7 @@ const EMPTY_FILTERS: EntryFilterState = {
   employee: "",
   hour_type: "",
   building: "",
+  source_type: "",
   date_from: "",
   date_to: "",
 };
@@ -308,6 +310,7 @@ export function HoursAdminPage() {
       employee: filters.employee,
       hour_type: filters.hour_type,
       building: filters.building,
+      source_type: filters.source_type,
       date_from: filters.date_from,
       date_to: filters.date_to,
     }),
@@ -739,6 +742,7 @@ export function HoursAdminPage() {
                 employee: filters.employee,
                 hour_type: filters.hour_type,
                 building: filters.building,
+                source_type: filters.source_type,
               }}
               onChange={patchFilters}
               employees={employees}

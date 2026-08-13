@@ -478,5 +478,18 @@
   "assign.col_role": "On this request",
   "assign.remove": "Remove",
   "assign.summary_requests_one": "Assigning to {{count}} selected request.",
-  "assign.summary_requests_other": "Assigning to {{count}} selected requests."
+  "assign.summary_requests_other": "Assigning to {{count}} selected requests.",
+  "list.column_deadline": "Deadline",
+  "list.overdue": "Overdue",
+  "list.startedEarly": "Started early",
+  "list.startedEarlyWhy": "Work began before the planned start date. Not blocked, but shown.",
+  "list.filter_planned": "Planning",
+  "list.planned_all": "All",
+  "list.planned_only": "Planned only",
+  "list.planned_none": "Unplanned only",
+  "detail.deadline": "Deadline",
+  "detail.plannedEnd": "Planned end",
+  "detail.plannedStart": "Planned start",
+  "create.plannedEndHint": "Leave empty when the work is planned for a single day.",
+  "create.deadlineHint": "When it must be finished. Separate from the planning."
 }

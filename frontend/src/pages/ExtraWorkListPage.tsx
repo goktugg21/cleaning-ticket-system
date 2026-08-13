@@ -238,6 +238,14 @@ export function ExtraWorkList({
   // value, not an effect: syncing a prop into state through an effect is
   // the pattern CLAUDE.md bans, and the component is keyed by customer
   // id at the mount site so a change remounts it.
+  const [deadlineSort, setDeadlineSort] = useState<"" | "asc" | "desc">("");
+  // Sprint 174 §4d — a FILTER, never a mode. Default ALL, and it is
+  // visible and clearable: the owner was explicit that planned extra
+  // work must still be findable if he changes his mind about planning
+  // it, so nothing may hide rows with no way back.
+  const [plannedFilter, setPlannedFilter] = useState<
+    "ALL" | "PLANNED" | "UNPLANNED"
+  >("ALL");
   const [customerFilter, setCustomerFilter] = useState(
     customerId === undefined ? "" : String(customerId),
   );
@@ -423,7 +431,7 @@ export function ExtraWorkList({
 
   const visibleRows = useMemo(() => {
     const needle = searchInput.trim().toLowerCase();
-    return rows.filter((r) => {
+    const filtered = rows.filter((r) => {
       if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
       if (needle) {
         const hay = `${r.title} ${r.building_name ?? ""} ${
@@ -433,7 +441,31 @@ export function ExtraWorkList({
       }
       return true;
     });
-  }, [rows, searchInput, statusFilter]);
+    // Sprint 174 §1/§4d — the deadline sort and the planned filter.
+    // Both are CLIENT-side over rows the server already scoped: the
+    // list is a page of rows the operator can see, and a second server
+    // round-trip to reorder what is already on screen would be slower
+    // and no more correct.
+    const narrowed =
+      plannedFilter === "ALL"
+        ? filtered
+        : filtered.filter((r) =>
+            plannedFilter === "PLANNED"
+              ? Boolean(r.preferred_date)
+              : !r.preferred_date,
+          );
+    if (!deadlineSort) return narrowed;
+    return [...narrowed].sort((a, b) => {
+      // A row with NO deadline sorts last in both directions: "nobody
+      // said when" is not earlier or later than a date, and putting it
+      // first would bury the rows the sort exists to surface.
+      if (!a.deadline && !b.deadline) return 0;
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+      const order = a.deadline.localeCompare(b.deadline);
+      return deadlineSort === "asc" ? order : -order;
+    });
+  }, [rows, searchInput, statusFilter, deadlineSort, plannedFilter]);
 
 
   // Sprint 157 §2 — the Edit gate + the bulk assign handlers. The
@@ -787,6 +819,24 @@ export function ExtraWorkList({
             )}
           </select>
         </div>
+        <div className="filter-field">
+          <span className="filter-label">{t("list.filter_planned")}</span>
+          <select
+            className="filter-control"
+            value={plannedFilter}
+            onChange={(event) =>
+              setPlannedFilter(
+                event.target.value as "ALL" | "PLANNED" | "UNPLANNED",
+              )
+            }
+            data-testid="extra-work-list-filter-planned"
+          >
+            <option value="ALL">{t("list.planned_all")}</option>
+            <option value="PLANNED">{t("list.planned_only")}</option>
+            <option value="UNPLANNED">{t("list.planned_none")}</option>
+          </select>
+        </div>
+
         {isProvider && customerId === undefined && (
           <>
             {/* Sprint 128 — the label cascade: Customer -> Building ->
@@ -1071,6 +1121,33 @@ export function ExtraWorkList({
                   </th>
                   {isProvider && <th>{t("list.column_billing")}</th>}
                   <th>{t("list.column_requested")}</th>
+                  {/* Sprint 174 §1 — the DEADLINE, sortable. Sprint 173
+                      added the field and the API filter; nothing on any
+                      screen showed it, which is where the owner looked
+                      for it. */}
+                  <th>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() =>
+                        setDeadlineSort((current) =>
+                          current === "asc"
+                            ? "desc"
+                            : current === "desc"
+                              ? ""
+                              : "asc",
+                        )
+                      }
+                      data-testid="ew-sort-deadline"
+                    >
+                      {t("list.column_deadline")}
+                      {deadlineSort === "asc"
+                        ? " ▲"
+                        : deadlineSort === "desc"
+                          ? " ▼"
+                          : ""}
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1141,6 +1218,33 @@ export function ExtraWorkList({
                       </td>
                     )}
                     <td>{formatDate(row.requested_at)}</td>
+                    <td className="td-date">
+                      {row.deadline ? formatDate(row.deadline) : (
+                        <span className="muted-empty">—</span>
+                      )}
+                      {/* The markers, in the status colours this app
+                          already has — a new pair would mean two
+                          vocabularies for "something is wrong". */}
+                      {row.is_overdue && (
+                        <span
+                          className="cell-tag cell-tag-rejected"
+                          style={{ marginLeft: 6 }}
+                          data-testid="ew-overdue-marker"
+                        >
+                          {t("list.overdue")}
+                        </span>
+                      )}
+                      {row.started_before_plan && (
+                        <span
+                          className="cell-tag cell-tag-open"
+                          style={{ marginLeft: 6 }}
+                          title={t("list.startedEarlyWhy")}
+                          data-testid="ew-started-early-marker"
+                        >
+                          {t("list.startedEarly")}
+                        </span>
+                      )}
+                    </td>
                   </ClickableRow>
                 ))}
               </tbody>

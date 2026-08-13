@@ -64,6 +64,8 @@ interface ParentFormState {
   // `default=OTHER` server-side.
   urgency: ExtraWorkUrgency;
   preferred_date: string;
+  planned_end_date: string;
+  deadline: string;
 }
 
 interface CartLineState {
@@ -117,6 +119,8 @@ const EMPTY_PARENT: ParentFormState = {
   description: "",
   urgency: "NORMAL",
   preferred_date: "",
+  planned_end_date: "",
+  deadline: "",
 };
 
 const URGENCY_VALUES: ExtraWorkUrgency[] = ["NORMAL", "HIGH", "URGENT"];
@@ -1379,6 +1383,8 @@ export function CreateExtraWorkPage({
           : {}),
         urgency: form.urgency,
         preferred_date: form.preferred_date || null,
+        planned_end_date: form.planned_end_date || null,
+        deadline: form.deadline || null,
         // Sprint 128 — optional per-customer labels. `effective*` collapses a
         // stale (foreign-customer) selection to "" so it can never reach here.
         ...(effectiveDepartmentId
@@ -1885,6 +1891,44 @@ export function CreateExtraWorkPage({
                   update("preferred_date", event.target.value)
                 }
               />
+            </div>
+
+            {/* Sprint 174 §1 — the planned WINDOW's end and the
+                DEADLINE. Sprint 173 added both fields and no form ever
+                offered them, so every record was created with them
+                empty. */}
+            <div className="field">
+              <label className="field-label" htmlFor="ew-planned-end">
+                {t("detail.plannedEnd")}
+              </label>
+              <input
+                id="ew-planned-end"
+                className="field-input"
+                type="date"
+                value={form.planned_end_date}
+                onChange={(event) =>
+                  update("planned_end_date", event.target.value)
+                }
+              />
+              <p className="muted small" style={{ margin: "4px 0 0" }}>
+                {t("create.plannedEndHint")}
+              </p>
+            </div>
+
+            <div className="field">
+              <label className="field-label" htmlFor="ew-deadline">
+                {t("detail.deadline")}
+              </label>
+              <input
+                id="ew-deadline"
+                className="field-input"
+                type="date"
+                value={form.deadline}
+                onChange={(event) => update("deadline", event.target.value)}
+              />
+              <p className="muted small" style={{ margin: "4px 0 0" }}>
+                {t("create.deadlineHint")}
+              </p>
             </div>
           </div>
 

@@ -478,5 +478,18 @@
   "assign.col_role": "Op deze aanvraag",
   "assign.remove": "Verwijderen",
   "assign.summary_requests_one": "Toewijzen aan {{count}} geselecteerde aanvraag.",
-  "assign.summary_requests_other": "Toewijzen aan {{count}} geselecteerde aanvragen."
+  "assign.summary_requests_other": "Toewijzen aan {{count}} geselecteerde aanvragen.",
+  "list.column_deadline": "Deadline",
+  "list.overdue": "Te laat",
+  "list.startedEarly": "Vroeg gestart",
+  "list.startedEarlyWhy": "Het werk is begonnen voor de geplande startdatum. Niet geblokkeerd, wel zichtbaar.",
+  "list.filter_planned": "Planning",
+  "list.planned_all": "Alles",
+  "list.planned_only": "Alleen gepland",
+  "list.planned_none": "Alleen ongepland",
+  "detail.deadline": "Deadline",
+  "detail.plannedEnd": "Gepland einde",
+  "detail.plannedStart": "Gepland begin",
+  "create.plannedEndHint": "Laat leeg als het werk op een dag gepland staat.",
+  "create.deadlineHint": "Wanneer het klaar moet zijn. Los van de planning."
 }

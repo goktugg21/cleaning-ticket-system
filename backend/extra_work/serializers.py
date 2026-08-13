@@ -683,6 +683,11 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             # /api/extra-work/ returned 500 for everyone. They belong on
             # the list precisely because the list is where an operator
             # scans for what is overdue.
+            # Sprint 174 §1 — the planned window's START travels with
+            # its end: the list's planned/unplanned filter reads it, and
+            # a filter reading `undefined` silently calls every row
+            # unplanned.
+            "preferred_date",
             "deadline",
             "planned_end_date",
             "is_overdue",

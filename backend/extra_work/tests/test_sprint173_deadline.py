@@ -129,3 +129,90 @@ class DeadlineTests(ExtraWorkFixtureMixin, TestCase):
             changed_by=self.admin_a,
         )
         self.assertFalse(row.started_before_plan)
+
+
+class SerialiserRenderTests(ExtraWorkFixtureMixin, TestCase):
+    """Sprint 174 §0 — the tests that would have caught the live break.
+
+    Sprint 173 declared `is_overdue` and `started_before_plan` on the
+    LIST serializer and added them to the DETAIL serializer's `fields`
+    only. DRF asserts on that mismatch, so every call to
+    `/api/extra-work/` returned 500 and the page read "The server is
+    having trouble right now". The owner found it on the live site.
+
+    Nothing caught it because the sprint's tests exercised the model
+    PROPERTIES and the list FILTER. **A filter test issues a query; it
+    never serialises a row.** No test rendered either serializer, and a
+    frontend gate cannot see a server-side assertion.
+
+    So: a field is not done until a test RENDERS the endpoint carrying
+    it. These call the list and the detail and assert each key is
+    present with the right value — two lines each, and they close the
+    exact hole.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup_fixture()
+
+    def setUp(self):
+        super().setUp()
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        self.row = ExtraWorkRequest.objects.create(
+            company=self.provider_a,
+            customer=self.customer_a,
+            building=self.building_a1,
+            title="Rendered job",
+            description="x",
+            created_by=self.admin_a,
+            deadline=timezone.localdate() - timedelta(days=2),
+            preferred_date=timezone.localdate() + timedelta(days=10),
+            planned_end_date=timezone.localdate() + timedelta(days=12),
+        )
+
+    def api(self, user):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    # The four keys Sprint 173 added, plus the two it derives.
+    KEYS = (
+        "deadline",
+        "planned_end_date",
+        # Sprint 174 — the window's START too. The list's
+        # planned/unplanned filter reads it, and a filter reading
+        # `undefined` silently calls every row unplanned.
+        "preferred_date",
+        "is_overdue",
+        "started_before_plan",
+    )
+
+    def test_the_LIST_endpoint_renders_every_field(self):
+        response = self.api(self.admin_a).get("/api/extra-work/")
+        self.assertEqual(response.status_code, 200, response.data)
+        rows = response.data["results"]
+        row = next(r for r in rows if r["id"] == self.row.id)
+        for key in self.KEYS:
+            with self.subTest(key=key):
+                self.assertIn(key, row)
+        self.assertTrue(row["is_overdue"])
+        self.assertEqual(str(row["deadline"]), str(self.row.deadline))
+
+    def test_the_DETAIL_endpoint_renders_every_field(self):
+        response = self.api(self.admin_a).get(f"/api/extra-work/{self.row.id}/")
+        self.assertEqual(response.status_code, 200, response.data)
+        for key in self.KEYS:
+            with self.subTest(key=key):
+                self.assertIn(key, response.data)
+        self.assertTrue(response.data["is_overdue"])
+
+    def test_the_list_does_not_500(self):
+        """The regression itself, stated as plainly as it deserves."""
+        self.assertEqual(
+            self.api(self.admin_a).get("/api/extra-work/").status_code, 200
+        )

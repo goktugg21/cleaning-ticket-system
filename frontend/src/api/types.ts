@@ -1367,6 +1367,15 @@ export type ExtraWorkUnitType =
 
 // List shape (lean — no description / notes / line items).
 export interface ExtraWorkRequestList {
+  /** Sprint 173 §4 / Sprint 174 §1 — the deadline, the planned window's
+   *  end, and the two facts DERIVED from them server-side so the list,
+   *  the detail page and the Work Plan cannot disagree about what
+   *  "late" or "started early" means. */
+  deadline: string | null;
+  planned_end_date: string | null;
+  preferred_date: string | null;
+  is_overdue: boolean;
+  started_before_plan: boolean;
   id: number;
   company: number;
   company_name: string;
@@ -1672,6 +1681,11 @@ export interface EwMessageRecipient {
 // client side. The backend keeps the existing parent fields and
 // adds `line_items` as the authoritative cart.
 export interface ExtraWorkRequestCartCreatePayload {
+  /** Sprint 174 §1 — the planned window's end and the deadline. Sprint
+   *  173 added both fields and no form offered them, so every record
+   *  was created with them empty. */
+  planned_end_date?: string | null;
+  deadline?: string | null;
   title: string;
   description: string;
   building: number;
