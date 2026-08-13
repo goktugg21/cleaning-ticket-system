@@ -27,6 +27,7 @@ export interface CatalogRow {
 export interface CatalogLabels {
   title: string;
   desc: string;
+  /** Only read when `standardSetUrl` is supplied. */
   standardSet: string;
   name: string;
   inUse: string;
@@ -80,7 +81,13 @@ export function CatalogTab({
 }: {
   listUrl: string;
   detailUrl: (id: number) => string;
-  standardSetUrl: string;
+  /** Sprint 178 §1 — OPTIONAL. Most catalogs ship a recognised standard
+   *  set an operator can seed in one click; some are bespoke by nature
+   *  (a building type like "health building" is the owner's own example
+   *  of a type only one company will ever want). Omitted, the seed
+   *  button is simply not rendered — a button that posts to nowhere is
+   *  worse than no button. */
+  standardSetUrl?: string;
   labels: CatalogLabels;
   /** Each catalog names its usage count differently
    *  (`contract_count` / `usage_count`), so the caller maps. */
@@ -190,7 +197,7 @@ export function CatalogTab({
             ))}
           </select>
         )}
-        {canManage && (
+        {canManage && standardSetUrl && (
           <button
             type="button"
             className="btn btn-secondary btn-sm"

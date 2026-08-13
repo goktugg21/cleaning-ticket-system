@@ -56,12 +56,24 @@ for (const file of files) {
 
   skipped += [...src.matchAll(/\bt\(`/g)].length;
 
-  for (const m of src.matchAll(/\bt\(\s*"([^"]+)"/g)) {
+  // Capture the call's OPTIONS too, so `{ ns: "..." }` is understood.
+  for (const m of src.matchAll(/\bt\(\s*"([^"]+)"\s*(,\s*\{[^}]*\})?/g)) {
     const raw = m[1];
     const [maybeNs, ...rest] = raw.split(":");
     const explicit = rest.length > 0;
     const key = explicit ? rest.join(":") : raw;
-    const search = explicit ? [maybeNs] : namespaces;
+    // i18next takes the namespace THREE ways: a "ns:key" prefix, an
+    // explicit `{ ns: "..." }` option, or the component's declared
+    // default. The option form was invisible to this gate until Sprint
+    // 178, so `t("nav.contracts", { ns: "contracts" })` — a key that
+    // exists and renders correctly — was reported missing. Same lesson
+    // as the plural suffixes below: a gate that cries wolf gets ignored.
+    const nsOption = (m[2] || "").match(/\bns\s*:\s*"([^"]+)"/);
+    const search = explicit
+      ? [maybeNs]
+      : nsOption
+        ? [nsOption[1]]
+        : namespaces;
     // i18next resolves a COUNTED key to its plural form, so `t("x",
     // {count})` looks up `x_one` / `x_other` and `x` itself never
     // exists. Treating that as missing would make this gate cry wolf on

@@ -86,6 +86,7 @@ import { HoursAdminPage } from "./pages/admin/HoursAdminPage";
 import { ContractsAdminPage } from "./pages/admin/contracts/ContractsAdminPage";
 import { ContractDetailPage } from "./pages/admin/contracts/ContractDetailPage";
 import { ContractsRoute } from "./components/ContractsRoute";
+import { CatalogsAdminPage } from "./pages/admin/CatalogsAdminPage";
 import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserDetailPage } from "./pages/admin/UserDetailPage";
@@ -678,6 +679,17 @@ export default function App() {
             element={
               <AdminRoute>
                 <ServicesAdminPage />
+              </AdminRoute>
+            }
+          />
+          {/* Sprint 178 §1 — the Catalogs area. Same AdminRoute gate as
+              every other per-company admin screen; the individual
+              catalogs keep their own endpoint permissions unchanged. */}
+          <Route
+            path="/admin/catalogs"
+            element={
+              <AdminRoute>
+                <CatalogsAdminPage />
               </AdminRoute>
             }
           />

@@ -663,10 +663,26 @@ export const COMPANY_POLICY_FLAGS = [
 ] as const;
 export type CompanyPolicyFlag = (typeof COMPANY_POLICY_FLAGS)[number];
 
+/** Sprint 178 §1 — one row of a company's own building-type catalog. */
+export interface BuildingTypeOption {
+  id: number;
+  company: number;
+  company_name?: string;
+  name: string;
+  is_active: boolean;
+  sort_order?: number;
+  usage_count?: number;
+}
+
 export interface BuildingAdmin {
   id: number;
   company: number;
   name: string;
+  /** Sprint 178 §1 — the type's id, and its resolved name alongside.
+   *  Both null when the building is unclassified; the keys are always
+   *  present, so a client never has to tell "absent" from "null". */
+  building_type?: number | null;
+  building_type_name?: string | null;
   address: string;
   city: string;
   country: string;

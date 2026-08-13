@@ -1,5 +1,6 @@
 import { api } from "./client";
 import type {
+  BuildingTypeOption,
   AuditLog,
   BuildingAdmin,
   BuildingBulkLinkResult,
@@ -100,6 +101,9 @@ export interface AdminListParams {
   page?: number;
   company?: number;
   building?: number;
+  /** Sprint 178 §1 — narrow the buildings list to one building
+   *  type from that company's own catalog. */
+  building_type?: number;
   page_size?: number;
   role?: string;
   // Sprint 2c — comma-separated customer access roles; narrows the user
@@ -207,6 +211,23 @@ export interface BuildingWritePayload {
   city?: string;
   country?: string;
   postal_code?: string;
+  /** Sprint 178 §1 — `null` CLEARS the classification; omitted leaves it
+   *  alone. Never `""`: the field is a nullable integer server-side. */
+  building_type?: number | null;
+}
+
+/** Sprint 178 §1 — a company's building-type catalog.
+ *
+ *  Unbounded server-side by design: this feeds a `<select>` and a list
+ *  filter, and neither has pagination UI. */
+export async function listBuildingTypes(
+  companyId?: number | "",
+): Promise<BuildingTypeOption[]> {
+  const response = await api.get<{ results: BuildingTypeOption[] }>(
+    "/buildings/types/",
+    { params: companyId ? { company: companyId } : undefined },
+  );
+  return response.data.results ?? [];
 }
 
 export async function listBuildings(

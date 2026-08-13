@@ -23,6 +23,7 @@ import {
   Megaphone,
   MessagesSquare,
   Menu,
+  Library,
   Package,
   PlusCircle,
   Receipt,
@@ -755,6 +756,21 @@ export function AppShell({ children }: AppShellProps) {
                       <Package size={16} strokeWidth={2} />
                     </span>
                     {t("nav.services")}
+                  </NavLink>
+                  {/* Sprint 178 §1 — ONE place for every per-company
+                      catalog. The old entry points (Hours, Contracts,
+                      Services) all still work; this is where an operator
+                      setting a company up can FIND them without already
+                      knowing which of three screens each lives on. */}
+                  <NavLink
+                    to="/admin/catalogs"
+                    className={navClass}
+                    data-testid="sidebar-catalogs"
+                  >
+                    <span className="nav-icon">
+                      <Library size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.catalogs")}
                   </NavLink>
                   {/* Sprint 152 — the Uren admin area. Gated on
                       `canManageTimesheets` (SA / CA), NOT on the admin

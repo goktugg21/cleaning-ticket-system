@@ -16,9 +16,11 @@ import {
   listBuildings,
   reactivateBuilding,
   updateBuilding,
+  listBuildingTypes,
 } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type {
+  BuildingTypeOption,
   BuildingAdmin,
   CompanyAdmin,
   CustomerAdmin,
@@ -109,6 +111,9 @@ export function BuildingsAdminPage() {
   const [searchActive, setSearchActive] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("true");
   const [companyFilter, setCompanyFilter] = useState<number | "">("");
+  // Sprint 178 §1 — the building-type filter and the catalog behind it.
+  const [buildingTypeFilter, setBuildingTypeFilter] = useState<number | "">("");
+  const [buildingTypes, setBuildingTypes] = useState<BuildingTypeOption[]>([]);
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
@@ -172,14 +177,51 @@ export function BuildingsAdminPage() {
     return () => window.clearTimeout(handle);
   }, [searchInput]);
 
+  /** Sprint 178 §1 — the catalog the filter offers.
+   *
+   *  Reloads when the company filter changes, and CLEARS the chosen type
+   *  at the same time: type ids are per company, so a leftover id would
+   *  filter another company's list by something it does not have and
+   *  quietly return nothing. */
+  useEffect(() => {
+    let cancelled = false;
+    // The chosen type is cleared by the company select's own handler, not
+    // here: `react-hooks/set-state-in-effect` forbids a synchronous
+    // setState in an effect body, and resetting where the operator ACTS
+    // is the clearer place for it anyway.
+    listBuildingTypes(companyFilter)
+      .then((options) => {
+        if (!cancelled) setBuildingTypes(options.filter((o) => o.is_active));
+      })
+      .catch(() => {
+        if (!cancelled) setBuildingTypes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyFilter]);
+
   const queryParams = useMemo<AdminListParams>(() => {
     const params: AdminListParams = { page };
     if (searchActive) params.search = searchActive;
     if (activeFilter !== "all") params.is_active = activeFilter;
     if (companyFilter !== "") params.company = companyFilter;
+    // Sprint 178 §1 — THE point of the building-type catalog. The owner's
+    // example is a type only one building uses that must still appear in
+    // the filters; without this line the catalog is a dropdown, not a
+    // taxonomy.
+    if (buildingTypeFilter !== "") params.building_type = buildingTypeFilter;
     params.ordering = sortDirection === "desc" ? `-${sortField}` : sortField;
     return params;
-  }, [page, searchActive, activeFilter, companyFilter, sortField, sortDirection]);
+  }, [
+    page,
+    searchActive,
+    activeFilter,
+    companyFilter,
+    buildingTypeFilter,
+    sortField,
+    sortDirection,
+  ]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -509,6 +551,35 @@ export function BuildingsAdminPage() {
               <option value="all">{t("admin.status_all")}</option>
             </select>
           </div>
+          {/* Sprint 178 §1 — filter by the company's own building type.
+              Shown only when there is a catalog to filter BY: an empty
+              dropdown is a control that looks broken. */}
+          {buildingTypes.length > 0 && (
+            <div className="filter-field">
+              <span className="filter-label">
+                {t("buildings.filter_building_type")}
+              </span>
+              <select
+                className="filter-control"
+                style={{ maxWidth: 220 }}
+                value={buildingTypeFilter === "" ? "" : String(buildingTypeFilter)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setBuildingTypeFilter(value === "" ? "" : Number(value));
+                  setPage(1);
+                  setSelectedIds([]);
+                }}
+                data-testid="buildings-filter-building-type"
+              >
+                <option value="">{t("buildings.filter_type_all")}</option>
+                {buildingTypes.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="filter-field">
             <span className="filter-label">{t("company")}</span>
             {/* Cap the Company select so it matches Search / Status instead
@@ -520,6 +591,10 @@ export function BuildingsAdminPage() {
               onChange={(event) => {
                 const v = event.target.value;
                 setCompanyFilter(v === "" ? "" : Number(v));
+                // Sprint 178 §1 — type ids are PER COMPANY, so a leftover
+                // id would filter the new company's list by something it
+                // does not have and quietly return nothing.
+                setBuildingTypeFilter("");
                 setPage(1);
                 setSelectedIds([]);
               }}

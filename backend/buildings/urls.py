@@ -2,6 +2,10 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import BuildingViewSet
+from .views_building_types import (
+    BuildingTypeDetailView,
+    BuildingTypeListCreateView,
+)
 from .views_bulk import (
     BuildingBulkDeactivateView,
     BuildingBulkLinkView,
@@ -25,6 +29,19 @@ router.register(r"", BuildingViewSet, basename="building")
 
 
 urlpatterns = [
+    # Sprint 178 §1 — the building-type catalog. ABOVE `router.urls` for
+    # the same reason the bulk family is: the router owns the empty
+    # prefix, so its detail route would read "types" as a pk.
+    path(
+        "types/",
+        BuildingTypeListCreateView.as_view(),
+        name="building-type-list",
+    ),
+    path(
+        "types/<int:building_type_id>/",
+        BuildingTypeDetailView.as_view(),
+        name="building-type-detail",
+    ),
     # Sprint 154 §I.2/§I.3/§I.4 — the bulk-write family. These MUST stay
     # above `router.urls`: the router owns the empty prefix, so its
     # detail route `^(?P<pk>[^/.]+)/$` would otherwise swallow

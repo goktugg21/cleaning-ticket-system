@@ -53,7 +53,7 @@ class BuildingViewSet(viewsets.ModelViewSet):
         # multiply each other's row sets otherwise.
         return (
             scope_buildings_for(self.request.user)
-            .select_related("company")
+            .select_related("company", "building_type")
             .prefetch_related("customer_memberships__customer")
             .annotate(
                 _customer_count=Count("customer_memberships", distinct=True),

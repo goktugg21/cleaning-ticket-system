@@ -1,5 +1,95 @@
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower, Trim
+
+
+class BuildingType(models.Model):
+    """
+    Sprint 178 §1 — a per-provider-company catalog of building kinds.
+
+    The owner's own example is the reason this exists, and it is worth
+    quoting because it sets the requirement precisely:
+
+        Ramazan may want one building to be of type "health building"
+        even though no other building uses it — but it should still
+        appear in the filters.
+
+    So: no enum, no fixed list, no deployment to add a type. A company
+    types the name it wants, one building carries it, and it appears in
+    the buildings-list filter from that moment. That last clause is the
+    whole point — a catalog whose values do not reach the filters is a
+    dropdown, not a taxonomy.
+
+    Deliberately the `HourType` shape, field for field, because that
+    shape is settled: company FK under PROTECT, a `name` that is NOT
+    `unique=True`, `is_active` for archiving, `sort_order` for picker
+    order, and the case/whitespace-insensitive uniqueness expressed as
+    the expression constraint below.
+
+    The constraint is created WITH the table, so there is never a window
+    in which the column exists without it — the thing `ServiceCategory`
+    and `ManagedUnit` had to be retrofitted with.
+
+    NO `standard_slot`, unlike `HourType` and `WorkType`. Those two have
+    recognised standard kinds worth naming in the reader's language; a
+    building type is bespoke by nature, which is exactly what the owner's
+    example says. Inventing a standard set here would be inventing
+    product content nobody asked for.
+
+    Archiving keeps the type on every building that already carries it
+    and removes it from the picker for new ones. `Building.building_type`
+    is SET_NULL rather than PROTECT: a building outlives its
+    classification, and refusing to delete a type because one building
+    was once tagged with it would make the catalog unmanageable.
+    """
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.PROTECT,
+        related_name="building_types",
+        help_text=(
+            "Provider company that owns this building type. PROTECT "
+            "mirrors HourType.company: a Company cannot be hard-deleted "
+            "while it still owns building types."
+        ),
+    )
+    # NOT `unique=True`: uniqueness is per-company and
+    # case/whitespace-insensitive, expressed as the constraint below.
+    name = models.CharField(
+        max_length=128,
+        help_text='Operator-facing name, e.g. "Zorggebouw", "Kantoor".',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "Archived types stay on the buildings that carry them but "
+            "are not offerable for new ones."
+        ),
+    )
+    sort_order = models.PositiveIntegerField(
+        default=0,
+        help_text="Ascending display order in the pickers; ties break on name.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "name", "id"]
+        verbose_name = "building type"
+        verbose_name_plural = "building types"
+        constraints = [
+            # Trim() first so leading/trailing whitespace cannot bypass a
+            # Lower()-only dedupe, Lower() for case — the HourType shape.
+            models.UniqueConstraint(
+                Lower(Trim("name")),
+                "company",
+                name="uniq_building_type_name_per_company_ci",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
 
 
 class Building(models.Model):
@@ -10,6 +100,22 @@ class Building(models.Model):
     )
 
     name = models.CharField(max_length=255)
+    # Sprint 178 §1 — the building's kind, from the per-company catalog
+    # above. Optional: every existing building predates the catalog and
+    # none of them is going to be classified by a migration guessing.
+    #
+    # SET_NULL, not PROTECT: a building outlives its classification, and
+    # a type that can never be deleted because one building was once
+    # tagged with it makes the catalog unmanageable. Losing the tag is
+    # recoverable; an undeletable catalog row is not.
+    building_type = models.ForeignKey(
+        "buildings.BuildingType",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="buildings",
+        help_text="Optional classification from this company's own catalog.",
+    )
     address = models.CharField(max_length=500, blank=True)
     city = models.CharField(max_length=120, blank=True)
     country = models.CharField(max_length=120, blank=True)

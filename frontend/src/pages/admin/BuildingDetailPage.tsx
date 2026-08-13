@@ -420,6 +420,22 @@ export function BuildingDetailPage() {
                 {building.address || "—"}
               </div>
             </div>
+            {/* Sprint 178 §1 — the building's kind, from this company's
+                own catalog. Renders the em dash when unclassified, the
+                same as every other optional field on this page. */}
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("building_detail.field_building_type")}
+              </div>
+              <div
+                className={`detail-field-value${
+                  building.building_type_name ? "" : " muted-empty"
+                }`}
+                data-testid="building-detail-building-type"
+              >
+                {building.building_type_name || "—"}
+              </div>
+            </div>
             <div className="detail-field-row">
               <div className="detail-field-label">
                 {t("building_detail.field_city")}

@@ -18,7 +18,9 @@ import {
   updateBuilding,
 } from "../../api/admin";
 import type { BuildingWritePayload } from "../../api/admin";
+import { listBuildingTypes } from "../../api/admin";
 import type {
+  BuildingTypeOption,
   BuildingAdmin,
   BuildingManagerMembership,
   CompanyAdmin,
@@ -53,6 +55,10 @@ export function BuildingFormPage() {
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const [postalCode, setPostalCode] = useState("");
+  // Sprint 178 §1 — the building's kind, from this company's own
+  // catalog. Optional everywhere: most buildings will never carry one.
+  const [buildingType, setBuildingType] = useState<number | "">("");
+  const [buildingTypes, setBuildingTypes] = useState<BuildingTypeOption[]>([]);
 
   // Sprint 154 §H (building half) — the mirror image of the customer
   // form's linked-buildings section: pick the CUSTOMERS served here, in
@@ -107,6 +113,9 @@ export function BuildingFormPage() {
         city: city.trim(),
         country: country.trim(),
         postal_code: postalCode.trim(),
+        // "" means unclassified, and null is what clears the FK. Sending
+        // "" would be a 400 on a nullable integer field.
+        building_type: buildingType === "" ? null : Number(buildingType),
       };
       if (isCreate && company !== "") payload.company = Number(company);
       return payload;
@@ -118,11 +127,45 @@ export function BuildingFormPage() {
       setCity(entity.city);
       setCountry(entity.country);
       setPostalCode(entity.postal_code);
+      setBuildingType(entity.building_type ?? "");
     },
     successPath: (entity) => `/admin/buildings/${entity.id}?saved=ok`,
     onEditSuccess: () => setSavedBanner(t("buildings.banner_saved")),
   });
   const building = form.entity;
+
+  /** Sprint 178 §1 — this company's building types.
+   *
+   *  Keyed on the RESOLVED company (the picked one in create mode, the
+   *  building's own in edit mode) so switching company reloads the right
+   *  catalog rather than offering the previous company's types — which
+   *  the server would refuse anyway, but only after the operator had
+   *  chosen one.
+   *
+   *  Non-fatal on failure: an unreachable catalog must not stop somebody
+   *  saving a building's address. */
+  const typeCompany = isCreate ? company : (building?.company ?? "");
+  useEffect(() => {
+    let cancelled = false;
+    // Resolved rather than an early `setBuildingTypes([])`: a synchronous
+    // setState in an effect body is banned (`react-hooks/set-state-in-effect`),
+    // so the no-company case travels the same promise path as the rest.
+    const pending =
+      typeCompany === ""
+        ? Promise.resolve([] as BuildingTypeOption[])
+        : listBuildingTypes(typeCompany);
+    pending
+      .then((options) => {
+        if (!cancelled) setBuildingTypes(options);
+      })
+      .catch(() => {
+        if (!cancelled) setBuildingTypes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [typeCompany]);
+
   const numericId = form.numericId;
 
   // Membership section state.
@@ -465,6 +508,37 @@ export function BuildingFormPage() {
                 value={city}
                 onChange={(event) => setCity(event.target.value)}
               />
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="building-type">
+                {t("building_form.field_building_type")}
+              </label>
+              <select
+                id="building-type"
+                className="field-select"
+                value={buildingType}
+                onChange={(event) =>
+                  setBuildingType(
+                    event.target.value === "" ? "" : Number(event.target.value),
+                  )
+                }
+                data-testid="building-type-select"
+              >
+                <option value="">{t("building_form.building_type_none")}</option>
+                {/* ACTIVE types only, PLUS whatever this building already
+                    carries — so an archived type stays visible on the row
+                    that has it instead of silently resetting to "none"
+                    the next time somebody saves the form. */}
+                {buildingTypes
+                  .filter(
+                    (option) => option.is_active || option.id === buildingType,
+                  )
+                  .map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+              </select>
             </div>
             <div className="field">
               <label className="field-label" htmlFor="building-postal">

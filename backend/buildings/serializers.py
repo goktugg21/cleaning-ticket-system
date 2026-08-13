@@ -31,6 +31,11 @@ class BuildingSerializer(serializers.ModelSerializer):
     # names plus the true total, so the client never has to fetch the
     # whole membership set to render a cell.
     customer_names = serializers.SerializerMethodField()
+    # Sprint 178 §1 — the type's NAME travels with the row so the list and
+    # the detail can render it without a second request. `select_related`
+    # in the viewset keeps it free; the fallback is for the single-object
+    # paths that serialise a bare Building.
+    building_type_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Building
@@ -38,6 +43,10 @@ class BuildingSerializer(serializers.ModelSerializer):
             "id",
             "company",
             "name",
+            # Sprint 178 §1 — writable (the building form offers it) and
+            # its resolved name alongside, read-only.
+            "building_type",
+            "building_type_name",
             "address",
             "city",
             "country",
@@ -89,6 +98,14 @@ class BuildingSerializer(serializers.ModelSerializer):
 
     def get_contact_count(self, obj: Building) -> int:
         return self._annotated_or_count(obj, "_contact_count", "contact_links")
+
+    def get_building_type_name(self, obj):
+        """The type's name, or None when the building is unclassified.
+
+        None rather than "" so the client can tell "no type" from "a type
+        whose name is empty" — the latter cannot happen, but a serializer
+        that erases the difference makes the client guess."""
+        return obj.building_type.name if obj.building_type_id else None
 
     def get_customer_names(self, obj: Building) -> dict:
         """`{"names": [...], "total": N}` — the first few linked customer
