@@ -1,7 +1,9 @@
+import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PeriodReportView } from "./PeriodReportView";
 import type { PeriodPayload } from "./PeriodReportView";
+import type { ReportFilters } from "../../api/reports";
 
 /**
  * Sprint 178 §2 — the three employee-hours reports and the ticket report.
@@ -10,6 +12,12 @@ import type { PeriodPayload } from "./PeriodReportView";
  * period picker, the fetch, the CSV and the PDF all live in
  * `PeriodReportView`. Splitting four ~40-line tables across four files
  * would be four imports for no separation.
+ *
+ * Sprint 180 §1 — all four take the Reports page's `filters` and pass
+ * them straight through. They hold no filter state of their own: the
+ * shell owns the period and the page owns the company and the building,
+ * which is the arrangement that keeps the CSV and the screen describing
+ * the same slice.
  */
 
 const DAYS = [
@@ -22,6 +30,11 @@ const DAYS = [
   "sunday",
 ] as const;
 
+/** Every one of the four takes exactly this. */
+interface ReportViewProps {
+  filters: ReportFilters;
+}
+
 interface ByBuildingPayload extends PeriodPayload {
   buildings: {
     building: number | null;
@@ -31,7 +44,7 @@ interface ByBuildingPayload extends PeriodPayload {
   }[];
 }
 
-export function EmployeeHoursByBuildingView() {
+export function EmployeeHoursByBuildingView({ filters }: ReportViewProps) {
   const { t } = useTranslation(["reports", "common"]);
   return (
     <PeriodReportView<ByBuildingPayload>
@@ -39,6 +52,7 @@ export function EmployeeHoursByBuildingView() {
       stem="employee-hours-by-building"
       emptyHint={t("employee_hours_building_empty")}
       testIdPrefix="employee-hours-building"
+      filters={filters}
     >
       {(payload) => (
         <div className="table-wrap">
@@ -77,21 +91,33 @@ export function EmployeeHoursByBuildingView() {
   );
 }
 
+interface WeeklyHourTypeBucket {
+  hour_type: number;
+  hour_type_name: string;
+  hour_type_code: string | null;
+  days: Record<string, string>;
+  total: string;
+}
+
 interface WeeklyPayload extends PeriodPayload {
   weeks: {
     iso_year: number;
     iso_week: number;
     total: string;
+    /** Sprint 180 §3 — the Monday-to-Sunday column totals for the week. */
+    day_totals: Record<string, string>;
     employees: {
       employee: number;
       employee_name: string;
       days: Record<string, string>;
       total: string;
+      /** Sprint 180 §3 — the split under the person's own row. */
+      hour_types: WeeklyHourTypeBucket[];
     }[];
   }[];
 }
 
-export function EmployeeHoursWeeklyView() {
+export function EmployeeHoursWeeklyView({ filters }: ReportViewProps) {
   const { t } = useTranslation(["reports", "common"]);
   return (
     <PeriodReportView<WeeklyPayload>
@@ -99,6 +125,7 @@ export function EmployeeHoursWeeklyView() {
       stem="employee-hours-weekly"
       emptyHint={t("employee_hours_weekly_empty")}
       testIdPrefix="employee-hours-weekly"
+      filters={filters}
     >
       {(payload) => (
         <div className="table-wrap">
@@ -118,6 +145,10 @@ export function EmployeeHoursWeeklyView() {
                 <thead>
                   <tr>
                     <th>{t("employee")}</th>
+                    {/* Sprint 180 §3 — normal, overtime and sick hours
+                        are paid differently, so a week summed into one
+                        number cannot be handed to payroll. */}
+                    <th>{t("hour_type")}</th>
                     {DAYS.map((day) => (
                       <th key={day} className="contract-num">
                         {t(`common:contract_hours.day_${day}`)}
@@ -128,17 +159,62 @@ export function EmployeeHoursWeeklyView() {
                 </thead>
                 <tbody>
                   {week.employees.map((employee) => (
-                    <tr key={employee.employee}>
-                      <td>{employee.employee_name}</td>
-                      {DAYS.map((day) => (
-                        <td key={day} className="contract-num">
-                          {employee.days[day]}
-                        </td>
+                    // A Fragment per person, not a nested table: the
+                    // person's combined row and the hour-type rows under
+                    // it are one group, and nesting a table inside a
+                    // cell would give the sub-rows their own column
+                    // widths — the split would stop lining up with the
+                    // weekday columns it is a split OF.
+                    <Fragment key={employee.employee}>
+                      <tr>
+                        <td>{employee.employee_name}</td>
+                        <td className="muted">—</td>
+                        {DAYS.map((day) => (
+                          <td key={day} className="contract-num">
+                            {employee.days[day]}
+                          </td>
+                        ))}
+                        <td className="contract-num">{employee.total}</td>
+                      </tr>
+                      {employee.hour_types.map((bucket) => (
+                        <tr key={bucket.hour_type}>
+                          <td />
+                          <td className="muted small">
+                            {bucket.hour_type_name}
+                            {bucket.hour_type_code
+                              ? ` (${bucket.hour_type_code})`
+                              : ""}
+                          </td>
+                          {DAYS.map((day) => (
+                            <td key={day} className="contract-num muted small">
+                              {bucket.days[day]}
+                            </td>
+                          ))}
+                          <td className="contract-num muted small">
+                            {bucket.total}
+                          </td>
+                        </tr>
                       ))}
-                      <td className="contract-num">{employee.total}</td>
-                    </tr>
+                    </Fragment>
                   ))}
                 </tbody>
+                <tfoot>
+                  {/* Sprint 180 §3 — "how much did the team work on
+                      Wednesday" was answerable only by adding a column
+                      up with a finger. Summed server-side from the same
+                      buckets the rows are, so it cannot disagree with
+                      them. */}
+                  <tr data-testid={`weekly-day-totals-${week.iso_year}-${week.iso_week}`}>
+                    <th>{t("total")}</th>
+                    <th />
+                    {DAYS.map((day) => (
+                      <th key={day} className="contract-num">
+                        {week.day_totals[day]}
+                      </th>
+                    ))}
+                    <th className="contract-num">{week.total}</th>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           ))}
@@ -160,7 +236,7 @@ interface ByExtraWorkPayload extends PeriodPayload {
   }[];
 }
 
-export function EmployeeHoursByExtraWorkView() {
+export function EmployeeHoursByExtraWorkView({ filters }: ReportViewProps) {
   const { t } = useTranslation(["reports", "common"]);
   return (
     <PeriodReportView<ByExtraWorkPayload>
@@ -172,6 +248,7 @@ export function EmployeeHoursByExtraWorkView() {
       // means "nothing has been tagged yet", not "nobody worked".
       emptyHint={t("employee_hours_extra_work_empty")}
       testIdPrefix="employee-hours-extra-work"
+      filters={filters}
     >
       {(payload) => (
         <div className="table-wrap">
@@ -223,7 +300,7 @@ interface TicketReportPayload extends PeriodPayload {
   average_duration_days: number | null;
 }
 
-export function TicketReportView() {
+export function TicketReportView({ filters }: ReportViewProps) {
   const { t } = useTranslation(["reports", "common"]);
   return (
     <PeriodReportView<TicketReportPayload>
@@ -231,6 +308,7 @@ export function TicketReportView() {
       stem="ticket-report"
       emptyHint={t("ticket_report_empty")}
       testIdPrefix="ticket-report"
+      filters={filters}
     >
       {(payload) => (
         <div className="table-wrap">

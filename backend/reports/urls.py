@@ -5,6 +5,7 @@ from .views import (
     EmployeeHoursByExtraWorkView,
     EmployeeHoursWeeklyView,
     HourSourceOptionsView,
+    PeriodReportSummariesView,
     TicketReportView,
     WorkerHoursExportView,
     WorkerHoursReportView,
@@ -46,6 +47,14 @@ urlpatterns = [
         "hour-sources/",
         HourSourceOptionsView.as_view(),
         name="report-hour-sources",
+    ),
+    # Sprint 180 §2 — the four report CARDS, in one request. A literal
+    # path, before the report routes, in keeping with the ordering rule
+    # below.
+    path(
+        "period-report-summaries/",
+        PeriodReportSummariesView.as_view(),
+        name="report-period-summaries",
     ),
     # Sprint 178 §2 — the four reports. EXPORT literal before the report
     # route in each pair, the ordering this repo keeps so a later

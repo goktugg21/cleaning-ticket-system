@@ -21,11 +21,13 @@ from .hour_sources import available_sources
 from .employee_hours import (
     build_employee_hours_by_building,
     build_employee_hours_by_extra_work,
+    build_employee_hours_summaries,
     build_employee_hours_weekly,
     default_period as employee_hours_default_period,
 )
 from .ticket_report import (
     build_ticket_report,
+    build_ticket_report_summary,
     default_period as ticket_report_default_period,
 )
 from .dimensions import (
@@ -1115,6 +1117,36 @@ def _report_period(request, default_fn):
     return (date_from, date_to), None
 
 
+def _report_scope(request):
+    """The `?company=` / `?building=` narrowing, or None when neither was asked.
+
+    Sprint 180 §1. Resolution is SKIPPED when no filter is present, and
+    that is deliberate rather than an optimisation detail:
+    `resolve_scope` runs two membership lookups to decide what the actor
+    may reach, and an unfiltered report must not pay for a question
+    nobody asked. It also keeps the no-filter query counts the Sprint 178
+    tests measure exactly where they were.
+    """
+    raw_company = _first_param(request.query_params, "company")
+    raw_building = _first_param(request.query_params, "building")
+    if not raw_company and not raw_building:
+        return None
+    # Raises PermissionDenied (403) for a company/building the actor may
+    # not reach and ValidationError (400) for a malformed id or a
+    # building/company mismatch — the same contract the twelve charts on
+    # the same page already answer to, which is the point: one page, one
+    # filter bar, one meaning.
+    return resolve_scope(request.user, raw_company, raw_building)
+
+
+EMPTY_SCOPE = {
+    "company_id": None,
+    "company_name": None,
+    "building_id": None,
+    "building_name": None,
+}
+
+
 class _PeriodReportView(APIView):
     """Shared plumbing for the Sprint 178 reports.
 
@@ -1127,6 +1159,14 @@ class _PeriodReportView(APIView):
     Subclasses set `build`, `csv_builder`, `pdf_builder`, `stem` and
     `default_period`. One class rather than four near-identical ones,
     because four copies of a permission gate is how two of them drift.
+
+    Sprint 180 §1 — these four took NO filters. The page computed a
+    company, a building and a date range, handed them to the twelve
+    charts, and rendered the four report cards with no props at all, so
+    "this building, last month" was answerable on one half of the page
+    and not the other. It is the daily question. The scope now reaches
+    the builders, and it is echoed back in `scope` so the screen, the CSV
+    and the PDF all state which slice they are showing.
     """
 
     permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
@@ -1142,7 +1182,11 @@ class _PeriodReportView(APIView):
         if error is not None:
             return error
         date_from, date_to = period
-        payload = self.build(request.user, date_from, date_to)
+        scope = _report_scope(request)
+        payload = self.build(request.user, date_from, date_to, scope=scope)
+        # Echoed on EVERY response, filtered or not, so no consumer has
+        # to test for the key's presence to know what it is looking at.
+        payload["scope"] = scope.to_dict() if scope is not None else dict(EMPTY_SCOPE)
         payload["generated_at"] = timezone.now()
 
         if fmt is None:
@@ -1219,3 +1263,67 @@ class TicketReportView(_PeriodReportView):
     pdf_builder = staticmethod(build_ticket_report_pdf)
     stem = "ticket-report"
     default_period = staticmethod(ticket_report_default_period)
+
+
+class PeriodReportSummariesView(APIView):
+    """GET /api/reports/period-report-summaries/?from=&to=&company=&building=
+
+    Sprint 180 §2 — what the four report cards SAY before they are opened.
+
+    ## Why one endpoint and not four
+
+    The obvious build is a summary fetch per card. That is four extra
+    requests on every visit to a page that already fires thirteen, to
+    print a dozen numbers. One request returns all four summaries, which
+    is why this view exists at all rather than each card fetching its own
+    report and reading the total off it.
+
+    ## What it costs
+
+    Five queries, flat, whatever the period holds: three aggregates for
+    the hours cards (`build_employee_hours_summaries`) and two for the
+    ticket card (`build_ticket_report_summary`). No report is built and
+    no row list is materialised. Pinned by `assertNumQueries`.
+
+    ## Why the numbers cannot drift from the reports
+
+    Every figure comes from the same scoped querysets and the same
+    helpers the reports themselves use — `_base` for the hours,
+    `_scoped_tickets` + `_first_terminal_by_ticket` for the tickets. A
+    card saying 41 hours and the report it opens saying 38 is the one
+    failure that would make the whole panel untrustworthy, so there is no
+    second implementation to disagree with.
+
+    Same permission gate as the reports it summarises: a summary of a
+    figure is the figure.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        period, error = _report_period(request, employee_hours_default_period)
+        if error is not None:
+            return error
+        date_from, date_to = period
+        if date_from > date_to:
+            # The builders order the bounds themselves; the envelope has
+            # to say the same thing they used or the card would print a
+            # period the numbers do not belong to.
+            date_from, date_to = date_to, date_from
+        scope = _report_scope(request)
+
+        summaries = build_employee_hours_summaries(
+            request.user, date_from, date_to, scope=scope
+        )
+        summaries["tickets"] = build_ticket_report_summary(
+            request.user, date_from, date_to, scope=scope
+        )
+        return Response(
+            {
+                "from": date_from.isoformat(),
+                "to": date_to.isoformat(),
+                "scope": scope.to_dict() if scope is not None else dict(EMPTY_SCOPE),
+                "cards": summaries,
+                "generated_at": timezone.now().isoformat(),
+            }
+        )

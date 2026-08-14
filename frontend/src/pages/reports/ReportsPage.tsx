@@ -13,6 +13,7 @@ import {
 } from "./EmployeeHoursViews";
 import { WorkerHoursCardTiles } from "./charts/WorkerHoursCardTiles";
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
+import { api } from "../../api/client";
 import type { ReportFilters } from "../../api/reports";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
@@ -39,6 +40,60 @@ const RANGE_PRESETS: Array<{
 ];
 
 /**
+ * Sprint 180 §2 — what the four report cards say before they are opened.
+ *
+ * ONE request returns all four summaries
+ * (`/reports/period-report-summaries/`), not one per card. Four extra
+ * calls on a page that already fires thirteen, to print a dozen numbers,
+ * is not a trade worth making — and a per-card fetch would have meant
+ * each card reading the total off its own full report, which is the
+ * whole report built to display one figure.
+ */
+interface HoursCardSummary {
+  total_hours: string;
+  entries: number;
+  employees: number;
+}
+
+interface ReportCardSummaries {
+  hours_building: HoursCardSummary & { buildings: number };
+  hours_weekly: HoursCardSummary & { weeks: number };
+  hours_extra_work: HoursCardSummary & { jobs: number };
+  tickets: {
+    total: number;
+    finished: number;
+    open: number;
+    average_duration_days: number | null;
+  };
+}
+
+interface SummariesResponse {
+  from: string;
+  to: string;
+  cards: ReportCardSummaries;
+}
+
+interface CardTile {
+  key: string;
+  labelKey: string;
+  value: string;
+}
+
+/**
+ * Only ever used to get the tile LABELS out of `card.tiles()` before the
+ * answer arrives; every value it produces is overwritten with an em
+ * dash. A card that renders four labelled tiles at zero and then swaps
+ * them for the real numbers would be claiming an answer it does not have
+ * yet, so the zeros never reach the screen.
+ */
+const PLACEHOLDER_SUMMARIES: ReportCardSummaries = {
+  hours_building: { total_hours: "0", entries: 0, employees: 0, buildings: 0 },
+  hours_weekly: { total_hours: "0", entries: 0, employees: 0, weeks: 0 },
+  hours_extra_work: { total_hours: "0", entries: 0, employees: 0, jobs: 0 },
+  tickets: { total: 0, finished: 0, open: 0, average_duration_days: null },
+};
+
+/**
  * Sprint 178 §2 — the four reports, as ONE list that both the cards and
  * the modals iterate.
  *
@@ -47,6 +102,14 @@ const RANGE_PRESETS: Array<{
  * group rendered a headerless column and stayed invisible for three
  * sprints because two consumers each had their own list. One constant,
  * two consumers, and the compiler sees every entry.
+ *
+ * Sprint 180 §2 adds `tiles` and `emptyKey` to the SAME entries, for the
+ * same reason: the figures a card shows and the report it opens must be
+ * declared in one place or they drift apart.
+ *
+ * `tiles` takes the whole `cards` object rather than its own slice so
+ * the entry stays a plain literal the compiler can check — a per-card
+ * generic here would buy nothing and cost the exhaustiveness.
  */
 const REPORT_CARDS = [
   {
@@ -55,6 +118,15 @@ const REPORT_CARDS = [
     titleKey: "employee_hours_building_title",
     subtitleKey: "employee_hours_building_subtitle",
     View: EmployeeHoursByBuildingView,
+    emptyKey: "employee_hours_building_empty",
+    isEmpty: (cards: ReportCardSummaries) =>
+      cards.hours_building.entries === 0,
+    tiles: (cards: ReportCardSummaries): CardTile[] => [
+      { key: "hours", labelKey: "tile_hours", value: cards.hours_building.total_hours },
+      { key: "entries", labelKey: "tile_entries", value: String(cards.hours_building.entries) },
+      { key: "buildings", labelKey: "tile_buildings", value: String(cards.hours_building.buildings) },
+      { key: "employees", labelKey: "tile_employees", value: String(cards.hours_building.employees) },
+    ],
   },
   {
     key: "hours_weekly" as const,
@@ -62,6 +134,14 @@ const REPORT_CARDS = [
     titleKey: "employee_hours_weekly_title",
     subtitleKey: "employee_hours_weekly_subtitle",
     View: EmployeeHoursWeeklyView,
+    emptyKey: "employee_hours_weekly_empty",
+    isEmpty: (cards: ReportCardSummaries) => cards.hours_weekly.entries === 0,
+    tiles: (cards: ReportCardSummaries): CardTile[] => [
+      { key: "hours", labelKey: "tile_hours", value: cards.hours_weekly.total_hours },
+      { key: "entries", labelKey: "tile_entries", value: String(cards.hours_weekly.entries) },
+      { key: "weeks", labelKey: "tile_weeks", value: String(cards.hours_weekly.weeks) },
+      { key: "employees", labelKey: "tile_employees", value: String(cards.hours_weekly.employees) },
+    ],
   },
   {
     key: "hours_extra_work" as const,
@@ -69,6 +149,18 @@ const REPORT_CARDS = [
     titleKey: "employee_hours_extra_work_title",
     subtitleKey: "employee_hours_extra_work_subtitle",
     View: EmployeeHoursByExtraWorkView,
+    // This is the one that legitimately answers NOTHING on data entered
+    // before Sprint 177's job picker, so its empty line explains rather
+    // than states — see the key's own text.
+    emptyKey: "employee_hours_extra_work_empty",
+    isEmpty: (cards: ReportCardSummaries) =>
+      cards.hours_extra_work.entries === 0,
+    tiles: (cards: ReportCardSummaries): CardTile[] => [
+      { key: "hours", labelKey: "tile_hours", value: cards.hours_extra_work.total_hours },
+      { key: "entries", labelKey: "tile_entries", value: String(cards.hours_extra_work.entries) },
+      { key: "jobs", labelKey: "tile_jobs", value: String(cards.hours_extra_work.jobs) },
+      { key: "employees", labelKey: "tile_employees", value: String(cards.hours_extra_work.employees) },
+    ],
   },
   {
     key: "tickets" as const,
@@ -76,6 +168,23 @@ const REPORT_CARDS = [
     titleKey: "ticket_report_title",
     subtitleKey: "ticket_report_subtitle",
     View: TicketReportView,
+    emptyKey: "ticket_report_empty",
+    isEmpty: (cards: ReportCardSummaries) => cards.tickets.total === 0,
+    tiles: (cards: ReportCardSummaries): CardTile[] => [
+      { key: "tickets", labelKey: "tile_tickets", value: String(cards.tickets.total) },
+      { key: "finished", labelKey: "tile_finished", value: String(cards.tickets.finished) },
+      { key: "open", labelKey: "tile_open", value: String(cards.tickets.open) },
+      {
+        key: "avg_days",
+        labelKey: "tile_avg_days",
+        // An em dash, not a zero: nothing finished means there is no
+        // average, and 0 would read as "everything was instant".
+        value:
+          cards.tickets.average_duration_days === null
+            ? "—"
+            : String(cards.tickets.average_duration_days),
+      },
+    ],
   },
 ];
 
@@ -173,6 +282,38 @@ export function ReportsPage() {
     }),
     [filters.from, filters.to, filters.company, filters.building],
   );
+
+  // Sprint 180 §2 — ONE fetch for all four card summaries, re-run when
+  // the filter bar or the Refresh button moves. A failed read leaves the
+  // tiles at their dashes rather than putting an error banner across
+  // four cards whose job is a summary; the report behind each one
+  // reports its own errors properly when opened.
+  const [summaries, setSummaries] = useState<SummariesResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const params: Record<string, string> = {
+      from: apiFilters.from ?? "",
+      to: apiFilters.to ?? "",
+    };
+    if (apiFilters.company !== undefined) {
+      params.company = String(apiFilters.company);
+    }
+    if (apiFilters.building !== undefined) {
+      params.building = String(apiFilters.building);
+    }
+    api
+      .get<SummariesResponse>("/reports/period-report-summaries/", { params })
+      .then((response) => {
+        if (!cancelled) setSummaries(response.data);
+      })
+      .catch(() => {
+        if (!cancelled) setSummaries(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFilters, refreshKey]);
 
   return (
     <div>
@@ -511,33 +652,83 @@ export function ReportsPage() {
             a sub-page as far as an operator is concerned. Iterating a
             constant rather than repeating four near-identical sections,
             for the reason CLAUDE.md records about second render lists. */}
-        {REPORT_CARDS.map((card) => (
-          <section
-            key={card.key}
-            className="card"
-            /* Sprint 179B §4 — 360, the height every other card in this
-               grid already uses. At 220 the four new cards sat visibly
-               short inside one auto-fit grid, which reads as a row that
-               did not finish loading rather than as four cards. */
-            style={{ padding: "20px 22px", minHeight: 360 }}
-            data-testid={`chart-card-${card.testId}`}
-          >
-            <h3 className="section-title">{t(card.titleKey)}</h3>
-            <p className="muted small" style={{ marginBottom: 8 }}>
-              {t(card.subtitleKey)}
-            </p>
-            <div style={{ marginTop: 10 }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setOpenReport(card.key)}
-                data-testid={`open-${card.testId}`}
+        {REPORT_CARDS.map((card) => {
+          const cards = summaries?.cards;
+          const tiles: CardTile[] = cards
+            ? card.tiles(cards)
+            : // Before the answer arrives: the same four labels with
+              // dashes, so the card does not change SHAPE when it loads.
+              card.tiles(PLACEHOLDER_SUMMARIES).map((tile) => ({
+                ...tile,
+                value: "—",
+              }));
+          return (
+            <section
+              key={card.key}
+              className="card"
+              /* Sprint 179B §4 — 360, the height every other card in this
+                 grid already uses. At 220 the four new cards sat visibly
+                 short inside one auto-fit grid, which reads as a row that
+                 did not finish loading rather than as four cards. */
+              style={{ padding: "20px 22px", minHeight: 360 }}
+              data-testid={`chart-card-${card.testId}`}
+            >
+              <h3 className="section-title">{t(card.titleKey)}</h3>
+              <p className="muted small" style={{ marginBottom: 8 }}>
+                {t(card.subtitleKey)}
+              </p>
+              {/* Sprint 180 §2 — the card answers something on its own.
+                  The same `.hours-tile` grid the Worker hour report's
+                  card uses, so the row reads as one set of tiles. */}
+              <div
+                className="hours-tile-row"
+                data-testid={`card-tiles-${card.testId}`}
+                style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
               >
-                {t("open_report")}
-              </button>
-            </div>
-          </section>
-        ))}
+                {tiles.map((tile) => (
+                  <div key={tile.key} className="hours-tile">
+                    <span className="hours-tile-label">
+                      {t(tile.labelKey)}
+                    </span>
+                    <span className="hours-tile-value">{tile.value}</span>
+                  </div>
+                ))}
+              </div>
+              {summaries && (
+                <p className="muted small" style={{ marginBottom: 4 }}>
+                  {t("card_period", {
+                    from: summaries.from,
+                    to: summaries.to,
+                  })}
+                </p>
+              )}
+              {/* An empty card is an ANSWER and says so, in the report's
+                  own words. The extra-work one legitimately finds
+                  nothing on data entered before Sprint 177's job
+                  picker, and the owner must be able to tell that from a
+                  panel that failed to load. */}
+              {cards && card.isEmpty(cards) && (
+                <p
+                  className="muted small"
+                  data-testid={`card-empty-${card.testId}`}
+                  style={{ marginTop: 0 }}
+                >
+                  {t(card.emptyKey)}
+                </p>
+              )}
+              <div style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setOpenReport(card.key)}
+                  data-testid={`open-${card.testId}`}
+                >
+                  {t("open_report")}
+                </button>
+              </div>
+            </section>
+          );
+        })}
       </div>
 
       {REPORT_CARDS.map((card) =>
@@ -599,7 +790,11 @@ export function ReportsPage() {
                   {t("common:cancel")}
                 </button>
               </div>
-              <card.View />
+              {/* Sprint 180 §1 — the page's own company, building and
+                  date range, the SAME object the twelve charts read.
+                  The modal mounts fresh on every open, so the report
+                  always starts on the slice the page is showing. */}
+              <card.View filters={apiFilters} />
             </div>
           </div>
         ) : null,
