@@ -134,5 +134,11 @@
   "agenda.upcoming_none": "Nothing planned after this week.",
   "agenda.overdue_desc": "Everything late, in any week — a different question from what is planned this week.",
   "agenda.col_planned": "Planned for",
-  "agenda.truncated_note": "This list shows the first {{count}} rows. The counts above are complete — the server computes them over the whole scope."
+  "agenda.truncated_note": "This list shows the first {{count}} rows. The counts above are complete — the server computes them over the whole scope.",
+  "agenda.undated_title": "Not planned yet",
+  "agenda.undated_desc": "Work that belongs to no week. Plan it for today, or open it to pick a date.",
+  "agenda.undated_plan_today": "Plan for today",
+  "agenda.undated_planning": "Planning...",
+  "agenda.undated_planned": "Planned for today.",
+  "agenda.undated_open_extra_work": "Open extra work"
 }

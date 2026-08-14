@@ -34,18 +34,24 @@ export function ExtraWorkOriginPill({
   testId: string;
   style?: CSSProperties;
 }) {
-  const { t } = useTranslation("dashboard");
+  // Sprint 181 §5 — the pill says the NAME, from `common`, which is the
+  // same string the nav entry, the sub-page title and the Extra Work
+  // list's second tab render. It used to read `ops_type_extra_work` out
+  // of the `dashboard` namespace: a third spelling of one concept
+  // ("extra work origin" / "spawned from extra work" / "Extra work"),
+  // which is the drift §5 exists to end.
+  const { t } = useTranslation("common");
   return (
     <Link
       to={`/extra-work/${ewId}`}
       className="work-type-pill work-type-pill-extra-work work-type-pill-link"
-      title={t("ticket_row_extra_work_origin_title")}
+      title={t("chargeable_work.pill_title")}
       data-testid={testId}
       style={style}
       onClick={(event) => event.stopPropagation()}
     >
       <Layers size={12} strokeWidth={2.5} aria-hidden />
-      {t("ops_type_extra_work")}
+      {t("chargeable_work.pill")}
     </Link>
   );
 }

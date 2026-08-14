@@ -46,7 +46,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { updateStaffSlot } from "../api/admin";
+import { setTicketSchedule, updateStaffSlot } from "../api/admin";
 import type { SlotStatus } from "../api/admin";
 import { getApiError } from "../api/client";
 import { listAllTickets } from "../api/tickets";
@@ -359,6 +359,11 @@ function WorkPlanWeek() {
     null,
   );
   const [unableTarget, setUnableTarget] = useState<WorkPlanEntry | null>(null);
+  // Sprint 181 §8 — which undated row is being planned, and why the
+  // last attempt failed. Keyed by entry rather than a bare boolean so
+  // only the pressed button goes busy.
+  const [planningKey, setPlanningKey] = useState<string | null>(null);
+  const [planError, setPlanError] = useState("");
 
   const weekParam = formatIsoWeek(week);
 
@@ -386,6 +391,48 @@ function WorkPlanWeek() {
 
   function reload() {
     setRefreshKey((n) => n + 1);
+  }
+
+  /**
+   * Sprint 181 §8 — one action to move a job out of the undated lane
+   * and onto a day.
+   *
+   * "Today", not a date picker, because that is the action the lane
+   * exists for: the reason a job has no date is almost never that
+   * somebody meant a different one, it is that nobody set one. A picker
+   * asks a question; this answers the common case and leaves the
+   * uncommon one to the ticket's own schedule card.
+   *
+   * TICKET SLOTS ONLY, and that is a real limit rather than an
+   * oversight. An undated extra work is one with no `preferred_date`,
+   * and `preferred_date` is the CUSTOMER's wish (Sprint 176 §3 was
+   * explicit: the customer states a wish, the provider commits to a
+   * deadline). There is no provider endpoint that writes it, and adding
+   * one so the work plan could put words in a customer's mouth is a
+   * product decision, not a UI convenience. Those rows link through to
+   * the extra work instead.
+   */
+  async function planForToday(entry: WorkPlanEntry) {
+    if (entry.ticket_id === null) return;
+    setPlanningKey(entry.key);
+    setPlanError("");
+    try {
+      // Local noon: a bare midnight is the value most likely to fall
+      // into the previous day once the server converts to UTC, which is
+      // the bug `extra_work.billing.billing_month` had to be taught
+      // about. Noon is safe in every timezone this app runs in.
+      const today = new Date();
+      today.setHours(12, 0, 0, 0);
+      await setTicketSchedule(entry.ticket_id, {
+        scheduled_start_at: today.toISOString(),
+      });
+      push({ title: t("agenda.undated_planned"), variant: "success" });
+      reload();
+    } catch (err) {
+      setPlanError(getApiError(err));
+    } finally {
+      setPlanningKey(null);
+    }
   }
 
   /** Mon-Sun of the loaded week, ALWAYS all seven — a week with nothing
@@ -643,10 +690,57 @@ function WorkPlanWeek() {
         {t("agenda.missing_chips_note")}
       </p>
 
-      {counts !== null && counts.undated > 0 && (
-        <p className="muted small" data-testid="agenda-undated-note">
-          {t("agenda.undated_count", { count: counts.undated })}
-        </p>
+      {/* Sprint 181 §8 — the undated work has a PLACE now.
+          This was one muted sentence saying N items had no date. On
+          crmtest that sentence stood for 43 of 70 live tickets: two
+          thirds of the work admitted to and not shown, while six of the
+          seven week columns underneath read "Nothing planned". A count
+          is not somewhere to put something.
+          It sits ABOVE the week, because unplanned work is what you deal
+          with before you read a plan, and the action that moves a row
+          out of here and into the week is on the row itself. */}
+      {data && data.undated_entries.length > 0 && (
+        <section
+          className="card"
+          data-testid="agenda-undated-lane"
+          style={{ marginBottom: 18, padding: "16px 18px" }}
+        >
+          <div className="section-head-title" style={{ marginBottom: 4 }}>
+            {t("agenda.undated_title")}
+          </div>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            {t("agenda.undated_desc")}
+          </p>
+          <BoundedList
+            size="lg"
+            count={data.undated_entries.length}
+            ariaLabel={t("agenda.undated_title")}
+            testIdPrefix="agenda-undated"
+          >
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {data.undated_entries.map((entry) => (
+                <UndatedRow
+                  key={entry.key}
+                  entry={entry}
+                  busy={planningKey === entry.key}
+                  onPlanToday={() => planForToday(entry)}
+                />
+              ))}
+            </ul>
+          </BoundedList>
+          {data.truncated.undated_entries && (
+            <p className="wp-notice" role="status">
+              {t("agenda.truncated_note", {
+                count: data.limits.undated_entries,
+              })}
+            </p>
+          )}
+          {planError && (
+            <div className="alert-error" role="alert">
+              {planError}
+            </div>
+          )}
+        </section>
       )}
 
       {/* A list that silently stops is the same defect as a count that
@@ -809,6 +903,74 @@ function detailPath(
     return `/extra-work/${entry.extra_work_id}`;
   }
   return null;
+}
+
+/**
+ * Sprint 181 §8 — one row of the undated lane.
+ *
+ * Deliberately NOT `WorkPlanCard`. That card carries a planned window,
+ * a time, an overdue marker and completion actions — every one of which
+ * is about a job that HAS a date, and all of them would be blank or
+ * meaningless here. A row in this lane needs three things: what it is,
+ * where it is, and the one action that gets it out of this lane. The
+ * sprint's own rule applies hardest here: if a control does not change
+ * what somebody does next, it is not on this row.
+ */
+function UndatedRow({
+  entry,
+  busy,
+  onPlanToday,
+}: {
+  entry: WorkPlanEntry;
+  busy: boolean;
+  onPlanToday: () => void;
+}) {
+  const { t } = useTranslation(["staff_slots", "common"]);
+  const isTicket = entry.ticket_id !== null;
+  return (
+    <li
+      className="wp-undated-row"
+      data-testid={`agenda-undated-row-${entry.key}`}
+    >
+      <div className="wp-undated-row-main">
+        <Link
+          to={
+            isTicket
+              ? `/tickets/${entry.ticket_id}`
+              : `/extra-work/${entry.extra_work_id}`
+          }
+        >
+          {entry.ticket_no ? `${entry.ticket_no} · ` : ""}
+          {entry.title}
+        </Link>
+        <span className="muted small">
+          {[entry.building_name, entry.customer_name]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </div>
+      {/* Only a ticket can be planned from here — see `planForToday`
+          for why an extra work cannot, and links there instead. */}
+      {isTicket ? (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={onPlanToday}
+          disabled={busy}
+          data-testid={`agenda-undated-plan-${entry.key}`}
+        >
+          {busy ? t("agenda.undated_planning") : t("agenda.undated_plan_today")}
+        </button>
+      ) : (
+        <Link
+          to={`/extra-work/${entry.extra_work_id}`}
+          className="btn btn-secondary btn-sm"
+        >
+          {t("agenda.undated_open_extra_work")}
+        </Link>
+      )}
+    </li>
+  );
 }
 
 function WorkPlanCard({

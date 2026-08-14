@@ -138,7 +138,7 @@
   "ticket_status.in_progress": "In behandeling",
   "ticket_status.waiting_manager_review": "Wacht op beheerder",
   "ticket_status.waiting_customer_approval": "Wacht op klant",
-  "ticket_status.approved": "Goedgekeurd",
+  "ticket_status.approved": "Werk akkoord",
   "ticket_status.rejected": "Afgewezen",
   "ticket_status.closed": "Gesloten",
   "ticket_status.reopened_by_admin": "Heropend",
@@ -150,7 +150,7 @@
   "extra_work_status.requested": "Aangevraagd",
   "extra_work_status.under_review": "In behandeling",
   "extra_work_status.pricing_proposed": "Prijsvoorstel",
-  "extra_work_status.customer_approved": "Klant akkoord",
+  "extra_work_status.customer_approved": "Prijs akkoord",
   "extra_work_status.in_progress": "In uitvoering",
   "extra_work_status.completed": "Voltooid",
   "extra_work_status.customer_rejected": "Klant geweigerd",
@@ -2350,5 +2350,10 @@
   "building_detail.field_building_type": "Gebouwtype",
   "buildings.col_building_type": "Gebouwtype",
   "buildings.filter_building_type": "Gebouwtype",
-  "buildings.filter_type_all": "Alle types"
+  "buildings.filter_type_all": "Alle types",
+  "nav.chargeable_work": "Meerwerk",
+  "chargeable_work.title": "Meerwerk",
+  "chargeable_work.subtitle": "Meldingen die uit een goedgekeurd extra werk zijn ontstaan.",
+  "chargeable_work.pill": "Meerwerk",
+  "chargeable_work.pill_title": "Deze melding komt uit een extra werk. Open het extra werk."
 }

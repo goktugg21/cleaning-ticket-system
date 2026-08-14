@@ -138,7 +138,7 @@
   "ticket_status.in_progress": "In progress",
   "ticket_status.waiting_manager_review": "Waiting manager review",
   "ticket_status.waiting_customer_approval": "Waiting customer approval",
-  "ticket_status.approved": "Approved",
+  "ticket_status.approved": "Work approved",
   "ticket_status.rejected": "Rejected",
   "ticket_status.closed": "Closed",
   "ticket_status.reopened_by_admin": "Reopened by admin",
@@ -150,7 +150,7 @@
   "extra_work_status.requested": "Requested",
   "extra_work_status.under_review": "Under review",
   "extra_work_status.pricing_proposed": "Pricing proposed",
-  "extra_work_status.customer_approved": "Customer approved",
+  "extra_work_status.customer_approved": "Price approved",
   "extra_work_status.in_progress": "In progress",
   "extra_work_status.completed": "Completed",
   "extra_work_status.customer_rejected": "Customer rejected",
@@ -2350,5 +2350,10 @@
   "building_detail.field_building_type": "Building type",
   "buildings.col_building_type": "Building type",
   "buildings.filter_building_type": "Building type",
-  "buildings.filter_type_all": "All types"
+  "buildings.filter_type_all": "All types",
+  "nav.chargeable_work": "Chargeable work",
+  "chargeable_work.title": "Chargeable work",
+  "chargeable_work.subtitle": "Tickets that came from an approved extra work.",
+  "chargeable_work.pill": "Chargeable",
+  "chargeable_work.pill_title": "This ticket came from an extra work. Open the extra work."
 }

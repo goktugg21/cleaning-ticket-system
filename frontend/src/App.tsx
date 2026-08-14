@@ -225,6 +225,20 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          {/* Sprint 181 §5 — chargeable work: the tickets born from an
+              Extra Work, findable as a group. They ARE tickets and only
+              their origin differs, so this mounts the same list with one
+              server-side filter pinned on rather than a second
+              implementation. Static path, so it must sit above
+              /tickets/:id. */}
+          <Route
+            path="/tickets/chargeable"
+            element={
+              <ProtectedRoute>
+                <DashboardPage variant="chargeable-work" />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/tickets/new"
             element={

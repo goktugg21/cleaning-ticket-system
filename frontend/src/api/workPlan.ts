@@ -104,15 +104,22 @@ export interface WorkPlanResponse {
   entries: WorkPlanEntry[];
   overdue_entries: WorkPlanEntry[];
   upcoming_entries: WorkPlanEntry[];
+  /** Sprint 181 §8 — work that belongs to no week: a ticket slot with
+   *  no `scheduled_start_at`, or an extra work with no planned start.
+   *  `counts.undated` has always been here; the ROWS had not, so the
+   *  page could only say how much work it was declining to show. */
+  undated_entries: WorkPlanEntry[];
   limits: {
     entries: number;
     overdue_entries: number;
     upcoming_entries: number;
+    undated_entries: number;
   };
   truncated: {
     entries: boolean;
     overdue_entries: boolean;
     upcoming_entries: boolean;
+    undated_entries: boolean;
   };
 }
 

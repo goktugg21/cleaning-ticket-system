@@ -39,6 +39,7 @@ import type {
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
+  TicketStatus,
 } from "../api/types";
 import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -47,6 +48,8 @@ import { ChoiceDialog } from "../components/ChoiceDialog";
 import { StatusTiles } from "../components/StatusTiles";
 import { TrackTabs } from "../components/extra-work/TrackTabs";
 import type { ExtraWorkTrack } from "../components/extra-work/TrackTabs";
+import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
+import { ticketStatusLabelKey } from "../lib/enumLabels";
 import { EditModeToggle } from "../components/EditModeToggle";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
@@ -94,21 +97,96 @@ const BILLED_TO_I18N_KEY: Record<ExtraWorkBilledTo, string> = {
   CUSTOMER: "billed_to.customer",
 };
 
-const STATUS_FILTER_OPTIONS: ReadonlyArray<ExtraWorkStatus> = [
-  "REQUESTED",
-  "UNDER_REVIEW",
-  "PRICING_PROPOSED",
-  "CUSTOMER_APPROVED",
-  // Sprint 29 Batch 29.8 — surface the operational segment in the
-  // list filter so operators can narrow to in-progress / completed
-  // execution rows.
-  "IN_PROGRESS",
-  "COMPLETED",
-  "CUSTOMER_REJECTED",
-  "CANCELLED",
+/**
+ * Sprint 181 §2 — nine chips became four, twice.
+ *
+ * The list used to show all nine Extra Work statuses as chips on both
+ * tracks. The tracks already answer the biggest question, so the chips
+ * were repeating it — and worse, most of them were STRUCTURALLY zero
+ * wherever they sat. "In progress" and "Completed" cannot occur in a
+ * track defined as "has no ticket"; "Awaiting pricing" cannot occur in
+ * one defined as "the price is agreed and the work has begun". A chip
+ * that can only ever read 0 costs attention and returns nothing.
+ *
+ * So each track offers only what can be non-zero within it, and the two
+ * sets are of DIFFERENT KINDS, which is the whole of §1:
+ *
+ *   Quote & price   commercial states, read off the EXTRA WORK.
+ *   Work started    operational states, read off the TICKET.
+ *
+ * `REQUESTED` and `UNDER_REVIEW` collapse into one chip: they are two
+ * spellings of "nobody has priced this yet", and which one a row is in
+ * changes nothing anybody does next.
+ */
+interface ChipSpec<TStatus extends string> {
+  /** Group key. A chip can stand for several statuses, so this is not
+   *  necessarily an enum member. */
+  value: string;
+  statuses: ReadonlyArray<TStatus>;
+  labelKey: string;
+}
+
+const QUOTE_TRACK_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkStatus>> = [
+  {
+    value: "AWAITING_PRICING",
+    statuses: ["REQUESTED", "UNDER_REVIEW"],
+    labelKey: "list.chip_awaiting_pricing",
+  },
+  {
+    value: "PRICING_PROPOSED",
+    statuses: ["PRICING_PROPOSED"],
+    labelKey: "list.chip_with_customer",
+  },
+  {
+    value: "CUSTOMER_REJECTED",
+    statuses: ["CUSTOMER_REJECTED"],
+    labelKey: "list.chip_rejected",
+  },
+  {
+    value: "CANCELLED",
+    statuses: ["CANCELLED"],
+    labelKey: "list.chip_cancelled",
+  },
 ];
 
-type StatusFilter = ExtraWorkStatus | "ALL";
+/** Sprint 181 §1/§2 — the Work started chips are TICKET states, because
+ *  on that track the ticket is the only authority for how the work is
+ *  going. `WAITING_MANAGER_REVIEW` and `REOPENED_BY_ADMIN` fold into
+ *  "In progress" (internal hops, not states this list needs a chip for),
+ *  and both finished states fold into one "Finished" — an operator
+ *  scanning the list wants to know whether it is done, not which of two
+ *  doors it left by. */
+const STARTED_TRACK_CHIPS: ReadonlyArray<ChipSpec<TicketStatus>> = [
+  { value: "OPEN", statuses: ["OPEN"], labelKey: "list.chip_ticket_open" },
+  {
+    value: "IN_PROGRESS",
+    statuses: ["IN_PROGRESS", "WAITING_MANAGER_REVIEW", "REOPENED_BY_ADMIN"],
+    labelKey: "list.chip_ticket_in_progress",
+  },
+  {
+    value: "WAITING_CUSTOMER_APPROVAL",
+    statuses: ["WAITING_CUSTOMER_APPROVAL"],
+    labelKey: "list.chip_ticket_waiting_customer",
+  },
+  {
+    value: "FINISHED",
+    statuses: ["APPROVED", "CLOSED"],
+    labelKey: "list.chip_ticket_finished",
+  },
+];
+
+/** "" = no chip selected (the All tile). A chip value is a GROUP key,
+ *  not necessarily a raw enum member. */
+type StatusFilter = string;
+
+/** Sprint 181 §1 — the operational status of a row on the Work started
+ *  track, read off its ticket. The lowest-id ticket is the spawned one
+ *  (`build_ticket_map` picks the same row), and one ticket per Extra
+ *  Work has been the rule since Sprint 6A, so this is a lookup rather
+ *  than a reduction. */
+function operationalStatus(row: ExtraWorkRequestList): TicketStatus | null {
+  return row.spawned_tickets[0]?.status ?? null;
+}
 
 /** Sprint 180 §1(b) — a CUSTOMER_APPROVED request with zero operational
  *  tickets. It stays on the Quote & price track (operationally nothing
@@ -385,18 +463,26 @@ export function ExtraWorkList({
   // other one and offers the click (see the EmptyState `action` below).
   const [track, setTrack] = useState<ExtraWorkTrack>("QUOTE");
   // RF-18 (#107) — dashboard widgets deep-link with ?status=<EW status>;
-  // read once at mount (validated), the dropdown owns the state after.
-  // Sprint 158 §2 — the list opens on what has not been actioned.
-  // `REQUESTED` is the genuinely-untouched status in
-  // `ExtraWorkStatus` (the customer has asked, nobody has picked it up),
-  // and the owner named it. A `?status=` deep link still wins, and
-  // `?status=ALL` is how a link asks for everything.
+  // read once at mount (validated), the chips own the state after.
+  //
+  // Sprint 181 §2 — the chips are GROUPS now, so a deep link naming a
+  // raw status is matched against the groups rather than compared to
+  // one. A link to `?status=REQUESTED` lands on the "Awaiting pricing"
+  // chip, which is where that row now lives; an unrecognised value
+  // falls through to no filter rather than to an empty screen.
+  //
+  // Sprint 158's "open on what has not been actioned" default is GONE,
+  // and deliberately: it only ever made sense for one of the two
+  // tracks, and since Sprint 180 the track already answers "what should
+  // I look at". Opening pre-filtered on a chip the operator did not
+  // pick is the same confusion §2 is removing, one level up.
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
-    if (raw === "ALL") return "ALL";
-    return raw && (STATUS_FILTER_OPTIONS as readonly string[]).includes(raw)
-      ? (raw as StatusFilter)
-      : "REQUESTED";
+    if (!raw || raw === "ALL") return "";
+    const match = QUOTE_TRACK_CHIPS.find((chip) =>
+      (chip.statuses as readonly string[]).includes(raw),
+    );
+    return match ? match.value : "";
   });
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
   const [categoryOptions, setCategoryOptions] =
@@ -619,19 +705,38 @@ export function ExtraWorkList({
     [trackRows],
   );
 
-  // Sprint 158 §2 — counts per status, computed from loaded rows and
-  // not from `visibleRows`, or every chip but the active one would read
-  // zero.
-  // Sprint 180 §1 — over the ACTIVE TRACK rather than over everything:
-  // a tile that promises nine rows and then shows none because they are
-  // all on the other track is worse than no number.
+  // Sprint 181 §1/§2 — the chips for the ACTIVE track, with their real
+  // counts. Which set is on screen is the same question as which status
+  // the rows are judged by, so both come from one place: on Quote &
+  // price the Extra Work's own status, on Work started the ticket's.
+  //
+  // Counts come from the track's rows, not from `visibleRows` — every
+  // chip but the active one would otherwise read zero — and not from
+  // the whole set, or a chip would promise rows that live on the other
+  // track (Sprint 180).
+  const chips = isWorkStarted ? STARTED_TRACK_CHIPS : QUOTE_TRACK_CHIPS;
+
+  const chipMatches = useCallback(
+    (row: ExtraWorkRequestList, chipValue: string): boolean => {
+      const spec = (
+        chips as ReadonlyArray<ChipSpec<string>>
+      ).find((c) => c.value === chipValue);
+      if (!spec) return false;
+      const status = isWorkStarted ? operationalStatus(row) : row.status;
+      return status !== null && spec.statuses.includes(status);
+    },
+    [chips, isWorkStarted],
+  );
+
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const row of activeTrackRows) {
-      counts[row.status] = (counts[row.status] ?? 0) + 1;
+    for (const chip of chips) {
+      counts[chip.value] = activeTrackRows.filter((row) =>
+        chipMatches(row, chip.value),
+      ).length;
     }
     return counts;
-  }, [activeTrackRows]);
+  }, [activeTrackRows, chips, chipMatches]);
 
   // KPI strip — computed from the full loaded set (not the filtered
   // view, and not the active track) so the operator always sees the same
@@ -668,7 +773,9 @@ export function ExtraWorkList({
   const visibleRows = useMemo(() => {
     const needle = searchInput.trim().toLowerCase();
     const filtered = activeTrackRows.filter((r) => {
-      if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
+      // Sprint 181 §2 — a chip stands for a GROUP of statuses, and on
+      // the Work started track for a group of TICKET statuses.
+      if (statusFilter && !chipMatches(r, statusFilter)) return false;
       if (needle) {
         const hay = `${r.title} ${r.building_name ?? ""} ${
           r.customer_name ?? ""
@@ -703,6 +810,7 @@ export function ExtraWorkList({
     });
   }, [
     activeTrackRows,
+    chipMatches,
     searchInput,
     statusFilter,
     deadlineSort,
@@ -831,7 +939,15 @@ export function ExtraWorkList({
           row.title,
           row.customer_name,
           row.building_name,
-          t(STATUS_I18N_KEY[row.status] ?? row.status),
+          // Sprint 181 §1 — the export carries the SAME status the
+          // screen does. An export that disagreed with the list it was
+          // taken from would be the drift this sprint removes, in a
+          // spreadsheet.
+          isWorkStarted
+            ? t(ticketStatusLabelKey(operationalStatus(row) ?? "OPEN"), {
+                ns: "common",
+              })
+            : t(STATUS_I18N_KEY[row.status] ?? row.status),
           amounts.subtotal.toFixed(2),
           amounts.vat.toFixed(2),
           amounts.total.toFixed(2),
@@ -1039,25 +1155,24 @@ export function ExtraWorkList({
       </p>
 
       {/* Sprint 159 §3 — the statuses as TILES, the design the owner
-          picked for both work lists. Every one visible with its count
-          (real ones: Sprint 120 made this page fetch the full set), the
-          active one visibly selected, and clearing is the All tile or
-          the × on the active one rather than a sentence of prose. The
-          status dropdown below stays: it is the same state, and removing
-          a control an operator may already be using would be hiding a
-          feature.
-          Sprint 180 — counts and total are per TRACK now, so a tile
-          never promises rows that live on the other one. */}
+          picked for both work lists: the tile IS the filter, it carries
+          its own count, the active one is visibly selected.
+          Sprint 180 — counts are per TRACK, so a tile never promises
+          rows that live on the other one.
+          Sprint 181 §2 — FOUR tiles, not nine, and they change meaning
+          with the track: commercial states on Quote & price, TICKET
+          states on Work started. The old status dropdown that sat below
+          the search box is gone with them — it was a second control for
+          the same state, and nine options in a select was the least
+          readable of the two. */}
       <StatusTiles
-        tiles={STATUS_FILTER_OPTIONS.map((value) => ({
-          value,
-          label: t(STATUS_I18N_KEY[value]),
-          count: statusCounts[value] ?? 0,
+        tiles={chips.map((chip) => ({
+          value: chip.value,
+          label: t(chip.labelKey),
+          count: statusCounts[chip.value] ?? 0,
         }))}
-        active={statusFilter === "ALL" ? "" : statusFilter}
-        onChange={(value) =>
-          setStatusFilter((value === "" ? "ALL" : value) as StatusFilter)
-        }
+        active={statusFilter}
+        onChange={setStatusFilter}
         totalCount={activeTrackRows.length}
         testIdPrefix="extra-work-status"
       />
@@ -1077,23 +1192,12 @@ export function ExtraWorkList({
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
-        <div className="filter-field">
-          <span className="filter-label">{t("list.column_status")}</span>
-          <select
-            className="filter-control"
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as StatusFilter)
-            }
-          >
-            <option value="ALL">{t("list.filter_all_statuses")}</option>
-            {STATUS_FILTER_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {t(STATUS_I18N_KEY[s])}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Sprint 181 §2 — the status <select> that stood here is gone.
+            It was a SECOND control over the same state as the tiles
+            above, offering the same nine options in the less readable
+            of the two shapes. A control earns its place by changing
+            what somebody does next; this one only offered a second way
+            to do what the tiles already do. */}
         <div className="filter-field">
           <span className="filter-label">
             {t("list.filter_catalog_category")}
@@ -1548,9 +1652,32 @@ export function ExtraWorkList({
                       <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
                     </td>
                     <td>
-                      <StatusBadge
-                        status={{ kind: "extra-work", value: row.status }}
-                      />
+                      {/* Sprint 181 §1 — ONE status per row, and on the
+                          Work started track it is the TICKET's.
+                          The owner clicked an Extra Work reading
+                          "Completed", scrolled down, and its ticket read
+                          "Open". Both were "true"; they were two copies
+                          of one fact. Once a ticket exists it is the
+                          only authority for how the work is going, so
+                          the pricing-stage status does not appear here
+                          at all — not as a column, not as a smaller
+                          second line. That is also what fixes the row
+                          that read "Customer approved" in a track full
+                          of started work: it now reads the ticket's
+                          "Open", i.e. approved, not started. */}
+                      {isWorkStarted ? (
+                        <StatusBadge
+                          status={{
+                            kind: "ticket",
+                            value: operationalStatus(row) ?? "OPEN",
+                          }}
+                          testId={`ew-operational-status-${row.id}`}
+                        />
+                      ) : (
+                        <StatusBadge
+                          status={{ kind: "extra-work", value: row.status }}
+                        />
+                      )}
                       {/* Sprint 180 §1(b) — approved, but the spawn that
                           is supposed to be synchronous with approval
                           produced no ticket. The row belongs on this
@@ -1583,25 +1710,12 @@ export function ExtraWorkList({
                     </td>
                     {isWorkStarted && (
                       <td data-testid={`ew-ticket-cell-${row.id}`}>
-                        {/* The reverse of the ticket page's "came from
-                            Extra Work" block, which has existed for
-                            sprints. One row, one link per spawned
-                            ticket — one is the normal case (Sprint 6A
-                            spawns exactly one). */}
-                        {row.spawned_tickets.length === 0 ? (
-                          <span className="muted-empty">—</span>
-                        ) : (
-                          row.spawned_tickets.map((ticket) => (
-                            <Link
-                              key={ticket.id}
-                              to={`/tickets/${ticket.id}`}
-                              onClick={(event) => event.stopPropagation()}
-                              style={{ marginRight: 8 }}
-                            >
-                              {ticket.ticket_no ?? `#${ticket.id}`}
-                            </Link>
-                          ))
-                        )}
+                        {/* Sprint 181 §1b — one renderer for the ticket
+                            numbers, with a real separator. Sprint 180
+                            leaned on a margin here and joined with ", "
+                            in the mobile card below; two tickets rendered
+                            as `TCK-...207TCK-...208`. */}
+                        <SpawnedTicketLinks tickets={row.spawned_tickets} />
                       </td>
                     )}
                     {isWorkStarted && isProvider && (
@@ -1690,9 +1804,21 @@ export function ExtraWorkList({
                         flexWrap: "wrap",
                       }}
                     >
-                      <StatusBadge
-                        status={{ kind: "extra-work", value: row.status }}
-                      />
+                      {/* Sprint 181 §1 — the card carries the same one
+                          status the table row does, from the same
+                          authority. */}
+                      {isWorkStarted ? (
+                        <StatusBadge
+                          status={{
+                            kind: "ticket",
+                            value: operationalStatus(row) ?? "OPEN",
+                          }}
+                        />
+                      ) : (
+                        <StatusBadge
+                          status={{ kind: "extra-work", value: row.status }}
+                        />
+                      )}
                       <RouteBadge value={row.routing_decision} />
                       {isSpawnAnomaly(row) && (
                         <span
@@ -1738,11 +1864,7 @@ export function ExtraWorkList({
                       <div className="admin-card-meta-row">
                         <dt>{t("list.column_ticket")}</dt>
                         <dd>
-                          {row.spawned_tickets.length === 0
-                            ? "—"
-                            : row.spawned_tickets
-                                .map((tk) => tk.ticket_no ?? `#${tk.id}`)
-                                .join(", ")}
+                          <SpawnedTicketLinks tickets={row.spawned_tickets} />
                         </dd>
                       </div>
                     )}

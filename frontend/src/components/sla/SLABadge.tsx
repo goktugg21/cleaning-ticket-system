@@ -10,8 +10,9 @@ interface SLABadgeProps {
   size?: "sm" | "md";
 }
 
+// Sprint 181 §4 — no HISTORICAL entry: that state no longer renders a
+// badge, so it can have no tooltip.
 const TOOLTIP_KEYS: Partial<Record<SLADisplayState, string>> = {
-  HISTORICAL: "sla_tooltip_historical",
   PAUSED: "sla_tooltip_paused",
   COMPLETED: "sla_tooltip_completed",
 };
@@ -25,9 +26,23 @@ export function SLABadge({
   const slaLabel = useSLALabel();
   const formatSLATime = useFormatSLATime();
 
+  // Sprint 181 §4 — HISTORICAL renders NOTHING.
+  //
+  // It means "this ticket predates the SLA engine", which is a fact
+  // about our migration, not about the ticket. No operator action
+  // depends on it, and a badge reading "Historical" beside a workflow
+  // status is one more word to decode in the exact cell §4 exists to
+  // simplify. On crmtest all 79 historical tickets are already
+  // soft-deleted, so this branch is reachable only by a legacy row.
+  //
+  // The whole badge goes, not just its label: an empty pill in the SLA
+  // column would be a colour that means nothing, which is worse. After
+  // every hook has run, so the early return cannot change hook order.
+  if (state === "HISTORICAL") return null;
+
   const label = slaLabel(state);
   const time =
-    state === "PAUSED" || state === "COMPLETED" || state === "HISTORICAL"
+    state === "PAUSED" || state === "COMPLETED"
       ? ""
       : formatSLATime(remainingSeconds);
   const className =

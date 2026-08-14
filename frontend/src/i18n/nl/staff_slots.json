@@ -134,5 +134,11 @@
   "agenda.upcoming_none": "Niets gepland na deze week.",
   "agenda.overdue_desc": "Alles wat te laat is, in welke week dan ook — een andere vraag dan wat er deze week gepland staat.",
   "agenda.col_planned": "Gepland op",
-  "agenda.truncated_note": "Deze lijst toont de eerste {{count}} regels. De tellingen hierboven zijn compleet — die worden door de server over de hele selectie berekend."
+  "agenda.truncated_note": "Deze lijst toont de eerste {{count}} regels. De tellingen hierboven zijn compleet — die worden door de server over de hele selectie berekend.",
+  "agenda.undated_title": "Nog niet gepland",
+  "agenda.undated_desc": "Werk dat bij geen enkele week hoort. Plan het vandaag, of open het om een datum te kiezen.",
+  "agenda.undated_plan_today": "Plan vandaag",
+  "agenda.undated_planning": "Bezig...",
+  "agenda.undated_planned": "Vandaag ingepland.",
+  "agenda.undated_open_extra_work": "Extra werk openen"
 }

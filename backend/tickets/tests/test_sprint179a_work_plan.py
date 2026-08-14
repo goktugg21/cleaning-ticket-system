@@ -493,6 +493,11 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "entries",
                 "overdue_entries",
                 "upcoming_entries",
+                # Sprint 181 §8 — the undated work, as ROWS. The page
+                # could previously only say how much of it existed
+                # (`counts.undated`), which is how two thirds of the
+                # work on crmtest came to live in one muted sentence.
+                "undated_entries",
                 "limits",
                 "truncated",
             },
@@ -519,13 +524,25 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
         # Every list is bounded, and the response says by how much and
         # whether it hit the bound — a list that silently stops is the
         # same defect as a count that describes one page.
+        # Sprint 181 §8 — the undated lane is bounded and says so on the
+        # same terms as its two siblings.
         self.assertEqual(
             set(payload["limits"]),
-            {"entries", "overdue_entries", "upcoming_entries"},
+            {
+                "entries",
+                "overdue_entries",
+                "upcoming_entries",
+                "undated_entries",
+            },
         )
         self.assertEqual(
             set(payload["truncated"]),
-            {"entries", "overdue_entries", "upcoming_entries"},
+            {
+                "entries",
+                "overdue_entries",
+                "upcoming_entries",
+                "undated_entries",
+            },
         )
         self.assertFalse(any(payload["truncated"].values()))
 

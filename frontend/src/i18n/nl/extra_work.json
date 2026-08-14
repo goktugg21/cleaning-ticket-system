@@ -510,7 +510,7 @@
   "list.bulk_dates_unchanged_hint": "Een leeg veld blijft ongewijzigd: alleen de datums die je hier invult worden op de geselecteerde aanvragen gezet.",
   "detail.planned_window_until": "Tot {{date}}",
   "list.track_quote": "Offerte & prijs",
-  "list.track_started": "Werk gestart",
+  "list.track_started": "Meerwerk",
   "list.track_quote_hint": "Aanvragen die nog geen ingepland werk zijn geworden. Facturatie is hier niet van toepassing.",
   "list.track_started_hint": "Aanvragen waaruit een operationele melding is ontstaan. Deze tonen de melding, de factuurstatus en aan wie er wordt gefactureerd.",
   "list.track_anomaly_marker": "Geen melding",
@@ -525,5 +525,16 @@
   "detail.field_ticket": "Melding",
   "detail.ticket_none": "Nog geen operationele melding",
   "list.track_switch_to_one": "Toon {{track}} ({{count}} aanvraag)",
-  "list.track_switch_to_other": "Toon {{track}} ({{count}} aanvragen)"
+  "list.track_switch_to_other": "Toon {{track}} ({{count}} aanvragen)",
+  "list.chip_awaiting_pricing": "Wacht op prijs",
+  "list.chip_with_customer": "Bij de klant",
+  "list.chip_rejected": "Afgewezen",
+  "list.chip_cancelled": "Geannuleerd",
+  "list.chip_ticket_open": "Open",
+  "list.chip_ticket_in_progress": "Bezig",
+  "list.chip_ticket_waiting_customer": "Wacht op klant",
+  "list.chip_ticket_finished": "Afgerond",
+  "detail.operational_state": "Werkstatus",
+  "detail.operational_state_hint": "Volgt melding {{ticket}}. Wijzig de melding om dit te veranderen.",
+  "detail.commercial_state": "Prijsstatus"
 }

@@ -4697,8 +4697,15 @@ a.attn-row:hover {
     overflow-wrap: anywhere;
   }
 
+  /* Sprint 181 §4 — the workflow status and the SLA state answer
+     different questions ("how is this job going" vs "are we late") and
+     sat 8px apart in one row, which read as one string. `space-between`
+     puts them at opposite ends of the card so the eye stops joining
+     them; the gap stays as the floor when the row wraps. */
   .ticket-card-pills {
     display: flex;
+    justify-content: space-between;
+    align-items: center;
     gap: 8px;
     flex-wrap: wrap;
   }
@@ -9926,4 +9933,99 @@ details[open] > .ew-department-tree-summary::before {
 }
 .report-summary-line {
   margin-bottom: 10px;
+}
+
+/* ---------------------------------------------------------------------------
+   Sprint 181 §7 — the chip that rendered as one word.
+
+   `active-filter-chip` and `active-filter-clear` were used five times in
+   DashboardPage.tsx and defined in NO css file. An undefined class is not
+   a missing decoration: the wrapper stayed a plain block and its <span>
+   and <Link> stayed inline, so "Finished extra work is hidden" and
+   "Show all" ran together into "...is hiddenShow all", with the clear
+   control indistinguishable from the sentence it followed.
+
+   Same shape as `.chip-multiselect-chip` (the app's existing pill) so the
+   two do not become two vocabularies for one idea. The clear control is a
+   real affordance rather than trailing text: underlined, in the link
+   colour, with a hit area.
+   --------------------------------------------------------------------------- */
+.active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+  /* The chip sits in a section header beside a title; without this it
+     stretches to the header's height and the pill stops reading as one. */
+  align-self: center;
+  max-width: 100%;
+}
+.active-filter-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.active-filter-clear {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--green);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.active-filter-clear:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Sprint 181 §4 — the SLA column is a different question from the
+   workflow status immediately to its left, and two adjacent columns of
+   small coloured pills scan as one string. A single hairline rule marks
+   the boundary: enough to stop the eye joining them, far less than a
+   second header row or a gap that would push the table wider. */
+.data-table th.td-sla,
+.data-table td.td-sla {
+  border-left: 1px solid var(--border-soft);
+  padding-left: 12px;
+}
+
+/* Sprint 181 §8 — a row of the Work Plan's "Not planned yet" lane.
+   Deliberately plain: a name, where it is, and the one button that
+   moves it into the week. The lane is the whole design; the row does
+   not need decoration to be understood. */
+.wp-undated-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.wp-undated-row:last-child {
+  border-bottom: none;
+}
+.wp-undated-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.wp-undated-row-main > a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

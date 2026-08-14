@@ -114,6 +114,10 @@ ENTRY_LIMIT = 300
 #: The two "elsewhere" lists behind their own buttons.
 OVERDUE_LIMIT = 100
 UPCOMING_LIMIT = 100
+#: Sprint 181 §8 — the undated lane. Same bound as its two siblings:
+#: this list is potentially the LARGEST of the three (on crmtest it is
+#: 43 of 70 live tickets), which is precisely why it needs one.
+UNDATED_LIMIT = 100
 
 #: How many names a card carries before it just says how many more.
 ASSIGNEE_NAMES_SHOWN = 5
@@ -567,6 +571,30 @@ class WorkPlanView(APIView):
             viewer=user,
             fallback_placement=PLACEMENT_PLANNED,
         )
+        # Sprint 181 §8 — the undated work, as ENTRIES rather than as a
+        # number.
+        #
+        # `counts.undated` has always been here and the page rendered it
+        # as one muted sentence: "N items have no date". On crmtest that
+        # sentence currently stands for 43 of 70 live tickets — two
+        # thirds of the work admitted to and not shown, while six of the
+        # seven week columns read "Nothing planned". A count is not a
+        # place to put something; a list is.
+        #
+        # Same shape as the two flat lists above, deliberately: same
+        # builder, same limit-plus-one truncation, same placement
+        # fallback. Nothing new to learn, nothing new to keep in step.
+        undated_entries, undated_truncated = self._flat_entries(
+            slots.filter(_slot_undated_q()),
+            extra_work.filter(_ew_undated_q()),
+            week_start,
+            week_end,
+            today,
+            limit=UNDATED_LIMIT,
+            team=team,
+            viewer=user,
+            fallback_placement=PLACEMENT_PLANNED,
+        )
 
         return Response(
             {
@@ -586,15 +614,19 @@ class WorkPlanView(APIView):
                 "entries": entries,
                 "overdue_entries": overdue_entries,
                 "upcoming_entries": upcoming_entries,
+                # Sprint 181 §8 — the undated lane's rows.
+                "undated_entries": undated_entries,
                 "limits": {
                     "entries": ENTRY_LIMIT,
                     "overdue_entries": OVERDUE_LIMIT,
                     "upcoming_entries": UPCOMING_LIMIT,
+                    "undated_entries": UNDATED_LIMIT,
                 },
                 "truncated": {
                     "entries": truncated,
                     "overdue_entries": overdue_truncated,
                     "upcoming_entries": upcoming_truncated,
+                    "undated_entries": undated_truncated,
                 },
             },
             status=status.HTTP_200_OK,
@@ -828,6 +860,7 @@ __all__ = [
     "KIND_EXTRA_WORK",
     "KIND_TICKET_SLOT",
     "OVERDUE_LIMIT",
+    "UNDATED_LIMIT",
     "UPCOMING_LIMIT",
     "WorkPlanView",
 ]

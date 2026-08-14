@@ -162,6 +162,21 @@ class TicketFilter(df.FilterSet):
         method="filter_awaiting_customer_approval_days"
     )
 
+    # Sprint 181 §5 — every chargeable-work ticket, as a group.
+    #
+    # `?extra_work_request=<id>` has always answered "which tickets came
+    # from THAT extra work"; nothing answered "which came from an extra
+    # work at all", so the sub-page that lists them had no query to
+    # make. Reuses `_extra_work_origin_q()` — the same three parentage
+    # paths `filter_extra_work_request` and
+    # `resolve_extra_work_origin_core` walk — rather than restating
+    # them, so the sub-page cannot disagree with the pill on the row.
+    #
+    # `?is_extra_work=false` is the inverse (ordinary tickets only), and
+    # an absent param leaves the queryset alone, so no existing caller
+    # changes behaviour.
+    is_extra_work = df.BooleanFilter(method="filter_is_extra_work")
+
     class Meta:
         model = Ticket
         fields = {
@@ -182,6 +197,18 @@ class TicketFilter(df.FilterSet):
             | Q(extra_work_request_item__extra_work_request_id=value)
             | Q(proposal_line__proposal__extra_work_request_id=value)
         ).distinct()
+
+    def filter_is_extra_work(self, queryset, name, value):
+        # Sprint 181 §5. `distinct()` because two of the three parentage
+        # paths join through a to-many relation and would multiply rows.
+        if value is None:
+            return queryset
+        origin = _extra_work_origin_q()
+        return (
+            queryset.filter(origin).distinct()
+            if value
+            else queryset.exclude(origin)
+        )
 
     def filter_hide_finished_extra_work(self, queryset, name, value):
         # Sprint 180 §2. A falsy value leaves the queryset untouched, so

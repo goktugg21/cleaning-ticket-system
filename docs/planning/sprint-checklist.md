@@ -13,6 +13,120 @@ update was left for a later docs-only pass.
 
 ## NOW
 
+**Branch:** `feat/sprint-181`, cut from the INTEGRATED Sprint 180 (see
+the note under Sprint 180 below — `origin/feat/sprint-180-merged` did
+not exist when this branch was cut).
+
+### Done — Sprint 181: one fact, one place
+
+- **§1 The ticket is the authority for operational state.** An Extra
+  Work carried its own status AND its spawned ticket carried one, and
+  `IN_PROGRESS -> COMPLETED` was documented as "SYSTEM auto ... **or
+  provider manual**". That last clause is how rows on crmtest came to
+  read COMPLETED against a ticket that was still OPEN. Once an Extra
+  Work HAS a live ticket, the two forward operational pairs (exactly
+  `SYSTEM_AUTO_TRANSITIONS`) are system-only: no role can drive them,
+  `allowed_next_statuses` withdraws the buttons, and the endpoint
+  answers `operational_status_follows_ticket` rather than a generic
+  permission error. `COMPLETED -> IN_PROGRESS` (edge recovery, reason
+  required), `IN_PROGRESS -> CANCELLED`, and EVERY manual transition on
+  a ticketless Extra Work are deliberately untouched. One predicate
+  (`_operational_status_is_derived`), two callers, no second copy.
+- **§1 The Work started track shows the TICKET's status**, on the list
+  and in the CSV export, with no pricing-stage status surviving into
+  that track at all. The detail page adds a "Work status" cell carrying
+  the ticket's status and its number, so nobody wonders where the value
+  came from or why the workflow buttons no longer move it.
+- **§1b Ticket numbers no longer run together.** Three renderers for one
+  fact (list table, mobile card, detail card) became one
+  `SpawnedTicketLinks`, with a real text separator instead of a margin,
+  and a bound: `max` links then `+N`.
+- **§2 Nine status chips became four, twice.** Quote & price shows
+  commercial states (Awaiting pricing · With the customer · Rejected ·
+  Cancelled); Work started shows TICKET states (Open · In progress ·
+  Awaiting customer · Finished). Each track offers only what can be
+  non-zero within it. The duplicate status `<select>` is gone.
+- **§2b `Customer approved` split.** `Price approved` where the customer
+  accepted the quote, `Work approved` where they accepted the finished
+  work. The other three bare "Approved" strings are listed in NEXT.
+- **§3 `reconcile_extra_work_status`.** Reports by default, repairs only
+  with `--repair`, prints the table either way, and NEVER writes a
+  status `ALLOWED_TRANSITIONS` forbids — where the derived value is not
+  reachable the row is reported and left alone. On crmtest: 8 repairable
+  (COMPLETED against an unfinished ticket) and 8 report-only (the mild
+  IN_PROGRESS-against-an-untouched-ticket shape).
+- **§4 SLA separated from workflow status**, and `Historical` removed
+  from the UI entirely — filter option, badge and tooltip. A UI removal
+  only; the backend constant and `sla_backfill` are untouched.
+- **§5 Chargeable work.** A tickets sub-page at `/tickets/chargeable`
+  (the same list component with `?is_extra_work=true` pinned), a nav
+  entry, and ONE name used by the nav, the sub-page title, the row pill
+  and the Extra Work list's second tab. EN "Chargeable work" / NL
+  "Meerwerk" — **the owner is invited to veto the word**.
+- **§7 `active-filter-chip` / `active-filter-clear` defined.** They were
+  used five times in `DashboardPage.tsx` and defined in no CSS file,
+  which is why the ticket list read "...is hiddenShow all". The sweep
+  that should have caught them is now a COMMITTED script
+  (`frontend/scripts/check-css-classes.mjs`) rather than something run
+  by hand — see NEXT for the 35 other undefined classes it found.
+- **§8 The Work Plan's undated work has a place.** `undated_entries` on
+  the work-plan payload (same builder, bound and truncation flag as its
+  two siblings) and a "Not planned yet" lane above the week, replacing
+  the one muted sentence that stood for 43 of 70 live tickets. Each
+  ticket row carries a one-click "Plan for today".
+
+### Not done — Sprint 181 §6
+
+**§6 (splitting the invoice TARGET from the split-granularity) was not
+started.** It is a data-model change plus a faithful data migration plus
+a rewrite of `generate_draft_invoices`' grouping, under an explicit
+"nobody's behaviour changes" requirement, and starting it without room
+to finish and test it would have been worse than deferring it. Carried
+into NEXT with the analysis done.
+
+### Gates
+
+`extra_work` (whole app) + `tickets.tests.test_state_machine` ran
+isolated in this worktree: **1035 tests, all passing** (the run also
+reported one ERROR, which was a module name I mistyped on the command
+line — `tickets.tests.test_filters` does not exist — not a test).
+Re-run afterwards for the surfaces that name covers:
+`tickets.tests.test_sprint181_chargeable_and_undated` (new),
+`test_sprint179a_work_plan`, `test_sprint170_agenda_scope`,
+`test_m6_ticket_customer_filter`, `test_inactive_filtering`. `invoicing`, `reports`, `timesheets`,
+`buildings`, `accounts`, `planned_work`, `contracts` NOT run and not
+touched. `makemigrations --dry-run --check` clean — **no new migrations
+this sprint**. Frontend: tsc clean, eslint 44 (42 errors, 2 warnings),
+build OK, i18n key gate clean, nl/en lockstep clean.
+
+### Done — Sprint 180 (integrated, recorded here late)
+
+**This file had NO Sprint 180 entry.** Five agents worked five branches
+and each handed its checklist lines to the integrator; the integration
+commit did not fold them in, so a whole sprint was missing. Recorded
+from the commit subjects rather than from the five reports, so treat the
+detail as thinner than usual:
+
+- Batch 1 (`84d26e5`) — Extra Work rows: the two-track split on the
+  canonical `Ticket.extra_work_request` FK, the spawned-ticket link on
+  the list and detail serializers, a pre-existing `started_before_plan`
+  N+1 killed, `billed_to` (BUILDING | CUSTOMER), the dashboard
+  billing-period money bug, and `BuildingType` + `ManagedUnit`
+  registered for audit.
+- Batch 2 (`060a3ad`, `ba083fb`) — ticket lifecycle: approval closes the
+  ticket; the ticket list says what it is.
+- Batch 3 (`346f0ff`) — reports: "this building, last month".
+- Batch 4 (`8572ff3`) — invoice PDF.
+- Batch 5 (`adf9e4e`, `3eae4bf`, `9134eff`, `dc2192c`) — chrome: ten
+  dead class names, the week grid, two fields, an e2e assertion.
+
+**Sprint 180 was never pushed as `feat/sprint-180-merged`.** The
+integration exists only as the local `integ180` branch, and it was
+missing `feat/sprint-180-tickets`' final commit; `feat/sprint-181`
+starts with that merge so all five batch tips are ancestors.
+
+### History — Sprint 179A
+
 **Branch:** `feat/sprint-179a`, cut from `feat/sprint-178` (`56c0740`).
 Still ONE chain, one PR — #153 -> ... -> #179 are not one PR per sprint.
 
@@ -379,6 +493,51 @@ warnings)**, build OK, i18n in lockstep, **undefined-CSS-class sweep
 clean**.
 
 ## NEXT
+
+### Carried out of Sprint 181
+
+1. **§6 — split the invoice TARGET from the split-granularity.** Not
+   started; the analysis is done and holds. `Customer.
+   invoice_granularity_default` offers three values, and the first two
+   (`CUSTOMER`, `PER_BUILDING`) decide the same thing
+   `ExtraWorkRequest.billed_to` decides — `Invoice.building` is NULL for
+   one and set for the other. The third,
+   `PER_BUILDING_DEPARTMENT_WORK_TYPE`, is not a third target: it is
+   "per building, split further", and sitting in the same dropdown makes
+   it look like one. The shape: a two-value target on the customer
+   (the DEFAULT) plus a separate "split by department and work type"
+   control; the extra work's own `billed_to` WINS over the customer
+   default because it is the more specific statement, and the UI where
+   the default is set must say so. Migration must be faithful —
+   `PER_BUILDING_DEPARTMENT_WORK_TYPE` becomes target=building +
+   split=on — and `generate_draft_invoices` must produce byte-identical
+   groupings for existing data. **Note the trap found while scoping it:**
+   Sprint 180 made `billed_to` non-null with `default=BUILDING`, so if
+   generation simply starts reading it, every customer currently on
+   `CUSTOMER` granularity would silently start being invoiced per
+   building. Either backfill `billed_to` from each customer's current
+   granularity, or make it nullable with NULL meaning "follow the
+   customer". That decision is the whole risk in this item.
+2. **The other three bare "Approved" strings** (§2b fixed the two the
+   owner named). Still ambiguous: `staff_requests.status_approved`,
+   `contract_hours.status_APPROVED` (+ `locked_hint`, which is also the
+   bare word), and the generic `status.approved`. Each labels a
+   different event; each should say WHAT was approved.
+3. **The 35 other undefined CSS classes** that
+   `frontend/scripts/check-css-classes.mjs` reports. READ THEM AS
+   SUSPECTS, NOT BUGS: an undefined class only renders wrong when
+   nothing else supplies the layout, and at least two
+   (`customer-contacts-filter-bar`, `customer-users-filter-bar`) are
+   fine because their elements carry inline styles and use the class as
+   a test hook. Wire the script into the frontend gate once the real
+   ones are cleared.
+4. **An undated EXTRA WORK still cannot be planned in one action** from
+   the Work Plan's new lane (§8 gave tickets that button). The blocker
+   is deliberate: "undated" for an extra work means no `preferred_date`,
+   and `preferred_date` is the CUSTOMER's wish — Sprint 176 §3 decided
+   the customer states a wish and the provider commits to a deadline.
+   Letting the provider's work plan write it is a product decision, not
+   a UI convenience.
 
 **The Work Plan has left this list.** It was item 1 for six rounds and
 Sprint 179A built it; the detail is under NOW. What is left below is

@@ -510,7 +510,7 @@
   "list.bulk_dates_unchanged_hint": "A blank field is left unchanged: only the dates you fill in here are written to the selected requests.",
   "detail.planned_window_until": "Until {{date}}",
   "list.track_quote": "Quote & price",
-  "list.track_started": "Work started",
+  "list.track_started": "Chargeable work",
   "list.track_quote_hint": "Requests that have not become scheduled work yet. Invoicing does not apply here.",
   "list.track_started_hint": "Requests that produced an operational ticket. These carry the ticket, the invoice state and who is billed.",
   "list.track_anomaly_marker": "No ticket",
@@ -525,5 +525,16 @@
   "detail.field_ticket": "Ticket",
   "detail.ticket_none": "No operational ticket yet",
   "list.track_switch_to_one": "Show {{track}} ({{count}} request)",
-  "list.track_switch_to_other": "Show {{track}} ({{count}} requests)"
+  "list.track_switch_to_other": "Show {{track}} ({{count}} requests)",
+  "list.chip_awaiting_pricing": "Awaiting pricing",
+  "list.chip_with_customer": "With the customer",
+  "list.chip_rejected": "Rejected",
+  "list.chip_cancelled": "Cancelled",
+  "list.chip_ticket_open": "Open",
+  "list.chip_ticket_in_progress": "In progress",
+  "list.chip_ticket_waiting_customer": "Awaiting customer",
+  "list.chip_ticket_finished": "Finished",
+  "detail.operational_state": "Work status",
+  "detail.operational_state_hint": "Follows ticket {{ticket}}. Move the ticket to change it.",
+  "detail.commercial_state": "Pricing status"
 }

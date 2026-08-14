@@ -91,13 +91,27 @@ const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 // silent queue here is lost revenue, not just a stale list.
 const STALLED_APPROVAL_DAYS = 14;
 
-const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "">[] = [
+/**
+ * Sprint 181 §4 — `historical` is gone from the UI.
+ *
+ * It meant "this ticket predates the SLA engine": a migration artefact,
+ * not something an operator should ever have to read or reason about.
+ * The owner has confirmed the SLA engine is here to stay, and on
+ * crmtest all 79 historical tickets are already soft-deleted, so the
+ * option now matches nothing at all — a filter that can only return an
+ * empty list is worse than no filter.
+ *
+ * A UI removal only. `HISTORICAL` stays in the backend constant and in
+ * `sla_backfill`, which still writes it, and stays in `SLADisplayState`
+ * so a legacy row that does surface renders as something rather than
+ * breaking the badge.
+ */
+const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "" | "historical">[] = [
   "on_track",
   "at_risk",
   "breached",
   "paused",
   "completed",
-  "historical",
 ];
 
 function priorityCellClass(priority: string): string {
@@ -144,7 +158,12 @@ export function DashboardPage({
   customerId,
   hideHeader = false,
 }: {
-  variant?: "dashboard" | "tickets-page";
+  /** Sprint 181 §5 — `"chargeable-work"` is the Tickets page narrowed
+   *  to tickets born from an Extra Work. A THIRD variant rather than a
+   *  fourth copy of the ticket surface, for the same reason
+   *  `CustomerTicketsPage` stopped being one: a list must behave the
+   *  same however you reach it. */
+  variant?: "dashboard" | "tickets-page" | "chargeable-work";
   /** Sprint 169 §8 — mounted INSIDE a customer: the list is narrowed to
    *  that customer and everything else is identical.
    *
@@ -161,7 +180,12 @@ export function DashboardPage({
   /** The customer page draws its own header. */
   hideHeader?: boolean;
 } = {}) {
-  const isTicketsPage = variant === "tickets-page";
+  // Sprint 181 §5 — the chargeable-work sub-page IS the tickets page,
+  // with one filter pinned on. Everything `isTicketsPage` gates (the
+  // ticket surface, the filters, bulk actions, pagination) applies to
+  // it unchanged.
+  const isChargeableWork = variant === "chargeable-work";
+  const isTicketsPage = variant === "tickets-page" || isChargeableWork;
   const navigate = useNavigate();
   const { me } = useAuth();
   const { push } = useToast();
@@ -272,16 +296,12 @@ export function DashboardPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const slaFilter: SLAFilterValue = (() => {
     const raw = searchParams.get("sla") || "";
-    const allowed: SLAFilterValue[] = [
-      "",
-      "on_track",
-      "at_risk",
-      "breached",
-      "paused",
-      "completed",
-      "historical",
-    ];
-    return allowed.includes(raw as SLAFilterValue)
+    // Sprint 181 §4 — validated against the OFFERED set, so a stale
+    // `?sla=historical` bookmark resolves to "no filter" (the full list)
+    // rather than to a state with no control to clear it. Derived from
+    // `SLA_FILTER_VALUES` rather than re-listed, so removing an option
+    // there cannot leave a reachable value here.
+    return (SLA_FILTER_VALUES as string[]).includes(raw)
       ? (raw as SLAFilterValue)
       : "";
   })();
@@ -342,6 +362,10 @@ export function DashboardPage({
     // (where the clear chip is shown).
     // The fixed customer, when this list is mounted inside one.
     if (customerId !== undefined) params.customer = customerId;
+    // Sprint 181 §5 — the ONE thing that makes this the chargeable-work
+    // sub-page. Server-side (`TicketFilter.is_extra_work`), so the
+    // narrowing survives pagination instead of filtering one page.
+    if (isChargeableWork) params.is_extra_work = "true";
     if (isTicketsPage) {
       if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
       const typeParam = searchParams.get("type");
@@ -363,6 +387,7 @@ export function DashboardPage({
     searchParams,
     me,
     isTicketsPage,
+    isChargeableWork,
   ]);
 
   const loadTickets = useCallback(async () => {
@@ -955,7 +980,14 @@ export function DashboardPage({
             {isTicketsPage ? t("tickets_page.eyebrow") : t("eyebrow")}
           </div>
           <h2 className="page-title">
-            {isTicketsPage ? t("tickets_page.title") : t("title")}
+            {/* Sprint 181 §5 — the sub-page says the NAME, and it is the
+                same name the nav entry, the row pill and the Extra Work
+                list's second tab use. */}
+            {isChargeableWork
+              ? t("common:chargeable_work.title")
+              : isTicketsPage
+                ? t("tickets_page.title")
+                : t("title")}
           </h2>
           <p className="page-sub">
             {/* RF-16 — the dashboard loads no list, so the list-count
@@ -2114,7 +2146,7 @@ export function DashboardPage({
                         <th>{t("common:subject")}</th>
                         <th>{t("common:priority")}</th>
                         <th>{t("common:status")}</th>
-                        <th>{t("common:sla")}</th>
+                        <th className="td-sla">{t("common:sla")}</th>
                         <th>{t("common:facility")}</th>
                         <th>{t("common:customer")}</th>
                         <th>{t("common:created")}</th>
@@ -2198,7 +2230,13 @@ export function DashboardPage({
                               {tStatus(ticket.status)}
                             </span>
                           </td>
-                          <td>
+                          {/* Sprint 181 §4 — the SLA is a DIFFERENT
+                              question from the workflow status beside
+                              it, and adjacent columns of small coloured
+                              pills read as one string. The rule marks
+                              where "how is this job going" ends and
+                              "are we late" begins. */}
+                          <td className="td-sla">
                             <SLABadge
                               state={ticket.sla_display_state}
                               remainingSeconds={

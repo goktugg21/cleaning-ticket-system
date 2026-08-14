@@ -91,6 +91,7 @@ import { ProposalBuilder } from "../components/ProposalBuilder";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
 import { useToast } from "../components/ToastProvider";
 import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
 import { formatPlannedWindow } from "../lib/plannedWindow";
@@ -1853,23 +1854,47 @@ export function ExtraWorkDetailPage() {
                 <div>
                   <div className="muted small">{t("detail.field_ticket")}</div>
                   <div data-testid="extra-work-ticket-link">
-                    {ew.spawned_tickets.length === 0 ? (
-                      <span className="muted-empty">
-                        {t("detail.ticket_none")}
-                      </span>
-                    ) : (
-                      ew.spawned_tickets.map((ticket) => (
-                        <Link
-                          key={ticket.id}
-                          to={`/tickets/${ticket.id}`}
-                          style={{ marginRight: 8 }}
-                        >
-                          {ticket.ticket_no ?? `#${ticket.id}`}
-                        </Link>
-                      ))
-                    )}
+                    {/* Sprint 181 §1b — one renderer, with a real
+                        separator. `max` is higher here than in the list
+                        because this is the page somebody opens to see
+                        all of them. */}
+                    <SpawnedTicketLinks
+                      tickets={ew.spawned_tickets}
+                      max={4}
+                      emptyLabel={t("detail.ticket_none")}
+                    />
                   </div>
                 </div>
+                {/* Sprint 181 §1 — the operational state, and where it
+                    comes from. When a ticket exists this IS the ticket's
+                    status, with the number beside it so nobody wonders
+                    where the value came from, or why the workflow
+                    buttons below no longer offer to move it. The Extra
+                    Work's own status stays on this page (the Workflow
+                    card) for an operator debugging a stuck row — the
+                    LIST is where one status had to win. */}
+                {ew.spawned_tickets.length > 0 && (
+                  <div>
+                    <div className="muted small">
+                      {t("detail.operational_state")}
+                    </div>
+                    <div data-testid="extra-work-operational-state">
+                      <StatusBadge
+                        status={{
+                          kind: "ticket",
+                          value: ew.spawned_tickets[0].status,
+                        }}
+                      />
+                    </div>
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("detail.operational_state_hint", {
+                        ticket:
+                          ew.spawned_tickets[0].ticket_no ??
+                          `#${ew.spawned_tickets[0].id}`,
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="form-2col">
                 <div>
