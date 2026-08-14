@@ -39,8 +39,35 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
+from django.utils.text import slugify
 
 from customers.models import Customer
+
+
+def invoice_pdf_upload_to(instance, filename: str) -> str:
+    """Where a FROZEN invoice PDF is stored (Sprint 180 §1).
+
+    `invoices/<company_id>/<year>/<number>.pdf`. Partitioned by company
+    first so a tenant's documents are never interleaved with another's on
+    disk, then by numbering year, which is how an operator looks for them.
+
+    The stem is the invoice NUMBER, which by construction exists on every
+    invoice this is called for: freezing happens at SEND, and SEND is where
+    the gapless number is allocated. The `pk` fallback is defensive only —
+    a numberless invoice should never reach here, and if one ever does, a
+    file named after its pk is far better than a collision on "None".
+
+    Django appends a random suffix on a name collision rather than
+    overwriting, so a re-freeze can never silently replace the bytes an
+    earlier freeze committed. That is deliberate: the frozen document is
+    the artefact, and the field pointing somewhere new is a visible change,
+    while a same-path overwrite would not be.
+    """
+    stem = slugify(instance.number or f"concept-{instance.pk}")
+    year = instance.year or (
+        instance.sent_at.year if instance.sent_at is not None else 0
+    )
+    return f"invoices/{instance.company_id}/{year}/factuur-{stem}.pdf"
 
 
 class Invoice(models.Model):
@@ -186,6 +213,51 @@ class Invoice(models.Model):
             "is_reversal. A reversal is terminal (cannot reverse a reversal)."
         ),
     )
+
+    # ------------------------------------------------------------------
+    # Sprint 180 §1 — THE FROZEN DOCUMENT.
+    #
+    # Until this sprint the PDF was re-rendered from live data on every
+    # download, so a sent invoice's document could render differently later
+    # if anything behind it changed — a different customer name, a relabelled
+    # department, a changed brand. An invoice is a legal artefact, not a
+    # view: snapshot it, save it, never recompute.
+    #
+    # The bytes are frozen at SEND, inside `send_invoice`'s existing atomic
+    # block — the same moment the gapless number is allocated and the invoice
+    # becomes immutable. While an invoice is DRAFT (or ISSUED-but-unsent) the
+    # PDF keeps rendering fresh, because a draft is still changing and its
+    # preview is taken from it.
+    #
+    # `pdf_sha256` is the integrity witness: the digest of exactly the bytes
+    # that were stored. It is what lets a test — or an auditor — prove that
+    # the document served today is byte-for-byte the one committed at send,
+    # rather than merely asserting that some file exists.
+    # ------------------------------------------------------------------
+    pdf_file = models.FileField(
+        upload_to=invoice_pdf_upload_to,
+        null=True,
+        blank=True,
+        max_length=255,
+        help_text=(
+            "The frozen invoice PDF, written at SEND. NULL means not yet "
+            "frozen: every DRAFT and ISSUED invoice, plus any invoice sent "
+            "before this field existed (those freeze lazily on first access, "
+            "or in bulk via `manage.py freeze_invoice_pdfs`)."
+        ),
+    )
+    pdf_frozen_at = models.DateTimeField(null=True, blank=True)
+    # `db_default` as well as `default`, deliberately. A plain
+    # `default=""` on a NOT NULL column makes Django add the column with a
+    # database default and then DROP it, so any INSERT that does not name
+    # the column fails — raw SQL, a fixture loaded from an older dump, or
+    # (the case that caught this) an older copy of this model still running
+    # against a migrated database. Keeping a real DB default costs nothing
+    # and removes a whole class of "works on my branch" breakage.
+    pdf_sha256 = models.CharField(
+        max_length=64, blank=True, default="", db_default=""
+    )
+    pdf_page_count = models.PositiveIntegerField(null=True, blank=True)
 
     # Billing period the invoice covers, stored as a (year, month) tuple
     # mirroring extra_work.billing.billing_month() (which returns

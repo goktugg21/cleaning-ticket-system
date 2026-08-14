@@ -1,38 +1,61 @@
 """
-Invoicing — Phase 3: the two-page invoice PDF renderer.
+Invoicing — the invoice PDF renderer, and (Sprint 180 §1) the FREEZE.
 
 Pure rendering layer (mirrors `extra_work.proposal_pdf.render_proposal_pdf`).
-The HTTP wrapper lives in `invoicing.views.InvoicePdfView`.
+The HTTP wrappers live in `invoicing.views`.
 
-    render_invoice_pdf(invoice) -> bytes
+    render_invoice_pdf(invoice)  -> bytes          (always renders fresh)
+    freeze_invoice_pdf(invoice)  -> Invoice        (render once, store, digest)
+    invoice_pdf_bytes(invoice)   -> bytes          (what the endpoints serve)
 
-LOCKED decisions this renders (see the checklist Invoicing section):
+LOCKED decisions this renders (see docs/product/sot-addendum-b-invoicing.md):
 
   * DUTCH-ONLY, like the proposal PDF + the emails. Static labels/status and
     money/quantity use Dutch formatting ("€ 1.234,56", comma decimals). We
     REUSE the shared brand assets (`config.pdf_branding`: logo, embedded
     DejaVu font with the real euro sign, accent rule) and the canonical
-    proposal-PDF formatters (`_fmt_money` / `_nl_number` / `_safe_pdf_text` /
-    `_fitted_cell`) so the two families cannot drift.
-  * TWO PAGES. Page 1 = the SUMMARY (branded header; number or "CONCEPT"
-    while draft; customer + optional building; dates; period; the optional
-    free-text fee; and the invoice totals). Page 2 = the ITEMIZED DETAIL:
-    one width-safe row per InvoiceLine with "EW-maand / uitgevoerd werk /
-    datum" + the money columns, and a totals footer.
+    proposal-PDF formatters (`_fmt_money` / `_nl_number` / `_safe_pdf_text`)
+    so the two families cannot drift. The annex reuses `_fitted_cell` from
+    the same source for its own table.
+  * PAGE 1 IS THE SUMMARY, PAGE 2 ONWARD IS THE SPECIFICATION (Sprint 180
+    §2). Page 1: branded header; number or "CONCEPT" while unnumbered;
+    customer + optional building; dates; period; the optional free-text fee;
+    ONE summary line — "3 meerwerken - Zie bijlage voor specificatie" — and
+    the totals. Page 2+: the annex, grouped building -> department -> work
+    type, over as many pages as it takes. That is the document the owner's
+    father assembles by hand today; see `invoicing.annex`.
+
+    This REPLACED a fixed second page carrying a flat per-line table with
+    quantity / unit price / VAT% columns. The owner's own invoices do not
+    carry those: the specification lists what was done, when, and the amount
+    excluding VAT, and the VAT is summarised once on page 1. Keeping both
+    would have meant printing the same money twice in two different shapes.
   * DRAFT marker: while status==DRAFT a "CONCEPT" marker is shown on every
     page (header band) + in the number slot + a prominent page-1 banner, so
     a printed draft is unmistakable. ISSUED/SENT show the real number and no
     marker.
   * A reversal (is_reversal=True) is titled "Creditnota" and its amounts are
-    already negative in the data — they simply render negative.
+    already negative in the data — they simply render negative. Its annex
+    references the original invoice number rather than re-listing work,
+    because `reverse_invoice` mirrors lines with `extra_work=None` and there
+    is no work there to list (Sprint 180 §1a).
 
-Page-1 SUMMARY is v1 (auto-composed from the invoice's own figures). The
-fully hand-editable page-1 summary line + line editing is the Phase-4 UI.
+**THE FREEZE.** Until Sprint 180 this module was called on every download
+and the document was re-rendered from live data each time, so a SENT
+invoice could render differently later if anything behind it changed. An
+invoice is an artefact, not a view. `freeze_invoice_pdf` renders once,
+stores the bytes on `Invoice.pdf_file`, and records their SHA-256 and page
+count; `send_invoice` calls it inside its own atomic block. From then on
+`invoice_pdf_bytes` serves the stored bytes and never re-renders. A DRAFT
+(or ISSUED-but-unsent) invoice keeps rendering fresh — it is still changing,
+and its preview is taken from it.
 """
 from __future__ import annotations
 
-from decimal import Decimal
+import hashlib
 
+from django.core.files.base import ContentFile
+from django.db import transaction
 from django.utils import timezone
 from fpdf import FPDF
 
@@ -49,28 +72,14 @@ from config.pdf_branding import (
 # REUSE the canonical Dutch formatters + width-safe cell from the proposal
 # PDF so money/label rendering cannot drift between the two PDF families.
 from extra_work.proposal_pdf import (
-    _fitted_cell,
     _fmt_money,
     _nl_number,
     _safe_pdf_text,
 )
 
+from .annex import build_annex, draw_annex, summary_line
 from .models import Invoice
 
-# Page-2 detail table column widths (mm). Sum = 189, within the 190mm usable
-# width of A4 at fpdf2's default 10mm side margins. Width-fitted cells mean
-# no realistic value overflows its column.
-_COL_MONTH = 18.0
-_COL_WORK = 45.0
-_COL_DATE = 20.0
-_COL_QTY = 16.0
-_COL_UNIT = 24.0
-_COL_VATPCT = 13.0
-_COL_SUBTOTAL = 18.0
-_COL_VAT = 16.0
-_COL_TOTAL = 19.0
-
-_TABLE_BORDER_RGB = (208, 200, 206)
 _DRAFT_GREY = (200, 195, 198)
 
 
@@ -100,10 +109,6 @@ def _group_label(invoice: Invoice) -> str:
         invoice.work_type.name if invoice.work_type_id else None,
     ]
     return " - ".join(p for p in parts if p)
-
-
-def _fmt_qty(value: Decimal) -> str:
-    return _nl_number(value if value is not None else Decimal("0"), 2)
 
 
 class _InvoicePDF(FPDF):
@@ -182,8 +187,30 @@ _STATUS_LABELS_NL = {
 }
 
 
-def render_invoice_pdf(invoice: Invoice) -> bytes:
-    """Render `invoice` as a two-page Dutch PDF. Read-only — no mutations."""
+def _vat_display(invoice: Invoice, lines) -> str:
+    """"21%" when every line carries the same VAT rate, else the AMOUNT.
+
+    The owner's page-1 line reads "157,40 + 21% = 190,45". That shorthand is
+    only truthful when there is one rate on the document; a mixed-rate
+    invoice would be misdescribed by any single percentage, so it falls back
+    to stating the VAT figure itself rather than picking one of the rates.
+
+    An invoice with no lines at all (fee-only) has no rate to quote either.
+    """
+    rates = {line.vat_pct for line in lines}
+    if len(rates) == 1:
+        rate = rates.pop()
+        return f"{_nl_number(rate, 0 if rate == rate.to_integral_value() else 2)}%"
+    return f"{_fmt_money(invoice.vat_amount)} BTW"
+
+
+def _render(invoice: Invoice) -> tuple[bytes, int]:
+    """The renderer proper — bytes AND the page count.
+
+    The page count comes from fpdf2's own page list rather than from re-
+    parsing the output with pypdf: the renderer already knows, and a second
+    parse is both slower and a second thing that can disagree.
+    """
     company = invoice.company
     company_name = getattr(company, "name", "") or ""
     # Company-aware branding — OSIUS pink/logo only for the platform company;
@@ -329,6 +356,43 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
             align="R", new_x="LMARGIN", new_y="NEXT",
         )
 
+    # Sprint 180 §2 — THE summary line. One line, the count, and the
+    # pointer to the annex, exactly as the owner's own page 1 reads:
+    #
+    #     3 meerwerken - Zie bijlage voor specificatie   157,40 + 21% = 190,45
+    #
+    # Both halves are composed from the SAME `Annex` the pages below are
+    # drawn from, so the count on page 1 cannot drift from the number of
+    # rows overleaf.
+    annex = build_annex(invoice)
+    lines = list(invoice.lines.all())
+    pdf.ln(2)
+    pdf.set_fill_color(*brand_tint)
+    pdf.set_font(FONT_FAMILY, "B", 10)
+    pdf.cell(
+        95,
+        8,
+        _safe_pdf_text(summary_line(annex)),
+        border=0,
+        fill=True,
+    )
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0,
+        8,
+        _safe_pdf_text(
+            f"{_fmt_money(invoice.subtotal_amount)} + "
+            f"{_vat_display(invoice, lines)} = "
+            f"{_fmt_money(invoice.total_amount)}"
+        ),
+        border=0,
+        align="R",
+        fill=True,
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.set_fill_color(255, 255, 255)
+
     pdf.ln(2)
     _total_row("Subtotaal", invoice.subtotal_amount, size=10)
     _total_row("BTW", invoice.vat_amount, size=10)
@@ -345,67 +409,114 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     )
 
     # ==================================================================
-    # PAGE 2 — ITEMIZED DETAIL
+    # PAGE 2+ — THE SPECIFICATION ANNEX
     # ==================================================================
-    pdf.add_page()
-    _draw_header(
+    # As many pages as the work takes. `invoicing.annex` owns the grouping,
+    # the pagination and the repeated headers; the branded header stays here
+    # and is handed in as a callable so the annex never imports back into
+    # this module.
+    def _annex_page_header(target_pdf, subtitle: str) -> None:
+        _draw_header(
+            target_pdf,
+            company=company,
+            brand_accent=brand_accent,
+            company_name=company_name,
+            doc_title=f"{doc_title} — {subtitle}",
+            number_text=number_text,
+            status_text=status_text,
+        )
+
+    draw_annex(
         pdf,
-        company=company,
+        invoice,
+        annex,
         brand_accent=brand_accent,
-        company_name=company_name,
-        doc_title=doc_title + " — specificatie",
-        number_text=number_text,
-        status_text=status_text,
+        brand_tint=brand_tint,
+        draw_page_header=_annex_page_header,
     )
 
-    pdf.set_font(FONT_FAMILY, "B", 11)
-    pdf.cell(0, 7, _safe_pdf_text("Uitgevoerd werk (specificatie)"), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(1)
+    return bytes(pdf.output()), len(pdf.pages)
 
-    # Table header row.
-    pdf.set_draw_color(*_TABLE_BORDER_RGB)
-    pdf.set_font(FONT_FAMILY, "B", 8.0)
-    pdf.set_fill_color(*brand_tint)
-    pdf.set_text_color(*brand_accent)
-    headers = (
-        ("EW-maand", _COL_MONTH, "L"),
-        ("Uitgevoerd werk", _COL_WORK, "L"),
-        ("Datum", _COL_DATE, "L"),
-        ("Aantal", _COL_QTY, "R"),
-        ("Eenheidsprijs", _COL_UNIT, "R"),
-        ("BTW %", _COL_VATPCT, "R"),
-        ("Subtotaal", _COL_SUBTOTAL, "R"),
-        ("BTW", _COL_VAT, "R"),
-        ("Totaal", _COL_TOTAL, "R"),
+
+def render_invoice_pdf(invoice: Invoice) -> bytes:
+    """Render `invoice` fresh. Read-only — no mutations, no stored bytes.
+
+    Kept as the module's public rendering entry point (several callers and
+    tests speak it). Endpoints should call `invoice_pdf_bytes` instead, which
+    serves the FROZEN document for a sent invoice.
+    """
+    return _render(invoice)[0]
+
+
+# ---------------------------------------------------------------------------
+# Sprint 180 §1 — the freeze
+# ---------------------------------------------------------------------------
+
+
+def freeze_invoice_pdf(invoice: Invoice) -> Invoice:
+    """Render `invoice` ONCE, store the bytes, and record their digest.
+
+    Idempotent by design: an invoice that already has `pdf_file` is returned
+    untouched. That is not an optimisation — it is the whole point. The
+    frozen document is the artefact; re-rendering it would defeat the freeze,
+    and a caller that asks twice must get the same answer both times.
+
+    Assumes the caller holds the row (it is called from inside
+    `send_invoice`'s atomic block, and from `invoice_pdf_bytes` under its own
+    `select_for_update`). Saves with `update_fields` so it touches only what
+    it wrote.
+    """
+    if invoice.pdf_file:
+        return invoice
+    data, page_count = _render(invoice)
+    invoice.pdf_sha256 = hashlib.sha256(data).hexdigest()
+    invoice.pdf_page_count = page_count
+    invoice.pdf_frozen_at = timezone.now()
+    # save=False, then ONE save() below: `FieldFile.save()` would issue its
+    # own UPDATE of just `pdf_file`, so the four fields would land in two
+    # statements and a crash between them could leave a stored file with no
+    # digest beside it.
+    invoice.pdf_file.save(
+        f"factuur-{invoice.number or invoice.pk}.pdf",
+        ContentFile(data),
+        save=False,
     )
-    for label, width, align in headers:
-        _fitted_cell(pdf, width, 7, label, align=align, border=1, fill=True, base_size=8.0)
-    pdf.ln(7)
-    pdf.set_text_color(0, 0, 0)
-
-    pdf.set_font(FONT_FAMILY, "", 8.5)
-    for line in invoice.lines.all():
-        _fitted_cell(pdf, _COL_MONTH, 6, _fmt_period(line.period_year, line.period_month), align="L", border=1, base_size=8.5)
-        _fitted_cell(pdf, _COL_WORK, 6, line.description or "", align="L", border=1, base_size=8.5)
-        _fitted_cell(pdf, _COL_DATE, 6, _fmt_date(line.performed_on), align="L", border=1, base_size=8.5)
-        _fitted_cell(pdf, _COL_QTY, 6, _fmt_qty(line.quantity), align="R", border=1, base_size=8.5)
-        _fitted_cell(pdf, _COL_UNIT, 6, _fmt_money(line.unit_price), align="R", border=1, base_size=8.5)
-        _fitted_cell(pdf, _COL_VATPCT, 6, _nl_number(line.vat_pct, 2), align="R", border=1, base_size=8.5)
-        _fitted_cell(pdf, _COL_SUBTOTAL, 6, _fmt_money(line.line_subtotal), align="R", border=1, base_size=8.5)
-        _fitted_cell(pdf, _COL_VAT, 6, _fmt_money(line.line_vat), align="R", border=1, base_size=8.5)
-        _fitted_cell(pdf, _COL_TOTAL, 6, _fmt_money(line.line_total), align="R", border=1, base_size=8.5)
-        pdf.ln(6)
-    pdf.set_draw_color(0, 0, 0)
-    pdf.ln(4)
-
-    # Detail totals footer (mirrors the invoice totals).
-    _total_row("Subtotaal", invoice.subtotal_amount, size=10)
-    _total_row("BTW", invoice.vat_amount, size=10)
-    pdf.set_font(FONT_FAMILY, "B", 11)
-    pdf.cell(140, 7, _safe_pdf_text("Totaal"), align="R")
-    pdf.cell(
-        0, 7, _safe_pdf_text(_fmt_money(invoice.total_amount)),
-        align="R", new_x="LMARGIN", new_y="NEXT",
+    invoice.save(
+        update_fields=[
+            "pdf_file",
+            "pdf_sha256",
+            "pdf_page_count",
+            "pdf_frozen_at",
+            "updated_at",
+        ]
     )
+    return invoice
 
-    return bytes(pdf.output())
+
+def invoice_pdf_bytes(invoice: Invoice) -> bytes:
+    """What the endpoints serve.
+
+    * DRAFT / ISSUED-but-unsent -> rendered FRESH every time. The document is
+      still changing and the preview is taken from it.
+    * SENT with a frozen file -> the stored bytes, verbatim. Never re-rendered.
+    * SENT with NO frozen file -> frozen NOW and then served (Sprint 180 §1b).
+      That is every invoice sent before the field existed. The lazy path is
+      row-locked and re-checks under the lock, so two concurrent downloads
+      cannot each write a file; `manage.py freeze_invoice_pdfs` exists to do
+      the same thing deliberately and in bulk instead of by accident of who
+      happens to open which invoice first.
+    """
+    if invoice.status != Invoice.Status.SENT:
+        return render_invoice_pdf(invoice)
+    if invoice.pdf_file:
+        with invoice.pdf_file.open("rb") as fh:
+            return fh.read()
+    with transaction.atomic():
+        locked = Invoice.objects.select_for_update().get(pk=invoice.pk)
+        # Re-checked under the lock: another request may have frozen it
+        # between our first read and this one.
+        if not locked.pdf_file:
+            freeze_invoice_pdf(locked)
+    locked.refresh_from_db(fields=["pdf_file"])
+    with locked.pdf_file.open("rb") as fh:
+        return fh.read()

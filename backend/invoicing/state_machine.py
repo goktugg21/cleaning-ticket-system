@@ -39,6 +39,7 @@ from customers.models import Customer
 from extra_work.models import ExtraWorkRequest
 from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement)
 
+from .invoice_pdf import freeze_invoice_pdf
 from .models import Invoice, InvoiceLine
 from .numbering import allocate_invoice_number
 
@@ -195,6 +196,23 @@ def send_invoice(actor, invoice):
     locked.status = Invoice.Status.SENT
     locked.sent_at = now
     locked.save(update_fields=update_fields)
+    # Sprint 180 §1 — FREEZE THE DOCUMENT, inside this same atomic block.
+    #
+    # SEND is the only defensible moment: it is where the gapless number is
+    # assigned and where the invoice becomes immutable, so it is the first
+    # instant at which the document is finished AND the last at which it is
+    # still guaranteed to describe what was decided. Before this, the PDF was
+    # re-rendered from live data on every download, which meant a sent
+    # invoice's document could render differently later — a renamed customer,
+    # a relabelled department, a changed brand. `freeze_invoice_pdf` is
+    # called AFTER the save above so the frozen bytes carry the number and
+    # the sent date, not the state one statement earlier.
+    #
+    # It shares this transaction deliberately: if the write of the file or
+    # its digest fails, the send fails with it. An invoice that is SENT with
+    # no frozen document is exactly the state this sprint exists to remove,
+    # and it must not be reachable through the happy path.
+    freeze_invoice_pdf(locked)
     return locked
 
 

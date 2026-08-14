@@ -93,6 +93,19 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "credited_by_number",
             "issued_at",
             "sent_at",
+            # Sprint 180 §1 — is this document FROZEN, and how long is it?
+            # Provider-side only. `pdf_frozen_at` is NULL for every draft and
+            # for any invoice sent before the freeze existed (those freeze on
+            # first access or via `manage.py freeze_invoice_pdfs`), so it
+            # doubles as the operator-visible backfill progress indicator.
+            # `pdf_page_count` is what makes "an invoice can run to eight
+            # pages" checkable from the list without opening each one.
+            #
+            # `pdf_sha256` is deliberately NOT exposed: it is the integrity
+            # witness the tests and a future audit read from the row, and no
+            # screen has a use for a hex digest.
+            "pdf_frozen_at",
+            "pdf_page_count",
             "created_at",
             "updated_at",
             "lines",

@@ -45,9 +45,27 @@ class RenderInvoicePdfTests(InvoicingFixture):
         self.assertTrue(data)
         self.assertTrue(data.startswith(b"%PDF"))
 
-    def test_is_two_page_document(self):
+    def test_is_a_summary_page_plus_an_annex(self):
+        """Sprint 180 §2 — this asserted `== 2` until the annex existed.
+
+        The document is no longer a fixed two-pager: page 1 is the summary
+        and page 2 ONWARD is the specification, over as many pages as the
+        work takes. What is invariant is that there is exactly one summary
+        page and at least one annex page — an annex that rendered zero pages
+        would leave page 1 pointing at a bijlage that is not there.
+        """
         data = render_invoice_pdf(self._draft(n_lines=2))
-        self.assertEqual(_page_count(data), 2)
+        self.assertGreaterEqual(_page_count(data), 2)
+
+    def test_page_one_points_at_the_annex_and_the_annex_exists(self):
+        data = render_invoice_pdf(self._draft(n_lines=3))
+        reader = PdfReader(BytesIO(data))
+        page1 = reader.pages[0].extract_text() or ""
+        self.assertIn("3 meerwerken", page1)
+        self.assertIn("Zie bijlage voor specificatie", page1)
+        annex = "\n".join(p.extract_text() or "" for p in reader.pages[1:])
+        self.assertIn("Bijlage", annex)
+        self.assertIn("specificatie", annex)
 
     def test_draft_shows_concept_and_no_real_number(self):
         draft = self._draft()
