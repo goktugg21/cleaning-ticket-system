@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import { getCustomer, listCustomerBuildings } from "../../api/admin";
+import { PageHeader } from "../../components/PageHeader";
 import type {
   CustomerAdmin,
   CustomerBuildingMembership,
@@ -81,31 +81,30 @@ export function BuildingManagerCustomerDetailPage() {
   }, [numericId, t]);
 
   return (
-    <div className="admin-page" data-testid="bm-customer-detail-page">
-      <header className="admin-page-head">
-        <div>
-          <Link
-            to="/admin/customers"
-            className="admin-back-link"
-            data-testid="bm-customer-detail-back"
-          >
-            <ChevronLeft size={14} strokeWidth={2.5} />
-            {t("bm_customer_detail.back")}
-          </Link>
-          <h1
-            className="admin-page-title"
-            data-testid="bm-customer-detail-title"
-          >
+    <div data-testid="bm-customer-detail-page">
+      {/* Sprint 180 §1 — the shared header. `admin-page-head`,
+          `admin-back-link`, `admin-page-title` and `admin-page-sub` were
+          defined nowhere, so the back link rendered as a plain inline
+          anchor and the customer's name as a browser-default `h1` in the
+          body face. `PageHeader` owns the back link (`link-back`, with
+          the same chevron) and the house 28/800 title. Both test ids are
+          kept where they were. */}
+      <PageHeader
+        backLink={{
+          to: "/admin/customers",
+          label: t("bm_customer_detail.back"),
+        }}
+        title={
+          <span data-testid="bm-customer-detail-title">
             {customer ? customer.name : t("loading")}
-          </h1>
-          <p
-            className="admin-page-sub"
-            data-testid="bm-customer-detail-readonly-hint"
-          >
+          </span>
+        }
+        subtitle={
+          <span data-testid="bm-customer-detail-readonly-hint">
             {t("bm_customer_detail.readonly_hint")}
-          </p>
-        </div>
-      </header>
+          </span>
+        }
+      />
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
@@ -123,22 +122,74 @@ export function BuildingManagerCustomerDetailPage() {
                 {t("bm_customer_detail.section_basic_title")}
               </div>
             </div>
-            <dl className="readonly-grid">
-              <dt>{t("customers.col_name")}</dt>
-              <dd data-testid="bm-customer-detail-name">{customer.name}</dd>
-              <dt>{t("customers.col_contact_email")}</dt>
-              <dd>{customer.contact_email || "—"}</dd>
-              <dt>{t("customers.col_phone")}</dt>
-              <dd>{customer.phone || "—"}</dd>
-              <dt>{t("bm_customer_detail.field_language")}</dt>
-              <dd>{customer.language || "—"}</dd>
-              <dt>{t("bm_customer_detail.field_active")}</dt>
-              <dd>
-                {customer.is_active
-                  ? t("bm_customer_detail.active_yes")
-                  : t("bm_customer_detail.active_no")}
-              </dd>
-            </dl>
+            {/* Sprint 180 §1 — the house read-only field rows
+                (`detail-field-row` / `-label` / `-value`), which is what
+                the building and customer detail pages use. The
+                definition list this replaces asked for a class that had
+                no rule behind it at all, so its labels and values
+                stacked as plain block text with the reset removing even
+                the browser's own indent — the two columns the markup
+                implied never existed. An empty value now carries
+                `muted-empty`, exactly as on the building detail page. */}
+            <>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customers.col_name")}
+                </div>
+                <div
+                  className="detail-field-value"
+                  data-testid="bm-customer-detail-name"
+                >
+                  {customer.name}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customers.col_contact_email")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    customer.contact_email ? "" : " muted-empty"
+                  }`}
+                >
+                  {customer.contact_email || "—"}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customers.col_phone")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    customer.phone ? "" : " muted-empty"
+                  }`}
+                >
+                  {customer.phone || "—"}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("bm_customer_detail.field_language")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    customer.language ? "" : " muted-empty"
+                  }`}
+                >
+                  {customer.language || "—"}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("bm_customer_detail.field_active")}
+                </div>
+                <div className="detail-field-value">
+                  {customer.is_active
+                    ? t("bm_customer_detail.active_yes")
+                    : t("bm_customer_detail.active_no")}
+                </div>
+              </div>
+            </>
           </div>
 
           <div className="card" style={{ marginBottom: 16 }}>
