@@ -73,7 +73,17 @@ class CustomerApprovalGateTests(TenantFixtureMixin, APITestCase):
         ticket = apply_transition(
             self.ticket, self.customer_user, TicketStatus.APPROVED
         )
-        self.assertEqual(ticket.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — the approval carries the ticket through
+        # APPROVED to CLOSED. What this test locks is that the creator
+        # was ALLOWED to approve; the APPROVED history row records it.
+        self.assertEqual(ticket.status, TicketStatus.CLOSED)
+        self.assertTrue(
+            TicketStatusHistory.objects.filter(
+                ticket=ticket,
+                new_status=TicketStatus.APPROVED,
+                changed_by=self.customer_user,
+            ).exists()
+        )
 
     def test_plain_customer_user_cannot_approve_foreign_ticket(self):
         # The colleague holds a valid access row for the exact pair —
@@ -185,7 +195,9 @@ class CustomerApprovalGateTests(TenantFixtureMixin, APITestCase):
             TicketStatus.APPROVED,
             override_reason="Customer approved by phone.",
         )
-        self.assertEqual(ticket.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — auto-closed; the override row asserted below
+        # is what this test is about and is unchanged.
+        self.assertEqual(ticket.status, TicketStatus.CLOSED)
         history = TicketStatusHistory.objects.get(
             ticket=ticket,
             old_status=TicketStatus.WAITING_CUSTOMER_APPROVAL,

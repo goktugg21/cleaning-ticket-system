@@ -339,7 +339,11 @@ class CCATicketApprovalPolicyTests(TestCase):
             0,
         )
         ticket = apply_transition(self.ticket, self.cca_user, TicketStatus.APPROVED)
-        self.assertEqual(ticket.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — a customer approval auto-closes. This test is
+        # about the CCA being ALLOWED to approve with no access row;
+        # reaching a terminal state via APPROVED proves it, and the
+        # denial sibling below still raises.
+        self.assertEqual(ticket.status, TicketStatus.CLOSED)
 
     def test_approval_denied_when_policy_toggle_off(self):
         self.policy.customer_users_can_approve_ticket_completion = False
@@ -360,7 +364,9 @@ class CCATicketApprovalPolicyTests(TestCase):
             permission_overrides={"customer.ticket.approve_location": False},
         )
         ticket = apply_transition(self.ticket, self.cca_user, TicketStatus.APPROVED)
-        self.assertEqual(ticket.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — auto-closed. The revoking row still did not
+        # stop the approval, which is what this test locks.
+        self.assertEqual(ticket.status, TicketStatus.CLOSED)
 
     def test_visibility_unaffected_by_policy_when_action_denied(self):
         """Denial is ACTION-only: with the policy toggle off (so approval is

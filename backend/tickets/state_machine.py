@@ -169,6 +169,25 @@ ALLOWED_TRANSITIONS = {
 }
 
 
+# Sprint 180 §1 — transitions the SYSTEM may drive with `user=None`.
+#
+# Mirrors `extra_work.state_machine.SYSTEM_AUTO_TRANSITIONS`. A `None`
+# actor is admitted for these pairs and NOTHING else; the same pairs
+# stay available to qualified humans through the role table above (a
+# SUPER_ADMIN or in-scope COMPANY_ADMIN can still close by hand).
+#
+# The single member is the customer-approval auto-close, driven from
+# `tickets/auto_close.py`. Adding a pair here grants an unauthenticated,
+# unattributed write path to that transition — do it deliberately.
+SYSTEM_AUTO_TRANSITIONS = {
+    (TicketStatus.APPROVED, TicketStatus.CLOSED),
+}
+
+_SYSTEM_AUTO_TRANSITION_KEYS = {
+    (str(a), str(b)) for (a, b) in SYSTEM_AUTO_TRANSITIONS
+}
+
+
 # Each entry stamps the field with the most-recent timestamp on entry to that
 # status. Loop transitions (REJECTED -> IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
 # -> APPROVED again) overwrite the value. For first/last/duration analytics use
@@ -258,6 +277,16 @@ def _user_passes_scope(user, ticket, scope):
 
 
 def can_transition(user, ticket, to_status):
+    # Sprint 180 §1 — the SYSTEM actor. `user=None` is admitted ONLY
+    # for the pairs in `SYSTEM_AUTO_TRANSITIONS`; it is not a super-role
+    # and it does not fall through to any of the branches below. Same
+    # shape as `extra_work.state_machine._user_can_drive_transition`.
+    if user is None:
+        return (
+            str(ticket.status),
+            str(to_status),
+        ) in _SYSTEM_AUTO_TRANSITION_KEYS
+
     # SUPER_ADMIN_CAN_TRANSITION_ANY_STATUS
     if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
         # #109 Part C (audit P3-3) — CONVERTED_TO_EXTRA_WORK is excluded
@@ -300,8 +329,13 @@ def apply_transition(
         )
 
     if not can_transition(user, ticket, to_status):
+        # Sprint 180 §1 — `user` may be the system actor (None), so the
+        # role label has to survive a missing user. "system" is the
+        # honest label: the pair is simply not in
+        # `SYSTEM_AUTO_TRANSITIONS`.
+        role_label = getattr(user, "role", None) or "system"
         raise TransitionError(
-            f"Transition {ticket.status} -> {to_status} not allowed for role {user.role}.",
+            f"Transition {ticket.status} -> {to_status} not allowed for role {role_label}.",
             code="forbidden_transition",
         )
 
@@ -493,7 +527,15 @@ def apply_transition(
     # Sprint 29 Batch 29.8 — sync parent EW state.
     _sync_parent_extra_work_after_ticket_transition(locked, old_status, to_status)
 
-    return locked
+    # Sprint 180 §1 — customer approval closes the ticket. Runs AFTER
+    # the EW sync so the Sprint 8B `final_*` freeze still happens while
+    # the ticket is APPROVED. Returns `locked` untouched on every
+    # transition that is not the customer-approval leg, and the CLOSED
+    # ticket when it fires — so callers always see the true final
+    # state. Imported lazily: `auto_close` imports back from here.
+    from .auto_close import maybe_auto_close_after_customer_approval
+
+    return maybe_auto_close_after_customer_approval(locked, old_status)
 
 
 def _sync_parent_extra_work_after_ticket_transition(
@@ -649,6 +691,12 @@ def _sync_parent_extra_work_after_ticket_transition(
 
 
 def allowed_next_statuses(user, ticket):
+    # Sprint 180 §1 — this answers "what may this PERSON do next" and
+    # feeds the UI's transition buttons. The system actor has no UI, so
+    # it gets an empty list rather than falling into `user.role` below.
+    if user is None:
+        return []
+
     # SUPER_ADMIN_ALLOWED_NEXT_ALL_STATUSES
     if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
         return [

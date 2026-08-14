@@ -30,7 +30,7 @@ from notifications.services import (
     ticket_message_audience,
 )
 
-from .filters import TicketFilter
+from .filters import TicketFilter, exclude_finished_extra_work
 from .models import (
     Ticket,
     TicketAttachment,
@@ -350,15 +350,37 @@ class TicketViewSet(
         )
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
+
+        # Sprint 180 §1 — the email describes the transition the ACTOR
+        # drove, which is no longer always the ticket's final status.
+        #
+        # A customer approval now auto-closes (`tickets/auto_close.py`),
+        # so `updated.status` can be CLOSED while the thing that
+        # happened was "the customer approved". Reading `updated.status`
+        # here would have two consequences:
+        #   * recipients get "Goedgekeurd -> Gesloten" instead of the
+        #     decision they actually care about, and
+        #   * `is_admin_override` resolves False on an on-behalf
+        #     approval, silently downgrading the "approved on the
+        #     customer's behalf by X" mail to a generic status change.
+        #
+        # This is also the whole answer to "should auto-close fire a
+        # second customer notification": it must not, and it does not.
+        # The close happens inside `apply_transition`, which sends
+        # nothing (notification is a view-layer concern in this app), so
+        # the customer who just clicked Approve gets exactly ONE email,
+        # about their own decision. The close is visible on the ticket
+        # and in its timeline — where a bookkeeping step belongs.
+        requested_status = str(serializer.validated_data["to_status"])
         is_admin_override = (
             is_staff_role(request.user)
             and old_status == "WAITING_CUSTOMER_APPROVAL"
-            and updated.status in {"APPROVED", "REJECTED"}
+            and requested_status in {"APPROVED", "REJECTED"}
         )
         send_ticket_status_changed_email(
             updated,
             old_status=old_status,
-            new_status=updated.status,
+            new_status=requested_status,
             actor=request.user,
             is_admin_override=is_admin_override,
         )
@@ -1093,6 +1115,20 @@ class TicketViewSet(
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):
         scoped = scope_tickets_for(request.user)
+
+        # Sprint 180 §2 — the count chips sit directly above the rows
+        # they count, so they have to be counting the same thing. When
+        # the caller is hiding finished Extra Work in the list, it
+        # passes the same flag here and the counts drop the same rows.
+        # Absent / falsy param == the untouched totals every existing
+        # caller (the dashboard KPI strip, the status-breakdown panel)
+        # already gets.
+        if request.query_params.get("hide_finished_extra_work") in {
+            "true",
+            "True",
+            "1",
+        }:
+            scoped = exclude_finished_extra_work(scoped)
 
         status_counts = {row["status"]: row["c"] for row in scoped.values("status").annotate(c=Count("id"))}
         priority_counts = {row["priority"]: row["c"] for row in scoped.values("priority").annotate(c=Count("id"))}

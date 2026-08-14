@@ -774,11 +774,22 @@ class FreezeLockAuditTests(ActualHoursFixtureMixin, TestCase):
         ticket = self._ticket_for(ew)
 
         # APPROVED -> CLOSED -> REOPENED_BY_ADMIN -> IN_PROGRESS.
+        #
+        # Sprint 180 §1 — the customer approval inside
+        # `_approve_operational_ticket` auto-closes the ticket, so CLOSED
+        # is where this walk now STARTS rather than being its first hop;
+        # re-driving it would 400 with `no_op_transition`. The hop stays
+        # in the list (so the path this test is about still reads in
+        # full, and still runs if the auto-close is ever narrowed) and
+        # is skipped only when the ticket is already there.
         for to in (
             TicketStatus.CLOSED,
             TicketStatus.REOPENED_BY_ADMIN,
             TicketStatus.IN_PROGRESS,
         ):
+            ticket.refresh_from_db()
+            if str(ticket.status) == str(to):
+                continue
             r = self._api(self.super_admin).post(
                 f"/api/tickets/{ticket.id}/status/",
                 {"to_status": to, "note": "reopen"},

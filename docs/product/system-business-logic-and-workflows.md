@@ -788,6 +788,77 @@ When provider-side users approve/reject on behalf of the customer:
 
 Staff should not perform customer approval/rejection.
 
+### Approval closes the ticket (Sprint 180)
+
+**When the customer approves the work, the ticket becomes Closed
+automatically.** The approval is the decision; closing is the
+bookkeeping that follows from it, and an operator should not have to
+remember to do it.
+
+Why this matters more than it sounds. An Extra Work becomes invoiceable
+only when its spawned operational ticket is **Closed** specifically
+(`extra_work/billing.py::is_earned`), and the month it bills in is read
+off that ticket's close timestamp. But the Extra Work status sync treats
+Approved and Closed alike, so before this rule an Extra Work could read
+"Completed" on screen, be genuinely finished, and never become
+invoiceable — silently, with nobody warned. Closing on approval closes
+most of that hole.
+
+Exactly which transition closes:
+
+- **Waiting for customer approval → Approved** closes, whether the
+  customer clicked it themselves or a provider recorded their decision
+  on their behalf through the reasoned override above. The on-behalf
+  route is the common one in the field (the customer approves by
+  phone), so leaving it out would leave the hole open for the usual
+  case.
+- **Rejected does not close.** Rejected work goes back to In progress
+  for rework; it is live work.
+- **An administrative Approved does not close.** A Super Admin moving a
+  stuck ticket straight into Approved involved no customer, so there is
+  no approval to close on. The ticket parks on Approved and is closed by
+  hand, exactly as before.
+- A **reopened** ticket that is completed and approved again closes
+  again, and the newer close timestamp is the one that bills.
+
+The close is recorded as a **system** transition — no person is named
+for it, because no person performed it. The approval row above it names
+the actor who approved, carrying the override flag and reason when the
+decision was recorded on the customer's behalf. Auto-close sends **no
+second notification**: the customer just acted, and telling them their
+own click changed something is noise.
+
+### Work the customer never answers
+
+Auto-close only helps when the customer answers. Work that sits in
+Waiting for customer approval forever is finished, unbillable and
+silent — the worst of the three.
+
+The system does **not** approve on a timer. Approving on the customer's
+behalf is a decision with money attached, and there is already a route
+for it that demands a written reason and records who did it; inventing
+that decision automatically would be an override with nobody behind it.
+
+Instead the queue is made visible: the dashboard carries an **Approval
+overdue** row counting tickets that have been awaiting approval for more
+than 14 days, deep-linking into the filtered list. A provider then
+chases the customer, or records the approval on their behalf through the
+existing reasoned override.
+
+### Finished Extra Work leaves the ticket list
+
+Completed Extra Work should not clutter the ticket list. "Finished" is
+read off the **ticket's own** status (Approved or Closed), never off the
+parent Extra Work's — a provider can mark an Extra Work Completed by
+hand while one of its spawned tickets is still open, and that ticket
+must not vanish from the list that exists to show it.
+
+The Tickets page hides finished Extra Work by default and says so, with
+a one-click "Show all". The status count chips above the list apply the
+same rule, so the chips and the rows always agree. The Extra Work detail
+page's own spawned-tickets panel is unaffected — there, showing every
+spawned ticket is the point.
+
 ---
 
 ## 7. Extra Work workflow
