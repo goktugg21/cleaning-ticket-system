@@ -195,8 +195,12 @@ export interface TicketStatusHistory {
   id: number;
   old_status: TicketStatus;
   new_status: TicketStatus;
-  changed_by: number;
-  changed_by_email: string;
+  // Sprint 180 Batch 2 — a system transition (auto-close on customer
+  // approval) writes changed_by NULL, and the serializer OMITS
+  // changed_by_email entirely rather than emitting null, because DRF
+  // turns the null-FK traversal into SkipField.
+  changed_by: number | null;
+  changed_by_email?: string | null;
   note: string;
   // Sprint 27F-B1 — workflow override columns. Required on the
   // wire because the backend always emits them (`is_override`

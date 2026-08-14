@@ -117,7 +117,7 @@ export function UnifiedTimeline({ rows }: { rows: TicketTimelineRow[] }) {
     return (
       <TimelineRow color={color} timestamp={row.timestamp}>
         <div className="timeline-text">
-          <b>{humanName(row.changed_by_email, unassigned)}</b>
+          <b>{row.changed_by_email ? humanName(row.changed_by_email, unassigned) : t("common:audit_logs.system_actor")}</b>
           {row.old_status ? (
             <>
               {t("timeline_status_changed_from_to")}
@@ -196,7 +196,7 @@ export function UnifiedTimeline({ rows }: { rows: TicketTimelineRow[] }) {
     return (
       <TimelineRow color="muted" timestamp={row.timestamp}>
         <div className="timeline-text">
-          <b>{humanName(row.changed_by_email, unassigned)}</b>{" "}
+          <b>{row.changed_by_email ? humanName(row.changed_by_email, unassigned) : t("common:audit_logs.system_actor")}</b>{" "}
           {t("timeline_ew_status_change", { id: row.extra_work_id })}{" "}
           <StatusBadge
             status={{ kind: "extra-work", value: row.old_status }}
