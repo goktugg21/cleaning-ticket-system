@@ -699,7 +699,7 @@ export function UserDetailPage() {
                       ariaLabel={t("user_detail.memberships.companies_title")}
                       testIdPrefix="user-detail-companies"
                     >
-                      <ul className="user-detail-membership-list">
+                      <ul className="readonly-list">
                         {companies.map((c) => (
                           <li key={c.id}>
                             <Link to={`/admin/companies/${c.id}`}>{c.name}</Link>
@@ -720,7 +720,7 @@ export function UserDetailPage() {
                       ariaLabel={t("user_detail.memberships.buildings_title")}
                       testIdPrefix="user-detail-membership-buildings"
                     >
-                      <ul className="user-detail-membership-list">
+                      <ul className="readonly-list">
                         {buildings.map((b) => (
                           <li key={b.id}>
                             <Link to={`/admin/buildings/${b.id}`}>{b.name}</Link>
@@ -741,7 +741,7 @@ export function UserDetailPage() {
                       ariaLabel={t("user_detail.memberships.customers_title")}
                       testIdPrefix="user-detail-membership-customers"
                     >
-                      <ul className="user-detail-membership-list">
+                      <ul className="readonly-list">
                         {customers.map((c) => (
                           <li key={c.id}>
                             <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>

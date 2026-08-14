@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import { getCustomer, listCustomerContacts } from "../../api/admin";
+import { PageHeader } from "../../components/PageHeader";
 import type { Contact, CustomerAdmin } from "../../api/types";
 
 /**
@@ -80,30 +80,27 @@ export function BuildingManagerCustomerContactsPage() {
   );
 
   return (
-    <div className="admin-page" data-testid="bm-customer-contacts-page">
-      <header className="admin-page-head">
-        <div>
-          {customer ? (
-            <Link
-              to={`/admin/customers/${customer.id}`}
-              className="admin-back-link"
-              data-testid="bm-customer-contacts-back"
-            >
-              <ChevronLeft size={14} strokeWidth={2.5} />
-              {t("bm_customer_contacts.back", { name: customer.name })}
-            </Link>
-          ) : null}
-          <h1 className="admin-page-title">
-            {t("bm_customer_contacts.title")}
-          </h1>
-          <p
-            className="admin-page-sub"
-            data-testid="bm-customer-contacts-readonly-hint"
-          >
+    <div data-testid="bm-customer-contacts-page">
+      {/* Sprint 180 §1 — the shared header, same swap as the other two
+          building-manager pages. The back link is conditional here (it
+          needs the customer's name), which `PageHeader` supports by
+          taking `backLink` as an optional prop. */}
+      <PageHeader
+        backLink={
+          customer
+            ? {
+                to: `/admin/customers/${customer.id}`,
+                label: t("bm_customer_contacts.back", { name: customer.name }),
+              }
+            : undefined
+        }
+        title={t("bm_customer_contacts.title")}
+        subtitle={
+          <span data-testid="bm-customer-contacts-readonly-hint">
             {t("bm_customer_contacts.readonly_hint")}
-          </p>
-        </div>
-      </header>
+          </span>
+        }
+      />
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
@@ -123,38 +120,55 @@ export function BuildingManagerCustomerContactsPage() {
               {t("bm_customer_contacts.empty")}
             </p>
           ) : (
-            <table className="admin-table">
-              <thead>
-                {/* Sprint 179B §5 — these four headers rendered their KEY
-                    on screen: `customer_contacts.col_*` was never in any
-                    bundle. The `field_*` twins are in `common`, carry the
-                    exact wording this page wants, and are what the admin
-                    twin of this screen already uses as headers — so this
-                    reads word for word like the page it mirrors instead
-                    of adding four synonyms beside four existing keys. */}
-                <tr>
-                  <th>{t("customer_contacts.field_full_name")}</th>
-                  <th>{t("customer_contacts.field_email")}</th>
-                  <th>{t("customer_contacts.field_phone")}</th>
-                  <th>{t("customer_contacts.field_role_label")}</th>
-                </tr>
-              </thead>
-              <tbody data-testid="bm-customer-contacts-tbody">
-                {contacts.map((contact) => (
-                  <tr
-                    key={contact.id}
-                    data-testid={`bm-contact-row-${contact.id}`}
-                    onClick={() => setSelectedId(contact.id)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td>{contact.full_name}</td>
-                    <td>{contact.email || "—"}</td>
-                    <td>{contact.phone || "—"}</td>
-                    <td>{contact.role_label || "—"}</td>
+            /* Sprint 180 §1 — `data-table` inside `table-wrap`, the house
+               pair, replacing the undefined `admin-table`. */
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  {/* Sprint 179B §5 — these four headers rendered their
+                      KEY on screen: `customer_contacts.col_*` was never
+                      in any bundle. The `field_*` twins are in `common`,
+                      carry the exact wording this page wants, and are
+                      what the admin twin of this screen already uses as
+                      headers — so this reads word for word like the page
+                      it mirrors instead of adding four synonyms beside
+                      four existing keys. */}
+                  <tr>
+                    <th>{t("customer_contacts.field_full_name")}</th>
+                    <th>{t("customer_contacts.field_email")}</th>
+                    <th>{t("customer_contacts.field_phone")}</th>
+                    <th>{t("customer_contacts.field_role_label")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody data-testid="bm-customer-contacts-tbody">
+                  {contacts.map((contact) => (
+                    <tr
+                      key={contact.id}
+                      data-testid={`bm-contact-row-${contact.id}`}
+                      className="admin-row-clickable"
+                      onClick={() => setSelectedId(contact.id)}
+                    >
+                      <td className="td-subject">{contact.full_name}</td>
+                      <td>
+                        {contact.email || (
+                          <span className="muted-empty">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {contact.phone || (
+                          <span className="muted-empty">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {contact.role_label || (
+                          <span className="muted-empty">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
 
           {selectedContact && (
@@ -168,22 +182,59 @@ export function BuildingManagerCustomerContactsPage() {
                   {selectedContact.full_name}
                 </div>
               </div>
-              <dl className="readonly-grid">
-                <dt>{t("customer_contacts.field_email")}</dt>
-                <dd>{selectedContact.email || "—"}</dd>
-                <dt>{t("customer_contacts.field_phone")}</dt>
-                <dd>{selectedContact.phone || "—"}</dd>
-                <dt>{t("customer_contacts.field_role_label")}</dt>
-                <dd>{selectedContact.role_label || "—"}</dd>
-                {selectedContact.notes && (
-                  <>
-                    <dt>{t("bm_customer_contacts.notes_label")}</dt>
-                    <dd style={{ whiteSpace: "pre-wrap" }}>
-                      {selectedContact.notes}
-                    </dd>
-                  </>
-                )}
-              </dl>
+              {/* Sprint 180 §1 — the house read-only field rows, same
+                  swap as the customer detail page: `readonly-grid` was
+                  a `<dl>` with no rule behind it, so its labels and
+                  values stacked as plain text. */}
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_contacts.field_email")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    selectedContact.email ? "" : " muted-empty"
+                  }`}
+                >
+                  {selectedContact.email || "—"}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_contacts.field_phone")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    selectedContact.phone ? "" : " muted-empty"
+                  }`}
+                >
+                  {selectedContact.phone || "—"}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_contacts.field_role_label")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    selectedContact.role_label ? "" : " muted-empty"
+                  }`}
+                >
+                  {selectedContact.role_label || "—"}
+                </div>
+              </div>
+              {selectedContact.notes && (
+                <div className="detail-field-row">
+                  <div className="detail-field-label">
+                    {t("bm_customer_contacts.notes_label")}
+                  </div>
+                  <div
+                    className="detail-field-value"
+                    style={{ whiteSpace: "pre-wrap" }}
+                  >
+                    {selectedContact.notes}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

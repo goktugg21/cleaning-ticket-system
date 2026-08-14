@@ -40,7 +40,11 @@ import {
   toDateString,
 } from "../lib/isoWeek";
 import type { IsoWeek } from "../lib/isoWeek";
-import { hourSourceLabel } from "../lib/hourSource";
+import {
+  decodeSource,
+  encodeSource,
+  hourSourceLabel,
+} from "../lib/hourSource";
 import { HoursWeekGrid } from "../components/timesheets/HoursWeekGrid";
 import { useAuth } from "../auth/AuthContext";
 
@@ -50,10 +54,14 @@ interface EntryFormState {
   hours: string;
   building: string;
   note: string;
+  /** Sprint 180 §3 — "TYPE:id", or bare "TYPE" for a type-only source
+   *  (Contract / Other), or "" for none. The `lib/hourSource` encoding
+   *  the entries table already uses, so one decoder serves both. */
+  source: string;
 }
 
 function emptyForm(date: string): EntryFormState {
-  return { date, hour_type: "", hours: "", building: "", note: "" };
+  return { date, hour_type: "", hours: "", building: "", note: "", source: "" };
 }
 
 function formatDayLabel(value: string, locale: string): string {
@@ -315,6 +323,7 @@ export function MyHoursPage() {
       hours: entry.hours,
       building: entry.building === null ? "" : String(entry.building),
       note: entry.note,
+      source: encodeSource(entry.source_type, entry.source_id),
     });
     setFormError("");
   }
@@ -339,6 +348,11 @@ export function MyHoursPage() {
       hours: form.hours.trim(),
       building: form.building === "" ? null : Number(form.building),
       note: form.note.trim(),
+      // Sprint 180 §3 — the decoder turns "" back into OTHER with no id,
+      // which is the column's own default, so clearing the field puts
+      // the row back to the state an untagged row has rather than
+      // leaving whatever was there before.
+      ...decodeSource(form.source),
     };
     try {
       if (mode === "create") {
@@ -535,6 +549,11 @@ export function MyHoursPage() {
           </div>
           {gridOpen && (
             <HoursWeekGrid
+              /* Sprint 180 §2 — keyed by the week, for the same reason
+                 the week wizard is: the grid's cells are keyed by date
+                 and Save posts one week, so anything typed for the week
+                 you just paged away from was invisible AND unsaveable. */
+              key={weekKey}
               week={week}
               /* Sprint 155 §5 — the grid renders a block per employee it
                  is given. Here that is exactly one person: this page
@@ -829,6 +848,61 @@ export function MyHoursPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Sprint 180 §3 — WHICH JOB, editable at last.
+                Sprint 179B put the job in the list on this page and left
+                it read-only, so the one screen that showed a wrong job
+                was the one screen that could not correct it. The options
+                and the encoding are the entries table's — the same
+                `listHourSources()` list and the same
+                `encodeSource`/`decodeSource` pair — so the two paths
+                cannot drift on what a valid source is. */}
+            <div className="field">
+              <label className="field-label" htmlFor="my-hours-source">
+                {t("my_hours.field_job")}
+              </label>
+              <select
+                id="my-hours-source"
+                className="field-select"
+                value={form.source}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, source: event.target.value }))
+                }
+                data-testid="my-hours-input-source"
+                disabled={formBusy}
+              >
+                <option value="">{t("my_hours.field_job_empty")}</option>
+                {/* The row's CURRENT job stays offerable even when the
+                    job has since closed and left the picker: without it,
+                    editing the hours of a finished ticket would silently
+                    retag them. Same guard the entries table carries. */}
+                {form.source &&
+                  !sourceOptions.some(
+                    (option) =>
+                      encodeSource(option.source_type, option.source_id) ===
+                      form.source,
+                  ) && (
+                    <option value={form.source}>
+                      {hourSourceLabel(
+                        decodeSource(form.source).source_type,
+                        decodeSource(form.source).source_id,
+                        sourceOptions,
+                        t,
+                        t("hours_week_grid.no_source"),
+                      )}
+                    </option>
+                  )}
+                {sourceOptions.map((option) => (
+                  <option
+                    key={encodeSource(option.source_type, option.source_id)}
+                    value={encodeSource(option.source_type, option.source_id)}
+                  >
+                    {option.title}
+                  </option>
+                ))}
+              </select>
+              <div className="field-hint">{t("my_hours.field_job_hint")}</div>
             </div>
 
             <div className="field">

@@ -34,6 +34,12 @@ class StaffProfileSerializer(serializers.ModelSerializer):
             "user_email",
             "user_full_name",
             "phone",
+            # Sprint 180 §4 — the payroll join key, on the READ shape too.
+            # It has been on the model since Sprint 172 §5 and the worker
+            # hour report has printed it ("Personeelsnr.") ever since, but
+            # it appeared on no serializer at all: a column the report
+            # joins on and nobody could see, let alone fill in.
+            "personnel_number",
             "internal_note",
             "can_request_assignment",
             "is_active",
@@ -65,6 +71,16 @@ class StaffProfileUpdateSerializer(serializers.ModelSerializer):
         model = StaffProfile
         fields = [
             "phone",
+            # Sprint 180 §4 — WRITABLE. The field existed, the report read
+            # it, and no write path anywhere could set it: the number had
+            # to be put in the database by hand or stay empty forever.
+            # `blank=True` on the model, so DRF derives
+            # `allow_blank=True` and clearing it is a legitimate edit.
+            #
+            # No audit wiring needed: StaffProfile is registered for the
+            # generic full-CRUD trio in `audit/signals.py`, so the field
+            # becomes audited by the same rows the moment it is writable.
+            "personnel_number",
             "internal_note",
             "can_request_assignment",
             "is_active",

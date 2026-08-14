@@ -1185,6 +1185,11 @@ export async function promoteCustomerContact(
 
 export interface StaffProfileUpdatePayload {
   phone?: string;
+  /** Sprint 180 §4 — the employer's own number for this worker, as it
+   *  appears on the payroll. Free text: every payroll numbers its people
+   *  differently. Blank is a legitimate value (the model is
+   *  `blank=True`), so clearing the box clears the number. */
+  personnel_number?: string;
   internal_note?: string;
   can_request_assignment?: boolean;
   is_active?: boolean;

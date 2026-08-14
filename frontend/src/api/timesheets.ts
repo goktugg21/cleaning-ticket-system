@@ -201,6 +201,17 @@ export async function saveWeekGrid(payload: {
     building?: number | null;
     date: string;
     hours: string;
+    /** Sprint 180 §3 — the same hole as `TimeEntryWritePayload`, on the
+     *  bulk path. The grid has attached a job to every cell it sends
+     *  since Sprint 177 §7 (`GridCell.source_type` / `source_id`), and
+     *  since Sprint 179B the endpoint keys a row on that pair — but
+     *  this wire type never mentioned it, so the one place that
+     *  documents what `bulk-week` accepts was missing the field that
+     *  decides WHICH row a cell addresses. Optional, because an
+     *  untagged cell omits both keys entirely and the endpoint reads
+     *  key presence. */
+    source_type?: string;
+    source_id?: number | null;
   }[];
 }): Promise<{ created: number; updated: number; deleted: number }> {
   const response = await api.post<{

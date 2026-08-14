@@ -110,6 +110,22 @@ export interface TimeEntryWritePayload {
   hours: string;
   building?: number | null;
   note?: string;
+  /** Sprint 180 §3 — WHICH JOB, on the WRITE side.
+   *
+   *  The serializer has accepted these two since Sprint 173 and the
+   *  entries table has been sending them since Sprint 178 §4a — by
+   *  spreading `decodeSource(...)` into this payload, which TypeScript
+   *  permits from a spread and therefore never checked. The wire shape
+   *  and the type disagreed, and a new caller had no way to learn from
+   *  the type that a source could be written at all.
+   *
+   *  `string`, not the `HourSourceType` union the READ side uses:
+   *  `decodeSource` returns a plain string because it parses a
+   *  `<select>` value, and narrowing here would only push a cast into
+   *  every caller. The server validates against `HourSource.choices`
+   *  and 400s anything else, which is the check that matters. */
+  source_type?: string;
+  source_id?: number | null;
 }
 
 export interface TimeEntryFilters {

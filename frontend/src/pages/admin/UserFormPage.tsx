@@ -534,6 +534,11 @@ function StaffDetailsSection({
     null,
   );
 
+  /** Sprint 180 §4 — the payroll number. On the model since Sprint 172
+   *  §5 and printed by the worker hour report ever since; this is the
+   *  first screen that can put a value in it. */
+  const [personnelNumber, setPersonnelNumber] = useState("");
+
   const [removeTarget, setRemoveTarget] =
     useState<BuildingStaffVisibilityAdmin | null>(null);
   const removeDialogRef = useRef<ConfirmDialogHandle>(null);
@@ -547,6 +552,7 @@ function StaffDetailsSection({
         if (cancelled) return;
         setProfile(data);
         setPhone(data.phone ?? "");
+        setPersonnelNumber(data.personnel_number ?? "");
         setInternalNote(data.internal_note ?? "");
         setCanRequestAssignment(data.can_request_assignment);
         setIsActive(data.is_active);
@@ -617,6 +623,7 @@ function StaffDetailsSection({
     try {
       const updated = await updateStaffProfile(userId, {
         phone: phone.trim(),
+        personnel_number: personnelNumber.trim(),
         internal_note: internalNote,
         can_request_assignment: canRequestAssignment,
         is_active: isActive,
@@ -787,6 +794,31 @@ function StaffDetailsSection({
                 disabled={!canEdit || profileSaving}
                 data-testid="staff-phone-input"
               />
+            </div>
+            {/* Sprint 180 §4 — the payroll join key, enterable at last.
+                The worker hour report has a "Personeelsnr." column that
+                joins on this, and until now the only way to fill it was
+                a shell. Free text on purpose: every payroll numbers its
+                people differently, which is what the model says. */}
+            <div className="field">
+              <label className="field-label" htmlFor="staff-personnel-number">
+                {t("staff_admin.field_personnel_number")}
+              </label>
+              <input
+                id="staff-personnel-number"
+                className="field-input"
+                type="text"
+                value={personnelNumber}
+                placeholder={t(
+                  "staff_admin.field_personnel_number_placeholder",
+                )}
+                onChange={(event) => setPersonnelNumber(event.target.value)}
+                disabled={!canEdit || profileSaving}
+                data-testid="staff-personnel-number-input"
+              />
+              <div className="field-hint">
+                {t("staff_admin.field_personnel_number_hint")}
+              </div>
             </div>
             <div className="field">
               <label className="field-label" htmlFor="staff-internal-note">

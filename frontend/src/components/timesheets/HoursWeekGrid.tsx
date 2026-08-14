@@ -197,6 +197,7 @@ export function HoursWeekGrid({
   onSaved,
   onCancel,
   onSaveCells,
+  onDirtyChange,
 }: {
   week: IsoWeek;
   /** Whose weeks this grid writes. Empty = nothing chosen yet. */
@@ -256,6 +257,15 @@ export function HoursWeekGrid({
   /** Rendered next to Save when given. The modal supplies it so the
    *  footer reads "Cancel / Save"; My hours does not. */
   onCancel?: () => void;
+  /** Sprint 180 §2 — "there are typed hours in here that are not saved".
+   *
+   *  A modal caller needs this to decide whether Escape may close it: a
+   *  window-level Escape listener that always closes is how an hour of
+   *  typing died on one keystroke, with no warning and nothing to
+   *  recover. Reported from the event handlers that cause it, never
+   *  from an effect — a synchronous setState in an effect body is what
+   *  CLAUDE.md and `react-hooks/set-state-in-effect` both forbid. */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t, i18n } = useTranslation("common");
   const [busy, setBusy] = useState(false);
@@ -376,8 +386,13 @@ export function HoursWeekGrid({
   const cellValue = (row: GridRow, dayKey: string) =>
     edits[cellKey(row.id, dayKey)] ?? row.cells[dayKey] ?? "";
 
-  const setCell = (row: GridRow, dayKey: string, value: string) =>
+  const setCell = (row: GridRow, dayKey: string, value: string) => {
     setEdits((current) => ({ ...current, [cellKey(row.id, dayKey)]: value }));
+    // Sprint 180 §2 — told, never derived in an effect. Every path that
+    // can create an unsaved value says so from its own event handler,
+    // and `handleSave` says the opposite when the grid is clean again.
+    onDirtyChange?.(true);
+  };
 
   const rowTotal = (row: GridRow) =>
     dayKeys.reduce((sum, key) => sum + parseHours(cellValue(row, key)), 0);
@@ -527,6 +542,9 @@ export function HoursWeekGrid({
       }
       return next;
     });
+    // Sprint 180 §2 — the fill line writes into the same `edits` a cell
+    // does, so it makes the grid just as unsaved.
+    onDirtyChange?.(true);
   }
 
   /** Add one hour-type row to a block. The block already fixes the
@@ -660,6 +678,8 @@ export function HoursWeekGrid({
       }
       setEdits({});
       setExtraRows({});
+      // Sprint 180 §2 — saved is clean: Escape may close again.
+      onDirtyChange?.(false);
       setBanner(t("hours_week_grid.saved", { count: changed }));
       await onSaved(changed);
     } catch (err) {
@@ -749,6 +769,15 @@ export function HoursWeekGrid({
         </span>
         <span className="muted small hours-week-table-hint">
           {t("hours_week_grid.empty_hint")}
+          {/* Sprint 180 §2 — the week rule, said BEFORE it bites.
+              Typed hours used to survive a week change in state while
+              disappearing from the screen, and Save only ever posts the
+              week it is showing — so they were unrecoverable and
+              unmentioned. The grid is now remounted per week by its
+              callers, which makes the screen and the pending write the
+              same thing; this sentence is what makes that predictable
+              rather than surprising. */}{" "}
+          {t("hours_week_grid.week_switch_hint")}
         </span>
       </div>
 

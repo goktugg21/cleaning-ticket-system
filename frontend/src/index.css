@@ -243,6 +243,12 @@ p { line-height: 1.6; }
 .badge-closed { background: var(--closed-soft); color: var(--closed); border-color: #CFDAD2; }
 .badge-normal { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
 .badge-low { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
+/* Sprint 180 §1 — used on the customer pricing page since Sprint 15.x
+   ("Inactive", "Custom", "Archived") and defined nowhere, so `.badge`
+   alone rendered it in the DEFAULT badge colours and an archived row's
+   tag looked like a live status. Same declarations as `.badge-normal`
+   and `.badge-low`, which are the family's existing quiet variants. */
+.badge-muted { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
 .badge-high { background: var(--amber-soft); color: var(--amber); border-color: var(--amber-border); }
 .badge-urgent { background: var(--red-soft); color: var(--red); border-color: var(--red-border); }
 .badge-lg { height: 28px; padding: 0 12px; font-size: 12px; }
@@ -357,6 +363,17 @@ p { line-height: 1.6; }
   font-weight: 700;
   color: var(--text-muted);
   letter-spacing: 0.01em;
+}
+/* Sprint 180 §1 — the line UNDER a field that explains it. Used in three
+   places and defined nowhere, so it inherited the body's 14px and read as
+   ordinary copy rather than as help. Two of the three callers already
+   pair it with `muted small`, which is this same 12px/faint; the rule
+   makes the third (the account page) match them instead of the caller
+   having to remember two class names. */
+.field-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.45;
 }
 .field-input, .field-select, .field-textarea {
   width: 100%;
@@ -3946,6 +3963,16 @@ a.attn-row:hover {
 /* Misc helpers */
 .muted { color: var(--text-muted); }
 .muted.small { font-size: 12px; }
+/* Sprint 180 §1 — "there is nothing here", as a BARE class.
+   `.detail-field-value.muted-empty` (further down) has styled this since
+   the detail pages were built, but only in that compound form — so the
+   seventeen other call sites, nearly all of them em dashes in table
+   cells, carried a class that did nothing and rendered at full text
+   weight, exactly like a real value. One rule here rather than an edit
+   in twenty-six page files, most of which belong to other batches. The
+   compound rule stays: same declarations, and it wins on specificity
+   wherever both apply. */
+.muted-empty { color: var(--text-faint); font-style: italic; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -7814,11 +7841,19 @@ a.attn-row:hover {
   color: var(--text-muted);
   margin-bottom: 8px;
 }
-.user-detail-membership-list {
+/* Sprint 180 §1 — one plain read-only list of names, named for what it
+   IS rather than for the first page that wanted one.
+   `.user-detail-membership-list` styled exactly this and nothing else,
+   and the building-manager customer page had been asking for it under
+   the name `readonly-list` — which was defined nowhere, so its list
+   rendered with the reset's zero padding and its markers clipped. The
+   rule is generalised rather than duplicated; the user detail page's
+   three call sites move with it and look identical. */
+.readonly-list {
   margin: 0; padding: 0; list-style: none;
   display: flex; flex-direction: column; gap: 4px;
 }
-.user-detail-membership-list li { font-size: 14px; }
+.readonly-list li { font-size: 14px; }
 .user-detail-customer-access-list {
   margin: 0; padding: 0; list-style: none;
   display: flex; flex-direction: column; gap: 6px;
@@ -8980,7 +9015,12 @@ details[open] > .ew-department-tree-summary::before {
 }
 .hours-tiles-title {
   font-family: var(--f-head);
-  font-size: 14px;
+  /* Sprint 180 §1 — 15px, the house card-heading size that
+     `.section-title` and `.section-head-title` both carry. This was the
+     fifth member of Sprint 179B's typography set and the only one left
+     behind, because AgendaPage shares the class and was being rewritten
+     in parallel. Both branches merged, so it is one line now. */
+  font-size: 15px;
   font-weight: 700;
 }
 .hours-tile {

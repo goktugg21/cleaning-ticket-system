@@ -447,9 +447,22 @@ test("admin/buildings: clicking a row navigates to the edit page", async ({
     .first();
   await expect(row).toBeVisible({ timeout: 10_000 });
   // The first cell holds an inner anchor; clicking the row body but
-  // outside the anchor should still navigate. We click the status
-  // cell — neutral, has no inner anchor.
-  await row.locator("td").nth(4).click();
+  // outside the anchor should still navigate. So the click has to land
+  // on a NEUTRAL cell — plain text, no inner anchor, no handler of its
+  // own — and the Building type cell is exactly that.
+  //
+  // Sprint 180 §5 — anchored on that cell's `data-testid` rather than on
+  // its POSITION. This read `td` nth(4) while its own comment said "the
+  // status cell", which was already off by one when it was written
+  // (nth(4) was Created); Sprint 179B then inserted the Type column and
+  // moved it again, onto Customers. It passed through both, because
+  // every cell in an `.admin-row-clickable` row navigates — so the
+  // index could drift indefinitely while staying green, which is the
+  // same as not asserting the thing the test is named for.
+  //
+  // The test id already exists on the page (Sprint 179B added it with
+  // the Type column), so nothing in the source under test changes here.
+  await row.getByTestId(/^buildings-type-/).click();
   await page.waitForURL(/\/admin\/buildings\/\d+$/, { timeout: 10_000 });
 });
 

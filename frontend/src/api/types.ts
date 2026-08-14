@@ -1148,6 +1148,7 @@ export interface StaffProfileAdmin {
   user_email: string;
   user_full_name: string;
   phone: string;
+  personnel_number: string;
   internal_note: string;
   can_request_assignment: boolean;
   is_active: boolean;

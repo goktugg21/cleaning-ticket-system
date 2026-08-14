@@ -33,7 +33,7 @@
  * about the native `<dialog>` element; `ConfirmDialog` stays native and
  * ref-driven where it is used.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchWeekStatus, listTimeEntries } from "../../api/timesheets";
@@ -46,6 +46,8 @@ import type { BuildingAdmin } from "../../api/types";
 import { listHourSources } from "../../api/reports";
 import type { HourSourceOption } from "../../api/reports";
 import { ChipMultiSelect } from "../ChipMultiSelect";
+import { ConfirmDialog } from "../ConfirmDialog";
+import type { ConfirmDialogHandle } from "../ConfirmDialog";
 import { usePickerReserve } from "../../lib/usePickerReserve";
 import { formatIsoWeek, parseIsoWeek } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
@@ -105,15 +107,39 @@ export function WeekEntryDialog({
   const { modalRef, spacerRef, reserve, onPickerOpenChange } =
     usePickerReserve();
 
-  // Escape closes. One effect, and it touches only a listener — no
-  // setState in an effect body.
+  /**
+   * Sprint 180 §2 — Escape still closes, but not over unsaved hours.
+   *
+   * The listener is on `window`, so Escape closed this dialog from
+   * anywhere, including with the caret inside a cell. The grid's typed
+   * values live in the grid's own state and are thrown away with it: an
+   * hour of typing died on one keystroke, silently, with nothing to
+   * recover and no way to know it had happened. The same is true of
+   * Cancel and of a click on the backdrop.
+   *
+   * So all three routes go through `requestClose`, which closes
+   * immediately when the grid is clean and asks first when it is not.
+   * The dirty flag is REPORTED by the grid from its own event handlers
+   * (`onDirtyChange`), never derived in an effect here.
+   */
+  const [dirty, setDirty] = useState(false);
+  const discardDialogRef = useRef<ConfirmDialogHandle>(null);
+
+  const requestClose = useCallback(() => {
+    if (dirty) {
+      discardDialogRef.current?.open();
+      return;
+    }
+    onClose();
+  }, [dirty, onClose]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") requestClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [requestClose]);
 
   // The week's existing entries, one read PER selected employee with
   // `allSettled`, so a failure for one person cannot discard anybody
@@ -463,6 +489,15 @@ export function WeekEntryDialog({
             so the grid is handed it rather than fetching it again; and
             `showSource` is on because these rows CAN belong to a job. */}
         <HoursWeekGrid
+          /* Sprint 180 §2 — KEYED BY THE WEEK, which is CLAUDE.md's own
+             rule for prop-derived state. The grid's typed cells are
+             keyed by DATE and Save posts exactly one iso_year/iso_week,
+             so hours typed for week 32 went invisible and unsaveable the
+             moment the operator paged to week 33 — they sat in state
+             until the dialog closed. Remounting makes the screen and the
+             pending write the same thing, and the grid's own head says
+             so before it happens rather than after. */
+          key={`${week.isoYear}-W${week.isoWeek}`}
           week={week}
           employees={gridEmployees}
           companyId={companyId}
@@ -475,7 +510,8 @@ export function WeekEntryDialog({
           showSource
           weekClosed={weekClosed}
           onSaved={onSaved}
-          onCancel={onClose}
+          onCancel={requestClose}
+          onDirtyChange={setDirty}
         />
         {/* Sprint 170 §8 — see `usePickerReserve`. */}
         <div
@@ -483,6 +519,25 @@ export function WeekEntryDialog({
           style={{ flex: "0 0 auto", height: reserve }}
           aria-hidden="true"
           data-testid="picker-reserve-spacer"
+        />
+
+        {/* Sprint 180 §2 — the guard on Escape and Cancel.
+            Rendered UNCONDITIONALLY and driven entirely through the ref,
+            which is CLAUDE.md's rule for a native `<dialog>`: wrapping
+            it in `{dirty && …}` mounts an invisible dialog whose trigger
+            looks dead, and unmounting one while it is open can leave the
+            whole page inert. */}
+        <ConfirmDialog
+          ref={discardDialogRef}
+          title={t("week_setup.discard_title")}
+          body={t("week_setup.discard_body")}
+          confirmLabel={t("week_setup.discard_confirm")}
+          cancelLabel={t("week_setup.discard_cancel")}
+          destructive
+          onConfirm={() => {
+            discardDialogRef.current?.close();
+            onClose();
+          }}
         />
       </div>
     </div>

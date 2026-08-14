@@ -47,6 +47,24 @@ class ContractHoursSerializer(serializers.ModelSerializer):
     work_type_name = serializers.CharField(
         source="work_type.name", read_only=True, default=None
     )
+    # Sprint 180 §4 — the SLOT beside the name, exactly as
+    # `TimeEntrySerializer` ships `hour_type_standard_slot` beside
+    # `hour_type_name`.
+    #
+    # `frontend/.../ContractHoursTab.tsx` has declared this field and fed
+    # it to `workTypeLabel()` since Sprint 170 §5, and no serializer ever
+    # sent it — so the value was always `undefined` and the helper fell
+    # back to the raw operator-typed name. An English reader looking at a
+    # standard work type read Dutch, which is the precise bug
+    # `standard_slot` was introduced to fix: it was fixed on the work-type
+    # catalog endpoints and missed on this read path.
+    #
+    # `default=None` for the same reason as `work_type_name` above: the FK
+    # is nullable, and traversing `work_type.standard_slot` on a row with
+    # no work type would otherwise raise rather than render.
+    work_type_standard_slot = serializers.CharField(
+        source="work_type.standard_slot", read_only=True, default=None
+    )
     weekly_total = serializers.DecimalField(
         max_digits=6, decimal_places=2, read_only=True
     )
@@ -65,6 +83,7 @@ class ContractHoursSerializer(serializers.ModelSerializer):
             "hour_type_name",
             "work_type",
             "work_type_name",
+            "work_type_standard_slot",
             "valid_from",
             "valid_to",
             *WEEKDAYS,
