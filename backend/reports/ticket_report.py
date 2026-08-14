@@ -43,6 +43,12 @@ honest.
 `scope_tickets_for`, the same helper the ticket list uses. No second
 scoping path — a report that computed its own visibility would be a
 second answer to "what may this actor see", and the two would drift.
+
+Sprint 180 §1 adds the Reports page's own `?company=` / `?building=`
+narrowing ON TOP of that, never instead of it: `reports.scoping.
+resolve_scope` has already refused (403) any company or building the
+actor may not reach, so by the time a `ResolvedScope` arrives here it can
+only ever make the answer SMALLER.
 """
 from __future__ import annotations
 
@@ -63,37 +69,68 @@ def _period(date_from: date, date_to: date) -> tuple[date, date]:
     return (date_from, date_to) if date_from <= date_to else (date_to, date_from)
 
 
-def build_ticket_report(user, date_from: date, date_to: date):
-    """One row per ticket created in the period, with its duration."""
+def _scoped_tickets(user, date_from: date, date_to: date, scope=None):
+    """The tickets of the period the actor may read, optionally narrowed.
+
+    One function, so the report and its summary card cannot be looking at
+    two different sets of tickets.
+    """
     from accounts.scoping import scope_tickets_for
 
+    tickets = scope_tickets_for(user).filter(
+        created_at__date__gte=date_from, created_at__date__lte=date_to
+    )
+    if scope is not None:
+        if scope.company is not None:
+            tickets = tickets.filter(company_id=scope.company.id)
+        if scope.building is not None:
+            tickets = tickets.filter(building_id=scope.building.id)
+    return tickets
+
+
+def _first_terminal_by_ticket(ticket_ids) -> dict:
+    """`{ticket_id: when it FIRST reached a terminal status}`.
+
+    ONE query for every relevant transition, then bucketed in Python. A
+    per-ticket history lookup would be the N+1 the query-count test
+    exists to catch. Shared by the report and its summary so "finished"
+    means one thing.
+    """
+    first_terminal: dict[int, object] = {}
+    if not ticket_ids:
+        return first_terminal
+    history = (
+        TicketStatusHistory.objects.filter(
+            ticket_id__in=ticket_ids,
+            new_status__in=TERMINAL_STATUSES,
+        )
+        .values_list("ticket_id", "created_at")
+        .order_by("created_at")
+    )
+    for ticket_id, changed_at in history:
+        # FIRST arrival wins — see the module docstring. `order_by` makes
+        # the first one seen the earliest.
+        first_terminal.setdefault(ticket_id, changed_at)
+    return first_terminal
+
+
+def _duration_days(created_at, ended) -> int:
+    """Whole days, floor. Half a day is not a unit anybody in this
+    business talks in, and rounding up would make every same-day ticket
+    read as "1 day"."""
+    return max(0, (ended.date() - created_at.date()).days)
+
+
+def build_ticket_report(user, date_from: date, date_to: date, scope=None):
+    """One row per ticket created in the period, with its duration."""
     date_from, date_to = _period(date_from, date_to)
 
     tickets = list(
-        scope_tickets_for(user)
-        .filter(created_at__date__gte=date_from, created_at__date__lte=date_to)
+        _scoped_tickets(user, date_from, date_to, scope)
         .select_related("building", "customer")
         .order_by("-created_at")
     )
-    ticket_ids = [ticket.id for ticket in tickets]
-
-    # ONE query for every relevant transition, then bucketed in Python.
-    # A per-ticket history lookup would be the N+1 the query-count test
-    # exists to catch.
-    first_terminal: dict[int, object] = {}
-    if ticket_ids:
-        history = (
-            TicketStatusHistory.objects.filter(
-                ticket_id__in=ticket_ids,
-                new_status__in=TERMINAL_STATUSES,
-            )
-            .values_list("ticket_id", "created_at")
-            .order_by("created_at")
-        )
-        for ticket_id, changed_at in history:
-            # FIRST arrival wins — see the module docstring. `order_by`
-            # makes the first one seen the earliest.
-            first_terminal.setdefault(ticket_id, changed_at)
+    first_terminal = _first_terminal_by_ticket([ticket.id for ticket in tickets])
 
     rows = []
     finished = 0
@@ -102,10 +139,7 @@ def build_ticket_report(user, date_from: date, date_to: date):
         ended = first_terminal.get(ticket.id)
         duration_days = None
         if ended is not None:
-            # Whole days, floor. Half a day is not a unit anybody in this
-            # business talks in, and rounding up would make every
-            # same-day ticket read as "1 day".
-            duration_days = max(0, (ended.date() - ticket.created_at.date()).days)
+            duration_days = _duration_days(ticket.created_at, ended)
             finished += 1
             total_days += duration_days
         rows.append(
@@ -134,6 +168,49 @@ def build_ticket_report(user, date_from: date, date_to: date):
         "finished": finished,
         # None rather than 0 when nothing finished: an average of zero
         # days would read as "everything was instant".
+        "average_duration_days": (
+            round(total_days / finished, 1) if finished else None
+        ),
+    }
+
+
+def build_ticket_report_summary(user, date_from: date, date_to: date, scope=None):
+    """The three figures the ticket card shows, without the rows.
+
+    Sprint 180 §2. The same two queries the full report costs, but it
+    fetches two columns instead of joining the building and the customer
+    and building a dict per ticket — a summary that loads on every visit
+    to the Reports page has no business dragging the whole table across.
+
+    It shares `_scoped_tickets`, `_first_terminal_by_ticket` and
+    `_duration_days` with the report, so the card and the report it opens
+    cannot report a different number of finished tickets.
+    """
+    date_from, date_to = _period(date_from, date_to)
+
+    rows = list(
+        _scoped_tickets(user, date_from, date_to, scope).values_list(
+            "id", "created_at"
+        )
+    )
+    first_terminal = _first_terminal_by_ticket([row[0] for row in rows])
+
+    finished = 0
+    total_days = 0
+    for ticket_id, created_at in rows:
+        ended = first_terminal.get(ticket_id)
+        if ended is None:
+            continue
+        finished += 1
+        total_days += _duration_days(created_at, ended)
+
+    return {
+        "total": len(rows),
+        "finished": finished,
+        "open": len(rows) - finished,
+        # None rather than 0 when nothing finished, exactly as the report
+        # does: an average of zero days would read as "everything was
+        # instant".
         "average_duration_days": (
             round(total_days / finished, 1) if finished else None
         ),

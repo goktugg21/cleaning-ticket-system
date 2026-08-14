@@ -1075,12 +1075,18 @@ def build_worker_hours_pdf(payload: dict) -> bytes:
 
 
 def _flat_pdf(title: str, payload: dict) -> FPDF:
-    """`_new_pdf` without the scope/total block.
+    """`_new_pdf` without the total block.
 
-    The Sprint 14A reports carry a `scope` dict and an integer `total`;
-    these four carry neither shape (their totals are decimal strings, and
-    they have no dimension filters), so they get the branded header and
-    the period line and nothing that would have to be faked.
+    The Sprint 14A reports print a `Total:` line in the header; these
+    four carry decimal-string totals of different kinds (hours, tickets)
+    and print their own at the end, so the shared header would have to
+    fake a shape.
+
+    Sprint 180 §1 — the SCOPE line is here now, because these four take
+    a company and a building filter. A downloaded PDF that does not say
+    which building it covers is the document somebody files and cannot
+    later explain, and `_scope_summary_lines` already prints "Scope: All"
+    for the unfiltered case, so there is no branch to get wrong.
     """
     pdf = _branded_pdf(title, payload.get("generated_at"))
     pdf.set_font(FONT_FAMILY, "", 10)
@@ -1088,6 +1094,8 @@ def _flat_pdf(title: str, payload: dict) -> FPDF:
         0, 6, f"Period: {payload['from']} -- {payload['to']}",
         new_x="LMARGIN", new_y="NEXT",
     )
+    for line in _scope_summary_lines(payload.get("scope") or {}):
+        pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
     return pdf
 
@@ -1145,11 +1153,27 @@ def build_employee_hours_by_building_pdf(payload: dict) -> bytes:
     return _pdf_bytes(pdf)
 
 
+WEEKLY_DAY_KEYS = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+
+# Sprint 180 §3 — the grain is (week, employee, HOUR TYPE) now. The
+# columns a payroll clerk reads are here rather than only on screen: an
+# export that could not tell normal hours from overtime was the reason
+# the screen figure had to be re-derived by hand every week.
 EMPLOYEE_HOURS_WEEKLY_CSV_COLUMNS = (
     "iso_year",
     "iso_week",
     "employee",
     "employee_name",
+    "hour_type",
+    "hour_type_code",
     "monday",
     "tuesday",
     "wednesday",
@@ -1165,15 +1189,18 @@ def build_employee_hours_weekly_csv(payload: dict) -> bytes:
     buffer, writer = _csv_writer(EMPLOYEE_HOURS_WEEKLY_CSV_COLUMNS)
     for week in payload["weeks"]:
         for employee in week["employees"]:
-            row = {
-                "iso_year": week["iso_year"],
-                "iso_week": week["iso_week"],
-                "employee": employee["employee"],
-                "employee_name": employee["employee_name"],
-                "total": employee["total"],
-            }
-            row.update(employee["days"])
-            writer.writerow(row)
+            for bucket in employee["hour_types"]:
+                row = {
+                    "iso_year": week["iso_year"],
+                    "iso_week": week["iso_week"],
+                    "employee": employee["employee"],
+                    "employee_name": employee["employee_name"],
+                    "hour_type": bucket["hour_type_name"] or "",
+                    "hour_type_code": bucket["hour_type_code"] or "",
+                    "total": bucket["total"],
+                }
+                row.update(bucket["days"])
+                writer.writerow(row)
     return buffer.getvalue().encode("utf-8")
 
 
@@ -1189,24 +1216,37 @@ def build_employee_hours_weekly_pdf(payload: dict) -> bytes:
             new_y="NEXT",
         )
         pdf.set_font(FONT_FAMILY, "", 9)
+        rows = []
+        for employee in week["employees"]:
+            # The person's own line first, then one per hour type under
+            # it. An indent rather than a second table: the split is a
+            # breakdown OF the row above, and two tables would let a
+            # reader take them for two populations.
+            rows.append(
+                [employee["employee_name"], ""]
+                + [employee["days"][day] for day in WEEKLY_DAY_KEYS]
+                + [employee["total"]]
+            )
+            for bucket in employee["hour_types"]:
+                label = bucket["hour_type_name"] or ""
+                if bucket["hour_type_code"]:
+                    label = f"{label} ({bucket['hour_type_code']})"
+                rows.append(
+                    ["   -", label]
+                    + [bucket["days"][day] for day in WEEKLY_DAY_KEYS]
+                    + [bucket["total"]]
+                )
+        # The weekday column totals, as the last row of the week's table.
+        rows.append(
+            ["Total", ""]
+            + [week["day_totals"][day] for day in WEEKLY_DAY_KEYS]
+            + [week["total"]]
+        )
         _draw_table(
             pdf,
-            ["Employee", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su", "Total"],
-            [62, 14, 14, 14, 14, 14, 14, 14, 20],
-            [
-                [
-                    e["employee_name"],
-                    e["days"]["monday"],
-                    e["days"]["tuesday"],
-                    e["days"]["wednesday"],
-                    e["days"]["thursday"],
-                    e["days"]["friday"],
-                    e["days"]["saturday"],
-                    e["days"]["sunday"],
-                    e["total"],
-                ]
-                for e in week["employees"]
-            ],
+            ["Employee", "Hour type", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su", "Total"],
+            [42, 32, 13, 13, 13, 13, 13, 13, 13, 17],
+            rows,
         )
         pdf.ln(2)
     pdf.set_font(FONT_FAMILY, "B", 10)
