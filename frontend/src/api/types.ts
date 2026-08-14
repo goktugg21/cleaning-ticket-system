@@ -1381,6 +1381,30 @@ export type ExtraWorkUnitType =
   | "ITEM"
   | "OTHER";
 
+/** Sprint 180 §3 — WHO the finished work is charged to. Exactly two
+ *  values, and the pair is the feature: the building (the answer 99% of
+ *  the time, and the default) or the customer organisation.
+ *
+ *  NOT the customer's `invoice_granularity_default`
+ *  (CUSTOMER / PER_BUILDING / PER_BUILDING_DEPARTMENT_WORK_TYPE), which
+ *  decides how many invoice DOCUMENTS a month's work is cut into. That
+ *  one is a property of the customer's paperwork; this one is a
+ *  property of the job. Mirrors `extra_work.models.ExtraWorkBilledTo`. */
+export type ExtraWorkBilledTo = "BUILDING" | "CUSTOMER";
+
+/** Sprint 180 §2 — an operational ticket born from an Extra Work.
+ *
+ *  Resolved through the CANONICAL FK (`Ticket.extra_work_request`) and
+ *  nothing else, which is the same definition the invoice run uses.
+ *  `ticket_no` is null only for a ticket whose number has not been
+ *  stamped yet. Mirrors `extra_work/serializers.py
+ *  ::_serialize_spawned_tickets`. */
+export interface ExtraWorkSpawnedTicket {
+  id: number;
+  ticket_no: string | null;
+  status: TicketStatus;
+}
+
 // List shape (lean — no description / notes / line items).
 export interface ExtraWorkRequestList {
   /** Sprint 173 §4 / Sprint 174 §1 — the deadline, the planned window's
@@ -1437,6 +1461,20 @@ export interface ExtraWorkRequestList {
   // every list row so the EW list can render an at-a-glance
   // Instant/Proposal badge per row without a per-row detail fetch.
   routing_decision: RoutingDecision;
+  // Sprint 180 §1/§2 — which TRACK this row is on, and the operational
+  // ticket(s) it produced.
+  //
+  // `has_operational_ticket` is the ONE question the two list tracks
+  // split on: has a ticket been born from this extra work? It is
+  // answered server-side by the canonical FK alone (the same definition
+  // the invoice run uses), so the list cannot drift from the money.
+  // Present for every audience — a customer is entitled to know their
+  // extra work turned into scheduled work.
+  has_operational_ticket: boolean;
+  spawned_tickets: ExtraWorkSpawnedTicket[];
+  // Sprint 180 §3 — who the finished work is charged to. Not
+  // provider-only: the customer picks it on their own create form.
+  billed_to: ExtraWorkBilledTo;
   // M4 — billing month / invoice run. Provider-only (the backend redacts
   // these for CUSTOMER_USER), hence optional.
   invoice_date?: string | null;
@@ -1729,6 +1767,11 @@ export interface ExtraWorkRequestCartCreatePayload {
   // (`derive_default_intent`) when omitted, so older callers and the
   // graceful-degradation path (preview unavailable) stay valid.
   request_intent?: ExtraWorkRequestIntent;
+  // Sprint 180 §3 — who the finished work is charged to. Optional on
+  // the wire: the backend defaults to BUILDING, so every existing
+  // caller keeps working and takes the answer that is right 99% of the
+  // time.
+  billed_to?: ExtraWorkBilledTo;
   // Each line is either a catalog service (`service`) OR a free-text
   // custom line (`custom_description`) — XOR, the create form guarantees
   // exactly one is set. A custom line carries no `service`; the backend

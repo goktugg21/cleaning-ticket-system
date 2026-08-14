@@ -23,6 +23,31 @@ from .billing import billing_month, build_ticket_map, is_earned
 from .models import ExtraWorkRequest
 
 
+def _stripped(queryset):
+    """The two billing filters materialise the scoped set to answer a
+    question about it. They need TWO columns and no relations, so this
+    strips the list view's own prefetches and column set before the
+    walk.
+
+    Sprint 180 §2 added `prefetch_related` for the spawned tickets and
+    the status history to the list queryset — right for rendering a
+    page, wrong for a filter that only wants ids and `invoice_date`.
+    Without this, asking the dashboard for one month would pull every
+    status-history row of every Extra Work in scope.
+
+    `select_related(None)` is REQUIRED, not tidiness: the list queryset
+    joins six FKs, and Django refuses a field that is both deferred by
+    `.only()` and traversed by `select_related` ("cannot be both
+    deferred and traversed"). Clearing both relation plans first is what
+    makes the narrow column set legal.
+    """
+    return (
+        queryset.select_related(None)
+        .prefetch_related(None)
+        .only("id", "invoice_date")
+    )
+
+
 class ExtraWorkRequestFilter(df.FilterSet):
     # M4 — billing-month + invoice-status filters for the monthly invoice
     # view. Both reuse extra_work.billing (the SAME logic the invoice run
@@ -151,11 +176,28 @@ class ExtraWorkRequestFilter(df.FilterSet):
             return queryset.none()
         if not (1 <= month <= 12):
             return queryset.none()
-        ew_list = list(queryset)
+        ew_list = list(_stripped(queryset))
         ticket_map = build_ticket_map([e.id for e in ew_list])
+        # Sprint 180 §4 — `is_earned` FIRST, then the month. It was
+        # missing, and the gap was money on a screen: the dashboard's
+        # "This month" tile is this endpoint, and it counted Extra Work
+        # whose operational ticket was still open as if it were billable
+        # this month. `invoicing.selectors.unbilled_extra_work` has
+        # always applied both tests (`is_earned(...) and
+        # billing_month(...) == (year, month)`), so the invoice run was
+        # right and only the displayed number was wrong — the worst
+        # shape for a bug, because nothing downstream ever contradicted
+        # it.
+        #
+        # Same two calls, same order, same module (`extra_work.billing`)
+        # as the invoice run. A row with a provider-set `invoice_date`
+        # but no finished ticket is NOT in the period: the invoice_date
+        # says which month it will bill in once it is earned, not that
+        # it is earned.
         ids = [
             e.id for e in ew_list
-            if billing_month(e, ticket_map.get(e.id)) == (year, month)
+            if is_earned(ticket_map.get(e.id))
+            and billing_month(e, ticket_map.get(e.id)) == (year, month)
         ]
         return queryset.filter(pk__in=ids)
 
@@ -164,7 +206,7 @@ class ExtraWorkRequestFilter(df.FilterSet):
             return queryset.filter(is_invoiced=True)
         if value == "completed":
             # earned (spawned ticket CLOSED) AND not yet invoiced
-            ew_list = list(queryset.filter(is_invoiced=False))
+            ew_list = list(_stripped(queryset.filter(is_invoiced=False)))
             ticket_map = build_ticket_map([e.id for e in ew_list])
             ids = [e.id for e in ew_list if is_earned(ticket_map.get(e.id))]
             return queryset.filter(pk__in=ids)

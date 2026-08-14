@@ -38,6 +38,7 @@ import type {
   CustomerLabel,
   CustomerPriceFolder,
   CustomerServicePrice,
+  ExtraWorkBilledTo,
   ExtraWorkIntentErrorCode,
   ExtraWorkPreviewLine,
   ExtraWorkPreviewPriceSource,
@@ -388,6 +389,11 @@ export function CreateExtraWorkPage({
   } | null>(null);
   const [departmentId, setDepartmentId] = useState("");
   const [workTypeId, setWorkTypeId] = useState("");
+  // Sprint 180 §3 — who the finished work is charged to. Seeded to
+  // BUILDING, which is both the model default and the owner's own
+  // "99% of the time", so an operator who ignores the control gets the
+  // right answer rather than an empty one.
+  const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo>("BUILDING");
   // Search filter for the agreed-prices dropdown (scales to long
   // contract lists — the list scrolls and filters rather than dumping
   // every row inline).
@@ -1393,6 +1399,11 @@ export function CreateExtraWorkPage({
         ...(effectiveWorkTypeId
           ? { work_type: Number(effectiveWorkTypeId) }
           : {}),
+        // Sprint 180 §3 — always sent (never omitted): the control has
+        // no unset state, so there is no case where "leave it to the
+        // server" and "the operator chose BUILDING" mean different
+        // things.
+        billed_to: billedTo,
         // Send the validated intent (a member of the latest preview's
         // allowed_intents). Omitted when no fresh preview exists: the
         // backend then derives a safe default — identical to the
@@ -1756,6 +1767,42 @@ export function CreateExtraWorkPage({
                     {t("create.field_work_type_empty")}
                   </span>
                 )}
+              </div>
+            </div>
+            {/* Sprint 180 §3 — who pays for this one.
+                Asked HERE, in the parent section next to the building
+                and the customer, because those are the two things it
+                chooses between: the answer is only meaningful once you
+                can see both names on screen.
+                This page IS both create surfaces — the customer-facing
+                one (a CUSTOMER_USER, customer and building fixed by
+                their own access) and the provider-facing one (the
+                pickers above) — so a single control serves both, and
+                both post the same `billed_to` to the same endpoint.
+                Two options and no empty first option, because there is
+                no "unset": the field is non-null server-side with
+                BUILDING as its default, which is the honest answer 99%
+                of the time rather than a placeholder. */}
+            <div className="form-2col">
+              <div className="field">
+                <label className="field-label" htmlFor="ew-billed-to">
+                  {t("create.field_billed_to")}
+                </label>
+                <select
+                  id="ew-billed-to"
+                  data-testid="extra-work-create-billed-to"
+                  className="field-select"
+                  value={billedTo}
+                  onChange={(event) =>
+                    setBilledTo(event.target.value as ExtraWorkBilledTo)
+                  }
+                >
+                  <option value="BUILDING">{t("billed_to.building")}</option>
+                  <option value="CUSTOMER">{t("billed_to.customer")}</option>
+                </select>
+                <span className="muted small">
+                  {t("create.field_billed_to_hint")}
+                </span>
               </div>
             </div>
           </div>

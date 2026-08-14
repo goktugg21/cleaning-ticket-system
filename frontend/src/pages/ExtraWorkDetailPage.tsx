@@ -1829,6 +1829,47 @@ export function ExtraWorkDetailPage() {
                   <div className="muted small">{t("detail.field_customer")}</div>
                   <div>{ew.customer_name}</div>
                 </div>
+                {/* Sprint 180 §3 — who pays, next to the two names it
+                    chooses between. Read-only here: the value is set on
+                    the create form and the Extra Work ViewSet has no
+                    update action, so an editable control would be a
+                    promise no endpoint keeps. */}
+                <div>
+                  <div className="muted small">
+                    {t("detail.field_billed_to")}
+                  </div>
+                  <div data-testid="extra-work-billed-to">
+                    {ew.billed_to === "CUSTOMER"
+                      ? t("billed_to.customer")
+                      : t("billed_to.building")}
+                  </div>
+                </div>
+                {/* Sprint 180 §2 — the ticket this Extra Work became.
+                    The ticket page has shown its Extra Work origin for
+                    sprints; the reverse had no field at all. The panel
+                    lower down lists every spawned ticket with its
+                    status; this cell answers "did this become work, and
+                    which one" without scrolling for it. */}
+                <div>
+                  <div className="muted small">{t("detail.field_ticket")}</div>
+                  <div data-testid="extra-work-ticket-link">
+                    {ew.spawned_tickets.length === 0 ? (
+                      <span className="muted-empty">
+                        {t("detail.ticket_none")}
+                      </span>
+                    ) : (
+                      ew.spawned_tickets.map((ticket) => (
+                        <Link
+                          key={ticket.id}
+                          to={`/tickets/${ticket.id}`}
+                          style={{ marginRight: 8 }}
+                        >
+                          {ticket.ticket_no ?? `#${ticket.id}`}
+                        </Link>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="form-2col">
                 <div>

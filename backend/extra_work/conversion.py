@@ -34,6 +34,7 @@ from .classification import (
     validate_intent_for_cart,
 )
 from .models import (
+    ExtraWorkBilledTo,
     ExtraWorkCategory,
     ExtraWorkLinePriceSource,
     ExtraWorkPricingUnitType,
@@ -53,6 +54,7 @@ def convert_ticket_to_extra_work(
     line_items_data: list,
     customer_visible_note: str = "",
     internal_note: str = "",
+    billed_to: str = ExtraWorkBilledTo.BUILDING,
 ) -> Tuple[ExtraWorkRequest, List[Ticket]]:
     """Convert `ticket` into a new `ExtraWorkRequest`.
 
@@ -63,6 +65,15 @@ def convert_ticket_to_extra_work(
     service owns the intent validation, the EW + line-item creation, the
     routing decision, the optional instant spawn, and the source-ticket
     flip.
+
+    Sprint 180 §3 — `billed_to` defaults to BUILDING, the same default
+    the model carries, so this path produces a correctly-billed request
+    without its caller knowing the field exists. The keyword is here
+    because this is the seam where a converted request's billing target
+    would be chosen: the convert ENDPOINT and its serializer live in
+    `tickets/`, which Sprint 180 Batch 1 does not own, so the control
+    that would pass a non-default value is not built yet. Nothing calls
+    this with an explicit value today — see the sprint report.
 
     Returns `(extra_work_request, spawned_tickets)`. The spawned list is
     non-empty only on the INSTANT route (a single operational ticket);
@@ -123,6 +134,7 @@ def convert_ticket_to_extra_work(
             category_other_text=f"Converted from ticket {source_label}",
             department=default_department,
             work_type=default_work_type,
+            billed_to=billed_to,
             request_intent=request_intent,
             customer_visible_note=customer_visible_note,
             manager_note=internal_note,

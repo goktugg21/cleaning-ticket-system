@@ -39,6 +39,7 @@ from buildings.models import (
     Building,
     BuildingManagerAssignment,
     BuildingStaffVisibility,
+    BuildingType,
 )
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
@@ -58,6 +59,7 @@ from extra_work.models import (
     CustomerServicePrice,
     ExtraWorkAssignment,
     ExtraWorkRequestItem,
+    ManagedUnit,
     Proposal,
     ProposalLine,
     Service,
@@ -853,6 +855,20 @@ _EW_TRACKED_FIELDS = (
     "invoiced_at",
     "department_id",
     "work_type_id",
+    # Sprint 180 §3 — who the finished work is charged to. It belongs
+    # here for the same reason the two label FKs above do: it decides
+    # where money lands, and a later change to it makes an already-sent
+    # invoice look wrong to whoever reads it next, so the change has to
+    # be attributable.
+    #
+    # Today the only write path is CREATE (`ExtraWorkRequestCreate
+    # Serializer`; the `/billing/` PATCH action writes invoice_date
+    # only), and this handler is deliberately UPDATE-only, so in the
+    # shipped flows it emits nothing yet. That is the correct ordering,
+    # not a gap: the tracking is in place BEFORE the edit surface that
+    # will need it, rather than bolted on after the first correction
+    # has already gone unrecorded.
+    "billed_to",
 )
 
 
@@ -1453,6 +1469,29 @@ def _connect():
         ServiceCategory,
         Service,
         CustomerServicePrice,
+        # Sprint 180 §5 — the two catalogs that were never registered.
+        # Every other per-company catalog in this trio (ServiceCategory,
+        # Service, HourType, TimesheetWorkType, ContractType, Department,
+        # WorkType) is here for the same reason, and these two were
+        # simply missed:
+        #
+        #   * `BuildingType` (Sprint 178) — a RENAME is the change worth
+        #     auditing, exactly as for `HourType`: every building points
+        #     at the type by id, so renaming "Kantoor" silently
+        #     reclassifies every building carrying it, and the buildings
+        #     list filter changes underneath whoever was using it.
+        #   * `ManagedUnit` (Sprint 123) — the same, and with money
+        #     attached: `Service` / `CustomerCustomPrice` rows keep
+        #     `custom_unit_label` in sync with the unit's current label
+        #     at every write, so relabelling "m³" restates the unit a
+        #     price is quoted in on every row that adopted it.
+        #
+        # Both carry editable fields (name/label, is_active, sort_order)
+        # that produce meaningful UPDATE diffs, no FileField, and no
+        # `*StatusHistory` to double-write against (H-11) — neither has
+        # a state machine. So the full CRUD trio is the right shape.
+        BuildingType,
+        ManagedUnit,
         # M5 A — customer custom price lines (ad-hoc, no service FK)
         # carry the same provider price / VAT / validity data and have
         # create / update / soft-delete endpoints, so they get the same

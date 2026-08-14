@@ -40,6 +40,7 @@ from .classification import (
 )
 from .models import (
     CustomerCustomPrice,
+    ExtraWorkBilledTo,
     ExtraWorkLinePriceSource,
     ExtraWorkPricingLineItem,
     ExtraWorkPricingUnitType,
@@ -627,11 +628,73 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
+# Sprint 180 §1/§2 — the operational-ticket link, shared by the list and
+# the detail serializer.
+# ---------------------------------------------------------------------------
+def _spawned_tickets_for(obj):
+    """The operational tickets born from this Extra Work, lowest id first.
+
+    Resolves through the CANONICAL FK (`Ticket.extra_work_request`) and
+    nothing else — the same definition `extra_work.billing.
+    build_ticket_map` and `reports.dimensions` use to decide what is
+    earned and what may be invoiced. `tickets.filters` unions two more
+    legacy chains for its `?extra_work_request=` query param; where the
+    two disagree, the money definition wins, and one list must not show
+    a row as "work started" that the invoice run considers unstarted.
+
+    Reads the view's prefetched list when it is there and falls back to
+    a query when it is not (a create read-back, or a detail serializer
+    nested in another module's response). Same accessor-with-fallback
+    shape as `ServiceSerializer.get_has_price_rows`.
+    """
+    prefetched = getattr(obj, "prefetched_operational_tickets", None)
+    if prefetched is not None:
+        return prefetched
+    return list(
+        obj.operational_tickets.filter(deleted_at__isnull=True).order_by("id")
+    )
+
+
+def _serialize_spawned_tickets(obj):
+    return [
+        {
+            "id": ticket.id,
+            "ticket_no": ticket.ticket_no,
+            "status": ticket.status,
+        }
+        for ticket in _spawned_tickets_for(obj)
+    ]
+
+
+def _has_operational_ticket(obj) -> bool:
+    """Sprint 180 §1 — the ONE question the two list tracks split on.
+
+    Prefers the view's single `Exists` annotation over the whole page
+    (`views_catalog`'s `annotated_has_price_rows` precedent); falls back
+    to the prefetched list, and only then to a query.
+    """
+    annotated = getattr(obj, "annotated_has_operational_ticket", None)
+    if annotated is not None:
+        return bool(annotated)
+    prefetched = getattr(obj, "prefetched_operational_tickets", None)
+    if prefetched is not None:
+        return bool(prefetched)
+    return obj.operational_tickets.filter(deleted_at__isnull=True).exists()
+
+
+# ---------------------------------------------------------------------------
 # Extra Work — list (lean)
 # ---------------------------------------------------------------------------
 class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     is_overdue = serializers.BooleanField(read_only=True)
     started_before_plan = serializers.BooleanField(read_only=True)
+
+    # Sprint 180 §1/§2 — the reverse of `Ticket.extra_work_origin`,
+    # which had no serializer field at all in either direction from the
+    # Extra Work side. `has_operational_ticket` is the track split;
+    # `spawned_tickets` is the number and the link.
+    has_operational_ticket = serializers.SerializerMethodField()
+    spawned_tickets = serializers.SerializerMethodField()
 
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
@@ -705,6 +768,17 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "routing_decision",
             # Sprint 2A — explicit customer-facing intent.
             "request_intent",
+            # Sprint 180 §1/§2 — which TRACK this row is on, and the
+            # operational ticket(s) it produced. Visible to every
+            # audience: the customer is entitled to know that their
+            # extra work turned into scheduled work.
+            "has_operational_ticket",
+            "spawned_tickets",
+            # Sprint 180 §3 — who the finished work is charged to. Not
+            # provider-only: the customer picks it on their own create
+            # form, so hiding it from them afterwards would hide their
+            # own answer.
+            "billed_to",
             "subtotal_amount",
             "vat_amount",
             "total_amount",
@@ -736,6 +810,12 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     # Mirror ExtraWorkRequestDetailSerializer's redaction: a CUSTOMER_USER
     # never sees billing metadata on the list either.
     _PROVIDER_ONLY_FIELDS = ("invoice_date", "is_invoiced", "invoiced_at")
+
+    def get_has_operational_ticket(self, obj) -> bool:
+        return _has_operational_ticket(obj)
+
+    def get_spawned_tickets(self, obj):
+        return _serialize_spawned_tickets(obj)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -802,6 +882,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     # an N+1 across every row (Sprint 120's whole reason for existing).
     labels_locked = serializers.SerializerMethodField()
     labels_locked_invoice = serializers.SerializerMethodField()
+    # Sprint 180 §1/§2 — same pair as the list serializer, so a page
+    # that has the detail does not have to re-derive the track or refetch
+    # the ticket list to name the ticket.
+    has_operational_ticket = serializers.SerializerMethodField()
+    spawned_tickets = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkRequest
@@ -843,6 +928,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "routing_decision",
             # Sprint 2A — explicit customer-facing intent.
             "request_intent",
+            # Sprint 180 §1/§2 — the track and the operational ticket(s).
+            "has_operational_ticket",
+            "spawned_tickets",
+            # Sprint 180 §3 — who the finished work is charged to.
+            "billed_to",
             "line_items",
             "customer_visible_note",
             "pricing_note",
@@ -898,6 +988,14 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "status",
             "routing_decision",
             "request_intent",
+            # Sprint 180 — the track, the ticket link and the billing
+            # target are all read-only HERE. `billed_to` is written at
+            # CREATE time (ExtraWorkRequestCreateSerializer); this
+            # ViewSet has no update action at all, so listing it as
+            # writable would be a promise no endpoint keeps.
+            "has_operational_ticket",
+            "spawned_tickets",
+            "billed_to",
             "subtotal_amount",
             "vat_amount",
             "total_amount",
@@ -927,6 +1025,12 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         "is_invoiced",
         "invoiced_at",
     )
+
+    def get_has_operational_ticket(self, obj) -> bool:
+        return _has_operational_ticket(obj)
+
+    def get_spawned_tickets(self, obj):
+        return _serialize_spawned_tickets(obj)
 
     def get_pricing_line_items(self, obj):
         user = self.context.get("request").user if self.context.get("request") else None
@@ -1239,6 +1343,20 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         allow_null=True,
         default=None,
     )
+    # Sprint 180 §3 — who the finished work is charged to, asked at
+    # create time on BOTH create surfaces (the customer-facing and the
+    # provider-facing one are the same React page in two roles).
+    #
+    # OPTIONAL on the wire, and it has to be: every existing client
+    # (and `extra_work.conversion`, which never touches this serializer)
+    # keeps working and takes the model default, BUILDING — the answer
+    # 99% of the time. An explicit value is validated against the two
+    # choices; anything else is a 400 rather than a silent fallback.
+    billed_to = serializers.ChoiceField(
+        choices=ExtraWorkBilledTo.choices,
+        required=False,
+        default=ExtraWorkBilledTo.BUILDING,
+    )
 
     class Meta:
         model = ExtraWorkRequest
@@ -1272,6 +1390,8 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "is_overdue",
             "started_before_plan",
             "request_intent",
+            # Sprint 180 §3 — the billing target, chosen at create time.
+            "billed_to",
             "line_items",
         ]
         read_only_fields = ["id"]
@@ -1675,10 +1795,18 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             # — validate_intent_for_cart guarantees that any other
             # intent on an all-agreed cart is rejected, and an
             # all-agreed cart with no explicit intent derives to
-            # DIRECT. The one-ticket-per-request refactor is
-            # explicitly deferred (see Sprint 2A non-goals); this
-            # spawn still emits one Ticket per ExtraWorkRequestItem
-            # for now.
+            # DIRECT.
+            #
+            # Sprint 180 §5 — this comment used to end "this spawn
+            # still emits one Ticket per ExtraWorkRequestItem for now".
+            # That has been false since Sprint 6A: the refactor it calls
+            # deferred was DONE, and `instant_tickets.spawn_tickets_for
+            # _request` creates exactly ONE Ticket per request (see the
+            # request-level idempotency guard there and
+            # `test_sprint6_one_ticket_per_request`). One ticket per
+            # request is now the assumption the whole Extra Work billing
+            # chain rests on, so a comment saying otherwise is worse
+            # than no comment.
             if request.routing_decision == ExtraWorkRoutingDecision.INSTANT:
                 # Imported lazily to avoid circular import:
                 # `instant_tickets.py` imports from this app's models +

@@ -199,6 +199,32 @@ class ExtraWorkRoutingDecision(models.TextChoices):
     PROPOSAL = "PROPOSAL", "Proposal"
 
 
+class ExtraWorkBilledTo(models.TextChoices):
+    """Sprint 180 §3 — WHO the finished work is charged to.
+
+    Exactly two values, and the pair is the whole feature: the owner
+    said the answer is the building 99% of the time and the customer
+    the rest. A third value would be a grouping rule wearing a billing
+    target's clothes.
+
+    NOT `Customer.invoice_granularity_default`
+    (CUSTOMER / PER_BUILDING / PER_BUILDING_DEPARTMENT_WORK_TYPE) —
+    that one decides how many invoice DOCUMENTS a month's work is cut
+    into for one customer, and it lives on the customer because it is a
+    property of the customer's paperwork. This one is a property of the
+    JOB and says who the charge belongs to. They read alike and are not
+    alike: a customer invoiced PER_BUILDING can still have a single
+    extra work that the customer's own head office pays for.
+
+    Nothing in `generate_draft_invoices` reads this field yet. That is
+    deliberate — the month-end job is a separate piece of work; this
+    sprint records the answer so the job has something to read.
+    """
+
+    BUILDING = "BUILDING", "Building"
+    CUSTOMER = "CUSTOMER", "Customer"
+
+
 def _two_places(value: Decimal) -> Decimal:
     """Quantize a Decimal to 2 places, the canonical money rounding
     used everywhere in the Extra Work domain."""
@@ -398,6 +424,24 @@ class ExtraWorkRequest(models.Model):
         default=ExtraWorkStatus.REQUESTED,
     )
 
+    # Sprint 180 §3 — who pays for this one. See `ExtraWorkBilledTo`
+    # for why this is NOT the customer's invoice granularity.
+    #
+    # `default=BUILDING` is also the backfill: every pre-180 row takes
+    # it, and that is the correct historical answer rather than a
+    # placeholder — the building is who was charged, which is why it is
+    # the default for new rows too. Non-null with a default, so no
+    # write path has to know about the field to keep working.
+    billed_to = models.CharField(
+        max_length=16,
+        choices=ExtraWorkBilledTo.choices,
+        default=ExtraWorkBilledTo.BUILDING,
+        help_text=(
+            "Sprint 180 — who the finished work is charged to: the "
+            "BUILDING (default) or the CUSTOMER organisation."
+        ),
+    )
+
     @property
     def is_overdue(self) -> bool:
         """Past its deadline and not finished.
@@ -437,23 +481,34 @@ class ExtraWorkRequest(models.Model):
         for the reason recorded in the product docs: eleven date columns
         are that history flattened, and a flattened history cannot say
         who did something or whether it went backwards.
+
+        Sprint 180 §2 — the narrowing happens in PYTHON over
+        `status_history.all()`, deliberately, and it is the whole fix
+        for the list's N+1. A `.filter(...)` on the related manager
+        builds a NEW queryset, which ignores any prefetch cache and
+        issues one query per row; `.all()` on a prefetched relation is
+        free. The list queryset prefetches `status_history`, so a page
+        of a hundred rows costs one extra query instead of a hundred.
+        A single-object read (detail, create read-back) has no prefetch
+        and pays exactly one query here, same as before.
+
+        The rule itself is unchanged, and `ExtraWorkRequestFilter.
+        filter_started_early` still expresses the same rule as a
+        database `Min(...)` for the ?started_early= filter — a filter
+        must not materialise the table to answer one question. A test
+        pins that the two agree.
         """
         if self.preferred_date is None:
             return False
-        first_start = (
-            self.status_history.filter(
-                new_status__in=[
-                    ExtraWorkStatus.IN_PROGRESS,
-                    ExtraWorkStatus.COMPLETED,
-                ]
-            )
-            .order_by("created_at")
-            .values_list("created_at", flat=True)
-            .first()
-        )
-        if first_start is None:
+        starts = [
+            row.created_at
+            for row in self.status_history.all()
+            if row.new_status
+            in (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.COMPLETED)
+        ]
+        if not starts:
             return False
-        return first_start.date() < self.preferred_date
+        return min(starts).date() < self.preferred_date
 
     # Sprint 28 Batch 6 — routing taxonomy computed at submission time
     # by `ExtraWorkRequestCreateSerializer.create()` from the cart's

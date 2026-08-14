@@ -508,5 +508,22 @@
   "list.bulk_dates_summary_one": "{{count}} aanvraag geselecteerd.",
   "list.bulk_dates_summary_other": "{{count}} aanvragen geselecteerd.",
   "list.bulk_dates_unchanged_hint": "Een leeg veld blijft ongewijzigd: alleen de datums die je hier invult worden op de geselecteerde aanvragen gezet.",
-  "detail.planned_window_until": "Tot {{date}}"
+  "detail.planned_window_until": "Tot {{date}}",
+  "list.track_quote": "Offerte & prijs",
+  "list.track_started": "Werk gestart",
+  "list.track_quote_hint": "Aanvragen die nog geen ingepland werk zijn geworden. Facturatie is hier niet van toepassing.",
+  "list.track_started_hint": "Aanvragen waaruit een operationele melding is ontstaan. Deze tonen de melding, de factuurstatus en aan wie er wordt gefactureerd.",
+  "list.track_anomaly_marker": "Geen melding",
+  "list.track_anomaly_title": "Goedgekeurd, maar er is geen operationele melding aangemaakt. Open de aanvraag en gebruik Opnieuw aanmaken.",
+  "list.column_ticket": "Melding",
+  "list.column_billed_to": "Gefactureerd aan",
+  "billed_to.building": "Gebouw",
+  "billed_to.customer": "Klant",
+  "create.field_billed_to": "Gefactureerd aan",
+  "create.field_billed_to_hint": "Aan wie dit werk wordt gefactureerd. Vrijwel altijd het gebouw.",
+  "detail.field_billed_to": "Gefactureerd aan",
+  "detail.field_ticket": "Melding",
+  "detail.ticket_none": "Nog geen operationele melding",
+  "list.track_switch_to_one": "Toon {{track}} ({{count}} aanvraag)",
+  "list.track_switch_to_other": "Toon {{track}} ({{count}} aanvragen)"
 }

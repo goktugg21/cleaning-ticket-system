@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, mixins, serializers, status, viewsets
@@ -141,11 +141,58 @@ class ExtraWorkRequestViewSet(
     filterset_class = ExtraWorkRequestFilter
 
     def get_queryset(self):
-        return scope_extra_work_for(self.request.user).select_related(
-            # Sprint 127 — department / work_type joined so the list
-            # serializer's `*_name` fields never trigger a per-row lookup.
-            "company", "building", "customer", "created_by",
-            "department", "work_type",
+        from tickets.models import Ticket
+
+        # Sprint 180 §1 — "has an operational ticket been born from this
+        # extra work?" is the ONE question the two list tracks split on,
+        # and it is answered by the CANONICAL FK (`Ticket.
+        # extra_work_request`) alone — the same definition
+        # `extra_work.billing.build_ticket_map` and
+        # `reports.dimensions` already use to decide what is earned and
+        # what may be invoiced. `tickets.filters` unions two more legacy
+        # chains for its `?extra_work_request=` filter; where the two
+        # disagree, the money definition wins.
+        #
+        # ONE EXISTS subquery for the whole page, not a query per row —
+        # the `views_catalog.ServiceListCreateView` precedent
+        # (`annotated_has_price_rows`). Soft-deleted tickets are
+        # excluded, mirroring `build_ticket_map`: a deleted ticket
+        # cannot make work "started".
+        spawned = Ticket.objects.filter(
+            extra_work_request_id=OuterRef("pk"), deleted_at__isnull=True
+        )
+        return (
+            scope_extra_work_for(self.request.user)
+            .select_related(
+                # Sprint 127 — department / work_type joined so the list
+                # serializer's `*_name` fields never trigger a per-row
+                # lookup.
+                "company", "building", "customer", "created_by",
+                "department", "work_type",
+            )
+            .annotate(annotated_has_operational_ticket=Exists(spawned))
+            .prefetch_related(
+                # Sprint 180 §2 — the spawned ticket(s) themselves, so
+                # the list can print the ticket number and link to it
+                # without a fetch per row. `.only()` because the list
+                # needs four columns of a ticket, not a ticket.
+                Prefetch(
+                    "operational_tickets",
+                    queryset=Ticket.objects.filter(
+                        deleted_at__isnull=True
+                    )
+                    .only("id", "ticket_no", "status", "extra_work_request_id")
+                    .order_by("id"),
+                    to_attr="prefetched_operational_tickets",
+                ),
+                # Sprint 180 §2 — kills a REAL N+1 that predates this
+                # sprint: `started_before_plan` is declared on the list
+                # serializer and its model property read the status
+                # history per row. The property now iterates
+                # `status_history.all()`, which this prefetch answers
+                # once for the whole page.
+                "status_history",
+            )
         )
 
     def get_serializer_class(self):

@@ -508,5 +508,22 @@
   "list.bulk_dates_summary_one": "{{count}} request selected.",
   "list.bulk_dates_summary_other": "{{count}} requests selected.",
   "list.bulk_dates_unchanged_hint": "A blank field is left unchanged: only the dates you fill in here are written to the selected requests.",
-  "detail.planned_window_until": "Until {{date}}"
+  "detail.planned_window_until": "Until {{date}}",
+  "list.track_quote": "Quote & price",
+  "list.track_started": "Work started",
+  "list.track_quote_hint": "Requests that have not become scheduled work yet. Invoicing does not apply here.",
+  "list.track_started_hint": "Requests that produced an operational ticket. These carry the ticket, the invoice state and who is billed.",
+  "list.track_anomaly_marker": "No ticket",
+  "list.track_anomaly_title": "Approved, but no operational ticket was created. Open the request and use Retry spawn.",
+  "list.column_ticket": "Ticket",
+  "list.column_billed_to": "Billed to",
+  "billed_to.building": "Building",
+  "billed_to.customer": "Customer",
+  "create.field_billed_to": "Billed to",
+  "create.field_billed_to_hint": "Who is charged for this work. Almost always the building.",
+  "detail.field_billed_to": "Billed to",
+  "detail.field_ticket": "Ticket",
+  "detail.ticket_none": "No operational ticket yet",
+  "list.track_switch_to_one": "Show {{track}} ({{count}} request)",
+  "list.track_switch_to_other": "Show {{track}} ({{count}} requests)"
 }

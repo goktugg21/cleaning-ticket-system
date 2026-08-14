@@ -73,6 +73,61 @@ class BillingPeriodFilterTests(_InvoiceRunFixture):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["results"], [])
 
+    def test_unearned_row_is_not_in_the_period(self):
+        """Sprint 180 §4 — the dashboard money bug.
+
+        `?billing_period=` applied the month test but never `is_earned`,
+        so the dashboard's "This month" tile counted Extra Work whose
+        operational ticket was still OPEN. `invoicing.selectors.
+        unbilled_extra_work` always applied both, so the invoice run was
+        right and only the number on screen was wrong.
+
+        The unearned row here carries an explicit `invoice_date` INSIDE
+        the period, which is the case that used to slip through: an
+        invoice_date says which month a row will bill in once it is
+        earned, not that it is earned.
+        """
+        earned = self._make_ew_with_ticket(
+            ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 5, 20)
+        )
+        unearned = self._make_ew_with_ticket(
+            ticket_status=TicketStatus.OPEN,
+            closed_at=None,
+            invoice_date=date(2026, 5, 31),
+        )
+
+        resp = self._api(self.admin).get(LIST_URL, {"billing_period": "2026-05"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        ids = {r["id"] for r in resp.data["results"]}
+        self.assertIn(earned.id, ids)
+        self.assertNotIn(
+            unearned.id,
+            ids,
+            "work whose operational ticket is still open is not billable "
+            "this month",
+        )
+
+    def test_extra_work_with_no_ticket_at_all_is_not_in_the_period(self):
+        """The other half of §4: no spawned ticket means nothing has been
+        done, whatever the provider typed into `invoice_date`."""
+        from extra_work.models import ExtraWorkRequest, ExtraWorkStatus
+
+        ticketless = ExtraWorkRequest.objects.create(
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            created_by=self.admin,
+            title="Priced but never started",
+            description="d",
+            status=ExtraWorkStatus.CUSTOMER_APPROVED,
+            invoice_date=date(2026, 5, 10),
+        )
+        resp = self._api(self.admin).get(LIST_URL, {"billing_period": "2026-05"})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertNotIn(
+            ticketless.id, {r["id"] for r in resp.data["results"]}
+        )
+
 
 class InvoiceStatusFilterTests(_InvoiceRunFixture):
     def test_invoice_status_invoiced(self):
