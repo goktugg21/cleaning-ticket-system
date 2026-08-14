@@ -197,7 +197,16 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
         first_resolved = ticket.resolved_at
         self.assertIsNotNone(first_resolved)
 
-        ticket = apply_transition(ticket, self.company_admin, TicketStatus.CLOSED)
+        # Sprint 180 §1 — the customer approval above already auto-closed
+        # the ticket, so this hop is satisfied on arrival and re-driving
+        # it would raise `no_op_transition`. Kept (guarded) rather than
+        # deleted: the CLOSED -> REOPENED_BY_ADMIN -> ... -> APPROVED
+        # loop is what this test is about, and the hop must still run if
+        # the auto-close is ever narrowed.
+        if str(ticket.status) != str(TicketStatus.CLOSED):
+            ticket = apply_transition(
+                ticket, self.company_admin, TicketStatus.CLOSED
+            )
         ticket = apply_transition(ticket, self.company_admin, TicketStatus.REOPENED_BY_ADMIN)
         ticket = apply_transition(ticket, self.manager, TicketStatus.IN_PROGRESS)
         ticket = apply_transition(
