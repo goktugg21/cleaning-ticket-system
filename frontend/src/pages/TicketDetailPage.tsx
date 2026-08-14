@@ -1873,11 +1873,20 @@ export function TicketDetailPage() {
                         {formatDate(entry.created_at)}
                       </div>
                       <div className="timeline-text">
+                        {/* Sprint 180 §1 — a status-history row with no
+                            `changed_by` is a SYSTEM transition (today,
+                            the customer-approval auto-close). Falling
+                            through to the generic "unassigned" label
+                            would read as "Unassigned closed the
+                            ticket": it names nobody and still implies
+                            somebody. */}
                         <b>
-                          {humanName(
-                            entry.changed_by_email,
-                            t("unassigned"),
-                          )}
+                          {entry.changed_by_email
+                            ? humanName(
+                                entry.changed_by_email,
+                                t("unassigned"),
+                              )
+                            : t("common:audit_logs.system_actor")}
                         </b>
                         {entry.old_status ? (
                           <>

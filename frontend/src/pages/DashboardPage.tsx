@@ -1,7 +1,9 @@
-import type { CSSProperties, FormEvent } from "react";
+import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Layers, Plus, RefreshCw } from "lucide-react";
+// Sprint 180 §3 — `CSSProperties` and `Layers` left with
+// `ExtraWorkOriginPill`; they were only ever used by it.
+import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { getMySlots } from "../api/admin";
@@ -38,6 +40,7 @@ import {
 } from "../auth/permissions";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
 import { EditModeToggle } from "../components/EditModeToggle";
+import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { SLABadge } from "../components/sla/SLABadge";
 import { StatusTiles } from "../components/StatusTiles";
 import { useToast } from "../components/ToastProvider";
@@ -79,6 +82,15 @@ const STATUS_OPTIONS: TicketStatus[] = [
 
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 
+// Sprint 180 §1 — how long a ticket may sit in WAITING_CUSTOMER_APPROVAL
+// before the dashboard calls it overdue. Mirrors
+// `backend/tickets/auto_close.py::STALLED_CUSTOMER_APPROVAL_DAYS`; the
+// backend filter takes any number of days, this is only what the UI
+// asks for. Such work is DONE and unbillable — `is_earned` needs
+// CLOSED, and CLOSED is downstream of the customer's answer — so a
+// silent queue here is lost revenue, not just a stale list.
+const STALLED_APPROVAL_DAYS = 14;
+
 const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "">[] = [
   "on_track",
   "at_risk",
@@ -96,38 +108,12 @@ function statusCellClass(status: TicketStatus): string {
   return `cell-tag cell-tag-${status.toLowerCase()}`;
 }
 
-// SoT (Osius_Source_of_Truth_FINAL_2026-05-30) §1.4 + §7.1 — an
-// Extra Work-origin ticket "must not disappear into the normal ticket
-// list" and the dashboard "must make Extra Work origin impossible to
-// miss". This single, prominent pill marks an EW-spawned ticket
-// identically in every dashboard rendering (the operational queue, the
-// fuller ticket table, the mobile cards) and deep-links to the parent
-// Extra Work request. `stopPropagation` keeps the click from also
-// triggering the row/card's own navigation to the ticket.
-function ExtraWorkOriginPill({
-  ewId,
-  testId,
-  style,
-}: {
-  ewId: number;
-  testId: string;
-  style?: CSSProperties;
-}) {
-  const { t } = useTranslation("dashboard");
-  return (
-    <Link
-      to={`/extra-work/${ewId}`}
-      className="work-type-pill work-type-pill-extra-work work-type-pill-link"
-      title={t("ticket_row_extra_work_origin_title")}
-      data-testid={testId}
-      style={style}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <Layers size={12} strokeWidth={2.5} aria-hidden />
-      {t("ops_type_extra_work")}
-    </Link>
-  );
-}
+// Sprint 180 §3 — `ExtraWorkOriginPill` moved to
+// `components/ExtraWorkOriginPill.tsx`. It lived here as a local
+// component, which is why the dashboard's ticket table showed a
+// ticket's Extra Work origin and the agenda and meldingen lists showed
+// nothing. Same markup, same testids, same translation keys — one
+// definition, three consumers.
 
 /**
  * Sprint 28 Batch 13 (rework) — unified operations dashboard.
@@ -235,6 +221,29 @@ export function DashboardPage({
   const [unassignedFilter, setUnassignedFilter] = useState(
     () => new URLSearchParams(window.location.search).get("unassigned") === "1",
   );
+  // Sprint 180 §1 — the "customer never answered" preset. Deep-linked
+  // from the dashboard's approval-overdue attention row; shows a
+  // clearable chip like every other preset on this page.
+  const [stalledApprovalFilter, setStalledApprovalFilter] = useState(
+    () => new URLSearchParams(window.location.search).get("stalled") === "1",
+  );
+  // Sprint 180 §2 — "completed extra works should not show inside
+  // tickets."
+  //
+  // ON by default because that is what was asked, and because a
+  // provider looking at the ticket list is looking for work to do.
+  // Clearable because the house rule is that nothing is hidden with no
+  // way back (the Sprint 158 escape-hatch shape): the chip below states
+  // that rows are hidden and turns it off in one click.
+  //
+  // A URL opt-out (`?finished_extra_work=1`) exists so a link can point
+  // straight at the unhidden list.
+  const [hideFinishedExtraWork, setHideFinishedExtraWork] = useState(
+    () =>
+      new URLSearchParams(window.location.search).get(
+        "finished_extra_work",
+      ) !== "1",
+  );
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
@@ -316,6 +325,19 @@ export function DashboardPage({
     // RF-16 — unassigned preset (attention-card deep link). Uses the
     // backend filterset's assigned_to isnull lookup.
     if (unassignedFilter) params.assigned_to__isnull = "true";
+    // Sprint 180 §1 — approval-overdue preset. The backend filter is
+    // the authority on what "overdue" means (it ages
+    // `sent_for_approval_at`, the column the transition stamps); the
+    // page only supplies the threshold.
+    if (stalledApprovalFilter) {
+      params.awaiting_customer_approval_days = STALLED_APPROVAL_DAYS;
+    }
+    // Sprint 180 §2 — hide finished Extra Work. Sent only on the
+    // Tickets page: it is a list-reading preference, and the dashboard
+    // widgets that share this component's fetch helpers count totals.
+    if (isTicketsPage && hideFinishedExtraWork) {
+      params.hide_finished_extra_work = "true";
+    }
     // M6.3 — "my work" deep-links. Only applied on the Tickets page
     // (where the clear chip is shown).
     // The fixed customer, when this list is mounted inside one.
@@ -336,6 +358,8 @@ export function DashboardPage({
     searchActive,
     slaFilter,
     unassignedFilter,
+    stalledApprovalFilter,
+    hideFinishedExtraWork,
     searchParams,
     me,
     isTicketsPage,
@@ -531,12 +555,23 @@ export function DashboardPage({
 
   const loadStats = useCallback(async () => {
     try {
-      const response = await api.get<TicketStats>("/tickets/stats/");
+      // Sprint 180 §2 — the status tiles sit directly above the rows
+      // they count, so they must be counting the same rows. When the
+      // Tickets page is hiding finished Extra Work, the stats request
+      // carries the same flag and the endpoint applies the same
+      // exclusion. The DASHBOARD is a summary of everything and sends
+      // nothing, so its KPI strip is unchanged.
+      const response = await api.get<TicketStats>("/tickets/stats/", {
+        params:
+          isTicketsPage && hideFinishedExtraWork
+            ? { hide_finished_extra_work: "true" }
+            : undefined,
+      });
       setStats(response.data);
     } catch {
       // KPI cards fall back to "—" placeholders if the endpoint fails.
     }
-  }, []);
+  }, [isTicketsPage, hideFinishedExtraWork]);
 
   // M6.3 — "my work" summary counts (provider-management only). Each
   // count is the PaginatedResponse.count for a created_by=me query;
@@ -615,6 +650,17 @@ export function DashboardPage({
     count: number;
     rows: TicketList[];
   } | null>(null);
+  // Sprint 180 §1 — finished work the customer has not answered on.
+  // This is the edge case auto-close CANNOT fix: nobody approves, so
+  // nothing closes, so `is_earned` never turns true and the work is
+  // never invoiced. We do not manufacture the approval on a timer —
+  // approving on the customer's behalf is a money decision and the
+  // system already has a reasoned, audited route for it. We make the
+  // queue visible instead, so somebody chases it.
+  const [attnStalledApproval, setAttnStalledApproval] = useState<{
+    count: number;
+    rows: TicketList[];
+  } | null>(null);
   const [attnActivity, setAttnActivity] = useState<Notification[] | null>(
     null,
   );
@@ -682,7 +728,7 @@ export function DashboardPage({
   const loadAttention = useCallback(async () => {
     if (isTicketsPage) return;
     try {
-      const [rev, una, act, recentTk, recentEw] = await Promise.all([
+      const [rev, una, stalled, act, recentTk, recentEw] = await Promise.all([
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: { status: "WAITING_MANAGER_REVIEW", page_size: 3 },
         }),
@@ -690,6 +736,15 @@ export function DashboardPage({
           params: {
             status: "OPEN",
             assigned_to__isnull: "true",
+            page_size: 3,
+          },
+        }),
+        // Sprint 180 §1 — the approval-overdue queue. The backend
+        // filter already narrows to WAITING_CUSTOMER_APPROVAL, so no
+        // status param is needed here.
+        api.get<PaginatedResponse<TicketList>>("/tickets/", {
+          params: {
+            awaiting_customer_approval_days: STALLED_APPROVAL_DAYS,
             page_size: 3,
           },
         }),
@@ -704,6 +759,10 @@ export function DashboardPage({
       ]);
       setAttnReview({ count: rev.data.count, rows: rev.data.results });
       setAttnUnassigned({ count: una.data.count, rows: una.data.results });
+      setAttnStalledApproval({
+        count: stalled.data.count,
+        rows: stalled.data.results,
+      });
       setAttnActivity(act.results.slice(0, 3));
       setRecentTickets(recentTk.data.results.slice(0, 5));
       setRecentExtraWork(recentEw.results.slice(0, 5));
@@ -1121,6 +1180,55 @@ export function DashboardPage({
                             </li>
                           ),
                         )}
+                      </ul>
+                    )}
+                  </li>
+                  {/* Sprint 180 §1 — finished work the customer never
+                      answered on. Unlike the row below it, this one IS
+                      provider-actionable (chase the customer, or record
+                      the approval on their behalf through the existing
+                      reasoned override), and unlike the rest of the
+                      list it is money: none of it can be invoiced until
+                      it closes. So it gets the warning tint. */}
+                  <li className="attn-item">
+                    <Link
+                      to={`/tickets?status=WAITING_CUSTOMER_APPROVAL&stalled=1`}
+                      className="attn-row"
+                      data-testid="attention-approval-overdue"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.approval_overdue_title", {
+                          days: STALLED_APPROVAL_DAYS,
+                        })}
+                      </span>
+                      <span
+                        className={attnBadge(
+                          attnStalledApproval?.count ?? null,
+                          true,
+                        )}
+                      >
+                        {fmt(attnStalledApproval?.count ?? null)}
+                      </span>
+                    </Link>
+                    {(attnStalledApproval?.rows ?? []).length > 0 && (
+                      <ul className="attn-sublist">
+                        {(attnStalledApproval?.rows ?? [])
+                          .slice(0, 3)
+                          .map((ticket) => (
+                            <li key={ticket.id}>
+                              <Link
+                                to={`/tickets/${ticket.id}`}
+                                className="attention-row"
+                              >
+                                <span className="attention-row-title">
+                                  {ticket.title}
+                                </span>
+                                <span className="muted small">
+                                  {formatDate(ticket.created_at)}
+                                </span>
+                              </Link>
+                            </li>
+                          ))}
                       </ul>
                     )}
                   </li>
@@ -1716,6 +1824,73 @@ export function DashboardPage({
                         }}
                       >
                         {t("my_work.filter_clear")}
+                      </button>
+                    </div>
+                  )}
+                  {/* Sprint 180 §1 — approval-overdue preset chip. */}
+                  {stalledApprovalFilter && (
+                    <div
+                      className="active-filter-chip"
+                      data-testid="dashboard-stalled-approval-chip"
+                    >
+                      <span>
+                        {t("attention.approval_overdue_chip", {
+                          days: STALLED_APPROVAL_DAYS,
+                        })}
+                      </span>
+                      <button
+                        type="button"
+                        className="active-filter-clear"
+                        onClick={() => {
+                          setPage(1);
+                          setStalledApprovalFilter(false);
+                        }}
+                      >
+                        {t("my_work.filter_clear")}
+                      </button>
+                    </div>
+                  )}
+                  {/* Sprint 180 §2 — the escape hatch for the hide.
+                      Rendered whenever the hide is ON, so the list
+                      never quietly omits rows: it says what it is
+                      holding back and undoes it in one click. */}
+                  {hideFinishedExtraWork && (
+                    <div
+                      className="active-filter-chip"
+                      data-testid="dashboard-hide-finished-ew-chip"
+                    >
+                      <span>{t("finished_extra_work.hidden_chip")}</span>
+                      <button
+                        type="button"
+                        className="active-filter-clear"
+                        onClick={() => {
+                          setPage(1);
+                          setHideFinishedExtraWork(false);
+                        }}
+                        data-testid="dashboard-hide-finished-ew-show"
+                      >
+                        {t("finished_extra_work.show_all")}
+                      </button>
+                    </div>
+                  )}
+                  {/* ...and the way back to hiding, so the control is
+                      a toggle rather than a one-way door. */}
+                  {!hideFinishedExtraWork && (
+                    <div
+                      className="active-filter-chip"
+                      data-testid="dashboard-show-finished-ew-chip"
+                    >
+                      <span>{t("finished_extra_work.shown_chip")}</span>
+                      <button
+                        type="button"
+                        className="active-filter-clear"
+                        onClick={() => {
+                          setPage(1);
+                          setHideFinishedExtraWork(true);
+                        }}
+                        data-testid="dashboard-hide-finished-ew-hide"
+                      >
+                        {t("finished_extra_work.hide_again")}
                       </button>
                     </div>
                   )}

@@ -548,9 +548,27 @@ class TicketStatusHistory(models.Model):
 
     old_status = models.CharField(max_length=64, blank=True)
     new_status = models.CharField(max_length=64)
+    # Sprint 180 §1 — nullable for SYSTEM-driven transitions.
+    #
+    # `changed_by IS NULL` means "no person drove this row, the system
+    # did", which is exactly what the customer-approval auto-close is
+    # (`tickets/auto_close.py`). The rest of the codebase was already
+    # written for it and only the column was still NOT NULL:
+    # `TicketStatusHistorySerializer.to_representation` documents "rows
+    # whose `changed_by` is None (system transitions)", and
+    # `audit/views_ticket_timeline.py` already emits
+    # `changed_by_email: None` for such a row.
+    # `ExtraWorkStatusHistory.changed_by` has been nullable for the
+    # same reason since Sprint 29 Batch 29.8.
+    #
+    # `on_delete` stays PROTECT (deliberately unchanged): a real actor
+    # still cannot be hard-deleted out from under their own history.
+    # NULL is only ever WRITTEN by the system path, never by a cascade.
     changed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="ticket_status_changes",
     )
     note = models.TextField(blank=True)

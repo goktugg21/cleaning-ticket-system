@@ -77,6 +77,8 @@ tickets that may have been created during a manual walkthrough.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
@@ -321,6 +323,11 @@ COMPANIES = [
                 "type": TicketType.REPORT,
                 "priority": TicketPriority.HIGH,
                 "target_status": TicketStatus.WAITING_CUSTOMER_APPROVAL,
+                # Sprint 180 §1 — the work-the-customer-never-answered
+                # fixture. Backdates `sent_for_approval_at` so the
+                # dashboard's "approval overdue" attention row has
+                # something in it on a fresh seed.
+                "stalled_approval_days": 21,
             },
             {
                 "title": f"{DEMO_TICKET_PREFIX} Closed kitchen tap",
@@ -652,6 +659,25 @@ class Command(BaseCommand):
             )
             self._walk_to_status(ticket, tspec["target_status"], super_admin)
 
+            # Sprint 180 §1 — a fixture for the "customer never
+            # answered" case. Without one, the dashboard's new
+            # "approval overdue" attention row reads 0 on every fresh
+            # seed and there is nothing to click through: freshly
+            # walked tickets were sent for approval seconds ago.
+            #
+            # Backdating `sent_for_approval_at` directly (rather than
+            # walking through a fake clock) is deliberate — it is the
+            # one column the age filter reads, and the walk that set it
+            # has already written its real history row.
+            stalled_days = tspec.get("stalled_approval_days")
+            if stalled_days and str(ticket.status) == str(
+                TicketStatus.WAITING_CUSTOMER_APPROVAL
+            ):
+                ticket.sent_for_approval_at = timezone.now() - timedelta(
+                    days=stalled_days
+                )
+                ticket.save(update_fields=["sent_for_approval_at"])
+
         # Sprint 25C audit-followup — make the demo seed actually
         # exercise the staff workflow features Sprints 23B and 25A
         # added. Without this, an operator on a fresh seed sees an
@@ -913,16 +939,41 @@ class Command(BaseCommand):
         apply_transition so timestamps and TicketStatusHistory rows
         populate correctly. Uses the super admin actor — they can
         perform any transition without the per-role scope checks.
+
+        Sprint 180 §1 — the customer-approval leg
+        (WAITING_CUSTOMER_APPROVAL -> APPROVED) auto-closes now, which
+        breaks two assumptions this walk used to make: the ticket can
+        overshoot the hop it was asked for, and the old unconditional
+        CLOSED hop would then re-drive an already-CLOSED ticket and
+        raise `no_op_transition`, aborting the entire seed. So the path
+        is chosen per target instead of being one list with an early
+        return.
         """
-        if target_status == TicketStatus.OPEN:
+        if str(target_status) == str(TicketStatus.OPEN):
             return
-        path = [
-            TicketStatus.IN_PROGRESS,
-            TicketStatus.WAITING_CUSTOMER_APPROVAL,
-            TicketStatus.APPROVED,
-            TicketStatus.CLOSED,
-        ]
+
+        if str(target_status) == str(TicketStatus.APPROVED):
+            # A fixture parked on APPROVED is, after Sprint 180, by
+            # definition one that NO customer approved — every customer
+            # approval closes. The super admin's cross-status privilege
+            # produces exactly that: an administrative APPROVED with no
+            # customer decision behind it, which is a real state the
+            # auto-close deliberately leaves alone (see
+            # `tickets.auto_close.should_auto_close`).
+            path = [TicketStatus.IN_PROGRESS, TicketStatus.APPROVED]
+        else:
+            path = [
+                TicketStatus.IN_PROGRESS,
+                TicketStatus.WAITING_CUSTOMER_APPROVAL,
+                TicketStatus.APPROVED,
+                TicketStatus.CLOSED,
+            ]
+
         for stop in path:
+            # The APPROVED hop auto-closes, so the ticket may already BE
+            # the next hop; re-driving it would raise `no_op_transition`.
+            if str(ticket.status) == str(stop):
+                continue
             # Sprint 27F-B1 — provider-driven customer-decision transitions
             # (WAITING_CUSTOMER_APPROVAL → APPROVED/REJECTED) are now coerced
             # to is_override=True with a mandatory reason. The seed walks
@@ -936,7 +987,11 @@ class Command(BaseCommand):
                 note=f"seed_demo_data → {stop}",
                 override_reason="seed_demo_data fixture walk",
             )
-            if str(stop) == str(target_status):
+            # Compare against the ticket's ACTUAL status, not against the
+            # hop we asked for: Sprint 180's auto-close means the APPROVED
+            # hop can land on CLOSED, which is the target for every
+            # `target_status=CLOSED` spec in this file.
+            if str(ticket.status) == str(target_status):
                 return
 
     # -----------------------------------------------------------------
@@ -1693,6 +1748,14 @@ class Command(BaseCommand):
             ew.recompute_final_amounts()
             # Completed: drive the spawned ticket to CLOSED so the EW
             # is EARNED (the invoice run's own predicate).
+            #
+            # Sprint 180 §1 — the APPROVED hop auto-closes, so the
+            # CLOSED hop below usually finds the ticket already there;
+            # driving it again would raise `no_op_transition` and abort
+            # the seed. The hop is kept (rather than deleted) so this
+            # fixture still reaches CLOSED if the auto-close is ever
+            # narrowed — it is the CLOSED status, not the route to it,
+            # that `extra_work.billing.is_earned` cares about.
             for spawned_ticket in spawned:
                 t = spawned_ticket
                 for stop in (
@@ -1701,6 +1764,8 @@ class Command(BaseCommand):
                     TicketStatus.APPROVED,
                     TicketStatus.CLOSED,
                 ):
+                    if str(t.status) == str(stop):
+                        continue
                     t = ticket_apply(
                         t,
                         super_admin,

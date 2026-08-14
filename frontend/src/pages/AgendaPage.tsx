@@ -66,6 +66,7 @@ import {
 import { BoundedList } from "../components/BoundedList";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
+import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { PageHeader } from "../components/PageHeader";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { SlotStatusBadge } from "../components/SlotStatusBadge";
@@ -294,6 +295,18 @@ function ManagerTicketsAgenda({ embedded = false }: { embedded?: boolean }) {
                   >
                     <td className="td-subject">
                       <Link to={`/tickets/${row.id}`}>{row.title}</Link>
+                      {/* Sprint 180 §3 — a manager's own agenda was the
+                          one list where an Extra Work ticket looked
+                          exactly like a normal one. The data was
+                          already on the row (`extra_work_origin`); only
+                          the pill was missing. */}
+                      {row.extra_work_origin && (
+                        <ExtraWorkOriginPill
+                          ewId={row.extra_work_origin.extra_work_request_id}
+                          testId="agenda-manager-row-extra-work-origin"
+                          style={{ marginLeft: 8 }}
+                        />
+                      )}
                     </td>
                     <td>
                       {TICKET_TYPE_KEYS[row.type as TicketTypeValue]

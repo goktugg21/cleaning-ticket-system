@@ -69,7 +69,12 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
             override_reason="Customer phoned to approve.",
         )
 
-        self.assertEqual(ticket.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — a customer-decision approval auto-closes, and
+        # an on-behalf override IS a recorded customer decision. The
+        # ticket passed THROUGH approved, which is why the approval
+        # stamps and the APPROVED history row below are unchanged; it
+        # simply does not stop there any more.
+        self.assertEqual(ticket.status, TicketStatus.CLOSED)
         self.assertIsNotNone(ticket.approved_at)
         self.assertEqual(ticket.resolved_at, ticket.approved_at)
         self.assertTrue(
@@ -137,7 +142,9 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
             TicketStatus.APPROVED,
             override_reason="Customer approved verbally on a site visit.",
         )
-        self.assertEqual(updated.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — auto-closed; the override row this test is
+        # actually about is unaffected and asserted below.
+        self.assertEqual(updated.status, TicketStatus.CLOSED)
         history_row = TicketStatusHistory.objects.get(
             ticket=ticket,
             old_status=TicketStatus.WAITING_CUSTOMER_APPROVAL,
@@ -352,7 +359,19 @@ class CustomerUserPairAccessTransitionTests(TenantFixtureMixin, APITestCase):
         ticket = apply_transition(
             self.ticket_in_scope, self.amanda, TicketStatus.APPROVED
         )
-        self.assertEqual(ticket.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — the customer's approval carries the ticket
+        # through APPROVED to CLOSED. What this test locks is that the
+        # in-scope customer was ALLOWED to approve, which the APPROVED
+        # history row records.
+        self.assertEqual(ticket.status, TicketStatus.CLOSED)
+        self.assertTrue(
+            TicketStatusHistory.objects.filter(
+                ticket=ticket,
+                old_status=TicketStatus.WAITING_CUSTOMER_APPROVAL,
+                new_status=TicketStatus.APPROVED,
+                changed_by=self.amanda,
+            ).exists()
+        )
 
     # --- user_has_scope_for_ticket (Sprint 15 hardening) ------------------
 

@@ -306,7 +306,12 @@ class DefaultBehaviourTests(_B6Fixture):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         ticket.refresh_from_db()
-        self.assertEqual(str(ticket.status), str(TicketStatus.APPROVED))
+        # Sprint 180 §1 — an on-behalf approval is a recorded customer
+        # decision and auto-closes. This test locks that the BM's
+        # override key is granted by DEFAULT (the revoked sibling below
+        # still gets `bm_override_disabled`), so a terminal status here
+        # is the pass condition.
+        self.assertEqual(str(ticket.status), str(TicketStatus.CLOSED))
 
     def test_bm_can_send_proposal_by_default(self):
         ew, proposal, _ = self._make_extra_work_with_draft_proposal()

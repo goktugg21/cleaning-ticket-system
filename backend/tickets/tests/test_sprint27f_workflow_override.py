@@ -68,7 +68,10 @@ class TicketWorkflowOverrideTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
 
         self.ticket.refresh_from_db()
-        self.assertEqual(self.ticket.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — an on-behalf approval is a recorded customer
+        # decision, so it auto-closes like any other. The approval
+        # stamps and the override row this test is about are unchanged.
+        self.assertEqual(self.ticket.status, TicketStatus.CLOSED)
         self.assertIsNotNone(self.ticket.approved_at)
         self.assertIsNotNone(self.ticket.resolved_at)
 

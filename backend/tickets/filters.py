@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.db.models import Q
 from django.utils import timezone
 from django_filters import rest_framework as df
@@ -14,6 +16,62 @@ _AGENDA_TERMINAL_STATUSES = [
     TicketStatus.CLOSED,
     TicketStatus.CONVERTED_TO_EXTRA_WORK,
 ]
+
+
+# Sprint 180 §2 — "completed extra works should not clutter the ticket
+# list". FINISHED is read off the TICKET's own status, never off the
+# parent Extra Work's.
+#
+# Keying on `ExtraWorkStatus.COMPLETED` was the obvious reading and it
+# is the wrong one: a provider operator can drive an Extra Work
+# IN_PROGRESS -> COMPLETED by hand while one of its spawned tickets is
+# still OPEN, and that ticket would vanish from the list that is
+# supposed to be showing it. The ticket's own status is the authority
+# on whether the ticket's work is finished, and it cannot be set from
+# the Extra Work side.
+#
+# REJECTED is deliberately absent: rejected work loops back through
+# IN_PROGRESS for rework, so it is live work despite being listed in
+# `models.TERMINAL_TICKET_STATUSES`. CONVERTED_TO_EXTRA_WORK is absent
+# too — such a ticket is the SOURCE of an Extra Work, not a row spawned
+# by one, and its pointer to the successor is the reason to keep it
+# visible.
+_FINISHED_TICKET_STATUSES = [
+    TicketStatus.APPROVED,
+    TicketStatus.CLOSED,
+]
+
+
+def _extra_work_origin_q() -> Q:
+    """
+    Rows that were SPAWNED BY an Extra Work request, across all three
+    parentage paths, exactly as `TicketFilter.filter_extra_work_request`
+    and `serializers.resolve_extra_work_origin_core` resolve them:
+    the canonical FK first, then the two legacy chains historical rows
+    may still be anchored on.
+
+    All three are forward FKs on Ticket, so `isnull` compiles to the
+    local column and no join fan-out (and therefore no `.distinct()`)
+    is involved.
+    """
+    return (
+        Q(extra_work_request__isnull=False)
+        | Q(extra_work_request_item__isnull=False)
+        | Q(proposal_line__isnull=False)
+    )
+
+
+def exclude_finished_extra_work(queryset):
+    """
+    Drop EW-spawned tickets whose OWN work is finished.
+
+    Shared by `TicketFilter.hide_finished_extra_work` (the list) and
+    `TicketViewSet.stats` (the count chips above it) so the chips and
+    the rows can never disagree about what is on screen.
+    """
+    return queryset.exclude(
+        Q(status__in=_FINISHED_TICKET_STATUSES) & _extra_work_origin_q()
+    )
 
 
 class TicketFilter(df.FilterSet):
@@ -86,6 +144,24 @@ class TicketFilter(df.FilterSet):
     # `scope_tickets_for` already allowed.
     customer = df.NumberFilter(field_name="customer_id")
 
+    # Sprint 180 §2 — hide finished Extra Work rows from the ticket
+    # list. OPT-IN at the API layer (absent param == today's behaviour,
+    # every existing caller unaffected); the Tickets page turns it ON by
+    # default and shows a clearable chip, because "default to hiding
+    # finished work" is what was asked and "never hide things with no
+    # way back" is the house rule.
+    hide_finished_extra_work = df.BooleanFilter(
+        method="filter_hide_finished_extra_work"
+    )
+
+    # Sprint 180 §1 — age the customer-approval queue. Narrows to
+    # tickets that have been sitting in WAITING_CUSTOMER_APPROVAL for at
+    # least N days, i.e. finished work the customer has not answered on
+    # and which therefore cannot become invoiceable. OPT-IN.
+    awaiting_customer_approval_days = df.NumberFilter(
+        method="filter_awaiting_customer_approval_days"
+    )
+
     class Meta:
         model = Ticket
         fields = {
@@ -106,6 +182,34 @@ class TicketFilter(df.FilterSet):
             | Q(extra_work_request_item__extra_work_request_id=value)
             | Q(proposal_line__proposal__extra_work_request_id=value)
         ).distinct()
+
+    def filter_hide_finished_extra_work(self, queryset, name, value):
+        # Sprint 180 §2. A falsy value leaves the queryset untouched, so
+        # "show all" is genuinely all — the escape hatch is a real one.
+        if not value:
+            return queryset
+        return exclude_finished_extra_work(queryset)
+
+    def filter_awaiting_customer_approval_days(self, queryset, name, value):
+        # Sprint 180 §1. `value` is a number of days; 0 means "every
+        # ticket currently awaiting approval".
+        #
+        # Rows with a NULL `sent_for_approval_at` are excluded rather
+        # than treated as infinitely old: the column is stamped by
+        # `TIMESTAMP_ON_ENTER[WAITING_CUSTOMER_APPROVAL]`, so a NULL is
+        # a row that never went through the transition (a hand-set
+        # fixture, or a legacy row) and has no age to measure. Ageing
+        # them from `created_at` instead would put rows in the "customer
+        # is sitting on this" queue that the customer was never asked
+        # about.
+        if value in (None, ""):
+            return queryset
+        cutoff = timezone.now() - timedelta(days=float(value))
+        return queryset.filter(
+            status=TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            sent_for_approval_at__isnull=False,
+            sent_for_approval_at__lte=cutoff,
+        )
 
     def filter_agenda(self, queryset, name, value):
         # Sprint 9B — agenda view-state filter. Opt-in only.
