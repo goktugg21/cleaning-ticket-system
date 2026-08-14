@@ -33,6 +33,8 @@ from customers.models import Customer
 from invoicing.invoice_pdf import render_invoice_pdf
 from invoicing.models import Invoice, InvoiceLine
 
+from ._helpers import MediaRootIsolation
+
 User = get_user_model()
 
 PLATFORM_SLUG = "osius"
@@ -68,7 +70,7 @@ def _page1_header_text(data: bytes, *, top_mm: float = 30.0) -> str:
 
 
 @override_settings(PLATFORM_BRAND_SLUG=PLATFORM_SLUG)
-class PdfBrandingFunctionTests(TestCase):
+class PdfBrandingFunctionTests(MediaRootIsolation, TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.platform = Company.objects.create(name="Osius", slug=PLATFORM_SLUG)
@@ -124,7 +126,7 @@ class PdfBrandingFunctionTests(TestCase):
 
 
 @override_settings(PLATFORM_BRAND_SLUG=PLATFORM_SLUG)
-class InvoicePdfBrandingTests(TestCase):
+class InvoicePdfBrandingTests(MediaRootIsolation, TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(

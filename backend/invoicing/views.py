@@ -36,7 +36,7 @@ from customers.models import Customer
 from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement)
 
 from .filters import InvoiceFilter
-from .invoice_pdf import render_invoice_pdf
+from .invoice_pdf import invoice_pdf_bytes
 from .line_services import (
     add_invoice_line,
     remove_invoice_line,
@@ -78,10 +78,15 @@ class InvoicePdfView(views.APIView):
     """
     GET /api/invoices/<invoice_id>/pdf/
 
-    Render an invoice as a two-page Dutch PDF. Provider-operator only
-    (403 for a customer user / staff); tenant-scoped via scope_invoices_for
-    (404 for a cross-tenant or out-of-scope invoice). Customer visibility is
-    Phase 5 — customer users cannot reach this endpoint here.
+    The invoice as a Dutch PDF: page 1 the summary, page 2+ the
+    specification annex. Provider-operator only (403 for a customer user /
+    staff); tenant-scoped via scope_invoices_for (404 for a cross-tenant or
+    out-of-scope invoice). Customer visibility is Phase 5 — customer users
+    cannot reach this endpoint here.
+
+    Sprint 180 §1 — a SENT invoice serves its FROZEN bytes; a draft still
+    renders fresh. `invoice_pdf_bytes` owns that decision so both PDF
+    endpoints cannot disagree about it.
     """
 
     permission_classes = [IsAuthenticatedAndActive]
@@ -98,7 +103,7 @@ class InvoicePdfView(views.APIView):
             ),
             pk=invoice_id,
         )
-        pdf_bytes = render_invoice_pdf(invoice)
+        pdf_bytes = invoice_pdf_bytes(invoice)
         filename = (
             f"factuur-{invoice.number}.pdf"
             if invoice.number
@@ -502,10 +507,13 @@ class CustomerInvoiceDetailView(views.APIView):
 
 
 class CustomerInvoicePdfView(views.APIView):
-    """GET /api/invoices/my/<id>/pdf/ — the two-page Dutch PDF (REUSES
-    `render_invoice_pdf`, already customer-safe), but ONLY for an invoice in
+    """GET /api/invoices/my/<id>/pdf/ — the Dutch PDF (REUSES
+    `invoice_pdf_bytes`, already customer-safe), but ONLY for an invoice in
     `scope_customer_invoices_for` — so a customer cannot fetch a DRAFT /
-    ISSUED / other-tenant PDF by id (404). Mirrors `InvoicePdfView`."""
+    ISSUED / other-tenant PDF by id (404). Mirrors `InvoicePdfView`.
+
+    This scope is SENT-only, so in practice a customer always receives the
+    FROZEN document — the same bytes the operator sent, not a re-render."""
 
     permission_classes = [IsAuthenticatedAndActive]
 
@@ -516,7 +524,7 @@ class CustomerInvoicePdfView(views.APIView):
             ),
             pk=invoice_id,
         )
-        pdf_bytes = render_invoice_pdf(invoice)
+        pdf_bytes = invoice_pdf_bytes(invoice)
         filename = (
             f"factuur-{invoice.number}.pdf"
             if invoice.number
