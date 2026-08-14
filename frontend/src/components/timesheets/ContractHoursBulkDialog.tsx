@@ -29,13 +29,15 @@
  * A NON-native overlay, conditionally mounted, like every other editing
  * modal here.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api } from "../../api/client";
 import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
 import { ChipMultiSelect } from "../ChipMultiSelect";
+import { ConfirmDialog } from "../ConfirmDialog";
+import type { ConfirmDialogHandle } from "../ConfirmDialog";
 import { usePickerReserve } from "../../lib/usePickerReserve";
 import { workTypeLabel } from "../../lib/workTypeLabel";
 import { fromDateString, isoWeekOf, toDateString } from "../../lib/isoWeek";
@@ -107,14 +109,32 @@ export function ContractHoursBulkDialog({
   const { modalRef, spacerRef, reserve, onPickerOpenChange } =
     usePickerReserve();
 
-  // Escape closes. One effect, and it touches only a listener.
+  /**
+   * Sprint 180 §2 — Escape closes, unless there are unsaved hours.
+   *
+   * Identical treatment to the week wizard, and for the identical
+   * reason: the listener is on `window`, so one Escape from anywhere
+   * threw away everything typed into the grid without a word. The grid
+   * reports its own dirtiness from its event handlers.
+   */
+  const [dirty, setDirty] = useState(false);
+  const discardDialogRef = useRef<ConfirmDialogHandle>(null);
+
+  const requestClose = useCallback(() => {
+    if (dirty) {
+      discardDialogRef.current?.open();
+      return;
+    }
+    onClose();
+  }, [dirty, onClose]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") requestClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [requestClose]);
 
   /** The rendering frame: the ISO week containing valid-from. */
   const week = useMemo(() => {
@@ -346,6 +366,13 @@ export function ContractHoursBulkDialog({
         </div>
 
         <HoursWeekGrid
+          /* Sprint 180 §2 — keyed by the RENDERING FRAME. Moving
+             valid-from across an ISO week boundary changes the grid's
+             dates, and `handleSave` only reads the dates it is currently
+             showing, so anything typed under the old frame was stranded
+             in state. Moving valid-from WITHIN a week keeps the key and
+             keeps the typed hours, which is the common case. */
+          key={`${week.isoYear}-W${week.isoWeek}`}
           week={week}
           employees={gridEmployees}
           companyId={companyId}
@@ -358,8 +385,24 @@ export function ContractHoursBulkDialog({
           seedBuildingIds={seedBuildingIds}
           weekClosed={false}
           onSaved={onClose}
-          onCancel={onClose}
+          onCancel={requestClose}
+          onDirtyChange={setDirty}
           onSaveCells={saveCells}
+        />
+
+        {/* Sprint 180 §2 — see the week wizard: rendered unconditionally,
+            driven by ref, per CLAUDE.md's native-dialog rule. */}
+        <ConfirmDialog
+          ref={discardDialogRef}
+          title={t("week_setup.discard_title")}
+          body={t("week_setup.discard_body")}
+          confirmLabel={t("week_setup.discard_confirm")}
+          cancelLabel={t("week_setup.discard_cancel")}
+          destructive
+          onConfirm={() => {
+            discardDialogRef.current?.close();
+            onClose();
+          }}
         />
         {/* Sprint 170 §8 — the reserve, as a real element. Its TOP is
             where the modal's content ends and does not move when its
