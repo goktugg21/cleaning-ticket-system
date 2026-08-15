@@ -109,5 +109,9 @@
   "bottom.billing_title": "Billing {{month}}",
   "bottom.billing_empty": "No billing this month.",
   "bottom.billing_open_count": "{{count}} open",
-  "bottom.recent_title": "Latest tickets / extra work"
+  "bottom.recent_title": "Latest tickets / extra work",
+  "work_type.label": "Show",
+  "work_type.all": "All work",
+  "work_type.tickets_only": "Tickets only",
+  "work_type.chargeable": "Chargeable work"
 }

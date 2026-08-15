@@ -47,8 +47,8 @@
   "kpi.open_meta": "Wacht op provider-review",
   "kpi.awaiting_label": "Wacht op klant",
   "kpi.awaiting_meta": "Prijsvoorstel verstuurd",
-  "kpi.approved_label": "Goedgekeurd",
-  "kpi.approved_meta": "Klant heeft geaccepteerd",
+  "kpi.approved_label": "Prijs akkoord",
+  "kpi.approved_meta": "Klant heeft de offerte geaccepteerd",
   "kpi.value_label": "Totale waarde",
   "kpi.value_meta": "Exclusief geannuleerd",
   "quote.page_title": "Offerte aanvragen",
@@ -536,5 +536,6 @@
   "list.chip_ticket_finished": "Afgerond",
   "detail.operational_state": "Werkstatus",
   "detail.operational_state_hint": "Volgt melding {{ticket}}. Wijzig de melding om dit te veranderen.",
-  "detail.commercial_state": "Prijsstatus"
+  "detail.commercial_state": "Prijsstatus",
+  "detail.header_total_hint": "Het definitieve bedrag zodra het werk is afgerekend; tot dan de offerteprijs. Hetzelfde bedrag als in de lijst."
 }

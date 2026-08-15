@@ -49,7 +49,10 @@ import { StatusTiles } from "../components/StatusTiles";
 import { TrackTabs } from "../components/extra-work/TrackTabs";
 import type { ExtraWorkTrack } from "../components/extra-work/TrackTabs";
 import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
-import { ticketStatusLabelKey } from "../lib/enumLabels";
+import {
+  extraWorkStatusLabelKey,
+  ticketStatusLabelKey,
+} from "../lib/enumLabels";
 import { EditModeToggle } from "../components/EditModeToggle";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
@@ -75,17 +78,14 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   OTHER: "category.other",
 };
 
-const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
-  REQUESTED: "status.requested",
-  UNDER_REVIEW: "status.under_review",
-  PRICING_PROPOSED: "status.pricing_proposed",
-  CUSTOMER_APPROVED: "status.customer_approved",
-  // Sprint 29 Batch 29.8 — operational segment.
-  IN_PROGRESS: "status.in_progress",
-  COMPLETED: "status.completed",
-  CUSTOMER_REJECTED: "status.customer_rejected",
-  CANCELLED: "status.cancelled",
-};
+// Sprint 182 §2 — this page's private status-label map is gone.
+//
+// It pointed at `extra_work:status.*`, where CUSTOMER_APPROVED reads
+// "Customer approved", while the badge two lines below rendered
+// `common:extra_work_status.*`, where the same status reads "Price
+// approved" — the crisp name, because what the customer approved is the
+// QUOTE. One row could therefore say one thing on screen and another in
+// the CSV taken from it. `extraWorkStatusLabelKey` is the one source now.
 
 /** Sprint 180 §3 — the two billing targets. A `Record` over the union
  *  rather than a second array literal: adding a third value to
@@ -947,7 +947,7 @@ export function ExtraWorkList({
             ? t(ticketStatusLabelKey(operationalStatus(row) ?? "OPEN"), {
                 ns: "common",
               })
-            : t(STATUS_I18N_KEY[row.status] ?? row.status),
+            : t(extraWorkStatusLabelKey(row.status), { ns: "common" }),
           amounts.subtotal.toFixed(2),
           amounts.vat.toFixed(2),
           amounts.total.toFixed(2),

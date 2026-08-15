@@ -109,5 +109,9 @@
   "bottom.billing_title": "Facturatie {{month}}",
   "bottom.billing_empty": "Geen facturatie deze maand.",
   "bottom.billing_open_count": "{{count}} open",
-  "bottom.recent_title": "Laatste tickets / extra werk"
+  "bottom.recent_title": "Laatste tickets / extra werk",
+  "work_type.label": "Tonen",
+  "work_type.all": "Al het werk",
+  "work_type.tickets_only": "Alleen tickets",
+  "work_type.chargeable": "Meerwerk"
 }
