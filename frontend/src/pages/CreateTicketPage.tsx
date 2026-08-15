@@ -27,6 +27,12 @@ interface CreateTicketForm {
   priority: string;
   building: string;
   customer: string;
+  /** Sprint 184 §3 — the date the CUSTOMER would like this done. A WISH,
+   *  never a deadline: a deadline is a provider commitment and stays
+   *  provider-only, because the overdue rules read deadlines. Carried
+   *  into `ExtraWorkRequest.preferred_date` if this melding is later
+   *  converted, so a date somebody typed does not vanish. */
+  customer_wanted_date: string;
 }
 
 type TicketTypeValue =
@@ -94,6 +100,7 @@ const EMPTY_FORM: CreateTicketForm = {
   priority: "NORMAL",
   building: "",
   customer: "",
+  customer_wanted_date: "",
 };
 
 // Mirrors the backend per-file cap in
@@ -307,6 +314,10 @@ export function CreateTicketPage() {
         priority: form.priority,
         building: Number(form.building),
         customer: Number(form.customer),
+        // Empty means "the customer did not say", which has to stay
+        // distinguishable from a date they chose — so it is sent as
+        // null rather than "".
+        customer_wanted_date: form.customer_wanted_date || null,
       });
 
       const newId = response.data.id;
@@ -474,6 +485,31 @@ export function CreateTicketPage() {
                   value={form.room_label}
                   onChange={(event) => update("room_label", event.target.value)}
                 />
+              </div>
+              {/* Sprint 184 §3 — the customer's WANTED DATE.
+                  Deliberately labelled as a wish, not a deadline: a
+                  deadline is the provider's commitment and the overdue
+                  rules read it, so letting a customer type one would let
+                  them set a commitment on the provider's behalf. The
+                  helper says so in the customer's own words rather than
+                  leaving them to guess what the field promises. */}
+              <div className="field">
+                <label className="field-label" htmlFor="f-wanted-date">
+                  {t("field_wanted_date_label")}
+                </label>
+                <input
+                  id="f-wanted-date"
+                  className="field-input"
+                  type="date"
+                  value={form.customer_wanted_date}
+                  onChange={(event) =>
+                    update("customer_wanted_date", event.target.value)
+                  }
+                  data-testid="create-ticket-wanted-date"
+                />
+                <span className="muted small">
+                  {t("field_wanted_date_helper")}
+                </span>
               </div>
             </div>
             <div className="field">

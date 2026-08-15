@@ -37,6 +37,12 @@ def apply_extra_work_dates(extra_work, data: dict) -> dict | None:
 
     Saves with `update_fields` so the write touches only what changed, and
     includes `updated_at` so the audit handler sees a real modification.
+
+    Sprint 184 §1 — when `provider_planned_date` is part of the write,
+    the spawned tickets' schedules follow it (see `planned_date.py`), and
+    the outcome is attached to the row as
+    `extra_work.planned_date_ticket_result` for the caller to report.
+    Tickets a person rescheduled by hand keep their own date.
     """
     update_fields: list[str] = []
 
@@ -85,4 +91,25 @@ def apply_extra_work_dates(extra_work, data: dict) -> dict | None:
 
     update_fields.append("updated_at")
     extra_work.save(update_fields=update_fields)
+
+    # Sprint 184 §1 (write half) — planning the work MOVES the work.
+    #
+    # Only `provider_planned_date` does this, and only when it was part
+    # of this write. The other two dates are read through the link
+    # (`extra_work_origin`) and never copied onto a ticket; this one is
+    # not a copy but an ACTION — the ticket's own `scheduled_start_at`,
+    # which the agenda and the staff slots read, moves to the day the
+    # provider committed to.
+    #
+    # A ticket somebody rescheduled BY HAND keeps its own date and is
+    # reported back rather than silently overwritten. The result is
+    # attached to the row for the caller to surface; it is deliberately
+    # not raised, because the date write above already succeeded and a
+    # ticket holding its own plan is not a failure of it.
+    if "provider_planned_date" in data:
+        from .planned_date import apply_planned_date_to_tickets
+
+        extra_work.planned_date_ticket_result = (
+            apply_planned_date_to_tickets(extra_work)
+        )
     return None

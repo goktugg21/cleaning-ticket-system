@@ -199,8 +199,38 @@ _EW_LIVE_Q = ~Q(
 )
 
 
+#: Sprint 184 §2 — the slot's DUE date in SQL, mirroring `_slot_job`.
+#:
+#: The Python rule and this predicate must select the same rows; the
+#: module header says so and a test enforces it. So the branch is the
+#: same branch: a real extra-work deadline where one exists, the last
+#: planned day where none does.
+_SLOT_EW_DEADLINE = "ticket__extra_work_request__deadline"
+
+
+def _slot_due_q(lookup: str, value: datetime.date) -> Q:
+    """`due <lookup> value` for a slot.
+
+    Written as two POSITIVE branches rather than one negated branch on
+    purpose. `deadline__isnull=True` over a nullable FK chain is true
+    both when the ticket has no extra work at all and when it has one
+    with no deadline — which is exactly the set that should fall back to
+    the planned window. A `~Q(...isnull=False)` would mean the same
+    thing here but reads as a double negative over a LEFT JOIN, and this
+    predicate has to be obviously right to anybody checking it against
+    `_slot_job`.
+    """
+    return (
+        Q(**{f"{_SLOT_EW_DEADLINE}__isnull": False})
+        & Q(**{f"{_SLOT_EW_DEADLINE}__{lookup}": value})
+    ) | (
+        Q(**{f"{_SLOT_EW_DEADLINE}__isnull": True})
+        & _slot_window_end_q(lookup, value)
+    )
+
+
 def _slot_overdue_q(today: datetime.date) -> Q:
-    return _SLOT_LIVE_Q & _slot_window_end_q("lt", today)
+    return _SLOT_LIVE_Q & _slot_due_q("lt", today)
 
 
 def _ew_overdue_q(today: datetime.date) -> Q:
@@ -274,7 +304,16 @@ def _slot_source(user, team: bool):
     else:
         queryset = queryset.filter(user=user)
     return queryset.select_related(
-        "ticket", "ticket__building", "ticket__customer", "user"
+        "ticket",
+        "ticket__building",
+        "ticket__customer",
+        # Sprint 184 §2 — the slot's due date is the parent extra work's
+        # deadline where one exists. Joined here so `_slot_deadline`
+        # reads an already-loaded row: without it every slot in the week
+        # would fetch its own extra work, which is the N+1 the §1 read
+        # design exists to avoid.
+        "ticket__extra_work_request",
+        "user",
     )
 
 
@@ -342,16 +381,60 @@ def _extra_work_state(extra_work) -> str:
     return STATE_OPEN
 
 
+def _slot_deadline(slot) -> datetime.date | None:
+    """The REAL deadline behind this slot, when there is one.
+
+    Sprint 184 §2. A slot is one person's dated piece of work on a
+    ticket, and a ticket born from an extra work inherits that request's
+    `deadline` — the provider's commitment for when the job must be
+    finished. Read through the link (Sprint 184 §1), never copied onto
+    the ticket, so editing the deadline on the extra work moves this in
+    the same instant.
+
+    Returns None for an ordinary ticket's slot: those genuinely have no
+    deadline, and inventing one is what the old rule effectively did.
+
+    FOLLOWS THE CANONICAL FK ONLY, deliberately. `resolve_extra_work_
+    origin_core` also walks the two legacy chains (`proposal_line` and
+    `extra_work_request_item`) for historical rows whose canonical FK is
+    null; this does not, because the SQL twin `_slot_due_q` has to
+    select exactly the same rows and three OR'd join paths in a
+    predicate that also composes into `Count(filter=...)` is a great
+    deal of machinery for rows that no longer occur — every spawn path
+    has set the canonical FK since Sprint 6A. Measured on crmtest: all
+    four live slots on extra-work tickets resolve through the canonical
+    FK. A legacy-linked row keeps the old last-planned-day rule, which
+    is its pre-Sprint-184 behaviour, so nothing regresses.
+    """
+    return getattr(
+        getattr(slot.ticket, "extra_work_request", None), "deadline", None
+    )
+
+
 def _slot_job(slot) -> Job:
     start = _local_date(slot.scheduled_start_at)
     end = _local_date(slot.scheduled_end_at)
+    # Sprint 184 §2 — "overdue" on a slot now means what it says.
+    #
+    # It used to mean "past its last planned day", because a slot has no
+    # deadline column and the rule needed SOMETHING. That quietly
+    # redefined late in both directions: a job planned for Monday but
+    # genuinely due Friday was marked overdue on Tuesday, and a job that
+    # had blown a real deadline stopped being marked the moment somebody
+    # moved its planned window forward.
+    #
+    # Where a real deadline exists — a ticket spawned by an extra work
+    # carrying one — it is the answer. Where none exists the old
+    # definition stands unchanged, because for an ordinary ticket the
+    # last planned day is still the only date anybody stated. §12B's
+    # placement rule ("a job past its deadline and unfinished also
+    # appears in the current week, marked overdue") is what this makes
+    # literally true rather than approximately true.
+    deadline = _slot_deadline(slot)
     return Job(
         planned_start=start,
         planned_end=end,
-        # A slot carries no deadline column. Its last planned day IS the
-        # date it was supposed to be done by, which is the definition the
-        # agenda has used since Sprint 168 — kept, not redefined.
-        due=end or start,
+        due=deadline if deadline is not None else (end or start),
         state=_slot_state(slot),
     )
 

@@ -226,6 +226,41 @@ class Ticket(models.Model):
     resolved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
+    # ------------------------------------------------------------------
+    # Sprint 184 §3 — THE CUSTOMER'S WANTED DATE. A WISH, NOT A DEADLINE.
+    #
+    # A customer opening a melding can now say when they would like it
+    # done, the same way they already can on an extra work.
+    #
+    # The distinction this system settled in Sprint 176 §3 and must keep:
+    #
+    #   a WISH     is the customer's — "I would like it around then".
+    #              `ExtraWorkRequest.preferred_date` is the same thing on
+    #              the extra work; this is its melding counterpart.
+    #   a DEADLINE is a PROVIDER COMMITMENT — "it will be finished by".
+    #              It stays provider-only and is deliberately NOT added
+    #              here: a customer who could type a deadline would be
+    #              setting the provider's commitment, and the overdue
+    #              rule reads deadlines.
+    #
+    # So this field never feeds `is_overdue` and never decides late. It
+    # records what the customer asked for, so the provider can see it and
+    # so it survives conversion into `ExtraWorkRequest.preferred_date`
+    # (`extra_work/conversion.py`) — a date a customer typed that
+    # vanishes at conversion is worse than never having asked for it.
+    # ------------------------------------------------------------------
+    customer_wanted_date = models.DateField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Sprint 184 — the date the CUSTOMER would like this done. A "
+            "wish, not a commitment: it never decides whether the ticket "
+            "is late. Carried into ExtraWorkRequest.preferred_date on "
+            "conversion."
+        ),
+    )
+
     # Sprint 28 Batch 7 — link back to the ExtraWorkRequestItem this
     # Ticket was spawned from. NULL for tickets created by any other
     # path (legacy creation, direct API submission, etc.). SET_NULL on
