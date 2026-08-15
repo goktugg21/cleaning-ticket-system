@@ -99,9 +99,6 @@
   "agenda.this_week": "This week",
   "agenda.chip_total": "Total",
   "agenda.chip_overdue": "Overdue",
-  "agenda.filter_type": "Type",
-  "agenda.all_types": "All types",
-  "agenda.missing_chips_note": "One of the reference chips is deliberately absent: nothing in this system has an archived state.",
   "agenda.undated_count": "{{count}} job(s) with no planned date — they belong to no week.",
   "agenda.today": "Today",
   "agenda.day_empty": "Nothing planned",
@@ -117,7 +114,7 @@
   "agenda.chip_in_progress": "In progress",
   "agenda.chip_done": "Completed",
   "agenda.chip_blocked": "Can't complete",
-  "agenda.filter_source": "Kind of work",
+  "agenda.filter_source": "Show",
   "agenda.all_sources": "Everything",
   "agenda.source_ticket": "Ticket",
   "agenda.source_extra_work": "Extra work",
@@ -140,5 +137,10 @@
   "agenda.undated_plan_today": "Plan for today",
   "agenda.undated_planning": "Planning...",
   "agenda.undated_planned": "Planned for today.",
-  "agenda.undated_open_extra_work": "Open extra work"
+  "agenda.overview_week_one": "{{count}} job this week",
+  "agenda.overview_week_other": "{{count}} jobs this week",
+  "agenda.overview_unplanned_one": "{{count}} not planned yet",
+  "agenda.overview_unplanned_other": "{{count}} not planned yet",
+  "agenda.overview_overdue_one": "{{count}} overdue",
+  "agenda.overview_overdue_other": "{{count}} overdue"
 }

@@ -39,7 +39,6 @@ import {
   ChevronRight,
   Lock,
   PlayCircle,
-  RefreshCw,
   Ticket,
   Users,
   XCircle,
@@ -51,7 +50,7 @@ import type { SlotStatus } from "../api/admin";
 import { getApiError } from "../api/client";
 import { listAllTickets } from "../api/tickets";
 import type { Role, TicketList } from "../api/types";
-import { getWorkPlan } from "../api/workPlan";
+import { getWorkPlan, planExtraWorkForDate } from "../api/workPlan";
 import type {
   WorkPlanEntry,
   WorkPlanKind,
@@ -351,7 +350,6 @@ function WorkPlanWeek() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [chip, setChip] = useState<ChipKey>("");
-  const [typeFilter, setTypeFilter] = useState("");
   const [kindFilter, setKindFilter] = useState<"" | WorkPlanKind>("");
   const [overdueOpen, setOverdueOpen] = useState(false);
   const [upcomingOpen, setUpcomingOpen] = useState(false);
@@ -403,17 +401,21 @@ function WorkPlanWeek() {
    * asks a question; this answers the common case and leaves the
    * uncommon one to the ticket's own schedule card.
    *
-   * TICKET SLOTS ONLY, and that is a real limit rather than an
-   * oversight. An undated extra work is one with no `preferred_date`,
-   * and `preferred_date` is the CUSTOMER's wish (Sprint 176 §3 was
-   * explicit: the customer states a wish, the provider commits to a
-   * deadline). There is no provider endpoint that writes it, and adding
-   * one so the work plan could put words in a customer's mouth is a
-   * product decision, not a UI convenience. Those rows link through to
-   * the extra work instead.
+   * Sprint 182 §3 — BOTH kinds now. It used to be ticket slots only,
+   * and that was a real limit rather than an oversight: an extra work's
+   * only date was `preferred_date`, which is the CUSTOMER's wish
+   * (Sprint 176 §3 was explicit — the customer states a wish, the
+   * provider commits to a deadline), and writing it here would have had
+   * the work plan put words in a customer's mouth. Sprint 182 gives the
+   * provider a date of its own, `provider_planned_date`, so the lane's
+   * one action now works on the rows it could not reach.
+   *
+   * The two branches write through different endpoints because they are
+   * genuinely different records — a ticket has a schedule, an extra work
+   * has a planned day — and one shared "plan this" endpoint over two
+   * models would be a third thing to keep in step with both.
    */
   async function planForToday(entry: WorkPlanEntry) {
-    if (entry.ticket_id === null) return;
     setPlanningKey(entry.key);
     setPlanError("");
     try {
@@ -423,12 +425,26 @@ function WorkPlanWeek() {
       // about. Noon is safe in every timezone this app runs in.
       const today = new Date();
       today.setHours(12, 0, 0, 0);
-      await setTicketSchedule(entry.ticket_id, {
-        scheduled_start_at: today.toISOString(),
-      });
+      if (entry.ticket_id !== null) {
+        await setTicketSchedule(entry.ticket_id, {
+          scheduled_start_at: today.toISOString(),
+        });
+      } else if (entry.extra_work_id !== null) {
+        // A DATE, not a timestamp: `provider_planned_date` is a DateField
+        // and the day is the whole fact. Formatted from the local date
+        // parts rather than `toISOString().slice(0, 10)`, which converts
+        // to UTC first and files an evening in Amsterdam under the next
+        // day.
+        await planExtraWorkForDate(entry.extra_work_id, toDateString(today));
+      } else {
+        return;
+      }
       push({ title: t("agenda.undated_planned"), variant: "success" });
       reload();
     } catch (err) {
+      // Surfaced, never swallowed. Until Agent A's branch is merged the
+      // extra-work half answers 400 here, and a button that silently did
+      // nothing would be worse than one that says why.
       setPlanError(getApiError(err));
     } finally {
       setPlanningKey(null);
@@ -458,26 +474,14 @@ function WorkPlanWeek() {
   const counts = data?.counts ?? null;
   const todayKey = data?.today ?? toDateString(new Date());
 
-  const ticketTypes = useMemo(
-    () => [
-      ...new Set(
-        entries
-          .map((entry) => entry.ticket_type)
-          .filter((value): value is string => Boolean(value)),
-      ),
-    ],
-    [entries],
-  );
-
   const filtered = useMemo(
     () =>
       entries.filter((entry) => {
         if (!matchesChip(entry, chip)) return false;
-        if (typeFilter && entry.ticket_type !== typeFilter) return false;
         if (kindFilter && entry.kind !== kindFilter) return false;
         return true;
       }),
-    [entries, chip, typeFilter, kindFilter],
+    [entries, chip, kindFilter],
   );
 
   const groups = useMemo(
@@ -537,6 +541,31 @@ function WorkPlanWeek() {
         }
       />
 
+      {/* Sprint 182 §3 — ONE sentence, in plain words, saying what this
+          week holds AND what it does not.
+          The page used to admit the second half only obliquely: a muted
+          count of undated rows below the fold, and six columns reading
+          "Nothing planned" while two thirds of the live work sat outside
+          the week entirely. A reader had to assemble "most of the work is
+          not here" out of an absence. It is stated instead, and in the
+          operator's words — jobs, not entries; "not planned yet", not
+          "undated". */}
+      {counts !== null && (
+        <p
+          className="muted"
+          data-testid="agenda-overview"
+          style={{ marginTop: -4 }}
+        >
+          {t("agenda.overview_week", { count: counts.total })}
+          {counts.undated > 0 && (
+            <> · {t("agenda.overview_unplanned", { count: counts.undated })}</>
+          )}
+          {counts.overdue_all > 0 && (
+            <> · {t("agenda.overview_overdue", { count: counts.overdue_all })}</>
+          )}
+        </p>
+      )}
+
       {loading && (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
@@ -591,15 +620,6 @@ function WorkPlanWeek() {
             data-testid="agenda-week-today"
           >
             {t("agenda.this_week")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={reload}
-            data-testid="agenda-refresh"
-          >
-            <RefreshCw size={14} strokeWidth={2.5} />
-            {t("common:refresh")}
           </button>
           {/* Two questions the WEEK cannot answer, so they get their own
               buttons: "what is late, anywhere" and "what is coming after
@@ -661,34 +681,8 @@ function WorkPlanWeek() {
             <option value="EXTRA_WORK">{t("agenda.source_extra_work")}</option>
           </select>
         </div>
-        <div className="filter-field">
-          <span className="filter-label">{t("agenda.filter_type")}</span>
-          <select
-            className="filter-control"
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            data-testid="agenda-filter-type"
-          >
-            <option value="">{t("agenda.all_types")}</option>
-            {ticketTypes.map((value) => (
-              <option key={value} value={value}>
-                {TICKET_TYPE_KEYS[value as TicketTypeValue]
-                  ? t(
-                      `create_ticket:${TICKET_TYPE_KEYS[value as TicketTypeValue]}`,
-                    )
-                  : value}
-              </option>
-            ))}
-          </select>
-        </div>
       </form>
 
-      {/* Said on screen rather than filled with an invented number: the
-          reference's sixth chip is Archived, and neither a staff slot
-          nor an extra work has an archived state in this system. */}
-      <p className="muted small" data-testid="agenda-no-archived">
-        {t("agenda.missing_chips_note")}
-      </p>
 
       {/* Sprint 181 §8 — the undated work has a PLACE now.
           This was one muted sentence saying N items had no date. On
@@ -949,26 +943,18 @@ function UndatedRow({
             .join(" · ")}
         </span>
       </div>
-      {/* Only a ticket can be planned from here — see `planForToday`
-          for why an extra work cannot, and links there instead. */}
-      {isTicket ? (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={onPlanToday}
-          disabled={busy}
-          data-testid={`agenda-undated-plan-${entry.key}`}
-        >
-          {busy ? t("agenda.undated_planning") : t("agenda.undated_plan_today")}
-        </button>
-      ) : (
-        <Link
-          to={`/extra-work/${entry.extra_work_id}`}
-          className="btn btn-secondary btn-sm"
-        >
-          {t("agenda.undated_open_extra_work")}
-        </Link>
-      )}
+      {/* Sprint 182 §3 — the SAME action on both kinds. A ticket writes
+          its schedule, an extra work writes the provider's planned day;
+          the row does not make the reader care which. */}
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={onPlanToday}
+        disabled={busy}
+        data-testid={`agenda-undated-plan-${entry.key}`}
+      >
+        {busy ? t("agenda.undated_planning") : t("agenda.undated_plan_today")}
+      </button>
     </li>
   );
 }

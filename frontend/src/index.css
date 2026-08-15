@@ -10053,3 +10053,31 @@ details[open] > .ew-department-tree-summary::before {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ===================================================================
+   Sprint 182 §3 (Agent D) — APPEND-ONLY block. Nothing above this line
+   is touched, reordered or reindented.
+
+   The week grid held seven columns from 1000px up. MEASURED on the
+   rendered page, that is not a week — it is a column of single words:
+
+       1024px   card 67px wide, title wraps to 17 lines
+       1280px   card 104px wide, title wraps to 9 lines
+       1440px   card 127px wide, title wraps to 7 lines
+
+   Sprint 179A's own comment claimed "seven columns hold down to 1024,
+   which is the narrowest width the owner measures at". The claim was
+   never measured; it does not hold. A title that takes seventeen lines
+   is not readable at any density.
+
+   So below 1500px the seven days WRAP instead of compressing. They stay
+   in order and every column still carries its own date heading, so the
+   week reads left-to-right then down — the way a calendar already does.
+   Seven readable days over two rows beats seven unreadable ones in one.
+   =================================================================== */
+@media (min-width: 1001px) and (max-width: 1200px) {
+  .agenda-week-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1201px) and (max-width: 1500px) {
+  .agenda-week-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
