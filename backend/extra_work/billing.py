@@ -13,6 +13,8 @@ from django.utils import timezone
 
 from tickets.models import Ticket, TicketStatus
 
+from .models import ExtraWorkStatus
+
 
 def build_ticket_map(ew_ids):
     """ew_id -> spawned operational ticket (lowest-id per EW), mirroring
@@ -34,6 +36,59 @@ def is_earned(ticket) -> bool:
     """Work is done == the spawned operational ticket is CLOSED (mirrors
     reports.dimensions._classify_extra_work 'earned')."""
     return ticket is not None and ticket.status == TicketStatus.CLOSED
+
+
+#: Sprint 182 §3 — statuses that mean "this was called off". An extra
+#: work in one of these is not billable no matter what its ticket says.
+#:
+#: CANCELLED and CUSTOMER_REJECTED are the two ways an extra work stops
+#: being work anybody agreed to. `reports.dimensions` already groups
+#: exactly this pair as `_EW_TERMINAL_NO_TICKET_LOST`; the same two, for
+#: the same reason.
+NON_BILLABLE_STATUSES = frozenset(
+    {
+        ExtraWorkStatus.CANCELLED,
+        ExtraWorkStatus.CUSTOMER_REJECTED,
+    }
+)
+
+
+def is_billable(ew, ticket) -> bool:
+    """Sprint 182 §3 — may this extra work go on an invoice at all?
+
+    **`invoicing.selectors.unbilled_extra_work` must call this**, and as
+    of this sprint it does not: it filters on company, customer,
+    `deleted_at`, `is_invoiced` and the live-claim predicate, and never
+    once on the extra work's own status. Cancel an extra work, let its
+    already-spawned ticket run on to CLOSED, and it walks straight into
+    the unbilled pool — you would invoice a customer for work you told
+    them was cancelled. The selector file belongs to Agent B this round,
+    so the predicate lives here and Agent B wires it in.
+
+    TWO conditions, and they are different questions:
+
+      * the extra work was not called off — a CANCELLED or
+        CUSTOMER_REJECTED row is not billable however its ticket ended,
+        because the ticket only records what was DONE and this records
+        whether it was ever OWED;
+      * the work is finished — `is_earned`, which reads the ticket, per
+        the owner's rule that the month-end job takes only extra works
+        whose operational side is COMPLETED.
+
+    Note what this does NOT decide: the AMOUNT. A zero-amount extra work
+    is billable and the owner was explicit that it belongs on the
+    invoice, written as zero rather than skipped — "nothing to charge
+    for this one" is information the customer is owed, and a line that
+    silently vanishes is not.
+
+    Nor does it decide the MONTH (`billing_month`) or whether the row is
+    already claimed (`is_invoiced` / the live-claim subquery). Those stay
+    where they are; this is only the billable/not-billable half that was
+    missing.
+    """
+    if ew.status in NON_BILLABLE_STATUSES:
+        return False
+    return is_earned(ticket)
 
 
 def billing_month(ew, ticket):

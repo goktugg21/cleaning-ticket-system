@@ -34,7 +34,6 @@ from .classification import (
     validate_intent_for_cart,
 )
 from .models import (
-    ExtraWorkBilledTo,
     ExtraWorkCategory,
     ExtraWorkLinePriceSource,
     ExtraWorkPricingUnitType,
@@ -54,7 +53,7 @@ def convert_ticket_to_extra_work(
     line_items_data: list,
     customer_visible_note: str = "",
     internal_note: str = "",
-    billed_to: str = ExtraWorkBilledTo.BUILDING,
+    billed_to: str | None = None,
 ) -> Tuple[ExtraWorkRequest, List[Ticket]]:
     """Convert `ticket` into a new `ExtraWorkRequest`.
 
@@ -66,14 +65,18 @@ def convert_ticket_to_extra_work(
     routing decision, the optional instant spawn, and the source-ticket
     flip.
 
-    Sprint 180 §3 — `billed_to` defaults to BUILDING, the same default
-    the model carries, so this path produces a correctly-billed request
-    without its caller knowing the field exists. The keyword is here
-    because this is the seam where a converted request's billing target
-    would be chosen: the convert ENDPOINT and its serializer live in
-    `tickets/`, which Sprint 180 Batch 1 does not own, so the control
-    that would pass a non-default value is not built yet. Nothing calls
-    this with an explicit value today — see the sprint report.
+    Sprint 182 §6 — `billed_to` defaults to None, meaning "follow the
+    customer's setting", which is the same default the model now
+    carries. It defaulted to BUILDING while the column was non-null;
+    leaving it that way after 0032 set the whole table to NULL would
+    have made CONVERTED requests the only rows in the system carrying a
+    billing target nobody chose, and that value would then override the
+    customer's own setting.
+
+    The keyword stays because this is still the seam where a converted
+    request's billing target would be chosen: the convert ENDPOINT and
+    its serializer live in `tickets/`, which this agent does not own, so
+    the control that would pass a real value is still not built.
 
     Returns `(extra_work_request, spawned_tickets)`. The spawned list is
     non-empty only on the INSTANT route (a single operational ticket);

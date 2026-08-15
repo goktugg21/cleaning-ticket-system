@@ -281,6 +281,50 @@ class TicketViewSet(
                 request,
                 message="You are not allowed to delete this ticket.",
             )
+        # Sprint 182 §4 — an extra-work-born ticket CANNOT be deleted.
+        #
+        # This ticket is the operational record of chargeable work, and
+        # three separate things read it as such: `billing.is_earned`
+        # asks whether it is CLOSED, the unbilled pool is assembled from
+        # that answer, and the spawn-idempotency guards treat its
+        # existence as "this extra work already has its ticket".
+        # Soft-deleting it therefore did two things at once, both
+        # silent: the extra work dropped out of the unbilled pool (the
+        # money stopped being owed, with nothing on any screen saying
+        # so), and the slot stayed occupied by the deleted row, so no
+        # replacement could ever be spawned.
+        #
+        # REFUSED rather than allowed-and-repaired, which was the other
+        # option on the table. Freeing the slot would need
+        # `deleted_at__isnull=True` added to the two spawn guards in
+        # `extra_work/instant_tickets.py` and `proposal_tickets.py`,
+        # neither of which this agent owns — and a half-applied version
+        # of that fix leaves the slot jammed, which is the worse
+        # failure. It is also the weaker shape on merit: even done
+        # perfectly it still lets the money leave the pool silently
+        # between the delete and a re-spawn nobody may remember to press.
+        #
+        # There is already a correct action for "this should not have
+        # been created", and it lives on the extra work rather than on
+        # the ticket: CANCEL it. That is audited, demands a written
+        # reason, and leaves the row visible. The error says so rather
+        # than leaving the operator to guess.
+        if ticket.extra_work_request_id is not None:
+            return Response(
+                {
+                    "detail": (
+                        "This ticket is the operational record of "
+                        "chargeable work and cannot be deleted, because "
+                        "deleting it would remove the work from "
+                        "invoicing without a trace. Cancel the extra "
+                        "work instead."
+                    ),
+                    "code": "extra_work_ticket_not_deletable",
+                    "extra_work_request_id": ticket.extra_work_request_id,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if ticket.deleted_at is not None:
             # Idempotent: already soft-deleted means the queryset gate
             # would have returned 404, but defend in depth.

@@ -223,7 +223,22 @@ class Command(BaseCommand):
                         # pairs and then demands a reason. Passing it
                         # unconditionally means a repair path can gain a
                         # hop later without silently starting to fail.
-                        apply_transition(
+                        #
+                        # Sprint 182 §5 — REASSIGN `ew`.
+                        # `apply_transition` re-fetches the row with
+                        # `select_for_update()`, mutates THAT instance
+                        # and returns it; the caller's object is never
+                        # touched. So hop 2 used to be computed from the
+                        # ORIGINAL status: the one multi-hop path,
+                        # CUSTOMER_APPROVED -> [IN_PROGRESS, COMPLETED],
+                        # asked for (CUSTOMER_APPROVED, COMPLETED) on
+                        # its second hop — not in ALLOWED_TRANSITIONS —
+                        # so it raised `invalid_transition` and rolled
+                        # the whole row back into `skipped`. It failed
+                        # loudly and corrupted nothing, which is why
+                        # nobody noticed; but the repair path the owner
+                        # was told about could not run for that shape.
+                        ew = apply_transition(
                             ew,
                             None,
                             hop,

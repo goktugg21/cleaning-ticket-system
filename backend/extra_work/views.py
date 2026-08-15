@@ -715,14 +715,61 @@ class ExtraWorkRequestViewSet(
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # Sprint 182 §1 — THE INVOICE LOCK, on the money path.
+        #
+        # Checked BEFORE the ticket-status lock below, and that order is
+        # the point. The ticket lock's own message invites the operator
+        # to "reopen it to edit actual hours" — and reopening a ticket
+        # was a legitimate thing to do until you notice that the work is
+        # already on an invoice the customer has been sent. Doing it
+        # then rewrites the amount behind a document that has left the
+        # building. Offering that instruction on a row we already know
+        # is invoiced is the defect, so this check gets there first and
+        # says something else.
+        #
+        # `issued_invoice_locking_labels` is the SAME predicate the
+        # label lock uses (ISSUED/SENT, not soft-deleted, not reversed;
+        # a DRAFT deliberately does not lock, because the draft window
+        # is the correction window). Reused rather than re-expressed:
+        # "may this extra work still change" must not have two answers,
+        # and money is the half that was missing.
+        #
+        # The way out is the same as for a mislabel and it is the
+        # correct business action rather than a workaround: reverse the
+        # invoice, which releases the extra work, then edit, then
+        # re-invoice.
+        locking_invoice = issued_invoice_locking_labels(extra_work)
+        if locking_invoice is not None:
+            return Response(
+                {
+                    "detail": (
+                        "Actual hours are locked: this extra work is on "
+                        f"invoice {locking_invoice.number or 'CONCEPT'}, "
+                        "which has been issued. Reverse that invoice "
+                        "first if the amount is wrong."
+                    ),
+                    "code": "actual_hours_invoice_locked",
+                    "invoice_id": locking_invoice.id,
+                    "invoice_number": locking_invoice.number,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Lock: once the operational ticket is APPROVED/CLOSED, the
         # final amount is frozen. Reopen required to edit further.
+        #
+        # Sprint 182 §4 — `deleted_at__isnull=True`: a soft-deleted
+        # ticket is not an operational ticket, and letting one hold this
+        # lock froze the amount of an extra work that no longer had a
+        # live ticket at all.
         locked_statuses = {
             str(TicketStatus.APPROVED),
             str(TicketStatus.CLOSED),
         }
         if (
-            Ticket.objects.filter(extra_work_request=extra_work)
+            Ticket.objects.filter(
+                extra_work_request=extra_work, deleted_at__isnull=True
+            )
             .filter(status__in=list(locked_statuses))
             .exists()
         ):
@@ -973,9 +1020,18 @@ class ExtraWorkRequestViewSet(
         # exactly ONE operational Ticket; when it already exists, return
         # 200 with the existing id(s) instead of a 400 error so the
         # retry endpoint is safe to re-fire.
+        #
+        # Sprint 182 §4 — `deleted_at__isnull=True`. Without it a
+        # SOFT-DELETED ticket still occupied the slot: the retry button
+        # reported "already spawned" and handed back the id of a ticket
+        # nobody can open, so an extra work whose ticket had been
+        # deleted could never get another one. The delete is refused
+        # outright now (`tickets/views.py` destroy), but this query was
+        # wrong on its own terms and a guard elsewhere is not a reason
+        # to leave it that way.
         existing_ids = list(
             Ticket.objects.filter(
-                extra_work_request=extra_work
+                extra_work_request=extra_work, deleted_at__isnull=True
             ).values_list("id", flat=True)
         )
         if existing_ids:

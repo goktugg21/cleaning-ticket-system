@@ -760,6 +760,11 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "preferred_date",
             "deadline",
             "planned_end_date",
+            # Sprint 182 §6 — the PROVIDER's planned day. `preferred_date`
+            # above is the CUSTOMER's wish (Sprint 176 §3); this is when
+            # the provider says the work will actually happen, and it is
+            # what lets the Work Plan schedule an extra work at all.
+            "provider_planned_date",
             "is_overdue",
             "started_before_plan",
             # Sprint 28 Batch 6 — cart routing taxonomy. Surfaced on
@@ -917,6 +922,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             # the detail page and the Work Plan cannot disagree about
             # what "late" or "started early" means.
             "planned_end_date",
+            # Sprint 182 §6 — the PROVIDER's planned day. `preferred_date`
+            # above is the CUSTOMER's wish (Sprint 176 §3); this is when
+            # the provider says the work will actually happen, and it is
+            # what lets the Work Plan schedule an extra work at all.
+            "provider_planned_date",
             "deadline",
             "is_overdue",
             "started_before_plan",
@@ -1347,15 +1357,21 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
     # create time on BOTH create surfaces (the customer-facing and the
     # provider-facing one are the same React page in two roles).
     #
-    # OPTIONAL on the wire, and it has to be: every existing client
-    # (and `extra_work.conversion`, which never touches this serializer)
-    # keeps working and takes the model default, BUILDING — the answer
-    # 99% of the time. An explicit value is validated against the two
-    # choices; anything else is a 400 rather than a silent fallback.
+    # OPTIONAL on the wire and NULLABLE, which are two different things
+    # and both deliberate (Sprint 182 §6). Omitting the key and sending
+    # `null` now mean the same thing — "follow the customer's setting" —
+    # which is the right answer for a form field nobody touched.
+    #
+    # The `default=BUILDING` that stood here is GONE: defaulting it
+    # would write a decision nobody made, which is exactly the state
+    # migration 0032 had to undo across the whole table. An explicit
+    # BUILDING / CUSTOMER still overrides the customer for this one job;
+    # anything else is a 400 rather than a silent fallback.
     billed_to = serializers.ChoiceField(
         choices=ExtraWorkBilledTo.choices,
         required=False,
-        default=ExtraWorkBilledTo.BUILDING,
+        allow_null=True,
+        default=None,
     )
 
     class Meta:
@@ -1386,6 +1402,11 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             # the detail page and the Work Plan cannot disagree about
             # what "late" or "started early" means.
             "planned_end_date",
+            # Sprint 182 §6 — the PROVIDER's planned day. `preferred_date`
+            # above is the CUSTOMER's wish (Sprint 176 §3); this is when
+            # the provider says the work will actually happen, and it is
+            # what lets the Work Plan schedule an extra work at all.
+            "provider_planned_date",
             "deadline",
             "is_overdue",
             "started_before_plan",

@@ -285,11 +285,20 @@ class ListQueryGrowthTests(_TrackFixture):
 
 
 class BilledToTests(_TrackFixture):
-    def test_defaults_to_building(self):
+    def test_defaults_to_null_meaning_follow_the_customer(self):
+        """Sprint 182 §6 changed this rule, by owner decision.
+
+        Sprint 180 defaulted the column to BUILDING, which was harmless
+        while nothing read it. Once invoice generation started reading
+        it, that default would have silently re-targeted every customer
+        configured for one-invoice-per-customer — so NULL ("follow the
+        customer's setting") is the default now, and migration 0032 set
+        every pre-182 row to it. Asserting BUILDING here is what this
+        test used to do; it is now the wrong contract."""
         ew = self._make_ew()
-        self.assertEqual(ew.billed_to, ExtraWorkBilledTo.BUILDING)
+        self.assertIsNone(ew.billed_to)
         row = self._row_for(self._api(self.admin).get(LIST_URL), ew.id)
-        self.assertEqual(row["billed_to"], "BUILDING")
+        self.assertIsNone(row["billed_to"])
 
     def test_rendered_on_detail_for_provider_and_customer(self):
         ew = self._make_ew(created_by=self.customer_user)
@@ -327,7 +336,7 @@ class BilledToTests(_TrackFixture):
             ExtraWorkBilledTo.CUSTOMER,
         )
 
-    def test_create_without_the_field_takes_the_building_default(self):
+    def test_create_without_the_field_stores_null(self):
         resp = self._api(self.admin).post(
             LIST_URL,
             {
@@ -346,7 +355,10 @@ class BilledToTests(_TrackFixture):
             format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
-        self.assertEqual(resp.data["billed_to"], "BUILDING")
+        # Sprint 182 §6 — omitting the field now stores NULL ("follow the
+        # customer"), not BUILDING. See the docstring on
+        # `test_defaults_to_null_meaning_follow_the_customer`.
+        self.assertIsNone(resp.data["billed_to"])
 
     def test_create_rejects_a_third_value(self):
         resp = self._api(self.admin).post(
@@ -370,7 +382,7 @@ class BilledToTests(_TrackFixture):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("billed_to", resp.data)
 
-    def test_converted_extra_work_takes_the_building_default(self):
+    def test_converted_extra_work_stores_null(self):
         """`extra_work.conversion` builds its row with `objects.create()`
         and never touches the create serializer, so the model default is
         what makes "every Extra Work has a billing target" true on EVERY
@@ -400,4 +412,8 @@ class BilledToTests(_TrackFixture):
                 }
             ],
         )
-        self.assertEqual(ew.billed_to, ExtraWorkBilledTo.BUILDING)
+        # Sprint 182 §6 — the conversion path defaults to NULL too.
+        # Leaving it at BUILDING would have made converted requests the
+        # only rows in the system carrying a target nobody chose, and
+        # that value would then override the customer's own setting.
+        self.assertIsNone(ew.billed_to)

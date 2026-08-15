@@ -424,21 +424,69 @@ class ExtraWorkRequest(models.Model):
         default=ExtraWorkStatus.REQUESTED,
     )
 
-    # Sprint 180 §3 — who pays for this one. See `ExtraWorkBilledTo`
-    # for why this is NOT the customer's invoice granularity.
+    # Sprint 180 §3 / Sprint 182 §6 — who pays for this one. See
+    # `ExtraWorkBilledTo` for why this is NOT the customer's invoice
+    # granularity.
     #
-    # `default=BUILDING` is also the backfill: every pre-180 row takes
-    # it, and that is the correct historical answer rather than a
-    # placeholder — the building is who was charged, which is why it is
-    # the default for new rows too. Non-null with a default, so no
-    # write path has to know about the field to keep working.
+    # NULLABLE since Sprint 182, and the null is the point: NULL means
+    # "follow the customer's setting", a SET value overrides it for this
+    # one job.
+    #
+    # Sprint 180 shipped it non-null with `default=BUILDING`, which was
+    # right while nothing read it and wrong the moment something did: if
+    # invoice generation simply started reading the column, every
+    # customer configured for one-invoice-per-customer would silently
+    # begin to be invoiced per building, because every pre-182 row says
+    # BUILDING whether or not anybody chose it. Migration 0032 sets
+    # every existing row to NULL for exactly that reason — those rows
+    # took a default, they did not record a decision, and NULL is how
+    # the column says so.
+    #
+    # PRECEDENCE, in one line: the extra work wins when it is set,
+    # being the more specific statement; NULL defers to the customer.
     billed_to = models.CharField(
         max_length=16,
         choices=ExtraWorkBilledTo.choices,
-        default=ExtraWorkBilledTo.BUILDING,
+        null=True,
+        blank=True,
+        default=None,
         help_text=(
-            "Sprint 180 — who the finished work is charged to: the "
-            "BUILDING (default) or the CUSTOMER organisation."
+            "Who the finished work is charged to: the BUILDING or the "
+            "CUSTOMER organisation. NULL means follow the customer's "
+            "own setting; a value set here overrides it for this job."
+        ),
+    )
+
+    # Sprint 182 §6 — WHEN THE PROVIDER WILL DO IT.
+    #
+    # The only date this row had was `preferred_date`, and Sprint 176 §3
+    # settled what that is: the CUSTOMER's wish. "I would like it around
+    # then" is not a plan, and the provider had nowhere to write one —
+    # which is why extra work shows up in the Work Plan as undated and
+    # cannot be planned from there.
+    #
+    # So this is the provider's own answer, deliberately a SEPARATE
+    # column rather than a reinterpretation of the customer's:
+    #
+    #   preferred_date        the customer's wish (unchanged, untouched)
+    #   provider_planned_date the provider's commitment to a day
+    #   planned_end_date      the last planned day, when the job spans
+    #                         several (Sprint 173's window END)
+    #   deadline              by when it must be finished; the only one
+    #                         that decides whether a row is late
+    #
+    # Nullable and with no default: an extra work nobody has planned yet
+    # must be distinguishable from one planned for today, which is the
+    # whole distinction the Work Plan's undated lane rests on.
+    provider_planned_date = models.DateField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Sprint 182 — the day the PROVIDER plans to do the work. "
+            "Distinct from `preferred_date` (the customer's wish) and "
+            "from `deadline` (when it must be finished). NULL means "
+            "nobody has planned it yet."
         ),
     )
 
