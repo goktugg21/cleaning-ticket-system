@@ -653,17 +653,27 @@ export function DashboardPage({
       // carries the same flag and the endpoint applies the same
       // exclusion. The DASHBOARD is a summary of everything and sends
       // nothing, so its KPI strip is unchanged.
+      // Sprint 183 integration — the chips also carry the WORK-TYPE
+      // narrowing now. Sprint 183 gave `/tickets/stats/` the same
+      // `is_extra_work` the list takes, but the page never sent it and
+      // the tiles kept the old "we cannot know" em-dash fallback. Once
+      // the Tickets page started defaulting to ordinary tickets, that
+      // fallback fired on the DEFAULT view and every chip read as a dash.
+      const statsParams: Record<string, string> = {};
+      if (isTicketsPage && hideFinishedExtraWork)
+        statsParams.hide_finished_extra_work = "true";
+      if (isTicketsPage && workTypeFilter === "chargeable")
+        statsParams.is_extra_work = "true";
+      else if (isTicketsPage && workTypeFilter === "tickets")
+        statsParams.is_extra_work = "false";
       const response = await api.get<TicketStats>("/tickets/stats/", {
-        params:
-          isTicketsPage && hideFinishedExtraWork
-            ? { hide_finished_extra_work: "true" }
-            : undefined,
+        params: Object.keys(statsParams).length ? statsParams : undefined,
       });
       setStats(response.data);
     } catch {
       // KPI cards fall back to "—" placeholders if the endpoint fails.
     }
-  }, [isTicketsPage, hideFinishedExtraWork]);
+  }, [isTicketsPage, hideFinishedExtraWork, workTypeFilter]);
 
   // M6.3 — "my work" summary counts (provider-management only). Each
   // count is the PaginatedResponse.count for a created_by=me query;
@@ -1898,15 +1908,10 @@ export function DashboardPage({
         {/* Sprint 182 §1/§4 — the counts and the rows describe the same
             set, or the counts say they cannot know.
 
-            `/tickets/stats/` takes no work-type parameter, so under
-            "Tickets only" or "Chargeable work" it still counts every
-            ticket. Rather than print a number that disagrees with the
-            rows underneath it, the tiles fall back to `-1`, which
-            `StatusTiles` renders as an em dash — its documented answer
-            for "this list cannot know". The chips still FILTER; they
-            just stop claiming a total they do not have. Giving the
-            stats endpoint the same filter is a backend change and is in
-            the report as NEXT. */}
+            The stats request carries the SAME work-type and
+            hide-finished flags as the list, so the tiles count exactly
+            the rows beneath them. The em dash is now reserved for its
+            real meaning: the stats call itself failed. */}
         <StatusTiles
           tiles={TICKET_LIST_STATUSES.map((value) => ({
             value,
@@ -1914,10 +1919,7 @@ export function DashboardPage({
             // the dropdown below uses — a second labelling path
             // here rendered raw enum names.
             label: tStatus(value),
-            count:
-              stats && workTypeFilter === "all"
-                ? (stats.by_status[value] ?? 0)
-                : -1,
+            count: stats ? (stats.by_status[value] ?? 0) : -1,
           }))}
           active={statusFilter}
           onChange={(value: string) => {
@@ -1925,22 +1927,17 @@ export function DashboardPage({
             setPage(1);
             setSelectedIds(new Set<number>());
           }}
-          // Sprint 182 §1 — "All" counts what the chips count. It read
-          // `stats.total`, which includes the converted tickets this list
-          // does not show, so the tile and the chips below it were
-          // answering two different questions with one number.
+          // "All" counts what the chips count: the same stats response,
+          // minus exactly the statuses this list does not show.
           //
-          // Under a work-type narrowing the server's own `count` for the
-          // current query is the only true total, and with a status chip
-          // on top of it even that answers a narrower question than the
-          // tile asks — so it says so.
-          totalCount={
-            workTypeFilter === "all"
-              ? visibleTicketTotal(stats)
-              : statusFilter
-                ? -1
-                : count
-          }
+          // It used to fall back to the list's own `count` under a
+          // work-type narrowing, and to an em dash when a status chip was
+          // also active — because the stats endpoint could not then be
+          // asked for a narrowed total. It can now (the request carries
+          // the same `is_extra_work`), so the fallbacks are gone: once the
+          // Tickets page began defaulting to ordinary tickets, "All" was
+          // reading a dash on the default view with a status selected.
+          totalCount={visibleTicketTotal(stats)}
           testIdPrefix="tickets-status"
         />
 

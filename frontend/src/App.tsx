@@ -221,7 +221,7 @@ export default function App() {
             path="/tickets"
             element={
               <ProtectedRoute>
-                <DashboardPage variant="tickets-page" />
+                <DashboardPage key="tickets-page" variant="tickets-page" />
               </ProtectedRoute>
             }
           />
@@ -235,7 +235,7 @@ export default function App() {
             path="/tickets/chargeable"
             element={
               <ProtectedRoute>
-                <DashboardPage variant="chargeable-work" />
+                <DashboardPage key="chargeable-work" variant="chargeable-work" />
               </ProtectedRoute>
             }
           />
