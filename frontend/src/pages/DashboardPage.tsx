@@ -287,7 +287,14 @@ export function DashboardPage({
     // thing the owner asked to remove.
     if (variant === "chargeable-work") return "chargeable";
     const raw = new URLSearchParams(window.location.search).get("work");
-    return raw === "tickets" ? raw : "all";
+    if (raw === "all" || raw === "tickets") return raw;
+    // The Tickets page is the ORDINARY tickets page. "Tickets only" was
+    // a confusing name for a chip on a page where everything is already
+    // a ticket -- and chargeable work has its own page, so showing it in
+    // both was the duplication the owner objected to. Default: ordinary
+    // tickets. The chip ADDS chargeable work back for the rare view of
+    // everything at once.
+    return variant === "tickets-page" ? "tickets" : "all";
   });
   const [unassignedFilter, setUnassignedFilter] = useState(
     () => new URLSearchParams(window.location.search).get("unassigned") === "1",
@@ -1866,23 +1873,23 @@ export function DashboardPage({
             <button
               type="button"
               className={`btn btn-sm ${
-                workTypeFilter === "tickets" ? "btn-primary" : "btn-secondary"
+                workTypeFilter === "all" ? "btn-primary" : "btn-secondary"
               }`}
-              aria-pressed={workTypeFilter === "tickets"}
+              aria-pressed={workTypeFilter === "all"}
               data-testid="tickets-work-type-tickets"
               onClick={() => {
                 const next_value =
-                  workTypeFilter === "tickets" ? "all" : "tickets";
+                  workTypeFilter === "all" ? "tickets" : "all";
                 setPage(1);
                 setSelectedIds(new Set<number>());
                 setWorkTypeFilter(next_value);
                 const next = new URLSearchParams(searchParams);
-                if (next_value === "all") next.delete("work");
+                if (next_value === "tickets") next.delete("work");
                 else next.set("work", next_value);
                 setSearchParams(next, { replace: true });
               }}
             >
-              {t("work_type.tickets_only")}
+              {t("work_type.include_chargeable")}
             </button>
           </div>
         </div>
@@ -2266,7 +2273,20 @@ export function DashboardPage({
                         )}
                         <th>{t("common:ticket_no")}</th>
                         <th>{t("common:subject")}</th>
-                        <th>{t("common:priority")}</th>
+                        {/* Chargeable work exists to TRACK the extra works that
+                            went operational, so it shows the extra work and how
+                            it got here. On the ordinary tickets page neither
+                            column means anything, so it shows priority instead.
+                            Two pages, two jobs -- which is the point of having
+                            two pages. */}
+                        {isChargeableWork ? (
+                          <>
+                            <th>{t("chargeable.col_extra_work")}</th>
+                            <th>{t("chargeable.col_route")}</th>
+                          </>
+                        ) : (
+                          <th>{t("common:priority")}</th>
+                        )}
                         <th>{t("common:status")}</th>
                         <th className="td-sla">{t("common:sla")}</th>
                         <th>{t("common:facility")}</th>
@@ -2340,12 +2360,44 @@ export function DashboardPage({
                                 </span>
                               )}
                           </td>
-                          <td>
-                            <span className={priorityCellClass(ticket.priority)}>
-                              <i />
-                              {tPriority(ticket.priority)}
-                            </span>
-                          </td>
+                          {isChargeableWork ? (
+                            <>
+                              <td>
+                                {ticket.extra_work_origin ? (
+                                  <a
+                                    href={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
+                                    onClick={(event) => event.stopPropagation()}
+                                    data-testid={`chargeable-ew-${ticket.id}`}
+                                  >
+                                    {ticket.extra_work_origin
+                                      .extra_work_request_title ||
+                                      `#${ticket.extra_work_origin.extra_work_request_id}`}
+                                  </a>
+                                ) : (
+                                  <span className="muted-empty">—</span>
+                                )}
+                              </td>
+                              <td>
+                                {ticket.extra_work_origin?.origin ? (
+                                  <span className="badge badge-muted">
+                                    {ticket.extra_work_origin.origin ===
+                                    "INSTANT"
+                                      ? t("common:route_badge.instant")
+                                      : t("common:route_badge.proposal")}
+                                  </span>
+                                ) : (
+                                  <span className="muted-empty">—</span>
+                                )}
+                              </td>
+                            </>
+                          ) : (
+                            <td>
+                              <span className={priorityCellClass(ticket.priority)}>
+                                <i />
+                                {tPriority(ticket.priority)}
+                              </span>
+                            </td>
+                          )}
                           <td>
                             {/* Sprint 182 §2 — the shared badge, so a
                                 ticket's status is the same word and the

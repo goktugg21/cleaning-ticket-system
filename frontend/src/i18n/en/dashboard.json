@@ -113,5 +113,8 @@
   "work_type.label": "Show",
   "work_type.all": "All work",
   "work_type.tickets_only": "Tickets only",
-  "work_type.chargeable": "Chargeable work"
+  "work_type.chargeable": "Chargeable work",
+  "work_type.include_chargeable": "Include chargeable work",
+  "chargeable.col_extra_work": "Extra work",
+  "chargeable.col_route": "Route"
 }

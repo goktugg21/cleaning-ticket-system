@@ -113,5 +113,8 @@
   "work_type.label": "Tonen",
   "work_type.all": "Al het werk",
   "work_type.tickets_only": "Alleen tickets",
-  "work_type.chargeable": "Meerwerk"
+  "work_type.chargeable": "Meerwerk",
+  "work_type.include_chargeable": "Inclusief meerwerk",
+  "chargeable.col_extra_work": "Meerwerk",
+  "chargeable.col_route": "Route"
 }
