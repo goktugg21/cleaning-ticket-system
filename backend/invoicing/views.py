@@ -18,11 +18,9 @@ The auth + serving pattern mirrors `extra_work.views`.
 """
 from __future__ import annotations
 
-import calendar
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -32,7 +30,6 @@ from rest_framework.response import Response
 
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.scoping import scope_customers_for
-from customers.models import Customer
 from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement)
 
 from .filters import InvoiceFilter
@@ -44,6 +41,9 @@ from .line_services import (
     update_invoice_meta,
 )
 from .models import Invoice, InvoiceLine
+from .preview import plan_invoices
+from .preview_pdf import render_preview_pdf
+from .schedule import billing_day_reached, scheduled_customers
 from .selectors import (
     scope_customer_invoices_for,
     scope_invoices_for,
@@ -54,6 +54,7 @@ from .serializers import (
     InvoiceLineSerializer,
     InvoiceLineWriteSerializer,
     InvoiceMetaSerializer,
+    InvoicePreviewSerializer,
     InvoiceSerializer,
 )
 from .services import _earned_amounts, delete_draft_invoice, generate_draft_invoices
@@ -224,6 +225,119 @@ class InvoiceViewSet(viewsets.GenericViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=False, methods=["get"], url_path="preview")
+    def preview(self, request):
+        """
+        Sprint 182 §2 — "if this were cut now, your invoice would be this".
+
+        PROVIDER-ONLY, and that is a decision rather than an oversight:
+        these are numbers no operator has reviewed yet. A customer who
+        downloads a preview and later receives a different invoice is
+        holding a document you have to argue with. `_forbid_non_operator`
+        is the same gate the rest of this viewset uses.
+
+        NOTHING IS STORED. The result is recomputed on every call, so
+        there is nothing to expire, nothing to clean up, and no second
+        source of drafts the month-end job would have to reconcile
+        against.
+
+        NO INVOICE NUMBER, ever — numbering happens at Send and must stay
+        gapless. `InvoicePreviewSerializer` has no `number` field at all,
+        so there is nothing to accidentally populate.
+
+        The computation is `preview.plan_invoices`, which is also what
+        `services.generate_draft_invoices` executes. One function, so the
+        preview cannot disagree with the invoice it previews.
+
+        Query params: `customer` (required), `year` / `month` (optional,
+        defaulting to the current Amsterdam-local period).
+        """
+        guard = self._forbid_non_operator(request)
+        if guard is not None:
+            return guard
+        try:
+            customer_id = int(request.query_params["customer"])
+        except (KeyError, TypeError, ValueError):
+            return Response(
+                {"detail": "customer (int) is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        today = timezone.localdate()
+        try:
+            year = int(request.query_params.get("year", today.year))
+            month = int(request.query_params.get("month", today.month))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "year and month must be integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not (1 <= month <= 12):
+            return Response(
+                {"detail": "month must be between 1 and 12."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Resolved through the actor's customer scope so a cross-tenant id
+        # is a clean 404 and never previews another tenant's money.
+        customer = get_object_or_404(
+            scope_customers_for(request.user), pk=customer_id
+        )
+        planned = plan_invoices(
+            request.user,
+            customer.company_id,
+            customer.id,
+            year,
+            month,
+            granularity=request.query_params.get("granularity") or None,
+        )
+        computed_at = timezone.now()
+
+        # `?download=pdf` serves the same plan as a stamped document. The
+        # bytes are rendered from the plan object already in hand, so the
+        # PDF and the JSON cannot disagree — not even by the time it takes
+        # to recompute.
+        #
+        # NOT `?format=pdf`: DRF reserves `format` for content negotiation
+        # (`URL_FORMAT_OVERRIDE`), so that spelling makes it look for a
+        # renderer called "pdf" and 404 before this code runs.
+        if request.query_params.get("download") == "pdf":
+            pdf_bytes = render_preview_pdf(
+                company=customer.company,
+                customer=customer,
+                planned=planned,
+                period_year=year,
+                period_month=month,
+                computed_at=timezone.localtime(computed_at),
+            )
+            response = HttpResponse(
+                pdf_bytes, content_type="application/pdf"
+            )
+            # `preview` in the filename, and no number in it, because a
+            # file that reaches somebody's desktop has to say what it is
+            # without being opened.
+            response["Content-Disposition"] = (
+                'inline; filename="factuurvoorbeeld-'
+                f'{customer.id}-{year}-{month:02d}.pdf"'
+            )
+            return response
+
+        return Response(
+            {
+                "customer": customer.id,
+                "customer_name": customer.name,
+                "period_year": year,
+                "period_month": month,
+                # The moment this was computed. The PDF stamps the same
+                # value — a preview is a photograph, not a promise, and
+                # the reader needs to know when it was taken.
+                "computed_at": computed_at.isoformat(),
+                "invoice_count": len(planned),
+                "invoices": InvoicePreviewSerializer(
+                    planned, many=True, context={"request": request}
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=False, methods=["get"], url_path="due")
     def due(self, request):
         """
@@ -257,18 +371,15 @@ class InvoiceViewSet(viewsets.GenericViewSet):
             return guard
         today = timezone.localdate()
         year, month = today.year, today.month
-        last_day = calendar.monthrange(year, month)[1]
 
-        # A customer is "scheduled" if it has a specific billing day OR a
-        # first/last rule (either establishes a due day).
-        customers = (
-            scope_customers_for(request.user)
-            .filter(is_active=True)
-            .filter(
-                Q(invoice_day_of_month__isnull=False) | ~Q(invoice_day_rule="")
-            )
-            .order_by("name")
-        )
+        # Sprint 182 §1 — "who is scheduled" and "has their day arrived"
+        # moved to `invoicing.schedule` so the new daily job triggers on
+        # exactly the rule this panel reports. They were inline here; the
+        # job would have been a second copy, and the two drifting apart
+        # reads to an operator as "the panel said due, no invoice came".
+        customers = scheduled_customers(
+            scope_customers_for(request.user).filter(is_active=True)
+        ).order_by("name")
         payload = []
         for customer in customers:
             unbilled = unbilled_extra_work_through(
@@ -280,17 +391,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
             )
             rule = customer.invoice_day_rule
             day = customer.invoice_day_of_month
-            if day is not None:
-                # Specific day (<=28, so it exists in every month): reached
-                # from day D onward. Reached-for-the-rest-of-the-month, like
-                # FIRST_OF_MONTH but starting at D instead of 1.
-                billing_day_reached = today.day >= day
-            elif rule == Customer.InvoiceDayRule.FIRST_OF_MONTH:
-                billing_day_reached = True
-            elif rule == Customer.InvoiceDayRule.LAST_OF_MONTH:
-                billing_day_reached = today.day == last_day
-            else:  # defensive — the queryset already excludes fully-unset rows
-                billing_day_reached = False
+            reached = billing_day_reached(customer, today)
             payload.append(
                 {
                     "customer": customer.id,
@@ -301,11 +402,17 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                     "invoice_granularity_default": (
                         customer.invoice_granularity_default
                     ),
+                    # Sprint 182 §3 — the two controls that replaced the
+                    # single granularity dropdown. Reported alongside the
+                    # derived legacy value so the panel can show what the
+                    # operator actually set.
+                    "invoice_billing_target": customer.invoice_billing_target,
+                    "invoice_split": customer.invoice_split,
                     "period_year": year,
                     "period_month": month,
                     "unbilled_count": count,
                     "unbilled_total": f"{total:.2f}",
-                    "is_due": billing_day_reached and count > 0,
+                    "is_due": reached and count > 0,
                 }
             )
         return Response(payload, status=status.HTTP_200_OK)

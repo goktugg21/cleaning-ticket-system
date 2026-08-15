@@ -247,6 +247,17 @@ class CustomerSerializer(serializers.ModelSerializer):
             # informational (drives the "who's due" list, gates nothing).
             "invoice_day_rule",
             "invoice_day_of_month",
+            # Sprint 182 §3 — the two controls that replaced the single
+            # granularity dropdown: WHO the invoice is addressed to, and
+            # HOW FINELY it splits. These are the authoritative input.
+            "invoice_billing_target",
+            "invoice_split",
+            # DEPRECATED as an input (Sprint 182 §3) but still readable
+            # AND still writable, for back-compat: `Invoice.granularity`
+            # speaks this vocabulary and the /due/ payload reports it.
+            # `validate()` below translates a legacy-only write into the
+            # pair, so an older client keeps working and there is still
+            # exactly one source of truth.
             "invoice_granularity_default",
             "contract_pdf_url",
             "created_at",
@@ -272,6 +283,67 @@ class CustomerSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "building": {"required": False, "allow_null": True},
         }
+
+    def validate(self, attrs):
+        """Sprint 182 §3 — reconcile the pair with the legacy field.
+
+        Three cases, and the ordering matters:
+
+          * the PAIR is supplied -> it wins, and the legacy value is
+            derived from it in `create`/`update`. Any legacy value sent
+            alongside is ignored rather than honoured, because the pair
+            is what the operator actually saw and set.
+          * ONLY the legacy field is supplied -> translated into the
+            pair. This is what keeps an older client (or an integration
+            written against the pre-split API) working instead of having
+            its write silently ignored. A read-only field would have
+            no-op'd here, which is the quiet kind of break.
+          * neither -> nothing to do.
+        """
+        from invoicing.billing_target import pair_for_granularity
+
+        attrs = super().validate(attrs)
+        sent_pair = (
+            "invoice_billing_target" in attrs or "invoice_split" in attrs
+        )
+        legacy = attrs.get("invoice_granularity_default")
+        if not sent_pair and legacy:
+            target, split = pair_for_granularity(legacy)
+            attrs["invoice_billing_target"] = target
+            attrs["invoice_split"] = split
+        # Never let the legacy value through as an independent write; it
+        # is derived in create/update from whatever pair we settled on.
+        attrs.pop("invoice_granularity_default", None)
+        return attrs
+
+    def create(self, validated_data):
+        # Sprint 182 §3 — a new customer's legacy mirror is derived from
+        # whatever pair it was created with, so it is correct from the
+        # first write rather than only after the first edit.
+        # Imported locally: `invoicing` already depends on `customers`, so
+        # a module-level import here would make the pair bidirectional at
+        # app-load time. Same defensive style the cross-app helpers in this
+        # codebase already use.
+        from invoicing.billing_target import sync_legacy_granularity
+
+        customer = super().create(validated_data)
+        if sync_legacy_granularity(customer):
+            customer.save(update_fields=["invoice_granularity_default"])
+        return customer
+
+    def update(self, instance, validated_data):
+        # Sprint 182 §3 — keep the deprecated `invoice_granularity_default`
+        # in step with the pair on every write. `validate()` has already
+        # stripped any client-supplied value and settled the pair, so the
+        # legacy column is always DERIVED here and the two cannot disagree;
+        # `Invoice.granularity` and the /due/ payload keep speaking the old
+        # vocabulary safely.
+        from invoicing.billing_target import sync_legacy_granularity
+
+        customer = super().update(instance, validated_data)
+        if sync_legacy_granularity(customer):
+            customer.save(update_fields=["invoice_granularity_default"])
+        return customer
 
     def get_linked_building_ids(self, obj: Customer) -> list[int]:
         # When the view's queryset has prefetched

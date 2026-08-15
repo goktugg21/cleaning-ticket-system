@@ -137,6 +137,54 @@ class Customer(models.Model):
             "invoice_day_rule. NULL falls back to the first/last rule."
         ),
     )
+    # ------------------------------------------------------------------
+    # Sprint 182 §3 — the billing TARGET and the invoice SPLIT are two
+    # different questions and are now two different controls.
+    #
+    # `invoice_granularity_default` (below, now DERIVED) offered three
+    # values in one dropdown: CUSTOMER / PER_BUILDING /
+    # PER_BUILDING_DEPARTMENT_WORK_TYPE. The first two decide WHO THE
+    # INVOICE IS ADDRESSED TO — `Invoice.building` is NULL for a
+    # customer-level invoice and set for a per-building one, populated
+    # straight from this setting. The third is not a third addressee; it
+    # is "per building, split further". Sitting in one list made a
+    # split look like a target.
+    # ------------------------------------------------------------------
+    class InvoiceBillingTarget(models.TextChoices):
+        """WHO the invoice is addressed to. Two values, no more."""
+
+        BUILDING = "BUILDING", "The building"
+        CUSTOMER = "CUSTOMER", "The customer organisation"
+
+    class InvoiceSplit(models.TextChoices):
+        """HOW FINELY the target's work is split across invoices."""
+
+        NONE = "NONE", "One invoice"
+        DEPARTMENT_WORK_TYPE = (
+            "DEPARTMENT_WORK_TYPE",
+            "Split by department and work type",
+        )
+
+    invoice_billing_target = models.CharField(
+        max_length=16,
+        choices=InvoiceBillingTarget.choices,
+        default=InvoiceBillingTarget.CUSTOMER,
+        help_text=(
+            "Who the invoice is addressed to: the building, or the "
+            "customer organisation. An Extra Work with its own "
+            "`billed_to` set overrides this for that row."
+        ),
+    )
+    invoice_split = models.CharField(
+        max_length=32,
+        choices=InvoiceSplit.choices,
+        default=InvoiceSplit.NONE,
+        help_text=(
+            "Whether the target's work lands on one invoice or is split "
+            "by department and work type."
+        ),
+    )
+
     invoice_granularity_default = models.CharField(
         # Sprint 132 — widened 16 -> 40 to fit
         # "PER_BUILDING_DEPARTMENT_WORK_TYPE" (33 chars); additive, no
@@ -144,7 +192,16 @@ class Customer(models.Model):
         max_length=40,
         choices=InvoiceGranularity.choices,
         default=InvoiceGranularity.CUSTOMER,
-        help_text="Default invoice granularity for Phase 2 generation.",
+        help_text=(
+            "DEPRECATED (Sprint 182 §3) as an INPUT — read "
+            "`invoice_billing_target` + `invoice_split` instead. Still "
+            "written, kept exactly in step with the pair by "
+            "`billing_target.sync_legacy_granularity`, because "
+            "`Invoice.granularity` records it per invoice and "
+            "`state_machine._resync_invoice_group_labels` keys off that "
+            "vocabulary. Do not read it to decide behaviour; do not let "
+            "it drift."
+        ),
     )
     # Informational contract PDF: ZERO behavioural effect. One active PDF,
     # replace-on-reupload, NO version history (mirrors the `logo` pattern).

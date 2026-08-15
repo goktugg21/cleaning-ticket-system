@@ -69,11 +69,124 @@ export async function getInvoiceDueList(): Promise<InvoiceDueRow[]> {
   return response.data;
 }
 
+// ---- Sprint 182 §2 — the invoice preview -----------------------------
+//
+// "If this were cut now, your invoice would be this." Provider-only,
+// nothing stored server-side, recomputed on every call, and it NEVER
+// carries an invoice number — numbering happens at Send and has to stay
+// gapless, so there is no `number` (and no `id`) on these shapes at all.
+//
+// The types are declared HERE rather than in `api/types.ts` because that
+// file belongs to another agent this sprint. Local on purpose; if the
+// preview surface outlives this sprint they belong in types.ts.
+export interface InvoicePreviewLine {
+  extra_work: number;
+  description: string;
+  line_subtotal: string;
+  line_vat: string;
+  line_total: string;
+}
+
+export interface InvoicePreviewInvoice {
+  /** null = addressed to the customer organisation, not to a building. */
+  building: number | null;
+  building_name: string | null;
+  department: number | null;
+  work_type: number | null;
+  granularity: InvoiceGranularity;
+  subtotal_amount: string;
+  vat_amount: string;
+  total_amount: string;
+  line_count: number;
+  lines: InvoicePreviewLine[];
+}
+
+export interface InvoicePreview {
+  customer: number;
+  customer_name: string;
+  period_year: number;
+  period_month: number;
+  /** ISO timestamp — a preview is a photograph, not a promise. */
+  computed_at: string;
+  invoice_count: number;
+  invoices: InvoicePreviewInvoice[];
+}
+
+export interface GetInvoicePreviewParams {
+  customer: number;
+  year?: number;
+  month?: number;
+  granularity?: InvoiceGranularity;
+}
+
+// GET /api/invoices/preview/ — the planned invoices. Not paginated: the
+// response is one customer's plan, which is a handful of rows.
+export async function getInvoicePreview(
+  params: GetInvoicePreviewParams,
+): Promise<InvoicePreview> {
+  const response = await api.get<InvoicePreview>("/invoices/preview/", {
+    params,
+  });
+  return response.data;
+}
+
+// ---- Sprint 182 §3 — the billing target + split ----------------------
+//
+// WHO the invoice is addressed to, and HOW FINELY it splits: two
+// questions that used to share one dropdown.
+//
+// Declared and called from here rather than through
+// `api/admin.ts::updateCustomer`, whose `CustomerWritePayload` lives in
+// `api/types.ts` — another agent's file this sprint. Same endpoint, same
+// server-side permission gate (OSIUS-admin on write); only the payload
+// type is local.
+export type InvoiceBillingTarget = "BUILDING" | "CUSTOMER";
+export type InvoiceSplit = "NONE" | "DEPARTMENT_WORK_TYPE";
+
+export interface CustomerBillingSettingsPayload {
+  invoice_day_rule?: string;
+  invoice_day_of_month?: number | null;
+  invoice_billing_target?: InvoiceBillingTarget;
+  invoice_split?: InvoiceSplit;
+}
+
+/** The billing fields as the server now returns them. `invoice_
+ *  granularity_default` is still serialised but is DERIVED from the pair
+ *  and read-only — writing the pair is the only way to change it. */
+export interface CustomerBillingSettings {
+  invoice_day_rule: string;
+  invoice_day_of_month: number | null;
+  invoice_billing_target: InvoiceBillingTarget;
+  invoice_split: InvoiceSplit;
+  invoice_granularity_default: InvoiceGranularity;
+}
+
+export async function updateCustomerBillingSettings<T>(
+  customerId: number,
+  payload: CustomerBillingSettingsPayload,
+): Promise<T> {
+  const response = await api.patch<T>(`/customers/${customerId}/`, payload);
+  return response.data;
+}
+
+/** The same plan as a stamped PDF. `download=pdf`, NOT `format=pdf` —
+ *  DRF reserves `format` for content negotiation and would 404. */
+export async function fetchInvoicePreviewPdf(
+  params: GetInvoicePreviewParams,
+): Promise<Blob> {
+  const response = await api.get("/invoices/preview/", {
+    params: { ...params, download: "pdf" },
+    responseType: "blob",
+  });
+  return response.data as Blob;
+}
+
 export interface GenerateInvoicesPayload {
   customer: number;
   year: number;
   month: number;
-  // Omit to use the customer's invoice_granularity_default (server-side).
+  // Omit to use the customer's billing target + split (resolved
+  // server-side per Extra Work row, Sprint 182 §3).
   granularity?: InvoiceGranularity;
 }
 

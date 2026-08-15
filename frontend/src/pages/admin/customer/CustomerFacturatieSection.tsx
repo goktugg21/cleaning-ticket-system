@@ -23,12 +23,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
-import { updateCustomer } from "../../../api/admin";
-import type {
-  CustomerAdmin,
-  InvoiceDayRule,
-  InvoiceGranularity,
-} from "../../../api/types";
+import {
+  updateCustomerBillingSettings,
+  type CustomerBillingSettings,
+  type InvoiceBillingTarget,
+  type InvoiceSplit,
+} from "../../../api/invoices";
+import type { CustomerAdmin, InvoiceDayRule } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
 import { isProviderAdmin } from "../../../auth/permissions";
 import { useToast } from "../../../components/ToastProvider";
@@ -76,20 +77,55 @@ export function CustomerFacturatieSection({
   const [daySelection, setDaySelection] = useState<string>(() =>
     initialDaySelection(customer),
   );
-  const [granularity, setGranularity] = useState<InvoiceGranularity>(
-    customer.invoice_granularity_default ?? "CUSTOMER",
+  // Sprint 182 §3 — TWO controls, because these are two questions.
+  //
+  // The old single dropdown offered CUSTOMER / PER_BUILDING /
+  // PER_BUILDING_DEPARTMENT_WORK_TYPE. The first two decide WHO THE
+  // INVOICE IS ADDRESSED TO; the third is not a third addressee, it is
+  // "per building, split further". Sitting in one list made a split look
+  // like a target.
+  //
+  // `customer` is typed by `api/types.ts` (another agent's file this
+  // sprint), so the two new fields are read through a local narrowing
+  // rather than by widening that type. Falling back to the legacy value
+  // means this renders correctly even against a server that has not been
+  // migrated yet.
+  const billing = customer as CustomerAdmin & Partial<CustomerBillingSettings>;
+  const legacyGranularity = billing.invoice_granularity_default ?? "CUSTOMER";
+  const [billingTarget, setBillingTarget] = useState<InvoiceBillingTarget>(
+    billing.invoice_billing_target ??
+      (legacyGranularity === "CUSTOMER" ? "CUSTOMER" : "BUILDING"),
+  );
+  const [split, setSplit] = useState<InvoiceSplit>(
+    billing.invoice_split ??
+      (legacyGranularity === "PER_BUILDING_DEPARTMENT_WORK_TYPE"
+        ? "DEPARTMENT_WORK_TYPE"
+        : "NONE"),
   );
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [error, setError] = useState("");
+
+  // The split cuts WITHIN a building, so it is meaningless against a
+  // customer-addressed invoice. Disabled rather than hidden: a control
+  // that vanishes reads as a bug, while a disabled one with a reason
+  // beside it teaches the rule.
+  const splitApplies = billingTarget === "BUILDING";
 
   async function handleSaveSchedule() {
     setSavingSchedule(true);
     setError("");
     try {
-      const fresh = await updateCustomer(customer.id, {
-        ...daySelectionToPayload(daySelection),
-        invoice_granularity_default: granularity,
-      });
+      const fresh = await updateCustomerBillingSettings<CustomerAdmin>(
+        customer.id,
+        {
+          ...daySelectionToPayload(daySelection),
+          invoice_billing_target: billingTarget,
+          // Never send a split the target cannot use — the server would
+          // resolve it to "no split" anyway, and storing one that does
+          // nothing is how a setting starts lying to the operator.
+          invoice_split: splitApplies ? split : "NONE",
+        },
+      );
       onUpdated(fresh);
       pushToast({ variant: "success", title: t("facturatie.schedule_saved") });
     } catch (err) {
@@ -151,34 +187,56 @@ export function CustomerFacturatieSection({
               {t("facturatie.day_rule_helper")}
             </span>
           </label>
+          {/* Sprint 182 §3 — WHO the invoice is addressed to. */}
           <label className="field" style={{ flex: "1 1 220px" }}>
             <span className="field-label">
-              {t("facturatie.granularity_label")}
+              {t("facturatie.billing_target_label")}
             </span>
             <select
               className="field-select"
-              value={granularity}
+              value={billingTarget}
               onChange={(e) =>
-                setGranularity(e.target.value as InvoiceGranularity)
+                setBillingTarget(e.target.value as InvoiceBillingTarget)
               }
               disabled={!canManage || savingSchedule}
-              data-testid="facturatie-granularity"
+              data-testid="facturatie-billing-target"
             >
               <option value="CUSTOMER">
-                {t("facturatie.granularity_customer")}
+                {t("facturatie.billing_target_customer")}
               </option>
-              <option value="PER_BUILDING">
-                {t("facturatie.granularity_building")}
-              </option>
-              <option value="PER_BUILDING_DEPARTMENT_WORK_TYPE">
-                {t("facturatie.granularity_department_work_type")}
+              <option value="BUILDING">
+                {t("facturatie.billing_target_building")}
               </option>
             </select>
             <span
               className="muted small"
               style={{ display: "block", marginTop: 4 }}
             >
-              {t("facturatie.granularity_helper")}
+              {t("facturatie.billing_target_helper")}
+            </span>
+          </label>
+          {/* ...and HOW FINELY it splits. A different question. */}
+          <label className="field" style={{ flex: "1 1 220px" }}>
+            <span className="field-label">{t("facturatie.split_label")}</span>
+            <select
+              className="field-select"
+              value={splitApplies ? split : "NONE"}
+              onChange={(e) => setSplit(e.target.value as InvoiceSplit)}
+              disabled={!canManage || savingSchedule || !splitApplies}
+              data-testid="facturatie-split"
+            >
+              <option value="NONE">{t("facturatie.split_none")}</option>
+              <option value="DEPARTMENT_WORK_TYPE">
+                {t("facturatie.split_department_work_type")}
+              </option>
+            </select>
+            <span
+              className="muted small"
+              style={{ display: "block", marginTop: 4 }}
+            >
+              {splitApplies
+                ? t("facturatie.split_helper")
+                : t("facturatie.split_customer_target_note")}
             </span>
           </label>
         </div>

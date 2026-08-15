@@ -27,13 +27,14 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
-from customers.models import Customer
 from extra_work.billing import billing_month, build_ticket_map
 from extra_work.models import ExtraWorkRequest
 from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement)
 
 from .models import Invoice, InvoiceLine
-from .selectors import unbilled_extra_work
+# Sprint 182 §2 — the single "what would be billed" calculation. Grouping
+# and target resolution live there; this module persists the result.
+from .preview import plan_invoices
 
 _TWO_PLACES = Decimal("0.01")
 
@@ -212,22 +213,34 @@ def generate_draft_invoices(
     Roll up (company, customer)'s unbilled EW for (year, month) into DRAFT
     invoice(s) and claim the consumed EW.
 
-    granularity:
-      * "CUSTOMER"     -> ONE draft (building=NULL) with every building's
-                          unbilled EW.
-      * "PER_BUILDING" -> one draft per building that has unbilled EW.
-      * "PER_BUILDING_DEPARTMENT_WORK_TYPE" -> one draft per distinct
-                          (building, department, work_type) combination
-                          that has unbilled EW (Sprint 132). An EW with no
-                          department and/or no work type groups into its
-                          own untagged draft — NOT skipped, NOT folded into
-                          a labelled one; it is still unbilled work that
-                          must be invoiced, the same rule the Sprint 131
-                          report applies.
-      * None           -> the customer's `invoice_granularity_default`.
-      * anything else (including an unrecognised string) -> CUSTOMER, the
-        existing fallback (unchanged — this function has never validated
-        the granularity string; that stays out of scope here).
+    Sprint 182 §3 — grouping is now TWO decisions, not one dropdown:
+
+      * TARGET (who the invoice is addressed to) is resolved PER ROW by
+        `billing_target.resolve_billing_target`: the EW's own `billed_to`
+        wins when set, otherwise the customer's `invoice_billing_target`.
+        Customer-addressed rows land on ONE draft with `building=NULL`;
+        building-addressed rows are grouped by building.
+      * SPLIT (how finely the building-addressed pile is cut) comes from
+        the customer's `invoice_split`: NONE gives one draft per building,
+        DEPARTMENT_WORK_TYPE gives one per distinct (building, department,
+        work_type). An EW with no department and/or work type groups into
+        its own untagged draft — NOT skipped, NOT folded into a labelled
+        one; it is still unbilled work that must be invoiced, the same
+        rule the Sprint 131 report applies.
+
+    Because the target is per-row, ONE run can legitimately produce both a
+    customer-level invoice and per-building invoices for the same customer.
+
+    `granularity` (the legacy single string, still accepted by the
+    `generate` endpoint) is translated to a (target, split) pair by
+    `billing_target.pair_for_granularity` and supplies the DEFAULT target
+    for rows that state none of their own — it does not overrule a row
+    that does. An unrecognised string still falls back to CUSTOMER + NONE,
+    exactly as before. `None` means "use the customer's setting".
+
+    Each created invoice records the equivalent legacy
+    `Customer.InvoiceGranularity` value in `Invoice.granularity`, because
+    `state_machine._resync_invoice_group_labels` keys off that vocabulary.
 
     Provider-operator only (403 otherwise). Every read is tenant-scoped via
     scope_extra_work_for, so an actor cannot generate across tenants — an
@@ -239,86 +252,37 @@ def generate_draft_invoices(
     if not _is_provider_operator(actor):
         raise PermissionDenied("Only provider operators can generate invoices.")
 
-    if granularity is None:
-        customer = Customer.objects.filter(
-            id=customer_id, company_id=company_id
-        ).first()
-        granularity = (
-            customer.invoice_granularity_default
-            if customer is not None
-            else Customer.InvoiceGranularity.CUSTOMER
-        )
-
-    unbilled = unbilled_extra_work(actor, company_id, customer_id, year, month)
-    if not unbilled:
+    # Sprint 182 §2 — THE SINGLE CALCULATION.
+    #
+    # Generation does not decide what would be billed; it EXECUTES the
+    # plan the preview shows. `plan_invoices` is the one function that
+    # answers "what would be billed, grouped how", and this function's
+    # only remaining job is to persist that answer and claim the rows.
+    #
+    # This is the structural guarantee behind §2's requirement, not a
+    # convention anyone has to remember: there is no second grouping
+    # implementation to drift, because there is no second implementation.
+    #
+    # `through=False` keeps generation on the EXACT-period query it has
+    # always used — a run targets one specific billing period. The preview
+    # defaults to `through=True` (this period or any earlier), which is the
+    # /due/ panel's rule, so it shows what is genuinely outstanding.
+    planned = plan_invoices(
+        actor,
+        company_id,
+        customer_id,
+        year,
+        month,
+        granularity=granularity,
+        through=False,
+    )
+    if not planned:
         # Idempotent: nothing to claim -> do NOT create an empty draft.
         return []
 
     created = []
     with transaction.atomic():
-        if granularity == Customer.InvoiceGranularity.PER_BUILDING:
-            by_building: dict[int, list] = {}
-            for ew in unbilled:
-                by_building.setdefault(ew.building_id, []).append(ew)
-            # Deterministic order (by building id) for stable output.
-            for building_id in sorted(by_building):
-                created.append(
-                    _create_draft(
-                        actor,
-                        company_id,
-                        customer_id,
-                        year,
-                        month,
-                        building_id,
-                        by_building[building_id],
-                        granularity=Customer.InvoiceGranularity.PER_BUILDING,
-                    )
-                )
-        elif (
-            granularity
-            == Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_WORK_TYPE
-        ):
-            by_group: dict[tuple[int, int | None, int | None], list] = {}
-            for ew in unbilled:
-                key = (ew.building_id, ew.department_id, ew.work_type_id)
-                by_group.setdefault(key, []).append(ew)
-
-            # Deterministic order extending the PER_BUILDING rule above: by
-            # building id first (unchanged), then department id, then work
-            # type id — None sorts FIRST within its building (an untagged
-            # group reads as "the base group" ahead of its labelled
-            # siblings). None can't compare to int directly in Python 3, so
-            # -1 stands in for it (real ids start at 1, so this never
-            # collides with a genuine id).
-            def _group_sort_key(key):
-                b_id, d_id, w_id = key
-                return (
-                    b_id,
-                    d_id if d_id is not None else -1,
-                    w_id if w_id is not None else -1,
-                )
-
-            for key in sorted(by_group, key=_group_sort_key):
-                building_id, department_id, work_type_id = key
-                created.append(
-                    _create_draft(
-                        actor,
-                        company_id,
-                        customer_id,
-                        year,
-                        month,
-                        building_id,
-                        by_group[key],
-                        department_id=department_id,
-                        work_type_id=work_type_id,
-                        granularity=(
-                            Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_WORK_TYPE
-                        ),
-                    )
-                )
-        else:  # CUSTOMER (default) — also the fallback for an unrecognised
-            # granularity string; either way this branch is what actually
-            # ran, so `granularity` records CUSTOMER, not the raw input.
+        for plan in planned:
             created.append(
                 _create_draft(
                     actor,
@@ -326,9 +290,11 @@ def generate_draft_invoices(
                     customer_id,
                     year,
                     month,
-                    None,
-                    unbilled,
-                    granularity=Customer.InvoiceGranularity.CUSTOMER,
+                    plan.building_id,
+                    plan.extra_works,
+                    department_id=plan.department_id,
+                    work_type_id=plan.work_type_id,
+                    granularity=plan.granularity,
                 )
             )
     return created

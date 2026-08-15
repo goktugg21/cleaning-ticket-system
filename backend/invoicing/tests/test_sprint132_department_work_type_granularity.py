@@ -188,8 +188,20 @@ class GroupingTests(InvoicingFixture):
         self.assertEqual(second, [])
 
     def test_granularity_defaults_from_customer(self):
-        self.customer.invoice_granularity_default = GRANULARITY
-        self.customer.save(update_fields=["invoice_granularity_default"])
+        # Sprint 182 §3 — the customer's stored default is the
+        # (target, split) pair now; the legacy column is DERIVED from it.
+        # PER_BUILDING_DEPARTMENT_WORK_TYPE means "addressed to the
+        # building, split by department and work type" — the same
+        # behaviour, stated as the two questions it always was.
+        self.customer.invoice_billing_target = (
+            Customer.InvoiceBillingTarget.BUILDING
+        )
+        self.customer.invoice_split = (
+            Customer.InvoiceSplit.DEPARTMENT_WORK_TYPE
+        )
+        self.customer.save(
+            update_fields=["invoice_billing_target", "invoice_split"]
+        )
         self.make_ew(
             closed_at=dt(2026, 5, 31), department=self.dept_a, work_type=self.wt_a
         )
