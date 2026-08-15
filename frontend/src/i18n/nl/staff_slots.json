@@ -142,5 +142,8 @@
   "agenda.overview_unplanned_one": "{{count}} nog niet ingepland",
   "agenda.overview_unplanned_other": "{{count}} nog niet ingepland",
   "agenda.overview_overdue_one": "{{count}} te laat",
-  "agenda.overview_overdue_other": "{{count}} te laat"
+  "agenda.overview_overdue_other": "{{count}} te laat",
+  "agenda.day_count": "{{count}} klus",
+  "agenda.day_count_other": "{{count}} klussen",
+  "agenda.search_placeholder": "Zoek op titel, ticket, gebouw of klant"
 }

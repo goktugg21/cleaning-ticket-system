@@ -142,5 +142,8 @@
   "agenda.overview_unplanned_one": "{{count}} not planned yet",
   "agenda.overview_unplanned_other": "{{count}} not planned yet",
   "agenda.overview_overdue_one": "{{count}} overdue",
-  "agenda.overview_overdue_other": "{{count}} overdue"
+  "agenda.overview_overdue_other": "{{count}} overdue",
+  "agenda.day_count": "{{count}} job",
+  "agenda.day_count_other": "{{count}} jobs",
+  "agenda.search_placeholder": "Search title, ticket, building or customer"
 }

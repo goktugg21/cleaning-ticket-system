@@ -9707,23 +9707,145 @@ details[open] > .ew-department-tree-summary::before {
    empty ones included: a week with nothing on Thursday must SHOW an
    empty Thursday rather than close the gap and leave the reader
    counting columns. */
+/* ===================================================================
+   Sprint 183 §1 — the week grid, sized by the space it actually has.
+
+   Every previous version of this rule guessed. Sprint 171 asserted
+   "seven columns hold down to 1024" and was wrong by measurement (67px
+   cards, 17-line titles). Sprint 182 replaced that with a ladder of
+   VIEWPORT breakpoints — 1/2/3/4/7 — which is a better guess and still
+   a guess: the viewport is not the grid's width. This app puts a ~300px
+   sidebar beside the content, so a 1440px viewport gives the week
+   1128px, and a ladder keyed on 1440 cannot know that.
+
+   `auto-fill` + `minmax` does not guess. It fits as many columns of at
+   least MIN as the container really has and shares the remainder, so
+   one rule is correct at every width and in every shell. MEASURED on
+   the rendered page, viewport -> content width -> columns per row and
+   card width:
+
+       1024 ->  712 -> 3 cols, card 209px   (Sprint 182: 3, 205px)
+       1280 ->  968 -> 4 cols, card 213px   (Sprint 182: 4, 209px)
+       1440 -> 1128 -> 4 cols, card 253px   (Sprint 182: 4, 249px)
+       1600 -> 1288 -> 5 cols, card 228px
+       1920 -> 1608 -> 6 cols, card 238px
+       2100 -> 1788 -> 7 cols, card 225px   the reference's whole week
+
+   230px is the minimum a dense card holds this product's real titles in
+   three lines. Below it we are back to the column of single words the
+   last two sprints were spent removing, so the week WRAPS instead — in
+   order, each day still carrying its own boxed header, reading
+   left-to-right then down the way a calendar already does.
+
+   `auto-fill`, not `auto-fit`: with seven items in a five-track row
+   auto-fit COLLAPSES the two empty tracks and stretches Saturday and
+   Sunday to double width. A week whose last two days are twice the size
+   of the others is not a week. auto-fill keeps the empty tracks, so
+   every day is the same width whatever the row holds.
+
+   The owner's reference shows seven columns in one row, and this rule
+   shows exactly that from 2100px up. On his 1440 laptop seven columns
+   would be 152px each and the title back to six lines, which is the
+   layout Sprint 182 measured and rejected. Kept ours, deliberately; the
+   report gives him the numbers and the one value to change if he wants
+   the trade the other way.
+   =================================================================== */
 .agenda-week-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 10px;
   align-items: start;
 }
-/* Sprint 171 §3 — seven columns hold down to 1024, which is the
-   narrowest width the owner measures at and what the reference shows.
-   The old breakpoint dropped to two columns at 1200, so a 1024 viewport
-   got a four-row block rather than a week. Below 1000 the cards are
-   genuinely too narrow to read, and two columns is better than seven
-   unreadable ones. */
-@media (max-width: 1000px) {
-  .agenda-week-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 @media (max-width: 700px) {
   .agenda-week-grid { grid-template-columns: 1fr; }
+}
+
+/* -------------------------------------------------------------------
+   Sprint 183 §2 — the day column: a boxed header band over a body of
+   fixed generous height that scrolls inside itself.
+
+   Both halves come from the reference and both are about the week
+   keeping its SHAPE. A column that grows with its load renders a week
+   with one busy Thursday as one tall column and six stubs; a column
+   with a fixed body renders a week whatever Thursday is holding.
+   ------------------------------------------------------------------- */
+.wp-day {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.wp-day-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 6px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.wp-day-name {
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* The large day number is what the eye lands on when scanning a week
+   for a date, which is why the reference sets it two sizes above
+   everything else in the header. */
+.wp-day-number {
+  font-family: var(--f-head);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.wp-day-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+/* TODAY is marked. Seven identical columns give the reader nothing to
+   anchor on, and "which one is today" is the first thing anybody looks
+   for in a week view. */
+.wp-day-today {
+  border-color: var(--green-2, var(--border));
+}
+.wp-day-today .wp-day-head {
+  background: var(--green-faint, var(--surface-2));
+}
+.wp-day-today .wp-day-number { color: var(--green-2, var(--text)); }
+.wp-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  /* Generous and FIXED: the week keeps its shape whatever the load, and
+     a heavy day scrolls inside its own column rather than stretching
+     the row it sits in. */
+  min-height: 170px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+/* An empty day is a muted ICON, not a sentence.
+   The page printed "Nothing planned" in every empty column. On the live
+   database most of the week is legitimately empty, so the screen read
+   as seven repetitions of a complaint — which is what made it look
+   broken rather than quiet. The icon says the same thing once, and the
+   accessible name still says it in words for a screen reader. */
+.wp-day-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  opacity: 0.45;
 }
 
 /* Sprint 171 §1 — the comparison table's WIDTH DISTRIBUTION.
@@ -9783,19 +9905,27 @@ details[open] > .ew-department-tree-summary::before {
 /* WHY a card is in a week that is not its planned one (docs §12B). A
    card at HOME renders none of this, which is the point — the marker
    means "this is a visitor", so putting one on every card would tell
-   the reader nothing. */
+   the reader nothing.
+
+   Sprint 183 §3 — the owner: "a large red overdue banner eating the
+   card". It was a full-width bordered block with its own background,
+   two lines high on a narrow column, on nine of fifteen cards. The rule
+   it expresses still has to be on the card — §12B's whole point is that
+   a card appearing outside its planned week says why — so it is now a
+   MARKER: one line, an icon, a date, the tone in the text colour rather
+   than in a filled box. Same information, a tenth of the weight. */
 .wp-why {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
-  margin-top: 6px;
-  padding: 3px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  font-size: 12px;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 11px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.3;
 }
 .wp-why svg {
   flex: 0 0 auto;
@@ -9804,13 +9934,9 @@ details[open] > .ew-department-tree-summary::before {
    badges already use for rejected / waiting, so a reader who has learnt
    the palette anywhere else in the app has learnt it here. */
 .wp-why-overdue {
-  background: var(--red-soft);
-  border-color: var(--red-border);
   color: var(--red);
 }
 .wp-why-started {
-  background: var(--amber-soft);
-  border-color: var(--amber-border);
   color: var(--amber);
 }
 /* The "{{n}} days" tail inside an overdue marker — present, not shouted. */
@@ -9819,19 +9945,81 @@ details[open] > .ew-department-tree-summary::before {
   opacity: 0.85;
 }
 
-/* "Extra work" on a card, so the two sources are distinguishable at a
-   glance without reading the title. Teal rather than green: green is
-   the app's primary-action colour and this is a label, not a control. */
+/* The kind tag, so the two sources are distinguishable at a glance
+   without reading the title.
+
+   Sprint 183 §3 — it is the card's FIRST line now, as in the reference,
+   and both kinds carry one. Sprint 182 tagged only extra work, which
+   left the reader inferring "no tag means ticket" — an absence is not a
+   label. Teal for extra work, slate for a ticket: green is the app's
+   primary-action colour and these are labels, not controls. */
 .wp-kind-tag {
   display: inline-block;
-  margin-top: 6px;
-  padding: 2px 8px;
+  align-self: flex-start;
+  padding: 1px 7px;
   border-radius: var(--r-pill);
   background: var(--teal-soft);
   color: var(--teal);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.wp-kind-tag-ticket {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* -------------------------------------------------------------------
+   Sprint 183 §3 — the card, dense.
+
+   The reference's card is a kind tag, a title, a grey location line and
+   a status chip, in that order, and it is SMALL. Ours was a `.card`
+   with 12px padding carrying a heading row, an overdue banner, a
+   window/building line, a kind tag, an assignee line, a note and two
+   buttons — measured at 140px tall for one job.
+   ------------------------------------------------------------------- */
+.wp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.wp-card-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+a.wp-card-title:hover { text-decoration: underline; }
+/* building · customer — the reference's grey second line. It carries
+   the customer where the reference carries a department, because this
+   payload has no department on it and a cleaning operator reads the
+   customer. Said out loud in the report rather than quietly swapped. */
+.wp-card-where {
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.wp-card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.wp-card-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 /* A list that hit its bound says so. Deliberately not `.alert-error` —
@@ -9867,8 +10055,30 @@ details[open] > .ew-department-tree-summary::before {
 .wp-card-actions {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Sprint 183 §4 — the summary strip, the reference's row of counted
+   chips. Reuses the app's own `.status-tile` vocabulary rather than a
+   third one: the ticket list and the Extra Work list already answer
+   "how many, and click to filter" with exactly this control, and the
+   Work Plan asking the same question differently is how three screens
+   end up with three ideas of what a count chip is. */
+.wp-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 8px;
-  margin-top: 10px;
+  margin-bottom: 12px;
+}
+/* The one chip that is a WARNING rather than a bucket. Tinted only when
+   it is non-zero and only when it is not the active filter — a chip
+   shouting about nothing is the banner problem again, one level up. */
+.wp-strip .status-tile-warn:not(.status-tile-active) {
+  border-color: var(--red-border);
+}
+.wp-strip .status-tile-warn:not(.status-tile-active) .status-tile-count {
+  color: var(--red);
 }
 
 /* `.cell-tag` is `white-space: nowrap` app-wide, which is right in a
@@ -10075,9 +10285,7 @@ details[open] > .ew-department-tree-summary::before {
    week reads left-to-right then down — the way a calendar already does.
    Seven readable days over two rows beats seven unreadable ones in one.
    =================================================================== */
-@media (min-width: 1001px) and (max-width: 1200px) {
-  .agenda-week-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (min-width: 1201px) and (max-width: 1500px) {
-  .agenda-week-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
+/* Sprint 183 §1 — the ladder is gone; `auto-fill` above measures the
+   grid instead of guessing from the viewport. The reasoning Sprint 182
+   recorded here still stands and is quoted in the rule that replaced
+   it: below 230px a card is a column of single words. */

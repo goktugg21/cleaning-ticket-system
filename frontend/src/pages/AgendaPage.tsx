@@ -34,14 +34,10 @@ import {
   AlarmClock,
   CalendarClock,
   CalendarRange,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Lock,
-  PlayCircle,
   Ticket,
-  Users,
-  XCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -60,11 +56,21 @@ import { useAuth } from "../auth/AuthContext";
 import {
   agendaShowsTeamWeek,
   canAccessAgenda,
-  canAccessExtraWork,
 } from "../auth/permissions";
 import { BoundedList } from "../components/BoundedList";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
+// Sprint 183 — the week's three pieces, extracted. This file was 1334
+// lines holding a role dispatcher, a manager table, the week, the card,
+// the placement marker and two modals; the card and the column are the
+// two the sprint rebuilds, and they are easier to reason about with a
+// file each than as two of six things in one.
+import { WorkPlanCard } from "../components/workplan/WorkPlanCard";
+import { detailPath, formatDay } from "../components/workplan/entryHelpers";
+import { matchesChip } from "../components/workplan/chips";
+import { WorkPlanDayColumn } from "../components/workplan/WorkPlanDayColumn";
+import { WorkPlanStrip } from "../components/workplan/WorkPlanStrip";
+import type { ChipKey } from "../components/workplan/chips";
 import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { PageHeader } from "../components/PageHeader";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
@@ -82,7 +88,6 @@ import {
   toDateString,
 } from "../lib/isoWeek";
 import type { IsoWeek } from "../lib/isoWeek";
-import { formatPlannedWindow } from "../lib/plannedWindow";
 import { SlotCompletionDialog } from "./SlotCompletionDialog";
 
 // Ticket sub-type label keys — the canonical map lives in the create
@@ -107,46 +112,6 @@ const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
   OTHER: "type_other",
 };
 
-/** The chips. `""` is "everything in this week"; the rest narrow it.
- *  Every one of them has a SERVER-side count behind it. */
-type ChipKey = "" | "overdue" | "open" | "in_progress" | "done" | "blocked";
-
-/**
- * The chip row, as one exported-shaped constant that both the render
- * and the filter read.
- *
- * Deriving the order from a literal in one place and the behaviour from
- * a switch in another is exactly the split CLAUDE.md warns about (the
- * Sprint 126 headerless column): one list, one iteration, and a new chip
- * cannot be half-added.
- */
-const CHIPS: { key: ChipKey; label: string; count: (c: WorkPlanCounts) => number }[] =
-  [
-    { key: "", label: "chip_total", count: (c) => c.total },
-    { key: "overdue", label: "chip_overdue", count: (c) => c.overdue },
-    { key: "open", label: "chip_open", count: (c) => c.open },
-    { key: "in_progress", label: "chip_in_progress", count: (c) => c.in_progress },
-    { key: "done", label: "chip_done", count: (c) => c.done },
-    { key: "blocked", label: "chip_blocked", count: (c) => c.blocked },
-  ];
-
-type WorkPlanCounts = WorkPlanResponse["counts"];
-
-function matchesChip(entry: WorkPlanEntry, chip: ChipKey): boolean {
-  if (chip === "") return true;
-  if (chip === "overdue") return entry.is_overdue;
-  if (chip === "open") return entry.state === "OPEN";
-  if (chip === "in_progress") return entry.state === "IN_PROGRESS";
-  if (chip === "done") return entry.state === "DONE";
-  return entry.state === "BLOCKED";
-}
-
-/** A "YYYY-MM-DD" rendered in the viewer's locale. The explicit
- *  midnight matters: a bare date string parses as UTC, which anywhere
- *  east of Greenwich can print the previous day. */
-function formatDay(iso: string): string {
-  return formatDate(`${iso}T00:00:00`);
-}
 
 // ---------------------------------------------------------------------------
 // Role dispatcher — see the file-header comment for the per-role surfaces.
@@ -351,6 +316,15 @@ function WorkPlanWeek() {
 
   const [chip, setChip] = useState<ChipKey>("");
   const [kindFilter, setKindFilter] = useState<"" | WorkPlanKind>("");
+  /** Sprint 183 §4 — the reference's "search by title or description".
+   *
+   *  Client-side, and honestly so: the week's entries are a BOUNDED,
+   *  complete set (the response says through `truncated` when they are
+   *  not), so filtering them here narrows exactly what is on screen. The
+   *  CHIPS stay server counts — they describe the whole scope, which no
+   *  amount of client filtering can know. A search box that quietly
+   *  moved the chip numbers would be the defect Sprint 179A removed. */
+  const [search, setSearch] = useState("");
   const [overdueOpen, setOverdueOpen] = useState(false);
   const [upcomingOpen, setUpcomingOpen] = useState(false);
   const [completionTarget, setCompletionTarget] = useState<WorkPlanEntry | null>(
@@ -471,6 +445,7 @@ function WorkPlanWeek() {
   }, [data, week]);
 
   const entries = useMemo(() => data?.entries ?? [], [data]);
+  const needle = search.trim().toLowerCase();
   const counts = data?.counts ?? null;
   const todayKey = data?.today ?? toDateString(new Date());
 
@@ -479,9 +454,21 @@ function WorkPlanWeek() {
       entries.filter((entry) => {
         if (!matchesChip(entry, chip)) return false;
         if (kindFilter && entry.kind !== kindFilter) return false;
+        if (needle) {
+          const haystack = [
+            entry.title,
+            entry.ticket_no,
+            entry.building_name,
+            entry.customer_name,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          if (!haystack.includes(needle)) return false;
+        }
         return true;
       }),
-    [entries, chip, kindFilter],
+    [entries, chip, kindFilter, needle],
   );
 
   const groups = useMemo(
@@ -645,29 +632,33 @@ function WorkPlanWeek() {
         </div>
       </div>
 
-      {/* The counts, and each one FILTERS when clicked — the Sprint 163
-          status-strip behaviour, not a decorative badge row. Every
-          number comes from the SERVER, over the whole scope. */}
-      <div className="composer-toggle" role="tablist" style={{ marginBottom: 12 }}>
-        {CHIPS.map((entry) => (
-          <button
-            key={entry.label}
-            type="button"
-            role="tab"
-            aria-selected={chip === entry.key}
-            className={`composer-toggle-btn ${chip === entry.key ? "active" : ""}`}
-            onClick={() => setChip(entry.key)}
-            data-testid={`agenda-chip-${entry.key || "total"}`}
-          >
-            {t(`agenda.${entry.label}`)}
-            <span className="mywork-chip-count">
-              {counts ? entry.count(counts) : 0}
-            </span>
-          </button>
-        ))}
-      </div>
+      {/* Sprint 183 §4 — the reference's counted strip. Every number is
+          the SERVER's, over the whole scope, and every chip filters. */}
+      <WorkPlanStrip counts={counts} active={chip} onChange={setChip} />
 
+      {/* Sprint 183 §4 — search + source, the reference's filter row.
+
+          The reference has a third control, a Status dropdown, and it is
+          not here: the strip above IS the status filter, and offering
+          the same choice twice is the "one control, one question" rule
+          this batch is written around.
+
+          "Source" rather than the reference's "Type": Sprint 182
+          measured that a ticket TYPE filter on a page holding two kinds
+          of work silently emptied every extra work out of the week.
+          Kept ours. */}
       <form className="filter-bar" onSubmit={(e) => e.preventDefault()}>
+        <div className="filter-field search">
+          <span className="filter-label">{t("common:search")}</span>
+          <input
+            className="filter-control"
+            type="search"
+            value={search}
+            placeholder={t("agenda.search_placeholder")}
+            onChange={(e) => setSearch(e.target.value)}
+            data-testid="agenda-search"
+          />
+        </div>
         <div className="filter-field">
           <span className="filter-label">{t("agenda.filter_source")}</span>
           <select
@@ -682,7 +673,6 @@ function WorkPlanWeek() {
           </select>
         </div>
       </form>
-
 
       {/* Sprint 181 §8 — the undated work has a PLACE now.
           This was one muted sentence saying N items had no date. On
@@ -759,64 +749,23 @@ function WorkPlanWeek() {
       ) : (
         <div className="agenda-week-grid" data-testid="agenda-week-grid">
           {groups.map((group) => (
-            <section
+            <WorkPlanDayColumn
               key={group.key}
-              /* TODAY is marked. Seven identical columns give the reader
-                 nothing to anchor on, and "which one is today" is the
-                 first thing anybody looks for in a week view. */
-              className={
-                group.key === todayKey
-                  ? "agenda-day agenda-day-today"
-                  : "agenda-day"
-              }
-              data-testid={
-                group.key === todayKey ? "agenda-day-today" : "agenda-day"
-              }
-              style={{ marginBottom: 18 }}
+              iso={group.key}
+              isToday={group.key === todayKey}
+              count={group.items.length}
             >
-              <h3
-                className="section-head-title"
-                style={{ marginBottom: 8 }}
-                data-testid="agenda-group-heading"
-              >
-                {formatDay(group.key)}
-                {group.key === todayKey && (
-                  <span
-                    className="cell-tag cell-tag-open"
-                    style={{ marginLeft: 6 }}
-                  >
-                    {t("agenda.today")}
-                  </span>
-                )}
-              </h3>
-              {/* An empty day gets a MARKER, not blank space: a column
-                  with nothing in it should say so, or the reader cannot
-                  tell it apart from one that failed to load. */}
-              <BoundedList
-                size="lg"
-                count={group.items.length}
-                ariaLabel={formatDay(group.key)}
-                testIdPrefix="agenda-day"
-                emptyState={
-                  <p className="muted small" data-testid="agenda-day-empty">
-                    {t("agenda.day_empty")}
-                  </p>
-                }
-              >
-                <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                  {group.items.map((entry) => (
-                    <WorkPlanCard
-                      key={entry.key}
-                      entry={entry}
-                      role={role}
-                      locale={locale}
-                      onComplete={() => setCompletionTarget(entry)}
-                      onUnable={() => setUnableTarget(entry)}
-                    />
-                  ))}
-                </ul>
-              </BoundedList>
-            </section>
+              {group.items.map((entry) => (
+                <WorkPlanCard
+                  key={entry.key}
+                  entry={entry}
+                  role={role}
+                  locale={locale}
+                  onComplete={() => setCompletionTarget(entry)}
+                  onUnable={() => setUnableTarget(entry)}
+                />
+              ))}
+            </WorkPlanDayColumn>
           ))}
         </div>
       )}
@@ -878,26 +827,8 @@ function WorkPlanWeek() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// One card. The same shape whichever source it came from.
-// ---------------------------------------------------------------------------
-
-/** Where the card's title points, or null when this viewer may not open
- *  it. STAFF are gated out of `/extra-work/:id` by `ExtraWorkRoute` and
- *  by `scope_extra_work_for`, so an extra-work card is a plain title for
- *  them — a link to a page that 403s is worse than no link. */
-function detailPath(
-  entry: WorkPlanEntry,
-  role: Role | null,
-): string | null {
-  if (entry.kind === "TICKET_SLOT" && entry.ticket_id !== null) {
-    return `/tickets/${entry.ticket_id}`;
-  }
-  if (entry.kind === "EXTRA_WORK" && canAccessExtraWork(role)) {
-    return `/extra-work/${entry.extra_work_id}`;
-  }
-  return null;
-}
+// The card, the placement marker and `detailPath` now live in
+// `components/workplan/WorkPlanCard.tsx` — see Sprint 183 §3.
 
 /**
  * Sprint 181 §8 — one row of the undated lane.
@@ -956,217 +887,6 @@ function UndatedRow({
         {busy ? t("agenda.undated_planning") : t("agenda.undated_plan_today")}
       </button>
     </li>
-  );
-}
-
-function WorkPlanCard({
-  entry,
-  role,
-  locale,
-  onComplete,
-  onUnable,
-}: {
-  entry: WorkPlanEntry;
-  role: Role | null;
-  locale: string;
-  onComplete: () => void;
-  onUnable: () => void;
-}) {
-  const { t } = useTranslation(["staff_slots", "common"]);
-  const to = detailPath(entry, role);
-
-  function timeOnly(iso: string | null): string {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-  }
-
-  /** The clock window for a slot; the planned DAY window for extra
-   *  work, which has no dated slot and never has had one. */
-  function windowText(): string {
-    if (entry.kind === "EXTRA_WORK") {
-      return formatPlannedWindow(
-        entry.planned_start,
-        entry.planned_end,
-        formatDay,
-        {
-          empty: t("agenda.no_date"),
-          endOnly: (end) => t("agenda.until_date", { date: end }),
-        },
-      );
-    }
-    const parts: string[] = [];
-    if (entry.scheduled_start_at) {
-      parts.push(
-        entry.scheduled_end_at
-          ? `${timeOnly(entry.scheduled_start_at)}–${timeOnly(entry.scheduled_end_at)}`
-          : timeOnly(entry.scheduled_start_at),
-      );
-    }
-    if (entry.time_window_label) parts.push(entry.time_window_label);
-    return parts.length > 0 ? parts.join(" · ") : t("agenda.no_time");
-  }
-
-  const heading = (
-    <>
-      {entry.ticket_no ? `#${entry.ticket_no} · ` : ""}
-      {entry.title}
-    </>
-  );
-
-  return (
-    <li
-      className="card"
-      data-testid="agenda-slot-card"
-      data-kind={entry.kind}
-      data-placement={entry.placement}
-      style={{ padding: 12, marginBottom: 8 }}
-    >
-      {/* A class rather than an inline flex row: seven columns on a
-          1440px screen are ~150px wide, and a non-wrapping row put the
-          status badge past the column edge where it was clipped. The
-          rule wraps and lets long words break. */}
-      <div className="wp-card-head">
-        {to ? (
-          <Link to={to} className="td-subject" style={{ fontWeight: 600 }}>
-            {heading}
-          </Link>
-        ) : (
-          <span className="td-subject" style={{ fontWeight: 600 }}>
-            {heading}
-          </span>
-        )}
-        {entry.kind === "EXTRA_WORK" ? (
-          <StatusBadge
-            status={{ kind: "extra-work", value: entry.status }}
-            variant="cell"
-          />
-        ) : (
-          <SlotStatusBadge status={entry.status as SlotStatus} />
-        )}
-      </div>
-
-      {/* §12B — a card shown outside its planned week SAYS WHY, with its
-          planned date on it. */}
-      <PlacementMarker entry={entry} />
-
-      <div
-        className="muted small"
-        style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}
-      >
-        {entry.kind === "EXTRA_WORK" ? (
-          <CalendarRange size={13} strokeWidth={2} />
-        ) : (
-          <CalendarClock size={13} strokeWidth={2} />
-        )}
-        {windowText()}
-        {entry.building_name ? ` · ${entry.building_name}` : ""}
-      </div>
-
-      {entry.kind === "EXTRA_WORK" && (
-        <div className="wp-kind-tag" data-testid="agenda-card-kind">
-          {t("agenda.source_extra_work")}
-        </div>
-      )}
-
-      {entry.assignee_count > 1 && (
-        <div
-          className="muted small"
-          style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}
-          data-testid="agenda-card-assignees"
-        >
-          <Users size={13} strokeWidth={2} />
-          {entry.assignee_names.join(", ")}
-          {entry.assignee_count > entry.assignee_names.length
-            ? ` +${entry.assignee_count - entry.assignee_names.length}`
-            : ""}
-        </div>
-      )}
-
-      {entry.assignment_note && (
-        <div className="small" style={{ marginTop: 4 }}>
-          {entry.assignment_note}
-        </div>
-      )}
-      {entry.state === "DONE" && entry.completion_note && (
-        <div className="muted small" style={{ marginTop: 4 }}>
-          {entry.completion_note}
-        </div>
-      )}
-      {entry.unable_to_complete_reason && (
-        <div className="muted small" style={{ marginTop: 4 }}>
-          {t("editor.unable_reason", {
-            reason: entry.unable_to_complete_reason,
-          })}
-        </div>
-      )}
-
-      {entry.can_complete && (
-        <div className="wp-card-actions" data-testid="agenda-slot-actions">
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={onComplete}
-            data-testid="agenda-mark-done"
-          >
-            <CheckCircle2 size={14} strokeWidth={2} />
-            {t("agenda.mark_done")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={onUnable}
-            data-testid="agenda-mark-unable"
-          >
-            <XCircle size={14} strokeWidth={2} />
-            {t("agenda.cant_complete")}
-          </button>
-        </div>
-      )}
-    </li>
-  );
-}
-
-/**
- * Why this card is in a week that is not its planned one.
- *
- * §12B, verbatim: "A card shown outside its planned week must say why —
- * a short marker reading started early or overdue, with its planned date
- * on the card. Otherwise the operator meets the same job in two weeks
- * and cannot tell why."
- *
- * A card at HOME renders nothing here — which is the point. The marker
- * means "this is a visitor", so putting one on every card would tell the
- * reader nothing.
- */
-function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
-  const { t } = useTranslation("staff_slots");
-  if (entry.placement === "PLANNED") return null;
-
-  if (entry.placement === "OVERDUE") {
-    return (
-      <div className="wp-why wp-why-overdue" data-testid="agenda-card-why">
-        <AlarmClock size={13} strokeWidth={2.5} />
-        {entry.due_date
-          ? t("agenda.why_overdue", { date: formatDay(entry.due_date) })
-          : t("agenda.why_overdue_undated")}
-        {entry.overdue_days !== null && (
-          <span>{t("agenda.overdue_days", { count: entry.overdue_days })}</span>
-        )}
-      </div>
-    );
-  }
-
-  const key =
-    entry.placement === "STARTED_EARLY" ? "why_started_early" : "why_started";
-  return (
-    <div className="wp-why wp-why-started" data-testid="agenda-card-why">
-      <PlayCircle size={13} strokeWidth={2.5} />
-      {entry.planned_start
-        ? t(`agenda.${key}`, { date: formatDay(entry.planned_start) })
-        : t("agenda.why_started_undated")}
-    </div>
   );
 }
 
