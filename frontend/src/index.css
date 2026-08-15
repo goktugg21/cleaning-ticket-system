@@ -9750,14 +9750,36 @@ details[open] > .ew-department-tree-summary::before {
    report gives him the numbers and the one value to change if he wants
    the trade the other way.
    =================================================================== */
+/* Sprint 183 integration — SEVEN columns, always. A week that wraps is
+   not a week: Sunday dropping to a second row is what the owner objected
+   to, and auto-fill produced exactly that on a 1440 laptop because the
+   ~300px sidebar leaves the grid 1128px.
+
+   The previous answer was to wrap; the answer before that was to squeeze
+   seven columns into whatever was left, which gave 152px cards and
+   six-line titles. Both were rejected. So: seven fixed columns at a
+   minimum readable width, and the CONTAINER scrolls sideways when they do
+   not fit. The week keeps its shape and the cards keep their size; what
+   gives is the viewport, which is the only one of the three that can. */
+.agenda-week-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 6px;
+}
 .agenda-week-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(7, minmax(210px, 1fr));
   gap: 10px;
   align-items: start;
+  min-width: min-content;
 }
+/* Phone: one day at a time, scrolled vertically like a list. */
 @media (max-width: 700px) {
-  .agenda-week-grid { grid-template-columns: 1fr; }
+  .agenda-week-scroll { overflow-x: visible; }
+  .agenda-week-grid {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
 }
 
 /* -------------------------------------------------------------------

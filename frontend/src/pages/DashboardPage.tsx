@@ -183,7 +183,12 @@ export function DashboardPage({
 }: {
   /** Sprint 183 §1 — the `"chargeable-work"` variant is gone with its
    *  sub-page. The narrowing it stood for is the list's own chip now. */
-  variant?: "dashboard" | "tickets-page";
+  /** Sprint 181 §5 / restored at the Sprint 183 integration —
+   *  `"chargeable-work"` is this same page narrowed to tickets born from
+   *  an Extra Work. A variant rather than a second implementation, so the
+   *  two can never drift. Sprint 183 deleted it on a misread instruction:
+   *  the owner asked for the redundant CHIP to go, not the page. */
+  variant?: "dashboard" | "tickets-page" | "chargeable-work";
   /** Sprint 169 §8 — mounted INSIDE a customer: the list is narrowed to
    *  that customer and everything else is identical.
    *
@@ -200,7 +205,8 @@ export function DashboardPage({
   /** The customer page draws its own header. */
   hideHeader?: boolean;
 } = {}) {
-  const isTicketsPage = variant === "tickets-page";
+  const isChargeableWork = variant === "chargeable-work";
+  const isTicketsPage = variant === "tickets-page" || isChargeableWork;
   const navigate = useNavigate();
   const { me } = useAuth();
   const { push } = useToast();
@@ -275,6 +281,11 @@ export function DashboardPage({
    * showing everything is friendlier than showing nothing.
    */
   const [workTypeFilter, setWorkTypeFilter] = useState<WorkTypeFilter>(() => {
+    // The Chargeable work sub-page IS this page pinned to chargeable
+    // work, so the route decides the filter and the chip below never
+    // offers "chargeable" as a third state -- that redundancy is the
+    // thing the owner asked to remove.
+    if (variant === "chargeable-work") return "chargeable";
     const raw = new URLSearchParams(window.location.search).get("work");
     return raw === "tickets" ? raw : "all";
   });
@@ -1029,7 +1040,11 @@ export function DashboardPage({
             {isTicketsPage ? t("tickets_page.eyebrow") : t("eyebrow")}
           </div>
           <h2 className="page-title">
-            {isTicketsPage ? t("tickets_page.title") : t("title")}
+            {isChargeableWork
+              ? t("common:chargeable_work.title")
+              : isTicketsPage
+                ? t("tickets_page.title")
+                : t("title")}
           </h2>
           <p className="page-sub">
             {/* RF-16 — the dashboard loads no list, so the list-count
@@ -1838,11 +1853,14 @@ export function DashboardPage({
             precisely why these come from the stats endpoint and
             not from `tickets`. Until it resolves, `-1` renders
             an em dash rather than a wrong number. */}
-        {/* Sprint 183 §1 — ONE chip. The owner asked for "just a chip on
-            tickets to show regular tickets only", and the sub-page that
-            used to be its twin is deleted. Pressed = ordinary tickets
-            only; unpressed = everything, which is the default and always
-            one click away. */}
+        {/* Sprint 183 — ONE chip: "Tickets only". Pressed = ordinary
+            tickets; unpressed = everything, the default, always one click
+            away. The owner asked for the redundant CHARGEABLE chip to go,
+            not the Chargeable work sub-page — that page is the only way to
+            see chargeable work as a group and it stays. Sprint 183 read
+            the instruction the other way round and deleted the page; the
+            integration restored it. */}
+        {!isChargeableWork && (
         <div className="work-strip" style={{ marginBottom: 12 }}>
           <div className="work-strip-toggle" data-testid="tickets-work-type">
             <button
@@ -1868,6 +1886,7 @@ export function DashboardPage({
             </button>
           </div>
         </div>
+        )}
 
         {/* Sprint 182 §1/§4 — the counts and the rows describe the same
             set, or the counts say they cannot know.

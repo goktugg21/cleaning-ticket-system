@@ -518,6 +518,23 @@ export function AppShell({ children }: AppShellProps) {
                   {t("nav.tickets")}
                 </NavLink>
               )}
+              {/* Sprint 181 §5 — chargeable work, as its own entry under
+                  Tickets. A CHILD row, because that is what it is: the
+                  same tickets, narrowed to the ones born from an Extra
+                  Work. Provider-side only — a customer's meldingen list
+                  is not the place to slice our billing pipeline. */}
+              {!isCustomerUser(me?.role) && (
+                <NavLink
+                  to="/tickets/chargeable"
+                  className={navChildClass}
+                  data-testid="sidebar-chargeable-work"
+                >
+                  <span className="nav-icon">
+                    <BadgeEuro size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.chargeable_work")}
+                </NavLink>
+              )}
               {canAccessAgenda(me?.role) && (
                 <NavLink
                   to="/agenda"

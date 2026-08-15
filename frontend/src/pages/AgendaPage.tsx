@@ -747,7 +747,8 @@ function WorkPlanWeek() {
           testId="agenda-empty"
         />
       ) : (
-        <div className="agenda-week-grid" data-testid="agenda-week-grid">
+        <div className="agenda-week-scroll">
+          <div className="agenda-week-grid" data-testid="agenda-week-grid">
           {groups.map((group) => (
             <WorkPlanDayColumn
               key={group.key}
@@ -767,6 +768,7 @@ function WorkPlanWeek() {
               ))}
             </WorkPlanDayColumn>
           ))}
+          </div>
         </div>
       )}
 
