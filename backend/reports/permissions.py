@@ -33,6 +33,26 @@ class IsRevenueReportConsumer(BasePermission):
     already excludes STAFF + CUSTOMER_USER); this dedicated class documents
     the stricter commercial-amount intent so a future widening of the
     general reports admit set cannot silently leak revenue to STAFF.
+
+    ## What BUILDING_MANAGER admission does and does not mean (Sprint 182 §1)
+
+    This class also gates the HOURS reports, and admitting a BM there
+    looked like it contradicted `timesheets.permissions.IsTimesheetManager`,
+    which deliberately excludes them from the same rows. It did not — but
+    only because of a rule the reports were not applying.
+
+    **Admission is to the SURFACE, not to the rows.** It is the same shape
+    the timesheets module already has: `IsTimesheetUser` admits every
+    provider role to the entries list, and `restrict_entries_to_self` then
+    narrows a non-manager to their own entries. The hours reports now do
+    exactly that — a BM may open them, and sees their own hours in them.
+    An empty Worker Hour Report for a BM with no hours of their own is the
+    correct answer, not a broken page.
+
+    So the two modules now say ONE thing: SA and CA see the company's
+    hours; STAFF and BUILDING_MANAGER see their own, wherever they read
+    them from. Building-level AGGREGATES (the hours-comparison totals) are
+    not personnel rows and stay whole — a BM manages buildings.
     """
 
     def has_permission(self, request, view):

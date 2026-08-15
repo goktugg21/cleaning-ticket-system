@@ -124,6 +124,39 @@ export interface WorkPlanResponse {
 }
 
 /**
+ * Sprint 182 §3 — put an extra work on a day.
+ *
+ * The undated lane offered "Plan for today" on a ticket row and only
+ * "Open extra work" on an extra-work row, because an extra work had no
+ * provider-owned date to write to: `preferred_date` is the CUSTOMER's
+ * wish (Sprint 176 §3) and the provider must not overwrite it to make a
+ * planning board work.
+ *
+ * Sprint 182 gives it one — `provider_planned_date`, Agent A's field —
+ * and this writes it through the EXISTING bulk-dates endpoint with a
+ * batch of exactly one, rather than asking for a new endpoint. That one
+ * already owns the rules this write needs: provider-only, scoped
+ * resolution, and an out-of-scope id answered identically to a
+ * non-existent one (H-1).
+ *
+ * **This call needs Agent A's branch merged to succeed**, and one more
+ * line inside it: the bulk-dates input serializer has to accept
+ * `provider_planned_date` the way it already accepts `deadline` and
+ * `planned_end_date`. That file is A's, so this branch does not touch
+ * it. Until it lands the server answers 400 and the button shows the
+ * message — it does not pretend to have worked.
+ */
+export async function planExtraWorkForDate(
+  extraWorkId: number,
+  isoDate: string,
+): Promise<void> {
+  await api.post("/extra-work/bulk-dates/", {
+    requests: [extraWorkId],
+    provider_planned_date: isoDate,
+  });
+}
+
+/**
  * One week of the Work Plan.
  *
  * `teamWeek` asks for every job the actor may see rather than only

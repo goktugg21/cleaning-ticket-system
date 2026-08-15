@@ -99,9 +99,6 @@
   "agenda.this_week": "Deze week",
   "agenda.chip_total": "Totaal",
   "agenda.chip_overdue": "Te laat",
-  "agenda.filter_type": "Type",
-  "agenda.all_types": "Alle types",
-  "agenda.missing_chips_note": "Een chip uit het referentiesysteem ontbreekt hier met opzet: dit systeem kent geen gearchiveerd werk.",
   "agenda.undated_count": "{{count}} taak/taken zonder geplande datum — die staan in geen enkele week.",
   "agenda.today": "Vandaag",
   "agenda.day_empty": "Niets gepland",
@@ -117,7 +114,7 @@
   "agenda.chip_in_progress": "Bezig",
   "agenda.chip_done": "Afgerond",
   "agenda.chip_blocked": "Niet gelukt",
-  "agenda.filter_source": "Soort werk",
+  "agenda.filter_source": "Laat zien",
   "agenda.all_sources": "Alles",
   "agenda.source_ticket": "Ticket",
   "agenda.source_extra_work": "Meerwerk",
@@ -140,5 +137,10 @@
   "agenda.undated_plan_today": "Plan vandaag",
   "agenda.undated_planning": "Bezig...",
   "agenda.undated_planned": "Vandaag ingepland.",
-  "agenda.undated_open_extra_work": "Extra werk openen"
+  "agenda.overview_week_one": "{{count}} klus deze week",
+  "agenda.overview_week_other": "{{count}} klussen deze week",
+  "agenda.overview_unplanned_one": "{{count}} nog niet ingepland",
+  "agenda.overview_unplanned_other": "{{count}} nog niet ingepland",
+  "agenda.overview_overdue_one": "{{count}} te laat",
+  "agenda.overview_overdue_other": "{{count}} te laat"
 }

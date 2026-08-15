@@ -39,11 +39,16 @@ broken.
 
 ## Scoping
 
-Every builder goes through `filter_time_entries_for`, the same helper the
-entries list uses, so no report can show an hour the actor could not
-already read. The views refuse CUSTOMER_* outright; these functions do
-not special-case roles, because a second role check that disagreed with
-the first is worse than one.
+Every builder goes through `_base`, which applies the SAME PAIR the
+entries list applies — `filter_time_entries_for` (the tenant floor, H-1)
+and `restrict_entries_to_self` (the privacy floor) — so no report can
+show an hour the actor could not already read. The views refuse
+CUSTOMER_* outright; these functions do not special-case roles, because a
+second role check that disagreed with the first is worse than one.
+
+Sprint 182 §1: only the first half was applied until then, which made
+every report in this module readable across the whole company by a
+BUILDING_MANAGER.
 
 ## The company / building filter (Sprint 180 §1)
 
@@ -74,7 +79,7 @@ from decimal import Decimal
 from django.db.models import Sum
 
 from timesheets.models import TimeEntry
-from timesheets.scope import filter_time_entries_for
+from timesheets.scope import filter_time_entries_for, restrict_entries_to_self
 
 from .hour_sources import resolve_sources, source_label
 
@@ -110,9 +115,18 @@ def _base(user, date_from: date, date_to: date, scope=None):
     fields are independently optional, so "all companies, this building"
     is expressible — which is what a BUILDING_MANAGER's page sends.
     """
-    queryset = filter_time_entries_for(
+    # Sprint 182 §1 — BOTH halves of the pair. `filter_time_entries_for`
+    # answers the tenant question; `restrict_entries_to_self` answers
+    # "whose row is it". This called only the first, so a
+    # BUILDING_MANAGER — who is not a timesheet manager — read every
+    # colleague's hours company-wide through all three of these reports
+    # and through the summary cards that share this helper.
+    queryset = restrict_entries_to_self(
         user,
-        TimeEntry.objects.filter(date__gte=date_from, date__lte=date_to),
+        filter_time_entries_for(
+            user,
+            TimeEntry.objects.filter(date__gte=date_from, date__lte=date_to),
+        ),
     )
     if scope is not None:
         if scope.company is not None:

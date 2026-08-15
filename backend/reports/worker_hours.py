@@ -71,8 +71,13 @@ from decimal import Decimal
 from django.db.models import Sum
 
 from timesheets.contract_hours import in_force_between
-from timesheets.models import ContractHours, TimeEntry
-from timesheets.scope import filter_contract_hours_for, filter_time_entries_for
+from timesheets.models import ContractHours, ContractHoursStatus, TimeEntry
+from timesheets.scope import (
+    filter_contract_hours_for,
+    filter_time_entries_for,
+    restrict_contract_hours_to_self,
+    restrict_entries_to_self,
+)
 
 
 WEEKDAY_KEYS = (
@@ -105,21 +110,158 @@ def week_span(iso_year: int, first_week: int, week_count: int):
     return start, end
 
 
+#: Which standing-agreement statuses count as an agreement.
+#:
+#: DRAFT is excluded because `ContractHoursStatus`'s own docstring says so
+#: in as many words: "Nothing downstream reads a DRAFT row as an
+#: agreement." SAVED is INCLUDED — it is submitted for review, and a
+#: company that never uses the approve step would otherwise see an empty
+#: contracted column forever, which is a silent regression dressed as
+#: strictness. If payroll should read APPROVED only, that is this one
+#: constant and nothing else.
+_CONTRACTED_STATUSES = (
+    ContractHoursStatus.SAVED,
+    ContractHoursStatus.APPROVED,
+)
+
+
+def _iso_week_bounds(iso_year: int, iso_week: int) -> tuple[date, date]:
+    """Monday and Sunday of one ISO week."""
+    monday = date.fromisocalendar(iso_year, iso_week, 1)
+    return monday, monday + timedelta(days=6)
+
+
+def _contracted_by_week(user, start: date, end: date):
+    """`({(week, employee, building, hour_type): weekly_total}, {...: action})`.
+
+    Sprint 182 §2 — the contracted column, rebuilt. It had four separate
+    defects, and because they compounded, the number payroll reads could
+    be wrong in four different directions at once:
+
+    1. **It SUMMED every overlapping agreement** instead of resolving the
+       one in force. Two successive agreements — the old one ending, the
+       new one starting — both overlap the window, so a worker whose
+       contract changed mid-report was reported as contracted for the
+       sum of both. `active_contract_hours` documents the rule this
+       system already uses ("the latest `valid_from` at or before the
+       date, ties broken by `-id`"); it just was not applied here.
+    2. **A DRAFT counted.** It passed `ContractHours.objects.all()`, so a
+       half-written row nobody had submitted was read as an agreement —
+       contradicting the model's own status docstring. See
+       `_CONTRACTED_STATUSES`.
+    3. **It keyed on `(employee, building)`** while the report row's
+       grain is `(week, employee, building, hour_type, source)`. Every
+       hour-type row of a person at a building therefore showed the SAME
+       contracted figure — the sum of that person's agreements across all
+       hour types — so a sick-leave row claimed the normal-hours contract
+       as its own.
+    4. **The fourth, read from the code rather than handed to me: there
+       was no WEEK in the key at all.** The report is per ISO week and
+       can span many (`week_count`), but `in_force_between(start, end)`
+       was asked once for the WHOLE span and its answer written onto
+       every week's rows. An agreement in force for only the first week
+       of a four-week report was reported as contracted in all four; one
+       that ended in week 31 kept appearing in weeks 32, 33 and 34. The
+       column was not describing the week its row is about.
+
+    The resolution combines the two rules this codebase already has,
+    rather than inventing a third: the WEEK overlap test from
+    `in_force_between` (Sprint 168 §2 — an agreement starting on Tuesday
+    is genuinely part of that week) picks the candidates, and
+    `active_contract_hours`'s latest-wins ordering (Sprint 167 §3) picks
+    the winner among them.
+
+    Cost: still ONE query for the whole report, grouped in Python. A
+    per-week or per-row query here is exactly the N+1 `assertNumQueries`
+    exists to catch, and the fix must not buy correctness with it.
+    """
+    agreements = list(
+        restrict_contract_hours_to_self(
+            user,
+            in_force_between(
+                filter_contract_hours_for(
+                    user,
+                    ContractHours.objects.filter(
+                        status__in=_CONTRACTED_STATUSES
+                    ),
+                ),
+                start,
+                end,
+            ),
+        )
+        .select_related("work_type")
+        # Latest agreement last, so the straightforward "last one wins"
+        # loop below implements `active_contract_hours`'s documented
+        # ordering (latest `valid_from`, ties broken by the higher id).
+        .order_by("valid_from", "id")
+    )
+    if not agreements:
+        return {}, {}
+
+    contracted: dict[tuple, Decimal] = {}
+    actions: dict[tuple, str] = {}
+
+    # Every ISO week the report covers, derived from the span rather than
+    # from the rows — a week with no worked hours still has a contract,
+    # and asking the rows would hide exactly that case.
+    cursor = start
+    while cursor <= end:
+        iso_year, iso_week, _ = cursor.isocalendar()
+        week_start, week_end = _iso_week_bounds(iso_year, iso_week)
+        for agreement in agreements:
+            # The same overlap test `in_force_between` applies, now asked
+            # of ONE week instead of the whole span.
+            if agreement.valid_from > week_end:
+                continue
+            if agreement.valid_to is not None and agreement.valid_to < week_start:
+                continue
+            key = (
+                iso_week,
+                agreement.employee_id,
+                agreement.building_id,
+                agreement.hour_type_id,
+            )
+            # Overwrite, never add: the ordering above means the last
+            # writer is the agreement in force.
+            contracted[key] = agreement.weekly_total or Decimal("0.00")
+            actions[key] = (
+                agreement.work_type.name if agreement.work_type_id else None
+            )
+        cursor = week_start + timedelta(days=7)
+
+    return contracted, {k: v for k, v in actions.items() if v}
+
+
 def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
     """The report payload, scoped to what `user` may see.
 
-    Scoping goes through `filter_time_entries_for`, the same helper the
-    entries list uses, so this report can never show an hour the actor
-    could not already read. CUSTOMER_* roles are refused at the view;
-    this function does not special-case them, because a second
-    role-check that disagreed with the first is worse than one.
+    Scoping goes through the SAME PAIR the entries list uses —
+    `filter_time_entries_for` for the tenant floor (H-1) and
+    `restrict_entries_to_self` for the privacy floor — so this report can
+    never show an hour the actor could not already read. CUSTOMER_* roles
+    are refused at the view; this function does not special-case them,
+    because a second role-check that disagreed with the first is worse
+    than one.
+
+    **Sprint 182 §1 — this docstring used to say exactly that while the
+    code applied only the first half.** A BUILDING_MANAGER is not a
+    timesheet manager (`timesheets.scope.is_timesheet_manager`), so
+    without `restrict_entries_to_self` they read every colleague's hours,
+    personnel number and travel-cost claims across the whole company.
+    Not a tenant breach — the company scope held — but a privacy hole
+    inside it, reachable through the Reports page, and the file asserted
+    it was closed. The pair is applied now, and the same pair is applied
+    to the contracted-hours read below.
     """
     start, end = week_span(iso_year, first_week, week_count)
 
     rows = (
-        filter_time_entries_for(
+        restrict_entries_to_self(
             user,
-            TimeEntry.objects.filter(date__gte=start, date__lte=end),
+            filter_time_entries_for(
+                user,
+                TimeEntry.objects.filter(date__gte=start, date__lte=end),
+            ),
         )
         .values(
             "iso_week",
@@ -243,20 +385,7 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
             # shape in this system.
             debtors.setdefault(membership.building_id, membership.customer.name)
 
-    contracted: dict[tuple, Decimal] = {}
-    actions: dict[tuple, str] = {}
-    agreements = in_force_between(
-        filter_contract_hours_for(user, ContractHours.objects.all()),
-        start,
-        end,
-    ).select_related("work_type")
-    for agreement in agreements:
-        key = (agreement.employee_id, agreement.building_id)
-        contracted[key] = contracted.get(key, Decimal("0.00")) + (
-            agreement.weekly_total or Decimal("0.00")
-        )
-        if agreement.work_type_id and key not in actions:
-            actions[key] = agreement.work_type.name
+    contracted, actions = _contracted_by_week(user, start, end)
 
     # Sprint 173 §1 — resolve every source in ONE pass. The resolver
     # scopes through the same helpers the ticket and extra-work lists
@@ -273,9 +402,18 @@ def build_worker_hours(user, iso_year: int, first_week: int, week_count: int):
             bucket["source_type"], bucket["source_id"], source_titles
         )
         bucket["debtor"] = debtors.get(bucket["building_id"])
-        pair = (bucket["employee_id"], bucket["building_id"])
-        bucket["contracted_hours"] = contracted.get(pair)
-        bucket["action"] = actions.get(pair)
+        # Sprint 182 §2 — the key is the report row's OWN grain: the week,
+        # the person, the building AND the hour type. It used to be
+        # (employee, building), which is a coarser thing than the row it
+        # was being written onto.
+        key = (
+            bucket["iso_week"],
+            bucket["employee_id"],
+            bucket["building_id"],
+            bucket["hour_type_id"],
+        )
+        bucket["contracted_hours"] = contracted.get(key)
+        bucket["action"] = actions.get(key)
 
     ordered = sorted(
         buckets.values(),

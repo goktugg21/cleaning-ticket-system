@@ -162,18 +162,34 @@ def models_q_end_after(first):
     return Q(end_date__isnull=True) | Q(end_date__gte=first)
 
 
-def worked_hours_by_building(company_ids, year: int, month: int):
+def worked_hours_by_building(company_ids, year: int, month: int, actor=None):
     """`({building_id or None: Decimal}, {building_id: [(employee, hours)]})`.
 
     Reads `timesheets` only, and both figures come from ONE aggregate
     query each — the per-building totals and the per-employee
     breakdown — rather than a query per building.
+
+    Sprint 182 §1 — `actor` applies the privacy floor. The per-employee
+    breakdown names individual colleagues and their hours, which is
+    personnel data whatever the building total beside it is; a
+    BUILDING_MANAGER therefore sees only their own line in it. The
+    BUILDING TOTAL is deliberately left whole: a building's total worked
+    hours is a building-management fact, and a BM manages buildings. That
+    is the line this sprint draws — individual rows are restricted,
+    building aggregates are not.
+
+    `actor=None` keeps the un-restricted behaviour for a caller that has
+    already established manager rights; every in-repo caller passes one.
     """
     from timesheets.models import TimeEntry
+    from timesheets.scope import restrict_entries_to_self
 
     first, last = month_bounds(year, month)
     base = TimeEntry.objects.filter(
         company_id__in=company_ids, date__gte=first, date__lte=last
+    )
+    per_employee_base = (
+        restrict_entries_to_self(actor, base) if actor is not None else base
     )
 
     totals = {
@@ -183,7 +199,7 @@ def worked_hours_by_building(company_ids, year: int, month: int):
 
     per_employee: dict = {}
     for row in (
-        base.values(
+        per_employee_base.values(
             "building_id", "employee_id", "employee__full_name",
             "employee__email",
         )
@@ -201,7 +217,7 @@ def worked_hours_by_building(company_ids, year: int, month: int):
     return totals, per_employee
 
 
-def build_comparison(company_ids, year: int, month: int) -> list:
+def build_comparison(company_ids, year: int, month: int, actor=None) -> list:
     """The whole report: one row per building that appears on EITHER
     side, with the missing side as zero.
 
@@ -212,7 +228,9 @@ def build_comparison(company_ids, year: int, month: int) -> list:
     from buildings.models import Building
 
     contracted = contracted_hours_by_building(company_ids, year, month)
-    worked, per_employee = worked_hours_by_building(company_ids, year, month)
+    worked, per_employee = worked_hours_by_building(
+        company_ids, year, month, actor=actor
+    )
 
     building_ids = {b for b in (set(contracted) | set(worked)) if b is not None}
     names = dict(

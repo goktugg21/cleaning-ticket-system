@@ -54,9 +54,18 @@ class IsTimesheetManager(BasePermission):
     """SUPER_ADMIN / COMPANY_ADMIN only — the admin surface (all
     employees' entries, hour types, week close/reopen, CSV export).
 
-    BUILDING_MANAGER is deliberately NOT admitted, unlike the reports
-    module: a BM manages buildings, and this module's rows are personnel
-    records with wage-adjacent weights on them.
+    BUILDING_MANAGER is deliberately NOT admitted: a BM manages
+    buildings, and this module's rows are personnel records with
+    wage-adjacent weights on them.
+
+    Sprint 182 §1 — this used to read "unlike the reports module", which
+    described a real disagreement: `reports` admitted a BM and then failed
+    to apply `restrict_entries_to_self`, so the same rows this class
+    withholds were readable company-wide from the Reports page. The
+    reports now apply the pair, and the two modules agree: admission to a
+    SURFACE is not admission to another employee's row. See
+    `reports.permissions.IsRevenueReportConsumer` for the same note from
+    the other side.
     """
 
     def has_permission(self, request, view):

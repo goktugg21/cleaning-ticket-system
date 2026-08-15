@@ -894,7 +894,9 @@ class HoursComparisonView(APIView):
             else:
                 company_ids = [c for c in company_ids if c == requested_id]
 
-        rows = build_comparison(company_ids, year, month)
+        # Sprint 182 §1 — the actor decides whose lines appear in the
+        # per-employee breakdown; the building totals are unaffected.
+        rows = build_comparison(company_ids, year, month, actor=request.user)
         first, last = month_bounds(year, month)
         return Response(
             {
