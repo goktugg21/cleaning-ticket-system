@@ -234,8 +234,39 @@ def run_invoice_run_for_customer(customer, *, year, month, actor=None):
 
     # `system=True` — the invoices this run creates have no human author.
     # `actor` above supplies the read scope only.
+    #
+    # Sprint 184 §1 — `through=True`: this billing period OR ANY EARLIER
+    # one. The run used to ask for work billable in the CURRENT month,
+    # matched exactly, while the work it exists to bill is last month's.
+    # On the 1st that question has no answer — nothing has finished in a
+    # month that started hours ago — so the run created nothing, and the
+    # month it skipped was never revisited, because it fires once a
+    # month. A customer billing on the 15th caught the 1st-15th and
+    # permanently missed the 16th-31st. The log read
+    # `invoices_created: 0`, which reads as "nothing outstanding".
+    #
+    # "This or earlier" rather than "the previous period" is the
+    # deliberate choice, for three reasons. A run missed for any reason
+    # (a beat tick, a deploy, a customer whose schedule was set later)
+    # is picked up by the NEXT one instead of being lost — and a lost
+    # run is precisely the failure being fixed here. It makes this job
+    # agree with the /due/ panel and the preview, so what an operator is
+    # shown as outstanding is what the run will bill. And it matches the
+    # owner's own description of the job: a draft invoice out of the
+    # completed extra works, not out of one particular month's.
+    #
+    # Nothing can be billed twice: the CLAIM (`is_invoiced` plus the
+    # live `InvoiceLine.extra_work` link) is what prevents that, not the
+    # month window, so a row already invoiced is out of the pool
+    # whatever period is asked for.
     created = generate_draft_invoices(
-        actor, customer.company_id, customer.id, year, month, system=True
+        actor,
+        customer.company_id,
+        customer.id,
+        year,
+        month,
+        system=True,
+        through=True,
     )
     if created:
         _notify_run(actor, customer, created)

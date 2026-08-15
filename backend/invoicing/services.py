@@ -222,6 +222,7 @@ def _create_draft(
 def generate_draft_invoices(
     actor, company_id, customer_id, year, month, granularity=None, *,
     system=False,
+    through=False,
 ):
     """
     Roll up (company, customer)'s unbilled EW for (year, month) into DRAFT
@@ -277,10 +278,26 @@ def generate_draft_invoices(
     # convention anyone has to remember: there is no second grouping
     # implementation to drift, because there is no second implementation.
     #
-    # `through=False` keeps generation on the EXACT-period query it has
-    # always used — a run targets one specific billing period. The preview
-    # defaults to `through=True` (this period or any earlier), which is the
-    # /due/ panel's rule, so it shows what is genuinely outstanding.
+    # Sprint 184 §1 — WHICH MONTHS THIS RUN SWEEPS, and it is now the
+    # caller's decision rather than a constant.
+    #
+    # `through=False` (the default) is the exact-period query the manual
+    # Generate button has always used: the operator picked "July", so
+    # give them July and nothing else.
+    #
+    # `through=True` is this period OR ANY EARLIER one — the same rule
+    # the /due/ panel and the preview use. THE NIGHTLY RUN PASSES IT,
+    # because an unattended job asking only about the current month was
+    # the most expensive defect in the system: on the 1st of the month
+    # nothing has finished in that month yet, so the run created nothing
+    # and last month was never picked up again — the job only fires once
+    # a month. It logged `invoices_created: 0`, which reads as "nothing
+    # outstanding".
+    #
+    # Widening the window cannot double-bill. What prevents that is the
+    # CLAIM (`is_invoiced` plus the live `InvoiceLine.extra_work` link),
+    # not the month filter, so a row already on an invoice is out of the
+    # pool whatever period is asked for.
     planned = plan_invoices(
         actor,
         company_id,
@@ -288,7 +305,7 @@ def generate_draft_invoices(
         year,
         month,
         granularity=granularity,
-        through=False,
+        through=through,
     )
     if not planned:
         # Idempotent: nothing to claim -> do NOT create an empty draft.

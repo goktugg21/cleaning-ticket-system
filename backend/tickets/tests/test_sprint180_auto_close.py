@@ -317,11 +317,16 @@ class CustomerApprovalAutoCloseTests(_AutoCloseFixtureMixin, TestCase):
         # parks on APPROVED and an admin closes it by hand, exactly as
         # before this sprint.
         ticket = self._make_ticket()
+        # Sprint 184 §2 — this jump is outside ALLOWED_TRANSITIONS, so it
+        # now needs a written reason and lands on the history row flagged
+        # as an override. The ACT is unchanged; what changed is that it
+        # can no longer look like an ordinary approval in the timeline.
         approved = apply_transition(
             ticket,
             self.super_admin,
             TicketStatus.APPROVED,
             note="admin correction",
+            override_reason="Customer approved verbally; recorded by hand.",
         )
         self.assertEqual(str(approved.status), str(TicketStatus.APPROVED))
         self.assertIsNone(approved.closed_at)
@@ -663,8 +668,13 @@ class HideFinishedExtraWorkTests(_AutoCloseFixtureMixin, APITestCase):
         approved_only = self._make_ticket(
             title="EW approved only", extra_work_request=self.ew
         )
+        # Sprint 184 §2 — an administrative approval is an out-of-machine
+        # jump and carries a reason now.
         approved_only = apply_transition(
-            approved_only, self.super_admin, TicketStatus.APPROVED
+            approved_only,
+            self.super_admin,
+            TicketStatus.APPROVED,
+            override_reason="Approved administratively for this test.",
         )
         self.assertEqual(
             str(approved_only.status), str(TicketStatus.APPROVED)

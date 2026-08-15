@@ -386,10 +386,47 @@ def apply_transition(
                 )
         is_override = True
 
+    # Sprint 184 §2 — A JUMP OUTSIDE THE STATE MACHINE IS AN OVERRIDE.
+    #
+    # Only a SUPER_ADMIN can reach this: `can_transition` lets that role
+    # past any pair, which is a power worth keeping — an admin genuinely
+    # has to be able to rescue a stuck ticket, and removing it would
+    # leave no way to. What it must not be is INVISIBLE.
+    #
+    # It was. The history row was written with `is_override=False` and
+    # no reason, so a hand-typed jump was indistinguishable in the
+    # timeline from an ordinary step somebody earned. Measured on
+    # crmtest: 28 such jumps, every one by the same super-admin account,
+    # every one unflagged and unexplained. The most common was
+    # WAITING_MANAGER_REVIEW -> APPROVED (13), which skips the
+    # customer's decision entirely while reading exactly like the
+    # customer made it.
+    #
+    # This is money rather than tidiness. CLOSED is what makes work
+    # invoiceable and `closed_at` sets the billing month, so a typed
+    # jump to CLOSED manufactures billable work nobody performed — and
+    # 7 of the 28 were CLOSED -> OPEN, which un-bills it again.
+    #
+    # H-11 says the status-history row IS the audit trail for a workflow
+    # change. This makes it tell the truth, using the same mechanism as
+    # the customer-decision coercion directly above and the same
+    # `override_reason_required` gate below — no new vocabulary.
+    #
+    # `user is not None` guards the SYSTEM actor: it drives its own
+    # `SYSTEM_AUTO_TRANSITIONS` pairs and there is nobody to ask for a
+    # reason.
+    out_of_machine_jump = (
+        user is not None
+        and (ticket.status, to_status) not in ALLOWED_TRANSITIONS
+    )
+    if out_of_machine_jump:
+        is_override = True
+
     if is_override and not override_reason.strip():
         raise TransitionError(
             "Override reason is required when a provider operator "
-            "drives a customer-decision transition.",
+            "drives a customer-decision transition, or moves a ticket "
+            "outside its normal workflow.",
             code="override_reason_required",
         )
 
@@ -699,10 +736,24 @@ def allowed_next_statuses(user, ticket):
 
     # SUPER_ADMIN_ALLOWED_NEXT_ALL_STATUSES
     if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
+        # Sprint 184 §2 — every status EXCEPT the one the endpoint would
+        # then refuse.
+        #
+        # `can_transition` has excluded CONVERTED_TO_EXTRA_WORK in both
+        # directions since #109 Part C: only the convert machinery may
+        # enter it and nothing leaves it. This list did not know that, so
+        # the API advertised a target its own `/status/` endpoint
+        # rejects — an offer that cannot be accepted.
+        #
+        # Fixed at the SOURCE rather than in the page. The frontend had
+        # already filtered the value out of both render groups, which
+        # left two places holding one rule and only one of them right;
+        # any other consumer of this list still saw the dead option.
+        converted = str(TicketStatus.CONVERTED_TO_EXTRA_WORK)
         return [
             status
             for status, _label in TicketStatus.choices
-            if str(status) != str(ticket.status)
+            if str(status) != str(ticket.status) and str(status) != converted
         ]
 
     candidates = [

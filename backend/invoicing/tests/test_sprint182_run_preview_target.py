@@ -47,7 +47,7 @@ from invoicing import services as invoicing_services
 from invoicing.services import generate_draft_invoices
 from invoicing.tasks import run_daily_invoice_run, run_invoice_run_for_customer
 
-from ._helpers import InvoicingFixture
+from ._helpers import InvoicingFixture, dt
 
 
 PERIOD = (2026, 5)
@@ -670,6 +670,11 @@ class MonthEndJobTests(InvoicingFixture):
         )
 
     def test_job_creates_drafts_on_the_billing_day(self):
+        """NOTE (Sprint 184 §1): the work here finished 31 May and the run
+        is 15 May — same month, and finishing AFTER the run at that. This
+        test passed against the broken code precisely because it never
+        described the real case, which is billing LAST month's work. The
+        cases below do."""
         self.make_ew()
         self._schedule(15)
 
@@ -679,6 +684,91 @@ class MonthEndJobTests(InvoicingFixture):
         self.assertEqual(result["invoices_created"], 1)
         self.assertEqual(result["failed"], 0)
         self.assertEqual(Invoice.objects.count(), 1)
+
+    def test_job_bills_last_months_work(self):
+        """Sprint 184 §1 — THE TEST THAT FAILS ON THE OLD CODE.
+
+        Work finished 31 May; the customer bills on the 1st; the run
+        fires 1 June. The old job asked "what is billable in JUNE?",
+        matched the month exactly, found nothing (nothing has finished in
+        a June that is hours old), created nothing — and May was never
+        looked at again, because the job fires once a month.
+        """
+        self.make_ew(closed_at=dt(2026, 5, 31))
+        self._schedule(1)
+
+        result = run_daily_invoice_run(today="2026-06-01")
+
+        self.assertEqual(
+            result["invoices_created"],
+            1,
+            "May's finished work must be billed by the June run",
+        )
+        self.assertEqual(Invoice.objects.count(), 1)
+
+    def test_job_catches_the_second_half_of_last_month(self):
+        """The mid-month customer's version of the same defect. Billing
+        on the 15th, the old exact-month query caught work finished on
+        the 1st-15th and permanently missed the 16th-31st."""
+        self.make_ew(closed_at=dt(2026, 5, 20))
+        self._schedule(15)
+
+        result = run_daily_invoice_run(today="2026-06-15")
+
+        self.assertEqual(result["invoices_created"], 1)
+        self.assertEqual(Invoice.objects.count(), 1)
+
+    def test_a_missed_run_is_picked_up_by_the_next_one(self):
+        """Why "this period or earlier" was chosen over "the previous
+        period": a run that does not happen is not lost money. Nothing
+        runs in June at all; the July run collects May's work."""
+        self.make_ew(closed_at=dt(2026, 5, 31))
+        self._schedule(1)
+
+        result = run_daily_invoice_run(today="2026-07-01")
+
+        self.assertEqual(result["invoices_created"], 1)
+        self.assertEqual(Invoice.objects.count(), 1)
+
+    def test_running_across_a_month_boundary_does_not_double_bill(self):
+        """The idempotency proof, widened to the case the fix opens up.
+
+        Widening the window is only safe because the CLAIM stops the
+        second pass, not the month filter. So: bill May's work in June,
+        then run again in July, and there must still be exactly one
+        invoice and one claimed row.
+        """
+        ew = self.make_ew(closed_at=dt(2026, 5, 31))
+        self._schedule(1)
+
+        first = run_daily_invoice_run(today="2026-06-01")
+        second = run_daily_invoice_run(today="2026-07-01")
+
+        self.assertEqual(first["invoices_created"], 1)
+        self.assertEqual(
+            second["invoices_created"],
+            0,
+            "the claim must keep an already-billed row out of the pool "
+            "however wide the period window is",
+        )
+        self.assertEqual(Invoice.objects.count(), 1)
+        ew.refresh_from_db()
+        self.assertTrue(ew.is_invoiced)
+        self.assertEqual(ew.invoice_lines.count(), 1)
+
+    def test_the_manual_generate_still_targets_one_exact_month(self):
+        """The operator picked a month; give them that month and not a
+        sweep. Only the unattended job widened."""
+        from invoicing.services import generate_draft_invoices
+
+        self.make_ew(closed_at=dt(2026, 5, 31))
+
+        created = generate_draft_invoices(
+            self.admin, self.company.id, self.customer.id, 2026, 6
+        )
+        self.assertEqual(
+            created, [], "June generation must not sweep up May's work"
+        )
 
     def test_job_does_nothing_on_a_day_that_is_not_the_billing_day(self):
         self.make_ew()
