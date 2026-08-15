@@ -2137,6 +2137,7 @@ class ExtraWorkDatesSerializer(serializers.Serializer):
 
     deadline = serializers.DateField(required=False, allow_null=True)
     planned_end_date = serializers.DateField(required=False, allow_null=True)
+    provider_planned_date = serializers.DateField(required=False, allow_null=True)
 
 
 # ---------------------------------------------------------------------------

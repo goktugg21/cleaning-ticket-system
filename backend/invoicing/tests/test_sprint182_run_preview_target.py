@@ -284,8 +284,25 @@ class BillingTargetResolverTests(InvoicingFixture):
             self._customer(Customer.InvoiceBillingTarget.CUSTOMER),
         )
         if nullable:
-            # Post-Agent-A: a real value wins.
-            self.assertEqual(resolved, str(ew.billed_to).upper())
+            # Post-Agent-A (integration): the column is nullable and
+            # migration 0032 set every existing row to NULL, so a fresh
+            # EW carries no decision and DEFERS to the customer. A row
+            # that names a target still wins -- asserted right below, so
+            # both halves of the precedence rule are covered here rather
+            # than only the half this branch happens to produce.
+            self.assertIsNone(ew.billed_to)
+            self.assertEqual(
+                resolved, Customer.InvoiceBillingTarget.CUSTOMER
+            )
+            ew.billed_to = Customer.InvoiceBillingTarget.BUILDING
+            ew.save(update_fields=["billed_to"])
+            self.assertEqual(
+                resolve_billing_target(
+                    ew,
+                    self._customer(Customer.InvoiceBillingTarget.CUSTOMER),
+                ),
+                Customer.InvoiceBillingTarget.BUILDING,
+            )
         else:
             # Pre-Agent-A: the default is not a decision.
             self.assertEqual(

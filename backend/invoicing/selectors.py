@@ -36,7 +36,7 @@ from accounts.models import UserRole
 from accounts.scoping import scope_customers_for
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
-from extra_work.billing import billing_month, build_ticket_map, is_earned
+from extra_work.billing import billing_month, build_ticket_map, is_billable
 from extra_work.scoping import scope_extra_work_for
 
 from .models import Invoice, InvoiceLine
@@ -181,7 +181,7 @@ def unbilled_extra_work(actor, company_id, customer_id, year, month, building_id
     return [
         e
         for e in ew_list
-        if is_earned(ticket_map.get(e.id))
+        if is_billable(e, ticket_map.get(e.id))
         and billing_month(e, ticket_map.get(e.id)) == (year, month)
     ]
 
@@ -214,7 +214,7 @@ def unbilled_extra_work_through(
     )
     result = []
     for e in ew_list:
-        if not is_earned(ticket_map.get(e.id)):
+        if not is_billable(e, ticket_map.get(e.id)):
             continue
         bm = billing_month(e, ticket_map.get(e.id))
         if bm is not None and bm <= (year, month):

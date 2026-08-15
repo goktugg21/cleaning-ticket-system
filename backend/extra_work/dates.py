@@ -46,6 +46,13 @@ def apply_extra_work_dates(extra_work, data: dict) -> dict | None:
     if "planned_end_date" in data:
         extra_work.planned_end_date = data["planned_end_date"]
         update_fields.append("planned_end_date")
+    # Sprint 182 integration — the provider's own planning date. Agent A
+    # added the column and its read surfaces; Agent D built the Work Plan
+    # button that writes it. Neither owned this helper, so the write path
+    # was the seam between them and it 400'd.
+    if "provider_planned_date" in data:
+        extra_work.provider_planned_date = data["provider_planned_date"]
+        update_fields.append("provider_planned_date")
 
     if not update_fields:
         return None

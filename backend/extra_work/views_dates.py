@@ -75,13 +75,18 @@ class _BulkDatesInputSerializer(serializers.Serializer):
     )
     deadline = serializers.DateField(required=False, allow_null=True)
     planned_end_date = serializers.DateField(required=False, allow_null=True)
+    provider_planned_date = serializers.DateField(required=False, allow_null=True)
 
     def validate(self, attrs):
-        if "deadline" not in attrs and "planned_end_date" not in attrs:
+        if (
+            "deadline" not in attrs
+            and "planned_end_date" not in attrs
+            and "provider_planned_date" not in attrs
+        ):
             raise serializers.ValidationError(
                 {
-                    "detail": "Provide deadline and/or planned_end_date to "
-                    "set or clear.",
+                    "detail": "Provide deadline, planned_end_date and/or "
+                    "provider_planned_date to set or clear.",
                     "code": "no_dates_provided",
                 }
             )

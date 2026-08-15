@@ -630,11 +630,15 @@ class ExtraWorkRequestViewSet(
         # Key presence distinguishes "sent as null" (clear) from "absent"
         # (leave unchanged) — the convention the bulk dialog's "leave
         # unchanged" default depends on. An empty body changes nothing.
-        if "deadline" not in data and "planned_end_date" not in data:
+        if (
+            "deadline" not in data
+            and "planned_end_date" not in data
+            and "provider_planned_date" not in data
+        ):
             return Response(
                 {
-                    "detail": "Provide deadline and/or planned_end_date to "
-                    "set or clear.",
+                    "detail": "Provide deadline, planned_end_date and/or "
+                    "provider_planned_date to set or clear.",
                     "code": "no_dates_provided",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
