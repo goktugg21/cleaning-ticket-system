@@ -11,8 +11,11 @@ export interface ReportScope {
 // Status distribution
 
 export interface StatusBucket {
+  /** The `TicketStatus` CODE. Sprint 184 §2 removed the English `label`
+   *  that used to travel beside it: the chart printed it as it arrived,
+   *  which put a fourth, untranslated status vocabulary on a Dutch-first
+   *  screen. The client labels this through `ticketStatusLabelKey`. */
   status: string;
-  label: string;
   count: number;
 }
 

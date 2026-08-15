@@ -1796,6 +1796,23 @@ class Command(BaseCommand):
             and is_earned(ticket_map.get(e.id))
             and billing_month(e, ticket_map.get(e.id)) == oldest_key
         ]
+        # Sprint 184 §4 — WHY these rows carry no invoice, and why that is
+        # not the defect it looks like.
+        #
+        # An audit of crmtest found Extra Works flagged invoiced with no
+        # invoice line and reported them as stranded data. They are
+        # written HERE: this block sets the DENORMALISED flag directly so
+        # a demo database opens with one month already billed, and it
+        # never creates an `Invoice`. In the running product the flag is
+        # a consequence of an invoice line existing, so this is a state
+        # the application itself cannot reach.
+        #
+        # Left as it is, deliberately. The alternative — driving the real
+        # invoice generator from the seeder — would push demo data
+        # through the gapless per-company-per-year numbering sequence,
+        # which is a production-shaped side effect for a demo
+        # convenience. Anyone auditing such a row should start here and
+        # not in `invoicing/`.
         if to_mark:
             now = timezone.now()
             for e in to_mark:

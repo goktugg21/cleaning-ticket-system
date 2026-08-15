@@ -10311,3 +10311,136 @@ a.wp-card-title:hover { text-decoration: underline; }
    grid instead of guessing from the viewport. The reasoning Sprint 182
    recorded here still stands and is quoted in the rule that replaced
    it: below 230px a card is a column of single words. */
+
+/* ===================================================================
+   Sprint 184 §5 — classes that were used and defined nowhere.
+
+   An undefined class is not a missing decoration. `active-filter-chip`
+   was undefined for three sprints and rendered "Finished extra work is
+   hidden" and "Show all" as the single word "hiddenShow all", because
+   the wrapper stayed a plain block and its children stayed inline. The
+   Sprint 182 C sweep found more of the same family; this closes the
+   ones whose intent the markup states plainly.
+
+   Every rule here mirrors an existing house pattern rather than
+   inventing a look — `.filter-bar` for the filter bars, `.alert-error`
+   for the alert boxes, `.btn-sm` for the button size. The pages
+   themselves belong to other agents this round and are untouched: this
+   file is the one both halves already share.
+
+   NOT defined here, and listed in the report instead: the classes whose
+   intended LAYOUT cannot be read off the markup without opening the
+   page and deciding what it should look like (the permissions matrix,
+   the crew and weekday pickers, the recurring-window editor, the
+   invoice line row, the account photo block). Guessing a grid for
+   markup one has not read makes a page worse than leaving the class
+   inert, which is what it is today.
+   =================================================================== */
+
+/* The two filter bars the Sprint 182 sweep named. Same shape as
+   `.filter-bar`, minus its card chrome: both sit INSIDE a card that
+   already draws the surface and the bottom rule. */
+.customer-contacts-filter-bar,
+.customer-users-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+/* The wrapper `BoundedList` puts around a scrollable list. `min-width: 0`
+   is the load-bearing half: without it a long unbreakable name inside
+   the list pushes the wrapper past its grid or flex share. */
+.bounded-list-wrap {
+  min-width: 0;
+}
+
+/* The label half of an SLA badge, beside its remaining-time half. The
+   badge is a pill in a table cell; a wrapping label makes the row grow. */
+.sla-badge-label {
+  white-space: nowrap;
+}
+
+/* Error text under a field or beside a control — NOT a box. `.alert-error`
+   is the box; these two are the inline sentence, and they were rendering
+   in body colour, which is the one thing an error must not do. */
+.form-error,
+.field-error {
+  margin: 4px 0 0;
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* `.alert` is the neutral box `.alert-error` specialises; `.alert-warn`
+   is its amber sibling, used where something needs care rather than
+   correction (editing your own permissions). Same geometry as
+   `.alert-error` so the three cannot drift apart. */
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.alert-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--amber-soft);
+  border: 1px solid var(--amber-border);
+  color: var(--amber);
+}
+
+/* One step below `.btn-sm`, for a chip-sized link inside a table cell. */
+.btn-xs {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+/* A button carrying an icon and no text: square, so it does not read as
+   a text button that failed to load its label. */
+.btn.icon-only {
+  padding: 0;
+  width: 30px;
+  justify-content: center;
+}
+
+/* `.badge` is already pill-radiused; this modifier exists so a caller
+   can say so explicitly. Defined as a no-op-shaped rule rather than
+   left undefined, so the class means something when read. */
+.badge-pill {
+  border-radius: var(--r-pill);
+}
+
+/* Prev / next around a page number. */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The full-height centred shell the route guards render "Loading…" into
+   before the app shell exists. Without it the word sits in the top-left
+   corner of a blank page. */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* The Inbox's own page wrapper. It holds a `.page-header` and a
+   two-pane body; all it needs of its own is to not collapse its
+   children's widths. */
+.inbox-page {
+  min-width: 0;
+}

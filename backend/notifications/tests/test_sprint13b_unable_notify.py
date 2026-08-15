@@ -85,8 +85,19 @@ class ManagerReviewEmailRecipientTests(TenantFixtureMixin, TestCase):
             # The raw enum token must never leak into a rendered email.
             self.assertNotIn("WAITING_MANAGER_REVIEW", log.subject)
             self.assertNotIn("WAITING_MANAGER_REVIEW", log.body)
-            # The defensive Dutch label is used instead.
-            self.assertIn("Wacht op controle beheerder", log.body)
+            # The Dutch label is used instead.
+            #
+            # Sprint 184 §1 — the WORD changed; this test's point did
+            # not. It was "Wacht op controle beheerder", which is what
+            # email said while every screen said "Wacht op beheerder".
+            # The email vocabulary now comes from
+            # `notifications/status_labels.py`, held byte-identical to
+            # the frontend bundle by
+            # `test_sprint184_status_vocabulary.py`. Keeping a literal
+            # here as well is deliberate: that test guards the
+            # VOCABULARY, this one guards the RENDERING — that a label
+            # reaches the body at all.
+            self.assertIn("Wacht op beheerder", log.body)
             # No unable reason is carried in the status-change email.
             self.assertNotIn("UNABLE TO COMPLETE", log.body)
 

@@ -69,7 +69,11 @@ export function CustomerInvoicesPage() {
           {error}
         </div>
       )}
-      <FacturenPage customerId={numericId} embedded />
+      {/* Sprint 184 §3b — keyed by customer id, like the three sibling
+          sub-pages. Two routes rendering one component do not remount,
+          so without this the previous customer's status filter and
+          billing period survive into the next customer's invoices. */}
+      <FacturenPage key={numericId} customerId={numericId} embedded />
     </div>
   );
 }

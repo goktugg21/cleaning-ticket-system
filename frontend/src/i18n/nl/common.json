@@ -2367,5 +2367,6 @@
   "chargeable_work.subtitle": "Meldingen die uit een goedgekeurd extra werk zijn ontstaan.",
   "chargeable_work.pill": "Meerwerk",
   "chargeable_work.pill_title": "Deze melding komt uit een extra werk. Open het extra werk.",
-  "ticket_status.converted_to_extra_work": "Geconverteerd naar meerwerk"
+  "ticket_status.converted_to_extra_work": "Geconverteerd naar meerwerk",
+  "nav.customer_submenu.chargeable": "Meerwerk-tickets"
 }

@@ -122,13 +122,22 @@ class StatusDistributionView(_ReportView):
         if customer is not None:
             qs = qs.filter(customer_id=customer.id)
         counts = dict(qs.values_list("status").annotate(c=Count("id")))
+        # Sprint 184 §2 — the CODE, and only the code.
+        #
+        # This used to emit `TicketStatus.choices`' English label beside
+        # it ("Approved", "Waiting Customer Approval") and the chart
+        # printed it as it arrived, so a Dutch-first screen carried a
+        # fourth status vocabulary that never passed through the
+        # translation layer at all. The label is gone rather than merely
+        # unused: leaving a display-shaped string on the wire is how the
+        # next caller renders it again. The client labels the code with
+        # `ticketStatusLabelKey`, the way every other screen now does.
         buckets = [
             {
                 "status": str(value),
-                "label": label,
                 "count": int(counts.get(value, 0)),
             }
-            for value, label in TicketStatus.choices
+            for value in TicketStatus.values
         ]
         return Response(
             {
