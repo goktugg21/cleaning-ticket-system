@@ -80,28 +80,24 @@ const AUTO_REFRESH_INTERVAL_MS = 60_000;
 // compiler instead of quietly vanishing from a screen.
 
 /**
- * Sprint 182 §4 — "tickets only".
+ * Sprint 183 §1 — ONE chip, not three segments and a sub-page.
  *
- * Extra-work tickets and ordinary tickets were mixed with no way to see
- * only the ordinary ones. `?is_extra_work=` has answered this on the
- * server since Sprint 181 (`true` is what the Chargeable work sub-page
- * sends); nothing on the ticket list ever asked it the other way round.
+ * The owner: "there is no need for both a chargeable-work filter on the
+ * tickets page AND a chargeable-work sub-page. Just a chip on tickets to
+ * show regular tickets only."
  *
- * A visible, always-rendered segmented control rather than a hidden
- * mode: whichever segment is active is the one that is filled, and "All
- * work" is always one click away. That is the house rule — nothing is
- * hidden with no way back.
+ * So the sub-page, its route and its nav entry are gone, and what is
+ * left is exactly what he asked for: the list shows everything by
+ * default, and one labelled chip narrows it to ordinary tickets. Off is
+ * always one click away, which is the house rule — nothing hidden with
+ * no way back.
+ *
+ * `chargeable` survives as a PARSED value with no control that sets it,
+ * so a bookmarked `?work=chargeable` still resolves rather than throwing;
+ * it renders as "everything", which is the least surprising fallback for
+ * a link to a view that no longer exists.
  */
 type WorkTypeFilter = "all" | "tickets" | "chargeable";
-
-const WORK_TYPE_FILTERS: ReadonlyArray<{
-  value: WorkTypeFilter;
-  labelKey: string;
-}> = [
-  { value: "all", labelKey: "work_type.all" },
-  { value: "tickets", labelKey: "work_type.tickets_only" },
-  { value: "chargeable", labelKey: "work_type.chargeable" },
-];
 
 // (RF-16 removed the dashboard Extra Work status breakdown — the EW
 // status vocabulary now lives with the list on ExtraWorkListPage.)
@@ -185,12 +181,9 @@ export function DashboardPage({
   customerId,
   hideHeader = false,
 }: {
-  /** Sprint 181 §5 — `"chargeable-work"` is the Tickets page narrowed
-   *  to tickets born from an Extra Work. A THIRD variant rather than a
-   *  fourth copy of the ticket surface, for the same reason
-   *  `CustomerTicketsPage` stopped being one: a list must behave the
-   *  same however you reach it. */
-  variant?: "dashboard" | "tickets-page" | "chargeable-work";
+  /** Sprint 183 §1 — the `"chargeable-work"` variant is gone with its
+   *  sub-page. The narrowing it stood for is the list's own chip now. */
+  variant?: "dashboard" | "tickets-page";
   /** Sprint 169 §8 — mounted INSIDE a customer: the list is narrowed to
    *  that customer and everything else is identical.
    *
@@ -207,12 +200,7 @@ export function DashboardPage({
   /** The customer page draws its own header. */
   hideHeader?: boolean;
 } = {}) {
-  // Sprint 181 §5 — the chargeable-work sub-page IS the tickets page,
-  // with one filter pinned on. Everything `isTicketsPage` gates (the
-  // ticket surface, the filters, bulk actions, pagination) applies to
-  // it unchanged.
-  const isChargeableWork = variant === "chargeable-work";
-  const isTicketsPage = variant === "tickets-page" || isChargeableWork;
+  const isTicketsPage = variant === "tickets-page";
   const navigate = useNavigate();
   const { me } = useAuth();
   const { push } = useToast();
@@ -281,18 +269,14 @@ export function DashboardPage({
     return variant === "tickets-page" ? "OPEN" : "";
   });
   /**
-   * Sprint 182 §4 — `?work=tickets` / `?work=chargeable`, URL-backed so
-   * the view survives a refresh and can be linked to.
-   *
-   * The Chargeable work SUB-PAGE (`/tickets/chargeable`) is the same
-   * thing reached by a route, so it starts on `chargeable` and its
-   * segments navigate rather than filter — one meaning, two doors, never
-   * two behaviours.
+   * Sprint 183 §1 — `?work=tickets`, URL-backed so the view survives a
+   * refresh and can be linked to. `?work=chargeable` from an old
+   * bookmark parses to "all": the view it named no longer exists, and
+   * showing everything is friendlier than showing nothing.
    */
   const [workTypeFilter, setWorkTypeFilter] = useState<WorkTypeFilter>(() => {
-    if (variant === "chargeable-work") return "chargeable";
     const raw = new URLSearchParams(window.location.search).get("work");
-    return raw === "tickets" || raw === "chargeable" ? raw : "all";
+    return raw === "tickets" ? raw : "all";
   });
   const [unassignedFilter, setUnassignedFilter] = useState(
     () => new URLSearchParams(window.location.search).get("unassigned") === "1",
@@ -423,11 +407,10 @@ export function DashboardPage({
     // (where the clear chip is shown).
     // The fixed customer, when this list is mounted inside one.
     if (customerId !== undefined) params.customer = customerId;
-    // Sprint 181 §5 / Sprint 182 §4 — the work-type narrowing. The
-    // chargeable-work sub-page IS `work=chargeable`, which is why its
-    // state starts there rather than pinning a second parallel flag.
-    // Server-side (`TicketFilter.is_extra_work`), so the narrowing
-    // survives pagination instead of filtering one page.
+    // Sprint 183 §1 — the work-type narrowing, server-side
+    // (`TicketFilter.is_extra_work`) so it survives pagination instead
+    // of filtering one page. Sprint 183 §2 sends the SAME parameter to
+    // `/tickets/stats/`, which is what stopped the chips showing dashes.
     if (isTicketsPage) {
       if (workTypeFilter === "chargeable") params.is_extra_work = "true";
       else if (workTypeFilter === "tickets") params.is_extra_work = "false";
@@ -1046,14 +1029,7 @@ export function DashboardPage({
             {isTicketsPage ? t("tickets_page.eyebrow") : t("eyebrow")}
           </div>
           <h2 className="page-title">
-            {/* Sprint 181 §5 — the sub-page says the NAME, and it is the
-                same name the nav entry, the row pill and the Extra Work
-                list's second tab use. */}
-            {isChargeableWork
-              ? t("common:chargeable_work.title")
-              : isTicketsPage
-                ? t("tickets_page.title")
-                : t("title")}
+            {isTicketsPage ? t("tickets_page.title") : t("title")}
           </h2>
           <p className="page-sub">
             {/* RF-16 — the dashboard loads no list, so the list-count
@@ -1862,48 +1838,34 @@ export function DashboardPage({
             precisely why these come from the stats endpoint and
             not from `tickets`. Until it resolves, `-1` renders
             an em dash rather than a wrong number. */}
-        {/* Sprint 182 §4 — which work this list is showing, as a
-            control rather than as a route you either found or did not.
-            Always rendered, so the active view is visible and "All
-            work" is one click away. */}
+        {/* Sprint 183 §1 — ONE chip. The owner asked for "just a chip on
+            tickets to show regular tickets only", and the sub-page that
+            used to be its twin is deleted. Pressed = ordinary tickets
+            only; unpressed = everything, which is the default and always
+            one click away. */}
         <div className="work-strip" style={{ marginBottom: 12 }}>
-          <span className="work-strip-label">{t("work_type.label")}</span>
           <div className="work-strip-toggle" data-testid="tickets-work-type">
-            {WORK_TYPE_FILTERS.map((option) => {
-              const active = workTypeFilter === option.value;
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
-                  aria-pressed={active}
-                  data-testid={`tickets-work-type-${option.value}`}
-                  onClick={() => {
-                    // The sub-page reached by ROUTE keeps its route: a
-                    // segment click there navigates to the list rather
-                    // than turning the page into a different one behind
-                    // the same URL.
-                    if (isChargeableWork) {
-                      navigate(
-                        option.value === "chargeable"
-                          ? "/tickets/chargeable"
-                          : `/tickets?work=${option.value}`,
-                      );
-                      return;
-                    }
-                    setPage(1);
-                    setSelectedIds(new Set<number>());
-                    setWorkTypeFilter(option.value);
-                    const next = new URLSearchParams(searchParams);
-                    if (option.value === "all") next.delete("work");
-                    else next.set("work", option.value);
-                    setSearchParams(next, { replace: true });
-                  }}
-                >
-                  {t(option.labelKey)}
-                </button>
-              );
-            })}
+            <button
+              type="button"
+              className={`btn btn-sm ${
+                workTypeFilter === "tickets" ? "btn-primary" : "btn-secondary"
+              }`}
+              aria-pressed={workTypeFilter === "tickets"}
+              data-testid="tickets-work-type-tickets"
+              onClick={() => {
+                const next_value =
+                  workTypeFilter === "tickets" ? "all" : "tickets";
+                setPage(1);
+                setSelectedIds(new Set<number>());
+                setWorkTypeFilter(next_value);
+                const next = new URLSearchParams(searchParams);
+                if (next_value === "all") next.delete("work");
+                else next.set("work", next_value);
+                setSearchParams(next, { replace: true });
+              }}
+            >
+              {t("work_type.tickets_only")}
+            </button>
           </div>
         </div>
 

@@ -172,19 +172,13 @@ export function ticketStatusLabelKey(status: TicketStatus | string): string {
       return "ticket_status.closed";
     case "REOPENED_BY_ADMIN":
       return "ticket_status.reopened_by_admin";
-    // Sprint 182 §2 — the ninth status had no case here, so anything
-    // that reached this resolver with a converted ticket rendered
-    // "Unknown status". It is not unknown; it is the one status this
-    // vocabulary had never been given a word for.
-    //
-    // The key deliberately keeps the OLDER `status.` prefix: that string
-    // ("Converted to Extra Work" / "Geconverteerd naar Extra Werk") is
-    // already crisp and already translated, and inventing a
-    // `ticket_status.` twin would put two spellings of one status in one
-    // namespace — the exact drift this sprint is closing. Same namespace,
-    // same `t()`, one string.
+    // Sprint 182 §2 gave the ninth status a case here but pointed it at
+    // the OLDER `common:status.*` block, reasoning that the string was
+    // already crisp so a twin would be drift. Sprint 183 §3 deletes that
+    // block, so the key moves into the one surviving namespace. Same
+    // string, same `t()`, one vocabulary — which is the whole point.
     case "CONVERTED_TO_EXTRA_WORK":
-      return "status.converted_to_extra_work";
+      return "ticket_status.converted_to_extra_work";
     default:
       return "ticket_status.fallback";
   }

@@ -1026,8 +1026,31 @@ class WorkPlanRuleParityTests(WorkPlanFixture, APITestCase):
         )
         for entry in payload["overdue_entries"]:
             with self.subTest(key=entry["key"]):
+                # Being LATE is the property this list selects on, and it
+                # is a flag of its own on the entry.
                 self.assertTrue(entry["is_overdue"])
-                self.assertEqual(entry["placement"], PLACEMENT_OVERDUE)
+                # Sprint 183 §4 — this used to demand `placement ==
+                # OVERDUE`, and that was wrong. PLACEMENT answers a
+                # different question: WHY is this card in the week on
+                # screen. A job whose planned window covers the current
+                # week is at HOME in it (PLACEMENT_PLANNED) and can be
+                # late at the same time — planned for Monday, still not
+                # done on Thursday. Both are true, which is precisely why
+                # `is_overdue` is a separate field and not a placement
+                # value.
+                #
+                # The old assertion only failed on the weekdays where a
+                # fixture's overdue row happened to land inside the
+                # current ISO week: `today - 5 days` is last week on a
+                # Tuesday and THIS week on a Saturday. It passed for
+                # months and then failed on a Saturday — the worst kind
+                # of test, one whose result depends on when it is run.
+                self.assertIn(
+                    entry["placement"],
+                    (PLACEMENT_OVERDUE, PLACEMENT_PLANNED),
+                    "an overdue row is either dragged into this week by "
+                    "rule 3, or already at home in it",
+                )
 
     def test_every_card_outside_its_planned_week_carries_a_reason(self):
         """§12B: "A card shown outside its planned week must say why."
