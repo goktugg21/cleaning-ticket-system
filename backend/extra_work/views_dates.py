@@ -137,7 +137,7 @@ class ExtraWorkBulkDatesView(APIView):
         # into "clear" for every row in the batch.
         fields = {
             key: data[key]
-            for key in ("deadline", "planned_end_date")
+            for key in ("deadline", "planned_end_date", "provider_planned_date")
             if key in data
         }
 

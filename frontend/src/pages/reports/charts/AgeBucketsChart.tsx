@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { useTranslation } from "react-i18next";
 import type { ReportFilters } from "../../../api/reports";
+import { ticketStatusLabelKey } from "../../../lib/enumLabels";
 import { fetchAgeBuckets } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
 
@@ -29,15 +30,17 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
     refreshKey,
   });
 
-  // Subtitle stitches the four status names from the shared common.status.*
-  // namespace so the chart copy matches the labels rendered everywhere else
-  // (status filter, ticket detail header, etc.). Avoids leaking raw enum
-  // values like APPROVED / WAITING_CUSTOMER_APPROVAL into user copy.
+  // Sprint 183 integration — the LAST consumer of the retired
+  // `common:status.*` block. Agent B deleted six of those keys and had to
+  // leave three alive purely because this one file was another agent's;
+  // moving it here lets the whole vocabulary die. Every status name in the
+  // app now comes from `ticketStatusLabelKey`, so the chart copy cannot
+  // drift from the chips and badges it describes.
   const subtitle = t("age_buckets_subtitle", {
-    approved: t("common:ticket_status.approved"),
-    rejected: t("common:status.rejected"),
-    waiting: t("common:status.waiting_customer_approval"),
-    reopened: t("common:status.reopened_by_admin"),
+    approved: t(`common:${ticketStatusLabelKey("APPROVED")}`),
+    rejected: t(`common:${ticketStatusLabelKey("REJECTED")}`),
+    waiting: t(`common:${ticketStatusLabelKey("WAITING_CUSTOMER_APPROVAL")}`),
+    reopened: t(`common:${ticketStatusLabelKey("REOPENED_BY_ADMIN")}`),
   });
 
   return (
