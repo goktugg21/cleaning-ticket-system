@@ -57,10 +57,20 @@ class GenerateDraftInvoicesTests(InvoicingFixture):
             self.assertEqual(inv.total_amount, Decimal("121.00"))
 
     def test_granularity_defaults_from_customer(self):
-        self.customer.invoice_granularity_default = (
-            Customer.InvoiceGranularity.PER_BUILDING
+        # Sprint 182 §3 — the customer's stored default IS the
+        # (target, split) pair now, and `invoice_granularity_default` is
+        # DERIVED from it, so setting the legacy column alone no longer
+        # states a preference. This is the faithful update of the test's
+        # subject rather than a loosened assertion: it still asserts that
+        # generation with `granularity=None` follows what the CUSTOMER is
+        # set to, and still expects two per-building invoices.
+        self.customer.invoice_billing_target = (
+            Customer.InvoiceBillingTarget.BUILDING
         )
-        self.customer.save(update_fields=["invoice_granularity_default"])
+        self.customer.invoice_split = Customer.InvoiceSplit.NONE
+        self.customer.save(
+            update_fields=["invoice_billing_target", "invoice_split"]
+        )
         self.make_ew(closed_at=dt(2026, 5, 31), building=self.building)
         self.make_ew(closed_at=dt(2026, 5, 31), building=self.building2)
         created = generate_draft_invoices(

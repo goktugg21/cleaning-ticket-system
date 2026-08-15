@@ -22,9 +22,12 @@ import { BadgeEuro } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
+  fetchInvoicePreviewPdf,
   generateInvoices,
   getInvoiceDueList,
+  getInvoicePreview,
   listAllInvoices,
+  type InvoicePreview,
 } from "../api/invoices";
 import type {
   Invoice,
@@ -35,7 +38,11 @@ import type {
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { useToast } from "../components/ToastProvider";
-import { formatInvoiceGroupLabel, formatMoney } from "../lib/intl";
+import {
+  formatDateTime,
+  formatInvoiceGroupLabel,
+  formatMoney,
+} from "../lib/intl";
 
 type StatusFilter = InvoiceStatus | "ALL";
 
@@ -95,6 +102,14 @@ export function FacturenPage({
   const [genGranularity, setGenGranularity] =
     useState<InvoiceGranularity>("CUSTOMER");
   const [genBusy, setGenBusy] = useState(false);
+
+  // Sprint 182 §2 — the preview. NOTHING IS STORED server-side, so this
+  // state is the only copy and it is thrown away when the panel closes;
+  // reopening recomputes. That is the point: a stored preview is a draft
+  // in all but name, and two kinds of draft is how you invoice twice.
+  const [previewRow, setPreviewRow] = useState<InvoiceDueRow | null>(null);
+  const [preview, setPreview] = useState<InvoicePreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
 
   // Due panel (skipped when customer-scoped / embedded).
   useEffect(() => {
@@ -184,6 +199,49 @@ export function FacturenPage({
         : currentMonthValue(),
     );
     setGenGranularity(row.invoice_granularity_default);
+  }
+
+  // Sprint 182 §2 — recomputed on every open, never cached across opens.
+  async function openPreview(row: InvoiceDueRow) {
+    setPreviewRow(row);
+    setPreview(null);
+    setPreviewBusy(true);
+    setError("");
+    try {
+      setPreview(
+        await getInvoicePreview({
+          customer: row.customer,
+          year: row.period_year,
+          month: row.period_month,
+        }),
+      );
+    } catch (err) {
+      setError(getApiError(err));
+      setPreviewRow(null);
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function handleDownloadPreview() {
+    if (!previewRow) return;
+    try {
+      const blob = await fetchInvoicePreviewPdf({
+        customer: previewRow.customer,
+        year: previewRow.period_year,
+        month: previewRow.period_month,
+      });
+      // Opened in a tab rather than force-downloaded: the operator is
+      // checking numbers, not filing a document, and the PDF is stamped
+      // PREVIEW on every page so a stray tab cannot be mistaken for an
+      // invoice.
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      // Revoked on the next tick so the opened tab has taken the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(getApiError(err));
+    }
   }
 
   async function handleGenerate() {
@@ -299,6 +357,19 @@ export function FacturenPage({
                         {formatMoney(row.unbilled_total)}
                       </td>
                       <td style={{ textAlign: "right" }}>
+                        {/* Sprint 182 §2 — look before you cut. The
+                            preview shows what a run WOULD produce, from
+                            the same calculation that produces it. */}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => openPreview(row)}
+                          disabled={row.unbilled_count === 0}
+                          data-testid="facturen-preview-open"
+                          style={{ marginRight: 8 }}
+                        >
+                          {t("facturen.preview_open")}
+                        </button>
                         <button
                           type="button"
                           className="btn btn-primary btn-sm"
@@ -313,6 +384,110 @@ export function FacturenPage({
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Sprint 182 §2 — the preview panel. Read-only: it creates
+              nothing and claims nothing, so it is safe to open at any
+              time and safe to close without deciding anything. */}
+          {previewRow && (
+            <div
+              className="card"
+              style={{ padding: 14, marginTop: 12 }}
+              data-testid="facturen-preview-panel"
+            >
+              <div className="section-head-title" style={{ marginBottom: 4 }}>
+                {t("facturen.preview_title", {
+                  name: previewRow.customer_name,
+                })}
+              </div>
+              <p className="muted small" style={{ marginTop: 0 }}>
+                {t("facturen.preview_disclaimer")}
+              </p>
+
+              {previewBusy && (
+                <div className="loading-bar">
+                  <div className="loading-bar-fill" />
+                </div>
+              )}
+
+              {!previewBusy && preview && preview.invoice_count === 0 && (
+                <p className="muted small" data-testid="facturen-preview-empty">
+                  {t("facturen.preview_empty")}
+                </p>
+              )}
+
+              {!previewBusy && preview && preview.invoice_count > 0 && (
+                <>
+                  <div className="table-wrap">
+                    <table
+                      className="data-table"
+                      data-testid="facturen-preview-table"
+                    >
+                      <thead>
+                        <tr>
+                          <th>{t("facturen.preview_col_addressed_to")}</th>
+                          <th style={{ textAlign: "right" }}>
+                            {t("facturen.preview_col_lines")}
+                          </th>
+                          <th style={{ textAlign: "right" }}>
+                            {t("facturen.preview_col_total")}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preview.invoices.map((planned, index) => (
+                          <tr
+                            key={`${planned.building ?? "customer"}-${planned.department ?? "d"}-${planned.work_type ?? "w"}-${index}`}
+                            data-testid="facturen-preview-row"
+                          >
+                            <td>
+                              {planned.building_name ??
+                                t("facturen.preview_customer_level")}
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              {planned.line_count}
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              {formatMoney(planned.total_amount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p
+                    className="muted small"
+                    data-testid="facturen-preview-computed-at"
+                  >
+                    {t("facturen.preview_computed_at", {
+                      when: formatDateTime(preview.computed_at),
+                    })}
+                  </p>
+                </>
+              )}
+
+              <div className="form-actions" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setPreviewRow(null);
+                    setPreview(null);
+                  }}
+                >
+                  {t("facturen.preview_close")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleDownloadPreview}
+                  disabled={previewBusy || !preview?.invoice_count}
+                  data-testid="facturen-preview-download"
+                >
+                  {t("facturen.preview_download")}
+                </button>
+              </div>
             </div>
           )}
 

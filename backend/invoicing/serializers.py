@@ -14,6 +14,80 @@ from rest_framework import serializers
 from .models import Invoice, InvoiceLine
 
 
+class InvoicePreviewLineSerializer(serializers.Serializer):
+    """Sprint 182 §2 — one row of a PLANNED invoice.
+
+    Shaped from an `ExtraWorkRequest`, not an `InvoiceLine`, because no
+    line exists: nothing is stored. The field names deliberately mirror
+    `InvoiceLineSerializer` so the frontend renders a preview and a real
+    invoice through the same table.
+    """
+
+    extra_work = serializers.IntegerField(source="id", read_only=True)
+    description = serializers.CharField(source="title", read_only=True)
+    line_subtotal = serializers.SerializerMethodField()
+    line_vat = serializers.SerializerMethodField()
+    line_total = serializers.SerializerMethodField()
+
+    def _amounts(self, ew):
+        from .services import _earned_amounts
+
+        return _earned_amounts(ew)
+
+    def get_line_subtotal(self, ew):
+        return f"{self._amounts(ew)[0] or 0:.2f}"
+
+    def get_line_vat(self, ew):
+        return f"{self._amounts(ew)[1] or 0:.2f}"
+
+    def get_line_total(self, ew):
+        return f"{self._amounts(ew)[2] or 0:.2f}"
+
+
+class InvoicePreviewSerializer(serializers.Serializer):
+    """Sprint 182 §2 — one invoice that WOULD be created.
+
+    No `id` and no `number`, deliberately: a preview is not an invoice and
+    must never be mistaken for one. Numbering happens at Send and has to
+    stay gapless, so nothing on this shape can carry a number.
+    """
+
+    building = serializers.IntegerField(source="building_id", allow_null=True)
+    building_name = serializers.SerializerMethodField()
+    department = serializers.IntegerField(
+        source="department_id", allow_null=True
+    )
+    work_type = serializers.IntegerField(source="work_type_id", allow_null=True)
+    granularity = serializers.CharField()
+    subtotal_amount = serializers.SerializerMethodField()
+    vat_amount = serializers.SerializerMethodField()
+    total_amount = serializers.SerializerMethodField()
+    line_count = serializers.SerializerMethodField()
+    lines = serializers.SerializerMethodField()
+
+    def get_building_name(self, plan):
+        # The plan owns this, so the PREVIEW PDF labels the same plan the
+        # same way (`preview_pdf.render_preview_pdf`).
+        return plan.building_name
+
+    def get_subtotal_amount(self, plan):
+        return f"{plan.subtotal:.2f}"
+
+    def get_vat_amount(self, plan):
+        return f"{plan.vat:.2f}"
+
+    def get_total_amount(self, plan):
+        return f"{plan.total:.2f}"
+
+    def get_line_count(self, plan):
+        return len(plan.extra_works)
+
+    def get_lines(self, plan):
+        return InvoicePreviewLineSerializer(
+            plan.extra_works, many=True, context=self.context
+        ).data
+
+
 class InvoiceLineSerializer(serializers.ModelSerializer):
     """Read shape for one invoice line (both origins). `extra_work` is the
     source-EW id (NULL for a hand-added line)."""
