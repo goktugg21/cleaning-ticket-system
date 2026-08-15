@@ -61,6 +61,46 @@ def _extra_work_origin_q() -> Q:
     )
 
 
+def apply_is_extra_work(queryset, value):
+    """Narrow to chargeable work (`True`) or to ordinary tickets
+    (`False`); `None` leaves the queryset alone.
+
+    Sprint 183 §2 — shared by `TicketFilter.filter_is_extra_work` (the
+    rows) and `TicketViewSet.stats` (the chips above them), for exactly
+    the reason `exclude_finished_extra_work` below is shared: a chip
+    counting a different set from the list it sits on is worse than no
+    chip at all.
+
+    The two branches are exact COMPLEMENTS by construction — one `Q`,
+    filtered and excluded — which is what makes "the chips sum to the
+    All tile" a property rather than a coincidence. All three parentage
+    paths are forward FKs on Ticket (`extra_work_request`,
+    `extra_work_request_item`, `proposal_line`), so `isnull` compiles to
+    a local column, there is no join fan-out, and neither side needs
+    `.distinct()`. Adding one to only the `True` branch — which is what
+    this code used to do — is how the complement breaks quietly.
+    """
+    if value is None:
+        return queryset
+    origin = _extra_work_origin_q()
+    return queryset.filter(origin) if value else queryset.exclude(origin)
+
+
+def parse_is_extra_work(raw):
+    """`?is_extra_work=` as a tri-state.
+
+    `None` when absent OR unrecognised: an unparseable value must mean
+    "no opinion", never "ordinary tickets only", or one typo in a URL
+    would silently hide every chargeable row and the page would look
+    like it had lost data.
+    """
+    if raw in {"true", "True", "1"}:
+        return True
+    if raw in {"false", "False", "0"}:
+        return False
+    return None
+
+
 def exclude_finished_extra_work(queryset):
     """
     Drop EW-spawned tickets whose OWN work is finished.
@@ -199,16 +239,14 @@ class TicketFilter(df.FilterSet):
         ).distinct()
 
     def filter_is_extra_work(self, queryset, name, value):
-        # Sprint 181 §5. `distinct()` because two of the three parentage
-        # paths join through a to-many relation and would multiply rows.
-        if value is None:
-            return queryset
-        origin = _extra_work_origin_q()
-        return (
-            queryset.filter(origin).distinct()
-            if value
-            else queryset.exclude(origin)
-        )
+        # Sprint 181 §5, moved to the shared helper in Sprint 183 §2 so
+        # the stats endpoint counts the same rows this lists. The old
+        # body called `.distinct()` on the True branch only, citing a
+        # to-many join that `_extra_work_origin_q`'s own docstring says
+        # does not exist — all three paths are forward FKs. Dropping it
+        # makes the two branches exact complements, which is what the
+        # chip-sum test rests on.
+        return apply_is_extra_work(queryset, value)
 
     def filter_hide_finished_extra_work(self, queryset, name, value):
         # Sprint 180 §2. A falsy value leaves the queryset untouched, so

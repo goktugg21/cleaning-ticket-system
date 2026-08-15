@@ -191,15 +191,9 @@
   "refresh": "Vernieuwen",
   "loading": "Laden…",
   "back_to_tickets": "Terug naar tickets",
-  "status.open": "Open",
-  "status.in_progress": "In behandeling",
-  "status.waiting_manager_review": "Wachten op manager-review",
-  "status.waiting_customer_approval": "Wacht op goedkeuring",
-  "status.approved": "Goedgekeurd",
+  "status.waiting_customer_approval": "Wacht op klant",
   "status.rejected": "Afgewezen",
-  "status.closed": "Gesloten",
   "status.reopened_by_admin": "Heropend",
-  "status.converted_to_extra_work": "Geconverteerd naar Extra Werk",
   "sla.on_track": "Op schema",
   "sla.at_risk": "Risico",
   "sla.breached": "Overschreden",
@@ -2375,5 +2369,6 @@
   "chargeable_work.title": "Meerwerk",
   "chargeable_work.subtitle": "Meldingen die uit een goedgekeurd extra werk zijn ontstaan.",
   "chargeable_work.pill": "Meerwerk",
-  "chargeable_work.pill_title": "Deze melding komt uit een extra werk. Open het extra werk."
+  "chargeable_work.pill_title": "Deze melding komt uit een extra werk. Open het extra werk.",
+  "ticket_status.converted_to_extra_work": "Geconverteerd naar meerwerk"
 }

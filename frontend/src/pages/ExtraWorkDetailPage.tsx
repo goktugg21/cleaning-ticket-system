@@ -1759,7 +1759,35 @@ export function ExtraWorkDetailPage() {
         title={ew.title}
         meta={
           <div className="ew-detail-header-meta">
-            <StatusBadge status={{ kind: "extra-work", value: ew.status }} />
+            {/* Sprint 183 §3 — an extra work that WENT OPERATIONAL shows
+                its TICKET's status here, exactly as its row already does
+                in the list (Sprint 181 §1). Same component, same
+                resolver, same string, same colour.
+
+                The owner, twice: "an extra work that went operational
+                has a ticket page and an extra work page. The statuses
+                must be identical — not similar, identical — and come
+                from the same place."
+
+                They did not. The list learned to read the ticket in
+                Sprint 181; this page was left reading `ew.status`, so
+                one screen said "Price approved" while the other said
+                "Open" about the same job. The extra work's own status is
+                the COMMERCIAL state and remains the truth for anything
+                not yet started; once a ticket exists, the ticket is what
+                is happening.
+
+                Nothing about the extra work's status is CHANGED — this
+                is a display change to this one block, which is all this
+                branch may touch in this file. */}
+            <StatusBadge
+              status={
+                ew.spawned_tickets.length > 0
+                  ? { kind: "ticket", value: ew.spawned_tickets[0].status }
+                  : { kind: "extra-work", value: ew.status }
+              }
+              testId="extra-work-header-status"
+            />
             {/* Sprint 182 §3 — the money, beside the status.
                 The owner: "when I open an extra work from Chargeable
                 work, show me its money too — the way the row does."

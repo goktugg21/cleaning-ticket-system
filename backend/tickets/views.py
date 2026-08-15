@@ -30,7 +30,12 @@ from notifications.services import (
     ticket_message_audience,
 )
 
-from .filters import TicketFilter, exclude_finished_extra_work
+from .filters import (
+    TicketFilter,
+    apply_is_extra_work,
+    exclude_finished_extra_work,
+    parse_is_extra_work,
+)
 from .models import (
     Ticket,
     TicketAttachment,
@@ -1173,6 +1178,23 @@ class TicketViewSet(
             "1",
         }:
             scoped = exclude_finished_extra_work(scoped)
+
+        # Sprint 183 §2 — the SAME work-type parameter the list takes.
+        #
+        # Sprint 182 gave the Tickets page a work-type control but not
+        # this endpoint, so under "Tickets only" every status chip fell
+        # back to an em dash: the page had no number to show because it
+        # had no way to ask for one. A chip showing a dash is a chip that
+        # stopped answering.
+        #
+        # `apply_is_extra_work` is the LIST's own helper, so the chips
+        # and the rows beneath them are counted from one definition, and
+        # its two branches are exact complements — which is what makes
+        # the two halves sum back to the unfiltered total.
+        scoped = apply_is_extra_work(
+            scoped,
+            parse_is_extra_work(request.query_params.get("is_extra_work")),
+        )
 
         status_counts = {row["status"]: row["c"] for row in scoped.values("status").annotate(c=Count("id"))}
         priority_counts = {row["priority"]: row["c"] for row in scoped.values("priority").annotate(c=Count("id"))}
