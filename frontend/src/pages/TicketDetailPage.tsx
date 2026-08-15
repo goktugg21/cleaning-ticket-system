@@ -70,6 +70,7 @@ import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
 import { useSLALabel } from "../utils/useSLALabel";
+import { ticketStatusLabelKey } from "../lib/enumLabels";
 
 // B7 four-tier note taxonomy — per-tier UI vocabulary. The bubble class
 // flags "private to provider" tiers ("internal") so existing CSS keeps
@@ -326,7 +327,8 @@ export function TicketDetailPage() {
 
   const tStatus = (status: TicketStatus | string | null): string => {
     if (!status) return t("status_default_created");
-    return t(`common:status.${status.toLowerCase()}`);
+    // Sprint 182 integration -- one vocabulary. See UnifiedTimeline.
+    return t(`common:${ticketStatusLabelKey(status)}`);
   };
 
   const priorityLabelLong = (priority: string): string => {
@@ -2849,7 +2851,7 @@ export function TicketDetailPage() {
                 ? t("card_workflow_title_staff_complete")
                 : t("card_workflow_title")
             }
-            meta={t(`common:status.${ticket.status.toLowerCase()}`)}
+            meta={t(`common:${ticketStatusLabelKey(ticket.status)}`)}
             defaultOpen
             testId="side-card-workflow"
           >

@@ -34,7 +34,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
   // (status filter, ticket detail header, etc.). Avoids leaking raw enum
   // values like APPROVED / WAITING_CUSTOMER_APPROVAL into user copy.
   const subtitle = t("age_buckets_subtitle", {
-    approved: t("common:status.approved"),
+    approved: t("common:ticket_status.approved"),
     rejected: t("common:status.rejected"),
     waiting: t("common:status.waiting_customer_approval"),
     reopened: t("common:status.reopened_by_admin"),

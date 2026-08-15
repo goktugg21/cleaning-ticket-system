@@ -27,7 +27,7 @@ import type {
   TimelineStatusHistoryRow,
 } from "../api/types";
 import { formatDate } from "../lib/intl";
-import { prettyEnum } from "../lib/enumLabels";
+import { prettyEnum, ticketStatusLabelKey } from "../lib/enumLabels";
 import { ChangeDiff } from "./ChangeDiff";
 import { StatusBadge } from "./StatusBadge";
 
@@ -98,7 +98,11 @@ export function UnifiedTimeline({ rows }: { rows: TicketTimelineRow[] }) {
 
   const tStatus = (status: string | null): string => {
     if (!status) return t("status_default_created");
-    return t(`common:status.${status.toLowerCase()}`);
+    // Sprint 182 integration -- the crisp set. `common:status.*` says
+    // "Waiting approval" where `ticket_status.*` says "Waiting customer
+    // approval": the same row read one way in the list and another way
+    // in the timeline beside it.
+    return t(`common:${ticketStatusLabelKey(status)}`);
   };
   const unassigned = t("unassigned");
 
