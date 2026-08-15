@@ -3654,6 +3654,30 @@ a.attn-row:hover {
   flex-direction: column;
   gap: 2px;
 }
+/* Sprint 182 §5 — the same hole `active-filter-chip` had, one section
+   further down the same page.
+
+   `.mywork-section` wraps the "My work" block on the dashboard and was
+   defined in no CSS file, so the block rendered as a bare <section>:
+   no surface, no border, no separation from the attention card directly
+   above it, and its `.section-head` — which brings its OWN white
+   background and bottom rule — sat on the page background with nothing
+   around it. The chips inside it were styled; the thing holding them
+   was not.
+
+   The house card treatment, the same three tokens `.card` uses, so this
+   block reads as one of the page's cards rather than as a fourth
+   vocabulary. The head keeps its own inset; the chips get the card's. */
+.mywork-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.mywork-section .mywork-chips {
+  padding: 0 20px 16px;
+}
 .mywork-chips {
   display: flex;
   flex-wrap: wrap;

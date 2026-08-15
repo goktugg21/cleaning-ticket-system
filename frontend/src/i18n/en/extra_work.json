@@ -47,8 +47,8 @@
   "kpi.open_meta": "Awaiting provider review",
   "kpi.awaiting_label": "Awaiting customer",
   "kpi.awaiting_meta": "Pricing proposed",
-  "kpi.approved_label": "Approved",
-  "kpi.approved_meta": "Customer accepted",
+  "kpi.approved_label": "Price approved",
+  "kpi.approved_meta": "Customer accepted the quote",
   "kpi.value_label": "Total value",
   "kpi.value_meta": "Excludes cancelled",
   "quote.page_title": "Request a quote",
@@ -536,5 +536,6 @@
   "list.chip_ticket_finished": "Finished",
   "detail.operational_state": "Work status",
   "detail.operational_state_hint": "Follows ticket {{ticket}}. Move the ticket to change it.",
-  "detail.commercial_state": "Pricing status"
+  "detail.commercial_state": "Pricing status",
+  "detail.header_total_hint": "Final amount when the work is priced; the quoted estimate until then. Same figure as the list."
 }

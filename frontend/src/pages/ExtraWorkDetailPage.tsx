@@ -93,6 +93,8 @@ import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
 import { useToast } from "../components/ToastProvider";
+import { rowAmounts } from "../lib/billing";
+import { extraWorkStatusLabelKey } from "../lib/enumLabels";
 import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
 import { formatPlannedWindow } from "../lib/plannedWindow";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
@@ -108,17 +110,20 @@ const TERMINAL_TICKET_STATUSES: ReadonlySet<TicketStatus> = new Set<TicketStatus
 ]);
 
 
-const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
-  REQUESTED: "status.requested",
-  UNDER_REVIEW: "status.under_review",
-  PRICING_PROPOSED: "status.pricing_proposed",
-  CUSTOMER_APPROVED: "status.customer_approved",
-  // Sprint 29 Batch 29.8 — operational segment status labels.
-  IN_PROGRESS: "status.in_progress",
-  COMPLETED: "status.completed",
-  CUSTOMER_REJECTED: "status.customer_rejected",
-  CANCELLED: "status.cancelled",
-};
+// Sprint 182 §2 — this page's private status-label map is gone, for the
+// reason the list's was: it read `extra_work:status.*` ("Customer
+// approved") while the badge in this page's own header rendered
+// `common:extra_work_status.*` ("Price approved"). The workflow button
+// therefore offered to move a request to a status spelled differently
+// from the one the header would show once it got there.
+//
+// `extraWorkStatusLabelKey` is the one source. It lives in `common`, so
+// every call passes `{ ns: "common" }` — this page's default namespace
+// is `extra_work`.
+const tStatusLabel = (
+  t: (key: string, options?: Record<string, unknown>) => string,
+  status: ExtraWorkStatus,
+) => t(extraWorkStatusLabelKey(status), { ns: "common" });
 
 // Sprint 31 — meaningful provider action labels per transition so the
 // EW workflow reads as a guided flow (Start review -> Propose price ->
@@ -1393,7 +1398,7 @@ export function ExtraWorkDetailPage() {
     const key = PROVIDER_ACTION_I18N[`${ew.status}->${target}`];
     return key
       ? t(key)
-      : t("detail.workflow_move_to", { label: t(STATUS_I18N_KEY[target]) });
+      : t("detail.workflow_move_to", { label: tStatusLabel(t, target) });
   };
   // One-line provider guidance for the current step (early steps only).
   const stepHintKey =
@@ -1755,6 +1760,25 @@ export function ExtraWorkDetailPage() {
         meta={
           <div className="ew-detail-header-meta">
             <StatusBadge status={{ kind: "extra-work", value: ew.status }} />
+            {/* Sprint 182 §3 — the money, beside the status.
+                The owner: "when I open an extra work from Chargeable
+                work, show me its money too — the way the row does."
+                It WAS on this page, in the meta line of a collapsed
+                card near the bottom, and only once a final amount
+                existed — so a priced-but-not-yet-finished request
+                showed an amount in the list and nothing at all here.
+
+                `rowAmounts` is the one billing-total rule (CLAUDE.md:
+                final-with-quoted-fallback), and `formatMoney` is the
+                list's own formatter, so this figure is the row's figure
+                — same number, same rounding, same currency. */}
+            <span
+              className="cell-tag cell-tag-muted"
+              data-testid="extra-work-header-total"
+              title={t("detail.header_total_hint")}
+            >
+              {t("list.column_total")}: {formatMoney(rowAmounts(ew).total)}
+            </span>
             {/* Sprint 174 §3 — the deadline and started-early markers
                 live in the HEADER, beside the status. A warning you
                 have to open a collapsed card to find is not a warning.
@@ -2337,7 +2361,7 @@ export function ExtraWorkDetailPage() {
                                     {overrideBusy
                                       ? t("detail.override_submitting")
                                       : t("detail.override_confirm", {
-                                          label: t(STATUS_I18N_KEY[target]),
+                                          label: tStatusLabel(t, target),
                                         })}
                                   </button>
                                 </div>

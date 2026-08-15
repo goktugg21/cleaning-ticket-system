@@ -46,7 +46,14 @@ import { StatusTiles } from "../components/StatusTiles";
 import { useToast } from "../components/ToastProvider";
 import { useEditMode } from "../lib/useEditMode";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
+import { ticketStatusLabelKey } from "../lib/enumLabels";
+import {
+  TICKET_LIST_STATUSES,
+  ticketListStatusParam,
+  visibleTicketTotal,
+} from "../lib/ticketStatus";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
+import { StatusBadge } from "../components/StatusBadge";
 
 type SLAFilterValue =
   | ""
@@ -64,17 +71,36 @@ const PAGE_SIZE = 25;
 // Sprint 12: dashboard data refreshes silently every minute.
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
 
-const STATUS_OPTIONS: TicketStatus[] = [
-  "OPEN",
-  "IN_PROGRESS",
-  // Sprint 7 — surface the manager-review queue so provider management
-  // can preset the list to the bulk-confirm view ("te bevestigen").
-  "WAITING_MANAGER_REVIEW",
-  "WAITING_CUSTOMER_APPROVAL",
-  "APPROVED",
-  "REJECTED",
-  "CLOSED",
-  "REOPENED_BY_ADMIN",
+// Sprint 182 §1 — the hand-written eight-status array that used to sit
+// here is gone. It listed eight of the nine `TicketStatus` members, and
+// nothing warned anyone: the chips omitted `CONVERTED_TO_EXTRA_WORK`
+// while the "All" tile counted it, which is the owner's "ALL says 142
+// but the chips add up to 138". `lib/ticketStatus.ts` derives the list
+// from a `Record` over the union, so a ninth status now fails the
+// compiler instead of quietly vanishing from a screen.
+
+/**
+ * Sprint 182 §4 — "tickets only".
+ *
+ * Extra-work tickets and ordinary tickets were mixed with no way to see
+ * only the ordinary ones. `?is_extra_work=` has answered this on the
+ * server since Sprint 181 (`true` is what the Chargeable work sub-page
+ * sends); nothing on the ticket list ever asked it the other way round.
+ *
+ * A visible, always-rendered segmented control rather than a hidden
+ * mode: whichever segment is active is the one that is filled, and "All
+ * work" is always one click away. That is the house rule — nothing is
+ * hidden with no way back.
+ */
+type WorkTypeFilter = "all" | "tickets" | "chargeable";
+
+const WORK_TYPE_FILTERS: ReadonlyArray<{
+  value: WorkTypeFilter;
+  labelKey: string;
+}> = [
+  { value: "all", labelKey: "work_type.all" },
+  { value: "tickets", labelKey: "work_type.tickets_only" },
+  { value: "chargeable", labelKey: "work_type.chargeable" },
 ];
 
 // (RF-16 removed the dashboard Extra Work status breakdown — the EW
@@ -118,9 +144,10 @@ function priorityCellClass(priority: string): string {
   return `cell-tag cell-tag-${priority.toLowerCase()}`;
 }
 
-function statusCellClass(status: TicketStatus): string {
-  return `cell-tag cell-tag-${status.toLowerCase()}`;
-}
+// Sprint 182 §2 — `statusCellClass` is gone with the two cells that
+// called it. It derived a CSS class by lowercasing the enum, which is a
+// second colour vocabulary beside `StatusBadge`'s tone map: the two
+// agreed for six statuses and quietly disagreed for the rest.
 
 // Sprint 180 §3 — `ExtraWorkOriginPill` moved to
 // `components/ExtraWorkOriginPill.tsx`. It lived here as a local
@@ -191,8 +218,19 @@ export function DashboardPage({
   const { push } = useToast();
   const { t } = useTranslation(["dashboard", "common"]);
   const userRole = me?.role ?? null;
+  // Sprint 182 §2 — ONE word per status, from the source every other
+  // screen reads.
+  //
+  // This page built its own i18n key by lowercasing the enum, which
+  // reached the OLDER `common:status.*` block — where APPROVED is the
+  // bare word "Approved". That bare word labels at least five different
+  // things in this product, and on a ticket it means one specific thing:
+  // the customer accepted the finished WORK. `ticket_status.approved`
+  // already says exactly that ("Work approved" / "Werk akkoord") and is
+  // what `StatusBadge` has rendered on the Extra Work list for a sprint.
+  // Two screens showing one fact now show one string.
   const tStatus = (status: TicketStatus) =>
-    t(`common:status.${status.toLowerCase()}`);
+    t(ticketStatusLabelKey(status), { ns: "common" });
   const tPriority = (priority: string) =>
     t(`common:priority.${priority.toLowerCase()}`);
   const tSLAFilter = (value: Exclude<SLAFilterValue, "">) =>
@@ -237,10 +275,24 @@ export function DashboardPage({
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
     if (raw === "ALL") return "";
-    if (raw && (STATUS_OPTIONS as string[]).includes(raw)) {
+    if (raw && (TICKET_LIST_STATUSES as readonly string[]).includes(raw)) {
       return raw as TicketStatus;
     }
     return variant === "tickets-page" ? "OPEN" : "";
+  });
+  /**
+   * Sprint 182 §4 — `?work=tickets` / `?work=chargeable`, URL-backed so
+   * the view survives a refresh and can be linked to.
+   *
+   * The Chargeable work SUB-PAGE (`/tickets/chargeable`) is the same
+   * thing reached by a route, so it starts on `chargeable` and its
+   * segments navigate rather than filter — one meaning, two doors, never
+   * two behaviours.
+   */
+  const [workTypeFilter, setWorkTypeFilter] = useState<WorkTypeFilter>(() => {
+    if (variant === "chargeable-work") return "chargeable";
+    const raw = new URLSearchParams(window.location.search).get("work");
+    return raw === "tickets" || raw === "chargeable" ? raw : "all";
   });
   const [unassignedFilter, setUnassignedFilter] = useState(
     () => new URLSearchParams(window.location.search).get("unassigned") === "1",
@@ -339,6 +391,15 @@ export function DashboardPage({
   const queryParams = useMemo(() => {
     const params: Record<string, string | number> = { page };
     if (statusFilter) params.status = statusFilter;
+    // Sprint 182 §1 — the ROWS agree with the chips above them.
+    //
+    // A converted ticket is not on this list (the owner's decision: its
+    // work did not finish, it became an Extra Work), so with no status
+    // chosen the query asks for exactly the statuses the chips count.
+    // Server-side via `status__in`, because filtering the current page
+    // in the client would leave `count` — and therefore the pager and
+    // the "All" tile — describing a different set than the rows.
+    else if (isTicketsPage) params.status__in = ticketListStatusParam();
     if (priorityFilter) params.priority = priorityFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
     if (slaFilter) params.sla = slaFilter;
@@ -362,10 +423,15 @@ export function DashboardPage({
     // (where the clear chip is shown).
     // The fixed customer, when this list is mounted inside one.
     if (customerId !== undefined) params.customer = customerId;
-    // Sprint 181 §5 — the ONE thing that makes this the chargeable-work
-    // sub-page. Server-side (`TicketFilter.is_extra_work`), so the
-    // narrowing survives pagination instead of filtering one page.
-    if (isChargeableWork) params.is_extra_work = "true";
+    // Sprint 181 §5 / Sprint 182 §4 — the work-type narrowing. The
+    // chargeable-work sub-page IS `work=chargeable`, which is why its
+    // state starts there rather than pinning a second parallel flag.
+    // Server-side (`TicketFilter.is_extra_work`), so the narrowing
+    // survives pagination instead of filtering one page.
+    if (isTicketsPage) {
+      if (workTypeFilter === "chargeable") params.is_extra_work = "true";
+      else if (workTypeFilter === "tickets") params.is_extra_work = "false";
+    }
     if (isTicketsPage) {
       if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
       const typeParam = searchParams.get("type");
@@ -387,7 +453,7 @@ export function DashboardPage({
     searchParams,
     me,
     isTicketsPage,
-    isChargeableWork,
+    workTypeFilter,
   ]);
 
   const loadTickets = useCallback(async () => {
@@ -1796,14 +1862,74 @@ export function DashboardPage({
             precisely why these come from the stats endpoint and
             not from `tickets`. Until it resolves, `-1` renders
             an em dash rather than a wrong number. */}
+        {/* Sprint 182 §4 — which work this list is showing, as a
+            control rather than as a route you either found or did not.
+            Always rendered, so the active view is visible and "All
+            work" is one click away. */}
+        <div className="work-strip" style={{ marginBottom: 12 }}>
+          <span className="work-strip-label">{t("work_type.label")}</span>
+          <div className="work-strip-toggle" data-testid="tickets-work-type">
+            {WORK_TYPE_FILTERS.map((option) => {
+              const active = workTypeFilter === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
+                  aria-pressed={active}
+                  data-testid={`tickets-work-type-${option.value}`}
+                  onClick={() => {
+                    // The sub-page reached by ROUTE keeps its route: a
+                    // segment click there navigates to the list rather
+                    // than turning the page into a different one behind
+                    // the same URL.
+                    if (isChargeableWork) {
+                      navigate(
+                        option.value === "chargeable"
+                          ? "/tickets/chargeable"
+                          : `/tickets?work=${option.value}`,
+                      );
+                      return;
+                    }
+                    setPage(1);
+                    setSelectedIds(new Set<number>());
+                    setWorkTypeFilter(option.value);
+                    const next = new URLSearchParams(searchParams);
+                    if (option.value === "all") next.delete("work");
+                    else next.set("work", option.value);
+                    setSearchParams(next, { replace: true });
+                  }}
+                >
+                  {t(option.labelKey)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Sprint 182 §1/§4 — the counts and the rows describe the same
+            set, or the counts say they cannot know.
+
+            `/tickets/stats/` takes no work-type parameter, so under
+            "Tickets only" or "Chargeable work" it still counts every
+            ticket. Rather than print a number that disagrees with the
+            rows underneath it, the tiles fall back to `-1`, which
+            `StatusTiles` renders as an em dash — its documented answer
+            for "this list cannot know". The chips still FILTER; they
+            just stop claiming a total they do not have. Giving the
+            stats endpoint the same filter is a backend change and is in
+            the report as NEXT. */}
         <StatusTiles
-          tiles={STATUS_OPTIONS.map((value) => ({
+          tiles={TICKET_LIST_STATUSES.map((value) => ({
             value,
             // The page's OWN status label helper, the same one
             // the dropdown below uses — a second labelling path
             // here rendered raw enum names.
             label: tStatus(value),
-            count: stats ? (stats.by_status[value] ?? 0) : -1,
+            count:
+              stats && workTypeFilter === "all"
+                ? (stats.by_status[value] ?? 0)
+                : -1,
           }))}
           active={statusFilter}
           onChange={(value: string) => {
@@ -1811,7 +1937,22 @@ export function DashboardPage({
             setPage(1);
             setSelectedIds(new Set<number>());
           }}
-          totalCount={stats ? stats.total : count}
+          // Sprint 182 §1 — "All" counts what the chips count. It read
+          // `stats.total`, which includes the converted tickets this list
+          // does not show, so the tile and the chips below it were
+          // answering two different questions with one number.
+          //
+          // Under a work-type narrowing the server's own `count` for the
+          // current query is the only true total, and with a status chip
+          // on top of it even that answers a narrower question than the
+          // tile asks — so it says so.
+          totalCount={
+            workTypeFilter === "all"
+              ? visibleTicketTotal(stats)
+              : statusFilter
+                ? -1
+                : count
+          }
           testIdPrefix="tickets-status"
         />
 
@@ -1964,7 +2105,7 @@ export function DashboardPage({
                       }}
                     >
                       <option value="">{t("common:all_statuses")}</option>
-                      {STATUS_OPTIONS.map((status) => (
+                      {TICKET_LIST_STATUSES.map((status) => (
                         <option key={status} value={status}>
                           {tStatus(status)}
                         </option>
@@ -2225,10 +2366,19 @@ export function DashboardPage({
                             </span>
                           </td>
                           <td>
-                            <span className={statusCellClass(ticket.status)}>
-                              <i />
-                              {tStatus(ticket.status)}
-                            </span>
+                            {/* Sprint 182 §2 — the shared badge, so a
+                                ticket's status is the same word and the
+                                same colour here as on the Extra Work
+                                list showing the same ticket. This cell
+                                built its own class and looked up its own
+                                label, which is how "Approved" here and
+                                "Work approved" there became two
+                                spellings of one fact. */}
+                            <StatusBadge
+                              status={{ kind: "ticket", value: ticket.status }}
+                              variant="cell"
+                              testId={`ticket-row-status-${ticket.id}`}
+                            />
                           </td>
                           {/* Sprint 181 §4 — the SLA is a DIFFERENT
                               question from the workflow status beside
@@ -2308,10 +2458,15 @@ export function DashboardPage({
                             )}
                         </div>
                         <div className="ticket-card-pills">
-                          <span className={statusCellClass(ticket.status)}>
-                            <i />
-                            {tStatus(ticket.status)}
-                          </span>
+                          {/* The mobile card is the same row; it renders
+                              the same badge. Two renderers for one status
+                              is how the desktop table and the phone card
+                              start disagreeing. */}
+                          <StatusBadge
+                            status={{ kind: "ticket", value: ticket.status }}
+                            variant="cell"
+                            testId={`ticket-card-status-${ticket.id}`}
+                          />
                           <SLABadge
                             state={ticket.sla_display_state}
                             remainingSeconds={
@@ -2530,7 +2685,7 @@ export function DashboardPage({
                     <p className="muted small">{t("loading")}</p>
                   ) : (
                     <div className="bld-list">
-                      {STATUS_OPTIONS.map((key) => {
+                      {TICKET_LIST_STATUSES.map((key) => {
                         const value = stats.by_status[key] ?? 0;
                         return (
                           <div key={key} className="bld-row-head">

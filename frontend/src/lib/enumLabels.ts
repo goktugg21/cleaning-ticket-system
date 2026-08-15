@@ -172,6 +172,19 @@ export function ticketStatusLabelKey(status: TicketStatus | string): string {
       return "ticket_status.closed";
     case "REOPENED_BY_ADMIN":
       return "ticket_status.reopened_by_admin";
+    // Sprint 182 §2 — the ninth status had no case here, so anything
+    // that reached this resolver with a converted ticket rendered
+    // "Unknown status". It is not unknown; it is the one status this
+    // vocabulary had never been given a word for.
+    //
+    // The key deliberately keeps the OLDER `status.` prefix: that string
+    // ("Converted to Extra Work" / "Geconverteerd naar Extra Werk") is
+    // already crisp and already translated, and inventing a
+    // `ticket_status.` twin would put two spellings of one status in one
+    // namespace — the exact drift this sprint is closing. Same namespace,
+    // same `t()`, one string.
+    case "CONVERTED_TO_EXTRA_WORK":
+      return "status.converted_to_extra_work";
     default:
       return "ticket_status.fallback";
   }
@@ -207,6 +220,11 @@ export function ticketStatusTone(status: TicketStatus | string): StatusTone {
       return "closed";
     case "REOPENED_BY_ADMIN":
       return "reopened";
+    // Sprint 182 §2 — terminal, and NOT a success: the ticket's work
+    // never happened here. The closed (grey) tone rather than the
+    // approved (green) one, which would read as "finished well".
+    case "CONVERTED_TO_EXTRA_WORK":
+      return "closed";
     default:
       return "neutral";
   }
