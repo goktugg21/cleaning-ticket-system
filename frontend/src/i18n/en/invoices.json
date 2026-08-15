@@ -1,0 +1,22 @@
+{
+  "billing.target_label": "Who is the invoice made out to?",
+  "billing.target_customer": "The customer organisation",
+  "billing.target_customer_help": "One invoice covering every building.",
+  "billing.target_building": "Each building",
+  "billing.target_building_help": "A separate invoice per building.",
+  "billing.split_label": "And within one building?",
+  "billing.split_none": "One invoice per building",
+  "billing.split_none_example": "B1 Amsterdam's general cleaning and window cleaning for the month go on one invoice together.",
+  "billing.split_department_work_type": "A separate invoice per department and work type",
+  "billing.split_department_work_type_example": "B1 Amsterdam's general cleaning and window cleaning become two invoices.",
+  "billing.this_run_only": "Applies to this run only. The customer's saved setting is not changed.",
+  "nothing.no_extra_work": "No extra work for this customer in this period.",
+  "nothing.none_finished_one": "{{count}} extra work, but it is not finished yet — an invoice needs a closed ticket.",
+  "nothing.none_finished_other": "{{count}} extra works, none of them finished yet — an invoice needs a closed ticket.",
+  "nothing.all_invoiced_one": "Everything finished has already been invoiced ({{count}} extra work).",
+  "nothing.all_invoiced_other": "Everything finished has already been invoiced ({{count}} extra works).",
+  "nothing.not_in_period": "{{count}} finished, but their invoice date falls in a later period.",
+  "nothing.heading": "Nothing to invoice",
+  "created_by.system": "System",
+  "created_by.label": "Created by"
+}

@@ -266,10 +266,29 @@ class Invoice(models.Model):
     period_year = models.PositiveIntegerField(null=True, blank=True)
     period_month = models.PositiveIntegerField(null=True, blank=True)
 
+    # Sprint 183 §3 — NULL means THE SYSTEM created this invoice.
+    #
+    # The month-end job (`invoicing/tasks.py`) used to hunt down "the
+    # company's longest-serving active COMPANY_ADMIN" and attribute its
+    # drafts to them, purely because this column was NOT NULL. That made
+    # every automatic invoice name a person who had not created it — the
+    # same defect Sprint 180 fixed on `TicketStatusHistory.changed_by`,
+    # and the same fix: let the column say "no person did this, the
+    # system did" rather than borrowing somebody's name.
+    #
+    # `on_delete` stays PROTECT (deliberately unchanged): a real actor
+    # still cannot be deleted out from under invoices they created. NULL
+    # is only ever WRITTEN by the system path, never by a cascade.
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="created_invoices",
+        help_text=(
+            "Who created this invoice. NULL = the system (the month-end "
+            "run); every read surface renders that as 'System'."
+        ),
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

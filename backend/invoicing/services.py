@@ -38,6 +38,12 @@ from .preview import plan_invoices
 
 _TWO_PLACES = Decimal("0.01")
 
+# Sprint 183 §3 — "the caller did not say" vs "the caller said nobody".
+# `created_by=None` is a MEANINGFUL value now (the system created this
+# invoice), so it cannot double as the "not supplied" default. This
+# sentinel is the default and resolves to the acting user.
+_ACTOR = object()
+
 
 def recompute_invoice_totals(invoice):
     """Recompute + persist the invoice's FROZEN subtotal/vat/total from its
@@ -114,6 +120,7 @@ def _create_draft(
     department_id=None,
     work_type_id=None,
     granularity=None,
+    created_by=_ACTOR,
 ):
     """Create ONE draft Invoice for the given EW list and CLAIM them.
 
@@ -152,7 +159,13 @@ def _create_draft(
         year=None,
         period_year=year,
         period_month=month,
-        created_by=actor,
+        # Sprint 183 §3 — `created_by` is a SEPARATE question from
+        # `actor`. The actor says whose scope the read ran through;
+        # `created_by=None` says no person created this invoice. The
+        # `_ACTOR` sentinel keeps the default "the actor wrote it"
+        # while letting a caller state None deliberately, which a
+        # plain `created_by=None` default could not express.
+        created_by=(actor if created_by is _ACTOR else created_by),
     )
     ticket_map = build_ticket_map([e.id for e in ews])
     now = timezone.now()
@@ -207,7 +220,8 @@ def _create_draft(
 
 
 def generate_draft_invoices(
-    actor, company_id, customer_id, year, month, granularity=None
+    actor, company_id, customer_id, year, month, granularity=None, *,
+    system=False,
 ):
     """
     Roll up (company, customer)'s unbilled EW for (year, month) into DRAFT
@@ -295,6 +309,9 @@ def generate_draft_invoices(
                     department_id=plan.department_id,
                     work_type_id=plan.work_type_id,
                     granularity=plan.granularity,
+                    # Sprint 183 §3 — a system run's invoices have no
+                    # human author. `actor` above is the read scope.
+                    created_by=None if system else _ACTOR,
                 )
             )
     return created

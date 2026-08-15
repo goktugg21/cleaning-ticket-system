@@ -1,6 +1,30 @@
 """
 Sprint 182 §2 — the downloadable PREVIEW document.
 
+SPRINT 183 §5 — WHY IT IS STILL A SECOND LAYOUT
+------------------------------------------------
+The brief asked to bring this closer to the real invoice PDF or explain
+in one line why not. The line:
+
+    `invoice_pdf._render` and `annex.build_annex` both take a SAVED
+    invoice and query `invoice.lines`, so rendering a plan through them
+    needs either a persisted draft — exactly what §2 forbids — or a
+    rewrite of the annex builder every real invoice depends on, which is
+    a bigger and riskier change than a preview justifies.
+
+What WAS brought closer, because it costs nothing and is what an
+operator actually compares holding the two side by side: the money
+formatting (`_fmt_money` mirrors the invoice PDF's Dutch convention),
+the branding (the same `config.pdf_branding` helpers, so logo and accent
+match), and the row order (the plan is ordered exactly as generation
+creates the invoices). What still differs is page furniture — the header
+block, table chrome, and the two-page annex structure.
+
+The residual risk is precise: figures cannot drift, because both
+documents' numbers come from `preview.plan_invoices`. Only presentation
+can, and a preview that looks plainer than the invoice is the safe
+direction for that to fail in.
+
 WHY THIS IS NOT `invoice_pdf._render`
 -------------------------------------
 The real invoice renderer takes a SAVED `Invoice`: it calls

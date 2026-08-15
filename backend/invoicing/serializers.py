@@ -137,6 +137,24 @@ class InvoiceSerializer(serializers.ModelSerializer):
     # ("reversed_by")` queryset avoids N+1 on the list endpoint; sorted in
     # Python (not `.order_by()`) so that prefetch cache is actually used.
     credited_by_number = serializers.SerializerMethodField()
+    # Sprint 183 §3 — WHO created this invoice, and the label to show.
+    #
+    # `created_by` was WRITE-ONLY until this sprint: the column was
+    # populated and read by no serializer, PDF or list. That is precisely
+    # why the month-end job could attribute drafts to a COMPANY_ADMIN who
+    # had not created them and nobody noticed — nothing displayed it. It
+    # is exposed now BECAUSE the fix is otherwise invisible: an operator
+    # has to be able to see that the nightly run, not a colleague,
+    # produced these.
+    #
+    # `created_by_label` is a SerializerMethodField rather than a
+    # `source="created_by.email"` CharField deliberately. On a NULL FK,
+    # DRF turns the attribute traversal into `SkipField` and OMITS the
+    # key entirely — the exact shape that caught Sprint 180's
+    # status-history payload. A method field always emits, so a
+    # system-created invoice reads "System" instead of a missing key the
+    # frontend has to guess about.
+    created_by_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -180,6 +198,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             # screen has a use for a hex digest.
             "pdf_frozen_at",
             "pdf_page_count",
+            "created_by",
+            "created_by_label",
             "created_at",
             "updated_at",
             "lines",
@@ -198,6 +218,23 @@ class InvoiceSerializer(serializers.ModelSerializer):
     def get_credited_by_number(self, obj: Invoice):
         reversals = sorted(obj.reversed_by.all(), key=lambda r: r.id, reverse=True)
         return reversals[0].number if reversals else None
+
+    def get_created_by_label(self, obj: Invoice):
+        """Who to show as the author. Never blank, never "Unassigned".
+
+        Sprint 183 §3 — a NULL `created_by` means the system created this
+        invoice, and it has to READ that way. "Unassigned" was the wrong
+        fallback once already this month (Sprint 180's timeline rendered
+        a system row as "Unassigned", which names nobody and still
+        implies somebody); the label is resolved here, server-side, so
+        every consumer gets the same word without re-deciding it.
+
+        A real actor shows their email — the same identifier every other
+        provider-side surface in this app uses for a person.
+        """
+        if obj.created_by_id is None:
+            return "System"
+        return getattr(obj.created_by, "email", "") or "System"
 
 
 class CustomerInvoiceLineSerializer(serializers.ModelSerializer):

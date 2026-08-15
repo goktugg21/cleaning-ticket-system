@@ -57,13 +57,35 @@ a second source of truth about whether the work happened, and the first
 time it disagreed with the claim someone would have to work out which one
 was lying.
 
-CONCURRENCY: two workers firing the same beat tick would both read the
-unbilled pool before either claims. `select_for_update` on the EW rows
-would close it. It is NOT done here, because it would mean editing
-`extra_work` (Agent A's app this sprint) and because beat delivers one
-tick to one worker; the exposure is a duplicate manual `generate` racing
-the job, which the operator would see immediately as two drafts. Called
-out rather than silently accepted — see the report.
+CONCURRENCY (Sprint 183 §5 — re-examined, still deferred, and here is
+the code that settles where it belongs)
+--------------------------------------------------------------------
+Two workers firing the same beat tick would both read the unbilled pool
+before either claims. `select_for_update` would close it, and the rows
+that need locking are `ExtraWorkRequest` rows selected inside
+`invoicing/selectors.py::_scoped_unbilled_ew_with_tickets`:
+
+    qs = scope_extra_work_for(actor).filter(...)   # <- these rows
+
+`selectors.py` IS this agent's file, so a `.select_for_update()` could
+be added here without touching another app. It is still NOT done, for a
+reason that is about correctness rather than ownership:
+
+  * the queryset is built by `extra_work.scoping.scope_extra_work_for`
+    and this module does not control its joins. `SELECT ... FOR UPDATE`
+    against a query containing an outer join raises in Postgres, and the
+    scoping helper's shape is free to change in an app this sprint does
+    not own. A lock that works today and starts raising when another
+    team adds a `select_related` is worse than no lock, because it
+    fails on the nightly run at month end.
+  * closing it properly means `select_for_update(of=("self",))` plus a
+    guarantee about that queryset's shape — i.e. a change agreed with
+    whoever owns `extra_work`, not one made unilaterally from here.
+
+The exposure meanwhile is unchanged and small: beat delivers one tick to
+one worker, so the real race is a manual Generate pressed while the
+nightly run is mid-flight, which surfaces immediately as two drafts an
+operator can delete. Named, located, and left — not silently accepted.
 """
 from __future__ import annotations
 
@@ -74,33 +96,37 @@ from celery import shared_task
 logger = logging.getLogger(__name__)
 
 
-# Sprint 182 §1 — the notification event for a completed invoice run.
+# Sprint 183 §3 — a real member of `NotificationEventType` now.
 #
-# Defined HERE rather than added to `notifications.NotificationEventType`
-# because `backend/notifications/` is not this agent's file this sprint.
-# The value persists and mails correctly (`NotificationLog.event_type` is
-# a CharField and `objects.create` does not validate choices), but it is
-# outside the enum, so `get_event_type_display()` returns the raw string.
-# The one-line fix — adding it to the enum plus an AlterField migration —
-# is named in the sprint report.
+# Sprint 182 wrote this as a bare string because that agent did not own
+# `notifications/models.py`. The rows persisted and the mails sent, but
+# the value sat outside the enum so any label lookup rendered the raw
+# string. The module-level alias is kept so existing importers still work.
 INVOICE_RUN_EVENT = "INVOICE_RUN_COMPLETED"
 
 
-def _run_actor(company_id):
-    """A provider operator to attribute the run's invoices to.
+def _scope_actor(company_id):
+    """A provider operator whose SCOPE this run reads through.
 
-    `Invoice.created_by` is NOT NULL and PROTECT, so the job needs a real
-    user. We pick the company's longest-standing active COMPANY_ADMIN,
-    falling back to any active SUPER_ADMIN.
+    Sprint 183 §3 — this is NOT the author. It used to be both, and that
+    conflation is what put a person's name on invoices nobody created.
+    They are different questions:
 
-    This is the weakest part of the design and worth naming: the invoices
-    say a person created them and no person did. The honest fix is a
-    nullable `created_by` meaning "the system", exactly as
-    `TicketStatusHistory.changed_by` was made nullable in Sprint 180 — but
-    that reads on every invoice serializer, PDF and list in the app, so it
-    is a change to make deliberately and not as a side effect of adding a
-    task. Returns None when no operator exists, and the caller skips the
-    customer rather than inventing one.
+      * "whose data may this read?" — needs a real user, because the read
+        path goes through `extra_work.scoping.scope_extra_work_for`,
+        which takes a user and lives in an app this sprint does not own.
+      * "who created this invoice?" — nobody. `Invoice.created_by` is
+        nullable as of migration 0007 and the run passes `system=True`,
+        so its drafts render as System.
+
+    Picks the company's longest-standing active COMPANY_ADMIN, falling
+    back to any active SUPER_ADMIN. Because this only decides what the
+    run may SEE — and it is immediately narrowed to the one (company,
+    customer) pair the loop already chose — which of several admins it
+    picks cannot change the result.
+
+    Returns None when the company has no operator at all; the caller
+    skips that customer rather than reading through nobody's scope.
     """
     from accounts.models import UserRole
     from companies.models import CompanyUserMembership
@@ -194,19 +220,22 @@ def run_invoice_run_for_customer(customer, *, year, month, actor=None):
     """
     from .services import generate_draft_invoices
 
-    actor = actor or _run_actor(customer.company_id)
+    actor = actor or _scope_actor(customer.company_id)
     if actor is None:
         logger.warning(
-            "Sprint 182 §1: no provider operator for company %s; skipping "
-            "customer %s. Invoice.created_by is NOT NULL, so the run cannot "
-            "attribute invoices without one.",
+            "Sprint 183 §3: no provider operator for company %s; skipping "
+            "customer %s. The run needs somebody's SCOPE to read the "
+            "unbilled pool through, even though the invoices it creates "
+            "are attributed to the system.",
             customer.company_id,
             customer.pk,
         )
         return []
 
+    # `system=True` — the invoices this run creates have no human author.
+    # `actor` above supplies the read scope only.
     created = generate_draft_invoices(
-        actor, customer.company_id, customer.id, year, month
+        actor, customer.company_id, customer.id, year, month, system=True
     )
     if created:
         _notify_run(actor, customer, created)
