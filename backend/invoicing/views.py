@@ -44,6 +44,7 @@ from .models import Invoice, InvoiceLine
 from .preview import plan_invoices
 from .preview_pdf import render_preview_pdf
 from .schedule import billing_day_reached, scheduled_customers
+from .why_nothing import diagnose_nothing_to_invoice
 from .selectors import (
     scope_customer_invoices_for,
     scope_invoices_for,
@@ -331,6 +332,15 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                 # the reader needs to know when it was taken.
                 "computed_at": computed_at.isoformat(),
                 "invoice_count": len(planned),
+                # Sprint 183 §2 — the SAME sentence the /due/ panel
+                # shows, from the same function, so the two screens
+                # cannot explain the same emptiness differently.
+                "nothing_reason": diagnose_nothing_to_invoice(
+                    request.user,
+                    customer.company_id,
+                    customer.id,
+                    billable_count=len(planned),
+                ),
                 "invoices": InvoicePreviewSerializer(
                     planned, many=True, context={"request": request}
                 ).data,
@@ -413,6 +423,20 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                     "unbilled_count": count,
                     "unbilled_total": f"{total:.2f}",
                     "is_due": reached and count > 0,
+                    # Sprint 183 §2 — when there is nothing to invoice,
+                    # say WHICH nothing this is. "I cannot generate
+                    # anything in Due now" turned out to be correct
+                    # behaviour with no explanation, and correct-but-
+                    # silent reads as broken software. Carries the counts
+                    # so the sentence is actionable: "61 extra works,
+                    # none finished" sends an operator somewhere, "no
+                    # billable work" does not.
+                    "nothing_reason": diagnose_nothing_to_invoice(
+                        request.user,
+                        customer.company_id,
+                        customer.id,
+                        billable_count=count,
+                    ),
                 }
             )
         return Response(payload, status=status.HTTP_200_OK)

@@ -109,6 +109,21 @@ export interface InvoicePreview {
   /** ISO timestamp — a preview is a photograph, not a promise. */
   computed_at: string;
   invoice_count: number;
+  /** Sprint 183 §2 — why there is nothing, when there is nothing. The
+   *  same diagnosis the /due/ panel carries, from the same server-side
+   *  function, so the two screens cannot explain one emptiness two
+   *  ways. Optional so an older server still renders. */
+  nothing_reason?: {
+    reason:
+      | "NO_EXTRA_WORK"
+      | "NONE_FINISHED"
+      | "ALL_INVOICED"
+      | "NOT_IN_PERIOD"
+      | "NOTHING_TO_EXPLAIN";
+    unbilled_count: number;
+    finished_count: number;
+    invoiced_count: number;
+  };
   invoices: InvoicePreviewInvoice[];
 }
 
@@ -142,6 +157,40 @@ export async function getInvoicePreview(
 // type is local.
 export type InvoiceBillingTarget = "BUILDING" | "CUSTOMER";
 export type InvoiceSplit = "NONE" | "DEPARTMENT_WORK_TYPE";
+
+/** Sprint 183 §1 — the legacy three-value vocabulary the API still
+ *  speaks on the wire.
+ *
+ *  We kept sending `granularity` rather than teaching the generate
+ *  endpoint the pair: the endpoint already accepts this field and the
+ *  customer serializer already translates a legacy write, so one
+ *  translation in one direction is cheaper and lower-risk than a new
+ *  request shape. The UI speaks the pair on both screens; only the wire
+ *  is legacy. */
+export function granularityFor(
+  target: InvoiceBillingTarget,
+  split: InvoiceSplit,
+): InvoiceGranularity {
+  if (target === "CUSTOMER") return "CUSTOMER";
+  return split === "DEPARTMENT_WORK_TYPE"
+    ? "PER_BUILDING_DEPARTMENT_WORK_TYPE"
+    : "PER_BUILDING";
+}
+
+/** The inverse, for seeding the generate dialog from a saved
+ *  granularity when the server predates the pair. */
+export function pairForGranularity(granularity: string | null | undefined): {
+  target: InvoiceBillingTarget;
+  split: InvoiceSplit;
+} {
+  if (granularity === "PER_BUILDING") {
+    return { target: "BUILDING", split: "NONE" };
+  }
+  if (granularity === "PER_BUILDING_DEPARTMENT_WORK_TYPE") {
+    return { target: "BUILDING", split: "DEPARTMENT_WORK_TYPE" };
+  }
+  return { target: "CUSTOMER", split: "NONE" };
+}
 
 export interface CustomerBillingSettingsPayload {
   invoice_day_rule?: string;

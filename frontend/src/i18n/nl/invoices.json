@@ -1,0 +1,22 @@
+{
+  "billing.target_label": "Op wie staat de factuur?",
+  "billing.target_customer": "De klantorganisatie",
+  "billing.target_customer_help": "Eén factuur voor alle gebouwen samen.",
+  "billing.target_building": "Elk gebouw",
+  "billing.target_building_help": "Een aparte factuur per gebouw.",
+  "billing.split_label": "En binnen één gebouw?",
+  "billing.split_none": "Eén factuur per gebouw",
+  "billing.split_none_example": "De algemene schoonmaak en de glasbewassing van B1 Amsterdam staan die maand samen op één factuur.",
+  "billing.split_department_work_type": "Een aparte factuur per afdeling en werktype",
+  "billing.split_department_work_type_example": "De algemene schoonmaak en de glasbewassing van B1 Amsterdam worden twee facturen.",
+  "billing.this_run_only": "Geldt alleen voor deze run. De opgeslagen instelling van de klant verandert niet.",
+  "nothing.no_extra_work": "Geen extra werk voor deze klant in deze periode.",
+  "nothing.none_finished_one": "{{count}} extra werk, maar het is nog niet afgerond — een factuur heeft een gesloten ticket nodig.",
+  "nothing.none_finished_other": "{{count}} extra werken, waarvan nog niets is afgerond — een factuur heeft een gesloten ticket nodig.",
+  "nothing.all_invoiced_one": "Alles wat af is, is al gefactureerd ({{count}} extra werk).",
+  "nothing.all_invoiced_other": "Alles wat af is, is al gefactureerd ({{count}} extra werken).",
+  "nothing.not_in_period": "{{count}} afgerond, maar hun factuurdatum valt in een latere periode.",
+  "nothing.heading": "Niets te factureren",
+  "created_by.system": "Systeem",
+  "created_by.label": "Aangemaakt door"
+}

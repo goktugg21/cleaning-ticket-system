@@ -23,12 +23,16 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
-import {
-  updateCustomerBillingSettings,
-  type CustomerBillingSettings,
-  type InvoiceBillingTarget,
-  type InvoiceSplit,
+import { updateCustomerBillingSettings } from "../../../api/invoices";
+import type {
+  CustomerBillingSettings,
+  InvoiceBillingTarget,
+  InvoiceSplit,
 } from "../../../api/invoices";
+// Sprint 183 §1 — the two controls live in ONE component now, shared
+// with the Invoices page's generate dialog, so the two screens cannot
+// describe the same decision in different words again.
+import { BillingTargetFields } from "../../../components/BillingTargetFields";
 import type { CustomerAdmin, InvoiceDayRule } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
 import { isProviderAdmin } from "../../../auth/permissions";
@@ -187,58 +191,25 @@ export function CustomerFacturatieSection({
               {t("facturatie.day_rule_helper")}
             </span>
           </label>
-          {/* Sprint 182 §3 — WHO the invoice is addressed to. */}
-          <label className="field" style={{ flex: "1 1 220px" }}>
-            <span className="field-label">
-              {t("facturatie.billing_target_label")}
-            </span>
-            <select
-              className="field-select"
-              value={billingTarget}
-              onChange={(e) =>
-                setBillingTarget(e.target.value as InvoiceBillingTarget)
-              }
-              disabled={!canManage || savingSchedule}
-              data-testid="facturatie-billing-target"
-            >
-              <option value="CUSTOMER">
-                {t("facturatie.billing_target_customer")}
-              </option>
-              <option value="BUILDING">
-                {t("facturatie.billing_target_building")}
-              </option>
-            </select>
-            <span
-              className="muted small"
-              style={{ display: "block", marginTop: 4 }}
-            >
-              {t("facturatie.billing_target_helper")}
-            </span>
-          </label>
-          {/* ...and HOW FINELY it splits. A different question. */}
-          <label className="field" style={{ flex: "1 1 220px" }}>
-            <span className="field-label">{t("facturatie.split_label")}</span>
-            <select
-              className="field-select"
-              value={splitApplies ? split : "NONE"}
-              onChange={(e) => setSplit(e.target.value as InvoiceSplit)}
-              disabled={!canManage || savingSchedule || !splitApplies}
-              data-testid="facturatie-split"
-            >
-              <option value="NONE">{t("facturatie.split_none")}</option>
-              <option value="DEPARTMENT_WORK_TYPE">
-                {t("facturatie.split_department_work_type")}
-              </option>
-            </select>
-            <span
-              className="muted small"
-              style={{ display: "block", marginTop: 4 }}
-            >
-              {splitApplies
-                ? t("facturatie.split_helper")
-                : t("facturatie.split_customer_target_note")}
-            </span>
-          </label>
+        </div>
+
+        {/* Sprint 183 §1 — the two billing controls, from the shared
+            component the Invoices page's generate dialog also uses.
+            They were two side-by-side dropdowns with a sentence
+            explaining when the second applied, and the owner's reaction
+            to that sentence was "what is this now, I am confused". The
+            dependency is shown by nesting now, and the copy is the
+            example that landed with him rather than a restatement of
+            the rule. */}
+        <div style={{ marginBottom: 16 }}>
+          <BillingTargetFields
+            idPrefix="facturatie"
+            target={billingTarget}
+            split={split}
+            onTargetChange={setBillingTarget}
+            onSplitChange={setSplit}
+            disabled={!canManage || savingSchedule}
+          />
         </div>
         {canManage && (
           <div className="form-actions" style={{ marginBottom: 20 }}>

@@ -26,15 +26,21 @@ import {
   generateInvoices,
   getInvoiceDueList,
   getInvoicePreview,
+  granularityFor,
   listAllInvoices,
+  pairForGranularity,
+  type InvoiceBillingTarget,
   type InvoicePreview,
+  type InvoiceSplit,
 } from "../api/invoices";
 import type {
   Invoice,
-  InvoiceDueRow,
-  InvoiceGranularity,
+  InvoiceDueRow as InvoiceDueRowBase,
   InvoiceStatus,
 } from "../api/types";
+// Sprint 183 §1 — the shared billing controls, used identically by
+// customer settings so the two screens cannot word this differently.
+import { BillingTargetFields } from "../components/BillingTargetFields";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { useToast } from "../components/ToastProvider";
@@ -45,6 +51,55 @@ import {
 } from "../lib/intl";
 
 type StatusFilter = InvoiceStatus | "ALL";
+
+/** Sprint 183 — the /due/ row carries three fields `api/types.ts` does
+ *  not describe yet: the saved billing pair (Sprint 182 §3) and the
+ *  Sprint 183 §2 "why is there nothing" diagnosis. `api/types.ts`
+ *  belongs to another agent this round, so the shape is narrowed here.
+ *  Optional throughout, so a server that predates either still renders. */
+type NothingReason = {
+  reason:
+    | "NO_EXTRA_WORK"
+    | "NONE_FINISHED"
+    | "ALL_INVOICED"
+    | "NOT_IN_PERIOD"
+    | "NOTHING_TO_EXPLAIN";
+  unbilled_count: number;
+  finished_count: number;
+  invoiced_count: number;
+};
+
+type InvoiceDueRow = InvoiceDueRowBase & {
+  invoice_billing_target?: InvoiceBillingTarget;
+  invoice_split?: InvoiceSplit;
+  nothing_reason?: NothingReason;
+};
+
+/** The one sentence, from the one diagnosis. Sprint 183 §2 — the same
+ *  function answers for the Due panel and the preview, so this renderer
+ *  is shared between them too rather than written twice. */
+function nothingSentence(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  nothing: NothingReason | undefined,
+): string | null {
+  if (!nothing || nothing.reason === "NOTHING_TO_EXPLAIN") return null;
+  if (nothing.reason === "NO_EXTRA_WORK") {
+    return t("invoices:nothing.no_extra_work");
+  }
+  if (nothing.reason === "NONE_FINISHED") {
+    return t("invoices:nothing.none_finished", {
+      count: nothing.unbilled_count,
+    });
+  }
+  if (nothing.reason === "NOT_IN_PERIOD") {
+    return t("invoices:nothing.not_in_period", {
+      count: nothing.finished_count,
+    });
+  }
+  return t("invoices:nothing.all_invoiced", {
+    count: nothing.invoiced_count,
+  });
+}
 
 const STATUS_LABEL_KEY: Record<InvoiceStatus, string> = {
   DRAFT: "facturen.status_draft",
@@ -77,7 +132,7 @@ export function FacturenPage({
   customerId?: number;
   embedded?: boolean;
 } = {}) {
-  const { t } = useTranslation("common");
+  const { t } = useTranslation(["common", "invoices"]);
   const { push: pushToast } = useToast();
   const navigate = useNavigate();
   const customerScoped = customerId !== undefined;
@@ -99,8 +154,15 @@ export function FacturenPage({
   // Generate control — opened from a due row; a single inline panel.
   const [genRow, setGenRow] = useState<InvoiceDueRow | null>(null);
   const [genMonth, setGenMonth] = useState("");
-  const [genGranularity, setGenGranularity] =
-    useState<InvoiceGranularity>("CUSTOMER");
+  // Sprint 183 §1 — the dialog speaks the SAME two controls as customer
+  // settings. It used to offer the old three-value granularity list,
+  // because Sprint 182 split the customer setting and never came back
+  // here — so the two screens described one decision in two
+  // vocabularies. Seeded from the customer's saved pair below; changing
+  // it here overrides THIS RUN only and never writes the setting back.
+  const [genTarget, setGenTarget] =
+    useState<InvoiceBillingTarget>("CUSTOMER");
+  const [genSplit, setGenSplit] = useState<InvoiceSplit>("NONE");
   const [genBusy, setGenBusy] = useState(false);
 
   // Sprint 182 §2 — the preview. NOTHING IS STORED server-side, so this
@@ -198,7 +260,17 @@ export function FacturenPage({
         ? `${row.period_year}-${String(row.period_month).padStart(2, "0")}`
         : currentMonthValue(),
     );
-    setGenGranularity(row.invoice_granularity_default);
+    // Seed from the customer's SAVED pair. The /due/ row carries both
+    // (Sprint 182), with the legacy granularity as the fallback for a
+    // server that predates them.
+    if (row.invoice_billing_target) {
+      setGenTarget(row.invoice_billing_target);
+      setGenSplit(row.invoice_split ?? "NONE");
+    } else {
+      const pair = pairForGranularity(row.invoice_granularity_default);
+      setGenTarget(pair.target);
+      setGenSplit(pair.split);
+    }
   }
 
   // Sprint 182 §2 — recomputed on every open, never cached across opens.
@@ -255,7 +327,11 @@ export function FacturenPage({
         customer: genRow.customer,
         year: parsed.year,
         month: parsed.month,
-        granularity: genGranularity,
+        // Sprint 183 §1 — the UI speaks the pair; the WIRE keeps the
+        // legacy `granularity` field. Cheaper and lower-risk than a new
+        // request shape: the endpoint already accepts it and the
+        // customer serializer already translates a legacy write.
+        granularity: granularityFor(genTarget, genSplit),
       });
       pushToast({
         variant: created.length > 0 ? "success" : "info",
@@ -352,7 +428,23 @@ export function FacturenPage({
                             ? t("facturatie.day_last")
                             : "—"}
                       </td>
-                      <td style={{ textAlign: "right" }}>{row.unbilled_count}</td>
+                      <td style={{ textAlign: "right" }}>
+                        {row.unbilled_count}
+                        {/* Sprint 183 §2 — "I cannot generate anything
+                            in Due now" was correct behaviour with no
+                            explanation. The count alone says 0; this
+                            says WHY it is 0 and what to go and look
+                            at. */}
+                        {nothingSentence(t, row.nothing_reason) && (
+                          <span
+                            className="muted small"
+                            style={{ display: "block", textAlign: "left" }}
+                            data-testid="facturen-due-nothing"
+                          >
+                            {nothingSentence(t, row.nothing_reason)}
+                          </span>
+                        )}
+                      </td>
                       <td style={{ textAlign: "right" }}>
                         {formatMoney(row.unbilled_total)}
                       </td>
@@ -413,7 +505,12 @@ export function FacturenPage({
 
               {!previewBusy && preview && preview.invoice_count === 0 && (
                 <p className="muted small" data-testid="facturen-preview-empty">
-                  {t("facturen.preview_empty")}
+                  {/* Sprint 183 §2 — the SAME sentence the Due panel
+                      shows, from the same server-side diagnosis. The old
+                      "no unbilled extra work" line was true and told an
+                      operator nothing they could act on. */}
+                  {nothingSentence(t, preview.nothing_reason) ??
+                    t("facturen.preview_empty")}
                 </p>
               )}
 
@@ -514,52 +611,22 @@ export function FacturenPage({
                     data-testid="facturen-generate-month"
                   />
                 </label>
-                <fieldset
-                  className="field"
-                  style={{ border: 0, padding: 0, margin: 0 }}
-                >
-                  <span className="field-label">
-                    {t("facturen.gen_granularity")}
-                  </span>
-                  <div style={{ display: "flex", gap: 14, marginTop: 4 }}>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        type="radio"
-                        name="gen-granularity"
-                        checked={genGranularity === "CUSTOMER"}
-                        onChange={() => setGenGranularity("CUSTOMER")}
-                        data-testid="facturen-granularity-customer"
-                      />
-                      {t("facturatie.granularity_customer")}
-                    </label>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        type="radio"
-                        name="gen-granularity"
-                        checked={genGranularity === "PER_BUILDING"}
-                        onChange={() => setGenGranularity("PER_BUILDING")}
-                        data-testid="facturen-granularity-building"
-                      />
-                      {t("facturatie.granularity_building")}
-                    </label>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        type="radio"
-                        name="gen-granularity"
-                        checked={
-                          genGranularity === "PER_BUILDING_DEPARTMENT_WORK_TYPE"
-                        }
-                        onChange={() =>
-                          setGenGranularity(
-                            "PER_BUILDING_DEPARTMENT_WORK_TYPE",
-                          )
-                        }
-                        data-testid="facturen-granularity-department-work-type"
-                      />
-                      {t("facturatie.granularity_department_work_type")}
-                    </label>
-                  </div>
-                </fieldset>
+                <div style={{ flexBasis: "100%" }}>
+                  {/* Sprint 183 §1 — the SAME component customer
+                      settings uses, so both screens describe this
+                      decision in identical words. */}
+                  <BillingTargetFields
+                    idPrefix="facturen-gen"
+                    target={genTarget}
+                    split={genSplit}
+                    onTargetChange={setGenTarget}
+                    onSplitChange={setGenSplit}
+                    disabled={genBusy}
+                  />
+                  <p className="muted small" style={{ marginBottom: 0 }}>
+                    {t("invoices:billing.this_run_only")}
+                  </p>
+                </div>
               </div>
               <div className="form-actions" style={{ marginTop: 12 }}>
                 <button
@@ -669,6 +736,7 @@ export function FacturenPage({
                 <th>{t("facturen.col_building")}</th>
                 <th>{t("facturen.col_department_work_type")}</th>
                 <th>{t("facturen.col_period")}</th>
+                <th>{t("invoices:created_by.label")}</th>
                 <th>{t("facturen.col_status")}</th>
                 <th style={{ textAlign: "right" }}>{t("facturen.col_total")}</th>
               </tr>
@@ -728,6 +796,16 @@ export function FacturenPage({
                   </td>
                   <td className="muted small">
                     {formatPeriod(inv.period_year, inv.period_month)}
+                  </td>
+                  {/* Sprint 183 §3 — WHO created it. The nightly run's
+                      invoices used to borrow a COMPANY_ADMIN's name
+                      because `created_by` was NOT NULL; they say System
+                      now. The server resolves the label so "System" is
+                      never a frontend guess, and never renders blank or
+                      "Unassigned". */}
+                  <td className="muted small" data-testid="facturen-created-by">
+                    {(inv as Invoice & { created_by_label?: string })
+                      .created_by_label ?? t("invoices:created_by.system")}
                   </td>
                   <td>
                     {/* Sprint 122 (B1) — an ISSUED-but-unsent credit note

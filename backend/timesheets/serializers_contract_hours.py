@@ -15,6 +15,10 @@ from rest_framework import serializers
 
 from buildings.models import Building
 
+from .contract_hours_company import (
+    ContractHoursCompanyError,
+    resolve_company_id,
+)
 from .models import ContractHours, HourType, WorkType
 from .scope import (
     eligible_employees_queryset,
@@ -152,23 +156,44 @@ class ContractHoursSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        # The tenant anchor is DERIVED from the employee, never sent by
-        # the client — the same rule `TimeEntry.company` follows, and
-        # the reason a client cannot place a row in another tenant.
-        from .scope import employee_company_ids
-
-        employee = validated_data["employee"]
-        actor = self.context["request"].user
-        scope = scope_company_ids_for_timesheets(actor)
-        candidates = employee_company_ids(employee)
-        if scope is not None:
-            candidates = candidates & scope
-        if not candidates:
-            raise serializers.ValidationError(
-                {"employee": "This employee is not in a company you manage."}
-            )
-        validated_data["company_id"] = sorted(candidates)[0]
+        # The tenant anchor is DERIVED, never sent by the client — the
+        # same rule `TimeEntry.company` follows, and the reason a client
+        # cannot place a row in another tenant.
+        #
+        # Sprint 183 §4 — derived by `resolve_company_id`, which prefers
+        # the BUILDING's company (a fact) over the employee's memberships
+        # (ambiguous for a dual-company employee) and refuses rather than
+        # guessing when neither settles it. This used to be
+        # `sorted(candidates)[0]` — the lower company id — which silently
+        # mis-filed every dual-company employee.
+        validated_data["company_id"] = resolve_company_id(
+            employee=validated_data["employee"],
+            building=validated_data.get("building"),
+            actor=self.context["request"].user,
+        )
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        """Sprint 183 §4 — RE-RESOLVE when the row's anchors change.
+
+        `company` is read-only to clients, and before this sprint that
+        meant it was resolved once at create and never revisited. PATCHing
+        `employee` to somebody from a different company (or `building` to
+        one owned by a different company) left the row anchored to the old
+        tenant — a row belonging to a company its own employee is not in.
+
+        Re-resolved ONLY when one of the two anchors is part of the patch.
+        An unrelated edit (hours, dates, work type) must not move a row
+        between tenants as a side effect, and must not start failing the
+        new ambiguity rule for a row that already exists.
+        """
+        if "employee" in validated_data or "building" in validated_data:
+            validated_data["company_id"] = resolve_company_id(
+                employee=validated_data.get("employee", instance.employee),
+                building=validated_data.get("building", instance.building),
+                actor=self.context["request"].user,
+            )
+        return super().update(instance, validated_data)
 
 
 class ContractHoursRowSerializer(serializers.Serializer):
@@ -348,12 +373,27 @@ class ContractHoursBulkSerializer(serializers.Serializer):
         # tell which four are missing.
         with transaction.atomic():
             for row in intended:
-                candidates = employee_company_ids_for(row["employee_id"])
-                if scope is not None:
-                    candidates = candidates & scope
-                if not candidates:
+                # Sprint 183 §4 — the same resolver the single-row path
+                # uses. This loop carried its OWN copy of the old
+                # `sorted(candidates)[0]` guess, which is how the bulk
+                # grid ended up mis-filing dual-company employees even
+                # after the single-row path was looked at.
+                #
+                # A row that cannot be resolved is SKIPPED, not raised:
+                # the bulk grid is one transaction over many rows and
+                # this loop already skips rows it cannot place (no
+                # candidates) and rows that exist. Raising here would
+                # discard an operator's whole twelve-row assignment
+                # because one worker is in two companies. The skip is
+                # reported through the existing created/skipped counts.
+                try:
+                    company_id = resolve_company_id(
+                        employee=_employee_instance(row["employee_id"]),
+                        building=_building_instance(row["building_id"]),
+                        actor=actor,
+                    )
+                except ContractHoursCompanyError:
                     continue
-                company_id = sorted(candidates)[0]
                 exists = ContractHours.objects.filter(
                     employee_id=row["employee_id"],
                     building_id=row["building_id"],
@@ -383,10 +423,30 @@ class ContractHoursBulkSerializer(serializers.Serializer):
         return created
 
 
-def employee_company_ids_for(employee_id):
+def _employee_instance(employee_id):
+    """Sprint 183 §4 — the bulk loop works in ids; `resolve_company_id`
+    works in instances, because the single-row path already has them and
+    the resolver reads `building.company_id`. One small fetch per row is
+    the honest cost of the two paths sharing one resolver instead of the
+    bulk path keeping its own copy of the rule."""
     from accounts.models import User
 
-    from .scope import employee_company_ids
+    return User.objects.filter(pk=employee_id).first()
 
-    user = User.objects.filter(pk=employee_id).first()
-    return employee_company_ids(user) if user else frozenset()
+
+def _building_instance(building_id):
+    """None is a legitimate answer: a building-less agreement is valid."""
+    if building_id is None:
+        return None
+    from buildings.models import Building
+
+    return Building.objects.filter(pk=building_id).first()
+
+
+# Sprint 183 §4 — `employee_company_ids_for(employee_id)` lived here and
+# is GONE. It existed only to feed the bulk loop's own copy of the
+# company guess; both callers now go through
+# `contract_hours_company.resolve_company_id`, and leaving a helper whose
+# whole purpose was the removed rule is how the next person reintroduces
+# it. `scope.employee_company_ids` (which takes a user, not an id) is
+# still the underlying answer and is what the resolver calls.
