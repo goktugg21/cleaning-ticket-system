@@ -1109,6 +1109,8 @@
   "customer_view.overview.about_desc": "Klantcontactgegevens en bedrijf.",
   "customer_view.overview.field_contact_email": "Contact e-mail",
   "customer_view.overview.field_phone": "Telefoon",
+  "customer_view.overview.field_billing_address": "Factuuradres",
+  "customer_view.overview.billing_address_missing": "Nog niet ingevuld — zonder straat en plaats kan een factuur niet worden verzonden",
   "customer_view.overview.field_language": "Taal",
   "customer_view.overview.field_status": "Status",
   "customer_view.overview.status_active": "Actief",

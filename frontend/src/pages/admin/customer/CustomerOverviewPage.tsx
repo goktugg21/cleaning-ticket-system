@@ -165,6 +165,23 @@ export function CustomerOverviewPage() {
     }
   }
 
+  // Sprint 188 — the billing address as one line: street, then postcode
+  // and city, then country. `has_billing_address` is the SERVER's rule
+  // (street AND city) and the screen must not re-derive it, so the empty
+  // state is driven by the parts actually present here only for the
+  // rendering; whether an invoice may be sent stays the server's answer.
+  const billingAddress = useMemo(() => {
+    if (!customer) return "";
+    return [
+      customer.address,
+      [customer.postal_code, customer.city].filter(Boolean).join(" "),
+      customer.country,
+    ]
+      .map((part) => (part ?? "").trim())
+      .filter(Boolean)
+      .join(", ");
+  }, [customer]);
+
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
   const buildingsCount = linkedBuildings.length;
@@ -471,6 +488,31 @@ export function CustomerOverviewPage() {
                     <a href={`tel:${customer.phone}`}>{customer.phone}</a>
                   ) : (
                     <span className="muted-empty">—</span>
+                  )}
+                </div>
+              </div>
+              {/* Sprint 188 — the BILLING address. Sprint 153 removed the
+                  address CARD that used to open this page, and that stands:
+                  the page opens with operational numbers. But the address
+                  itself is what every invoice is addressed to, and an
+                  invoice cannot be SENT without a street and a city, so it
+                  belongs here as a row like any other fact about the
+                  customer. Missing is stated rather than left blank — the
+                  gap is the thing worth seeing. */}
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_billing_address")}
+                </div>
+                <div
+                  className="detail-field-value"
+                  data-testid="customer-overview-billing-address"
+                >
+                  {billingAddress ? (
+                    billingAddress
+                  ) : (
+                    <span className="muted-empty">
+                      {t("customer_view.overview.billing_address_missing")}
+                    </span>
                   )}
                 </div>
               </div>

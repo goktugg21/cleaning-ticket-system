@@ -1109,6 +1109,8 @@
   "customer_view.overview.about_desc": "Customer contact info and company.",
   "customer_view.overview.field_contact_email": "Contact email",
   "customer_view.overview.field_phone": "Phone",
+  "customer_view.overview.field_billing_address": "Billing address",
+  "customer_view.overview.billing_address_missing": "Not set yet — an invoice cannot be sent without a street and a city",
   "customer_view.overview.field_language": "Language",
   "customer_view.overview.field_status": "Status",
   "customer_view.overview.status_active": "Active",
