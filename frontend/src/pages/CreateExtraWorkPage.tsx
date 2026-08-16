@@ -1755,6 +1755,16 @@ export function CreateExtraWorkPage({
                   onChange={(event) => setDepartmentId(event.target.value)}
                   disabled={currentDepartments.length === 0}
                 >
+                  {/* Sprint 186 — the field is required, so there is no
+                      empty CHOICE; but until a customer is picked there is
+                      nothing to choose from, and an empty dropdown reads
+                      as broken. A disabled placeholder says which step
+                      comes first instead. */}
+                  {currentDepartments.length === 0 && (
+                    <option value="">
+                      {t("create.field_label_pick_customer")}
+                    </option>
+                  )}
                   {currentDepartments.map((d) => (
                     <option key={d.id} value={d.id}>
                       {customerLabelName(d.name, t)}
@@ -1779,6 +1789,11 @@ export function CreateExtraWorkPage({
                   onChange={(event) => setWorkTypeId(event.target.value)}
                   disabled={currentWorkTypes.length === 0}
                 >
+                  {currentWorkTypes.length === 0 && (
+                    <option value="">
+                      {t("create.field_label_pick_customer")}
+                    </option>
+                  )}
                   {currentWorkTypes.map((w) => (
                     <option key={w.id} value={w.id}>
                       {customerLabelName(w.name, t)}

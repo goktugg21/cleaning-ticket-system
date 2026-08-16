@@ -27,6 +27,7 @@ import {
   type ConfirmDialogHandle,
 } from "../../../components/ConfirmDialog";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
+import { customerLabelName } from "../../../lib/customerLabelName";
 
 /** Map a coded label API error to an i18n key, else null (caller falls back
  *  to getApiError). Both list kinds share the same message keys. */
@@ -308,7 +309,7 @@ function LabelSection({
                     <>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500 }}>
-                          {row.name}
+                          {customerLabelName(row.name, t)}
                           {!row.is_active && (
                             <span className="cell-tag cell-tag-closed" style={{ marginLeft: 8 }}>
                               <i />

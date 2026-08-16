@@ -538,5 +538,6 @@
   "detail.operational_state": "Werkstatus",
   "detail.operational_state_hint": "Volgt melding {{ticket}}. Wijzig de melding om dit te veranderen.",
   "detail.commercial_state": "Prijsstatus",
-  "detail.header_total_hint": "Het definitieve bedrag zodra het werk is afgerekend; tot dan de offerteprijs. Hetzelfde bedrag als in de lijst."
+  "detail.header_total_hint": "Het definitieve bedrag zodra het werk is afgerekend; tot dan de offerteprijs. Hetzelfde bedrag als in de lijst.",
+  "create.field_label_pick_customer": "Kies eerst een klant"
 }
