@@ -763,6 +763,16 @@ export function UserDetailPage() {
                     <div className="user-detail-membership-group-title">
                       {t("user_detail.memberships.customers_title")}
                     </div>
+                    {/* Sprint 188 — a bare list of customer names does not
+                        say what the relation IS, and it differs by role:
+                        for a customer user these are the organisations
+                        they act on behalf of; for a provider operator
+                        they are the customers in their scope. */}
+                    <div className="muted small" style={{ marginBottom: 6 }}>
+                      {isCustomerUser
+                        ? t("user_detail.memberships.customers_hint_customer")
+                        : t("user_detail.memberships.customers_hint_provider")}
+                    </div>
                     <BoundedList
                       size="sm"
                       count={customers.length}

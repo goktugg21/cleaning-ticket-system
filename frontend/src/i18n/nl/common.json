@@ -1384,6 +1384,8 @@
   "user_detail.memberships.employed_by_title": "In dienst bij",
   "user_detail.memberships.buildings_title": "Gebouwen",
   "user_detail.memberships.customers_title": "Klanten",
+  "user_detail.memberships.customers_hint_customer": "Deze persoon logt in namens deze klanten.",
+  "user_detail.memberships.customers_hint_provider": "Klanten binnen het bereik van deze gebruiker.",
   "user_detail.memberships.empty": "Deze gebruiker heeft geen scope-lidmaatschappen.",
   "user_detail.customer_access.title": "Klanttoegang",
   "user_detail.customer_access.desc": "Klanten waarbij deze gebruiker acties kan uitvoeren. Klik op Rechten bekijken om te beheren wat ze kunnen doen.",

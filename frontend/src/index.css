@@ -4992,6 +4992,15 @@ a.attn-row:hover {
   align-items: start;
 }
 
+/* Sprint 188 — the Chargeable work variant. Its table has one more
+   column than the tickets page's, and at 1fr it did not fit the track,
+   so the whole list scrolled sideways. One column here gives the table
+   the sidebar's 340px and stacks the by-building card below it, which
+   is the right trade on a page whose job is reading that table. */
+.work-layout-wide {
+  grid-template-columns: 1fr;
+}
+
 @media (max-width: 1100px) {
   .work-layout {
     grid-template-columns: 1fr;

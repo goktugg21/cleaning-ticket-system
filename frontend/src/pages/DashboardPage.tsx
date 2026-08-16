@@ -2001,7 +2001,16 @@ export function DashboardPage({
         />
 
           <section
-            className="work-layout"
+            /* Sprint 188 — Chargeable work carries TWO columns the
+               tickets page does not (Extra work + Route, in place of its
+               single Priority), so the same `1fr 340px` grid left the
+               table wider than its track and it scrolled sideways. The
+               table needs that 340px more than the by-building card
+               does, so this variant drops to one column and the card
+               stacks underneath it instead of beside it. */
+            className={`work-layout${
+              isChargeableWork ? " work-layout-wide" : ""
+            }`}
             data-testid="dashboard-tickets-section"
           >
             <div className="dash-main">

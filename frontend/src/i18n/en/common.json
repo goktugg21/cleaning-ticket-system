@@ -1384,6 +1384,8 @@
   "user_detail.memberships.employed_by_title": "Employed by",
   "user_detail.memberships.buildings_title": "Buildings",
   "user_detail.memberships.customers_title": "Customers",
+  "user_detail.memberships.customers_hint_customer": "This person logs in on behalf of these customers.",
+  "user_detail.memberships.customers_hint_provider": "Customers within this user's scope.",
   "user_detail.memberships.empty": "This user has no scope memberships.",
   "user_detail.customer_access.title": "Customer access",
   "user_detail.customer_access.desc": "Customers this user can act on. Click View permissions to manage what they can do.",
