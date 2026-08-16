@@ -2389,5 +2389,6 @@
   "contacts.receives_invoices_needs_email": "Zonder e-mailadres kan deze contactpersoon geen factuur ontvangen.",
   "contacts.receives_invoices_yes": "Ja",
   "contacts.receives_invoices_no": "Nee",
-  "customers.lifecycle_hint": "Beschrijvend. Bepaalt niet wie kan inloggen — dat blijft de actief-schakelaar."
+  "customers.lifecycle_hint": "Beschrijvend. Bepaalt niet wie kan inloggen — dat blijft de actief-schakelaar.",
+  "customer_labels.seeded_default": "Algemeen"
 }

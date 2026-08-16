@@ -36,6 +36,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { useToast } from "../components/ToastProvider";
 import { formatDate, formatInvoiceGroupLabel, formatMoney } from "../lib/intl";
+import { customerLabelName } from "../lib/customerLabelName";
 
 const STATUS_LABEL_KEY: Record<InvoiceStatus, string> = {
   DRAFT: "facturen.status_draft",
@@ -577,8 +578,8 @@ export function InvoiceDetailPage() {
             </div>
             <div className="detail-field-value">
               {formatInvoiceGroupLabel(
-                invoice.department_name,
-                invoice.work_type_name,
+                customerLabelName(invoice.department_name, t),
+                customerLabelName(invoice.work_type_name, t),
               )}
             </div>
           </div>

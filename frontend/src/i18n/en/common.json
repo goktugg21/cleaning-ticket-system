@@ -2389,5 +2389,6 @@
   "contacts.receives_invoices_needs_email": "Without an e-mail address this contact cannot receive an invoice.",
   "contacts.receives_invoices_yes": "Yes",
   "contacts.receives_invoices_no": "No",
-  "customers.lifecycle_hint": "Descriptive. It does not decide who can log in — the active switch still does."
+  "customers.lifecycle_hint": "Descriptive. It does not decide who can log in — the active switch still does.",
+  "customer_labels.seeded_default": "General"
 }

@@ -88,6 +88,7 @@ import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { PageHeader } from "../components/PageHeader";
 import { ProposalBuilder } from "../components/ProposalBuilder";
+import { customerLabelName } from "../lib/customerLabelName";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
@@ -695,10 +696,18 @@ function LabelsCard({
           >
             <div>
               {t("detail.labels_field_department")}:{" "}
-              <strong>{ew.department_name ?? t("detail.empty_dash")}</strong>
+              <strong>
+                {ew.department_name
+                  ? customerLabelName(ew.department_name, t)
+                  : t("detail.empty_dash")}
+              </strong>
               {"  ·  "}
               {t("detail.labels_field_work_type")}:{" "}
-              <strong>{ew.work_type_name ?? t("detail.empty_dash")}</strong>
+              <strong>
+                {ew.work_type_name
+                  ? customerLabelName(ew.work_type_name, t)
+                  : t("detail.empty_dash")}
+              </strong>
             </div>
             <div style={{ marginTop: 6 }}>
               {/* Sprint 129 §2b — the backend sends the NUMBER or null; the
