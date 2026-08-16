@@ -574,3 +574,91 @@ class UserCompanyFilterTests(TenantFixtureMixin, APITestCase):
             self.client.get(f"{self.URL}?company={self.company.id}")
         )
         self.assertNotIn(self.super_admin.email, emails)
+
+
+class UserCustomerFilterTests(TenantFixtureMixin, APITestCase):
+    """Sprint 188 — `?customer=<id>`: "who at this customer can log in?"
+
+    Same rule as the company filter 187B added: it NARROWS the caller's
+    already-scoped set and can never widen it.
+    """
+
+    URL = "/api/users/"
+
+    def _emails(self, response):
+        rows = response.data.get("results", response.data)
+        return {row["email"] for row in rows}
+
+    def test_a_super_admin_can_narrow_to_one_customer(self):
+        self.authenticate(self.super_admin)
+        response = self.client.get(f"{self.URL}?customer={self.customer.id}")
+        self.assertEqual(response.status_code, 200, response.data)
+        emails = self._emails(response)
+        self.assertIn(self.customer_user.email, emails)
+        self.assertNotIn(self.other_customer_user.email, emails)
+        # A provider-side account holds no CustomerUserMembership, so it
+        # is not "at" any customer.
+        self.assertNotIn(self.company_admin.email, emails)
+
+    def test_a_company_admin_cannot_read_another_tenant_by_customer_id(self):
+        """The clause that matters. Asserted as 200-with-nothing rather
+        than an error: a 404 would confirm the id exists."""
+        self.authenticate(self.company_admin)
+        response = self.client.get(
+            f"{self.URL}?customer={self.other_customer.id}"
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self._emails(response), set())
+
+    def test_a_company_admin_passing_its_own_customer_still_sees_them(self):
+        """The control. Without it, an implementation that returned
+        nothing for every ?customer= value would pass the test above
+        while being completely broken."""
+        self.authenticate(self.company_admin)
+        response = self.client.get(f"{self.URL}?customer={self.customer.id}")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn(self.customer_user.email, self._emails(response))
+
+    def test_a_junk_value_cannot_500_the_page(self):
+        self.authenticate(self.super_admin)
+        response = self.client.get(f"{self.URL}?customer=not-a-number")
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_an_unknown_customer_id_is_empty_not_an_error(self):
+        self.authenticate(self.super_admin)
+        response = self.client.get(f"{self.URL}?customer=99999")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self._emails(response), set())
+
+
+class EmployedByTests(TenantFixtureMixin, APITestCase):
+    """Sprint 188 — "employed by" is not "whose data can you see".
+
+    The Users detail page rendered `company_ids` under the heading
+    "Companies ... this user belongs to". For a CUSTOMER_USER that array
+    is filled by `customer.company` — the provider that SERVES them — so
+    the page told the owner his customer's contact was a member of his
+    own company.
+    """
+
+    def _detail(self, user):
+        self.authenticate(self.super_admin)
+        return self.client.get(f"/api/users/{user.id}/")
+
+    def test_a_customer_user_is_employed_by_nobody(self):
+        response = self._detail(self.customer_user)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["employed_by"], [])
+        # ...while the scoping array still carries the provider, because
+        # that is a different question and other callers rely on it.
+        self.assertNotEqual(response.data["company_ids"], [])
+
+    def test_a_company_admin_names_its_company(self):
+        response = self._detail(self.company_admin)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["employed_by"], [self.company.name])
+
+    def test_a_super_admin_is_nobodys_employee(self):
+        response = self._detail(self.super_admin)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["employed_by"], [])

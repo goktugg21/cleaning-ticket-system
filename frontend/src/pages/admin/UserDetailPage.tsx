@@ -543,8 +543,23 @@ export function UserDetailPage() {
     </>
   ) : null;
 
+  // Sprint 188 — WHO EMPLOYS this person. Distinct from `companies`
+  // below, which is the SCOPE array: for a CUSTOMER_USER that one is
+  // filled by `customer.company`, i.e. the provider that serves them, so
+  // rendering it under "belongs to" told the owner his customer's
+  // contact person was a member of his own company.
+  const employedBy = user?.employed_by ?? [];
+  const isCustomerUser = user?.role === "CUSTOMER_USER";
+  // ...and for that same reason the scope-companies group is not shown
+  // to a customer user at all: the one entry it would carry is the
+  // provider, and naming it here is the confusion being fixed.
+  const showScopeCompanies = companies.length > 0 && !isCustomerUser;
+
   const hasAnyMembership =
-    companies.length > 0 || buildings.length > 0 || customers.length > 0;
+    employedBy.length > 0 ||
+    showScopeCompanies ||
+    buildings.length > 0 ||
+    customers.length > 0;
 
   return (
     <div data-testid="user-detail-page">
@@ -688,7 +703,20 @@ export function UserDetailPage() {
               />
             ) : (
               <>
-                {companies.length > 0 && (
+                {employedBy.length > 0 && (
+                  <div className="user-detail-membership-group">
+                    <div className="user-detail-membership-group-title">
+                      {t("user_detail.memberships.employed_by_title")}
+                    </div>
+                    <ul className="readonly-list">
+                      {employedBy.map((name) => (
+                        <li key={name}>{name}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {showScopeCompanies && (
                   <div className="user-detail-membership-group">
                     <div className="user-detail-membership-group-title">
                       {t("user_detail.memberships.companies_title")}

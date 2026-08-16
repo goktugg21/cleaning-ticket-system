@@ -1186,6 +1186,12 @@ export interface UserAdmin {
 }
 
 export interface UserAdminDetail extends UserAdmin {
+  // Sprint 188 — the provider companies that EMPLOY this person, by name.
+  // An OWN property, deliberately not reusing the list's `companies`:
+  // that field includes the provider a CUSTOMER_USER buys from, which is
+  // the exact conflation this one exists to end. Empty for a customer
+  // user and for a SUPER_ADMIN (a platform admin is nobody's employee).
+  employed_by: string[];
   company_ids: number[];
   building_ids: number[];
   customer_ids: number[];
@@ -1545,6 +1551,11 @@ export interface ExtraWorkRequestList {
   subtotal_amount: string;
   vat_amount: string;
   total_amount: string;
+  // Sprint 188 — has anyone priced this yet? Zero is a legal price, so
+  // the three columns above cannot answer that on their own. Optional:
+  // an older cached payload omits it, and `isPriced()` reads absent as
+  // "priced" so a stale client never blanks out a real amount.
+  is_priced?: boolean;
   // RF-13 (#106) — final (actual-hours) amounts on the list shape so
   // the invoices overview can apply the final-with-quoted-fallback
   // rule without a per-row detail fetch. Present for every audience

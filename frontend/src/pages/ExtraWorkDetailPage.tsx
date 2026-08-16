@@ -880,6 +880,10 @@ export function ExtraWorkDetailPage() {
   // Sprint 31 — proposal builder: create CTA busy/error.
   const [proposalBusy, setProposalBusy] = useState(false);
   const [proposalError, setProposalError] = useState("");
+  // Sprint 188 — set once, when the create response says the parent
+  // could not be advanced. Read by the builder to explain why Send is
+  // not there yet, in place of the generic line.
+  const [parentAdvanceBlocked, setParentAdvanceBlocked] = useState(false);
   // Direct-publish flow state.
   const [directPublishOpen, setDirectPublishOpen] = useState(false);
   const [directPublishReason, setDirectPublishReason] = useState("");
@@ -1525,10 +1529,15 @@ export function ExtraWorkDetailPage() {
       // permitted to move the parent, the proposal is still created and
       // the backend hands back the reason rather than failing silently.
       // `reloadProposals()` re-reads the proposal WITHOUT this field, so
-      // it is surfaced here, at the one moment it exists.
-      if (created.parent_advance_blocked) {
-        setProposalError(created.parent_advance_blocked);
-      }
+      // it is captured here, at the one moment it exists.
+      //
+      // Sprint 188 — it used to go into `proposalError`, whose only
+      // render site is the prepare-proposal card; `reloadProposals()`
+      // below makes a proposal exist, the card unmounts, and the message
+      // was gone in the same tick. It also arrived as raw backend
+      // English. It is now a flag carried into the builder, which says
+      // the actionable thing in the user's own language.
+      setParentAdvanceBlocked(Boolean(created.parent_advance_blocked));
       await reloadProposals();
     } catch (err) {
       setProposalError(getApiError(err));
@@ -1824,7 +1833,10 @@ export function ExtraWorkDetailPage() {
               data-testid="extra-work-header-total"
               title={t("detail.header_total_hint")}
             >
-              {t("list.column_total")}: {formatMoney(rowAmounts(ew).total)}
+              {t("list.column_total")}:{" "}
+              {ew.is_priced === false
+                ? "\u2014"
+                : formatMoney(rowAmounts(ew).total)}
             </span>
             {/* Sprint 174 §3 — the deadline and started-early markers
                 live in the HEADER, beside the status. A warning you
@@ -2925,6 +2937,7 @@ export function ExtraWorkDetailPage() {
                 ewId={ewId}
                 proposal={draftProposalDetail}
                 onChanged={reloadProposals}
+                parentAdvanceBlocked={parentAdvanceBlocked}
               />
             )}
 

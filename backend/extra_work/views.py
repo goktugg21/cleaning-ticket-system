@@ -22,7 +22,16 @@ from __future__ import annotations
 import logging
 
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, Prefetch, Q
+from django.db.models import (
+    BooleanField,
+    Case,
+    Count,
+    Exists,
+    OuterRef,
+    Prefetch,
+    Q,
+    When,
+)
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, mixins, serializers, status, viewsets
@@ -50,8 +59,12 @@ from .models import (
     ExtraWorkRequest,
     ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
+    ExtraWorkRoutingDecision,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
+    Proposal,
+    ProposalLine,
+    ProposalStatus,
 )
 from .scoping import scope_extra_work_for
 from .label_validation import (
@@ -161,6 +174,40 @@ class ExtraWorkRequestViewSet(
         spawned = Ticket.objects.filter(
             extra_work_request_id=OuterRef("pk"), deleted_at__isnull=True
         )
+        # Sprint 188 — "has anyone put a price on this yet?", so a list can
+        # print an em dash instead of EUR 0,00 for work nobody has priced.
+        # Zero is a LEGAL price (free work, a goodwill line); the two must
+        # not render the same. This mirrors `active_priced_lines`'
+        # resolution order exactly — approved proposal wins, then the cart
+        # for an INSTANT route, then the legacy rows — because a display
+        # that disagreed with the money rule would be worse than no
+        # display at all. Three EXISTS subqueries for the whole page.
+        priced_proposal = ProposalLine.objects.filter(
+            proposal__extra_work_request_id=OuterRef("pk"),
+            proposal__status=ProposalStatus.CUSTOMER_APPROVED,
+            is_approved_for_spawn=True,
+        )
+        any_approved_proposal = Proposal.objects.filter(
+            extra_work_request_id=OuterRef("pk"),
+            status=ProposalStatus.CUSTOMER_APPROVED,
+        )
+        cart_rows = ExtraWorkRequestItem.objects.filter(
+            extra_work_request_id=OuterRef("pk")
+        )
+        # NB the FK on the legacy row is `extra_work`, not
+        # `extra_work_request` like the other two.
+        legacy_rows = ExtraWorkPricingLineItem.objects.filter(
+            extra_work_id=OuterRef("pk")
+        )
+        is_priced = Case(
+            When(Exists(any_approved_proposal), then=Exists(priced_proposal)),
+            When(
+                routing_decision=ExtraWorkRoutingDecision.INSTANT,
+                then=Exists(cart_rows),
+            ),
+            default=Exists(legacy_rows),
+            output_field=BooleanField(),
+        )
         return (
             scope_extra_work_for(self.request.user)
             .select_related(
@@ -170,7 +217,10 @@ class ExtraWorkRequestViewSet(
                 "company", "building", "customer", "created_by",
                 "department", "work_type",
             )
-            .annotate(annotated_has_operational_ticket=Exists(spawned))
+            .annotate(
+                annotated_has_operational_ticket=Exists(spawned),
+                annotated_is_priced=is_priced,
+            )
             .prefetch_related(
                 # Sprint 180 §2 — the spawned ticket(s) themselves, so
                 # the list can print the ticket number and link to it
@@ -1269,6 +1319,40 @@ def _resolve_extra_work_or_404(request, ew_id: int) -> ExtraWorkRequest:
     return get_object_or_404(qs, pk=ew_id)
 
 
+def _require_legacy_pricing_is_the_owner(extra_work):
+    """Sprint 188 — the legacy `/pricing-items/` surface must not
+    overwrite a quote the Proposal route froze.
+
+    `ExtraWorkRequest.recompute_totals()` and
+    `final_amounts.recompute_quoted_totals()` write the SAME three
+    columns from DIFFERENT line sets. Sprint 187 gave the proposal route
+    a writer without noticing the legacy one already had the pen: with a
+    CUSTOMER_APPROVED proposal in place, `active_priced_lines` resolves
+    to that proposal's lines, so posting one legacy pricing row here
+    would replace an approved EUR 484.00 quote with the sum of whatever
+    was posted — no override recorded, no history row, and the customer
+    still approved the old number.
+
+    Once a proposal is approved it owns the money. Corrections go
+    through the proposal, not around it.
+    """
+    if extra_work.proposals.filter(
+        status=ProposalStatus.CUSTOMER_APPROVED
+    ).exists():
+        return Response(
+            {
+                "detail": (
+                    "This extra work is priced by an approved proposal. "
+                    "Change the price on the proposal; the legacy pricing "
+                    "lines no longer decide what it costs."
+                ),
+                "code": "legacy_pricing_locked_by_proposal",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return None
+
+
 def _require_provider_pricing_permission(request, extra_work):
     """Pricing line items can only be mutated by SUPER_ADMIN /
     COMPANY_ADMIN inside the company / BUILDING_MANAGER assigned
@@ -1318,6 +1402,9 @@ class ExtraWorkPricingLineItemListCreateView(generics.GenericAPIView):
         guard = _require_provider_pricing_permission(request, extra_work)
         if guard is not None:
             return guard
+        locked = _require_legacy_pricing_is_the_owner(extra_work)
+        if locked is not None:
+            return locked
         serializer = ExtraWorkPricingLineItemSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         item = serializer.save(extra_work=extra_work)
@@ -1348,6 +1435,9 @@ class ExtraWorkPricingLineItemDetailView(generics.GenericAPIView):
         guard = _require_provider_pricing_permission(request, extra_work)
         if guard is not None:
             return guard
+        locked = _require_legacy_pricing_is_the_owner(extra_work)
+        if locked is not None:
+            return locked
         serializer = ExtraWorkPricingLineItemSerializer(
             item, data=request.data, partial=True
         )
@@ -1361,6 +1451,9 @@ class ExtraWorkPricingLineItemDetailView(generics.GenericAPIView):
         guard = _require_provider_pricing_permission(request, extra_work)
         if guard is not None:
             return guard
+        locked = _require_legacy_pricing_is_the_owner(extra_work)
+        if locked is not None:
+            return locked
         item.delete()
         extra_work.recompute_totals()
         return Response(status=status.HTTP_204_NO_CONTENT)

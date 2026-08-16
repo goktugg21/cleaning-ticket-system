@@ -318,23 +318,13 @@ class ProviderEmployeeSerializer(serializers.ModelSerializer):
         attached = getattr(obj, "_company_names", None)
         if attached is not None:
             return attached
-        return sorted(
-            set(
-                CompanyUserMembership.objects.filter(user=obj).values_list(
-                    "company__name", flat=True
-                )
-            )
-            | set(
-                BuildingManagerAssignment.objects.filter(
-                    user=obj
-                ).values_list("building__company__name", flat=True)
-            )
-            | set(
-                BuildingStaffVisibility.objects.filter(user=obj).values_list(
-                    "building__company__name", flat=True
-                )
-            )
-        )
+        # Sprint 188 — the union moved to `scoping.
+        # employing_company_names_for` so the Users detail page can ask
+        # the same question and get the same answer. One definition of
+        # "employed by", not two.
+        from .scoping import employing_company_names_for
+
+        return employing_company_names_for(obj)
 
     def get_employment_type(self, obj):
         # OneToOne reverse accessor; present only for STAFF rows (PA/BM have

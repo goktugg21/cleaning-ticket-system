@@ -3,11 +3,16 @@ import { Link } from "react-router-dom";
 import { MailPlus, RefreshCw, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
-import { listAllCompanies, listUsers } from "../../api/admin";
+import {
+  listAllCompanies,
+  listAllCustomers,
+  listUsers,
+} from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type {
   CompanyAdmin,
   CustomerAccessRole,
+  CustomerAdmin,
   Role,
   UserAdmin,
   UserCompanies,
@@ -142,6 +147,10 @@ export function UsersAdminPage() {
   // auto-selected when exactly one company comes back (a single-company
   // admin), and disabled in that case because there is nothing to choose.
   const [companyFilter, setCompanyFilter] = useState<number | "">("");
+  // Sprint 188 — "who at this customer can log in?", the question the
+  // company filter cannot answer.
+  const [customerFilter, setCustomerFilter] = useState<number | "">("");
+  const [customers, setCustomers] = useState<CustomerAdmin[]>([]);
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
 
@@ -187,9 +196,13 @@ export function UsersAdminPage() {
       .then((response) => {
         if (cancelled) return;
         setCompanies(response);
-        if (response.length === 1) {
-          setCompanyFilter(response[0].id);
-        }
+        // Sprint 188 — NO auto-select here, unlike Buildings/Customers.
+        // Every building has a company; a SUPER_ADMIN has none, and the
+        // filter deliberately drops rows holding no membership in the
+        // chosen company. Auto-selecting on a one-company install (and
+        // then disabling the control, as this page also used to) pinned
+        // the filter on with no way back, so every platform admin
+        // disappeared from the Users list permanently.
       })
       .finally(() => {
         if (!cancelled) setCompaniesLoaded(true);
@@ -199,7 +212,27 @@ export function UsersAdminPage() {
     };
   }, []);
 
-  const companyDropdownDisabled = companiesLoaded && companies.length <= 1;
+  // Sprint 188 — never disabled: "All companies" must stay reachable,
+  // because it is the only value that shows a SUPER_ADMIN. `companiesLoaded`
+  // is still used to keep the control out of the way until it can be filled.
+  const companyDropdownDisabled = !companiesLoaded;
+
+  // Sprint 188 — the customer picker. Narrowed by the chosen company
+  // when there is one, so the two filters agree instead of offering a
+  // customer that the company filter has already excluded. Exhaustive
+  // paging (`listAllCustomers`), not a first page: the Sprint 135 rule
+  // is to fix the caller that has no pagination UI, never the endpoint.
+  useEffect(() => {
+    let cancelled = false;
+    listAllCustomers(
+      companyFilter === "" ? {} : { company: companyFilter },
+    ).then((rows) => {
+      if (!cancelled) setCustomers(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyFilter]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -214,8 +247,16 @@ export function UsersAdminPage() {
     if (roleFilter.length > 0) params.role = roleFilter.join(",");
     if (accessRoleFilter) params.access_role = accessRoleFilter;
     if (companyFilter !== "") params.company = companyFilter;
+    if (customerFilter !== "") params.customer = customerFilter;
     return params;
-  }, [page, activeFilter, roleFilter, accessRoleFilter, companyFilter]);
+  }, [
+    page,
+    activeFilter,
+    roleFilter,
+    accessRoleFilter,
+    companyFilter,
+    customerFilter,
+  ]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -265,7 +306,10 @@ export function UsersAdminPage() {
     searchActive ||
       activeFilter !== "true" ||
       roleFilter.length > 0 ||
-      accessRoleFilter,
+      accessRoleFilter ||
+      // Sprint 188 — both narrowing pickers count, so "Clear" clears them.
+      companyFilter !== "" ||
+      customerFilter !== "",
   );
 
   function toggleRole(role: Role) {
@@ -435,6 +479,27 @@ export function UsersAdminPage() {
               ))}
             </select>
           </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("customer")}</span>
+            <select
+              className="filter-control"
+              style={{ maxWidth: 220 }}
+              data-testid="users-filter-customer"
+              value={customerFilter === "" ? "" : String(customerFilter)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCustomerFilter(value === "" ? "" : Number(value));
+                setPage(1);
+              }}
+            >
+              <option value="">{t("users.all_customers")}</option>
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </select>
+          </div>
           {/* Sprint 157 §7 — the two chip groups share ONE full-width
               row, in equal columns.
 
@@ -542,6 +607,8 @@ export function UsersAdminPage() {
                   setActiveFilter("true");
                   setRoleFilter([]);
                   setAccessRoleFilter(null);
+                  setCompanyFilter("");
+                  setCustomerFilter("");
                   setPage(1);
                 }}
               >

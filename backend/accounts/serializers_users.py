@@ -206,6 +206,16 @@ class UserDetailSerializer(serializers.ModelSerializer):
     company_ids = serializers.SerializerMethodField()
     building_ids = serializers.SerializerMethodField()
     customer_ids = serializers.SerializerMethodField()
+    # Sprint 188 — WHO EMPLOYS this person, which `company_ids` above does
+    # not answer and never did: for a CUSTOMER_USER that array carries the
+    # provider company that SERVES them (via `customer.company`), and for
+    # STAFF it is empty because `company_ids_for` has no STAFF branch. So
+    # the page named a customer contact a member of the provider, and said
+    # nothing at all about the provider's own staff. Named `employed_by`
+    # and not `companies` on purpose: `UserAdminDetail extends UserAdmin`
+    # in types.ts, so reusing `companies` would silently bind this to the
+    # LIST field's customer-inclusive meaning.
+    employed_by = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -221,6 +231,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
             "company_ids",
             "building_ids",
             "customer_ids",
+            "employed_by",
         ]
         read_only_fields = fields
 
@@ -237,6 +248,15 @@ class UserDetailSerializer(serializers.ModelSerializer):
 
     def get_customer_ids(self, obj):
         return list(customer_ids_for(obj))
+
+    def get_employed_by(self, obj) -> list[str]:
+        # Three queries on a single-object read. Shares its definition
+        # with the Employees directory (`scoping.
+        # employing_company_names_for`) so the two pages cannot disagree
+        # about who works where.
+        from .scoping import employing_company_names_for
+
+        return employing_company_names_for(obj)
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):

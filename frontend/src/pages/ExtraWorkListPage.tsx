@@ -62,7 +62,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
-import { rowAmounts } from "../lib/billing";
+import { isPriced, rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 import { customerLabelName } from "../lib/customerLabelName";
@@ -1707,7 +1707,16 @@ export function ExtraWorkList({
                     <td>{row.building_name}</td>
                     <td>{row.customer_name}</td>
                     <td style={{ textAlign: "right" }}>
-                      {formatMoney(rowAmounts(row).total)}
+                      {isPriced(row) ? (
+                        formatMoney(rowAmounts(row).total)
+                      ) : (
+                        <span
+                          className="muted-empty"
+                          title={t("list.total_not_priced_hint")}
+                        >
+                          &mdash;
+                        </span>
+                      )}
                     </td>
                     {isWorkStarted && (
                       <td data-testid={`ew-ticket-cell-${row.id}`}>
@@ -1857,7 +1866,13 @@ export function ExtraWorkList({
                     </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_total")}</dt>
-                      <dd>{formatMoney(rowAmounts(row).total)}</dd>
+                      <dd>
+                        {isPriced(row) ? (
+                          formatMoney(rowAmounts(row).total)
+                        ) : (
+                          <span className="muted-empty">&mdash;</span>
+                        )}
+                      </dd>
                     </div>
                     {/* Sprint 180 — the mobile card carries exactly the
                         columns the table on this track carries. */}

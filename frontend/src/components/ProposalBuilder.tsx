@@ -682,10 +682,16 @@ export function ProposalBuilder({
   ewId,
   proposal,
   onChanged,
+  parentAdvanceBlocked = false,
 }: {
   ewId: number | string;
   proposal: ProposalDetail;
   onChanged: () => Promise<void> | void;
+  // Sprint 188 — creating this proposal was meant to start the review,
+  // and did not. Without this the builder shows the generic "Send is not
+  // available yet" line, which is true but useless: the operator cannot
+  // tell that ONE click on the workflow card above fixes it.
+  parentAdvanceBlocked?: boolean;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [busy, setBusy] = useState(false);
@@ -1076,7 +1082,9 @@ export function ProposalBuilder({
                 style={{ margin: "6px 0 0" }}
                 data-testid="extra-work-proposal-send-blocked-reason"
               >
-                {t("detail.proposal_send_blocked_reason")}
+                {parentAdvanceBlocked
+                  ? t("detail.proposal_send_blocked_parent")
+                  : t("detail.proposal_send_blocked_reason")}
               </p>
             </div>
           )

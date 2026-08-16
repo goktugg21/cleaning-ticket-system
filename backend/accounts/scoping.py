@@ -41,6 +41,54 @@ def company_admin_customer_ids(user) -> set[int]:
     )
 
 
+def employing_company_names_for(user) -> list[str]:
+    """Sprint 188 — the provider companies that EMPLOY `user`, by name.
+
+    Deliberately NOT `company_ids_for`. That helper answers "whose data
+    may this account see", and for a CUSTOMER_USER it answers it through
+    `CustomerUserMembership -> customer.company` — the provider that
+    SERVES them. Rendering that under "belongs to" told the owner his
+    customer's contact person was a member of his own company. It is a
+    tenancy fact, not a relationship.
+
+    Employment is a different union, and one this repo already writes
+    down once, in `ProviderEmployeeSerializer.get_companies`:
+
+      CompanyUserMembership            (COMPANY_ADMIN)
+      BuildingManagerAssignment.building.company   (BUILDING_MANAGER)
+      BuildingStaffVisibility.building.company     (STAFF)
+
+    and never the customer join. This is that union, extracted so the
+    Employees directory and the Users detail page cannot drift — the
+    failure mode CLAUDE.md's `PERMISSION_GROUPS` note already paid for.
+
+    A SUPER_ADMIN returns empty: a platform admin is nobody's employee,
+    the same judgement `ProviderEmployeesView` already makes by leaving
+    the role out of its directory entirely.
+    """
+    from buildings.models import BuildingStaffVisibility
+
+    if user is None or user.role == UserRole.SUPER_ADMIN:
+        return []
+    return sorted(
+        set(
+            CompanyUserMembership.objects.filter(user=user).values_list(
+                "company__name", flat=True
+            )
+        )
+        | set(
+            BuildingManagerAssignment.objects.filter(user=user).values_list(
+                "building__company__name", flat=True
+            )
+        )
+        | set(
+            BuildingStaffVisibility.objects.filter(user=user).values_list(
+                "building__company__name", flat=True
+            )
+        )
+    )
+
+
 def company_ids_for(user):
     if _is_anonymous(user):
         return Company.objects.none().values_list("id", flat=True)

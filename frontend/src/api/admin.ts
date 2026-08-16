@@ -102,6 +102,9 @@ export interface AdminListParams {
   page?: number;
   company?: number;
   building?: number;
+  /** Sprint 188 — narrow /api/users/ to the people holding a
+   *  CustomerUserMembership for this customer. */
+  customer?: number;
   /** Sprint 178 §1 — narrow the buildings list to one building
    *  type from that company's own catalog. */
   building_type?: number;

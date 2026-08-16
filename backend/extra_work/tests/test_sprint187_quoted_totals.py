@@ -600,3 +600,64 @@ class QuotedTotalsUnpricedRouteTests(_QuotedTotalsFixture):
             quoted_totals(ew),
             (Decimal("0.00"), Decimal("0.00"), Decimal("0.00")),
         )
+
+
+class LegacyPricingCannotOverwriteAFrozenQuoteTests(_QuotedTotalsFixture):
+    """Sprint 188 — the second writer of the same three columns.
+
+    `ExtraWorkRequest.recompute_totals()` (legacy `/pricing-items/`) and
+    `final_amounts.recompute_quoted_totals()` (the proposal route) both
+    own `subtotal_amount` / `vat_amount` / `total_amount`, and they read
+    DIFFERENT line sets. Sprint 187 handed the proposal route a pen
+    without noticing the legacy surface already had one.
+    """
+
+    def _approved(self) -> ExtraWorkRequest:
+        ew = self._make_ew(status=ExtraWorkStatus.CUSTOMER_APPROVED)
+        self._make_proposal(ew, status=ProposalStatus.CUSTOMER_APPROVED)
+        recompute_quoted_totals(ew)
+        ew.refresh_from_db()
+        self.assertEqual(ew.total_amount, Decimal("585.64"))
+        return ew
+
+    def _url(self, ew) -> str:
+        return f"/api/extra-work/{ew.id}/pricing-items/"
+
+    def test_posting_a_legacy_line_cannot_replace_the_approved_quote(self):
+        ew = self._approved()
+        response = self._api(self.super_admin).post(
+            self._url(ew),
+            {
+                "description": "a cheaper number nobody approved",
+                "quantity": "1.00",
+                "unit_type": ExtraWorkPricingUnitType.FIXED,
+                "unit_price": "1.00",
+                "vat_rate": "21.00",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(
+            response.data.get("code"), "legacy_pricing_locked_by_proposal"
+        )
+        ew.refresh_from_db()
+        self.assertEqual(ew.total_amount, Decimal("585.64"))
+
+    def test_the_lock_only_applies_once_a_proposal_is_approved(self):
+        """An EW with no approved proposal still prices the legacy way —
+        the guard closes a collision, it does not retire the surface."""
+        ew = self._make_ew(status=ExtraWorkStatus.UNDER_REVIEW)
+        response = self._api(self.super_admin).post(
+            self._url(ew),
+            {
+                "description": "ordinary legacy pricing",
+                "quantity": "2.00",
+                "unit_type": ExtraWorkPricingUnitType.HOURS,
+                "unit_price": "50.00",
+                "vat_rate": "21.00",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        ew.refresh_from_db()
+        self.assertEqual(ew.total_amount, Decimal("121.00"))

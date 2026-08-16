@@ -155,6 +155,42 @@ class UserViewSet(viewsets.ModelViewSet):
         # provider companies. (Other roles never reach here.)
         scope_company_ids = None if is_super else actor_company_ids
 
+        # Sprint 188 — ?customer=<id>. The owner could filter Users by
+        # company but not by customer, which is the question he actually
+        # asks: "who at this customer can log in?"
+        #
+        # H-1/H-2: this runs AFTER the tenant cut above, so it can only
+        # remove rows — and the extra `customer__company_id__in` clause is
+        # load-bearing, not belt-and-braces. A person holding memberships
+        # under TWO providers is legitimately in `base` for either admin;
+        # without that clause, passing the OTHER provider's customer id
+        # would return them, turning the filter into an existence oracle
+        # for a customer id the caller may not see.
+        #
+        # `Exists` on OuterRef("pk"), never a join: (customer, user) is
+        # unique, but the reverse accessor would still fan rows out and
+        # corrupt `count` for the pagination the page renders.
+        #
+        # Tolerant parse, matching `?company=` on this same endpoint: junk
+        # is no opinion, not a 500 and not a 400. An id the caller cannot
+        # see yields an empty 200 rather than a 404 — a 404 would confirm
+        # the id exists.
+        customer_filter = self.request.query_params.get("customer")
+        if customer_filter not in (None, ""):
+            try:
+                customer_id = int(customer_filter)
+            except (TypeError, ValueError):
+                customer_id = None
+            if customer_id is not None:
+                sub = CustomerUserMembership.objects.filter(
+                    user=OuterRef("pk"), customer_id=customer_id
+                )
+                if scope_company_ids is not None:
+                    sub = sub.filter(
+                        customer__company_id__in=scope_company_ids
+                    )
+                base = base.filter(Exists(sub))
+
         # Sprint 2c follow-up — ?access_role= filters by the EFFECTIVE
         # (single highest) customer access role, company-scoped to the
         # viewer. Single value, NOT comma-multi. An unknown value yields an

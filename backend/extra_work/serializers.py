@@ -689,9 +689,34 @@ def _has_operational_ticket(obj) -> bool:
 # ---------------------------------------------------------------------------
 # Extra Work — list (lean)
 # ---------------------------------------------------------------------------
+def _is_priced(obj) -> bool:
+    """Sprint 188 — has anyone put a price on this Extra Work yet?
+
+    ZERO IS A LEGAL PRICE. Free work and a goodwill line are ordinary
+    business, so `total_amount == 0.00` cannot be read as "unpriced" —
+    the lists need to tell "nobody has priced this" from "this costs
+    nothing", and print an em dash for the first.
+
+    Prefers `annotated_is_priced` from `ExtraWorkRequestViewSet.
+    get_queryset` (one EXISTS per page, not per row); falls back to
+    `active_priced_lines` so the detail serializer and any un-annotated
+    caller still answer correctly. Both follow the SAME resolution order
+    as the money rule, which is the point: a display that disagreed with
+    `rowAmounts()` would be worse than no display.
+    """
+    annotated = getattr(obj, "annotated_is_priced", None)
+    if annotated is not None:
+        return bool(annotated)
+    from .final_amounts import active_priced_lines
+
+    _kind, lines = active_priced_lines(obj)
+    return bool(lines)
+
+
 class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     is_overdue = serializers.BooleanField(read_only=True)
     started_before_plan = serializers.BooleanField(read_only=True)
+    is_priced = serializers.SerializerMethodField()
 
     # Sprint 180 §1/§2 — the reverse of `Ticket.extra_work_origin`,
     # which had no serializer field at all in either direction from the
@@ -791,6 +816,9 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            # Sprint 188 — lets a reader tell "nobody has priced this"
+            # from "this costs nothing". Both render 0.00 otherwise.
+            "is_priced",
             # RF-13 (#106) — final (actual-hours) amounts on the list
             # shape so the invoices overview can compute month totals
             # with the same final-with-quoted-fallback rule the revenue
@@ -823,6 +851,9 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     def get_has_operational_ticket(self, obj) -> bool:
         return _has_operational_ticket(obj)
 
+    def get_is_priced(self, obj) -> bool:
+        return _is_priced(obj)
+
     def get_spawned_tickets(self, obj):
         return _serialize_spawned_tickets(obj)
 
@@ -849,6 +880,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    # Sprint 188 — same question, same answer, on the detail shape. No
+    # annotation here, so `_is_priced` falls back to `active_priced_lines`.
+    is_priced = serializers.SerializerMethodField()
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
@@ -961,6 +995,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            # Sprint 188 — lets a reader tell "nobody has priced this"
+            # from "this costs nothing". Both render 0.00 otherwise.
+            "is_priced",
             # Sprint 8B — final billable amounts (NULL until actual
             # hours are entered / frozen at customer approval). Visible
             # to the customer per SoT §5.12.
@@ -1013,6 +1050,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            # Sprint 188 — lets a reader tell "nobody has priced this"
+            # from "this costs nothing". Both render 0.00 otherwise.
+            "is_priced",
             "final_subtotal_amount",
             "final_vat_amount",
             "final_total_amount",
@@ -1045,6 +1085,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
 
     def get_spawned_tickets(self, obj):
         return _serialize_spawned_tickets(obj)
+
+    def get_is_priced(self, obj) -> bool:
+        return _is_priced(obj)
 
     def get_pricing_line_items(self, obj):
         user = self.context.get("request").user if self.context.get("request") else None
