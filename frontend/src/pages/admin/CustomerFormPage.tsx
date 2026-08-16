@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
+import { CUSTOMER_LIFECYCLE_VALUES } from "../../api/types";
 import {
   addCustomerUser,
   addCustomerUserAccess,
@@ -32,6 +33,7 @@ import type {
   CustomerAccessRole,
   CustomerAdmin,
   CustomerBuildingMembership,
+  CustomerLifecycle,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
   UserAdmin,
@@ -90,6 +92,16 @@ export function CustomerFormPage() {
   const [contactEmail, setContactEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [language, setLanguage] = useState("nl");
+  // Sprint 185 §1 — the BILLING address. Same four fields as Building,
+  // deliberately, so the two records read alike. This is the address the
+  // invoice PDF prints; a building's address is the work site.
+  const [address, setAddress] = useState("");
+  const [postalCode, setPostalCode] = useState("");
+  const [city, setCity] = useState("");
+  const [country, setCountry] = useState("");
+  // Sprint 185 §3 — the relationship state. DESCRIPTIVE: it never gates
+  // access. `is_active` (the deactivate button below) still does.
+  const [lifecycle, setLifecycle] = useState<CustomerLifecycle>("ACTIVE");
   // Sprint 23B — assigned-staff contact visibility policy. Defaults
   // mirror the backend model defaults (all True). The backend gate
   // is IsSuperAdminOrCompanyAdmin on CustomerViewSet; the buildings
@@ -148,6 +160,11 @@ export function CustomerFormPage() {
         contact_email: contactEmail.trim(),
         phone: phone.trim(),
         language,
+        address: address.trim(),
+        postal_code: postalCode.trim(),
+        city: city.trim(),
+        country: country.trim(),
+        lifecycle,
         show_assigned_staff_name: showAssignedStaffName,
         show_assigned_staff_email: showAssignedStaffEmail,
         show_assigned_staff_phone: showAssignedStaffPhone,
@@ -169,6 +186,11 @@ export function CustomerFormPage() {
       setContactEmail(entity.contact_email);
       setPhone(entity.phone);
       setLanguage(entity.language);
+      setAddress(entity.address ?? "");
+      setPostalCode(entity.postal_code ?? "");
+      setCity(entity.city ?? "");
+      setCountry(entity.country ?? "");
+      setLifecycle(entity.lifecycle ?? "ACTIVE");
       // Sprint 23B — hydrate contact-visibility flags. Backend
       // ensures these are always present on read responses (model
       // defaults are True), so the `?? true` is belt-and-suspenders
@@ -661,6 +683,10 @@ export function CustomerFormPage() {
   }
 
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+  // Mirrors the server's `has_billing_address` (street AND city). Derived
+  // from the live inputs, not the fetched entity, so the warning clears
+  // as you type rather than only after a save.
+  const addressIsPrintable = address.trim() !== "" && city.trim() !== "";
   const customerName = customer?.name ?? t("customer_form.fallback");
 
   // Sprint 14 — buildings available to link: every active building
@@ -866,6 +892,96 @@ export function CustomerFormPage() {
             </select>
           </div>
 
+          {/* Sprint 185 §3 — where the relationship is. Beside the
+              address because the two answer the same operator question:
+              is this a real, invoiceable customer, and for how long. */}
+          <div className="field">
+            <label className="field-label" htmlFor="customer-lifecycle">
+              {t("customers.lifecycle")}
+            </label>
+            <select
+              id="customer-lifecycle"
+              className="field-select"
+              data-testid="customer-lifecycle"
+              value={lifecycle}
+              onChange={(event) =>
+                setLifecycle(event.target.value as CustomerLifecycle)
+              }
+            >
+              {CUSTOMER_LIFECYCLE_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {t(`customers.lifecycle_${value.toLowerCase()}`)}
+                </option>
+              ))}
+            </select>
+            <div className="form-section-helper">
+              {t("customers.lifecycle_hint")}
+            </div>
+          </div>
+
+          </div>
+
+          {/* Sprint 185 §1 — the billing address. Its own card, because
+              this is the thing an invoice is addressed TO and it must not
+              read as one more optional contact detail. */}
+          <div className="form-section" data-testid="section-customer-address">
+            <div className="form-section-title">{t("customers.address")}</div>
+            <div className="form-section-helper">{t("customers.address_hint")}</div>
+            {!isCreate && !addressIsPrintable && (
+              <div className="alert-warning" role="status">
+                {t("customers.address_missing")}
+              </div>
+            )}
+            <div className="field">
+              <label className="field-label" htmlFor="customer-address">
+                {t("customers.address_street")}
+              </label>
+              <input
+                id="customer-address"
+                className="field-input"
+                type="text"
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+              />
+            </div>
+            <div className="form-2col">
+              <div className="field">
+                <label className="field-label" htmlFor="customer-postal-code">
+                  {t("customers.address_postal_code")}
+                </label>
+                <input
+                  id="customer-postal-code"
+                  className="field-input"
+                  type="text"
+                  value={postalCode}
+                  onChange={(event) => setPostalCode(event.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="customer-city">
+                  {t("customers.address_city")}
+                </label>
+                <input
+                  id="customer-city"
+                  className="field-input"
+                  type="text"
+                  value={city}
+                  onChange={(event) => setCity(event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="customer-country">
+                {t("customers.address_country")}
+              </label>
+              <input
+                id="customer-country"
+                className="field-input"
+                type="text"
+                value={country}
+                onChange={(event) => setCountry(event.target.value)}
+              />
+            </div>
           </div>
           {/* Sprint 23B — Assigned-staff contact-visibility policy.
               Default True; toggling off scrubs the corresponding

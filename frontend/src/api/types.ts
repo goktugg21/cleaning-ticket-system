@@ -128,6 +128,29 @@ export interface CustomerActions {
   allowed_target_customer_access_roles: CustomerAccessRole[];
 }
 
+/** Sprint 185 §3 — proposed, and awaiting the owner's veto. Mirrors
+ *  `customers.models.CustomerLifecycle`. Nothing branches on the value;
+ *  it is what the screens say, not what anyone may do. */
+/** Sprint 185 §3 — the ONE ordered lifecycle list. Both the list page's
+ *  filter and the form's picker iterate this; a second local copy is how
+ *  a newly added state renders on one screen and silently not the other
+ *  (CLAUDE.md — Sprint 126/130). Adding a state here and to the union
+ *  below is the whole change. */
+export const CUSTOMER_LIFECYCLE_VALUES = [
+  "PROSPECT",
+  "ONBOARDING",
+  "ACTIVE",
+  "NOTICE",
+  "CHURNED",
+] as const;
+
+export type CustomerLifecycle =
+  | "PROSPECT"
+  | "ONBOARDING"
+  | "ACTIVE"
+  | "NOTICE"
+  | "CHURNED";
+
 export interface Customer {
   id: number;
   company: number;
@@ -146,7 +169,21 @@ export interface Customer {
   contact_email: string;
   phone: string;
   language: string;
+  // Sprint 185 §1 — the BILLING address. Every invoice carries the
+  // CUSTOMER's address, never the building's: a building's address is
+  // the work site.
+  address: string;
+  postal_code: string;
+  city: string;
+  country: string;
+  /** Server-derived: street AND city are filled in. One definition
+   *  (`Customer.has_billing_address`) so the screen's warning and the
+   *  document cannot disagree about what counts as an address. */
+  has_billing_address: boolean;
   is_active: boolean;
+  /** Sprint 185 §3 — where the relationship is. DESCRIPTIVE ONLY:
+   *  `is_active` above still decides access. */
+  lifecycle: CustomerLifecycle;
   // RF-1 — customer company logo URL (null when unset).
   logo_url?: string | null;
   // Per-current-user, per-customer capability block. Optional so
@@ -796,6 +833,19 @@ export interface CustomerAdmin {
   phone: string;
   language: string;
   is_active: boolean;
+  /** Sprint 185 §1 — the BILLING address, printed on every invoice.
+   *  A building's address is the work site and is NOT this. */
+  address: string;
+  postal_code: string;
+  city: string;
+  country: string;
+  /** Server-computed: street AND city both filled. Read-only — the
+   *  screen must not re-derive the rule the PDF actually applies. */
+  has_billing_address: boolean;
+  /** Sprint 185 §3 — where the relationship IS. Descriptive only:
+   *  `is_active` above still decides access, and nothing here may
+   *  change it. */
+  lifecycle: CustomerLifecycle;
   // Sprint 23B — assigned-staff contact-visibility policy. Defaults
   // True. The CustomerFormPage exposes these as three checkboxes
   // for OSIUS Admin / Company Admin only.
@@ -2126,6 +2176,10 @@ export interface Contact {
   notes: string;
   // Sprint 12B — contact taxonomy + the promote-to-user bridge.
   contact_type: string;
+  /** Sprint 185 §2 — send this person the invoice. Separate from
+   *  `contact_type === "BILLING"`: that says what they do, this says
+   *  what they receive. */
+  receives_invoices: boolean;
   is_primary: boolean;
   // `user` is the read-only FK set ONLY by the promote/link flow (null
   // until promoted). `promotion_status` is server-computed:
@@ -2152,6 +2206,8 @@ export interface ContactCreatePayload {
   phone?: string;
   role_label?: string;
   notes?: string;
+  /** Sprint 185 §2 — mark this contact as an invoice recipient. */
+  receives_invoices?: boolean;
 }
 
 // PATCH semantics — every field optional.

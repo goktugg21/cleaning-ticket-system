@@ -772,7 +772,29 @@ def send_logged_email(
     ticket=None,
     recipient_user=None,
     actor=None,
+    attachment=None,
 ):
+    """The ONE logged sender. Every notification in this system goes
+    through here: it writes the `NotificationLog` row first and then
+    queues the send, so "was it sent, to whom, and when" has an answer
+    whatever happens to the delivery.
+
+    Sprint 185 §2 — `attachment` is an optional
+    `(filename, content_bytes, mimetype)` triple, so a document can be
+    sent WITHOUT a second sender and without a second log. It is plain
+    data rather than a file object because the value crosses a Celery
+    boundary and is serialised on the way.
+
+    That boundary is the reason for the base64 hop below. This project
+    leaves `task_serializer` at Celery's default, which is JSON, and raw
+    `bytes` are not JSON-serialisable — enqueuing them raises
+    `EncodeError` in a real worker. Tests would never have caught it:
+    they run with `CELERY_TASK_ALWAYS_EAGER`, where the arguments are
+    handed over in-process and never serialised at all. So the bytes are
+    encoded here and decoded in the task, and a test asserts the payload
+    survives a real JSON round-trip.
+    """
+    import base64
     # Local import keeps Django from importing notifications.tasks during the
     # initial app-loading pass, which would in turn import this module again.
     from .tasks import send_email_task
@@ -788,11 +810,22 @@ def send_logged_email(
         status=NotificationStatus.QUEUED,
     )
 
+    if attachment is None:
+        queued_attachment = None
+    else:
+        filename, content, mimetype = attachment
+        queued_attachment = [
+            filename,
+            base64.b64encode(bytes(content)).decode("ascii"),
+            mimetype,
+        ]
+
     send_email_task.delay(
         log_id=log.id,
         recipient_email=recipient_email,
         subject=subject,
         body=body,
+        attachment=queued_attachment,
     )
 
     # Reflect any state transitions the task already performed (eager mode in
@@ -1191,3 +1224,92 @@ def send_invitation_email(invitation, raw_token, accept_url):
         recipient_user=None,
         actor=inviter,
     )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 185 §2 — sending an invoice to the customer's invoice contacts.
+# ---------------------------------------------------------------------------
+
+
+def send_invoice_to_contacts(invoice, pdf_bytes, *, actor=None):
+    """E-mail `invoice`'s PDF to the contacts flagged to receive invoices.
+
+    Returns `(logs, skipped)` — the `NotificationLog` rows written, and
+    the contacts that were flagged but have no e-mail address.
+
+    ## Why this lives here and not in `invoicing`
+
+    It is a MAIL function, and this module is the one place mail is sent
+    and logged from. Putting it beside `send_invoice` would have created
+    a second sender, which is the thing to avoid: one sender, one
+    `NotificationLog`, one answer to "did they get it".
+
+    ## What it deliberately does not do
+
+    It does not decide WHEN. `invoicing.state_machine.send_invoice` is
+    the only place that knows an invoice has become real, and calling
+    this is one line there:
+
+        from notifications.services import send_invoice_to_contacts
+        send_invoice_to_contacts(locked, invoice_pdf_bytes(locked), actor=actor)
+
+    That file belongs to another agent this round, so this branch does
+    not touch it — see the sprint report. Until that line exists the
+    function is reachable and tested but never fired, which is a
+    deliberately honest state: the recipients, the document, the log and
+    the send all work; nothing yet pulls the trigger.
+
+    ## Best-effort, like every other notification here
+
+    A failed e-mail must never roll back a SENT invoice. The invoice is
+    the artefact; the mail is a delivery of it, and losing the delivery
+    is an annoyance while losing the send is a billing incident.
+    """
+    from customers.invoice_recipients import (
+        invoice_contact_recipients,
+        skipped_invoice_contacts,
+    )
+
+    customer = invoice.customer
+    recipients = invoice_contact_recipients(customer)
+    skipped = skipped_invoice_contacts(customer)
+    if not recipients:
+        return [], skipped
+
+    number = invoice.number or f"concept-{invoice.pk}"
+    filename = f"factuur-{number}.pdf"
+    subject = f"Factuur {number} van {getattr(invoice.company, 'name', '')}".strip()
+    body = "\n".join(
+        [
+            f"Beste {{name}},",
+            "",
+            f"In de bijlage vindt u factuur {number}.",
+            "",
+            f"Totaal: {invoice.total_amount:.2f}",
+            "",
+            "Deze e-mail is automatisch verzonden.",
+        ]
+    )
+
+    logs = []
+    for contact in recipients:
+        try:
+            logs.append(
+                send_logged_email(
+                    recipient_email=contact.email,
+                    subject=subject,
+                    # Addressed by name: an invoice going to a person
+                    # should say whose desk it is on.
+                    body=body.replace("{name}", contact.full_name or ""),
+                    event_type=NotificationEventType.INVOICE_SENT,
+                    actor=actor,
+                    attachment=(filename, pdf_bytes, "application/pdf"),
+                )
+            )
+        except Exception:  # noqa: BLE001 — never lose a send over an e-mail.
+            logger.exception(
+                "Sprint 185 §2: invoice mail failed for contact %s on invoice %s",
+                contact.pk,
+                invoice.pk,
+            )
+    return logs, skipped

@@ -19,6 +19,7 @@ import {
 } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type { BuildingAdmin, CompanyAdmin, CustomerAdmin } from "../../api/types";
+import { CUSTOMER_LIFECYCLE_VALUES } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
@@ -37,6 +38,20 @@ type ActiveFilter = "true" | "false" | "all";
  * is the authority and silently ignores anything not on it.
  */
 type SortField = "name" | "contact_email" | "is_active";
+
+/** Sprint 185 §3 — the lifecycle's colour, reusing the app's existing
+ *  status tones rather than inventing a sixth palette. NOTICE is the one
+ *  that costs money — you are still cleaning, still incurring cost — so
+ *  it gets the waiting tone that means "needs attention", not the
+ *  neutral one that means "nothing to see". */
+const LIFECYCLE_TONE: Record<string, string> = {
+  PROSPECT: "cell-tag-muted",
+  ONBOARDING: "cell-tag-in_progress",
+  ACTIVE: "cell-tag-open",
+  NOTICE: "cell-tag-waiting_customer_approval",
+  CHURNED: "cell-tag-closed",
+};
+
 type SortDirection = "asc" | "desc";
 
 const DEBOUNCE_MS = 300;
@@ -58,6 +73,9 @@ export function CustomersAdminPage() {
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("true");
+  // Sprint 185 §3 — a SEPARATE axis from `is_active` above. Filtering by
+  // one must never imply the other; they answer different questions.
+  const [lifecycleFilter, setLifecycleFilter] = useState<string>("");
   const [companyFilter, setCompanyFilter] = useState<number | "">("");
   const [buildingFilter, setBuildingFilter] = useState<number | "">("");
   const [sortField, setSortField] = useState<SortField>("name");
@@ -163,6 +181,7 @@ export function CustomersAdminPage() {
     const params: AdminListParams = { page };
     if (searchActive) params.search = searchActive;
     if (activeFilter !== "all") params.is_active = activeFilter;
+    if (lifecycleFilter !== "") params.lifecycle = lifecycleFilter;
     if (companyFilter !== "") params.company = companyFilter;
     if (buildingFilter !== "") params.building = buildingFilter;
     params.ordering = sortDirection === "desc" ? `-${sortField}` : sortField;
@@ -170,6 +189,7 @@ export function CustomersAdminPage() {
   }, [
     page,
     searchActive,
+    lifecycleFilter,
     activeFilter,
     companyFilter,
     buildingFilter,
@@ -518,6 +538,30 @@ export function CustomersAdminPage() {
               <option value="all">{t("admin.status_all")}</option>
             </select>
           </div>
+          {/* Sprint 185 §3 — where the relationship IS, beside whether
+              the account is switched on. The one an operator reaches for
+              is "Notice period": who is leaving, and are we still
+              serving them properly. */}
+          <div className="filter-field">
+            <span className="filter-label">{t("customers.lifecycle")}</span>
+            <select
+              className="filter-control"
+              value={lifecycleFilter}
+              data-testid="customers-filter-lifecycle"
+              onChange={(event) => {
+                setLifecycleFilter(event.target.value);
+                setPage(1);
+                setSelectedIds([]);
+              }}
+            >
+              <option value="">{t("customers.lifecycle_all")}</option>
+              {CUSTOMER_LIFECYCLE_VALUES.map((value) => (
+                <option key={value} value={value}>
+                  {t(`customers.lifecycle_${value.toLowerCase()}`)}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="filter-field">
             <span className="filter-label">{t("company")}</span>
             {/* Cap the Company select so it matches Search / Status / Building
@@ -675,6 +719,7 @@ export function CustomersAdminPage() {
                 <th>{t("customers.col_buildings")}</th>
                 <th>{t("customers.col_users")}</th>
                 <th>{t("customers.col_contacts")}</th>
+                <th>{t("customers.lifecycle")}</th>
                 <SortableHeader
                   label={t("status")}
                   sort={sortStateFor("is_active")}
@@ -729,6 +774,19 @@ export function CustomersAdminPage() {
                     <td>{customer.linked_building_count}</td>
                     <td>{customer.user_count}</td>
                     <td>{customer.contact_count}</td>
+                    <td>
+                      <span
+                        className={`cell-tag ${
+                          LIFECYCLE_TONE[customer.lifecycle] ?? "cell-tag-muted"
+                        }`}
+                        data-testid={`customers-lifecycle-${customer.id}`}
+                      >
+                        <i />
+                        {t(
+                          `customers.lifecycle_${(customer.lifecycle || "active").toLowerCase()}`,
+                        )}
+                      </span>
+                    </td>
                     <td>
                       <span
                         className={`cell-tag cell-tag-${customer.is_active ? "open" : "closed"}`}

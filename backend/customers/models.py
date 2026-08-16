@@ -20,6 +20,36 @@ def customer_contract_upload_path(instance, filename):
     return f"customer_contracts/{instance.pk}/{uuid4().hex}.pdf"
 
 
+class CustomerLifecycle(models.TextChoices):
+    """Sprint 185 §3 — where a customer relationship actually is.
+
+    PROPOSED, not decreed: these five come from the reference system the
+    owner's father runs, and the prompt says he has not chosen them —
+    they are put forward for him to veto. If he wants different words or
+    a different set, this enum and one data migration are the whole
+    change; nothing branches on the values.
+
+      * PROSPECT   — being pitched. No work yet.
+      * ONBOARDING — signed, being set up. Work may be starting.
+      * ACTIVE     — the normal state.
+      * NOTICE     — notice given, still being served. THE ONE THAT COSTS
+                     MONEY: you are still cleaning, still incurring cost,
+                     and until now no screen said the relationship was
+                     ending.
+      * CHURNED    — over.
+
+    **None of these gates anything.** `Customer.is_active` remains the
+    only thing access is decided by. A NOTICE customer's users log in
+    exactly as before; that is the point of keeping the two separate.
+    """
+
+    PROSPECT = "PROSPECT", "Prospect"
+    ONBOARDING = "ONBOARDING", "Onboarding"
+    ACTIVE = "ACTIVE", "Active"
+    NOTICE = "NOTICE", "Notice period"
+    CHURNED = "CHURNED", "Churned"
+
+
 class Customer(models.Model):
     """
     Sprint 14 — model semantics changed.
@@ -78,7 +108,68 @@ class Customer(models.Model):
         blank=True,
     )
 
+    # ------------------------------------------------------------------
+    # Sprint 185 §1 — THE BILLING ADDRESS.
+    #
+    # The system assigned a gapless invoice number, froze a PDF and sent
+    # it to a debtor whose address it could not store, let alone print.
+    # Every Dutch invoice needs one, and so does every reminder after it.
+    #
+    # The owner's decision, already made: **the invoice always carries
+    # the CUSTOMER's address**, whether the invoice is addressed to the
+    # building or to the customer. A building's address is the WORK SITE,
+    # not the billing address, and must not be printed on an invoice.
+    #
+    # Same four fields, same names, same widths as `buildings.Building`,
+    # so the two read alike and nothing has to translate between them.
+    # Blank rather than null, matching Building: an unset address is ""
+    # everywhere in this codebase, and a second spelling of "not filled
+    # in" is how a template ends up printing "None".
+    # ------------------------------------------------------------------
+    address = models.CharField(max_length=500, blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    country = models.CharField(max_length=120, blank=True)
+    postal_code = models.CharField(max_length=32, blank=True)
+
     is_active = models.BooleanField(default=True)
+
+    # ------------------------------------------------------------------
+    # Sprint 185 §3 — the LIFECYCLE state.
+    #
+    # `is_active` is a boolean, so prospect / onboarding / active /
+    # notice period / churned all collapsed into on-or-off. The one that
+    # costs money is NOTICE PERIOD: you are still cleaning, still
+    # incurring cost, and nothing on any screen says the relationship is
+    # ending.
+    #
+    # **`is_active` stays, and stays authoritative for ACCESS.** This
+    # field is DESCRIPTIVE ONLY. A lifecycle value must never revoke a
+    # login — that is a permission change wearing a status costume, and
+    # this repo has a hard rule against exactly that. Nothing reads
+    # `lifecycle` to decide what anyone may do, and a test asserts it.
+    # ------------------------------------------------------------------
+    lifecycle = models.CharField(
+        max_length=16,
+        choices=CustomerLifecycle.choices,
+        default=CustomerLifecycle.ACTIVE,
+        db_index=True,
+        help_text=(
+            "Where the relationship is. DESCRIPTIVE ONLY — `is_active` "
+            "decides access, this decides what the screens say."
+        ),
+    )
+
+    @property
+    def has_billing_address(self) -> bool:
+        """Enough of an address to put on an invoice.
+
+        Street AND city. A postcode alone is not an addressee, and
+        country is genuinely optional on a domestic invoice — most Dutch
+        invoices carry none. Defined ONCE here so the serializer, the
+        PDF and any future send-time guard cannot disagree about what
+        "has an address" means.
+        """
+        return bool((self.address or "").strip() and (self.city or "").strip())
 
     # Sprint 23A — assigned-staff contact-visibility policy. Default
     # is "show everything" so existing pilot behaviour is unchanged
@@ -504,6 +595,36 @@ class Contact(models.Model):
     phone = models.CharField(max_length=64, blank=True, default="")
     role_label = models.CharField(max_length=128, blank=True, default="")
     notes = models.TextField(blank=True, default="")
+
+    # ------------------------------------------------------------------
+    # Sprint 185 §2 — this person receives the INVOICES.
+    #
+    # Contacts existed and were never written to: every notification
+    # recipient in this system is a USER ACCOUNT, and outside its own
+    # module `Contact` was read by two display screens and nothing else.
+    # So "this person should get the invoices" had neither a field nor a
+    # mechanism.
+    #
+    # INVOICES ONLY, deliberately. Not proposals, not ticket
+    # notifications — that is the owner's decision and the scope of this
+    # flag. A second boolean per document type is a decision for whoever
+    # is asked for the second one; one flag that quietly grew to mean
+    # "gets all our mail" would be worse.
+    #
+    # `contact_type == BILLING` is NOT reused for this. It is a phone-book
+    # category — what this person does — and the answer to "who do we
+    # send the invoice to" is a separate fact: a customer can have three
+    # billing contacts and want one of them to receive the document.
+    # Overloading the category would make the two unseparable later.
+    # ------------------------------------------------------------------
+    receives_invoices = models.BooleanField(
+        default=False,
+        help_text=(
+            "Sprint 185 §2 — send this contact the invoice when one is "
+            "sent. Requires an e-mail address; a contact with none is "
+            "skipped and the skip is reported."
+        ),
+    )
 
     # Sprint 12B — contact taxonomy + primary flag.
     contact_type = models.CharField(
