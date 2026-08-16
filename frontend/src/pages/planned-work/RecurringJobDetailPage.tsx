@@ -31,6 +31,7 @@ import { formatDate, formatDateTime, formatMoney } from "../../lib/intl";
 import { OccurrenceStatusBadge } from "./OccurrenceStatusBadge";
 import { OccurrenceOverrideDialog } from "./OccurrenceOverrideDialog";
 import { RecurringJobCalendar } from "./RecurringJobCalendar";
+import { customerLabelName } from "../../lib/customerLabelName";
 
 type ReasonMode = "skip" | "cancel";
 
@@ -323,13 +324,22 @@ export function RecurringJobDetailPage() {
               shown, with an em-dash when unset, so the operator can see
               at a glance that a job is untagged rather than having to
               open the edit form to find out. */}
+          {/* Sprint 187 §4 — BOTH of these, not just the department:
+              this page said "Algemeen" while `RecurringJobFormPage` —
+              the edit form for this very job — said "General". */}
           <SummaryRow
             label={t("detail.field_department")}
-            value={job.department_name ?? t("detail.field_none")}
+            value={
+              customerLabelName(job.department_name, t) ||
+              t("detail.field_none")
+            }
           />
           <SummaryRow
             label={t("detail.field_work_type")}
-            value={job.work_type_name ?? t("detail.field_none")}
+            value={
+              customerLabelName(job.work_type_name, t) ||
+              t("detail.field_none")
+            }
           />
           <SummaryRow
             label={t("detail.field_category")}

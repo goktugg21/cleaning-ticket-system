@@ -366,8 +366,15 @@ function LabelSection({
         ref={deleteDialogRef}
         title={t("labels.delete_confirm_title")}
         body={
+          // Sprint 187 §4 — the ROW above renders
+          // `customerLabelName(row.name, t)`; this dialog, on the same
+          // screen and about the same row, asked "delete Algemeen?" in
+          // English. One line away from a call site that was already
+          // correct, which is exactly how it survived.
           deleteTarget
-            ? t("labels.delete_confirm_body", { name: deleteTarget.name })
+            ? t("labels.delete_confirm_body", {
+                name: customerLabelName(deleteTarget.name, t),
+              })
             : ""
         }
         confirmLabel={t("labels.delete_confirm_button")}

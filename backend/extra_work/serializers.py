@@ -8,6 +8,7 @@ shape based on `context["request"].user.role`.
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 from rest_framework import serializers
@@ -64,6 +65,9 @@ from .label_validation import (
 from .pricing import resolve_price
 from .proposal_state_machine import allowed_next_proposal_statuses
 from .state_machine import allowed_next_statuses
+
+
+logger = logging.getLogger(__name__)
 
 
 # Sprint 176 §3 — one error code for "a customer tried to set a deadline",
@@ -2498,6 +2502,96 @@ class ProposalLineCustomerSerializer(serializers.ModelSerializer):
         return _decimal_str(self._classified(obj)[2])
 
 
+def _advance_parent_to_under_review(
+    extra_work_request: ExtraWorkRequest, actor
+) -> None:
+    """Sprint 187 §2a — move a REQUESTED parent to UNDER_REVIEW when a
+    proposal is created against it.
+
+    ## The trap this closes
+
+    The detail page offers "Prepare proposal" on a REQUESTED **or**
+    UNDER_REVIEW parent, and `ProposalCreateSerializer.validate`
+    deliberately admits both. But `can_send` requires UNDER_REVIEW, so an
+    operator who reached the builder from REQUESTED could build a
+    complete quote and then find the Send button simply absent — and,
+    because `can_direct_publish` is derived from `can_send`, the escape
+    hatch was hidden too. Both terminal actions on the builder were dead,
+    with nothing on screen saying why. The page even contradicted itself:
+    the REQUESTED step hint says "Start the review, then prepare a
+    pricing proposal" while the CTA below let you do it in the other
+    order.
+
+    Creating a proposal IS starting the review, so the order the hint
+    describes is now simply true whichever way the operator arrives.
+
+    ## Why `apply_transition` and not the `_advance_parent_on_send`
+    ## bypass
+
+    `_advance_parent_on_send` bypasses `apply_transition` for one
+    specific reason, stated in its own docstring: that path enforces
+    `pricing_line_items_required`, which counts LEGACY
+    `ExtraWorkPricingLineItem` rows the proposal flow never writes.
+
+    That precondition is scoped to `to_status == PRICING_PROPOSED`
+    (`state_machine.py`), and this transition is
+    `REQUESTED -> UNDER_REVIEW`. It cannot trip. So the reason for the
+    bypass does not exist here, and the normal path is correct — which
+    also means we inherit the role gate, the concurrency lock, the
+    history row and the timestamp bookkeeping instead of hand-rolling
+    a third copy of them.
+
+    `is_override=False` and no reason: this is an ordinary
+    provider-driven transition, present in `ALLOWED_TRANSITIONS` and not
+    system-only.
+
+    ## When the actor may not drive it
+
+    A provider operator who lacks `osius.ticket.view_building` at this
+    building cannot advance the parent. The proposal creation still
+    succeeds — refusing it would take away a capability the operator
+    already had — but the failure is NOT swallowed: the reason is
+    attached to the returned proposal as `parent_advance_blocked`, and
+    the builder renders a disabled Send button carrying it. Silence is
+    the actual defect being fixed here; a second silent skip would just
+    move it.
+    """
+    if extra_work_request.status != ExtraWorkStatus.REQUESTED:
+        # Idempotent: already UNDER_REVIEW (the normal arrival), or
+        # somewhere `validate` would have rejected.
+        return
+    from .state_machine import TransitionError as EwTransitionError
+    from .state_machine import apply_transition as ew_apply_transition
+
+    try:
+        ew_apply_transition(
+            extra_work_request,
+            actor,
+            ExtraWorkStatus.UNDER_REVIEW,
+            note=(
+                "Review started by preparing a pricing proposal "
+                "(Sprint 187 §2a)."
+            ),
+        )
+    except EwTransitionError as exc:
+        logger.warning(
+            "Proposal created on EW #%s but the parent could not be "
+            "advanced to UNDER_REVIEW (%s: %s). Send will be blocked "
+            "until the parent moves.",
+            extra_work_request.pk,
+            getattr(exc, "code", "transition_error"),
+            exc,
+        )
+        raise _ParentAdvanceBlocked(str(exc)) from exc
+
+
+class _ParentAdvanceBlocked(Exception):
+    """Carries the human-readable reason the parent could not advance,
+    from `_advance_parent_to_under_review` up to `create()`. Never
+    reaches the wire as an exception — `create()` turns it into the
+    `parent_advance_blocked` field."""
+
+
 class ProposalCreateSerializer(serializers.ModelSerializer):
     """
     Write serializer for `POST /api/extra-work/<id>/proposals/`.
@@ -2674,6 +2768,18 @@ class ProposalCreateSerializer(serializers.ModelSerializer):
                 customer_visible=True,
                 metadata={},
             )
+            # Sprint 187 §2a — creating a proposal IS starting the
+            # review. Inside the same atomic block, so the parent's
+            # status write and its history row commit with the proposal
+            # or not at all.
+            try:
+                _advance_parent_to_under_review(extra_work_request, actor)
+                proposal._parent_advance_blocked = ""
+            except _ParentAdvanceBlocked as blocked:
+                # The proposal still gets created — see the helper's
+                # docstring. The reason rides back on the response so
+                # the builder can say it rather than hide the button.
+                proposal._parent_advance_blocked = str(blocked)
         return proposal
 
 
@@ -2801,7 +2907,10 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
             _any_customer_approve_key,
             _target_provider_in_scope,
         )
-        from accounts.permissions_v2 import user_has_osius_permission
+        from accounts.permissions_v2 import (
+            user_has_osius_permission,
+            user_has_provider_dangerous_permission,
+        )
 
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
@@ -2937,12 +3046,55 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
         # True iff can_send AND the override key is granted (direct-
         # publish then does the SENT->CUSTOMER_APPROVED override leg).
         # Customer / STAFF: always False.
+        #
+        # Sprint 187 §3 — this flag used to mirror TWO of the endpoint's
+        # gates and the endpoint applies FOUR. The consequence was not an
+        # edge case: the dedicated dangerous grant below is OFF BY
+        # DEFAULT, so in a default deployment an in-scope COMPANY_ADMIN
+        # was shown "Publish directly" on a perfectly ordinary DRAFT and
+        # it failed 403 every single time.
+        #
+        # The class docstring's precedent does not cover these. It
+        # excuses exactly one kind of gate — the expensive cart-coverage
+        # / contract-price validations — and then states the governing
+        # rule for everything else: a gate that is cheap and accurate
+        # belongs in the action flag. That is why the parent-status guard
+        # is already inside `can_send`. Both of these are one attribute
+        # read and one cached permission resolve.
+        #
+        # H-11: reflecting a permission gate in an action flag is
+        # REPORTING authority, not granting it. The endpoint's own checks
+        # in `views_proposals.py` are untouched and remain the authority;
+        # this only stops the UI offering a button that authority will
+        # refuse.
         if is_super or is_ca_in:
             can_direct_publish = can_send
         elif is_bm_in:
             can_direct_publish = can_send and bm_has_override
         else:
             can_direct_publish = False
+
+        if can_direct_publish:
+            # Gate 3 — the DEDICATED dangerous quote-bypass grant
+            # (`views_proposals.py`). Holding the generic B6 override key
+            # is explicitly NOT sufficient (SoT §5.5, matrix H-11 —
+            # separate concepts). SA resolves True; CA / BM only when
+            # their provider company carries the Super-Admin grant.
+            can_direct_publish = user_has_provider_dangerous_permission(
+                user,
+                "provider.extra_work.quote_override_start",
+                company_id=extra_work.company_id,
+            )
+
+        if can_direct_publish:
+            # Gate 4 — the bypass is only meaningful for a
+            # Request-a-Quote request. DIRECT_AGREED_PRICE_ORDER spawns
+            # immediately and AUTO_START_AFTER_PRICING auto-approves on
+            # SEND, so neither has a customer decision to override.
+            can_direct_publish = (
+                extra_work.request_intent
+                == ExtraWorkRequestIntent.REQUEST_QUOTE
+            )
 
         return {
             "allowed_next_statuses": list(allowed),

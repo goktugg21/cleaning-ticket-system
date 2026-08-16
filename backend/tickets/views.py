@@ -1342,6 +1342,35 @@ class TicketViewSet(
                 # the same convention `parse_is_extra_work` follows.
                 pass
 
+        # Sprint 187 §5 — the work-category narrowing. Third appearance
+        # of this exact defect, which is why the block above is copied
+        # rather than re-derived: Sprint 185 gave the Tickets page a
+        # category dropdown and taught it to the LIST only, so choosing a
+        # category narrowed the rows and left the chips above them
+        # counting the whole company. Same shape as the work-type dash
+        # and the customer's "25", one filter later.
+        #
+        # `TicketFilter.Meta.fields` already offers `exact` / `in` /
+        # `isnull` on this field to the list; the two the page actually
+        # sends are mirrored here. Tolerant int parse, exactly as
+        # `customer` above — a junk value is no opinion, not a 500.
+        category_id = request.query_params.get("category")
+        if category_id:
+            try:
+                scoped = scoped.filter(category_id=int(category_id))
+            except (TypeError, ValueError):
+                pass
+
+        # "Not yet categorised" is a real state an operator lists and
+        # works through (`filters.py` has offered the lookup since
+        # Sprint 185), so the chips have to be able to count it too.
+        if request.query_params.get("category__isnull") in {
+            "true",
+            "True",
+            "1",
+        }:
+            scoped = scoped.filter(category__isnull=True)
+
         status_counts = {row["status"]: row["c"] for row in scoped.values("status").annotate(c=Count("id"))}
         priority_counts = {row["priority"]: row["c"] for row in scoped.values("priority").annotate(c=Count("id"))}
 

@@ -84,6 +84,11 @@ function customerMatchesBuilding(customer: Customer, buildingId: number): boolea
   );
 }
 
+// Sprint 187 §6b — one stable empty array, so the derived
+// `offeredCategories` below does not hand a new reference to its
+// consumers on every render.
+const EMPTY_CATEGORIES: ServiceCategory[] = [];
+
 export function RecurringJobFormPage() {
   const { id } = useParams();
   const isCreate = id === undefined;
@@ -315,21 +320,42 @@ export function RecurringJobFormPage() {
     };
   }, [customer]);
 
-  // The company's ACTIVE catalog categories — fetched once. An archived
-  // category must never be offerable.
+  // The company's ACTIVE catalog categories. An archived category must
+  // never be offerable.
+  //
+  // Sprint 187 §6b — and neither must ANOTHER provider's. Fetched once
+  // with no company, this offered a SUPER_ADMIN every company's category
+  // headings under "the company's categories", none of which can hold a
+  // service this customer is priceable from. Re-fetched per customer
+  // now, like the folders effect directly below it, because the company
+  // is a property of the chosen customer and not of the page.
+  const selectedCustomerCompany =
+    customer === ""
+      ? null
+      : (customers.find((c) => c.id === Number(customer))?.company ?? null);
+  // DERIVED, not stored: with no customer chosen there is no company, so
+  // there are no company categories to offer. Clearing the state inside
+  // the effect below would be a synchronous setState in an effect body,
+  // which CLAUDE.md forbids and the lint baseline is already at.
+  const offeredCategories =
+    selectedCustomerCompany === null ? EMPTY_CATEGORIES : companyCategories;
   useEffect(() => {
+    if (selectedCustomerCompany === null) return;
     let cancelled = false;
-    listServiceCategories({ is_active: true })
+    listServiceCategories({
+      is_active: true,
+      company: selectedCustomerCompany,
+    })
       .then((rows) => {
         if (!cancelled) setCompanyCategories(rows);
       })
       .catch(() => {
-        if (!cancelled) setCompanyCategories([]);
+        if (!cancelled) setCompanyCategories(EMPTY_CATEGORIES);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedCustomerCompany]);
 
   // ...and the selected customer's ACTIVE folders.
   useEffect(() => {
@@ -381,7 +407,7 @@ export function RecurringJobFormPage() {
       ? categoryChoice
       : ""
     : categoryChoice.startsWith("cat:")
-      ? companyCategories.some((c) => `cat:${c.id}` === categoryChoice)
+      ? offeredCategories.some((c) => `cat:${c.id}` === categoryChoice)
         ? categoryChoice
         : ""
       : "";
@@ -740,9 +766,9 @@ export function RecurringJobFormPage() {
                       company's categories, plus this customer's folders
                       once a customer is chosen. ACTIVE only on both
                       sides. */}
-                  {companyCategories.length > 0 && (
+                  {offeredCategories.length > 0 && (
                     <optgroup label={t("form.field_category_group_company")}>
-                      {companyCategories.map((c) => (
+                      {offeredCategories.map((c) => (
                         <option key={`cat-${c.id}`} value={`cat:${c.id}`}>
                           {c.name}
                         </option>

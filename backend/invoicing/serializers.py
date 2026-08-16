@@ -137,6 +137,22 @@ class InvoiceSerializer(serializers.ModelSerializer):
     """Read shape for one invoice (with its lines) for the Facturen UI."""
 
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    # Sprint 187 §6a — WHICH provider company issued this invoice.
+    #
+    # Numbering is gapless per company per YEAR, so two different
+    # invoices legitimately both display `2026-0001` and the list had
+    # nothing at all to tell them apart. Live on crmtest right now: one
+    # Osius Demo, one Bright Facilities.
+    #
+    # Free: `InvoiceViewSet.get_queryset` already `select_related`s
+    # `company`. `company` is NOT NULL on the model, so a plain
+    # `CharField(source=...)` is safe here — the SkipField-on-null trap
+    # that made `created_by_label` a method field does not apply.
+    #
+    # PROVIDER-SIDE ONLY. `CustomerInvoiceSerializer` is deliberately
+    # untouched: a customer has no business learning the provider's
+    # internal company structure.
+    company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.SerializerMethodField()
     # Sprint 132 — set only for an invoice generated at
     # PER_BUILDING_DEPARTMENT_WORK_TYPE granularity; null on every other
@@ -183,6 +199,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "number",
             "year",
             "company",
+            "company_name",
             "customer",
             "customer_name",
             "building",

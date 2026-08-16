@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { listAllCompanies } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
 import {
   deleteContract,
@@ -15,6 +16,7 @@ import type {
   ContractStats,
   ContractStatus,
 } from "../../../api/contracts.types";
+import type { CompanyAdmin } from "../../../api/types";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { EditModeToggle } from "../../../components/EditModeToggle";
@@ -108,6 +110,15 @@ export function ContractsAdminPage() {
   const [searchActive, setSearchActive] = useState("");
   const [pageTab, setPageTab] = useState<"list" | "types">("list");
   const [statusFilter, setStatusFilter] = useState<ContractStatus | "">("");
+  // Sprint 187 §6c — WHICH provider company. `company_name` has been
+  // in every row's JSON and `?company=` accepted by the endpoint
+  // since contracts shipped, so this is frontend-only. The pattern
+  // is `BuildingsAdminPage`'s verbatim: load once exhaustively,
+  // auto-select when exactly one company comes back, derive the
+  // disabled state rather than storing it.
+  const [companyFilter, setCompanyFilter] = useState<number | "">("");
+  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [customerFilter, setCustomerFilter] = useState<number | "">("");
   const [buildingFilter, setBuildingFilter] = useState<number | "">("");
   const [typeFilter, setTypeFilter] = useState<number | "">("");
@@ -144,10 +155,37 @@ export function ContractsAdminPage() {
     return () => window.clearTimeout(handle);
   }, [searchInput]);
 
+  // Sprint 187 §6c — loaded once, exhaustively (Sprint 135: a tenant
+  // with more than one page of companies must not get a silently
+  // truncated dropdown).
+  useEffect(() => {
+    let cancelled = false;
+    listAllCompanies({ is_active: "true" })
+      .then((rows) => {
+        if (cancelled) return;
+        setCompanies(rows);
+        // Auto-select for a COMPANY_ADMIN with exactly one company in
+        // scope: the filter is then a fact, not a question.
+        if (rows.length === 1) setCompanyFilter(rows[0].id);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanies([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCompaniesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const companyDropdownDisabled = companiesLoaded && companies.length <= 1;
+
   const filters: ContractFilters = useMemo(
     () => ({
       search: searchActive || undefined,
       status: statusFilter || undefined,
+      company: companyFilter || undefined,
       customer: customerFilter || undefined,
       building: buildingFilter || undefined,
       type: typeFilter || undefined,
@@ -157,6 +195,7 @@ export function ContractsAdminPage() {
     [
       searchActive,
       statusFilter,
+      companyFilter,
       customerFilter,
       buildingFilter,
       typeFilter,
@@ -263,6 +302,7 @@ export function ContractsAdminPage() {
   const filtersActive =
     Boolean(searchActive) ||
     statusFilter !== "" ||
+    (companyFilter !== "" && !companyDropdownDisabled) ||
     customerFilter !== "" ||
     buildingFilter !== "" ||
     typeFilter !== "";
@@ -294,7 +334,11 @@ export function ContractsAdminPage() {
         : t("table.yearly")
       : t("table.hours");
 
-  const fixedColumnCount = 5 + (editMode.editMode ? 1 : 0);
+  // Sprint 187 §6c — 6, not 5: the Company column is a new fixed
+  // header, and every `colSpan={totalColumnCount ...}` below is
+  // derived from this. A stale count here is how a group row stops
+  // spanning the table.
+  const fixedColumnCount = 6 + (editMode.editMode ? 1 : 0);
   const totalColumnCount =
     fixedColumnCount + projectColumns.columns.length +
     (projectColumns.folded > 0 ? 1 : 0) + 1;
@@ -492,6 +536,40 @@ export function ContractsAdminPage() {
               {STATUS_OPTIONS.map((value) => (
                 <option key={value} value={value}>
                   {t(`status.${value}`)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {/* Sprint 187 §6c — placed BEFORE Customer because it scopes
+              it: a customer belongs to one provider company. Hidden
+              disabled rather than removed on a single-company
+              deployment, matching `BuildingsAdminPage`. */}
+          <div className="filter-field">
+            <span className="filter-label">{t("filters.company")}</span>
+            <select
+              className="filter-control"
+              style={{ maxWidth: 220 }}
+              value={companyFilter === "" ? "" : String(companyFilter)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCompanyFilter(value === "" ? "" : Number(value));
+                // Customer / building / type ids are all per company, so
+                // a leftover id would filter the new company's list by
+                // something it does not have and quietly return nothing
+                // — the trap `BuildingsAdminPage` records for its own
+                // building-type filter.
+                setCustomerFilter("");
+                setBuildingFilter("");
+                setTypeFilter("");
+                setPage(1);
+              }}
+              disabled={companyDropdownDisabled}
+              data-testid="contracts-company-filter"
+            >
+              <option value="">{t("filters.allCompanies")}</option>
+              {companies.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
                 </option>
               ))}
             </select>
@@ -735,6 +813,11 @@ export function ContractsAdminPage() {
                   })}
                   onSort={() => onSort("contract_no")}
                 />
+                {/* Sprint 187 §6c — plain <th>, not sortable: the
+                    backend `sort` whitelist has no `company` field and
+                    offering a header that silently does nothing is worse
+                    than a header that does not claim to sort. */}
+                <th>{t("table.company")}</th>
                 <SortableHeader
                   label={t("table.customer")}
                   sort={sortStateFor("customer")}
@@ -857,7 +940,14 @@ export function ContractsAdminPage() {
                 </span>
               </div>
               <div className="admin-card-meta-row">
-                <span className="admin-card-meta">{row.customer_name}</span>
+                {/* Sprint 187 §6c — the phone rendering, changed in the
+                    SAME commit as the table: the two render in parallel
+                    and drift the moment only one is touched. */}
+                <span className="admin-card-meta">
+                  {[row.company_name, row.customer_name]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
               </div>
               <div className="admin-card-meta-row">
                 <span className="admin-card-meta">
@@ -1034,6 +1124,9 @@ function ContractGroup({
             </td>
           )}
           <td className="td-subject">{row.contract_no}</td>
+          <td className="muted small">
+            {row.company_name ?? <span className="muted-empty">—</span>}
+          </td>
           <td>{row.customer_name ?? <span className="muted-empty">—</span>}</td>
           <td>
             {row.buildings.length === 0 ? (

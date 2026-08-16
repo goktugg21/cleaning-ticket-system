@@ -252,7 +252,35 @@ def _advance_parent_on_customer_decision(
     a provider override, the override metadata is mirrored onto the
     parent row + the history row so the parent's audit trail tells
     the same story.
+
+    Sprint 187 §1 — this is also where an approved quote BECOMES the
+    extra work's price, so the quote cache is frozen here.
     """
+    # Sprint 187 §1 — freeze `subtotal_amount` / `vat_amount` /
+    # `total_amount` from the now-approved proposal's lines. Every route
+    # that approves a proposal reaches this helper — customer approval,
+    # provider override approval, direct-publish and Sprint 6B
+    # auto-start — so this is the one call site rather than four.
+    #
+    # Deliberately ABOVE the idempotency guard below: that guard is
+    # about the parent's STATUS, and a second proposal approved after
+    # the parent already moved is exactly the case where the price must
+    # be recomputed (`active_priced_lines` resolves "latest approved
+    # proposal wins"), even though there is no status transition left to
+    # make.
+    #
+    # NOT wrapped in try/except. The freeze at ticket approval
+    # (`tickets/state_machine.py`) deliberately sits inside a never-raise
+    # block because a freeze failure must not break a ticket transition;
+    # here the opposite is true — a silently swallowed failure is
+    # precisely how a EUR 484 job comes to invoice at EUR 0.00. We are
+    # already inside `apply_proposal_transition`'s `@transaction.atomic`,
+    # so a raise rolls the whole approval back and the operator sees it.
+    if to_status == ProposalStatus.CUSTOMER_APPROVED:
+        from .final_amounts import recompute_quoted_totals
+
+        recompute_quoted_totals(request)
+
     if request.status != ExtraWorkStatus.PRICING_PROPOSED:
         return
     now = timezone.now()

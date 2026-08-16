@@ -271,7 +271,13 @@ export function DashboardPage({
   /** Sprint 185 E §1 — narrow the meldingen list to one KIND OF WORK.
    *  The filter is the whole point of the catalog: a taxonomy whose
    *  values never reach the filters is a dropdown. */
-  const [categoryFilter, setCategoryFilter] = useState<number | "">("");
+  // Sprint 187 §5 — `""` is no filter, a number is one category, and
+  // "none" is the backend's `category__isnull` (offered by
+  // `TicketFilter` since Sprint 185 with nothing in the UI emitting
+  // it). A sentinel rather than a second piece of state: one value
+  // decides the list params, the stats params and the "filters are
+  // active" test, so the three cannot disagree.
+  const [categoryFilter, setCategoryFilter] = useState<number | "" | "none">("");
   const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
 
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">(() => {
@@ -431,7 +437,8 @@ export function DashboardPage({
     if (priorityFilter) params.priority = priorityFilter;
     // Sprint 185 E §1 — server-side, so it survives pagination instead
     // of filtering one page while `count` describes another set.
-    if (categoryFilter !== "") params.category = categoryFilter;
+    if (categoryFilter === "none") params.category__isnull = "true";
+    else if (categoryFilter !== "") params.category = categoryFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
     if (slaFilter) params.sla = slaFilter;
     // RF-16 — unassigned preset (attention-card deep link). Uses the
@@ -700,6 +707,16 @@ export function DashboardPage({
       // chips must be pinned to the same thing or they describe the
       // whole company while sitting above one customer's rows.
       if (customerId !== undefined) statsParams.customer = String(customerId);
+      // Sprint 187 §5 — the chips count the rows they sit above. Sprint
+      // 185 taught the category dropdown to the LIST only, so choosing a
+      // category narrowed the rows and left the chips describing the
+      // whole company: the same defect as the work-type dash directly
+      // above and the customer's "25" beside it, one filter later.
+      if (isTicketsPage) {
+        if (categoryFilter === "none") statsParams.category__isnull = "true";
+        else if (categoryFilter !== "")
+          statsParams.category = String(categoryFilter);
+      }
       const response = await api.get<TicketStats>("/tickets/stats/", {
         params: Object.keys(statsParams).length ? statsParams : undefined,
       });
@@ -707,7 +724,13 @@ export function DashboardPage({
     } catch {
       // KPI cards fall back to "—" placeholders if the endpoint fails.
     }
-  }, [isTicketsPage, hideFinishedExtraWork, workTypeFilter, customerId]);
+  }, [
+    isTicketsPage,
+    hideFinishedExtraWork,
+    workTypeFilter,
+    customerId,
+    categoryFilter,
+  ]);
 
   // M6.3 — "my work" summary counts (provider-management only). Each
   // count is the PaginatedResponse.count for a created_by=me query;
@@ -2124,17 +2147,33 @@ export function DashboardPage({
                       </span>
                       <select
                         className="filter-control"
-                        value={categoryFilter === "" ? "" : String(categoryFilter)}
+                        value={String(categoryFilter)}
                         data-testid="tickets-filter-category"
                         onChange={(event) => {
                           const value = event.target.value;
                           setPage(1);
                           setSelectedIds(new Set<number>());
-                          setCategoryFilter(value === "" ? "" : Number(value));
+                          setCategoryFilter(
+                            value === ""
+                              ? ""
+                              : value === "none"
+                                ? "none"
+                                : Number(value),
+                          );
                         }}
                       >
                         <option value="">
                           {t("common:work_categories.filter_all")}
+                        </option>
+                        {/* Sprint 187 §5 — the backend has been able to
+                            list "not yet categorised" since the catalog
+                            shipped (`category__isnull`); the dropdown
+                            offered no way to ask for it, so the one
+                            state an operator most needs to work through
+                            was the one they could only find by reading
+                            every row. */}
+                        <option value="none">
+                          {t("common:work_categories.filter_uncategorised")}
                         </option>
                         {workCategories.map((row) => (
                           <option key={row.id} value={row.id}>

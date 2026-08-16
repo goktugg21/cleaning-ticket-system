@@ -221,12 +221,23 @@ class ProposalListCreateView(views.APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(
-            ProposalDetailSerializer(
-                proposal, context={"request": request}
-            ).data,
-            status=status.HTTP_201_CREATED,
+        payload = ProposalDetailSerializer(
+            proposal, context={"request": request}
+        ).data
+        # Sprint 187 §2a — creating a proposal STARTS the review
+        # (REQUESTED -> UNDER_REVIEW), which is what makes Send reachable
+        # whichever way the operator arrived. When this actor was not
+        # permitted to move the parent, the proposal is still created and
+        # the reason rides back HERE so the builder can say why Send will
+        # refuse it, instead of hiding the button.
+        #
+        # Injected on the create response only, deliberately: it is a
+        # fact about THIS request, not a property of the proposal, and
+        # `ProposalDetailSerializer` also serves every GET.
+        payload["parent_advance_blocked"] = getattr(
+            proposal, "_parent_advance_blocked", ""
         )
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 # ---------------------------------------------------------------------------

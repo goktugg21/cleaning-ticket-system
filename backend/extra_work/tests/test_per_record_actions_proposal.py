@@ -41,6 +41,7 @@ from extra_work.models import (
     ExtraWorkCategory,
     ExtraWorkPricingUnitType,
     ExtraWorkRequest,
+    ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
     ExtraWorkStatus,
     Proposal,
@@ -378,7 +379,15 @@ class ProposalActionsBlockShapeTests(_ActionsFixtureMixin, TestCase):
         self.assertTrue(actions["can_edit_lines"])
         self.assertTrue(actions["can_send"])
         self.assertTrue(actions["can_cancel"])
-        self.assertTrue(actions["can_direct_publish"])
+        # Sprint 187 §3 — this asserted True and was asserting the BUG.
+        # The fixture is the DEFAULT configuration: the dedicated
+        # dangerous grant `provider.extra_work.quote_override_start` is
+        # off, and the EW carries no `request_intent`. The endpoint
+        # refuses both (403 `quote_override_not_permitted`, then 400
+        # `quote_bypass_requires_quote_request`), so a True here was the
+        # UI offering a button that fails every time. The flag now
+        # mirrors all four of the endpoint's gates.
+        self.assertFalse(actions["can_direct_publish"])
         # Customer-decision booleans False — proposal is DRAFT, not SENT.
         self.assertFalse(actions["can_approve"])
         self.assertFalse(actions["can_reject"])
@@ -488,12 +497,36 @@ class ProposalActionsBlockShapeTests(_ActionsFixtureMixin, TestCase):
         )
 
     def test_draft_with_parent_under_review_can_direct_publish_true_for_sa(self):
-        # Positive control — parent UNDER_REVIEW + DRAFT proposal -> SA
-        # sees both can_send and the derived can_direct_publish True.
+        """Positive control — parent UNDER_REVIEW + DRAFT proposal.
+
+        Sprint 187 §3 — `can_send` alone is no longer enough, and this
+        test used to assert that it was. Direct-publish also needs the
+        dedicated dangerous grant (SA resolves it True) and a
+        Request-a-Quote intent, because the other two intents have no
+        customer-decision step to bypass. The intent is set here so the
+        control is a control: it asserts True for a configuration where
+        the endpoint would genuinely allow it.
+        """
         ew = self._make_ew(status=ExtraWorkStatus.UNDER_REVIEW)
+        ew.request_intent = ExtraWorkRequestIntent.REQUEST_QUOTE
+        ew.save(update_fields=["request_intent"])
         proposal = self._make_proposal(ew, status=ProposalStatus.DRAFT)
         response = self._proposal_detail(self.super_admin, ew, proposal)
         self.assertEqual(response.status_code, 200, response.data)
         actions = response.data["actions"]
         self.assertTrue(actions["can_send"])
         self.assertTrue(actions["can_direct_publish"])
+
+    def test_direct_publish_false_for_sa_without_a_quote_intent(self):
+        """Sprint 187 §3 — the negative half of the control above. SA
+        clears the dangerous grant automatically, so intent is the only
+        remaining gate, and it still applies."""
+        ew = self._make_ew(status=ExtraWorkStatus.UNDER_REVIEW)
+        ew.request_intent = ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER
+        ew.save(update_fields=["request_intent"])
+        proposal = self._make_proposal(ew, status=ProposalStatus.DRAFT)
+        response = self._proposal_detail(self.super_admin, ew, proposal)
+        self.assertEqual(response.status_code, 200, response.data)
+        actions = response.data["actions"]
+        self.assertTrue(actions["can_send"])
+        self.assertFalse(actions["can_direct_publish"])

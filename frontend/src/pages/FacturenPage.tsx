@@ -64,6 +64,7 @@ import { BillingTargetFields } from "../components/BillingTargetFields";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { useToast } from "../components/ToastProvider";
+import { customerLabelName } from "../lib/customerLabelName";
 import {
   formatDateTime,
   formatInvoiceGroupLabel,
@@ -534,14 +535,28 @@ export function FacturenPage({
             )}
 
             {!previewBusy && preview && preview.invoice_count === 0 && (
-              <p className="muted small" data-testid="facturen-preview-empty">
-                {/* Sprint 183 §2 — the SAME sentence the Due panel
-                    shows, from the same server-side diagnosis. The old
-                    "no unbilled extra work" line was true and told an
-                    operator nothing they could act on. */}
-                {nothingSentence(t, preview.nothing_reason) ??
-                  t("facturen.preview_empty")}
-              </p>
+              <>
+                {/* Sprint 187 §7.2 — the heading this empty state was
+                    always supposed to have. It has been translated in
+                    BOTH bundles since Sprint 183 and rendered by
+                    nothing, so the panel showed a lone diagnostic
+                    sentence with no title above it and read like a
+                    stray line rather than an answer. */}
+                <div
+                  className="section-head-title"
+                  data-testid="facturen-preview-empty-heading"
+                >
+                  {t("invoices:nothing.heading")}
+                </div>
+                <p className="muted small" data-testid="facturen-preview-empty">
+                  {/* Sprint 183 §2 — the SAME sentence the Due panel
+                      shows, from the same server-side diagnosis. The old
+                      "no unbilled extra work" line was true and told an
+                      operator nothing they could act on. */}
+                  {nothingSentence(t, preview.nothing_reason) ??
+                    t("facturen.preview_empty")}
+                </p>
+              </>
             )}
 
             {!previewBusy && preview && preview.invoice_count > 0 && (
@@ -761,6 +776,15 @@ export function FacturenPage({
             <thead>
               <tr>
                 <th>{t("facturen.col_number")}</th>
+                {/* Sprint 187 §6a — WHICH company issued it. Numbering
+                    is gapless per company per YEAR, so two rows in this
+                    list legitimately both read `2026-0001` and nothing
+                    told them apart. Shown on every deployment, including
+                    a single-company one where the column repeats: the
+                    alternative is a column that appears and disappears
+                    depending on data, which is harder to trust than one
+                    that is always there. */}
+                <th>{t("facturen.col_company")}</th>
                 {!customerScoped && <th>{t("facturen.col_customer")}</th>}
                 <th>{t("facturen.col_building")}</th>
                 <th>{t("facturen.col_department_work_type")}</th>
@@ -813,14 +837,21 @@ export function FacturenPage({
                       )}
                     </Link>
                   </td>
+                  <td className="muted small">{inv.company_name}</td>
                   {!customerScoped && <td>{inv.customer_name}</td>}
                   <td className="muted small">
                     {inv.building_name ?? t("facturen.all_buildings")}
                   </td>
                   <td className="muted small">
+                    {/* Sprint 187 §4 — the LIST said "Algemeen" while
+                        the invoice DETAIL, one click away, said
+                        "General" for the same invoice. Both go through
+                        `customerLabelName` now: it translates ONLY the
+                        auto-seeded name and passes an operator-typed one
+                        through untouched. */}
                     {formatInvoiceGroupLabel(
-                      inv.department_name,
-                      inv.work_type_name,
+                      customerLabelName(inv.department_name, t),
+                      customerLabelName(inv.work_type_name, t),
                     ) || "—"}
                   </td>
                   <td className="muted small">

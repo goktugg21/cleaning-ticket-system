@@ -110,6 +110,12 @@ export interface ConvertToExtraWorkDialogProps {
   // makes this the "customer chosen" case of the Extra Work form's
   // filter: company categories PLUS that customer's price folders.
   customerId: number;
+  /** Sprint 187 §6b — the ticket's PROVIDER company, used to scope the
+   *  service + category pickers. `TicketDetail` inherits `company` from
+   *  `TicketList`, so the caller already has it and nothing extra is
+   *  fetched. Without it a SUPER_ADMIN was offered every company's
+   *  services and the save was rejected server-side. */
+  companyId: number;
   onClose: () => void;
   // Called with the new ExtraWorkRequest id after a successful convert
   // so the parent can navigate to /extra-work/<id>.
@@ -119,6 +125,7 @@ export interface ConvertToExtraWorkDialogProps {
 export function ConvertToExtraWorkDialog({
   ticketId,
   customerId,
+  companyId,
   onClose,
   onConverted,
 }: ConvertToExtraWorkDialogProps) {
@@ -151,7 +158,15 @@ export function ConvertToExtraWorkDialog({
 
   useEffect(() => {
     let cancelled = false;
-    listServices({ is_active: true })
+    // Sprint 187 §6b — scoped to the TICKET's provider company. This
+    // picker offered every company's services to a SUPER_ADMIN (and to
+    // a COMPANY_ADMIN with two memberships), and choosing one from
+    // another company failed the save with "Service belongs to a
+    // different provider company than the customer" — one layer below
+    // where Sprint 186 fixed the same shape. No backend change:
+    // `ServiceListParams.company` and the endpoint's `?company=` have
+    // both existed since the catalog was made per-company.
+    listServices({ is_active: true, company: companyId })
       .then((list) => {
         if (cancelled) return;
         setServices(list);
@@ -168,7 +183,9 @@ export function ConvertToExtraWorkDialog({
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Sprint 187 §6b — `companyId` is a real dependency now: the catalog
+    // fetched is the one belonging to THIS ticket's provider company.
+  }, [companyId]);
 
   // Sprint 143 §5 — the filter's two option groups. ACTIVE only on both
   // sides: the form offers what can be ordered NOW, so an archived
@@ -178,7 +195,7 @@ export function ConvertToExtraWorkDialog({
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      listServiceCategories({ is_active: true }).catch(
+      listServiceCategories({ is_active: true, company: companyId }).catch(
         () => [] as ServiceCategory[],
       ),
       listCustomerPriceFolders(customerId, { is_active: true }).catch(
@@ -201,7 +218,7 @@ export function ConvertToExtraWorkDialog({
     return () => {
       cancelled = true;
     };
-  }, [customerId]);
+  }, [customerId, companyId]);
 
   const serviceSearchTerm = serviceSearch.trim().toLowerCase();
 

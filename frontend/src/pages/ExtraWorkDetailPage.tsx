@@ -1518,7 +1518,17 @@ export function ExtraWorkDetailPage() {
     try {
       // Empty body — the backend auto-seeds one ProposalLine per cart
       // item, pre-filling contract prices (SoT §8.3).
-      await createProposal(ewId);
+      const created = await createProposal(ewId);
+      // Sprint 187 §2a — creating a proposal now also starts the review
+      // (REQUESTED -> UNDER_REVIEW), which is what makes Send reachable
+      // whichever way the operator arrived. When the actor was not
+      // permitted to move the parent, the proposal is still created and
+      // the backend hands back the reason rather than failing silently.
+      // `reloadProposals()` re-reads the proposal WITHOUT this field, so
+      // it is surfaced here, at the one moment it exists.
+      if (created.parent_advance_blocked) {
+        setProposalError(created.parent_advance_blocked);
+      }
       await reloadProposals();
     } catch (err) {
       setProposalError(getApiError(err));
@@ -2459,6 +2469,26 @@ export function ExtraWorkDetailPage() {
                   </button>
                 )}
               </div>
+              {/* Sprint 187 §2d — say where the decision went.
+                  At PRICING_PROPOSED with an open proposal this card
+                  renders no decision buttons AT ALL, and correctly so:
+                  the `!hasOpenProposal` guard above is load-bearing,
+                  because the customer decision has deliberately moved
+                  onto the quote and a second decision surface here would
+                  be two places to approve one price. What was missing is
+                  not a button, it is the sentence — the operator saw an
+                  empty card and no explanation.
+                  Purely additive: no guard is relaxed, nothing new can
+                  be pressed from here. */}
+              {ew.status === "PRICING_PROPOSED" && hasOpenProposal && (
+                <p
+                  className="muted small"
+                  style={{ margin: "10px 0 0" }}
+                  data-testid="extra-work-workflow-decision-on-proposal"
+                >
+                  {t("detail.workflow_decision_on_proposal")}
+                </p>
+              )}
             </div>
           </div>
           </div>{/* end .ew-detail-top-row */}

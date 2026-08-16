@@ -993,7 +993,25 @@ export function CustomerPricingPage() {
   // Plain derived value (the filter is cheap and the React Compiler memoizes
   // it): a manual useMemo here trips react-hooks/preserve-manual-memoization
   // because the earlier-defined openCreateModal captures it.
-  const activeServices = services.filter((s) => s.is_active);
+  // Sprint 187 §6b — active AND belonging to THIS customer's provider
+  // company.
+  //
+  // Sprint 142 narrowed the CATEGORY list to the customer's company for
+  // exactly this reason (see the load effect above) and stopped there,
+  // so the "add a price" dropdown beneath those headings still offered
+  // every company's services to a SUPER_ADMIN. Choosing one was then
+  // refused server-side with "Service belongs to a different provider
+  // company than the customer" — a dropdown offering options the save
+  // will reject.
+  //
+  // Narrowed client-side, not by `?company=`, for the reason the
+  // category filter states: the customer's company is only known once
+  // `getCustomer` resolves, and these six calls are deliberately
+  // parallel. `services` itself deliberately keeps the FULL catalog so
+  // the Default-price column still resolves for an archived service.
+  const activeServices = services.filter(
+    (s) => s.is_active && (!customer || s.company === customer.company),
+  );
 
   // M5 C — active catalog prices are the only rows the bulk-raise modal
   // can act on. Plain derived value (same rationale as activeServices:
@@ -2826,7 +2844,14 @@ export function CustomerPricingPage() {
           data-testid="customer-pricing-folder-delete-modal"
           role="dialog"
           aria-modal="true"
-          aria-label={t("customer_pricing.folder_delete_title")}
+          // Sprint 187 §7.1 — the interpolation values, which were
+          // missing. `role="dialog" aria-modal="true"` makes this the
+          // dialog's ACCESSIBLE NAME, so a screen reader announced the
+          // literal "Delete {{name}}" while the heading two lines below
+          // read correctly.
+          aria-label={t("customer_pricing.folder_delete_title", {
+            name: folderDeleteTarget.name,
+          })}
           style={{
             position: "fixed",
             inset: 0,
@@ -3064,7 +3089,11 @@ export function CustomerPricingPage() {
           data-testid="customer-pricing-move-folder-modal"
           role="dialog"
           aria-modal="true"
-          aria-label={t("customer_pricing.folder_move_title")}
+          // Sprint 187 §7.1 — same defect, same screen: announced as
+          // "Move {{count}} row(s)".
+          aria-label={t("customer_pricing.folder_move_title", {
+            count: activeBulkSelection.length,
+          })}
           style={{
             position: "fixed",
             inset: 0,

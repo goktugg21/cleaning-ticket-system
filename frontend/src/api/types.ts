@@ -2068,6 +2068,12 @@ export interface Proposal {
 // reflects what we use.
 export interface ProposalDetail extends Proposal {
   lines: ProposalLine[];
+  /** Sprint 187 §2a — non-empty ONLY on the create response, and only
+   *  when the parent Extra Work was still REQUESTED and this actor was
+   *  not permitted to move it to UNDER_REVIEW. The proposal was still
+   *  created; this is the reason Send will refuse it, so the builder can
+   *  say so instead of hiding the button. Absent on every read. */
+  parent_advance_blocked?: string;
 }
 
 // Mirrors backend `extra_work/serializers.py::ProposalDetailSerializer.get_actions`.
@@ -2084,9 +2090,18 @@ export interface ProposalActions {
   can_cancel: boolean;
   can_approve: boolean;
   can_reject: boolean;
-  // Direct-publish (DRAFT proposal → SENT → CUSTOMER_APPROVED) is
-  // tightened to include all cheap send preconditions PLUS, for BM,
-  // the override key. See backend/extra_work/views_proposals.py.
+  // Direct-publish (DRAFT proposal → SENT → CUSTOMER_APPROVED).
+  //
+  // Sprint 187 §3 — now mirrors ALL FOUR of the endpoint's gates, not
+  // two. The two it was missing are the reason this button used to fail
+  // by default rather than as an edge case:
+  //   * the DEDICATED dangerous grant `provider.extra_work.
+  //     quote_override_start`, which is OFF by default and which the
+  //     generic B6 override key does NOT satisfy (H-11);
+  //   * `request_intent == REQUEST_QUOTE`, since the other two intents
+  //     have no customer-decision step to bypass.
+  // See backend/extra_work/views_proposals.py — the endpoint's own
+  // checks remain the authority; this flag only reports them.
   can_direct_publish: boolean;
 }
 
@@ -2721,6 +2736,11 @@ export interface Invoice {
   number: string | null;
   year: number | null;
   company: number;
+  /** Sprint 187 §6a — the issuing provider company's name. Numbering is
+   *  gapless per company per year, so the number alone does not identify
+   *  an invoice. PROVIDER-SIDE ONLY: `CustomerInvoice` deliberately does
+   *  not carry it. */
+  company_name: string;
   customer: number;
   customer_name: string;
   building: number | null;

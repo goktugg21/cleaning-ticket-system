@@ -13,6 +13,124 @@ update was left for a later docs-only pass.
 
 ## NOW
 
+**Branch:** `feat/sprint-187`, cut from `integ186` (`0c47ee3`). Sprints
+185–187 land as ONE PR; the owner opens it after the last of them.
+
+<!-- Sprint 187 §8: this section read "Branch: feat/sprint-181" while the
+     chain was at 186 — three sprints of drift, and the second time this
+     file has done it. The rule in CLAUDE.md §8 and in "How to maintain
+     this file" below is the same one it was already breaking: NOW /
+     NEXT / SHIPPED are updated in the branch that makes them stale. -->
+
+### Done — Sprint 187: finishing what was half-wired
+
+Every item was already half-built: a function with no caller, an
+endpoint with no button, a flag mirroring half its own gates, a filter
+the list understood and the counts did not.
+
+- **§1 Quoted extra work no longer reads EUR 0,00.**
+  `ExtraWorkRequest.subtotal_amount` / `vat_amount` / `total_amount` are
+  the quote cache every list, widget, report KPI, CSV export and detail
+  header reads, and only the LEGACY `/pricing-items/` views ever wrote
+  them. Work priced through a Proposal — approved, ticket spawned — read
+  zero everywhere. `final_amounts.recompute_quoted_totals` writes them
+  now, frozen at proposal approval in
+  `_advance_parent_on_customer_decision`, which is the one helper every
+  approving route reaches (customer decision, provider override,
+  direct-publish, Sprint 6B auto-start). It uses the **ordered**
+  `line.quantity`, never `billable_quantity` — a quote is what was
+  ordered, a final amount is what was delivered — and that distinction
+  is pinned by a test that re-measures an hourly line and asserts the
+  quote does NOT move. Deliberately NOT inside a never-fail
+  `try/except`: the ticket-approval freeze is, because a freeze failure
+  must not break a ticket transition; a silent failure here is how a EUR
+  484 job comes to invoice at EUR 0.00. Existing rows are repaired by
+  `manage.py backfill_quoted_totals` (`--dry-run`, `--company`,
+  `--include-nonzero`), which the OWNER runs.
+- **§2a The order trap is closed.** "Prepare proposal" was offered on a
+  REQUESTED parent and the create endpoint admitted one, but `can_send`
+  requires UNDER_REVIEW — so an operator built a whole quote and found
+  no Send button, and no "Publish directly" either (it derives from
+  `can_send`). Creating a proposal IS starting the review, so it now
+  advances the parent through the NORMAL `apply_transition`: the
+  `_advance_parent_on_send` bypass exists only because the
+  PRICING_PROPOSED leg enforces `pricing_line_items_required` against
+  the legacy line model, and REQUESTED -> UNDER_REVIEW does not touch
+  that precondition. History row in the same transaction,
+  `is_override=False`. An actor who may not advance still gets their
+  proposal, with the reason on `parent_advance_blocked` — and the
+  builder now renders a DISABLED Send with the reason beside it instead
+  of rendering nothing.
+- **§2b A sent quote can be withdrawn and a draft discarded.**
+  `can_cancel` had been advertised for DRAFT and SENT since the endpoint
+  shipped and read by nothing. Frontend only. The SENT leg is coerced to
+  an override and requires a reason, so the dialog collects one and
+  disables Confirm until it is typed; the DRAFT leg is a plain
+  transition. `ConfirmDialog` rendered unconditionally, ref-driven.
+- **§2c A saved proposal line can be edited.** `updateProposalLine` and
+  its PATCH endpoint both existed with zero importers, so correcting one
+  price meant deleting the line and retyping every field. The composer
+  is now one component for add and edit rather than a second form.
+- **§2d The workflow card says where the decision went.** At
+  PRICING_PROPOSED with an open proposal it rendered nothing and
+  explained nothing. Purely additive — the `!hasOpenProposal` guard is
+  load-bearing and untouched; only a sentence was added.
+- **§3 "Publish directly" no longer fails by default.**
+  `can_direct_publish` mirrored two of the endpoint's four gates. The
+  two it missed are the two that fail in a DEFAULT deployment: the
+  dedicated dangerous grant `provider.extra_work.quote_override_start`
+  (OFF by default; the generic B6 key does NOT satisfy it — H-11) and
+  `request_intent == REQUEST_QUOTE`. Reporting authority, not granting
+  it: the endpoint's own checks are untouched.
+- **§4 "Algemeen" is gone from the English UI.** Four call sites printed
+  the auto-seeded label raw — and two of them printed it TWICE, not once
+  as reported: the invoice list, the customer-labels DELETE DIALOG (one
+  screen away from a row that was already correct), both classifiers on
+  the recurring-job detail, and both levels of the reports department
+  tree. Seven raw renders in four files, all through
+  `customerLabelName`.
+- **§5 The ticket chips count what the rows count.** Sprint 185 taught
+  the work-category dropdown to the LIST only; `/tickets/stats/` never
+  learned it. Third appearance of this exact defect (work-type dash,
+  customer "25", now category), so the existing `customer` block was
+  copied rather than re-derived, tolerant int parse and all. Plus a
+  "Not yet categorised" option, emitting the `category__isnull` lookup
+  the backend has offered since the catalog shipped.
+- **§6a Invoices say which company issued them.** Numbering is gapless
+  per company per YEAR, so two rows legitimately both read `2026-0001`.
+  `company_name` on the provider serializer only —
+  `CustomerInvoiceSerializer` is deliberately untouched.
+- **§6b Service pickers are scoped to the right company** at the three
+  call sites where that was genuinely the cause: the convert-to-extra-
+  work dialog, the customer pricing page's service dropdown (Sprint 142
+  narrowed its CATEGORIES and stopped there), and the recurring-job
+  form's category picker. The other three reported sites had a
+  different cause and were left alone — see the report.
+- **§6c Contracts admin has a company column and filter.** Frontend
+  only; `company_name` was already in every row and `?company=` already
+  accepted. `BuildingsAdminPage`'s pattern verbatim, table and phone
+  card list changed together.
+- **§7** Two Customer-pricing dialogs announced `Delete {{name}}` /
+  `Move {{count}} row(s)` to screen readers — the `aria-label` IS the
+  accessible name on a `role="dialog"`. And the "Nothing to invoice"
+  heading, translated in both bundles since Sprint 183 and rendered by
+  nothing, is rendered.
+- **§8** This file: two `## NEXT` headings merged into the one ordered
+  queue the second already claimed to be, the truncated sentence Sprint
+  175 left mid-word repaired, and NOW brought forward three sprints.
+
+### Deliberately NOT done
+
+- **The Users / Employees company work.** Named in the prompt as the one
+  thing to leave; it is a larger job than §6a–§6c and is in `## NEXT`.
+- **No `## SHIPPED` line was written.** This file's own rule is that a
+  PR cannot cite its own number, so the entry for this chain is appended
+  by the first commit of the NEXT branch. Inventing one here is exactly
+  the "do not invent status" trap.
+
+
+## Historical — Sprint 181
+
 **Branch:** `feat/sprint-181`, cut from the INTEGRATED Sprint 180 (see
 the note under Sprint 180 below — `origin/feat/sprint-180-merged` did
 not exist when this branch was cut).
@@ -492,7 +610,155 @@ no new migrations. Frontend: tsc clean, eslint **44 (42 errors, 2
 warnings)**, build OK, i18n in lockstep, **undefined-CSS-class sweep
 clean**.
 
+**CC updates `## NOW` / `## NEXT` / `## SHIPPED` for a sprint as part
+of that sprint's own commit(s)** — not in a later docs-only pass — so
+this file always reflects where we actually are.
+
+---
+
+## How to maintain this file (read this before editing anything below)
+
+- **`## NOW`** is rewritten every sprint — replace it, don't append to it.
+  It should stay a paragraph or a few bullets: current branch, the last
+  shipped PR on `main`, what's in flight, and the immediate next sprint.
+- **`## NEXT`** is ONE ordered queue, re-ordered whenever priorities
+  change. Add a newly-found item here as soon as it's found — don't let
+  it wait for a dedicated audit sprint. Remove an item once its sprint
+  starts (it moves into `## NOW`) or ships (it moves into `## SHIPPED`).
+- **`## SHIPPED`** is append-only: one line per merged PR, newest first.
+  Never edit a historical line's wording once it's written — if a line
+  turns out to be inaccurate, add a corrected note rather than rewriting
+  it (see the #115 entry below for the pattern).
+- Everything after the second `---` is a **frozen appendix**, or has been
+  moved to `docs/archive/` — not maintained, not current truth. Only edit
+  it to move MORE material out, not to update its content.
+- **This file drifted out of date twice** before Sprint 122.1 restructured
+  it (see `docs/archive/2026-06-sprints/` for what moved out and why) —
+  in both cases because nothing *required* the update to happen. CLAUDE.md
+  §8 now has a standing rule for this: a sprint does not close without
+  updating NOW/NEXT/SHIPPED in that same branch. Don't let it drift a
+  third time.
+- **A PR cannot cite its own number.** The `## SHIPPED` line for a merged PR
+  is therefore appended by the FIRST commit of the NEXT branch, not by the
+  PR it describes. A one-PR lag is by design; a two-PR lag is drift. (This
+  is what happened to #119 — Sprints 123 and 124 correctly declined to
+  invent a number, and the entry then had nowhere to land until this
+  docs-only close-out.)
+- **Cross-references into `## NEXT` cite the item by NAME, never by
+  number.** `## NEXT` renumbers whenever an item ships, which silently
+  breaks every numeric pointer into it.
+
+---
+
+## Conventions (apply to every sprint / CC prompt)
+- Backend is the business source of truth; **verify, don't assume**; never invent endpoints.
+- **Never stage** `docs/transkript*` or their `:Zone.Identifier`. Stage commits by **explicit path**.
+- nl + en i18n in lockstep (Dutch primary); every referenced i18n key must resolve (no raw keys on screen).
+- ESLint baseline = **44** (42 errors, 2 warnings): add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (History: 49 → 48 when Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation. This line then said 48 until Sprint 155, which was stale from Sprint 152 onwards — Sprints 152–154 each removed a violation without correcting it, and CLAUDE.md said 45 while this said 48. Sprint 154 §B deleted the effect that took it to **44**; Sprint 155 corrected both files to agree. When the count changes, change it in BOTH places in the same commit.)
+- **PR cadence (corrected 2026-07-27 — the old "PR per sprint" line was stale):** several sprints now land on ONE shared branch and the owner opens ONE PR after the last of them (Sprints 115–119 → PR #115; Sprints 122–124 are following the same pattern on `feat/sprint-122`). CI (+ Codex review) still gates that one PR when it opens. Migrations stay additive + back-compat regardless of when the PR opens.
+- Each prompt starts with a sync + a grep GUARD proving the right base, captures the ESLint baseline, applies any new migration to the dev DB before a FE smoke, and ends with an adversarial self-review. Screenshots/smokes via **token-inject** (the e2e login form is flaky).
+- Co-author trailer on commits: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` (the old line here named a different model — verify the current one in `CLAUDE.md` before reusing this, it has changed before).
+
+---
+
+## Historical — Sprint 166
+
+**Branch:** `feat/sprint-166`, cut from `feat/sprint-165` (`18c2d72`).
+It is the single branch being merged — #153 → … → #166 are ONE chain,
+one PR, not one per sprint.
+
+**Deployed to crmtest at the owner's instruction** (the prompt said not
+to; the owner overrode it in the same session).
+
+### The standard this sprint was held to, and why it was fair
+
+Two Sprint 165 items were reported as delivered and could not be reached
+by a user: a reporting endpoint with no screen, and a page with no link.
+An endpoint returning 401 proves a route exists, not that a feature
+does. Every item below was reached by CLICKING from the sidebar, and the
+report says which entry.
+
+### Per item
+
+- **§1 fill rule — DONE, third statement and the first correct one.**
+  The rule is about WHERE a row came from, not WHEN. Both earlier
+  attempts reached for timing because the row carried no way to tell the
+  wizard's rows from the operator's — `added` is true for both. The row
+  is now MARKED at creation (`manual: true`) and the fill skips it.
+  Verified in the failing order: add a type FIRST, then fill →
+  `7,7,7,"",7,7`, the added row untouched.
+- **§2 modal size — DONE.** `width: min(96vw, 1180px)` plus a
+  min-height; it had a cap and no floor, so it collapsed to its
+  content. 1024 → 983x741, 1280/1440 → 1180x741, page overflow 0.
+- **§3 sideways scroll — DIAGNOSED and fixed.** Two rounds "measured as
+  fixed" because they measured only the OUTER modal. All four levels
+  with the grid POPULATED found it: modal 0, inner 0, **gridWrap
+  258/61/61**, table 0. Day cells 64px → 54px takes 70px out across
+  seven days: gridWrap now **195/0/0** — nothing scrolls at 1280 or
+  1440, and at 1024 the container scrolls, which is the documented
+  fallback. The modal itself never scrolled.
+- **§4 hours comparison — HAS A SCREEN.** Sidebar → **Contract vs
+  worked** (under Reports) → `/reports/hours-comparison`. Period
+  selector, a row per building with contracted / worked / difference,
+  the sign carried by an under/over/on-target tag, a grand total, and
+  the per-worker breakdown expandable on the WORKED side. The page
+  states the asymmetry instead of hiding it.
+- **§5 customer contracts link — DONE.** Sidebar → Customers → a
+  customer → **Contracten** in the submenu →
+  `/admin/customers/3/contracts`. The route has existed since Sprint 162
+  with no way to reach it.
+
+### The §5 sweep
+
+66 routes checked by trailing segment (a prefix match would not have
+caught the very defect §5 names). Three with no in-app link:
+
+  * `/admin/customers/:id/quote-requests` — a genuine orphan, and
+    almost certainly superseded: the IA note of 2026-06-25 merged
+    Meldingen and Offerteaanvragen into Extra Work as filter chips. Left
+    unlinked deliberately rather than re-exposed against that decision;
+    it should probably be DELETED, which is a decision not a fix.
+  * `/invite/accept` and `/password/reset/confirm` — reached from
+    emailed links. Correct as they are.
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
 ## NEXT
+
+Single ordered queue — replaces the four lists this used to be spread
+across ("Owner's forward queue", "Deferred / undecided items", "Standing
+milestones", "Deferred"). All four are now retired; every genuinely-open
+item from them lives here, and every already-shipped or already-decided
+item has moved to `## SHIPPED` or been resolved below instead.
+
+<!-- Sprint 187 §8: this file carried TWO `## NEXT` headings (one here,
+     one ~400 lines above), which is why the queue this section calls
+     "single" was not one. The other section's content is merged in
+     below, newest carry-over first, under its original per-sprint
+     headings so nothing lost its provenance. Wording is carried
+     verbatim; no item's status was invented. -->
+
+### Carried out of Sprint 187
+
+1. **The Users and Employees admin lists have no company column and no
+   company filter.** Sprint 187 §6a–§6c gave Invoices, Contracts and the
+   service pickers the company reference they were missing, and stopped
+   deliberately short of this one: it is a larger job than the other
+   three (two lists, their filter bars, their phone card lists, and a
+   scope question — a COMPANY_ADMIN in two provider companies sees a
+   two-company mix and the list has to say which row is which). Nothing
+   was started; there is no half-done state to reconcile.
 
 ### Carried out of Sprint 181
 
@@ -531,6 +797,12 @@ clean**.
    fine because their elements carry inline styles and use the class as
    a test hook. Wire the script into the frontend gate once the real
    ones are cleared.
+   **CLOSED — read, not fixed (Sprint 187).** A read-only verification
+   pass over the whole set found the suspicion above holds for every
+   remaining one: each is either paired with a defined companion class
+   or is a no-op test hook. Nothing renders wrong, so there is nothing
+   here to fix and the entry is not carried forward. The script IS now
+   in the frontend gate, which is the other half this item asked for.
 4. **An undated EXTRA WORK still cannot be planned in one action** from
    the Work Plan's new lane (§8 gave tickets that button). The blocker
    is deliberate: "undated" for an extra work means no `preferred_date`,
@@ -556,6 +828,11 @@ integration. This list is NOT empty — it is waiting on that half.
    eight files across UnifiedTimeline, ChangeDiff, the BuildingManager
    customer pages and two customer sub-pages. **Agent B's item** —
    Sprint 179A touched none of those files.
+   **CLOSED — the count is now ZERO (Sprint 187).**
+   `frontend/scripts/check-i18n-keys.mjs` reports no missing key in
+   either bundle, so no screen renders a raw key; the 30 were closed by
+   the sprints between 179A and 186 without this line being updated.
+   The script is in the frontend gate, which is what keeps it at zero.
 3. **Six undefined CSS classes in the Extra Work pages** — see the
    section below. Unchanged; Sprint 179A defined `.agenda-day`, which
    was the seventh, because it was in a file this sprint rewrote.
@@ -762,137 +1039,6 @@ sprint of its own, not a section of one:
   together, would be the same mistake as the reference-copying that
   produced the headerless permission column.
 
- / `## SHIPPED`
-for a sprint as part of that sprint's own commit(s)** — not in a later
-docs-only pass — so this file always reflects where we actually are.
-
----
-
-## How to maintain this file (read this before editing anything below)
-
-- **`## NOW`** is rewritten every sprint — replace it, don't append to it.
-  It should stay a paragraph or a few bullets: current branch, the last
-  shipped PR on `main`, what's in flight, and the immediate next sprint.
-- **`## NEXT`** is ONE ordered queue, re-ordered whenever priorities
-  change. Add a newly-found item here as soon as it's found — don't let
-  it wait for a dedicated audit sprint. Remove an item once its sprint
-  starts (it moves into `## NOW`) or ships (it moves into `## SHIPPED`).
-- **`## SHIPPED`** is append-only: one line per merged PR, newest first.
-  Never edit a historical line's wording once it's written — if a line
-  turns out to be inaccurate, add a corrected note rather than rewriting
-  it (see the #115 entry below for the pattern).
-- Everything after the second `---` is a **frozen appendix**, or has been
-  moved to `docs/archive/` — not maintained, not current truth. Only edit
-  it to move MORE material out, not to update its content.
-- **This file drifted out of date twice** before Sprint 122.1 restructured
-  it (see `docs/archive/2026-06-sprints/` for what moved out and why) —
-  in both cases because nothing *required* the update to happen. CLAUDE.md
-  §8 now has a standing rule for this: a sprint does not close without
-  updating NOW/NEXT/SHIPPED in that same branch. Don't let it drift a
-  third time.
-- **A PR cannot cite its own number.** The `## SHIPPED` line for a merged PR
-  is therefore appended by the FIRST commit of the NEXT branch, not by the
-  PR it describes. A one-PR lag is by design; a two-PR lag is drift. (This
-  is what happened to #119 — Sprints 123 and 124 correctly declined to
-  invent a number, and the entry then had nowhere to land until this
-  docs-only close-out.)
-- **Cross-references into `## NEXT` cite the item by NAME, never by
-  number.** `## NEXT` renumbers whenever an item ships, which silently
-  breaks every numeric pointer into it.
-
----
-
-## Conventions (apply to every sprint / CC prompt)
-- Backend is the business source of truth; **verify, don't assume**; never invent endpoints.
-- **Never stage** `docs/transkript*` or their `:Zone.Identifier`. Stage commits by **explicit path**.
-- nl + en i18n in lockstep (Dutch primary); every referenced i18n key must resolve (no raw keys on screen).
-- ESLint baseline = **44** (42 errors, 2 warnings): add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (History: 49 → 48 when Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation. This line then said 48 until Sprint 155, which was stale from Sprint 152 onwards — Sprints 152–154 each removed a violation without correcting it, and CLAUDE.md said 45 while this said 48. Sprint 154 §B deleted the effect that took it to **44**; Sprint 155 corrected both files to agree. When the count changes, change it in BOTH places in the same commit.)
-- **PR cadence (corrected 2026-07-27 — the old "PR per sprint" line was stale):** several sprints now land on ONE shared branch and the owner opens ONE PR after the last of them (Sprints 115–119 → PR #115; Sprints 122–124 are following the same pattern on `feat/sprint-122`). CI (+ Codex review) still gates that one PR when it opens. Migrations stay additive + back-compat regardless of when the PR opens.
-- Each prompt starts with a sync + a grep GUARD proving the right base, captures the ESLint baseline, applies any new migration to the dev DB before a FE smoke, and ends with an adversarial self-review. Screenshots/smokes via **token-inject** (the e2e login form is flaky).
-- Co-author trailer on commits: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` (the old line here named a different model — verify the current one in `CLAUDE.md` before reusing this, it has changed before).
-
----
-
-## Historical — Sprint 166
-
-**Branch:** `feat/sprint-166`, cut from `feat/sprint-165` (`18c2d72`).
-It is the single branch being merged — #153 → … → #166 are ONE chain,
-one PR, not one per sprint.
-
-**Deployed to crmtest at the owner's instruction** (the prompt said not
-to; the owner overrode it in the same session).
-
-### The standard this sprint was held to, and why it was fair
-
-Two Sprint 165 items were reported as delivered and could not be reached
-by a user: a reporting endpoint with no screen, and a page with no link.
-An endpoint returning 401 proves a route exists, not that a feature
-does. Every item below was reached by CLICKING from the sidebar, and the
-report says which entry.
-
-### Per item
-
-- **§1 fill rule — DONE, third statement and the first correct one.**
-  The rule is about WHERE a row came from, not WHEN. Both earlier
-  attempts reached for timing because the row carried no way to tell the
-  wizard's rows from the operator's — `added` is true for both. The row
-  is now MARKED at creation (`manual: true`) and the fill skips it.
-  Verified in the failing order: add a type FIRST, then fill →
-  `7,7,7,"",7,7`, the added row untouched.
-- **§2 modal size — DONE.** `width: min(96vw, 1180px)` plus a
-  min-height; it had a cap and no floor, so it collapsed to its
-  content. 1024 → 983x741, 1280/1440 → 1180x741, page overflow 0.
-- **§3 sideways scroll — DIAGNOSED and fixed.** Two rounds "measured as
-  fixed" because they measured only the OUTER modal. All four levels
-  with the grid POPULATED found it: modal 0, inner 0, **gridWrap
-  258/61/61**, table 0. Day cells 64px → 54px takes 70px out across
-  seven days: gridWrap now **195/0/0** — nothing scrolls at 1280 or
-  1440, and at 1024 the container scrolls, which is the documented
-  fallback. The modal itself never scrolled.
-- **§4 hours comparison — HAS A SCREEN.** Sidebar → **Contract vs
-  worked** (under Reports) → `/reports/hours-comparison`. Period
-  selector, a row per building with contracted / worked / difference,
-  the sign carried by an under/over/on-target tag, a grand total, and
-  the per-worker breakdown expandable on the WORKED side. The page
-  states the asymmetry instead of hiding it.
-- **§5 customer contracts link — DONE.** Sidebar → Customers → a
-  customer → **Contracten** in the submenu →
-  `/admin/customers/3/contracts`. The route has existed since Sprint 162
-  with no way to reach it.
-
-### The §5 sweep
-
-66 routes checked by trailing segment (a prefix match would not have
-caught the very defect §5 names). Three with no in-app link:
-
-  * `/admin/customers/:id/quote-requests` — a genuine orphan, and
-    almost certainly superseded: the IA note of 2026-06-25 merged
-    Meldingen and Offerteaanvragen into Extra Work as filter chips. Left
-    unlinked deliberately rather than re-exposed against that decision;
-    it should probably be DELETED, which is a decision not a fix.
-  * `/invite/accept` and `/password/reset/confirm` — reached from
-    emailed links. Correct as they are.
-
----
-
-
-
-
-
-
-
-
-
-
-
-
-## NEXT
-
-Single ordered queue — replaces the four lists this used to be spread
-across ("Owner's forward queue", "Deferred / undecided items", "Standing
-milestones", "Deferred"). All four are now retired; every genuinely-open
-item from them lives here, and every already-shipped or already-decided
-item has moved to `## SHIPPED` or been resolved below instead.
 
 
 

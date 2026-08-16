@@ -3524,6 +3524,10 @@ export function TicketDetailPage() {
           // offer that customer's price folders beside the company's
           // categories without asking for anything.
           customerId={ticket.customer}
+          // Sprint 187 §6b — and its provider company, which scopes the
+          // service + category pickers to the catalog this ticket's
+          // customer can actually be charged from.
+          companyId={ticket.company}
           onClose={() => setConvertOpen(false)}
           onConverted={(extraWorkRequestId) => {
             setConvertOpen(false);
