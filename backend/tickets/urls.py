@@ -42,8 +42,25 @@ from .views_bulk_assign import (
     TicketAssignableUsersView,
     TicketBulkAssignView,
 )
+from .views_work_categories import (
+    WorkCategoryDetailView,
+    WorkCategoryListCreateView,
+)
 
 urlpatterns = [
+    # Sprint 185 E §1 — the work-category catalog. Before the router for
+    # the same reason `bulk-assign/` and `my-slots/` are: the router's
+    # `<pk>` detail pattern would otherwise swallow the literal.
+    path(
+        "categories/",
+        WorkCategoryListCreateView.as_view(),
+        name="work-category-list",
+    ),
+    path(
+        "categories/<int:category_id>/",
+        WorkCategoryDetailView.as_view(),
+        name="work-category-detail",
+    ),
     # Sprint 158 §1 — bulk assign, and the picker's candidate read.
     # Before the router for the same reason `my-slots/` is: the router's
     # `<pk>` detail pattern would otherwise swallow the literal.

@@ -6,6 +6,7 @@ from .views import (
     EmployeeHoursWeeklyView,
     HourSourceOptionsView,
     PeriodReportSummariesView,
+    MeldingenByCategoryView,
     TicketReportView,
     WorkerHoursExportView,
     WorkerHoursReportView,
@@ -88,6 +89,19 @@ urlpatterns = [
         "employee-hours-by-extra-work/",
         EmployeeHoursByExtraWorkView.as_view(),
         name="report-employee-hours-by-extra-work",
+    ),
+    # Sprint 185 E §1 — the export literal BEFORE the report route, the
+    # ordering this repo keeps so a later converter change cannot let one
+    # swallow the other.
+    path(
+        "meldingen-by-category/export.<str:fmt>",
+        MeldingenByCategoryView.as_view(),
+        name="report-meldingen-by-category-export",
+    ),
+    path(
+        "meldingen-by-category/",
+        MeldingenByCategoryView.as_view(),
+        name="report-meldingen-by-category",
     ),
     path(
         "ticket-report/export.<str:fmt>",

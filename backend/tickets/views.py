@@ -61,6 +61,7 @@ from .serializers import (
     TicketAssignSerializer,
     TicketAttachmentSerializer,
     TicketAutoCompleteFlagSerializer,
+    TicketCategorySerializer,
     TicketConvertToExtraWorkSerializer,
     TicketCreateSerializer,
     TicketDetailSerializer,
@@ -983,6 +984,136 @@ class TicketViewSet(
         except Exception:  # pragma: no cover — audit must not block the flip
             _audit_logger.exception(
                 "audit: failed to record ticket auto_complete flag flip #%s",
+                ticket.id,
+            )
+
+    @action(detail=True, methods=["patch"], url_path="category")
+    def category(self, request, pk=None):
+        """
+        Sprint 185 E §1 — set or clear the melding's WORK CATEGORY.
+
+        A dedicated action rather than a PATCH on the ticket, because
+        `TicketViewSet` carries no `UpdateModelMixin`: there is no
+        general ticket-edit endpoint in this system, and adding one to
+        reach a single field would open every other field with it. Every
+        other single-field ticket edit here is an action for the same
+        reason (`schedule`, `assign`, `auto-complete-flag`).
+
+        SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER. Categorising is
+        triage, and the building manager is who sees a melding first;
+        `get_object()` runs through the scoped queryset, so a BM can only
+        ever reach a ticket in a building they manage. STAFF and every
+        customer-side role are refused — the category feeds a
+        provider-side report, and a customer choosing the trade would be
+        the customer classifying the provider's work.
+
+        `null` CLEARS the category and is a real edit, not a no-op: "this
+        was tagged wrong" has to be expressible or the first mistake is
+        permanent.
+
+        NOT blocked on a terminal ticket, unlike `schedule`. A melding is
+        very often categorised while somebody reads back through last
+        month — that is precisely when the monthly review happens — and
+        refusing to classify closed work would leave the report unable
+        to describe the period it exists to describe. Nothing downstream
+        of a terminal ticket reads this field.
+
+        `Ticket` is not signal-audited, so the change is recorded with an
+        explicit AuditLog UPDATE row, mirroring `auto-complete-flag`.
+        """
+        # Role gate FIRST — before the object lookup — so a wrong role
+        # gets a clean 403 rather than a scope-driven 404.
+        if request.user.role not in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        ):
+            return Response(
+                {
+                    "detail": "Only a provider operator can categorise a "
+                    "melding.",
+                    "code": "ticket_category_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ticket = self.get_object()
+
+        ser = TicketCategorySerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_category = ser.validated_data["category"]
+
+        # A category belongs to ONE provider company. Naming another
+        # company's category reads as nonexistent rather than forbidden —
+        # the H-1 equivalence, and the same answer the create serializer
+        # gives.
+        if (
+            new_category is not None
+            and new_category.company_id != ticket.company_id
+        ):
+            return Response(
+                {"category": ["Unknown work category."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_category = ticket.category
+        if (new_category.id if new_category else None) != (
+            old_category.id if old_category else None
+        ):
+            ticket.category = new_category
+            # Explicit update_fields EXCLUDES `status`, so the SLA
+            # post_save signal sees no status change (the rule every
+            # single-field action here follows).
+            ticket.save(update_fields=["category", "updated_at"])
+            self._audit_category(request, ticket, old_category, new_category)
+
+        return Response(
+            TicketDetailSerializer(ticket, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def _audit_category(self, request, ticket, old_category, new_category):
+        """Sprint 185 E §1 — explicit AuditLog UPDATE row for a category
+        change. `Ticket` is NOT signal-audited (audit/signals.py registers
+        only its sub-models), so this mirrors `_audit_auto_complete_flag`.
+        Best-effort: a failure is logged and never blocks the edit.
+
+        The NAMES travel with the ids. An audit row that records
+        `category: 4 -> 7` is unreadable a year later, and by then the
+        catalog row may have been renamed or archived."""
+        try:
+            _scope = audit_context.get_current_actor_scope() or {}
+            if not _scope:
+                _scope = (
+                    audit_context.snapshot_actor_scope(request.user) or {}
+                )
+            AuditLog.objects.create(
+                actor=request.user,
+                action=AuditAction.UPDATE,
+                target_model="tickets.Ticket",
+                target_id=ticket.id,
+                changes={
+                    "category": {
+                        "before": (
+                            {"id": old_category.id, "name": old_category.name}
+                            if old_category
+                            else None
+                        ),
+                        "after": (
+                            {"id": new_category.id, "name": new_category.name}
+                            if new_category
+                            else None
+                        ),
+                    }
+                },
+                request_ip=audit_context.get_current_request_ip(),
+                request_id=audit_context.get_current_request_id(),
+                reason=audit_context.get_current_reason(),
+                actor_scope=_scope,
+            )
+        except Exception:  # pragma: no cover — audit must not block the edit
+            _audit_logger.exception(
+                "audit: failed to record ticket category change #%s",
                 ticket.id,
             )
 

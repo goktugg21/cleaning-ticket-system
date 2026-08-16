@@ -25,11 +25,13 @@ import type {
   TicketStatsByBuildingResponse,
   TicketStatsByBuildingRow,
   TicketStatus,
+  WorkCategory,
 } from "../api/types";
 import {
   bulkAssignTickets,
   bulkConfirmTickets,
   listTicketAssignmentCandidates,
+  listWorkCategories,
 } from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -266,6 +268,12 @@ export function DashboardPage({
   // `?status=` still wins, and `?status=ALL` is how a link asks for
   // everything, so the existing deep links from the dashboard widgets
   // are unaffected.
+  /** Sprint 185 E §1 — narrow the meldingen list to one KIND OF WORK.
+   *  The filter is the whole point of the catalog: a taxonomy whose
+   *  values never reach the filters is a dropdown. */
+  const [categoryFilter, setCategoryFilter] = useState<number | "">("");
+  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
     if (raw === "ALL") return "";
@@ -390,6 +398,24 @@ export function DashboardPage({
 
   const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
+  // Sprint 185 E §1 — the catalog behind the filter above. Loaded once
+  // on the tickets page; non-fatal, and the filter is simply not
+  // rendered when the company has no categories yet.
+  useEffect(() => {
+    if (!isTicketsPage) return;
+    let cancelled = false;
+    listWorkCategories()
+      .then((rows) => {
+        if (!cancelled) setWorkCategories(rows);
+      })
+      .catch(() => {
+        /* non-fatal: the list still reads without its filter */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isTicketsPage]);
+
   const queryParams = useMemo(() => {
     const params: Record<string, string | number> = { page };
     if (statusFilter) params.status = statusFilter;
@@ -403,6 +429,9 @@ export function DashboardPage({
     // the "All" tile — describing a different set than the rows.
     else if (isTicketsPage) params.status__in = ticketListStatusParam();
     if (priorityFilter) params.priority = priorityFilter;
+    // Sprint 185 E §1 — server-side, so it survives pagination instead
+    // of filtering one page while `count` describes another set.
+    if (categoryFilter !== "") params.category = categoryFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
     if (slaFilter) params.sla = slaFilter;
     // RF-16 — unassigned preset (attention-card deep link). Uses the
@@ -446,6 +475,7 @@ export function DashboardPage({
     page,
     statusFilter,
     priorityFilter,
+    categoryFilter,
     searchActive,
     slaFilter,
     unassignedFilter,
@@ -941,6 +971,7 @@ export function DashboardPage({
   function clearFilters() {
     setPage(1);
     setStatusFilter("");
+    setCategoryFilter("");
     setPriorityFilter("");
     setSearchInput("");
     setSearchActive("");
@@ -951,7 +982,8 @@ export function DashboardPage({
   }
 
   const hasActiveFilters = Boolean(
-    statusFilter || priorityFilter || searchActive || slaFilter ||
+    statusFilter || priorityFilter || categoryFilter !== "" ||
+      searchActive || slaFilter ||
       unassignedFilter,
   );
 
@@ -2075,6 +2107,39 @@ export function DashboardPage({
                 </div>
 
                 <form className="filter-bar" onSubmit={handleSearchSubmit}>
+                  {/* Sprint 185 E §1 — WHICH KIND OF WORK. Rendered only
+                      when the company has a catalog: an empty dropdown is
+                      a control that looks broken, and the Catalogs tab's
+                      empty state is what explains where it comes from
+                      (the Sprint 178 rule for the building-type filter,
+                      restated here rather than re-decided). */}
+                  {workCategories.length > 0 && (
+                    <div className="filter-field">
+                      <span className="filter-label">
+                        {t("common:work_categories.field_label")}
+                      </span>
+                      <select
+                        className="filter-control"
+                        value={categoryFilter === "" ? "" : String(categoryFilter)}
+                        data-testid="tickets-filter-category"
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setPage(1);
+                          setSelectedIds(new Set<number>());
+                          setCategoryFilter(value === "" ? "" : Number(value));
+                        }}
+                      >
+                        <option value="">
+                          {t("common:work_categories.filter_all")}
+                        </option>
+                        {workCategories.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="filter-field">
                     <span className="filter-label">{t("common:status")}</span>
                     <select

@@ -79,6 +79,7 @@ from tickets.models import (
     TicketManagerAssignment,
     TicketMessage,
     TicketStaffAssignment,
+    WorkCategory,
 )
 from timesheets.models import (
     ContractHours,
@@ -1492,6 +1493,15 @@ def _connect():
         # a state machine. So the full CRUD trio is the right shape.
         BuildingType,
         ManagedUnit,
+        # Sprint 185 E §1 — the work-category catalog, registered with
+        # its five siblings for the reason `BuildingType` is: every
+        # melding points at the category by id, so RENAMING one silently
+        # reclassifies every melding carrying it, and the category report
+        # and the meldingen filter both change underneath whoever was
+        # reading them. Editable name / is_active / sort_order, no
+        # FileField, no `*StatusHistory` to double-write against (H-11) —
+        # the full CRUD trio is the right shape.
+        WorkCategory,
         # M5 A — customer custom price lines (ad-hoc, no service FK)
         # carry the same provider price / VAT / validity data and have
         # create / update / soft-delete endpoints, so they get the same

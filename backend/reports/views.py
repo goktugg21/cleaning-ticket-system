@@ -30,6 +30,11 @@ from .ticket_report import (
     build_ticket_report_summary,
     default_period as ticket_report_default_period,
 )
+from .category_report import (
+    build_meldingen_by_category,
+    build_meldingen_by_category_summary,
+    meldingen_by_category_default_period,
+)
 from .dimensions import (
     DimensionFilters,
     OriginInvalid,
@@ -50,6 +55,8 @@ from .exports import (
     build_employee_hours_by_extra_work_pdf,
     build_employee_hours_weekly_csv,
     build_employee_hours_weekly_pdf,
+    build_meldingen_by_category_csv,
+    build_meldingen_by_category_pdf,
     build_ticket_report_csv,
     build_ticket_report_pdf,
     build_extra_work_by_department_csv,
@@ -1276,6 +1283,29 @@ class TicketReportView(_PeriodReportView):
     default_period = staticmethod(ticket_report_default_period)
 
 
+class MeldingenByCategoryView(_PeriodReportView):
+    """GET /api/reports/meldingen-by-category/[export.<fmt>]
+
+    Sprint 185 E §1 — "how many meldingen per category per building",
+    which is the monthly customer review and was unanswerable before this
+    sprint because nothing classified the WORK. See
+    `reports/category_report.py` for the shape and for why an
+    uncategorised melding is a row rather than a gap.
+
+    Same base as the four Sprint 178 reports, so it inherits their
+    permission gate (`IsRevenueReportConsumer`: SUPER_ADMIN,
+    COMPANY_ADMIN, BUILDING_MANAGER — STAFF and every customer role
+    denied), their period parsing, their company/building scope and
+    their CSV + PDF exports. Provider-side only, as asked.
+    """
+
+    build = staticmethod(build_meldingen_by_category)
+    csv_builder = staticmethod(build_meldingen_by_category_csv)
+    pdf_builder = staticmethod(build_meldingen_by_category_pdf)
+    stem = "meldingen-by-category"
+    default_period = staticmethod(meldingen_by_category_default_period)
+
+
 class PeriodReportSummariesView(APIView):
     """GET /api/reports/period-report-summaries/?from=&to=&company=&building=
 
@@ -1327,6 +1357,12 @@ class PeriodReportSummariesView(APIView):
             request.user, date_from, date_to, scope=scope
         )
         summaries["tickets"] = build_ticket_report_summary(
+            request.user, date_from, date_to, scope=scope
+        )
+        # Sprint 185 E §1 — the fifth card. Two more aggregates over the
+        # same scoped queryset the report itself uses, so the card and
+        # the report it opens can never disagree.
+        summaries["meldingen_category"] = build_meldingen_by_category_summary(
             request.user, date_from, date_to, scope=scope
         )
         return Response(
