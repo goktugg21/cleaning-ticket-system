@@ -1359,6 +1359,8 @@
   "building_detail.field_company": "Company",
   "building_detail.field_name": "Name",
   "building_detail.field_address": "Address",
+  "building_detail.field_billing_address": "Billing address",
+  "building_detail.billing_address_missing": "no billing address yet",
   "building_detail.field_city": "City",
   "building_detail.field_postal_code": "Postal code",
   "building_detail.field_country": "Country",

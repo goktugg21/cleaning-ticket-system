@@ -1359,6 +1359,8 @@
   "building_detail.field_company": "Bedrijf",
   "building_detail.field_name": "Naam",
   "building_detail.field_address": "Adres",
+  "building_detail.field_billing_address": "Factuuradres",
+  "building_detail.billing_address_missing": "nog geen factuuradres",
   "building_detail.field_city": "Stad",
   "building_detail.field_postal_code": "Postcode",
   "building_detail.field_country": "Land",

@@ -90,6 +90,27 @@ export function BuildingDetailPage() {
   const [summary, setSummary] = useState<BuildingSummary | null>(null);
   // Candidate universes for the four Add pickers.
   const [allCustomers, setAllCustomers] = useState<CustomerAdmin[]>([]);
+
+  // Sprint 188 — the billing address per linked customer, joined from
+  // the customer list this page already holds. One line each: who is
+  // invoiced, and where the invoice goes. A customer with no address is
+  // named and marked, not hidden — an invoice cannot be SENT without
+  // one, so the gap is the useful thing to see here.
+  const billingAddresses = useMemo(() => {
+    const byId = new Map(allCustomers.map((c) => [c.id, c]));
+    return customerLinks
+      .map((link) => {
+        const c = byId.get(link.customer);
+        if (!c) return null;
+        const parts = [c.address, [c.postal_code, c.city].filter(Boolean).join(" ")]
+          .map((part) => (part ?? "").trim())
+          .filter(Boolean);
+        return { id: c.id, name: c.name, address: parts.join(", ") };
+      })
+      .filter((row): row is { id: number; name: string; address: string } =>
+        row !== null,
+      );
+  }, [customerLinks, allCustomers]);
   const [allManagers, setAllManagers] = useState<UserAdmin[]>([]);
   const [allStaff, setAllStaff] = useState<UserAdmin[]>([]);
   const [candidateContacts, setCandidateContacts] = useState<Contact[]>([]);
@@ -419,6 +440,45 @@ export function BuildingDetailPage() {
                 }`}
               >
                 {building.address || "—"}
+              </div>
+            </div>
+            {/* Sprint 188 — the BILLING address, which is a different
+                thing from the row above: that one is the work site, this
+                one is who the invoice is addressed to, and it lives on
+                the CUSTOMER (`types.ts` says so on the field itself). A
+                building can serve several customers, so it is named per
+                customer rather than presented as one address for the
+                building. No extra request — `allCustomers` is already
+                loaded on this page for the link picker. */}
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("building_detail.field_billing_address")}
+              </div>
+              <div
+                className={`detail-field-value${
+                  billingAddresses.length > 0 ? "" : " muted-empty"
+                }`}
+                data-testid="building-detail-billing-address"
+              >
+                {billingAddresses.length === 0 ? (
+                  "—"
+                ) : (
+                  <ul className="readonly-list">
+                    {billingAddresses.map((row) => (
+                      <li key={row.id}>
+                        {row.name}
+                        {" — "}
+                        {row.address ? (
+                          row.address
+                        ) : (
+                          <span className="muted-empty">
+                            {t("building_detail.billing_address_missing")}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
             {/* Sprint 178 §1 — the building's kind, from this company's
