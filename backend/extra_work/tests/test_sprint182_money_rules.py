@@ -41,6 +41,20 @@ LIST_URL = "/api/extra-work/"
 
 
 class _Fixture(_InvoiceRunFixture):
+
+    # Sprint 186 — department and work type are REQUIRED on create.
+    # Every customer is seeded one of each (`customers/signals.py`), so
+    # the fixture asks for the seeded pair instead of building its own.
+    def _seeded_department(self):
+        from customers.models import Department
+
+        return Department.objects.filter(customer=self.customer).first()
+
+    def _seeded_work_type(self):
+        from customers.models import WorkType
+
+        return WorkType.objects.filter(customer=self.customer).first()
+
     def _make_ew(self, status_value=ExtraWorkStatus.COMPLETED, **extra):
         return ExtraWorkRequest.objects.create(
             company=self.company,
@@ -384,6 +398,11 @@ class BilledToAndProviderDateTests(_Fixture):
             {
                 "building": self.building.id,
                 "customer": self.customer.id,
+                # Sprint 186 — department and work type are REQUIRED on
+                # create. Every customer is seeded one of each, so the
+                # fixture picks the seeded pair rather than omitting them.
+                "department": self._seeded_department().id,
+                "work_type": self._seeded_work_type().id,
                 "title": "No billing target chosen",
                 "description": "d",
                 "line_items": [
@@ -410,6 +429,11 @@ class BilledToAndProviderDateTests(_Fixture):
             {
                 "building": self.building.id,
                 "customer": self.customer.id,
+                # Sprint 186 — department and work type are REQUIRED on
+                # create. Every customer is seeded one of each, so the
+                # fixture picks the seeded pair rather than omitting them.
+                "department": self._seeded_department().id,
+                "work_type": self._seeded_work_type().id,
                 "title": "Explicit null",
                 "description": "d",
                 "billed_to": None,
@@ -432,6 +456,11 @@ class BilledToAndProviderDateTests(_Fixture):
             {
                 "building": self.building.id,
                 "customer": self.customer.id,
+                # Sprint 186 — department and work type are REQUIRED on
+                # create. Every customer is seeded one of each, so the
+                # fixture picks the seeded pair rather than omitting them.
+                "department": self._seeded_department().id,
+                "work_type": self._seeded_work_type().id,
                 "title": "Planned by the provider",
                 "description": "d",
                 "provider_planned_date": "2026-06-15",

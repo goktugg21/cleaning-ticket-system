@@ -37,6 +37,7 @@ from rest_framework.test import APIClient
 from extra_work.models import ExtraWorkRequest
 
 from .test_extra_work_mvp import ExtraWorkFixtureMixin
+from customers.models import Department, WorkType
 
 
 class _Base(ExtraWorkFixtureMixin, TestCase):
@@ -373,6 +374,14 @@ class CreateRefusesACustomerDeadlineTests(_Base):
         payload = {
             "company": self.provider_a.id,
             "customer": self.customer_a.id,
+            # Sprint 186 — required on create; the customer is seeded one
+            # of each when it is created.
+            "department": Department.objects.filter(
+                customer=self.customer_a
+            ).first().id,
+            "work_type": WorkType.objects.filter(
+                customer=self.customer_a
+            ).first().id,
             "building": self.building_a1.id,
             "title": "Customer request",
             "description": "please",

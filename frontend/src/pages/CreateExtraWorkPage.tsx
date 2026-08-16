@@ -551,16 +551,25 @@ export function CreateExtraWorkPage({
   // Neutralise a stale selection (from a previously chosen customer) without
   // a setState-in-effect: an id not in the current customer's active list
   // collapses to "" for both the dropdown value and the payload.
+  // Sprint 186 — both are REQUIRED now, so an id that does not belong to
+  // the current customer falls back to that customer's FIRST label
+  // rather than to "". Every customer is seeded one of each when it is
+  // created, so the fallback always exists; "" would render a blank
+  // select on a field that cannot be left blank.
   const effectiveDepartmentId = currentDepartments.some(
     (d) => String(d.id) === departmentId,
   )
     ? departmentId
-    : "";
+    : currentDepartments.length > 0
+      ? String(currentDepartments[0].id)
+      : "";
   const effectiveWorkTypeId = currentWorkTypes.some(
     (w) => String(w.id) === workTypeId,
   )
     ? workTypeId
-    : "";
+    : currentWorkTypes.length > 0
+      ? String(currentWorkTypes[0].id)
+      : "";
 
   // The cart is "previewable" once a building + customer are chosen and
   // every line carries a service, a positive quantity, and a date —
@@ -1736,7 +1745,7 @@ export function CreateExtraWorkPage({
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="ew-department">
-                  {t("create.field_department")}
+                  {t("create.field_department")} *
                 </label>
                 <select
                   id="ew-department"
@@ -1746,7 +1755,6 @@ export function CreateExtraWorkPage({
                   onChange={(event) => setDepartmentId(event.target.value)}
                   disabled={currentDepartments.length === 0}
                 >
-                  <option value="">{t("create.field_department_none")}</option>
                   {currentDepartments.map((d) => (
                     <option key={d.id} value={d.id}>
                       {customerLabelName(d.name, t)}
@@ -1761,7 +1769,7 @@ export function CreateExtraWorkPage({
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="ew-work-type">
-                  {t("create.field_work_type")}
+                  {t("create.field_work_type")} *
                 </label>
                 <select
                   id="ew-work-type"
@@ -1771,7 +1779,6 @@ export function CreateExtraWorkPage({
                   onChange={(event) => setWorkTypeId(event.target.value)}
                   disabled={currentWorkTypes.length === 0}
                 >
-                  <option value="">{t("create.field_work_type_none")}</option>
                   {currentWorkTypes.map((w) => (
                     <option key={w.id} value={w.id}>
                       {customerLabelName(w.name, t)}

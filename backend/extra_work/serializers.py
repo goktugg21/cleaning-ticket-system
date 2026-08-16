@@ -1328,17 +1328,27 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
     # rule (the label must belong to THIS request's customer). Queryset is
     # unscoped here because the customer is not known until validate(); the
     # same-customer check there is the real gate.
+    # Sprint 186 — REQUIRED, both of them.
+    #
+    # Every customer is seeded one Department and one Work type when it
+    # is created (`customers/signals.py`), so there is always something
+    # to pick and "the customer has none yet" is not a state a caller can
+    # be in. An untagged extra work is a row that falls out of every
+    # report that groups by them, and the invoice granularity option
+    # `PER_BUILDING_DEPARTMENT_WORK_TYPE` groups on exactly this pair --
+    # a null there is an invoice nobody asked for.
+    #
+    # `allow_null=False` as well as `required=True`: sending an explicit
+    # null is the same omission wearing a different hat.
     department = serializers.PrimaryKeyRelatedField(
         queryset=Department.objects.all(),
-        required=False,
-        allow_null=True,
-        default=None,
+        required=True,
+        allow_null=False,
     )
     work_type = serializers.PrimaryKeyRelatedField(
         queryset=WorkType.objects.all(),
-        required=False,
-        allow_null=True,
-        default=None,
+        required=True,
+        allow_null=False,
     )
     line_items = ExtraWorkRequestItemSerializer(many=True)
     # Sprint 2A — explicit customer-facing intent. OPTIONAL on the
