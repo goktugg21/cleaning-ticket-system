@@ -48,6 +48,7 @@ from .billing_target import (
     pair_for_granularity,
     resolve_billing_target,
 )
+from .cost_shares import share_amounts_for, shares_for_buildings
 from .selectors import unbilled_extra_work_through
 
 _TWO_PLACES = Decimal("0.01")
@@ -69,6 +70,20 @@ class PlannedInvoice:
     work_type_id: int | None
     granularity: str
     extra_works: list = field(default_factory=list)
+    # Sprint 185 E §2 — `{extra_work_id: (subtotal, vat, total)}` for the
+    # customer this plan is FOR.
+    #
+    # On a building with no cost shares these are the Extra Work's own
+    # earned amounts and nothing about the invoice changes. On a shared
+    # building they are this customer's PART, computed from the whole
+    # share set so the parts sum exactly to the whole whichever customer
+    # is planned first (`cost_shares.allocate`).
+    #
+    # Carried beside `extra_works` rather than replacing it: the preview
+    # serializer and the preview PDF iterate the Extra Works for titles
+    # and buildings, and changing the element type would ripple through
+    # both for no gain.
+    amounts: dict = field(default_factory=dict)
 
     @property
     def building_name(self) -> str | None:
@@ -105,8 +120,17 @@ class PlannedInvoice:
         from .services import _earned_amounts
 
         return sum(
-            (_earned_amounts(ew)[index] or Decimal("0.00")
-             for ew in self.extra_works),
+            (
+                # Sprint 185 E §2 — the customer's PART when the building
+                # is shared, the whole earned amount when it is not. The
+                # fallback keeps a `PlannedInvoice` built by hand (tests,
+                # future callers) honest rather than crashing.
+                (
+                    self.amounts.get(ew.id) or _earned_amounts(ew)
+                )[index]
+                or Decimal("0.00")
+                for ew in self.extra_works
+            ),
             Decimal("0.00"),
         ).quantize(_TWO_PLACES)
 
@@ -145,6 +169,7 @@ def plan_invoices(
     makes the invoice disagree with what the customer was told happened.
     """
     from .selectors import unbilled_extra_work
+    from .services import _earned_amounts
 
     customer = Customer.objects.filter(
         id=customer_id, company_id=company_id
@@ -160,6 +185,38 @@ def plan_invoices(
     unbilled = query(actor, company_id, customer_id, year, month)
     if not unbilled:
         return []
+
+    # Sprint 185 E §2 — WHAT THIS CUSTOMER OWES OF EACH ROW.
+    #
+    # Resolved once for the whole run, from one query over the buildings
+    # involved, and applied to every row before anything is grouped —
+    # so the split is part of the single calculation rather than a second
+    # opinion applied afterwards by whoever remembers to.
+    #
+    # A row on a shared building this customer holds NO share of is
+    # dropped entirely: it reached the pool because the pool asks "is
+    # this building shared with you", and the answer for this particular
+    # row is "not by you". Writing a zero line instead would claim work
+    # the customer owes nothing for.
+    shares_by_building = shares_for_buildings(
+        {ew.building_id for ew in unbilled}
+    )
+    amounts: dict[int, tuple] = {}
+    billable = []
+    for ew in unbilled:
+        part = share_amounts_for(
+            customer_id,
+            ew.building_id,
+            _earned_amounts(ew),
+            shares_by_building,
+        )
+        if part is None:
+            continue
+        amounts[ew.id] = part
+        billable.append(ew)
+    if not billable:
+        return []
+    unbilled = billable
 
     customer_addressed = []
     building_addressed = []
@@ -179,6 +236,7 @@ def plan_invoices(
                 work_type_id=None,
                 granularity=Customer.InvoiceGranularity.CUSTOMER,
                 extra_works=customer_addressed,
+                amounts=amounts,
             )
         )
 
@@ -194,6 +252,7 @@ def plan_invoices(
                     work_type_id=None,
                     granularity=Customer.InvoiceGranularity.PER_BUILDING,
                     extra_works=by_building[building_id],
+                    amounts=amounts,
                 )
             )
     else:
@@ -227,6 +286,7 @@ def plan_invoices(
                         .PER_BUILDING_DEPARTMENT_WORK_TYPE
                     ),
                     extra_works=by_group[key],
+                    amounts=amounts,
                 )
             )
     return planned

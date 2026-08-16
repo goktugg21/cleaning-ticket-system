@@ -34,6 +34,7 @@ from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement
 from .models import Invoice, InvoiceLine
 # Sprint 182 §2 — the single "what would be billed" calculation. Grouping
 # and target resolution live there; this module persists the result.
+from .cost_shares import shares_for_buildings
 from .preview import plan_invoices
 
 _TWO_PLACES = Decimal("0.01")
@@ -108,6 +109,39 @@ def _derive_vat_pct(subtotal, vat):
     return Decimal("21.00")
 
 
+def _every_share_claimed(ew) -> bool:
+    """Has EVERY share-holder of this Extra Work's building been billed
+    for it?
+
+    True only when each customer holding a cost share of the building has
+    a LIVE invoice line claiming this row — the same liveness test the
+    unbilled pool uses (not soft-deleted, not reversed), so "claimed"
+    means one thing in both places.
+
+    This is what lets `is_invoiced` keep meaning SETTLED on a shared row.
+    It is deliberately a question about the shares, not about a count of
+    lines: a customer can hold two lines for the same row across a
+    reversal and a re-issue, and counting would call that everybody.
+    """
+    from buildings.models import BuildingCostShare
+
+    share_holders = set(
+        BuildingCostShare.objects.filter(
+            building_id=ew.building_id
+        ).values_list("customer_id", flat=True)
+    )
+    if not share_holders:
+        return True
+    claimed = set(
+        InvoiceLine.objects.filter(
+            extra_work_id=ew.id,
+            invoice__deleted_at__isnull=True,
+            invoice__reversed_by__isnull=True,
+        ).values_list("invoice__customer_id", flat=True)
+    )
+    return share_holders.issubset(claimed)
+
+
 def _create_draft(
     actor,
     company_id,
@@ -121,6 +155,7 @@ def _create_draft(
     work_type_id=None,
     granularity=None,
     created_by=_ACTOR,
+    amounts=None,
 ):
     """Create ONE draft Invoice for the given EW list and CLAIM them.
 
@@ -172,9 +207,20 @@ def _create_draft(
     subtotal = Decimal("0.00")
     vat = Decimal("0.00")
     total = Decimal("0.00")
+    amounts = amounts or {}
+    # Sprint 185 E §2 — one query for the shares of every building in
+    # this draft, so the claim rule below knows which rows are shared
+    # without asking per row.
+    shared_building_ids = set(
+        shares_for_buildings({e.building_id for e in ews})
+    )
     for i, ew in enumerate(ews):
         ticket = ticket_map.get(ew.id)
-        line_sub, line_vat, line_tot = _earned_amounts(ew)
+        # The customer's PART when the building is shared, the whole
+        # earned amount when it is not — computed by `plan_invoices`,
+        # which is the single calculation. Generation executes the plan;
+        # it does not re-derive the money.
+        line_sub, line_vat, line_tot = amounts.get(ew.id) or _earned_amounts(ew)
         bm = billing_month(ew, ticket)  # (year, month) for included rows
         performed_on = None
         if ticket is not None and ticket.closed_at is not None:
@@ -201,8 +247,21 @@ def _create_draft(
         # CLAIM: the is_invoiced flag is the fast Option-1 exclusion; the
         # InvoiceLine.extra_work link is the durable claim. Both are set on
         # claim and cleared on release.
-        ew.is_invoiced = True
+        #
+        # Sprint 185 E §2 — on a SHARED building the flag is set only
+        # once every share-holder has been billed. It is one boolean on a
+        # row several customers are billed parts of, so setting it at the
+        # first part would say "settled" while the other tenants had not
+        # been invoiced at all — and the fast exclusion would then hide
+        # the row from their own runs. The durable per-customer claim
+        # (the `InvoiceLine` on an invoice for that customer) is the
+        # authority for shared rows; this flag stays the fast answer for
+        # the unshared ones, which is every row that exists today.
         ew.invoiced_at = now
+        if ew.building_id in shared_building_ids:
+            ew.is_invoiced = _every_share_claimed(ew)
+        else:
+            ew.is_invoiced = True
         ew.save(update_fields=["is_invoiced", "invoiced_at", "updated_at"])
 
     invoice.subtotal_amount = subtotal
@@ -326,6 +385,10 @@ def generate_draft_invoices(
                     department_id=plan.department_id,
                     work_type_id=plan.work_type_id,
                     granularity=plan.granularity,
+                    # Sprint 185 E §2 — the money the plan computed.
+                    # Generation persists the plan; it never recomputes
+                    # it, which is the guarantee §2 asked for.
+                    amounts=plan.amounts,
                     # Sprint 183 §3 — a system run's invoices have no
                     # human author. `actor` above is the read scope.
                     created_by=None if system else _ACTOR,

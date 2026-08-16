@@ -6,6 +6,7 @@ from .views_building_types import (
     BuildingTypeDetailView,
     BuildingTypeListCreateView,
 )
+from .views_cost_shares import BuildingCostSharesView
 from .views_bulk import (
     BuildingBulkDeactivateView,
     BuildingBulkLinkView,
@@ -86,6 +87,12 @@ urlpatterns = [
         "<int:building_id>/summary/",
         BuildingSummaryView.as_view(),
         name="building-summary",
+    ),
+    # Sprint 185 E §2 — who pays which share of this building.
+    path(
+        "<int:building_id>/cost-shares/",
+        BuildingCostSharesView.as_view(),
+        name="building-cost-shares",
     ),
     path(
         "<int:building_id>/managers/",

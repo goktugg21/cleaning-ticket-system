@@ -30,9 +30,24 @@ class InvoicePreviewLineSerializer(serializers.Serializer):
     line_total = serializers.SerializerMethodField()
 
     def _amounts(self, ew):
+        """This row's money FOR THE CUSTOMER being previewed.
+
+        Sprint 185 E §2 — the plan carries a per-Extra-Work amounts map
+        (the customer's share on a shared building, the whole earned
+        amount everywhere else) and the row has to read it. Without this
+        the preview contradicted itself: the totals came from the plan
+        and were the customer's part, while every LINE printed the
+        undivided figure — rows of 100 adding up to a total of 60.
+
+        The map arrives through the serializer context, put there by the
+        parent that owns the plan. Falling back to the earned amounts
+        keeps a line serialized outside a plan (tests, future callers)
+        honest rather than crashing.
+        """
         from .services import _earned_amounts
 
-        return _earned_amounts(ew)
+        amounts = self.context.get("plan_amounts") or {}
+        return amounts.get(ew.id) or _earned_amounts(ew)
 
     def get_line_subtotal(self, ew):
         return f"{self._amounts(ew)[0] or 0:.2f}"
@@ -83,8 +98,12 @@ class InvoicePreviewSerializer(serializers.Serializer):
         return len(plan.extra_works)
 
     def get_lines(self, plan):
+        # Sprint 185 E §2 — the plan's own per-row amounts travel with
+        # the rows, so a line and the total above it are the same money.
+        context = dict(self.context)
+        context["plan_amounts"] = getattr(plan, "amounts", {}) or {}
         return InvoicePreviewLineSerializer(
-            plan.extra_works, many=True, context=self.context
+            plan.extra_works, many=True, context=context
         ).data
 
 
