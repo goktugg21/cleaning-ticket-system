@@ -304,6 +304,8 @@
   "users.scope_buildings_other": "{{count}} gebouwen",
   "users.scope_customers_one": "{{count}} klant",
   "users.scope_customers_other": "{{count}} klanten",
+  "users.companies_more_one": "+{{count}} meer",
+  "users.companies_more_other": "+{{count}} meer",
   "users.empty_filtered_title": "Geen gebruikers voldoen aan uw filters",
   "users.empty_initial_title": "Nog geen gebruikers",
   "users.empty_initial_desc": "Nodig de eerste gebruiker uit om te beginnen.",

@@ -317,3 +317,260 @@ class CustomerAccessRoleProjectionTests(TenantFixtureMixin, APITestCase):
             ],
             "CUSTOMER_USER",
         )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 187B §1 — WHICH companies, beside scope_summary's HOW MANY
+# ---------------------------------------------------------------------------
+
+
+class UserCompaniesFieldTests(TenantFixtureMixin, APITestCase):
+    """`companies` names the companies a user belongs to.
+
+    A sibling field rather than an extension of `scope_summary`: that
+    field is pinned above by exact dict equality in six places, and more
+    importantly its `count` means a different thing per role (buildings
+    for a BM), so company names inside it would put two axes in one
+    object. See `UserListSerializer.get_companies`.
+    """
+
+    URL = "/api/users/"
+
+    def _row_for(self, response, user_id):
+        rows = response.data.get("results", response.data)
+        for row in rows:
+            if row["id"] == user_id:
+                return row
+        self.fail(f"user {user_id} not present in /api/users/ payload")
+
+    def test_the_list_renders_the_field_for_every_role(self):
+        """Reads the RENDERED row, per role. A filter test cannot catch a
+        missing `fields` entry — that is what took the Extra Work page
+        down in Sprint 173."""
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(
+            self._row_for(response, self.company_admin.id)["companies"],
+            {"all": False, "names": ["Company A"]},
+        )
+        self.assertEqual(
+            self._row_for(response, self.manager.id)["companies"],
+            {"all": False, "names": ["Company A"]},
+        )
+        self.assertEqual(
+            self._row_for(response, self.other_manager.id)["companies"],
+            {"all": False, "names": ["Company B"]},
+        )
+
+    def test_a_super_admin_returns_the_all_sentinel(self):
+        """Kept rendering as "All companies" exactly as the scope chip
+        already does for this role — a SUPER_ADMIN holds no membership
+        row, so a names list would be empty and read as "belongs to
+        nothing", which is the opposite of the truth."""
+        self.authenticate(self.super_admin)
+        row = self._row_for(
+            self.client.get(self.URL), self.super_admin.id
+        )
+        self.assertEqual(row["companies"], {"all": True, "names": []})
+
+    def test_scope_summary_is_untouched(self):
+        """The whole reason this is a sibling field. If `scope_summary`
+        had been extended, this exact-equality assertion — and the five
+        like it above — would have had to be rewritten."""
+        self.authenticate(self.super_admin)
+        row = self._row_for(self.client.get(self.URL), self.company_admin.id)
+        self.assertEqual(row["scope_summary"], {"label": "companies", "count": 1})
+
+    def test_many_companies_are_named_once_each_and_sorted(self):
+        """A user can belong to MANY companies — that is the point of
+        company_memberships. Names are a SET: a BM assigned to several
+        buildings of one company names it once."""
+        CompanyUserMembership.objects.create(
+            user=self.company_admin, company=self.other_company
+        )
+        second_a = Building.objects.create(
+            company=self.company, name="Building A2"
+        )
+        BuildingManagerAssignment.objects.create(
+            user=self.manager, building=second_a
+        )
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL)
+        self.assertEqual(
+            self._row_for(response, self.company_admin.id)["companies"],
+            {"all": False, "names": ["Company A", "Company B"]},
+        )
+        self.assertEqual(
+            self._row_for(response, self.manager.id)["companies"],
+            {"all": False, "names": ["Company A"]},
+        )
+
+    def test_a_staff_user_names_the_company_of_its_visible_buildings(self):
+        staff = self.make_user("staff-a@example.com", UserRole.STAFF)
+        BuildingStaffVisibility.objects.create(
+            user=staff, building=self.building
+        )
+        self.authenticate(self.super_admin)
+        row = self._row_for(self.client.get(self.URL), staff.id)
+        self.assertEqual(row["companies"], {"all": False, "names": ["Company A"]})
+
+    def test_a_customer_user_names_the_provider_behind_its_customer(self):
+        """Deliberate: the page asks "whose people am I looking at", and
+        for a customer user the answer is the provider that serves them.
+        It names no CUSTOMER, so it is not customer linkage.
+
+        No membership is created here: `TenantFixtureMixin.setUp` already
+        links `customer_user` to `customer` (which is under `company`).
+        Creating it again violates the (customer, user) unique constraint.
+        """
+        self.authenticate(self.super_admin)
+        row = self._row_for(self.client.get(self.URL), self.customer_user.id)
+        self.assertEqual(row["companies"], {"all": False, "names": ["Company A"]})
+
+    def test_naming_the_companies_costs_a_constant_number_of_queries(self):
+        """§1a's requirement: the new field must ride the EXISTING
+        prefetch. Asserted as constant across a small and a large list
+        rather than as one magic number — a hardcoded number just gets
+        rewritten to whatever the code happens to do, while a constant
+        across sizes is the actual claim ("no N+1")."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def count_queries():
+            with CaptureQueriesContext(connection) as ctx:
+                response = self.client.get(self.URL)
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                rows = response.data.get("results", response.data)
+                self.assertTrue(rows, "no rows to measure")
+                # Read the field INSIDE the context: a lazily-deferred
+                # query would otherwise fire after it closed, uncounted.
+                self.assertTrue(all("companies" in r for r in rows))
+            return len(ctx.captured_queries)
+
+        self.authenticate(self.super_admin)
+        # Warm-up: the first request of a test can carry one-off queries
+        # that would make the baseline artificially high and this flaky.
+        count_queries()
+        baseline = count_queries()
+
+        for index in range(12):
+            extra = self.make_user(
+                f"bulk-{index}@example.com", UserRole.BUILDING_MANAGER
+            )
+            BuildingManagerAssignment.objects.create(
+                user=extra,
+                building=self.building if index % 2 else self.other_building,
+            )
+
+        grown = count_queries()
+        self.assertEqual(
+            baseline,
+            grown,
+            f"query count grew with the number of users: "
+            f"{baseline} -> {grown} (N+1)",
+        )
+
+
+class UserCompanyFilterTests(TenantFixtureMixin, APITestCase):
+    """Sprint 187B §1b — `?company=<id>` narrows; it never widens."""
+
+    URL = "/api/users/"
+
+    def _emails(self, response):
+        rows = response.data.get("results", response.data)
+        return {row["email"] for row in rows}
+
+    def test_a_super_admin_can_narrow_to_one_company(self):
+        self.authenticate(self.super_admin)
+        emails = self._emails(
+            self.client.get(f"{self.URL}?company={self.company.id}")
+        )
+        self.assertIn(self.company_admin.email, emails)
+        self.assertIn(self.manager.email, emails)
+        self.assertNotIn(self.other_company_admin.email, emails)
+        self.assertNotIn(self.other_manager.email, emails)
+
+    def test_a_company_admin_cannot_read_another_company_by_passing_its_id(
+        self,
+    ):
+        """H-1/H-2, and a P0 if it is wrong.
+
+        The company_admin holds Company A only. Passing Company B's id
+        must narrow their own scope to nothing — never return B's users
+        — and must not reveal that B exists, which is why this asserts
+        200-with-no-rows rather than an error. A 400 or 404 here would
+        itself confirm the id.
+        """
+        self.authenticate(self.company_admin)
+        response = self.client.get(f"{self.URL}?company={self.other_company.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = self._emails(response)
+        self.assertNotIn(self.other_company_admin.email, emails)
+        self.assertNotIn(self.other_manager.email, emails)
+        self.assertEqual(emails, set())
+
+    def test_a_company_admin_passing_its_own_id_still_sees_its_own_people(self):
+        """The control. Without it, an implementation returning nothing
+        for EVERY ?company= value would pass the test above while being
+        entirely broken."""
+        self.authenticate(self.company_admin)
+        emails = self._emails(
+            self.client.get(f"{self.URL}?company={self.company.id}")
+        )
+        self.assertIn(self.company_admin.email, emails)
+        self.assertNotIn(self.other_company_admin.email, emails)
+
+    def test_a_junk_value_cannot_500_the_page(self):
+        """Tolerant parse, matching the other list endpoints: junk is
+        ignored rather than raising. The requirement is that it is never
+        a server error."""
+        self.authenticate(self.super_admin)
+        response = self.client.get(f"{self.URL}?company=NOPE")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn(self.company_admin.email, self._emails(response))
+
+    def test_an_unknown_company_id_is_empty_not_an_error(self):
+        self.authenticate(self.super_admin)
+        response = self.client.get(f"{self.URL}?company=99999999")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._emails(response), set())
+
+    def test_the_filter_matches_all_four_membership_axes(self):
+        """The filter and the `companies` column must agree about what
+        "belongs to" means, so it tests the same four axes the serializer
+        reads: company membership, BM assignment, staff visibility and
+        the provider behind a customer membership."""
+        staff = self.make_user("staff-axis@example.com", UserRole.STAFF)
+        BuildingStaffVisibility.objects.create(
+            user=staff, building=self.building
+        )
+        # `customer_user` -> `customer` (under `company`) already exists
+        # from TenantFixtureMixin.setUp; re-creating it would violate the
+        # (customer, user) unique constraint.
+
+        self.authenticate(self.super_admin)
+        emails = self._emails(
+            self.client.get(f"{self.URL}?company={self.company.id}")
+        )
+        self.assertIn(self.company_admin.email, emails)   # CompanyUserMembership
+        self.assertIn(self.manager.email, emails)         # BM assignment
+        self.assertIn(staff.email, emails)                # staff visibility
+        self.assertIn(self.customer_user.email, emails)   # customer's provider
+
+    def test_a_super_admin_row_drops_out_when_filtering_by_company(self):
+        """Deliberate and worth pinning, because it could surprise.
+
+        §1b says the filter returns "users holding a membership in that
+        company". A SUPER_ADMIN holds none — they are global by
+        construction — so filtering to one company removes them. That is
+        the coherent reading: the question the filter answers is "whose
+        staff are these", and a platform admin is nobody's staff.
+        """
+        self.authenticate(self.super_admin)
+        emails = self._emails(
+            self.client.get(f"{self.URL}?company={self.company.id}")
+        )
+        self.assertNotIn(self.super_admin.email, emails)

@@ -685,6 +685,10 @@ export async function reactivateUser(id: number): Promise<UserAdminDetail> {
 export interface ProviderEmployeeListParams {
   role?: Role;
   employment_type?: EmploymentType;
+  // Sprint 187B §2 — narrow to one provider company. Intersects with the
+  // caller's own scope server-side; a non-integer is a 400 with the
+  // stable code `company_invalid`.
+  company?: number;
 }
 
 export async function listProviderEmployees(

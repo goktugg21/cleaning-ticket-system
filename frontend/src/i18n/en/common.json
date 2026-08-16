@@ -304,6 +304,8 @@
   "users.scope_buildings_other": "{{count}} buildings",
   "users.scope_customers_one": "{{count}} customer",
   "users.scope_customers_other": "{{count}} customers",
+  "users.companies_more_one": "+{{count}} more",
+  "users.companies_more_other": "+{{count}} more",
   "users.empty_filtered_title": "No users match your filters",
   "users.empty_initial_title": "No users yet",
   "users.empty_initial_desc": "Invite the first user to get started.",

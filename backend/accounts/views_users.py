@@ -87,6 +87,69 @@ class UserViewSet(viewsets.ModelViewSet):
             roles = [r.strip() for r in role_filter.split(",") if r.strip()]
             base = base.filter(role__in=roles)
 
+        # Sprint 187B §1b — ?company=<id> narrows the list to users holding
+        # a membership in that company.
+        #
+        # H-1/H-2: this INTERSECTS with what the caller may already see, it
+        # never widens it. `base` above has already been cut down to the
+        # caller's own scope (SUPER_ADMIN: everything; COMPANY_ADMIN: the
+        # four-axis `manageable_user_ids_for` set; everyone else: nothing),
+        # and this filter only ever removes rows from it. So a COMPANY_ADMIN
+        # in company A who passes company B's id gets their OWN scope
+        # narrowed by a membership test nobody in it satisfies — zero rows,
+        # HTTP 200, and no signal that B exists. That is the required shape:
+        # an error or a 404 here would itself confirm the id, which is why
+        # an unknown id is treated exactly like an id with no matching users.
+        #
+        # Parsed tolerantly, like the other list endpoints: junk is ignored
+        # rather than raising, so no query string can 500 this page.
+        company_filter = self.request.query_params.get("company")
+        if company_filter not in (None, ""):
+            try:
+                company_id = int(company_filter)
+            except (TypeError, ValueError):
+                company_id = None
+            if company_id is not None:
+                # The four "belongs to a company" axes, matching
+                # `accounts.scoping.company_ids_for` and the serializer's
+                # `companies` field, so the filter and the column cannot
+                # disagree about what membership means. Exists() subqueries
+                # keyed on OuterRef("pk") rather than joins, so a user in
+                # several buildings of one company cannot duplicate rows.
+                base = base.filter(
+                    Q(
+                        Exists(
+                            CompanyUserMembership.objects.filter(
+                                user=OuterRef("pk"), company_id=company_id
+                            )
+                        )
+                    )
+                    | Q(
+                        Exists(
+                            BuildingManagerAssignment.objects.filter(
+                                user=OuterRef("pk"),
+                                building__company_id=company_id,
+                            )
+                        )
+                    )
+                    | Q(
+                        Exists(
+                            BuildingStaffVisibility.objects.filter(
+                                user=OuterRef("pk"),
+                                building__company_id=company_id,
+                            )
+                        )
+                    )
+                    | Q(
+                        Exists(
+                            CustomerUserMembership.objects.filter(
+                                user=OuterRef("pk"),
+                                customer__company_id=company_id,
+                            )
+                        )
+                    )
+                )
+
         # Company scope for the customer-access surfaces: SUPER_ADMIN is
         # unrestricted (None); a COMPANY_ADMIN is limited to their own
         # provider companies. (Other roles never reach here.)
@@ -167,15 +230,38 @@ class UserViewSet(viewsets.ModelViewSet):
         # `customer` (select_related, for the per-grant company_id scope
         # check) and `building_access` rows, for the list serializer's
         # `customer_access_role` projection (no N+1).
+        # Sprint 187B §1a — the same four prefetches, each now carrying the
+        # COMPANY that the list serializer's `companies` field names. The
+        # `select_related` sits INSIDE each prefetch queryset, so naming a
+        # company is a JOIN on a query that already ran: the number of
+        # queries for a list of N users is unchanged, and an
+        # `assertNumQueries` test pins that. Adding the field without this
+        # would have fired one SELECT per membership row per user — the
+        # exact "you have made the page worse" §1a warned about.
         if self.action == "list":
             base = base.prefetch_related(
-                "company_memberships",
-                "building_assignments",
-                "building_visibility",
+                Prefetch(
+                    "company_memberships",
+                    queryset=CompanyUserMembership.objects.select_related(
+                        "company"
+                    ),
+                ),
+                Prefetch(
+                    "building_assignments",
+                    queryset=BuildingManagerAssignment.objects.select_related(
+                        "building__company"
+                    ),
+                ),
+                Prefetch(
+                    "building_visibility",
+                    queryset=BuildingStaffVisibility.objects.select_related(
+                        "building__company"
+                    ),
+                ),
                 Prefetch(
                     "customer_memberships",
                     queryset=CustomerUserMembership.objects.select_related(
-                        "customer"
+                        "customer__company"
                     ).prefetch_related("building_access"),
                 ),
             )

@@ -3,12 +3,14 @@ import { Link } from "react-router-dom";
 import { MailPlus, RefreshCw, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
-import { listUsers } from "../../api/admin";
+import { listAllCompanies, listUsers } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type {
+  CompanyAdmin,
   CustomerAccessRole,
   Role,
   UserAdmin,
+  UserCompanies,
   UserScopeSummary,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
@@ -49,6 +51,42 @@ function ScopeChip({ summary }: { summary: UserScopeSummary }) {
   return (
     <span className="users-scope-chip" data-testid="users-scope-chip">
       {t(`users.scope_${summary.label}`, { count: summary.count })}
+    </span>
+  );
+}
+
+// Sprint 187B §1a — WHICH companies, bounded.
+//
+// A user can belong to many companies, so this is a list, and CLAUDE.md
+// forbids rendering an unbounded server collection — at cell level that
+// means a user in eight companies must not print eight names into a
+// table cell. Two names, then "+N more", with the full set in the
+// title attribute. `all` is the SUPER_ADMIN sentinel and keeps rendering
+// as "All companies", exactly as the scope chip beside it already does.
+const COMPANY_NAMES_SHOWN = 2;
+
+function CompanyCell({ companies }: { companies: UserCompanies }) {
+  const { t } = useTranslation("common");
+  if (companies.all) {
+    return <span className="muted small">{t("users.scope_all")}</span>;
+  }
+  const names = companies.names;
+  if (names.length === 0) {
+    // An em dash, never a blank cell: a blank one reads as a rendering
+    // bug rather than "belongs to no company" (Sprint 154 §K).
+    return <span className="muted small">—</span>;
+  }
+  const shown = names.slice(0, COMPANY_NAMES_SHOWN);
+  const hidden = names.length - shown.length;
+  return (
+    <span data-testid="user-row-companies" title={names.join(", ")}>
+      {shown.join(", ")}
+      {hidden > 0 && (
+        <span className="muted small">
+          {" "}
+          {t("users.companies_more", { count: hidden })}
+        </span>
+      )}
     </span>
   );
 }
@@ -99,6 +137,14 @@ export function UsersAdminPage() {
   const [accessRoleFilter, setAccessRoleFilter] =
     useState<CustomerAccessRole | null>(null);
 
+  // Sprint 187B §1c — the company filter, copying the established
+  // BuildingsAdminPage pattern rather than inventing one: loaded once,
+  // auto-selected when exactly one company comes back (a single-company
+  // admin), and disabled in that case because there is nothing to choose.
+  const [companyFilter, setCompanyFilter] = useState<number | "">("");
+  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
+
   const [savedBanner] = useSavedBanner({
     saved: t("users.banner_saved"),
     deactivated: t("users.banner_deactivated"),
@@ -132,6 +178,29 @@ export function UsersAdminPage() {
     [availableRoles],
   );
 
+  // Loaded exhaustively (listAllCompanies) so a tenant with more than one
+  // page of companies gets a complete dropdown rather than a silently
+  // truncated one — the Sprint 135 fix, kept.
+  useEffect(() => {
+    let cancelled = false;
+    listAllCompanies({ is_active: "true" })
+      .then((response) => {
+        if (cancelled) return;
+        setCompanies(response);
+        if (response.length === 1) {
+          setCompanyFilter(response[0].id);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCompaniesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const companyDropdownDisabled = companiesLoaded && companies.length <= 1;
+
   useEffect(() => {
     const handle = window.setTimeout(() => {
       setSearchActive(searchInput.trim());
@@ -144,8 +213,9 @@ export function UsersAdminPage() {
     if (activeFilter !== "all") params.is_active = activeFilter;
     if (roleFilter.length > 0) params.role = roleFilter.join(",");
     if (accessRoleFilter) params.access_role = accessRoleFilter;
+    if (companyFilter !== "") params.company = companyFilter;
     return params;
-  }, [page, activeFilter, roleFilter, accessRoleFilter]);
+  }, [page, activeFilter, roleFilter, accessRoleFilter, companyFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -242,6 +312,9 @@ export function UsersAdminPage() {
         <td data-testid="user-row-access-role">
           <AccessRoleBadge accessRole={user.customer_access_role} />
         </td>
+        <td>
+          <CompanyCell companies={user.companies} />
+        </td>
         <td>{user.language}</td>
         <td data-testid="user-row-scope">
           <ScopeChip summary={user.scope_summary} />
@@ -336,6 +409,30 @@ export function UsersAdminPage() {
               <option value="true">{t("admin.status_active")}</option>
               <option value="false">{t("admin.status_inactive")}</option>
               <option value="all">{t("admin.status_all")}</option>
+            </select>
+          </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("company")}</span>
+            {/* Capped to match Search / Status instead of stretching to
+                fill the filter-bar's 1fr track — same as Buildings. */}
+            <select
+              className="filter-control"
+              style={{ maxWidth: 220 }}
+              data-testid="users-filter-company"
+              value={companyFilter === "" ? "" : String(companyFilter)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCompanyFilter(value === "" ? "" : Number(value));
+                setPage(1);
+              }}
+              disabled={companyDropdownDisabled}
+            >
+              <option value="">{t("admin.all_companies")}</option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
             </select>
           </div>
           {/* Sprint 157 §7 — the two chip groups share ONE full-width
@@ -469,6 +566,7 @@ export function UsersAdminPage() {
                 <th>{t("users.col_phone")}</th>
                 <th>{t("users.col_role")}</th>
                 <th>{t("users.col_access_role")}</th>
+                <th>{t("company")}</th>
                 <th>{t("users.col_language")}</th>
                 <th>{t("users.col_scope")}</th>
                 <th>{t("status")}</th>
@@ -481,7 +579,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-provider"
                   >
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       <span className="users-group-header-label">
                         {t("users.group_provider")}
                       </span>
@@ -499,7 +597,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-customer"
                   >
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       <span className="users-group-header-label">
                         {t("users.group_customer")}
                       </span>
@@ -576,6 +674,12 @@ export function UsersAdminPage() {
                           </dd>
                         </div>
                       )}
+                    <div className="admin-card-meta-row">
+                      <dt>{t("company")}</dt>
+                      <dd>
+                        <CompanyCell companies={user.companies} />
+                      </dd>
+                    </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("users.col_language")}</dt>
                       <dd>{user.language}</dd>
