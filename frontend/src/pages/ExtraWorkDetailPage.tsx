@@ -525,16 +525,6 @@ function DatesEditor({
         }}
       >
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span className="muted small">{t("detail.deadline")}</span>
-          <input
-            type="date"
-            className="field-input"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            data-testid="extra-work-dates-deadline"
-          />
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="muted small">
             {t("detail.field_planned_end_date")}
           </span>
@@ -544,6 +534,16 @@ function DatesEditor({
             value={plannedEnd}
             onChange={(e) => setPlannedEnd(e.target.value)}
             data-testid="extra-work-dates-planned-end"
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="muted small">{t("detail.deadline")}</span>
+          <input
+            type="date"
+            className="field-input"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            data-testid="extra-work-dates-deadline"
           />
         </label>
         <button

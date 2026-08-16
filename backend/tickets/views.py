@@ -1196,6 +1196,21 @@ class TicketViewSet(
             parse_is_extra_work(request.query_params.get("is_extra_work")),
         )
 
+        # The chips must count the rows they sit above. A customer's own
+        # ticket page pins `?customer=<id>` on the LIST and the chips did
+        # not carry it, so every customer's page showed the whole
+        # company's totals -- two different customers both reading "25".
+        # Same defect as the work-type one directly above, one filter
+        # later: the rows narrowed and the counts did not.
+        customer_id = request.query_params.get("customer")
+        if customer_id:
+            try:
+                scoped = scoped.filter(customer_id=int(customer_id))
+            except (TypeError, ValueError):
+                # An unparseable value is no opinion, not an empty page:
+                # the same convention `parse_is_extra_work` follows.
+                pass
+
         status_counts = {row["status"]: row["c"] for row in scoped.values("status").annotate(c=Count("id"))}
         priority_counts = {row["priority"]: row["c"] for row in scoped.values("priority").annotate(c=Count("id"))}
 
