@@ -109,7 +109,13 @@ class InvoicingFixture(MediaRootIsolation, TestCase):
         cls.building = Building.objects.create(company=cls.company, name="A-B1")
         cls.building2 = Building.objects.create(company=cls.company, name="A-B2")
         cls.customer = Customer.objects.create(
-            company=cls.company, name="Cust A", building=cls.building
+            company=cls.company,
+            name="Cust A",
+            building=cls.building,
+            # Sprint 186 — SEND refuses an invoice for a customer with no
+            # billing address, so every fixture that sends one needs one.
+            address="Teststraat 1",
+            city="Amsterdam",
         )
         CustomerBuildingMembership.objects.create(
             customer=cls.customer, building=cls.building
@@ -143,7 +149,11 @@ class InvoicingFixture(MediaRootIsolation, TestCase):
             company=cls.company_b, name="B-B1"
         )
         cls.customer_b = Customer.objects.create(
-            company=cls.company_b, name="Cust B", building=cls.building_b
+            company=cls.company_b,
+            name="Cust B",
+            building=cls.building_b,
+            address="Testweg 2",
+            city="Rotterdam",
         )
         CustomerBuildingMembership.objects.create(
             customer=cls.customer_b, building=cls.building_b

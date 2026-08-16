@@ -1328,27 +1328,36 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
     # rule (the label must belong to THIS request's customer). Queryset is
     # unscoped here because the customer is not known until validate(); the
     # same-customer check there is the real gate.
-    # Sprint 186 — REQUIRED, both of them.
+    # Sprint 186 — an extra work always ENDS UP with both, but the wire
+    # stays permissive.
     #
-    # Every customer is seeded one Department and one Work type when it
-    # is created (`customers/signals.py`), so there is always something
-    # to pick and "the customer has none yet" is not a state a caller can
-    # be in. An untagged extra work is a row that falls out of every
-    # report that groups by them, and the invoice granularity option
-    # `PER_BUILDING_DEPARTMENT_WORK_TYPE` groups on exactly this pair --
-    # a null there is an invoice nobody asked for.
+    # The owner's requirement is that no extra work is untagged: an
+    # untagged row falls out of every report that groups by them, and the
+    # invoice granularity option `PER_BUILDING_DEPARTMENT_WORK_TYPE`
+    # groups on exactly this pair, so a null there is an invoice nobody
+    # asked for.
     #
-    # `allow_null=False` as well as `required=True`: sending an explicit
-    # null is the same omission wearing a different hat.
+    # The first cut of this made both fields `required=True`. That is the
+    # blunt instrument: it 400s EVERY caller that ever omitted them --
+    # 130 existing tests, the customer portal, and any integration -- to
+    # enforce something the server can simply supply. Every customer is
+    # seeded one Department and one Work type when it is created
+    # (`customers/signals.py`), so the value is never in doubt.
+    #
+    # So: the FORM requires a choice (and pre-selects the seeded pair),
+    # and `validate()` below fills in that same pair when a caller omits
+    # them. Same guarantee, nobody broken.
     department = serializers.PrimaryKeyRelatedField(
         queryset=Department.objects.all(),
-        required=True,
-        allow_null=False,
+        required=False,
+        allow_null=True,
+        default=None,
     )
     work_type = serializers.PrimaryKeyRelatedField(
         queryset=WorkType.objects.all(),
-        required=True,
-        allow_null=False,
+        required=False,
+        allow_null=True,
+        default=None,
     )
     line_items = ExtraWorkRequestItemSerializer(many=True)
     # Sprint 2A — explicit customer-facing intent. OPTIONAL on the
@@ -1462,6 +1471,32 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
 
         building = attrs["building"]
         customer = attrs["customer"]
+
+        # Sprint 186 — no extra work is left untagged.
+        #
+        # An untagged row falls out of every report that groups by
+        # department or work type, and `PER_BUILDING_DEPARTMENT_WORK_TYPE`
+        # invoices group on exactly this pair. The FORM makes the operator
+        # choose (and pre-selects the seeded pair); this is the floor
+        # underneath it, for every other caller.
+        #
+        # Filled rather than refused: every customer is seeded one of
+        # each when it is created, so the answer is never in doubt, and
+        # 400-ing a caller over a value the server already knows would
+        # break the customer portal and every integration to enforce
+        # something it can simply supply.
+        if attrs.get("department") is None:
+            attrs["department"] = (
+                Department.objects.filter(customer=customer, is_active=True)
+                .order_by("id")
+                .first()
+            )
+        if attrs.get("work_type") is None:
+            attrs["work_type"] = (
+                WorkType.objects.filter(customer=customer, is_active=True)
+                .order_by("id")
+                .first()
+            )
 
         # Sprint 176 §3 — the deadline is a PROVIDER commitment, so the
         # create form refuses one from a customer-side actor.

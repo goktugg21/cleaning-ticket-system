@@ -180,6 +180,25 @@ def send_invoice(actor, invoice):
         raise InvoiceTransitionError(
             f"Only an ISSUED invoice can be sent (current status: {locked.status})."
         )
+    # Sprint 186 — an invoice with no addressee is not a document.
+    #
+    # SEND is where it becomes real: the gapless number is born here and
+    # the PDF is frozen immediately after, so this is the last moment the
+    # address can still be asked for. Sprint 185 D added the field, its
+    # screen warning and `Customer.has_billing_address` -- the one
+    # definition of "enough of an address to invoice" -- but the guard
+    # itself belonged in this file, which was another agent's that round.
+    #
+    # Refused rather than sent blank: a Dutch invoice needs the debtor's
+    # address, and so does every reminder that follows it. The message
+    # names the customer, because the operator sending it is usually not
+    # the person who maintains their record.
+    if not locked.customer.has_billing_address:
+        raise InvoiceTransitionError(
+            f"{locked.customer.name} has no billing address yet. "
+            "Add one on the customer before sending this invoice.",
+        )
+
     now = timezone.now()
     update_fields = ["status", "sent_at", "updated_at"]
     if locked.number is None:
