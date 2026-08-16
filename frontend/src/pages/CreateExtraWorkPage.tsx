@@ -1845,9 +1845,17 @@ export function CreateExtraWorkPage({
                   // provider's headings in front of a customer user.
                   disabled={!form.customer}
                 >
-                  <option value="">
-                    {t("create.catalog_filter.all_categories")}
-                  </option>
+                  {/* Sprint 186 §1 — "All categories" is filter wording
+                      on a field that files the request. There is no
+                      "General" ROW to select: `service_category` and
+                      `price_folder` are both nullable and nothing
+                      provisions a default one, so the empty value stays
+                      empty on the wire and only its LABEL changes. The
+                      word is the one this system already uses for the
+                      unclassified case — `customers/signals.py` seeds
+                      every customer an "Algemeen" department and work
+                      type — rather than a second name for one idea. */}
+                  <option value="">{t("create.field_category_none")}</option>
                   {/* Sprint 145 — ONE flat list: the categories that
                       belong to the selected customer. Archived ones are
                       excluded upstream (`currentFolders`), so the form

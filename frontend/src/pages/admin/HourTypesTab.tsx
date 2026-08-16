@@ -15,6 +15,7 @@ import type {
   HourTypeWritePayload,
 } from "../../api/timesheets.types";
 import { BoundedList } from "../../components/BoundedList";
+import { CatalogCompanySelect } from "../../components/CatalogTab";
 import { EditModeToggle } from "../../components/EditModeToggle";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
@@ -24,6 +25,7 @@ import {
   isStandardHourType,
 } from "../../lib/hourTypeLabel";
 import { Toggle } from "../../components/Toggle";
+import { useCatalogCompanies } from "../../lib/useCatalogCompanies";
 import { useEditMode } from "../../lib/useEditMode";
 
 interface HourTypeFormState {
@@ -41,8 +43,15 @@ const EMPTY_FORM: HourTypeFormState = {
 };
 
 interface HourTypesTabProps {
-  /** True when a SUPER_ADMIN must disambiguate (2+ provider companies). */
+  /** True when a SUPER_ADMIN must disambiguate (2+ provider companies).
+   *  Read only when the host also passes `selectedCompany`. */
   companyRequired?: boolean;
+  /** Sprint 186 §3 — OMIT IT and the tab renders its OWN selector.
+   *
+   *  `undefined` and `""` are deliberately different: `undefined` means
+   *  "no host is choosing", `""` means "the host is choosing and has not
+   *  resolved a company yet". Defaulting the prop to `""` is what made
+   *  the Catalogs page's copy of this tab silently unselectable. */
   selectedCompany?: number | "";
 }
 
@@ -52,9 +61,24 @@ interface HourTypesTabProps {
  * multipliers that every time entry is filed against.
  *
  * Shaped after `ManagedUnitsTab` (self-contained fetch, own modal, own
- * delete dialog, shared company selector threaded in via props) because
- * it is the same kind of object: a small per-company catalog whose rows
- * are PROTECTed once referenced.
+ * delete dialog) because it is the same kind of object: a small
+ * per-company catalog whose rows are PROTECTed once referenced.
+ *
+ * ## The company selector (Sprint 186 §3)
+ *
+ * This tab has two hosts. `HoursAdminPage` renders ONE selector for all
+ * of its tabs and passes the resolved company down; `CatalogsAdminPage`
+ * renders none, because its other three tabs each carry their own
+ * (`CatalogTab`). Mounted there with no props, this tab defaulted
+ * `selectedCompany` to `""` and showed no control at all: a SUPER_ADMIN
+ * on a multi-company deployment saw every company's rows mixed together
+ * and could not add one, because a create with no `company` is rejected
+ * outright once more than one provider company exists.
+ *
+ * So the tab now falls back to owning the choice itself, using the same
+ * `CatalogCompanySelect` the other three tabs render. Passing
+ * `selectedCompany` still hands the choice back to the host, which is
+ * how the Hours page keeps its single shared selector.
  *
  * Two things it does that the units tab does not:
  *   - the "Add standard set" action, which seeds the standard Dutch six
@@ -66,10 +90,20 @@ interface HourTypesTabProps {
  */
 export function HourTypesTab({
   companyRequired = false,
-  selectedCompany = "",
+  selectedCompany,
 }: HourTypesTabProps) {
   const { t } = useTranslation("common");
   const { push: pushToast } = useToast();
+
+  // Sprint 186 §3 — own the company only when no host is choosing.
+  // `enabled` is false on the Hours page, which already fetched the
+  // company list for the selector it renders itself.
+  const hostControlsCompany = selectedCompany !== undefined;
+  const owned = useCatalogCompanies(!hostControlsCompany);
+  const company = hostControlsCompany ? selectedCompany : owned.companyId;
+  const mustNameCompany = hostControlsCompany
+    ? companyRequired
+    : owned.companies.length > 1;
 
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
   // Sprint 155 §4 — this tab has no row selection, only per-row
@@ -81,7 +115,7 @@ export function HourTypesTab({
   const [showInactive, setShowInactive] = useState(false);
 
   // Derived `loading` — see `MyHoursPage` for why it is not stored.
-  const fetchKey = `${showInactive}|${selectedCompany}`;
+  const fetchKey = `${showInactive}|${company}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const loading = loadedKey !== fetchKey;
 
@@ -102,7 +136,7 @@ export function HourTypesTab({
     let cancelled = false;
     listHourTypes({
       ...(showInactive ? {} : { is_active: true }),
-      ...(selectedCompany === "" ? {} : { company: selectedCompany }),
+      ...(company === "" ? {} : { company }),
     })
       .then((rows) => {
         if (cancelled) return;
@@ -118,7 +152,7 @@ export function HourTypesTab({
     return () => {
       cancelled = true;
     };
-  }, [showInactive, selectedCompany, fetchKey]);
+  }, [showInactive, company, fetchKey]);
 
   /**
    * Re-read after any mutation, honouring the active filters. NEVER
@@ -131,7 +165,7 @@ export function HourTypesTab({
       setHourTypes(
         await listHourTypes({
           ...(showInactive ? {} : { is_active: true }),
-          ...(selectedCompany === "" ? {} : { company: selectedCompany }),
+          ...(company === "" ? {} : { company }),
         }),
       );
       setLoadError("");
@@ -171,7 +205,7 @@ export function HourTypesTab({
       setFormError(t("hour_types.error_name_required"));
       return;
     }
-    if (mode === "create" && companyRequired && selectedCompany === "") {
+    if (mode === "create" && mustNameCompany && company === "") {
       setFormError(t("catalog.error_company_required"));
       return;
     }
@@ -182,8 +216,8 @@ export function HourTypesTab({
       multiplier: form.multiplier.trim() || "1.00",
       sort_order: Number(form.sort_order) || 0,
       is_active: form.is_active,
-      ...(mode === "create" && selectedCompany !== ""
-        ? { company: selectedCompany }
+      ...(mode === "create" && company !== ""
+        ? { company }
         : {}),
     };
     try {
@@ -241,7 +275,7 @@ export function HourTypesTab({
   async function handleConfirmStandardSet() {
     setStandardBusy(true);
     try {
-      const result = await addStandardHourTypes(selectedCompany);
+      const result = await addStandardHourTypes(company);
       await refresh();
       standardDialogRef.current?.close();
       // Created-vs-skipped, not a bare count: "6 added" and "6 already
@@ -266,6 +300,18 @@ export function HourTypesTab({
       <div className="page-header" style={{ marginTop: 0, marginBottom: 12 }}>
         <div />
         <div className="page-header-actions">
+          {/* Sprint 186 §3 — rendered only when no host is choosing, and
+              only on a multi-company deployment (the component decides
+              the second half). First in the row because it scopes every
+              control after it. */}
+          {!hostControlsCompany && (
+            <CatalogCompanySelect
+              companies={owned.companies}
+              companyId={owned.companyId}
+              onChange={owned.setCompanyId}
+              testId="hour-types-company"
+            />
+          )}
           <button
             type="button"
             className={

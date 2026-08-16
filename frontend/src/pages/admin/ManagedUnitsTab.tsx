@@ -11,11 +11,13 @@ import {
 } from "../../api/admin";
 import type { ManagedUnit, ManagedUnitCreatePayload } from "../../api/types";
 import { BoundedList } from "../../components/BoundedList";
+import { CatalogCompanySelect } from "../../components/CatalogTab";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { useToast } from "../../components/ToastProvider";
 import { Toggle } from "../../components/Toggle";
+import { useCatalogCompanies } from "../../lib/useCatalogCompanies";
 
 interface UnitFormState {
   label: string;
@@ -45,8 +47,16 @@ interface ManagedUnitsTabProps {
   // 400s `service_company_required` for a SA managing 2+ provider
   // companies who omits `company`). `ServicesAdminPage` renders the ONE
   // shared selector (also used by the Services tab) and passes its
-  // resolved state down here — this tab does not render its own control.
+  // resolved state down here.
+  //
+  // Read only when the host also passes `selectedCompany`.
   companyRequired?: boolean;
+  /** Sprint 186 §3 — OMIT IT and the tab renders its OWN selector.
+   *
+   *  `undefined` and `""` are deliberately different: `undefined` means
+   *  "no host is choosing", `""` means "the host is choosing and has not
+   *  resolved a company yet". Defaulting the prop to `""` is what made
+   *  the Catalogs page's copy of this tab silently unselectable. */
   selectedCompany?: number | "";
 }
 
@@ -60,6 +70,16 @@ interface ManagedUnitsTabProps {
  * dependency on either — Sprint 135 is the one exception: the shared
  * company-disambiguation selector, threaded in via props.
  *
+ * Sprint 186 §3 — "threaded in via props" only holds where a host
+ * renders one. `CatalogsAdminPage` mounts this tab with no props at all
+ * (its other three tabs each carry their own selector, from
+ * `CatalogTab`), so `selectedCompany` fell back to `""` and there was no
+ * control anywhere on the screen: a SUPER_ADMIN saw every company's
+ * units at once and Add was rejected outright, because a create that
+ * names no company is invalid once more than one provider company
+ * exists. Omitting the prop now makes the tab own the choice, using the
+ * SAME `CatalogCompanySelect` the other three render.
+ *
  * `company_name` is shown as a list/detail column even though a
  * COMPANY_ADMIN only ever sees their own company's units (every row
  * repeats the same value for them) — a SUPER_ADMIN sees every
@@ -69,9 +89,19 @@ interface ManagedUnitsTabProps {
  */
 export function ManagedUnitsTab({
   companyRequired = false,
-  selectedCompany = "",
+  selectedCompany,
 }: ManagedUnitsTabProps) {
   const { t, i18n } = useTranslation("common");
+
+  // Sprint 186 §3 — own the company only when no host is choosing.
+  // `enabled` is false on the Services page, which already fetched the
+  // company list for the selector it renders itself.
+  const hostControlsCompany = selectedCompany !== undefined;
+  const owned = useCatalogCompanies(!hostControlsCompany);
+  const company = hostControlsCompany ? selectedCompany : owned.companyId;
+  const mustNameCompany = hostControlsCompany
+    ? companyRequired
+    : owned.companies.length > 1;
   // Sprint 139 §2 — success toasts auto-dismiss; the failure list stays.
   const { push: pushToast } = useToast();
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
@@ -115,7 +145,7 @@ export function ManagedUnitsTab({
     let cancelled = false;
     listManagedUnits({
       ...(showInactive ? {} : { is_active: true }),
-      ...(selectedCompany === "" ? {} : { company: selectedCompany }),
+      ...(company === "" ? {} : { company }),
     })
       .then((data) => {
         if (cancelled) return;
@@ -134,7 +164,7 @@ export function ManagedUnitsTab({
     return () => {
       cancelled = true;
     };
-  }, [showInactive, selectedCompany]);
+  }, [showInactive, company]);
 
   function openCreateModal() {
     setMode("create");
@@ -160,7 +190,7 @@ export function ManagedUnitsTab({
       setFormError(t("managed_units.error_label_required"));
       return;
     }
-    if (mode === "create" && companyRequired && selectedCompany === "") {
+    if (mode === "create" && mustNameCompany && company === "") {
       setFormError(t("catalog.error_company_required"));
       return;
     }
@@ -169,8 +199,8 @@ export function ManagedUnitsTab({
     const payload: ManagedUnitCreatePayload = {
       label: form.label.trim(),
       is_active: form.is_active,
-      ...(mode === "create" && selectedCompany !== ""
-        ? { company: selectedCompany }
+      ...(mode === "create" && company !== ""
+        ? { company }
         : {}),
     };
     try {
@@ -216,7 +246,7 @@ export function ManagedUnitsTab({
       setUnits(
         await listManagedUnits({
           ...(showInactive ? {} : { is_active: true }),
-          ...(selectedCompany === "" ? {} : { company: selectedCompany }),
+          ...(company === "" ? {} : { company }),
         }),
       );
       setLoadError("");
@@ -349,6 +379,18 @@ export function ManagedUnitsTab({
       <div className="page-header" style={{ marginTop: 0, marginBottom: 12 }}>
         <div />
         <div className="page-header-actions">
+          {/* Sprint 186 §3 — rendered only when no host is choosing, and
+              only on a multi-company deployment (the component decides
+              the second half). First in the row because it scopes every
+              control after it. */}
+          {!hostControlsCompany && (
+            <CatalogCompanySelect
+              companies={owned.companies}
+              companyId={owned.companyId}
+              onChange={owned.setCompanyId}
+              testId="services-units-company"
+            />
+          )}
           {/* Sprint 137 item 7 — Edit / Done. */}
           <button
             type="button"

@@ -11,10 +11,29 @@
 //     customer / building / status / period filters), each row linking to
 //     the dedicated invoice-detail page.
 //
-// Reusable, mirroring the old InvoicesPage contract: with `customerId` set
-// the page is customer-scoped (list only, no due panel / generate, a pointer
-// to the standalone Facturen page) and `embedded` drops the standalone header
-// (the customer sub-page header renders instead). Used by CustomerInvoicesPage.
+// Reusable: with `customerId` set the page is customer-scoped, and
+// `embedded` drops the standalone header (the customer sub-page header
+// renders instead). Used by CustomerInvoicesPage.
+//
+// Sprint 186 §2 — "customer-scoped" used to mean a LESSER page: no due
+// panel, no preview, no generate, and a card whose only content was a
+// link to the real one. Three of the four customer work sub-pages mount
+// the main component with the customer pinned; this was the one that
+// mounted a reduced copy, so an operator standing on a customer had to
+// leave, find that customer again in a provider-wide list, and generate
+// from there. It is now the SAME page with one pin.
+//
+// What "pinned" means, precisely — and what the `customerScoped` guards
+// below are protecting:
+//   * `customer` is passed to the list endpoint, server-side;
+//   * the customer FILTER dropdown is not rendered, so the pin cannot be
+//     widened from inside the page;
+//   * the customer COLUMN is not rendered, because every row is that one
+//     customer;
+//   * the Due panel is narrowed to that customer client-side (see the
+//     effect). Leaving it provider-wide would list OTHER customers on
+//     this customer's page, which is the cross-tenant surprise the
+//     customer chips shipped last week.
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -126,7 +145,7 @@ export function FacturenPage({
   const customerScoped = customerId !== undefined;
 
   const [dueRows, setDueRows] = useState<InvoiceDueRow[]>([]);
-  const [dueLoading, setDueLoading] = useState(!customerScoped);
+  const [dueLoading, setDueLoading] = useState(true);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -161,14 +180,31 @@ export function FacturenPage({
   const [preview, setPreview] = useState<InvoicePreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
 
-  // Due panel (skipped when customer-scoped / embedded).
+  // Due panel. Sprint 186 §2 — loaded in BOTH modes and narrowed to the
+  // pinned customer when there is one.
+  //
+  // The narrowing is client-side because `/invoices/due/` takes no
+  // customer parameter — it answers "who is due" over the caller's whole
+  // scope, one row per scheduled customer, unpaginated. Adding the
+  // parameter is a backend change and this is a frontend-only branch, so
+  // the page filters the response instead. That is a display narrowing
+  // over a response the server already tenant-scoped
+  // (`scope_customers_for`), not a substitute for one; and the guard on
+  // `/due/` is the SAME `_forbid_non_operator` that already gates the
+  // invoice list this page loads either way, so no caller reaches this
+  // fetch that was not already reaching that one.
   useEffect(() => {
-    if (customerScoped) return;
     let cancelled = false;
     async function loadDue() {
       try {
         const rows = await getInvoiceDueList();
-        if (!cancelled) setDueRows(rows);
+        if (!cancelled) {
+          setDueRows(
+            customerId === undefined
+              ? rows
+              : rows.filter((row) => row.customer === customerId),
+          );
+        }
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
       } finally {
@@ -179,7 +215,7 @@ export function FacturenPage({
     return () => {
       cancelled = true;
     };
-  }, [customerScoped, refreshKey]);
+  }, [customerId, refreshKey]);
 
   // Invoice list. Sprint 120 — listAllInvoices pages exhaustively (the
   // plain listInvoices requests page_size=100 and never follows `next`,
@@ -350,295 +386,300 @@ export function FacturenPage({
         </div>
       )}
 
-      {customerScoped ? (
-        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-          <Link to="/invoices" className="link" data-testid="facturen-manage-link">
-            {t("facturen.manage_link")}
-          </Link>
-        </div>
-      ) : (
-        // ---- Due panel ----
-        <section
-          className="card"
-          style={{ padding: 16, marginBottom: 16 }}
-          data-testid="facturen-due-panel"
-        >
-          <div className="section-head" style={{ marginBottom: 10 }}>
-            <div>
-              <div className="section-head-title">{t("facturen.due_title")}</div>
-              <div className="section-head-sub">{t("facturen.due_sub")}</div>
+      {/* ---- Due panel ---- */}
+      <section
+        className="card"
+        style={{ padding: 16, marginBottom: 16 }}
+        data-testid="facturen-due-panel"
+      >
+        <div className="section-head" style={{ marginBottom: 10 }}>
+          <div>
+            <div className="section-head-title">{t("facturen.due_title")}</div>
+            <div className="section-head-sub">
+              {customerScoped
+                ? t("facturen.due_sub_customer")
+                : t("facturen.due_sub")}
             </div>
           </div>
-          {dueLoading ? (
-            <div className="loading-bar">
-              <div className="loading-bar-fill" />
-            </div>
-          ) : dueRows.length === 0 ? (
-            <p className="muted small" data-testid="facturen-due-empty">
-              {t("facturen.due_empty")}
-            </p>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" data-testid="facturen-due-table">
-                <thead>
-                  <tr>
-                    <th>{t("facturen.col_customer")}</th>
-                    <th>{t("facturen.due_col_schedule")}</th>
-                    <th style={{ textAlign: "right" }}>
-                      {t("facturen.due_col_unbilled")}
-                    </th>
-                    <th style={{ textAlign: "right" }}>
-                      {t("facturen.col_total")}
-                    </th>
-                    <th />
+        </div>
+        {dueLoading ? (
+          <div className="loading-bar">
+            <div className="loading-bar-fill" />
+          </div>
+        ) : dueRows.length === 0 ? (
+          <p className="muted small" data-testid="facturen-due-empty">
+            {/* Sprint 186 §2 — an empty panel means two different
+                things. Provider-wide it means nobody is due. On ONE
+                customer it almost always means that customer has no
+                billing schedule at all, because `/due/` only reports
+                scheduled customers — so the page says which it is and
+                where the schedule is set, instead of a "nothing due"
+                that reads as a broken screen. */}
+            {customerScoped
+              ? t("facturen.due_empty_customer")
+              : t("facturen.due_empty")}
+          </p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table" data-testid="facturen-due-table">
+              <thead>
+                <tr>
+                  <th>{t("facturen.col_customer")}</th>
+                  <th>{t("facturen.due_col_schedule")}</th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("facturen.due_col_unbilled")}
+                  </th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("facturen.col_total")}
+                  </th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {dueRows.map((row) => (
+                  <tr key={row.customer} data-testid="facturen-due-row">
+                    <td>
+                      {row.customer_name}
+                      {row.is_due && (
+                        <span
+                          className="cell-tag cell-tag-open"
+                          style={{ marginLeft: 8 }}
+                          data-testid="facturen-due-badge"
+                        >
+                          <i />
+                          {t("facturen.due_now")}
+                        </span>
+                      )}
+                    </td>
+                    <td className="muted small">
+                      {row.invoice_day_rule === "FIRST_OF_MONTH"
+                        ? t("facturatie.day_first")
+                        : row.invoice_day_rule === "LAST_OF_MONTH"
+                          ? t("facturatie.day_last")
+                          : "—"}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {row.unbilled_count}
+                      {/* Sprint 183 §2 — "I cannot generate anything
+                          in Due now" was correct behaviour with no
+                          explanation. The count alone says 0; this
+                          says WHY it is 0 and what to go and look
+                          at. */}
+                      {nothingSentence(t, row.nothing_reason) && (
+                        <span
+                          className="muted small"
+                          style={{ display: "block", textAlign: "left" }}
+                          data-testid="facturen-due-nothing"
+                        >
+                          {nothingSentence(t, row.nothing_reason)}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {formatMoney(row.unbilled_total)}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {/* Sprint 182 §2 — look before you cut. The
+                          preview shows what a run WOULD produce, from
+                          the same calculation that produces it. */}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => openPreview(row)}
+                        disabled={row.unbilled_count === 0}
+                        data-testid="facturen-preview-open"
+                        style={{ marginRight: 8 }}
+                      >
+                        {t("facturen.preview_open")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => openGenerate(row)}
+                        disabled={row.unbilled_count === 0}
+                        data-testid="facturen-generate-open"
+                      >
+                        {t("facturen.generate")}
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {dueRows.map((row) => (
-                    <tr key={row.customer} data-testid="facturen-due-row">
-                      <td>
-                        {row.customer_name}
-                        {row.is_due && (
-                          <span
-                            className="cell-tag cell-tag-open"
-                            style={{ marginLeft: 8 }}
-                            data-testid="facturen-due-badge"
-                          >
-                            <i />
-                            {t("facturen.due_now")}
-                          </span>
-                        )}
-                      </td>
-                      <td className="muted small">
-                        {row.invoice_day_rule === "FIRST_OF_MONTH"
-                          ? t("facturatie.day_first")
-                          : row.invoice_day_rule === "LAST_OF_MONTH"
-                            ? t("facturatie.day_last")
-                            : "—"}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        {row.unbilled_count}
-                        {/* Sprint 183 §2 — "I cannot generate anything
-                            in Due now" was correct behaviour with no
-                            explanation. The count alone says 0; this
-                            says WHY it is 0 and what to go and look
-                            at. */}
-                        {nothingSentence(t, row.nothing_reason) && (
-                          <span
-                            className="muted small"
-                            style={{ display: "block", textAlign: "left" }}
-                            data-testid="facturen-due-nothing"
-                          >
-                            {nothingSentence(t, row.nothing_reason)}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        {formatMoney(row.unbilled_total)}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        {/* Sprint 182 §2 — look before you cut. The
-                            preview shows what a run WOULD produce, from
-                            the same calculation that produces it. */}
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => openPreview(row)}
-                          disabled={row.unbilled_count === 0}
-                          data-testid="facturen-preview-open"
-                          style={{ marginRight: 8 }}
-                        >
-                          {t("facturen.preview_open")}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => openGenerate(row)}
-                          disabled={row.unbilled_count === 0}
-                          data-testid="facturen-generate-open"
-                        >
-                          {t("facturen.generate")}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-          {/* Sprint 182 §2 — the preview panel. Read-only: it creates
-              nothing and claims nothing, so it is safe to open at any
-              time and safe to close without deciding anything. */}
-          {previewRow && (
-            <div
-              className="card"
-              style={{ padding: 14, marginTop: 12 }}
-              data-testid="facturen-preview-panel"
-            >
-              <div className="section-head-title" style={{ marginBottom: 4 }}>
-                {t("facturen.preview_title", {
-                  name: previewRow.customer_name,
-                })}
+        {/* Sprint 182 §2 — the preview panel. Read-only: it creates
+            nothing and claims nothing, so it is safe to open at any
+            time and safe to close without deciding anything. */}
+        {previewRow && (
+          <div
+            className="card"
+            style={{ padding: 14, marginTop: 12 }}
+            data-testid="facturen-preview-panel"
+          >
+            <div className="section-head-title" style={{ marginBottom: 4 }}>
+              {t("facturen.preview_title", {
+                name: previewRow.customer_name,
+              })}
+            </div>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {t("facturen.preview_disclaimer")}
+            </p>
+
+            {previewBusy && (
+              <div className="loading-bar">
+                <div className="loading-bar-fill" />
               </div>
-              <p className="muted small" style={{ marginTop: 0 }}>
-                {t("facturen.preview_disclaimer")}
+            )}
+
+            {!previewBusy && preview && preview.invoice_count === 0 && (
+              <p className="muted small" data-testid="facturen-preview-empty">
+                {/* Sprint 183 §2 — the SAME sentence the Due panel
+                    shows, from the same server-side diagnosis. The old
+                    "no unbilled extra work" line was true and told an
+                    operator nothing they could act on. */}
+                {nothingSentence(t, preview.nothing_reason) ??
+                  t("facturen.preview_empty")}
               </p>
+            )}
 
-              {previewBusy && (
-                <div className="loading-bar">
-                  <div className="loading-bar-fill" />
-                </div>
-              )}
-
-              {!previewBusy && preview && preview.invoice_count === 0 && (
-                <p className="muted small" data-testid="facturen-preview-empty">
-                  {/* Sprint 183 §2 — the SAME sentence the Due panel
-                      shows, from the same server-side diagnosis. The old
-                      "no unbilled extra work" line was true and told an
-                      operator nothing they could act on. */}
-                  {nothingSentence(t, preview.nothing_reason) ??
-                    t("facturen.preview_empty")}
-                </p>
-              )}
-
-              {!previewBusy && preview && preview.invoice_count > 0 && (
-                <>
-                  <div className="table-wrap">
-                    <table
-                      className="data-table"
-                      data-testid="facturen-preview-table"
-                    >
-                      <thead>
-                        <tr>
-                          <th>{t("facturen.preview_col_addressed_to")}</th>
-                          <th style={{ textAlign: "right" }}>
-                            {t("facturen.preview_col_lines")}
-                          </th>
-                          <th style={{ textAlign: "right" }}>
-                            {t("facturen.preview_col_total")}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {preview.invoices.map((planned, index) => (
-                          <tr
-                            key={`${planned.building ?? "customer"}-${planned.department ?? "d"}-${planned.work_type ?? "w"}-${index}`}
-                            data-testid="facturen-preview-row"
-                          >
-                            <td>
-                              {planned.building_name ??
-                                t("facturen.preview_customer_level")}
-                            </td>
-                            <td style={{ textAlign: "right" }}>
-                              {planned.line_count}
-                            </td>
-                            <td style={{ textAlign: "right" }}>
-                              {formatMoney(planned.total_amount)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <p
-                    className="muted small"
-                    data-testid="facturen-preview-computed-at"
+            {!previewBusy && preview && preview.invoice_count > 0 && (
+              <>
+                <div className="table-wrap">
+                  <table
+                    className="data-table"
+                    data-testid="facturen-preview-table"
                   >
-                    {t("facturen.preview_computed_at", {
-                      when: formatDateTime(preview.computed_at),
-                    })}
-                  </p>
-                </>
-              )}
-
-              <div className="form-actions" style={{ marginTop: 12 }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    setPreviewRow(null);
-                    setPreview(null);
-                  }}
-                >
-                  {t("facturen.preview_close")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={handleDownloadPreview}
-                  disabled={previewBusy || !preview?.invoice_count}
-                  data-testid="facturen-preview-download"
-                >
-                  {t("facturen.preview_download")}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {genRow && (
-            <div
-              className="card"
-              style={{ padding: 14, marginTop: 12 }}
-              data-testid="facturen-generate-panel"
-            >
-              <div className="section-head-title" style={{ marginBottom: 8 }}>
-                {t("facturen.gen_title", { name: genRow.customer_name })}
-              </div>
-              <div
-                className="invoices-toolbar"
-                style={{ display: "flex", gap: 16, flexWrap: "wrap" }}
-              >
-                <label className="field">
-                  <span className="field-label">{t("facturen.gen_month")}</span>
-                  <input
-                    className="field-input"
-                    type="month"
-                    value={genMonth}
-                    onChange={(e) => setGenMonth(e.target.value)}
-                    data-testid="facturen-generate-month"
-                  />
-                </label>
-                <div style={{ flexBasis: "100%" }}>
-                  {/* Sprint 183 §1 — the SAME component customer
-                      settings uses, so both screens describe this
-                      decision in identical words. */}
-                  <BillingTargetFields
-                    idPrefix="facturen-gen"
-                    target={genTarget}
-                    split={genSplit}
-                    onTargetChange={setGenTarget}
-                    onSplitChange={setGenSplit}
-                    disabled={genBusy}
-                  />
-                  <p className="muted small" style={{ marginBottom: 0 }}>
-                    {t("invoices:billing.this_run_only")}
-                  </p>
+                    <thead>
+                      <tr>
+                        <th>{t("facturen.preview_col_addressed_to")}</th>
+                        <th style={{ textAlign: "right" }}>
+                          {t("facturen.preview_col_lines")}
+                        </th>
+                        <th style={{ textAlign: "right" }}>
+                          {t("facturen.preview_col_total")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.invoices.map((planned, index) => (
+                        <tr
+                          key={`${planned.building ?? "customer"}-${planned.department ?? "d"}-${planned.work_type ?? "w"}-${index}`}
+                          data-testid="facturen-preview-row"
+                        >
+                          <td>
+                            {planned.building_name ??
+                              t("facturen.preview_customer_level")}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {planned.line_count}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {formatMoney(planned.total_amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-              <div className="form-actions" style={{ marginTop: 12 }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setGenRow(null)}
+                <p
+                  className="muted small"
+                  data-testid="facturen-preview-computed-at"
+                >
+                  {t("facturen.preview_computed_at", {
+                    when: formatDateTime(preview.computed_at),
+                  })}
+                </p>
+              </>
+            )}
+
+            <div className="form-actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setPreviewRow(null);
+                  setPreview(null);
+                }}
+              >
+                {t("facturen.preview_close")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleDownloadPreview}
+                disabled={previewBusy || !preview?.invoice_count}
+                data-testid="facturen-preview-download"
+              >
+                {t("facturen.preview_download")}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {genRow && (
+          <div
+            className="card"
+            style={{ padding: 14, marginTop: 12 }}
+            data-testid="facturen-generate-panel"
+          >
+            <div className="section-head-title" style={{ marginBottom: 8 }}>
+              {t("facturen.gen_title", { name: genRow.customer_name })}
+            </div>
+            <div
+              className="invoices-toolbar"
+              style={{ display: "flex", gap: 16, flexWrap: "wrap" }}
+            >
+              <label className="field">
+                <span className="field-label">{t("facturen.gen_month")}</span>
+                <input
+                  className="field-input"
+                  type="month"
+                  value={genMonth}
+                  onChange={(e) => setGenMonth(e.target.value)}
+                  data-testid="facturen-generate-month"
+                />
+              </label>
+              <div style={{ flexBasis: "100%" }}>
+                {/* Sprint 183 §1 — the SAME component customer
+                    settings uses, so both screens describe this
+                    decision in identical words. */}
+                <BillingTargetFields
+                  idPrefix="facturen-gen"
+                  target={genTarget}
+                  split={genSplit}
+                  onTargetChange={setGenTarget}
+                  onSplitChange={setGenSplit}
                   disabled={genBusy}
-                >
-                  {t("facturen.gen_cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={handleGenerate}
-                  disabled={genBusy || !parseMonth(genMonth)}
-                  data-testid="facturen-generate-confirm"
-                >
-                  {t("facturen.generate")}
-                </button>
+                />
+                <p className="muted small" style={{ marginBottom: 0 }}>
+                  {t("invoices:billing.this_run_only")}
+                </p>
               </div>
             </div>
-          )}
-        </section>
-      )}
+            <div className="form-actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setGenRow(null)}
+                disabled={genBusy}
+              >
+                {t("facturen.gen_cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleGenerate}
+                disabled={genBusy || !parseMonth(genMonth)}
+                data-testid="facturen-generate-confirm"
+              >
+                {t("facturen.generate")}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* ---- Invoice list ---- */}
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>

@@ -10,11 +10,18 @@ import { FacturenPage } from "../../FacturenPage";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
- * Invoicing Phase 4b — the customer-detail Invoices tab: the new Facturen
- * invoice list scoped to THIS customer (view-only). The due panel + the
- * generate control live on the standalone Facturen page — this embedded
- * variant shows a pointer link to it instead. All rendering is the shared
- * FacturenPage with `customerId` + `embedded` (reuse, not a copy).
+ * Invoicing Phase 4b — the customer-detail Invoices tab. All rendering is
+ * the shared `FacturenPage` with `customerId` + `embedded` (reuse, not a
+ * copy).
+ *
+ * Sprint 186 §2 — it is now THE Facturen page with this customer pinned,
+ * not a view-only slice of it. The due panel, the preview and Generate
+ * were all suppressed here and replaced by a link back to the standalone
+ * page; an operator who was already standing on the customer had to leave
+ * and find them again in a provider-wide list to invoice them. The pin
+ * itself is unchanged and still not removable: no customer picker, no
+ * clear button, and the due panel narrows to this customer rather than
+ * listing everyone else's on their page.
  */
 export function CustomerInvoicesPage() {
   const { id } = useParams();

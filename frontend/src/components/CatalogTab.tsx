@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 
-import { listAllCompanies } from "../api/admin";
 import { api, getApiError } from "../api/client";
 import type { CompanyAdmin } from "../api/types";
+import { useCatalogCompanies } from "../lib/useCatalogCompanies";
 
 export interface CatalogRow {
   id: number;
@@ -58,6 +59,52 @@ export interface CatalogLabels {
 }
 
 /**
+ * Sprint 186 §3 — the catalog company selector itself, rendered by all
+ * five catalog tabs and written once.
+ *
+ * It has to exist at all because these catalogs are per-company and a
+ * WRITE must name one — without it a SUPER_ADMIN gets `company is
+ * required when more than one provider Company exists`, which is exactly
+ * how the contract-types button failed the first time it was pressed and
+ * exactly how Add failed on the Catalogs page's hour types.
+ *
+ * Renders NOTHING on a single-company deployment: there is nothing to
+ * choose, and a one-option dropdown reads as a decision the operator has
+ * to make.
+ */
+export function CatalogCompanySelect({
+  companies,
+  companyId,
+  onChange,
+  testId,
+}: {
+  companies: CompanyAdmin[];
+  companyId: number | "";
+  onChange: (next: number | "") => void;
+  testId: string;
+}) {
+  const { t } = useTranslation("common");
+  if (companies.length <= 1) return null;
+  return (
+    <select
+      className="filter-control"
+      value={companyId}
+      onChange={(event) =>
+        onChange(event.target.value === "" ? "" : Number(event.target.value))
+      }
+      aria-label={t("catalog.company_selector_label")}
+      data-testid={testId}
+    >
+      {companies.map((company) => (
+        <option key={company.id} value={company.id}>
+          {company.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
  * Sprint 169 §2 — ONE per-company catalog screen, used by both.
  *
  * Contract types (Sprint 168 §5) and work types (this sprint) are the
@@ -73,12 +120,9 @@ export interface CatalogLabels {
  * permission gate, and the i18n namespace. Those genuinely differ, and
  * a component that tried to own them would need a flag per caller.
  *
- * The company selector appears only when the deployment has more than
- * one provider company. It has to exist at all because these catalogs
- * are per-company and a WRITE must name one — without it a SUPER_ADMIN
- * gets `company is required when more than one provider Company
- * exists`, which is exactly how the contract-types button failed the
- * first time it was pressed.
+ * The company selector is `CatalogCompanySelect` above — shared with
+ * the two catalog tabs that cannot be a `CatalogTab`, so all five offer
+ * one control rather than three.
  */
 export function CatalogTab({
   listUrl,
@@ -105,8 +149,11 @@ export function CatalogTab({
   testIdPrefix: string;
   canManage?: boolean;
 }) {
-  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
-  const [companyId, setCompanyId] = useState<number | "">("");
+  // Sprint 186 §3 — the selector's state and the selector itself moved
+  // up into `useCatalogCompanies` / `CatalogCompanySelect` so the two
+  // hand-rolled catalog tabs get the SAME control rather than a third
+  // one. Behaviour here is unchanged.
+  const { companies, companyId, setCompanyId } = useCatalogCompanies();
   const [rows, setRows] = useState<CatalogRow[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -118,29 +165,6 @@ export function CatalogTab({
   const requestKey = `${companyId}:${reloadKey}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const loading = loadedKey !== requestKey;
-
-  useEffect(() => {
-    let cancelled = false;
-    listAllCompanies()
-      .then((all) => {
-        if (cancelled) return;
-        setCompanies(all);
-        // Seeded inside the .then(), never in an effect body. The
-        // LOWEST id is the deployment's first tenant, not an
-        // alphabetical accident.
-        setCompanyId((current) =>
-          current === "" && all.length > 0
-            ? [...all].sort((a, b) => a.id - b.id)[0].id
-            : current,
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setCompanies([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,24 +216,12 @@ export function CatalogTab({
           <div className="section-head-title">{labels.title}</div>
           <div className="section-head-sub">{labels.desc}</div>
         </div>
-        {companies.length > 1 && (
-          <select
-            className="filter-control"
-            value={companyId}
-            onChange={(event) =>
-              setCompanyId(
-                event.target.value === "" ? "" : Number(event.target.value),
-              )
-            }
-            data-testid={`${testIdPrefix}-company`}
-          >
-            {companies.map((company) => (
-              <option key={company.id} value={company.id}>
-                {company.name}
-              </option>
-            ))}
-          </select>
-        )}
+        <CatalogCompanySelect
+          companies={companies}
+          companyId={companyId}
+          onChange={setCompanyId}
+          testId={`${testIdPrefix}-company`}
+        />
         {canManage && standardSetUrl && (
           <button
             type="button"

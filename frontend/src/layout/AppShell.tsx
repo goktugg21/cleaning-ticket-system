@@ -392,6 +392,36 @@ export function AppShell({ children }: AppShellProps) {
                       {t("nav.customer_submenu.contracts")}
                     </NavLink>
                   )}
+                  {/* Sprint 186 §4 — the customer's work pages read in
+                      the SAME shape and the SAME order as the main
+                      navigation: Tickets, then Chargeable work as a
+                      CHILD of it, then Extra work. Sprint 184 §3b added
+                      Chargeable work here as a third sibling, so the one
+                      relationship the main nav states — these are the
+                      same tickets, narrowed to the ones born from an
+                      Extra Work — had to be learned twice, and the
+                      customer submenu listed the three in the opposite
+                      order to the nav above it. */}
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/tickets`}
+                    className={navClass}
+                    data-testid="sidebar-customer-tickets"
+                  >
+                    <span className="nav-icon">
+                      <Ticket size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.tickets")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/chargeable`}
+                    className={navChildClass}
+                    data-testid="sidebar-customer-chargeable"
+                  >
+                    <span className="nav-icon">
+                      <BadgeEuro size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.chargeable")}
+                  </NavLink>
                   {/* IA 2026-06-25 — Meldingen and Offerteaanvragen merged
                       into these two as filter chips (4 content tabs -> 2). */}
                   <NavLink
@@ -403,30 +433,6 @@ export function AppShell({ children }: AppShellProps) {
                       <Receipt size={16} strokeWidth={2} />
                     </span>
                     {t("nav.customer_submenu.extra_work")}
-                  </NavLink>
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/tickets`}
-                    className={navClass}
-                    data-testid="sidebar-customer-tickets"
-                  >
-                    <span className="nav-icon">
-                      <Ticket size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.tickets")}
-                  </NavLink>
-                  {/* Sprint 184 §3b — chargeable work, the customer's
-                      copy of the top-level sub-page. Beside Tickets
-                      because it answers the neighbouring question:
-                      which of this customer's tickets are billable. */}
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/chargeable`}
-                    className={navClass}
-                    data-testid="sidebar-customer-chargeable"
-                  >
-                    <span className="nav-icon">
-                      <Receipt size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.chargeable")}
                   </NavLink>
                   {/* #108 Part E — customer-scoped Invoices + Reports. */}
                   <NavLink
