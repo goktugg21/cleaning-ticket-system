@@ -13,14 +13,120 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/sprint-187`, cut from `integ186` (`0c47ee3`). Sprints
-185–187 land as ONE PR; the owner opens it after the last of them.
+**Branch:** `feat/sprint-188`. Sprints 153–188 land as ONE PR into
+`main` — 200 commits, a fast-forward, and the first time CI runs on any
+of it. The owner opens and merges it.
+
+Sprint 187 shipped, then was VERIFIED rather than believed, and the
+verification found real defects in it. Those became 187C. 187B ran in a
+parallel Claude Code chat on a disjoint file set and merged into the same
+chain with zero conflicts. 188 is the owner's closing round.
 
 <!-- Sprint 187 §8: this section read "Branch: feat/sprint-181" while the
      chain was at 186 — three sprints of drift, and the second time this
      file has done it. The rule in CLAUDE.md §8 and in "How to maintain
      this file" below is the same one it was already breaking: NOW /
-     NEXT / SHIPPED are updated in the branch that makes them stale. -->
+     NEXT / SHIPPED are updated in the branch that makes them stale.
+     Sprint 188 §docs: brought to the head of the chain again, and the
+     NEXT queue below was re-verified item by item against the code
+     rather than carried forward on trust. -->
+
+### Done — Sprint 188: zero is a price, and a customer is not an employer
+
+- **An unpriced job no longer reads EUR 0,00.** Zero is a LEGAL price —
+  free work and a goodwill line are ordinary business — so "nobody has
+  priced this" and "this costs nothing" must not render the same. A new
+  `is_priced`, annotated once per page with three EXISTS subqueries that
+  mirror `active_priced_lines`' resolution order exactly, drives an em
+  dash on the list, the phone card and the detail header. DISPLAY ONLY:
+  `rowAmounts()` is untouched and stays the one billing-total rule, and
+  sums still count an unpriced row as zero.
+- **The legacy `/pricing-items/` surface can no longer overwrite an
+  approved quote.** Sprint 187 gave the proposal route a writer for the
+  three quote columns without noticing that surface already had one,
+  reading a different line set: posting one legacy row replaced an
+  approved EUR 484.00 quote with whatever was posted, with no override
+  recorded and no history row. Now 400 `legacy_pricing_locked_by_proposal`
+  on all three mutation paths; an EW with no approved proposal still
+  prices the legacy way.
+- **"Memberships" was telling the owner something untrue.** A customer's
+  contact person showed "Companies: Osius Demo" under "…this user belongs
+  to". That entry is not a membership and cannot be —
+  `CompanyUserMembership` is COMPANY_ADMIN-only by construction — it is
+  `company_ids_for`'s CUSTOMER_USER branch resolving `customer.company`,
+  the provider that SERVES them. Meanwhile STAFF showed nothing about
+  their employer, because that helper has no STAFF branch.
+  `scoping.employing_company_names_for` now answers "who employs this
+  person" in ONE place (the union 187B worked out for the Employees
+  directory), `UserDetailSerializer` gains `employed_by`, and the card
+  says what it means. `company_ids_for` itself is UNCHANGED — it is the
+  tenant-scoping helper behind `/auth/me`, and editing its CUSTOMER_USER
+  branch would be an H-1/H-2 change, not a copy fix.
+- **Users can be filtered by customer**, with the
+  `customer__company_id__in=scope_company_ids` clause that stops the
+  filter becoming an existence oracle for another tenant's customer ids.
+- **Platform admins stopped vanishing from the Users list.** The company
+  filter auto-selected on a one-company install AND disabled its own
+  dropdown, which pinned it on with no way back — and because the filter
+  drops rows holding no membership in the chosen company (deliberate, and
+  the owner confirmed he wants it), every SUPER_ADMIN disappeared
+  permanently.
+- **A recurring job could silently lose its category on save.**
+  `effectiveCategoryChoice` collapses a selection that does not belong to
+  the chosen customer — deliberate — but could not tell that from "the
+  list I check against has not arrived yet", and PATCH honoured the
+  resulting null. The keys are now OMITTED until both lists are loaded,
+  the rule the crew payload a few lines below already stated.
+- **Screen fixes:** the chargeable-work table fits its track (MEASURED:
+  1230px -> 978px inside a 978px track, in three steps — density, then
+  wrapping, then 6px off each side of the cell padding; the tickets page
+  measured immediately after was unchanged); the billing address is named
+  on both the customer overview and the building overview, where it is
+  shown per linked customer because a building's own address is the work
+  site and not the invoice address.
+
+### Done — Sprint 187C: the repair command had to be safe to trust
+
+Verification of 187 found defects in the one thing the owner runs by hand.
+
+- An Extra Work already carried by an ISSUED or SENT invoice is now
+  SKIPPED and named, not silently re-priced. The invoice's own amounts
+  were never at risk — they are snapshotted into `InvoiceLine` — but the
+  Extra Work would have started displaying a number that disagreed with
+  the invoice that billed it, with nothing recording the change.
+  `label_validation.py` already freezes an EW's labels at ISSUED for the
+  same reason.
+- "Wrote N row(s)" counted candidates minus every failure, mixing two
+  populations: one good write beside one compute failure printed
+  "Wrote 0" after having written a row — and that number is what the
+  owner reads to decide whether the run worked.
+- Change detection compared the total alone, so a row with the right
+  total and a wrong subtotal/VAT split was reported "already correct".
+- `--include-nonzero` could write 0.00 over a real total.
+- Three comments in 187 did not hold and were corrected, including one
+  claiming a state was "no longer reachable" that the same commit's own
+  `_ParentAdvanceBlocked` arm creates.
+- A test had gone vacuous: the new gates forced `can_direct_publish`
+  False for every EW its fixture builds, so it stayed green with the
+  permission restored. It now opens the other gates and carries a control
+  that fails without the fix.
+
+### Done — Sprint 187B: which company employs a person
+
+Ran in a PARALLEL Claude Code chat, on an explicitly disjoint file set,
+and merged with zero conflicts — the pattern is worth keeping.
+
+- `?company=` on `/api/users/` and `/api/employees/`, intersected INSIDE
+  the caller's own company set so it narrows and can never widen (H-1/H-2),
+  with a cross-tenant test on each and a control beside it so an
+  implementation that returned nothing for every value could not pass.
+- The Users list names WHICH companies a person belongs to instead of
+  only how many, bounded to two names plus "+N more".
+- The Employees directory gains a company column. Its exact-key-set
+  privacy assertion was amended deliberately, kept exact rather than
+  weakened to a subset check, with the reasoning recorded in the test:
+  a provider company name is not customer linkage.
+
 
 ### Done — Sprint 187: finishing what was half-wired
 
@@ -736,1040 +842,128 @@ caught the very defect §5 names). Three with no in-app link:
 
 ## NEXT
 
-Single ordered queue — replaces the four lists this used to be spread
-across ("Owner's forward queue", "Deferred / undecided items", "Standing
-milestones", "Deferred"). All four are now retired; every genuinely-open
-item from them lives here, and every already-shipped or already-decided
-item has moved to `## SHIPPED` or been resolved below instead.
+Single ordered queue. Sprint 188 §docs re-verified this section **item by
+item against the code** instead of carrying it forward on trust, because
+most of it had quietly become false: the Catalogs area, the four reports,
+the Work Plan's week-placement rule, the building-type catalog, the
+invoice target/granularity split, the contract-type catalog screen, the
+worker hour reports and the beat-wired month-end invoice run were all
+still listed as open, and all of them had shipped.
 
-<!-- Sprint 187 §8: this file carried TWO `## NEXT` headings (one here,
-     one ~400 lines above), which is why the queue this section calls
-     "single" was not one. The other section's content is merged in
-     below, newest carry-over first, under its original per-sprint
-     headings so nothing lost its provenance. Wording is carried
-     verbatim; no item's status was invented. -->
+<!-- How this pass was done, so the next one can repeat it rather than
+     trust it: each carried item was checked against the code that would
+     have to exist if it had shipped (a component, a serializer field, a
+     beat entry, a gate's measured output), not against a sprint report.
+     Anything that could not be settled that way is kept below and
+     labelled as not re-verified, rather than being quietly dropped. -->
 
-### Carried out of Sprint 187
+### Open — verified still open
 
-1. **The Users and Employees admin lists have no company column and no
-   company filter.** Sprint 187 §6a–§6c gave Invoices, Contracts and the
-   service pickers the company reference they were missing, and stopped
-   deliberately short of this one: it is a larger job than the other
-   three (two lists, their filter bars, their phone card lists, and a
-   scope question — a COMPANY_ADMIN in two provider companies sees a
-   two-company mix and the list has to say which row is which). Nothing
-   was started; there is no half-done state to reconcile.
+1. **The INSTANT / cart route never writes the quote cache.**
+   `instant_tickets.py` sets `CUSTOMER_APPROVED` directly with no
+   Proposal, and nothing on that path writes `subtotal_amount` /
+   `vat_amount` / `total_amount`. Sprint 188's `is_priced` makes such a
+   row read as an em dash rather than EUR 0,00, so it no longer LIES —
+   but the columns are still unwritten, and `_earned_amounts` falls back
+   to `total_amount`. Measured on crmtest during 188: zero rows are
+   currently at risk (every affected row either carries a final amount or
+   is genuinely unpriced), so this is a gap to close deliberately, not a
+   fire.
 
-### Carried out of Sprint 181
+2. **`select_for_update` on the unbilled pool.** Two concurrent invoice
+   runs could both claim the same extra work. Deferred from the invoicing
+   sprints; no report of it happening, and the nightly job is the only
+   scheduled writer.
 
-1. **§6 — split the invoice TARGET from the split-granularity.** Not
-   started; the analysis is done and holds. `Customer.
-   invoice_granularity_default` offers three values, and the first two
-   (`CUSTOMER`, `PER_BUILDING`) decide the same thing
-   `ExtraWorkRequest.billed_to` decides — `Invoice.building` is NULL for
-   one and set for the other. The third,
-   `PER_BUILDING_DEPARTMENT_WORK_TYPE`, is not a third target: it is
-   "per building, split further", and sitting in the same dropdown makes
-   it look like one. The shape: a two-value target on the customer
-   (the DEFAULT) plus a separate "split by department and work type"
-   control; the extra work's own `billed_to` WINS over the customer
-   default because it is the more specific statement, and the UI where
-   the default is set must say so. Migration must be faithful —
-   `PER_BUILDING_DEPARTMENT_WORK_TYPE` becomes target=building +
-   split=on — and `generate_draft_invoices` must produce byte-identical
-   groupings for existing data. **Note the trap found while scoping it:**
-   Sprint 180 made `billed_to` non-null with `default=BUILDING`, so if
-   generation simply starts reading it, every customer currently on
-   `CUSTOMER` granularity would silently start being invoiced per
-   building. Either backfill `billed_to` from each customer's current
-   granularity, or make it nullable with NULL meaning "follow the
-   customer". That decision is the whole risk in this item.
-2. **The other three bare "Approved" strings** (§2b fixed the two the
-   owner named). Still ambiguous: `staff_requests.status_approved`,
-   `contract_hours.status_APPROVED` (+ `locked_hint`, which is also the
-   bare word), and the generic `status.approved`. Each labels a
-   different event; each should say WHAT was approved.
-3. **The 35 other undefined CSS classes** that
-   `frontend/scripts/check-css-classes.mjs` reports. READ THEM AS
-   SUSPECTS, NOT BUGS: an undefined class only renders wrong when
-   nothing else supplies the layout, and at least two
-   (`customer-contacts-filter-bar`, `customer-users-filter-bar`) are
-   fine because their elements carry inline styles and use the class as
-   a test hook. Wire the script into the frontend gate once the real
-   ones are cleared.
-   **CLOSED — read, not fixed (Sprint 187).** A read-only verification
-   pass over the whole set found the suspicion above holds for every
-   remaining one: each is either paired with a defined companion class
-   or is a no-op test hook. Nothing renders wrong, so there is nothing
-   here to fix and the entry is not carried forward. The script IS now
-   in the frontend gate, which is the other half this item asked for.
-4. **An undated EXTRA WORK still cannot be planned in one action** from
-   the Work Plan's new lane (§8 gave tickets that button). The blocker
-   is deliberate: "undated" for an extra work means no `preferred_date`,
-   and `preferred_date` is the CUSTOMER's wish — Sprint 176 §3 decided
-   the customer states a wish and the provider commits to a deadline.
-   Letting the provider's work plan write it is a product decision, not
-   a UI convenience.
+3. **The invoice preview does not share the real renderer's layout.** It
+   answers "what would be billed" correctly; it just is not the PDF.
 
-**The Work Plan has left this list.** It was item 1 for six rounds and
-Sprint 179A built it; the detail is under NOW. What is left below is
-what Sprint 179A did not touch, plus room for Sprint 179B.
+4. **`/admin/customers/:id/quote-requests` — delete it or re-expose it.**
+   Three references remain in the frontend and nothing routes to it. A
+   decision, not a build.
 
-**Sprint 179B's lines go here.** Agent B owns the building type's
-visibility, the hours wizard's Job column and help text, the design
-pass, the 30 raw i18n keys and the contract-hours analysis; it does not
-edit this file, and web-Claude folds its report's lines in at
-integration. This list is NOT empty — it is waiting on that half.
+5. **The typography sweep**, owed since Sprint 175 and dropped or
+   partially done several times since. Genuine outliers only; the
+   building and customer detail pages are the house scale.
 
-1. **The typography sweep.** Owed since Sprint 175; dropped in 178 by
-   the prompt's own instruction, and out of Sprint 179A's scope by its
-   own (Agent B holds the design pass).
-2. **The 30 pre-existing raw i18n keys** listed under Sprint 178, in
-   eight files across UnifiedTimeline, ChangeDiff, the BuildingManager
-   customer pages and two customer sub-pages. **Agent B's item** —
-   Sprint 179A touched none of those files.
-   **CLOSED — the count is now ZERO (Sprint 187).**
-   `frontend/scripts/check-i18n-keys.mjs` reports no missing key in
-   either bundle, so no screen renders a raw key; the 30 were closed by
-   the sprints between 179A and 186 without this line being updated.
-   The script is in the frontend gate, which is what keeps it at zero.
-3. **Six undefined CSS classes in the Extra Work pages** — see the
-   section below. Unchanged; Sprint 179A defined `.agenda-day`, which
-   was the seventh, because it was in a file this sprint rewrote.
+6. **An undated extra work cannot be planned in one action** from the
+   Work Plan — it has to be given dates first, elsewhere.
 
-Left over from the Work Plan itself, deliberately and stated rather than
-quietly dropped:
+7. **Extra work with nobody assigned never reaches the Work Plan.** The
+   week view is built from assignments, so unassigned work is invisible
+   exactly when someone needs to notice it.
 
-4. **Extra work with nobody assigned never reaches the Work Plan.** The
-   week answers "who is doing what, when", so an unassigned request is
-   not yet anybody's work. That is a defensible reading and it is the
-   one shipped — but an operator looking for "what is planned this week
-   that nobody has picked up" will not find it here. If the owner wants
-   that, it is a second list beside Upcoming, not a change to this rule.
-5. **A slot has no deadline column, so "late" for a ticket slot means
-   "past its last planned day".** That is the definition the agenda has
-   used since Sprint 168 and it was kept rather than redefined. Extra
-   work uses its real `deadline`. The two are different questions
-   wearing one word, and if that ever matters the fix is a deadline on
-   the slot, not a new rule in the week view.
+8. **The Work Plan demo seeder** does not add scheduled tickets and extra
+   work, so a fresh dev database shows an empty week.
 
-Everything below this line is the older carried detail, kept for the
-wording of the items above.
+9. **The forecast's "Current Monthly" needs an as-of-today label.**
+   Without it the number reads as a full-month figure.
 
-### Carried from Sprint 175
+10. **The three remaining bare "Approved" strings** — the status word
+    without saying approved BY WHOM, which is the distinction the owner
+    has drawn twice: on a ticket it means the customer accepted the WORK;
+    on an extra work it means they accepted the PRICE.
 
-- **§2a/§2b the deadline's editing surfaces.** Both dates on the EDIT
-  surface and on the detail page behind Edit; both in the list's bulk
-  edit dialog with the "leave unchanged" default every bulk field
-  already has, so a bulk edit never silently overwrites a date nobody
-  touched.
-- **§2c who may set a deadline — a DECISION for the owner.** The
-  reasoning, unchanged and unimplemented: we already hold
-  `preferred_date`, which IS the customer's wish. The `deadline` is
-  what turns a row red and what an operator is measured against — a
-  provider commitment. If a customer could set it unilaterally, a
-  customer could make the provider look late by typing a date. So the
-  customer expresses a wish and the provider decides what it commits
-  to. **Reversible in a sentence** if the owner disagrees.
-- **§3's typography sweep** beyond the Approval counts.
-- **§4a Catalogs area** + per-company building-type catalog with a
-  buildings-list filter + the cost-of-the-next-catalog note.
-- **§4b the four reports** (employee hours by building / weekly / by
-  extra work; ticket report with duration from the status history).
-- **§4c the Work Plan** — docs §12B's week-placement rule, extra work
-  in the week view, BUILDING_MANAGER scope through the existing
-  `scope_tickets_for`, server-side counts, idempotent seeder.
-  Acceptance test: an overdue extra work assigned to a worker appears
-  as overdue in that worker's Work Plan.
+11. **20 undefined CSS class names.** CLOSED as a defect by Sprint 187's
+    verification — every one is paired with a defined companion class or
+    is a no-op hook, and the count is byte-identical to the base commit.
+    Listed here only so the next sweep does not re-open it.
 
+### Decisions the owner owes — no build until he answers
 
-### Carried from Sprint 174 — not built, nothing half-done
+- **Who may set a deadline on an extra work** — provider only, or the
+  customer too? The editing surfaces exist; the policy does not.
+- **Whether a SUPER_ADMIN should stay visible when the Users list is
+  filtered by company.** Sprint 188 kept the current behaviour (they drop
+  out, because a platform admin holds no company membership) and pinned
+  it with a test. Reversible in one line.
+- **The invoice email trigger.** The code is written and unfired; the
+  owner said it is not needed yet.
 
-- **§3 the Extra Work detail redesign** to the owner's specified
-  layout: Details and Workflow untouched on the top row; Messages moved
-  left and matched to the Details card's height; four COLLAPSED cards
-  filling the right (Customer contacts, Department & work type, People
-  on this request, Preview); Requested services and Pricing proposal
-  full width beneath. Collapsed is not hidden — every collapsed card
-  keeps its header and shows a COUNT. The page remembers nothing. The
-  deadline and started-early markers stay in the header (already done).
-- **§4a the Catalogs area** + the per-company building-type catalog
-  with a buildings-list FILTER, plus the cost-of-the-next-catalog note.
-- **§4b the four reports** (employee hours by building / weekly / by
-  extra work, and the ticket report with duration from the status
-  history).
-- **§4c the Work Plan**, implementing docs §12B's week-placement rule,
-  extra work in the week view, BUILDING_MANAGER scope through the
-  existing `scope_tickets_for`, server-side counts, and the idempotent
-  seeder. Acceptance test: an overdue extra work assigned to a worker
-  appears as overdue in that worker's Work Plan.
+### Standing milestones
 
-### Six undefined CSS classes in the Extra Work pages
+- **Production deployment.** `crmtest` runs the production compose stack,
+  but production itself is not deployed. Open since the beginning.
+- **A frontend component/unit test runner.** There is none. Adding one is
+  its own sprint and needs the owner's sign-off (CLAUDE.md §8); Playwright
+  e2e stays the only frontend test surface until then.
+- **The `osius.*` provider permission namespace** is technical-debt
+  naming. Renaming it needs a dedicated sprint.
+- **The deprecated `Customer` staff-visibility fields and the
+  single-building anchor FKs** (`Customer.building`, `Contact.building`)
+  are still the runtime read source, kept nullable for back-compat.
+  Nothing new builds on them; the read-switch is unscheduled.
 
-`ew-agreed-price-item-label`, `ew-intent-option`, `ew-auto-start`,
-`ew-workflow-card`, `form-control`, `link` — all used and none defined,
-all pre-existing. The sweep only surfaced them because Sprint 174
-touched those files. Same treatment as `section-title` got: fix them
-deliberately, not as a side effect, because defining them changes how
-those pages look.
+### Candidate sprints, none committed
 
+Raised but not decided. Listed so they are not re-discovered as new.
 
-### Carried from Sprint 173 — not built, nothing half-done
-
-- **§2 Catalogs area** — one admin home for hour types, work types,
-  contract types, services, managed units, reusing `CatalogTab`; plus a
-  generic per-company building-type catalog with a Building FK and a
-  list FILTER (the filter is the owner's whole example). Then write
-  down what adding the NEXT catalog costs; if it still means touching
-  six places, generalise further. Adding a type must never require a
-  deployment.
-- **§3 the four reports** — employee hours by building, employee hours
-  weekly, employee hours by extra work, ticket report (duration from
-  the status history, not a column). Cards opening modals, no nav
-  children, CSV + PDF, `assertNumQueries` each, provider-only.
-- **§5 the Work Plan** — extra work in the week view, BUILDING_MANAGER
-  scope through `scope_tickets_for` (not a second scoping path),
-  server-side counts, the idempotent `seed_demo_data` seeder, and the
-  week-placement rule from docs §12B. Acceptance test: an overdue extra
-  work assigned to Ahmet appears as overdue in Ahmet's Work Plan.
-- **§1's remaining half** — the Approval tab grouped by source with a
-  per-source approve and an approve-all-for-this-employee action, and
-  setting the source automatically when hours are logged from a ticket
-  or an extra work.
-
-### Noted by the owner for later — NOT to be built now
-
-Contract projects as first-class records; customer locations with their
-own page; richer employee records; the reference's second-generation
-invoices.
+- **Mobile UI polish.** The phone card lists exist everywhere the tables
+  do, but they have never had a pass of their own.
+- **Refactoring.** `accounts/` carries four overlapping permission
+  modules (CLAUDE.md §7), all live and all imported.
+- **A light / advanced mode split**, so an operator who wants six fields
+  is not shown sixty.
+- **Contract planning — the reference system's full-screen week grid.**
+- **A data-gap analysis against the reference system**: which data it
+  holds that this system cannot represent, EXCLUDING the things already
+  considered and declined below.
 
 ### Considered and DECLINED — do not propose again
 
-Rooms; quality inspections; the project/task planning subsystem;
-products; continuous extra work. The owner's father ruled all five out
-after the first Sprint 173 prompt was written against them.
+Rooms, quality inspections, project planning, products/stock, and
+"continuous extra work". The owner considered each and said no. They are
+recorded here so a later analysis does not present them as gaps.
+
+### Not re-verified in this pass
+
+Carried honestly rather than dropped: the per-sprint carry-over sections
+that used to fill this queue were retired once their items were checked,
+but a handful of narrow notes from Sprints 167–175 (agenda-vs-Work-Plan
+analysis, a slot deadline column, the Approval tab's grouped-by-source
+half) were not individually re-tested against the code. If one of them
+matters, re-derive it from the code rather than from this file.
 
-
-### Carried from Sprint 172
-
-- **§6 the Work Plan demo seeder.** Add scheduled tickets and extra
-  work across several days, states and buildings to `seed_demo_data`,
-  IDEMPOTENT so running it twice does not double the data, so every
-  count chip has a non-zero number and the overdue list has entries.
-- **The forecast's "Current Monthly" needs an as-of-today label** — see
-  the §7 disagreement in NOW. The figure is right; the screen does not
-  say what it is measuring.
-
-
-### From Sprint 168 — the Work Plan's unbuilt half
-
-- **Extra work in the week view.** Requires giving extra work a
-  schedule (a date, and probably a slot), not just a query. That is a
-  product decision, not a screen.
-- **The manager Work Plan.** The agenda holds two audiences in one
-  file; the week frame was given to the STAFF half only. Bolting it
-  onto the manager table because they share a file would be the
-  reference-copying mistake, so it was not done.
-- **Counts are computed client-side over the viewer's own slots.** That
-  is correct today because `my-slots` returns the viewer's whole set
-  unpaginated. If that ever paginates, the counts must move to the
-  server or they will silently count one page.
-
-
-### Sprint 167 §5 — Work Plan vs the AgendaPage we have (analysis only)
-
-The reference's Work Plan is a week view Mon-Sun with the week's items
-as cards, count chips (Total / Overdue / New / In Progress / Completed /
-Archived), Type and Status filters, and an Overdue button opening every
-overdue item with how long it has been overdue.
-
-**What `frontend/src/pages/AgendaPage.tsx` already does** (478 lines,
-two audiences in one file):
-
-- The STAFF agenda: the signed-in worker's own planned slots, fetched
-  as `MySlot[]`, grouped under date headings with an explicit
-  `__undated__` bucket for slots with no date. Each slot is already a
-  CARD (`agenda-slot-card`) carrying its status badge, and each card
-  carries the two actions that matter — Mark done, and Unable to
-  complete with a reason dialog that writes `UNABLE_TO_COMPLETE`.
-  Completion notes and unable-reasons render back onto the card.
-- The MANAGER agenda: a separate read-only table of the tickets the
-  signed-in manager manages, via the ticket list's `?my_managed=1`
-  filter, each row deep-linking to the ticket.
-- A role guard, and empty states for both audiences.
-
-**What it does not do:**
-
-1. **No week.** The grouping is by date over whatever the endpoint
-   returns — there is no Mon-Sun frame, no week stepper, and no notion
-   of "this week" at all. This is the largest single gap and everything
-   else depends on it: chips count "the week's items", and there is no
-   week to count.
-2. **No count chips.** Nothing aggregates. Total / Overdue / New / In
-   Progress / Completed / Archived do not exist in any form.
-3. **No Type or Status filters.** The staff list is unfiltered; the
-   manager table is filtered server-side to `my_managed` only.
-4. **No Overdue concept.** Nothing computes overdue-ness, so there is
-   no button and no list, and "how long it has been overdue" is not a
-   figure the page holds.
-5. **Archived is not a state we have.** The reference's sixth chip has
-   no counterpart in our slot model — a chip for it would have to be
-   dropped or redefined, and redefining it silently is the wrong move.
-
-**What closing it would cost.** The honest estimate is that this is a
-sprint of its own, not a section of one:
-
-- *Backend, small but real.* The slots endpoint takes no week
-  parameter today. A week window (`iso_year`/`iso_week`, the same
-  parameters `/timesheets/entries/` already accepts) plus the six
-  counts computed server-side over the same scoped queryset — counting
-  client-side would count only the page the client happens to hold.
-  Overdue needs a definition first: a dated slot in the past that is
-  neither COMPLETED nor UNABLE_TO_COMPLETE is the obvious one, and it
-  needs the owner's word before it is coded, because everything on the
-  screen keys off it.
-- *Frontend, the bulk of it.* A Mon-Sun frame the cards sit inside;
-  the chip row wired to the server counts; Type and Status filters; and
-  the Overdue drawer. The card itself, its actions and its dialogs are
-  already written and would be reused unchanged — that is the part
-  that is genuinely already done.
-- *The trap to avoid.* The manager table and the staff agenda are two
-  different screens sharing one file. A week frame belongs to the staff
-  agenda; bolting it onto the manager table too, because they live
-  together, would be the same mistake as the reference-copying that
-  produced the headerless permission column.
-
-
-
-
-
-
-
-0. **A CONTRACT-TYPE CATALOG SCREEN.** Sprint 166 §6 asked whether
-   creating a contract type is reachable. It is NOT: the backend has
-   full CRUD at `/api/contracts/types/` and the contract form offers
-   the company's own types, but there is no UI to add one — so a
-   company with an empty catalog cannot fill it without the API. Small
-   screen, endpoints already exist. Recorded rather than bolted onto
-   this sprint's last hour.
-
-0. **DELETE OR RE-EXPOSE `/admin/customers/:id/quote-requests`.** Found
-   by the §5 sweep: routed, no link anywhere. The 2026-06-25 IA note
-   merged Meldingen and Offerteaanvragen into Extra Work as filter
-   chips, so this looks superseded — but deleting a route is a
-   decision, not a cleanup, and it was not this sprint's to make.
-0. **CONTRACT PLANNING — the reference's full-screen week grid.** Out of
-   scope for Sprint 165 §4 and recorded rather than forgotten.
-
-   What it appears to do, from the reference: a full-screen planning
-   surface per contract, laid out as a week, where the contract's
-   services are scheduled across days — the bridge between "this
-   contract buys 40 hours a month" and "here is when they happen". It is
-   adjacent to both the hours grid (which records what WAS worked) and
-   the §5 comparison (which now scores one against the other), and
-   whoever builds it should read both first: the three would otherwise
-   grow three different ideas of what a planned hour is.
-
-0. **WORKER HOUR REPORTS**, still open, and **SCHEDULE — the GAP
-   ANALYSIS FIRST**: compare `frontend/src/pages/AgendaPage.tsx` against
-   the reference and report the gap BEFORE building. The owner has
-   stated that ordering twice.
-
-0. **WIRING THE INVOICE GENERATOR TO BEAT** (from Sprint 164 §8). The
-   code is ready — one `CELERY_BEAT_SCHEDULE` entry calling
-   `generate_invoices()`. What it needs is a decision: how often, at
-   what hour, and whether a run spanning midnight may bill a period a
-   day early.
-
-0. **WHAT REMAINS AFTER SPRINT 164**, in the order the owner set:
-
-   - **CONTRACT HOURS vs WORKED HOURS — the COMPARISON.** The owner has
-     confirmed he wants the two compared, not two independent lists. The
-     groundwork is deliberately in place: `ContractLine.hours` is a
-     per-billing-period budget and carries an optional `building`, so
-     the comparison has a period basis and something to group by without
-     a schema change. The worked side is `timesheets.TimeEntry`. Both
-     apps are module-independent by design, so this belongs in a
-     reporting surface that reads both — not an FK between them.
-   - **WORKER HOUR REPORTS.**
-   - **SCHEDULE — the GAP ANALYSIS FIRST.** Compare
-     `frontend/src/pages/AgendaPage.tsx` against the reference and
-     report the gap BEFORE building anything. That ordering is the
-     owner's and has been stated twice.
-
-   Also open, from §8 and recorded rather than assumed: wiring the
-   invoice generator to Celery beat. The code is ready — one
-   `CELERY_BEAT_SCHEDULE` entry calling `generate_invoices()`. What it
-   needs is a decision nobody has made: how often, at what hour, and
-   whether a run spanning midnight may bill a period a day early.
-
-0. **COMPANY CARDS ON THE EDIT PAGE — CLOSED by Sprint 163 §4.**
-   Extracted into `components/CompanyRelationCards.tsx` and mounted on
-   both pages. The entry below is kept for the reasoning, not as an
-   open item.
-
-0. ~~**COMPANY CARDS ON THE EDIT PAGE — Sprint 162 §2, NOT DONE.**~~
-
-   The detail page has the three editable cards (employees, buildings,
-   customers) and works; `CompanyFormPage.tsx` has none of them. §2 is
-   right that both pages should carry them.
-
-   It was not done because the brief also rules out the only cheap way
-   to do it: "If the two ever diverge, one shared component is the
-   answer — not a second copy of the markup." The three cards are ~460
-   lines of stateful JSX on the detail page, wired to three
-   `useEditMode` controllers, several `ConfirmDialog` refs, the
-   `bulkLinkBuildings` handlers and their own fetches. Doing it properly
-   means extracting all of that into one component that owns its data
-   and mounting it on both pages.
-
-   That is the right shape and it is a sprint item, not a corner of one.
-   Shipping the copy-paste instead would have put a second copy of the
-   company-boundary rule into the codebase, which is the specific
-   failure mode this file keeps recording.
-
-   Shape for whoever picks it up: a `CompanyRelationCards({ companyId })`
-   that fetches its own employees / buildings / customers, so mounting
-   it on the form page is one line and the detail page's rendered output
-   does not change.
-
-0. **THE GATE LIST NOW INCLUDES AN UNDEFINED-CSS-CLASS CHECK.** Run it
-   over every file a sprint touches, and paste its output:
-
-   ```bash
-   cd frontend/src && for c in $(grep -ohE 'className="[^"{]+"' <FILES> \
-     | sed 's/className="//;s/"//' | tr ' ' '\n' | sort -u); do
-     grep -q "\.$c[^a-zA-Z0-9_-]" index.css || echo "UNDEFINED: $c"; done
-   ```
-
-   **Why:** Sprint 160 shipped the whole contracts feature rendering as
-   raw text, and every existing gate passed it. TypeScript, ESLint and
-   Vite cannot know that a class name has no rule behind it, so 41
-   invented names — including `page`, `input` and `alert` — reached the
-   owner's screen. No gate we had could have caught it, which is what
-   makes this a gate rather than a note.
-
-   Two things learned running it: it catches real mistakes immediately
-   (`cell-tag-waiting` does not exist; only
-   `cell-tag-waiting_customer_approval` does, and a looser grep made it
-   look defined), and it only sees STATIC `className="..."`. Template
-   and conditional class names are invisible to it, so it is a floor,
-   not a proof.
-
-0. **HOURS — CLOSED.** Sprint 162 removed the wizard's hour-type step
-   and made the in-grid control work; Sprint 163 §1 rebuilt the modal's
-   layout to the reference. Kept below for the reasoning only.
-
-0. ~~**HOURS — Sprint 161 §8, NOT DONE.**~~ Carried forward whole rather
-   than half-reported:
-   - **Remove the hour-type selector from the setup wizard.** The owner:
-     it complicates matters. The grid should start with a sensible
-     default row per (employee, building) and the type chosen in the
-     grid.
-   - **The hour-type dropdown in the generated table changes nothing.**
-     Reproduce it first, then fix it. That fix is also what makes
-     removing the wizard selector safe, so the two are one piece of
-     work and should not be split.
-
-0. **COMPANY DETAIL EDIT IS DONE — do not re-request it.** Sprint 161
-   §3 asked for it a third time. It shipped in Sprint 159 and it works:
-   verified in a browser, three Edit buttons, each revealing row
-   checkboxes and an Add control on employees, buildings and customers.
-   What has NOT been exercised is a full add-then-remove round trip
-   through the API, which is the only thing left worth checking.
-
-0. **Sprint 158 leftovers.** The first two are CLOSED by Sprint 159 —
-   §4 shipped (the three company cards are editable), and the ticket
-   tiles now carry SERVER counts from `/tickets/stats/` `by_status`.
-   One caveat on the second, recorded rather than glossed: those counts
-   describe the actor's whole scope, **not** the current search /
-   priority / SLA / customer filters, because that is what the stats
-   endpoint answers and what the "Status breakdown" panel beside them
-   has always shown. If a tile reading 6 next to a searched list showing
-   2 ever confuses somebody, the fix is the aggregate shape recorded
-   earlier: `?counts=status` on the LIST endpoint, honouring the other
-   filters. Not worth a request today.
-   - **The demo seed gives one user staff visibility in TWO provider
-     companies** (`noah-staff-bright@bright-facilities.demo` is on both
-     Bright Facilities and Osius Demo buildings). That is LEGAL and the
-     tenant check correctly allows it — Sprint 158 §1 confirmed the
-     reported "bug" was not one — but it is confusing on screen, because
-     the e-mail domain says one company and the assignment says another.
-     Consider splitting them in the seed, or showing the company beside
-     the name in assignment pickers.
-
-0. **THE AGREED SEQUENCE AFTER #159 AND #160.** Both have now landed and
-   were built in PARALLEL as siblings off #158: **#159** took the hours
-   rebuild and the three carried-over fixes, **#160** built the contracts
-   subsystem. That resolves the numbering collision the contracts prompt
-   correctly flagged — it called its own follow-ups "#158" and "#159",
-   both of which were already taken by shipped work. Authoritative from
-   here, and renumbered ONCE, deliberately:
-
-   - **#161 CONTRACT INVOICES BECOME REAL.** Turn a due row of the
-     `contracts/billing.py` forecast into an actual `invoicing.Invoice`.
-     The forecast was deliberately built as a pure function so this is a
-     small step: it already yields invoice date, period, amount and due
-     date per period. Verified groundwork — `InvoiceLine.extra_work` is
-     NULLABLE and its docstring already anticipates a hand-added
-     free-text line, so a contract invoice needs no schema change. The
-     open design question is idempotency: what stops the same period
-     being invoiced twice, and where that claim is recorded.
-   - **#162 CONTRACT HOURS vs WORKED HOURS.** Per worker per building,
-     compared — the owner has confirmed he wants the COMPARISON, not two
-     independent lists. The groundwork is in place and was shaped for
-     this on purpose: `ContractLine.hours` is a per-billing-period
-     budget (so the period basis is well defined) and carries an
-     optional `building` FK (so there is something to group by) without
-     needing a schema change. The worked side is
-     `timesheets.TimeEntry`. Note the module-independence rule on both
-     apps — the comparison belongs in a reporting surface that reads
-     both, not in an FK between them.
-
-   Then **#163** Worker Hour Reports (blocked on #162 and on a decision
-   about the columns we hold no data for: cost-centre name and code,
-   order number, debtor, hour code, travel costs), and **#164** Schedule
-   — compare `frontend/src/pages/AgendaPage.tsx`
-   against the reference and report the GAP before building anything.
-   The detail behind each of these is in the entry below, which #157
-   wrote and which stays authoritative for scope.
-
-0. **THE AGREED SEQUENCE AFTER #157.** (Owner, Sprint 157 §11.) These
-   are the remaining pieces, in the order they must be built, because
-   each depends on the one before it.
-
-   **#158 Contracts — the subsystem.** Contract, revisions, per-contract
-   prices, billing settings, and an invoice preview that computes but
-   writes nothing.
-   A REVISION is a forward-dated VERSION of the contract's scope, with
-   the lines hanging off the revision rather than the contract.
-   Owner-confirmed decisions: contract invoices become REAL invoices; a
-   contract carries its OWN prices while Extra Work keeps using the
-   agreed `CustomerServicePrice` rows; contract hours will later be
-   compared against worked hours.
-   Standing fact, verified again in Sprint 156: **there is no contract
-   entity in this system.** `grep "class Contract" backend/*/models.py`
-   returns nothing; `contract` appears only as `Customer.contract_pdf`
-   (an informational file) and in invoicing comments, and
-   `sot-addendum-b-invoicing.md` states plainly that there is no contract
-   entity and no recurring contract fee. A prompt for this already
-   exists.
-
-   **#159 A due planned invoice becomes a real `Invoice`.**
-   `InvoiceLine.extra_work` is already NULLABLE and its docstring
-   anticipates a free-text line, so the schema does not need to change —
-   check that before designing around it.
-
-   **#160 Contract hours.** "This worker is contracted for N hours at
-   this building", plus the comparison against hours actually worked. The
-   owner chose the LINKED option: the system must be able to say
-   "contracted 15, worked 13". A new model plus an approval surface, not
-   a UI change. Sprint 155 §5 deliberately did NOT invent the
-   contract/validity model when adapting the reference grid; this is
-   where it goes.
-
-   **#161 Worker Hour Reports.** Weekly and 4-week accounting breakdown
-   with Excel and PDF export. **Blocked** on #160 and on a decision about
-   the columns we hold no data for: cost-centre name and code, order
-   number, debtor, hour code, travel costs.
-
-   **#162 Schedule / Work Plan.** `frontend/src/pages/AgendaPage.tsx`
-   ALREADY EXISTS. Before building anything, compare it against the
-   reference Work Plan and report the GAP. Do not start a second page.
-
-0. **The §9 proposals from Sprint 156 — two left.** Measured and
-   described there, deliberately not applied. Sprint 157 §7 CLOSED the
-   third (the Users chip groups) by aligning them rather than collapsing
-   them, and recorded the height trade that alignment costs.
-   - `/admin/buildings` is the densest screen measured (21 controls above
-     the fold), but every one is a filter or a per-row action — removing
-     any removes a capability, so this needs the owner to say which he
-     never uses.
-   - `/extra-work` starts its list at 553px because the KPI strip is four
-     cards tall. One sentence: "the four boxes at the top become one
-     line, so the list starts higher."
-
-0. **The week grid reads one request per selected employee.** (Sprint
-   155 §5, deliberate.) `HoursAdminPage` fires one `listTimeEntries` per
-   person through `Promise.allSettled`, so a failure for one cannot
-   discard anybody else's rows — but an operator who selects forty
-   people makes forty requests. The count is bounded by their own
-   choice, which is why this was acceptable to ship.
-   Fix shape if taken up: an `employee__in=` filter on the entries list,
-   then ONE request grouped client-side. Do **not** solve it by dropping
-   the employee filter and fetching the whole company's week — that
-   trades a bounded request count for an unbounded page size, and
-   `page_size=200` would silently truncate a busy week.
-
-0. **Three admin lists keep a selection that spans PAGES.** (Sprint 155
-   §4, deliberate.) Buildings, Customers and the customer's Buildings
-   sub-page union the current page's ids into what is already chosen,
-   and the bulk action fires against the union — so they take only the
-   MODE from `useEditMode` and keep their own selection array.
-   Worth revisiting on its own merits: a destructive bulk action whose
-   count includes rows scrolled off two pages ago is exactly the kind of
-   thing §4's intent step exists to prevent, and the operator cannot
-   verify it. Changing it is a behaviour change, not a refactor, so it
-   was not folded into a sweep about something else.
-
-0. **A COMPANY_ADMIN in MORE than one provider company cannot open
-   "Mijn uren".** (Sprint 152.1 §2, deliberately deferred.) The page
-   sends no `?company=`, so `views_common.resolve_view_company` refuses
-   to guess and returns `timesheet_company_required`. Everyone else
-   resolves cleanly: STAFF and BUILDING_MANAGER hold a one-company scope
-   in practice, and SUPER_ADMIN no longer sees the page at all.
-   Fix shape if taken up: a compact company selector on the page itself,
-   sourced from the timesheets scope helper — **not** from
-   `me.company_ids`. That field is `CompanyUserMembership` only, and a
-   STAFF member belongs to a company through `BuildingStaffVisibility`,
-   so it would report zero companies for exactly the role that uses the
-   page most. Same trap as the employee-picker one §1a avoided: the
-   membership question has three answers, not one.
-
-0. **`ServiceDetailView` is not narrowed for a CUSTOMER_USER.** Sprint
-   147 stopped a customer LISTING the provider's general catalog
-   (`ServiceListCreateView` requires an active, currently-valid
-   `CustomerServicePrice`), but `/api/services/<id>/` still resolves any
-   service of their provider company. So a customer cannot enumerate the
-   catalog, but can still fetch one by id — walking integer ids
-   reconstructs it. Left deliberately: narrowing the detail view risks
-   404ing a service referenced by an older request whose agreed price has
-   since expired, and that path was not traced. Fix shape if taken up:
-   apply the same predicate as the list view, but first confirm nothing
-   customer-facing resolves a historical line through this endpoint
-   (Extra Work detail uses the `snapshot_*` columns, which is why it is
-   probably safe).
-
-1. **SUPER_ADMIN "My Work" page content** — what should an SA see on a
-   "my work" surface? An SA creates little of their own work; the
-   concept today is admin-scoped. Awaiting the owner's definition before
-   anything is built.
-2. **Dashboard "Mijn werk" section purpose** — clarify whether the chip
-   row means "items I created" (current behaviour) or a broader "what
-   needs me" queue, and whether it should differ per role. Awaiting
-   owner direction.
-3. **Fixing & Auditing Sprint** — gated on Ramazan's full side-by-side
-   review landing (his own commitment, not yet delivered as of
-   2026-07-27). Scope once it lands: incorporate whatever further changes
-   Ramazan + father want; pin down **RF-7** (the Extra Work
-   pricing-area "big tabs" element he wants changed — location confirmed,
-   exact element still to be pinpointed — see the appendix below); design
-   + build the **Department + Event** section in person with Ramazan and
-   father (the `Department` MODEL itself already exists and shipped in
-   Sprint 127 — see item 6 — this item is about the broader in-person
-   UI/workflow design, not the label model); a full codebase audit
-   (bugs / dead code / inconsistencies, confirm each shipped feature
-   behaves as intended); reconcile this checklist against the real
-   codebase once the audit lands.
-4. **Mobile responsiveness** — gated on Ramazan's review landing (#3).
-5. **Light/advanced mode split** — gated on Ramazan's review. Owner
-   decision: this is an **architectural** decision to be settled BEFORE
-   the Department + Work Type features are built, not a later styling pass.
-6. **Department + Work Type** — designed in person with Ramazan and father
-   (see #3). The two per-customer label lists + Extra Work tagging +
-   filtering shipped (backend Sprint 127, frontend Sprint 128). Of the
-   two **Sprint C** follow-ups gated on that tagging (group Extra Work /
-   invoices by Customer + Building + Department + Work Type), **both are
-   now done**: the **grouped report** — Sprint 131,
-   `compute_extra_work_by_department`, summary + numbered-detail CSV/PDF
-   export, a customer Reports-tab tree — and **invoice grouping** —
-   Sprint 132, `Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_
-   WORK_TYPE`, plus the Sprint 134 resync fix (`Invoice.granularity`).
-   Both shipped to `main` via PR #125 (`## SHIPPED`). Sprint C itself is
-   closed; what remains of this item is the BROADER Department + Event UI
-   design, still gated on an in-person session with Ramazan and father.
-   Naming clarification from the reference implementation:
-   **"Event" was never a separate feature** — it is one VALUE in B
-   Amsterdam's **Department** list (Algemeen / Event / Member), and the real
-   second field is **Work Type** (Eindschoonmaak / Opleverschoonmaak / Bouw
-   schoonmaak / Extra werkzaamheden / Overige), not a selectable "event
-   type". Department is NOT an org-chart department — it is a sub-client /
-   segment of the customer (another customer's are twelve medical practices).
-7. **General code refactoring** (clean-up only, **no behaviour change**)
-   — owner decision: happens AFTER Department + Work Type ship, not before.
-8. **E2E Testing Sprint** — after Fixing & Auditing. Scope: Playwright
-    coverage of the critical full-stack flows on the settled
-    post-feedback system — auth/login, create ticket + melding, ticket
-    lifecycle (staff complete → manager review → customer approval),
-    extra-work request → proposal/instant → actual-hours finalize,
-    customer pricing (contract / custom / bulk-raise / copy-default),
-    notification deep-links. Token-inject pattern (the e2e login form is
-    flaky). Green in CI. Ordering rationale (recorded 2026-06-23, still
-    the plan): the Fixing & Auditing sprint reshapes the UI, so tests
-    written first would be invalidated by those changes.
-9. **Frontend Testing Sprint** — after E2E. Component/unit tests for
-    high-value frontend logic that lacks coverage: pricing-amount
-    display, active-priced-line selection, permission/visibility gating,
-    the drill-in people/permissions flows, notification rendering, and
-    **the Sprint 129 session-expiry auth flow** (a failed mid-session
-    refresh clears `me` + lands on `/login` with the notice; already-on-
-    `/login` does not loop; a SUCCESSFUL refresh transparently retries and
-    does NOT log out — see `AuthContext` + `api/client.ts::onSessionExpired`).
-    That P1 fix shipped in PR **#124** (Sprint 129 — the checklist
-    previously miscited this as "#129", conflating the sprint number with
-    the PR number; corrected here) verified by review + the FE gates only,
-    because no unit runner exists to assert the axios-interceptor
-    behaviour. **Sprint 134 already built the interim option this item
-    anticipated:** `frontend/tests/e2e/sprint134_axios_timeout.spec.ts`, a
-    `page.route`-mocked Playwright e2e covering the client-timeout/
-    session-expiry interaction specifically (a permanently-hanging
-    refresh and a 401'd refresh both converging on `/login` with the
-    notice) — so that one flow is no longer completely uncovered, though
-    a real unit-test runner is still the actual ask, and every other flow
-    this item lists still has zero coverage. Establish the test runner +
-    a CI gate; do not regress the ESLint baseline (44 — see Conventions;
-    this line said 48 until Sprint 155 corrected it). No frontend
-    component/unit test runner exists yet — backend `manage.py test` and
-    Playwright e2e are the only test runners today; do not add an
-    alternative opportunistically outside this planned sprint (CLAUDE.md §8).
-10. **Off-site, encrypted backups — BUILT, NOT RUNNING.** Sprint 134
-    built the whole pipeline: `scripts/backup_restic.sh` (one encrypted
-    restic snapshot per night covering both a Postgres dump and the
-    ENTIRE `backend_media_prod` volume — not just ticket attachments, see
-    `docs/operations/backups.md` §1 for the full list of what that volume
-    holds), the `scripts/systemd/osius-backup-restic.{service,timer}`
-    pair, and a documented restore drill. **None of it has been run.** No
-    restic repository has been initialized, no encryption credentials
-    generated, no backup has ever actually been taken, and the restore
-    drill has never been exercised once. This is the difference between
-    "we have backups" and "we have backup CODE" — do not read the code's
-    existence as the risk being closed. Blocked solely on the owner
-    buying off-site storage (a Hetzner Storage Box or equivalent) and
-    provisioning `/etc/osius-backup.env` — see `docs/operations/
-    backups.md` §2–3 for the exact steps once storage exists. Until that
-    happens, a disk loss is still unrecoverable, exactly as before Sprint
-    134.
-11. **Production hardening → CD → Sentry.** Needs the owner's OWN input,
-    not blocked on engineering: real SMTP credentials, a Sentry account +
-    DSN, and the real production OSIUS company slug for
-    `PLATFORM_BRAND_SLUG` (see `sot-addendum-b-invoicing.md` §B.9 — if it
-    doesn't match, OSIUS's own invoices render unbranded). CD via GitHub
-    Actions is otherwise ready to wire up (CI already runs as required PR
-    checks). Also standing: TLS, non-root containers (Postgres + media
-    backups are now their own item, above). The owner will work through
-    these interactively, not as an engineering-only backlog item.
-12. **`login.spec.ts`'s "demo card click fills the login form" e2e test
-    fails on a clean `main` build** — found while cherry-picking the axios
-    timeout fix (Sprint 134) onto this branch. Predates this branch
-    entirely: reproduces from `main` alone, with neither `LoginPage.tsx`
-    nor `login.spec.ts` touched by anything on it. Clicking
-    `[data-testid="demo-card-customer-b3"]` no longer autofills
-    `amanda-customer-b-amsterdam@b-amsterdam.demo` into the login form.
-    Not investigated or fixed here — recorded so it isn't mistaken for a
-    regression on some future branch's e2e run.
-13. **`ALLOWED_HOSTS` admits the Docker internal DNS name — an OPTIONAL
-    follow-up now available, not a live bug.** This item's previous
-    wording was wrong: it claimed the backend container reported
-    `(unhealthy)` because the healthcheck hit the `ALLOWED_HOSTS` gate.
-    Verified directly against `docker-compose.prod.yml` (Sprint 136): the
-    backend healthcheck is a pure TCP SOCKET probe
-    (`socket.create_connection(('localhost',8000),2)`), not an HTTP
-    request — it never touches Django's request/Host-header pipeline at
-    all, so it cannot trip `ALLOWED_HOSTS` regardless of what's in it.
-    That was true only BEFORE the TCP probe replaced an earlier HTTP
-    probe; the item was written from the stale, pre-swap version, and the
-    122.1 restructure carried the stale text forward without
-    re-verifying it against the compose file.
-    Sprint 134 still did something real, worth keeping: `backend/config/
-    settings.py` now unconditionally admits `"backend"` (the Compose
-    internal DNS name, in both compose files) to `ALLOWED_HOSTS`. That
-    doesn't repair a live failure — there isn't one — it REMOVES the
-    reason an HTTP probe would have failed, so switching the compose
-    healthcheck from the TCP probe to a real HTTP check (e.g. `curl -H
-    "Host: backend" http://localhost:8000/health/live`) is now POSSIBLE,
-    upgrading liveness from "gunicorn accepts TCP connections" to
-    "gunicorn accepts TCP connections AND Django itself responds 200".
-    Nobody has made that switch. See `docs/engineering/deployment.md` §4
-    for the full writeup. Optional, not urgent.
-14. **`customer_ids[0]` blindness in `MyMeldingenPage` and
-    `MyEmployeesPage`.** Same bug `/my/documents` had before Sprint 135
-    fixed it there: a user belonging to more than one customer silently
-    sees only `me.customer_ids[0]`'s data, with no way to reach the
-    others. Found during Sprint 135 while fixing the documents case,
-    deliberately left alone in both of these (out of scope for that
-    sprint). Same fix shape once prioritized: a picker when
-    `customer_ids.length > 1` (names via `listAllCustomers`, server-
-    scoped to the actor's own memberships), unchanged for the
-    single-customer case.
-15. **The Building picker (`listAllBuildings`, `frontend/src/api/
-    admin.ts`) could outgrow exhaustive client-side paging.** Company is
-    bounded by how many tenants exist on the platform; Customer is
-    bounded by one provider's own client roster — both comfortably small.
-    Building is different: a large facilities-management provider's
-    serviced-property portfolio could plausibly reach into the thousands,
-    at which point the picker's own exhaustive fetch (Sprint 135) means
-    dozens of sequential API round-trips before the dropdown even
-    renders — technically correct (no truncation) but a real, worsening
-    UX cost as the row count grows, a growth shape Company/Customer don't
-    share. Real fix, if/when this becomes a problem: a `?search=`
-    server-side type-ahead endpoint instead of fetch-everything-then-
-    filter-client-side. Not built — recorded so the shape of the eventual
-    fix is on file rather than re-derived under pressure.
-16. **Customer prices ARCHIVE — they do not hard-delete. This is
-    deliberate; do not re-file it as a bug.** DELETE on both
-    `/api/customers/<id>/pricing/` and
-    `/api/customers/<id>/custom-pricing/` sets `is_active=False` and
-    returns 204. It looked like a bug (Sprint 137 item 2: archived rows
-    were still listed, so a "deleted" price reappeared greyed-out on the
-    next load) and was fixed by HIDING archived rows by default rather
-    than by switching to a real delete. The reason is a live FK:
-    `ExtraWorkRequestItem.snapshot_customer_service_price` points at
-    `CustomerServicePrice` on `SET_NULL`, so hard-deleting a contract
-    row would irreversibly null the "which contract row produced this
-    line?" link on already-shipped Extra Work. The money itself is safe
-    either way — the `snapshot_*` columns, `ProposalLine` and
-    `InvoiceLine` all carry their own amounts — but there is no reason
-    to destroy the link when hiding solves the reported complaint.
-    `CustomerCustomPrice` had no inbound FK when that decision was made
-    and could have been hard-deleted by the letter of the rule, but both
-    kinds share ONE table on the pricing page so "delete" has to mean the
-    same thing on both — and Sprint 137 item 6 has since given it an
-    inbound FK of its own (`snapshot_customer_custom_price`), so the
-    original argument now applies to it directly too. Sprint 137 item 7's
-    bulk action is therefore worded **"Archive selected"**, not
-    "Delete selected", and puts the "Show archived" toggle on the same
-    screen. Revisit only as a deliberate decision with the owner, and
-    only alongside a plan for those two FKs.
-17. **The bulk list actions are N sequential client requests — no bulk
-    endpoint exists.** Sprint 137 item 7's Edit/Done mode on the customer
-    pricing list, the Services catalog list and the Units catalog list
-    issues one DELETE per selected row from the browser, sequentially,
-    and reports per-row failures. That is honest and fine at the sizes
-    these lists realistically reach (one category's prices; a provider's
-    catalog), but a selection in the high tens would mean that many
-    round-trips with no server-side transaction — a partial run is a real
-    outcome, which is exactly why the UI names the rows that failed. If a
-    tenant starts routinely selecting ~50+, the fix is a real bulk
-    endpoint per list (`POST .../bulk-archive/` with an id list, one
-    transaction, a per-id result array — the shape
-    `CustomerServicePriceBulkRaiseView` already uses). Not built.
-    *(Sprint 153 built the FIRST one — `POST /api/customers/bulk-
-    deactivate/` — so there is now a second reference implementation
-    alongside the bulk-raise view, this one all-or-nothing rather than
-    per-id-result. The three lists named above are still N sequential
-    requests.)*
-    *(Sprint 154 added four more — `buildings/bulk-link/`,
-    `bulk-deactivate/`, `bulk-update/` and `customers/bulk-update/` —
-    and settled the shape question: ALL-OR-NOTHING with one constant
-    rejection body, never a per-id result array, because a per-id array
-    over a top-level tenant list is an existence oracle. The pricing /
-    Services / Units lists are STILL N sequential requests; their ids
-    are already URL-scoped to one customer, so a per-id array is safe
-    there and the shape question above still applies to them.)*
-18. **`ExtraWorkRequest.category` and `ServiceCategory` are two
-    unrelated "category" concepts, and both are still live.**
-    `ExtraWorkRequest.category` is the fixed `ExtraWorkCategory` enum
-    (DEEP_CLEANING, WINDOW_CLEANING, …) classifying ONE request;
-    `ServiceCategory` is the catalog grouping that owns `Service` rows
-    and drives per-customer pricing. Sprint 137 item 5 confirmed against
-    the code that nothing reads the enum except the Extra Work
-    serializers themselves (`create`/`list`/`detail`, plus the
-    `category=OTHER ⇒ category_other_text` validation), `conversion.py`
-    (which pins converted tickets to `OTHER`) and the demo seeder — in
-    particular **`reports/` never reads it**, so the "reports may read
-    it" worry in the original brief does not hold today. Item 5
-    therefore left the field alone and populated, added the catalog
-    filter as a separate axis on the cart, and labelled the request-level
-    dropdown so the two stop being confusable. Migrating the enum away
-    (or onto `ServiceCategory`) is a real decision with a data migration
-    behind it and was bigger than that sprint; it stays open here.
-
-19. **The Extra Work filter bar is TWO rows at 1280px, not one — and one
-    is geometrically impossible without hiding filters.** Sprint 138 §6
-    asked for a single wrapping line. Measured against the real built
-    page with Playwright: the bar went from **3 ragged rows to 2 flush
-    rows** at 1280px with **0px horizontal overflow** (also 2 rows at
-    1440px, 3 at 1024px, 0px overflow at every width). One literal line
-    cannot be reached: the content column is 966px wide at a 1280px
-    viewport, and the nine controls need ~1356px at a usable 140px each
-    plus 12px gaps. The only way to one line is a "more filters"
-    disclosure — deliberately NOT built, because a collapsed group can
-    hide an ACTIVE filter, which is exactly the "the interface does not
-    explain itself" defect this sprint set out to remove. If the owner
-    wants it, the safe shape is: collapse only the four cascade filters,
-    auto-expand whenever any of them is set, and show a count badge when
-    collapsed.
-20. **Bulk (de)activate, bulk move and bulk archive are all N sequential
-    client requests.** Sprint 138 added bulk move-to-category and bulk
-    activate/deactivate on the Services list; both issue one PATCH per
-    selected row from the browser, like Sprint 137's bulk archive/delete
-    before them. Fine at catalog sizes, with per-row failure reporting
-    so a partial run is never reported as clean. If a tenant starts
-    selecting ~50+ routinely, the fix is one real bulk endpoint per
-    action (id list in, per-id result array out, one transaction — the
-    shape `ServiceBulkRaiseView` already uses). Not built.
-    *(Sprint 153 shipped `POST /api/customers/bulk-deactivate/`, which
-    is the same idea for the CUSTOMERS list. It chose all-or-nothing
-    over a per-id result array because a customer id the caller cannot
-    resolve must not be reported distinguishably from one that does not
-    exist — H-1. A per-id result array is fine for a list whose ids are
-    already URL-scoped to one customer; it is an existence oracle for a
-    top-level tenant list. Worth settling before the next bulk endpoint
-    is written.)*
-21. **Two PRE-EXISTING existence oracles of the same class as Sprint
-    142.1 §1, found by auditing every `validate*` method that runs an
-    ORM query.** Neither was introduced by this branch and neither was
-    fixed here (the round was explicitly scoped to three one-liners), but
-    both are the same shape and should be closed together.
-    (a) `accounts/serializers_invitations.py:159-161` resolves
-    client-supplied `company_ids` / `building_ids` / `customer_ids`
-    BEFORE the actor-scope authorisation that follows it, so an unknown
-    id returns `"Unknown company id."` while a known-but-foreign id
-    returns the scope error — distinguishing "exists" from "exists but
-    is not yours". Leaks bare id existence, not names.
-    (b) `tickets/serializers.py:1131` (`TicketCreateSerializer`) and its
-    twins at `extra_work/serializers.py:1245`/`:1632` check the
-    `CustomerBuildingMembership` link for a client-supplied
-    (customer, building) pair BEFORE any role branch, on plain unscoped
-    FK fields — so any authenticated writer can probe whether an
-    arbitrary pair is linked. The fix in both cases is the Sprint 142.1
-    one: authorise, or scope the queryset, before answering. Audited and
-    found CLEAN: `customers/serializers_labels.py` (customer is
-    URL-bound and `_get_customer()` 403s first),
-    `customers/serializers_contacts.py` (customer is `read_only`),
-    `planned_work/serializers.py` (queries keyed on the ACTOR), and
-    `tickets/serializers.py:1501` +
-    `extra_work/serializers_messages.py:113`/`:201` (already query
-    through `scope_tickets_for` / `scope_extra_work_for`).
-
-22. **`seed_demo_data` seeds the catalog for one company and the demo
-    Extra Work for another.** `_seed_service_catalog()` pins its 4
-    categories + 14 services to `Company.objects.order_by("id").first()`,
-    while `_seed_demo_extra_work` resolves its tenant by
-    `slug="osius-demo"`. On a multi-company dev DB those are different
-    companies, so the seeded `CustomerServicePrice` links a customer
-    under one provider to a service owned by another — a shape
-    `CustomerServicePriceSerializer` REJECTS over the API
-    (`service_customer_company_mismatch`); the seeder only gets away
-    with it by writing through the ORM. This predates Sprint 142 and was
-    deliberately not fixed there: making the two agree re-targets the
-    seeded catalog to a different company than existing dev DBs already
-    have it under, which duplicates rather than moves it. Sprint 142
-    narrowed the demo-EW lookup to the CATALOG's company (so the
-    now-per-company `category__name="Cleaning"` fallback cannot pick a
-    foreign provider's category) and left the mismatch itself alone. The
-    real fix is one company for both, plus a note on what an existing DB
-    should do with the old rows.
-
-23. **Five state writes still sit AFTER their refetch — consistency, not
-    a bug.** Sprint 141 moved three such writes to BEFORE the refetch so
-    they no longer depend on a network call that is allowed to fail, but
-    left five structurally identical sites behind:
-    `ServicesAdminPage.tsx:500`, `:740`, `:892`, `ManagedUnitsTab.tsx:183`
-    and `CustomerPricingPage.tsx:488`/`:507`. They are harmless ONLY
-    because the three refetch helpers are non-throwing by contract — the
-    line after `await refreshX()` always runs today. That contract is the
-    single thing keeping them correct, so the day someone makes a helper
-    throw again, these five silently regress into Sprint 141 §1. Either
-    move them ahead of the refetch like the other three, or make the
-    non-throwing contract enforceable rather than conventional.
-    *(Sprint 153 note: the new bulk-deactivate call site on
-    `CustomersAdminPage` writes local state BEFORE its refetch, so it
-    does not add a seventh. The five listed above are untouched.)*
-
-24. **Customers have no address or city — so the list cannot have a City
-    column.** (Found in the Sprint 153 recon.) The reference system the
-    owner compares us against shows a City column on its customer list.
-    Ours cannot: `Customer` has NO address fields at all — only
-    `contact_email`, `phone` and `language`. Adding them is a model
-    change plus a form change plus a real product decision: is a
-    customer's address distinct from its buildings' addresses, or is
-    "the customer's city" just the city of its primary building? A
-    customer sits in many buildings (that is why Sprint 153 deleted the
-    Building column), so the second reading has no single answer either.
-    Not built; awaiting the owner.
-
-25. **`User` has no phone field, so the Users and Employees lists cannot
-    show one.** (Found in the Sprint 153 recon.) Only `StaffProfile
-    .phone` (staff only) and `Contact.phone` (a phone-book row, not a
-    login) exist. A non-staff user — a COMPANY_ADMIN, a
-    BUILDING_MANAGER, a customer user — has no phone anywhere in the
-    system. Shape if taken up: additive `User.phone` + migration + form
-    field + list column, and a decision about whether `StaffProfile
-    .phone` then becomes redundant or stays as the work number. Queued
-    for the polish round.
-    ***CLOSED by Sprint 154 §I.1/§K.*** `User.phone` shipped (additive,
-    `accounts.0009`), with columns on the Users / Employees /
-    Customer-users lists and an input on the user form. The decision on
-    `StaffProfile.phone` was made and is NOT "redundant": it STAYS, as a
-    genuinely different field. It is staff-only and its visibility is
-    governed by `Customer.show_assigned_staff_phone` / the
-    CustomerCompanyPolicy mirror, and `ProviderEmployeeSerializer`
-    carries an explicit privacy floor forbidding it on the BM/CA read
-    surface. The two are not merged and not mirrored into each other;
-    every read site picks one explicitly.
-
-26. **Five copies of the terminal-ticket-status set.** (Found in the
-    Sprint 153 recon while wiring `open_ticket_count`.) The same four
-    statuses (`APPROVED`, `REJECTED`, `CLOSED`,
-    `CONVERTED_TO_EXTRA_WORK`) are declared independently in
-    `tickets/models.py` (`TERMINAL_TICKET_STATUSES`, the exported one),
-    `tickets/views.py` (`_SCHEDULE_TERMINAL_STATUSES`),
-    `tickets/filters.py` (`_AGENDA_TERMINAL_STATUSES`),
-    `tickets/views_manager_assignments.py` (`_TERMINAL_STATUSES`) and
-    `sla/services.py` (`TERMINAL_STATUSES`). **All five currently
-    agree**, and each carries a comment saying it mirrors one of the
-    others — which is precisely the Sprint 126 headerless-column shape:
-    a second independently-maintained copy that the compiler cannot
-    check. Sprint 153 imported the exported one rather than adding a
-    sixth. The fix is to collapse the other four onto
-    `tickets.models.TERMINAL_TICKET_STATUSES`, checking each call site's
-    intent first — `sla/services.py` additionally defines
-    `PAUSED_STATUS` and may genuinely mean something narrower.
-    *(Sprint 154's `buildings/views_summary.py` imported the exported
-    `tickets.models.TERMINAL_TICKET_STATUSES` rather than adding a
-    seventh copy. Still five.)*
-
-27. **This system has no ROOM concept, and §I.6 asked for a room
-    count.** (Found in the Sprint 154 recon.) There is no `Room` model,
-    no rooms app, and no field subdividing a `Building` — it is an
-    indivisible location everywhere: tickets, extra work, planned work
-    and staff visibility all anchor on `building_id` with nothing below
-    it. `GET /api/buildings/<id>/summary/` returns `room_count: null`
-    unconditionally so the contract is stable and the UI renders an em
-    dash rather than a misleading `0`. If the owner wants rooms it is a
-    new model, a migration, and a product decision about what a room
-    means for ticketing and for staff visibility — not something to
-    infer from a stat tile.
-
-28. **Two i18n bundles, one namespace default, and no check that
-    catches the gap.** (Found by MEASURING in Sprint 154 §N.2.) The
-    §P i18n gate compares `nl/common.json` against `en/common.json`
-    only. That is a lockstep check BETWEEN LANGUAGES; it says nothing
-    about whether a key is in the bundle the calling page actually
-    reads. `ExtraWorkListPage` defaults to the `extra_work` namespace,
-    `list.filter_catalog_category` lived only in `common.json`, and the
-    raw key rendered on screen for at least a sprint while the gate
-    stayed green. Fix shape: a check that every `t("...")` literal in a
-    page resolves in one of the namespaces that page passes to
-    `useTranslation`. Cheap to write, and it closes a class of bug the
-    current gate is structurally blind to. Note the other seven bundles
-    (`extra_work`, `dashboard`, `tickets`, ...) are not lockstep-checked
-    between languages at all either.
-
-29. **The two sortable-header components are duplicated verbatim.**
-    (Sprint 154 §E.) `CustomersAdminPage` and `BuildingsAdminPage` each
-    define an identical `SortableHeader` plus the same
-    `sortStateFor` / `handleSort` trio. They were kept separate because
-    their `SortField` unions are page-specific and TypeScript checks
-    each against its own endpoint's `ordering_fields`; a shared generic
-    would either lose that or need a type parameter threaded through
-    every call site. Worth extracting when a THIRD list needs sorting —
-    two copies is a coincidence, three is a pattern, and the Sprint 126
-    lesson applies from there on.
-
-30. **A COMPANY_ADMIN in more than one provider company gets an
-    unfiltered candidate list on the building detail Add pickers.**
-    (Sprint 154 §G.2.) `listAllUsersByRole` fetches every
-    BUILDING_MANAGER / STAFF the caller may administer, which for a
-    multi-company CA spans all their companies. The bulk-link endpoint
-    still refuses anything out of scope, so nothing unsafe can be
-    created — but the picker offers names from a company that has
-    nothing to do with the building being edited. Fix shape: pass the
-    building's `company` to the candidate fetch. Same family as NEXT
-    item 0.
-
----
 
 ## SHIPPED
 
