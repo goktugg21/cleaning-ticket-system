@@ -230,7 +230,21 @@ class CustomerSerializer(serializers.ModelSerializer):
             "phone",
             "language",
             "logo_url",
+            # Sprint 185 §1 — the BILLING address. Writable: an operator
+            # fills it in on the customer page, which is the whole point.
+            "address",
+            "postal_code",
+            "city",
+            "country",
+            # Derived, read-only: "is there enough here to put on an
+            # invoice". One definition (`Customer.has_billing_address`)
+            # so the screen's warning and the send-time guard cannot
+            # disagree about what counts as an address.
+            "has_billing_address",
             "is_active",
+            # Sprint 185 §3 — DESCRIPTIVE only. `is_active` above still
+            # decides access; this decides what the screens say.
+            "lifecycle",
             # Sprint 23B — assigned-staff contact-visibility policy.
             # The CustomerViewSet permission gate is already
             # IsSuperAdminOrCompanyAdmin for write operations, so
@@ -272,6 +286,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             "contact_count",
             "logo_url",
             "contract_pdf_url",
+            "has_billing_address",
             "is_active",
             "actions",
             "created_at",

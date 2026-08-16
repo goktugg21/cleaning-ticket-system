@@ -33,6 +33,16 @@ class NotificationEventType(models.TextChoices):
         "INVOICE_RUN_COMPLETED",
         "Invoice run completed",
     )
+    # Sprint 185 §2 — an invoice was SENT and the document went out.
+    #
+    # Distinct from INVOICE_RUN_COMPLETED above, which says drafts were
+    # created and goes to the operator. This one carries the PDF and goes
+    # to the debtor's people, so "did they get it" is answered by its own
+    # log rows rather than inferred from a run notification.
+    #
+    # Like its sibling, deliberately NOT user-mutable: a recipient who
+    # muted this would stop receiving invoices and nobody would know.
+    INVOICE_SENT = ("INVOICE_SENT", "Invoice sent")
 
 
 class NotificationStatus(models.TextChoices):

@@ -145,6 +145,43 @@ class _InvoicePDF(FPDF):
         self.set_text_color(0, 0, 0)
 
 
+def _address_lines(customer) -> list[tuple[str, str]]:
+    """Sprint 185 §1 — the customer's billing address, as printable rows.
+
+    Dutch convention: street on one line, then "1234 AB City", then the
+    country only when one is recorded (a domestic invoice does not carry
+    "Nederland", and printing it would make every normal invoice look
+    like an export).
+
+    Returns an empty list when there is nothing to print, so the caller
+    renders NOTHING rather than an empty labelled row — which is what a
+    reader would take for a broken template.
+
+    A list of (label, value) rather than a formatted block because the
+    header and the summary page draw their rows differently, and one
+    formatter that returned pre-joined text would force one of them to
+    take the other's layout.
+    """
+    if customer is None:
+        return []
+    street = (getattr(customer, "address", "") or "").strip()
+    postal = (getattr(customer, "postal_code", "") or "").strip()
+    city = (getattr(customer, "city", "") or "").strip()
+    country = (getattr(customer, "country", "") or "").strip()
+
+    rows: list[tuple[str, str]] = []
+    if street:
+        rows.append(("Adres:", street))
+    locality = " ".join(part for part in (postal, city) if part)
+    if locality:
+        # Labelled only when it is the FIRST line, so a two-line address
+        # reads as an address block rather than as two unrelated facts.
+        rows.append(("" if rows else "Adres:", locality))
+    if country:
+        rows.append(("" if rows else "Adres:", country))
+    return rows
+
+
 def _draw_header(
     pdf, *, company, brand_accent, company_name, doc_title, number_text, status_text
 ):
@@ -294,6 +331,27 @@ def _render(invoice: Invoice) -> tuple[bytes, int]:
         "Klant:", customer_name,
         "Verzonden:", _fmt_date(invoice.sent_at.date() if invoice.sent_at else None),
     )
+    # Sprint 185 §1 — the BILLING ADDRESS, directly under the customer it
+    # belongs to. The owner's decision: an invoice always carries the
+    # CUSTOMER's address, whether the invoice is addressed to the
+    # building or to the customer, because a building's address is the
+    # WORK SITE and not the billing address.
+    #
+    # Rows print only when they hold something. A blank "Adres:" line
+    # reads as a rendering fault; an absent address should simply be
+    # absent.
+    #
+    # NOTE — the refuse-at-SEND guard the sprint asked for is NOT here and
+    # is not anywhere yet. It belongs in `invoicing/state_machine.py`,
+    # which another agent owns this round, so this branch supplies the
+    # predicate (`Customer.has_billing_address`) and the screen warning
+    # but cannot install the block itself. See the sprint report.
+    for label, value in _address_lines(invoice.customer):
+        pdf.set_font(FONT_FAMILY, "B", 10)
+        pdf.cell(28, 6, _safe_pdf_text(label))
+        pdf.set_font(FONT_FAMILY, "", 10)
+        pdf.cell(0, 6, _safe_pdf_text(value), new_x="LMARGIN", new_y="NEXT")
+
     _kv_row(
         "Gebouw:", building_name or "Alle gebouwen",
         "Periode:", period_text,
@@ -415,6 +473,23 @@ def _render(invoice: Invoice) -> tuple[bytes, int]:
     # the pagination and the repeated headers; the branded header stays here
     # and is handed in as a callable so the annex never imports back into
     # this module.
+    # Sprint 185 §1 — the addressee, repeated on every annex page.
+    #
+    # Before this, page 3 of a specification carried the PROVIDER's brand
+    # and the invoice number and nothing at all about who it was billed
+    # to. A page that detaches from its bundle — and in an accounts
+    # department they do — could not be put back on the right pile. One
+    # compact line fixes that: the customer, and the locality of the
+    # address the invoice is addressed to.
+    #
+    # Deliberately one line, not the full block. The full address belongs
+    # once, on the summary page, where the document is addressed; repeating
+    # four lines on every page would turn a header into a letterhead.
+    addressee_rows = _address_lines(invoice.customer)
+    addressee_locality = next(
+        (value for label, value in addressee_rows if label == ""), ""
+    ) or (addressee_rows[0][1] if addressee_rows else "")
+
     def _annex_page_header(target_pdf, subtitle: str) -> None:
         _draw_header(
             target_pdf,
@@ -425,6 +500,16 @@ def _render(invoice: Invoice) -> tuple[bytes, int]:
             number_text=number_text,
             status_text=status_text,
         )
+        target_pdf.set_font(FONT_FAMILY, "", 9)
+        target_pdf.set_text_color(90, 90, 90)
+        line = customer_name
+        if addressee_locality:
+            line = f"{line} — {addressee_locality}"
+        target_pdf.cell(
+            0, 5, _safe_pdf_text(line), new_x="LMARGIN", new_y="NEXT"
+        )
+        target_pdf.set_text_color(0, 0, 0)
+        target_pdf.ln(1)
 
     draw_annex(
         pdf,

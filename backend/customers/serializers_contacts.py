@@ -71,6 +71,12 @@ class ContactSerializer(serializers.ModelSerializer):
             "role_label",
             "notes",
             "contact_type",
+            # Sprint 185 §2 — send this person the invoice. Writable, and
+            # deliberately separate from `contact_type == BILLING` above:
+            # that says what the person DOES, this says what they RECEIVE,
+            # and a customer can have three billing contacts of whom one
+            # gets the document.
+            "receives_invoices",
             "is_primary",
             "user",
             "building_ids",

@@ -22,6 +22,7 @@ import type {
   ContactUpdatePayload,
   CustomerAccessRole,
   CustomerAdmin,
+  CustomerLifecycle,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
   CustomerCustomPrice,
@@ -110,6 +111,10 @@ export interface AdminListParams {
   // list to users with >=1 CustomerUserBuildingAccess row of that role.
   // cleanParams() passes it through to ?access_role=.
   access_role?: string;
+  // Sprint 185 §3 — narrow the customer list to one relationship state.
+  // A SEPARATE axis from `is_active` above: filtering by one must never
+  // imply the other, they answer different questions.
+  lifecycle?: string;
   // Sprint 153 — DRF OrderingFilter field, "-" prefixed for descending.
   // The endpoint's `ordering_fields` allowlist decides what is honoured;
   // an unlisted field is ignored, not an error.
@@ -426,6 +431,16 @@ export interface CustomerWritePayload {
   contact_email?: string;
   phone?: string;
   language?: string;
+  // Sprint 185 §1 — the billing address that lands on the invoice PDF.
+  // Empty strings clear a field; `has_billing_address` is read-only and
+  // is deliberately absent here.
+  address?: string;
+  postal_code?: string;
+  city?: string;
+  country?: string;
+  // Sprint 185 §3 — the relationship state. Descriptive only; it does
+  // NOT gate access, `is_active` still does.
+  lifecycle?: CustomerLifecycle;
   // Sprint 23B — assigned-staff contact-visibility flags. The
   // backend serializer accepts these on PATCH; the CustomerViewSet
   // permission gate is IsSuperAdminOrCompanyAdmin, so only
