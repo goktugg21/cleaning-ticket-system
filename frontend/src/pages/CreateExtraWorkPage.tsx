@@ -52,6 +52,7 @@ import type {
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { formatMoney, formatNumber } from "../lib/intl";
+import { customerLabelName } from "../lib/customerLabelName";
 
 
 interface ParentFormState {
@@ -1748,7 +1749,7 @@ export function CreateExtraWorkPage({
                   <option value="">{t("create.field_department_none")}</option>
                   {currentDepartments.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {d.name}
+                      {customerLabelName(d.name, t)}
                     </option>
                   ))}
                 </select>
@@ -1773,7 +1774,7 @@ export function CreateExtraWorkPage({
                   <option value="">{t("create.field_work_type_none")}</option>
                   {currentWorkTypes.map((w) => (
                     <option key={w.id} value={w.id}>
-                      {w.name}
+                      {customerLabelName(w.name, t)}
                     </option>
                   ))}
                 </select>

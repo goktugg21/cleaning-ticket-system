@@ -747,7 +747,7 @@ function LabelsCard({
                   <option value="">{t("detail.labels_none")}</option>
                   {deptOptions.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {d.name}
+                      {customerLabelName(d.name, t)}
                     </option>
                   ))}
                 </select>
@@ -765,7 +765,7 @@ function LabelsCard({
                   <option value="">{t("detail.labels_none")}</option>
                   {wtOptions.map((w) => (
                     <option key={w.id} value={w.id}>
-                      {w.name}
+                      {customerLabelName(w.name, t)}
                     </option>
                   ))}
                 </select>

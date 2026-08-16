@@ -65,6 +65,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
+import { customerLabelName } from "../lib/customerLabelName";
 
 const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   DEEP_CLEANING: "category.deep_cleaning",
@@ -1325,7 +1326,7 @@ export function ExtraWorkList({
                 <option value="">{t("list.filter_all_departments")}</option>
                 {scopedDepartments.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.name}
+                    {customerLabelName(d.name, t)}
                   </option>
                 ))}
               </select>
@@ -1349,7 +1350,7 @@ export function ExtraWorkList({
                 <option value="">{t("list.filter_all_work_types")}</option>
                 {scopedWorkTypes.map((w) => (
                   <option key={w.id} value={w.id}>
-                    {w.name}
+                    {customerLabelName(w.name, t)}
                   </option>
                 ))}
               </select>

@@ -51,6 +51,7 @@ import type {
 } from "../../api/types";
 import { useToast } from "../../components/ToastProvider";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { customerLabelName } from "../../lib/customerLabelName";
 
 const FREQUENCIES: RecurringJobFrequency[] = ["WEEKLY", "BIWEEKLY", "MONTHLY"];
 const PRICING_MODES: SelectablePricingMode[] = ["CONTRACT_INCLUDED", "FIXED"];
@@ -686,7 +687,7 @@ export function RecurringJobFormPage() {
                   <option value="">{t("form.field_label_none")}</option>
                   {currentDepartments.map((d) => (
                     <option key={d.id} value={String(d.id)}>
-                      {d.name}
+                      {customerLabelName(d.name, t)}
                     </option>
                   ))}
                 </select>
@@ -712,7 +713,7 @@ export function RecurringJobFormPage() {
                   <option value="">{t("form.field_label_none")}</option>
                   {currentWorkTypes.map((w) => (
                     <option key={w.id} value={String(w.id)}>
-                      {w.name}
+                      {customerLabelName(w.name, t)}
                     </option>
                   ))}
                 </select>
