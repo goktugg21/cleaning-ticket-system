@@ -763,7 +763,15 @@ export function ProposalBuilder({
   }
 
   const removeLine = (lineId: number) =>
-    void run(() => deleteProposalLine(ewId, proposal.id, lineId));
+    void run(async () => {
+      await deleteProposalLine(ewId, proposal.id, lineId);
+      // Sprint 187C — Remove stays rendered on every row INCLUDING the
+      // one being edited, so deleting that row left `editingLineId`
+      // pointing at a line that no longer exists: the edit block's
+      // find() returns undefined and renders nothing, so the composer
+      // vanishes with no way back except reloading the page.
+      setEditingLineId((current) => (current === lineId ? null : current));
+    });
   const addLine = (payload: ProposalLineWritePayload) =>
     void run(async () => {
       await createProposalLine(ewId, proposal.id, payload);
@@ -1213,10 +1221,12 @@ export function ProposalBuilder({
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
                   placeholder={t(
-                    "detail.proposal_override_reason_placeholder",
+                    "detail.proposal_withdraw_reason_placeholder",
                   )}
                   rows={3}
-                  aria-label={t("detail.proposal_override_reason_placeholder")}
+                  aria-label={t(
+                    "detail.proposal_withdraw_reason_placeholder",
+                  )}
                 />
               )}
             </>
