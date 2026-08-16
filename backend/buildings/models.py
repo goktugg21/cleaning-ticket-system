@@ -306,3 +306,106 @@ class BuildingStaffVisibility(models.Model):
 
     def __str__(self):
         return f"{self.user} 👁 {self.building}"
+
+
+class BuildingCostShare(models.Model):
+    """
+    Sprint 185 E §2 — WHO OWES WHAT on a building several customers share.
+
+    A building with several tenants is the ordinary case in this
+    business, and until now the customer-to-building link table held
+    three columns — customer, building, created-at — with no weight
+    anywhere in the system. The arithmetic lived in somebody's head, and
+    the invoice it produced could not be checked against anything.
+
+    The owner's decision, and it is the reason this is not a report: the
+    percentages ACTUALLY SPLIT THE INVOICE. Work on a shared building is
+    billed to each customer in its share.
+
+    ## Why the shares live here and not on `CustomerBuildingMembership`
+
+    A share is a property OF THE BUILDING — "how is this building's cost
+    divided" — and it is meaningless one row at a time: a single share
+    is only correct in the context of the other shares that make it up
+    to 100. The membership row answers a different question ("does this
+    customer operate here"), it is written by a different screen, and it
+    is legitimately created and removed without anyone thinking about
+    money. Hanging a money weight off it would mean every membership
+    edit silently became a billing edit.
+
+    ## The invariant, and where it is enforced
+
+    **The shares of a building sum to exactly 100.** That cannot be
+    expressed as a database constraint — it is a condition over a SET of
+    rows, and no `CheckConstraint` spans rows — so it is enforced at the
+    write path, which is a whole-set replace (`PUT
+    /api/buildings/<id>/cost-shares/`). One row at a time could never be
+    valid: going from two shares to three has to pass through a state
+    that does not sum to 100, so a per-row endpoint would have to accept
+    invalid states and hope somebody finished the job.
+
+    **A building with NO shares behaves exactly as it always has.** That
+    is the safety property this whole item rests on: absence means "not
+    shared", never "shared 0%", so not one existing invoice changes.
+
+    `customer` is PROTECT: a customer that still holds a share of a
+    building cannot be hard-deleted, because removing it would leave the
+    remaining shares summing to less than 100 — every other tenant's
+    bill would silently change. Clearing the share first is a deliberate
+    act, and it is the one that should be recorded.
+
+    `building` is CASCADE: the shares describe the building and have no
+    meaning without it.
+    """
+
+    building = models.ForeignKey(
+        Building,
+        on_delete=models.CASCADE,
+        related_name="cost_shares",
+        help_text="The shared building whose cost this row divides.",
+    )
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.PROTECT,
+        related_name="building_cost_shares",
+        help_text=(
+            "The customer carrying this share. PROTECT: removing a "
+            "share-holder would silently change every other tenant's "
+            "bill, so the share must be cleared deliberately first."
+        ),
+    )
+    share_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        help_text=(
+            "This customer's percentage of the building's cost, 0.01 to "
+            "100.00. The shares of one building sum to exactly 100, "
+            "enforced at the write path (a sum is a condition over rows, "
+            "which no database constraint can express)."
+        ),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-share_pct", "customer_id"]
+        verbose_name = "building cost share"
+        verbose_name_plural = "building cost shares"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["building", "customer"],
+                name="uniq_cost_share_per_building_customer",
+            ),
+            # A single share is a percentage. The SUM is the write path's
+            # job; this is the part a constraint can hold, and it stops a
+            # negative or absurd row reaching the allocator.
+            models.CheckConstraint(
+                condition=models.Q(share_pct__gt=0)
+                & models.Q(share_pct__lte=100),
+                name="cost_share_pct_between_0_and_100",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.customer} {self.share_pct}% of {self.building}"

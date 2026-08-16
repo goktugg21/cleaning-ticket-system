@@ -200,11 +200,33 @@ export type SLAStatus =
 
 export type SLADisplayState = SLAStatus | "PAUSED";
 
+/** Sprint 185 E §1 — one row of the per-company work-category catalog
+ *  (`GET /api/tickets/categories/`). The `CatalogTab` shape, shared with
+ *  building types, hour types, work types, contract types and managed
+ *  units. */
+export interface WorkCategory {
+  id: number;
+  company: number;
+  company_name: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+  usage_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TicketList {
   id: number;
   ticket_no: string;
   title: string;
   type: string;
+  /** Sprint 185 E §1 — the kind of WORK, from the company's own
+   *  catalog. `type` above says what kind of MESSAGE it is; the two
+   *  answer different questions and a melding carries both. Null until
+   *  somebody classifies it, which is a real and common state. */
+  category: number | null;
+  category_name: string | null;
   priority: string;
   status: TicketStatus;
   company: number;

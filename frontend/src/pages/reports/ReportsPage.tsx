@@ -7,6 +7,7 @@ import { HoursComparisonChart } from "./charts/HoursComparisonChart";
 import { WorkerHoursView } from "./WorkerHoursView";
 import {
   EmployeeHoursByBuildingView,
+  MeldingenByCategoryView,
   EmployeeHoursByExtraWorkView,
   EmployeeHoursWeeklyView,
   TicketReportView,
@@ -65,6 +66,13 @@ interface ReportCardSummaries {
     open: number;
     average_duration_days: number | null;
   };
+  // Sprint 185 E §1 — the monthly customer review's card.
+  meldingen_category: {
+    total: number;
+    uncategorised: number;
+    categories: number;
+    buildings: number;
+  };
 }
 
 interface SummariesResponse {
@@ -91,6 +99,12 @@ const PLACEHOLDER_SUMMARIES: ReportCardSummaries = {
   hours_weekly: { total_hours: "0", entries: 0, employees: 0, weeks: 0 },
   hours_extra_work: { total_hours: "0", entries: 0, employees: 0, jobs: 0 },
   tickets: { total: 0, finished: 0, open: 0, average_duration_days: null },
+  meldingen_category: {
+    total: 0,
+    uncategorised: 0,
+    categories: 0,
+    buildings: 0,
+  },
 };
 
 /**
@@ -112,6 +126,40 @@ const PLACEHOLDER_SUMMARIES: ReportCardSummaries = {
  * generic here would buy nothing and cost the exhaustiveness.
  */
 const REPORT_CARDS = [
+  {
+    // Sprint 185 E §1 — the monthly customer review, first because it is
+    // the question the review actually opens with.
+    key: "meldingen_category" as const,
+    testId: "meldingen-category",
+    titleKey: "meldingen_category_title",
+    subtitleKey: "meldingen_category_subtitle",
+    View: MeldingenByCategoryView,
+    emptyKey: "meldingen_category_empty",
+    isEmpty: (cards: ReportCardSummaries) =>
+      cards.meldingen_category.total === 0,
+    tiles: (cards: ReportCardSummaries): CardTile[] => [
+      {
+        key: "meldingen",
+        labelKey: "tile_meldingen",
+        value: String(cards.meldingen_category.total),
+      },
+      {
+        key: "categories",
+        labelKey: "tile_categories",
+        value: String(cards.meldingen_category.categories),
+      },
+      {
+        key: "buildings",
+        labelKey: "tile_buildings",
+        value: String(cards.meldingen_category.buildings),
+      },
+      {
+        key: "uncategorised",
+        labelKey: "tile_uncategorised",
+        value: String(cards.meldingen_category.uncategorised),
+      },
+    ],
+  },
   {
     key: "hours_building" as const,
     testId: "employee-hours-building",
@@ -195,7 +243,13 @@ export function ReportsPage() {
    *  which is open, rather than four booleans: two cannot be open at
    *  once, and four booleans is four chances for them to be. */
   const [openReport, setOpenReport] = useState<
-    null | "hours_building" | "hours_weekly" | "hours_extra_work" | "tickets"
+    | null
+    | "hours_building"
+    | "hours_weekly"
+    | "hours_extra_work"
+    | "tickets"
+    // Sprint 185 E §1 — the fifth report.
+    | "meldingen_category"
   >(null);
   const { me } = useAuth();
   const { t } = useTranslation(["reports", "common"]);

@@ -1371,3 +1371,69 @@ def build_ticket_report_pdf(payload: dict) -> bytes:
         ],
     )
     return _pdf_bytes(pdf)
+
+
+# Sprint 185 E §1 — meldingen per category per building.
+#
+# The CSV is FLAT — one row per (building, category) pair — while the
+# JSON is nested. A spreadsheet is opened to be sorted and pivoted, and
+# a nested shape flattened by hand is the first thing anyone does to it;
+# the PDF keeps the nesting because it is read top to bottom.
+MELDINGEN_BY_CATEGORY_CSV_COLUMNS = (
+    "building_name",
+    "category_name",
+    "count",
+)
+
+
+def build_meldingen_by_category_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(MELDINGEN_BY_CATEGORY_CSV_COLUMNS)
+    for bucket in payload["buildings"]:
+        for row in bucket["categories"]:
+            writer.writerow(
+                {
+                    # The dash is chosen HERE rather than server-side in
+                    # the payload: the JSON keeps `None` so each client
+                    # picks its own word, and this is that choice for the
+                    # spreadsheet.
+                    "building_name": bucket["building_name"] or "--",
+                    "category_name": row["category_name"] or "--",
+                    "count": row["count"],
+                }
+            )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_meldingen_by_category_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Meldingen by category", payload)
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0,
+        6,
+        f"Meldingen: {payload['total']} -- "
+        f"uncategorised: {payload['uncategorised']}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+    for bucket in payload["buildings"]:
+        pdf.set_font(FONT_FAMILY, "B", 9)
+        pdf.cell(
+            0,
+            6,
+            f"{bucket['building_name'] or '--'} -- {bucket['total']}",
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+        pdf.set_font(FONT_FAMILY, "", 8)
+        _draw_table(
+            pdf,
+            ["Category", "Meldingen"],
+            [120, 30],
+            [
+                [row["category_name"] or "--", str(row["count"])]
+                for row in bucket["categories"]
+            ],
+        )
+        pdf.ln(2)
+    return _pdf_bytes(pdf)

@@ -213,7 +213,12 @@ def render_preview_pdf(
         for ew in plan.extra_works:
             from .services import _earned_amounts
 
-            _sub, _vat, total = _earned_amounts(ew)
+            # Sprint 185 E §2 — the customer's PART on a shared building,
+            # the whole earned amount everywhere else. Same map the JSON
+            # preview reads, so the document and the screen agree.
+            _sub, _vat, total = (getattr(plan, "amounts", {}) or {}).get(
+                ew.id
+            ) or _earned_amounts(ew)
             pdf.cell(140, 5, _safe(ew.title)[:70])
             pdf.cell(
                 0,

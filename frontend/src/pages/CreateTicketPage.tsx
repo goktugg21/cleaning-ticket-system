@@ -15,7 +15,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { listAllBuildings, listAllCustomers } from "../api/admin";
 import { api, getApiError } from "../api/client";
-import type { Building, Customer } from "../api/types";
+import type { Building, Customer, WorkCategory } from "../api/types";
+import { listWorkCategories } from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
 import { isCustomerUser } from "../auth/permissions";
 
@@ -33,6 +34,10 @@ interface CreateTicketForm {
    *  into `ExtraWorkRequest.preferred_date` if this melding is later
    *  converted, so a date somebody typed does not vanish. */
   customer_wanted_date: string;
+  /** Sprint 185 E §1 — the kind of WORK, from the company's own catalog.
+   *  A string because it is a `<select>` value; "" means "not yet
+   *  classified", which is a legitimate answer at intake. */
+  category: string;
 }
 
 type TicketTypeValue =
@@ -101,6 +106,7 @@ const EMPTY_FORM: CreateTicketForm = {
   building: "",
   customer: "",
   customer_wanted_date: "",
+  category: "",
 };
 
 // Mirrors the backend per-file cap in
@@ -131,6 +137,10 @@ export function CreateTicketPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState<CreateTicketForm>(EMPTY_FORM);
+  /** Sprint 185 E §1 — the company's kinds of work, for the picker.
+   *  Only the ACTIVE ones: an archived category stays on the meldingen
+   *  that carry it and is not offerable for new ones. */
+  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
   const [stagedAttachments, setStagedAttachments] = useState<File[]>([]);
   // Set only when the ticket was created but one or more attachments
   // failed to upload. The ticket is never rolled back, so we hold the id
@@ -234,6 +244,24 @@ export function CreateTicketPage() {
     }
   }, [form.building, form.customer, customers]);
 
+  // Sprint 185 E §1 — the pickable categories, loaded once for provider
+  // operators. Non-fatal: a catalog that would not load must never stop
+  // somebody opening a melding.
+  useEffect(() => {
+    if (isCustomer) return;
+    let cancelled = false;
+    listWorkCategories({ is_active: "true" })
+      .then((rows) => {
+        if (!cancelled) setWorkCategories(rows);
+      })
+      .catch(() => {
+        /* non-fatal: the melding can be opened uncategorised */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCustomer]);
+
   useEffect(() => {
     if (!form.customer) return;
     // Defensive only: reset the customer if it is no longer in the LOADED list
@@ -318,6 +346,10 @@ export function CreateTicketPage() {
         // distinguishable from a date they chose — so it is sent as
         // null rather than "".
         customer_wanted_date: form.customer_wanted_date || null,
+        // Sprint 185 E §1 — omitted entirely when unset: the serializer
+        // treats absence as "no category", and sending null would be the
+        // same thing said less clearly.
+        ...(form.category ? { category: Number(form.category) } : {}),
       });
 
       const newId = response.data.id;
@@ -468,6 +500,41 @@ export function CreateTicketPage() {
                     {TICKET_TYPE_VALUES.map((value) => (
                       <option key={value} value={value}>
                         {t(TICKET_TYPE_KEYS[value])}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {/* Sprint 185 E §1 — WHAT KIND OF WORK, beside the field
+                  above it that says what kind of MESSAGE this is. Two
+                  classifications, two questions; the label above reads
+                  "category" and holds the message type, which is exactly
+                  the confusion this catalog exists to end.
+
+                  Provider-side only: a customer describing the problem
+                  should not have to know which trade it belongs to, and
+                  the category feeds a provider-side report. Optional
+                  everywhere — a melding often arrives before anyone
+                  knows the trade, and forcing a guess at intake would
+                  fill the report with noise. */}
+              {!isCustomer && workCategories.length > 0 && (
+                <div className="field">
+                  <label className="field-label" htmlFor="f-category">
+                    {t("common:work_categories.field_label")}
+                  </label>
+                  <select
+                    id="f-category"
+                    className="field-select"
+                    value={form.category}
+                    onChange={(event) => update("category", event.target.value)}
+                    data-testid="create-ticket-category"
+                  >
+                    <option value="">
+                      {t("common:work_categories.none")}
+                    </option>
+                    {workCategories.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.name}
                       </option>
                     ))}
                   </select>

@@ -30,6 +30,7 @@ from .models import (
     TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
+    WorkCategory,
 )
 from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
@@ -349,6 +350,12 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
 
 class TicketListSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
+    # Sprint 185 E §1 — the KIND OF WORK, beside `type`'s kind of
+    # message. `default=None` because the FK is nullable and traversing
+    # `category.name` on an untagged melding must render, not raise.
+    category_name = serializers.CharField(
+        source="category.name", read_only=True, default=None
+    )
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
@@ -375,6 +382,8 @@ class TicketListSerializer(serializers.ModelSerializer):
             "ticket_no",
             "title",
             "type",
+            "category",
+            "category_name",
             "priority",
             "status",
             "company",
@@ -485,6 +494,27 @@ class SubTaskWriteSerializer(serializers.ModelSerializer):
         fields = ["title", "description", "ordering"]
 
 
+class TicketCategorySerializer(serializers.Serializer):
+    """Sprint 185 E §1 — input for the set-category action.
+
+    A nullable primary key: `null` CLEARS the category, which is a real
+    edit ("this was tagged wrong") and not a no-op. `allow_null` plus
+    `required` says exactly that — a caller must state which of the two
+    they mean rather than have an omitted key silently clear the field.
+
+    The queryset is deliberately unscoped HERE and checked against the
+    ticket's own company in the view: this serializer has no ticket, and
+    a `PrimaryKeyRelatedField` over a queryset scoped by the ACTOR would
+    answer "this id exists but is not yours" differently from "this id
+    does not exist" — the existence oracle H-1 forbids.
+    """
+
+    category = serializers.PrimaryKeyRelatedField(
+        queryset=WorkCategory.objects.all(),
+        allow_null=True,
+    )
+
+
 class TicketAutoCompleteFlagSerializer(serializers.Serializer):
     """Sprint 4 — input for the dedicated PA/SA auto-complete-flag action.
     A required boolean; DRF parses "true"/"false"/true/false and 400s on a
@@ -495,6 +525,11 @@ class TicketAutoCompleteFlagSerializer(serializers.Serializer):
 
 class TicketDetailSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
+    # Sprint 185 E §1 — see `TicketListSerializer`: the kind of WORK,
+    # rendered beside the kind of MESSAGE. Nullable FK, so `default=None`.
+    category_name = serializers.CharField(
+        source="category.name", read_only=True, default=None
+    )
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     created_by_email = serializers.CharField(source="created_by.email", read_only=True)
@@ -555,6 +590,8 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "description",
             "room_label",
             "type",
+            "category",
+            "category_name",
             "priority",
             "status",
             "company",
@@ -1162,6 +1199,12 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             "description",
             "room_label",
             "type",
+            # Sprint 185 E §1 — the kind of WORK, offered at intake.
+            # Optional: a melding may arrive before anyone knows which
+            # trade it belongs to, and forcing a guess here would fill
+            # the category report with noise. Validated against the
+            # ticket's own company in `validate()` below.
+            "category",
             "priority",
             "building",
             "customer",
@@ -1191,6 +1234,18 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         ).exists():
             raise serializers.ValidationError(
                 {"customer": "Customer is not linked to the selected building."}
+            )
+
+        # Sprint 185 E §1 — a category belongs to ONE provider company,
+        # and the ticket's company is the building's. Naming another
+        # company's category would tag this melding with a row the
+        # actor cannot see and would put a foreign name into this
+        # tenant's category report, so it reads as nonexistent (H-1)
+        # rather than as a permission error.
+        category = attrs.get("category")
+        if category is not None and category.company_id != building.company_id:
+            raise serializers.ValidationError(
+                {"category": "Unknown work category."}
             )
 
         if not building.is_active:

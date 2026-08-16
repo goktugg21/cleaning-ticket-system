@@ -36,6 +36,7 @@ import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
+import { BuildingCostShareCard } from "./building/BuildingCostShareCard";
 import { BuildingRelationCard } from "./building/BuildingRelationCard";
 
 /**
@@ -491,6 +492,21 @@ export function BuildingDetailPage() {
               </div>
             </div>
           </section>
+
+          {/* Sprint 185 E §2 — who pays which share of this building.
+              Directly under the building's own details and above the
+              linked-people cards, because it is a property OF the
+              building and it decides money. The customers offered are
+              the ones linked below: the server accepts a share only for
+              a customer that operates here. */}
+          <BuildingCostShareCard
+            buildingId={building.id}
+            customers={customerLinks.map((link) => ({
+              id: link.customer,
+              name: link.customer_name || String(link.customer),
+            }))}
+            canEdit={canEdit}
+          />
 
           {/* Sprint 154 §G.2 — the four sets of linked people, each
               manageable from here. None of these models are new; this is

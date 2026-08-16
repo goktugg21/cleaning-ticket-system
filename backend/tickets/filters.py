@@ -223,6 +223,13 @@ class TicketFilter(df.FilterSet):
             "status": ["exact", "in"],
             "priority": ["exact", "in"],
             "type": ["exact", "in"],
+            # Sprint 185 E §1 — WHICH KIND OF WORK, and this is the whole
+            # point of the catalog: a taxonomy whose values do not reach
+            # the filters is a dropdown, not a taxonomy. `isnull` is
+            # offered beside `exact` so "not yet categorised" is a state
+            # an operator can list and work through, rather than a gap
+            # they can only find by reading every row.
+            "category": ["exact", "in", "isnull"],
             "company": ["exact"],
             "building": ["exact"],
             "assigned_to": ["exact", "isnull"],

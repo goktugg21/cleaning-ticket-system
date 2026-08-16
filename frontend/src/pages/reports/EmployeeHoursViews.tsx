@@ -357,3 +357,84 @@ export function TicketReportView({ filters }: ReportViewProps) {
     </PeriodReportView>
   );
 }
+
+interface MeldingenByCategoryPayload extends PeriodPayload {
+  buildings: {
+    building: number | null;
+    building_name: string | null;
+    total: number;
+    categories: {
+      category: number | null;
+      category_name: string | null;
+      count: number;
+    }[];
+  }[];
+  uncategorised: number;
+}
+
+/**
+ * Sprint 185 E §1 — "how many meldingen per category per building".
+ *
+ * The monthly customer review, which was unanswerable before this sprint
+ * because nothing in the system classified the WORK. Same shell as the
+ * three hours reports (period picker, CSV, PDF, empty state), same
+ * building-outside / rows-inside shape as `employee-hours-by-building`.
+ *
+ * An UNCATEGORISED bucket arrives with `category_name: null` and is
+ * rendered as a named row rather than dropped: the report's total has to
+ * equal the number of meldingen in the period, and "how much is still
+ * untagged" is the number that says whether the taxonomy is being used.
+ */
+export function MeldingenByCategoryView({ filters }: ReportViewProps) {
+  const { t } = useTranslation(["reports", "common"]);
+  return (
+    <PeriodReportView<MeldingenByCategoryPayload>
+      endpoint="/reports/meldingen-by-category/"
+      stem="meldingen-by-category"
+      emptyHint={t("meldingen_category_empty")}
+      testIdPrefix="meldingen-category"
+      filters={filters}
+    >
+      {(payload) => (
+        <div className="table-wrap">
+          {payload.buildings.map((bucket) => (
+            <div
+              key={bucket.building ?? "none"}
+              style={{ marginBottom: 16 }}
+            >
+              <div className="form-section-title report-group-title">
+                {bucket.building_name ?? t("no_building")} — {bucket.total}
+              </div>
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("common:work_categories.field_label")}</th>
+                    <th className="contract-num">{t("meldingen_count")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bucket.categories.map((row) => (
+                    <tr key={row.category ?? "none"}>
+                      <td>
+                        {row.category_name ?? (
+                          <span className="muted-empty">
+                            {t("meldingen_uncategorised")}
+                          </span>
+                        )}
+                      </td>
+                      <td className="contract-num">{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+          <p className="muted small report-grand-total">
+            {t("grand_total")}: {payload.total} — {t("meldingen_uncategorised")}
+            : {payload.uncategorised}
+          </p>
+        </div>
+      )}
+    </PeriodReportView>
+  );
+}
