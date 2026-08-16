@@ -28,6 +28,7 @@ What these tests pin, in order of how badly each would hurt if it broke:
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -60,6 +61,7 @@ from extra_work.models import (
     ServiceCategory,
 )
 from extra_work.proposal_state_machine import apply_proposal_transition
+from invoicing.models import Invoice, InvoiceLine
 
 
 User = get_user_model()
@@ -431,6 +433,139 @@ class QuotedTotalsBackfillCommandTests(_QuotedTotalsFixture):
         self._run()
         ew.refresh_from_db()
         self.assertEqual(ew.total_amount, Decimal("0.00"))
+
+    # ---- Sprint 187C — what an invoice does to this -------------------
+
+    def _invoice(self, ew, status):
+        """Put `ew` on an invoice in `status`, the way the invoicing
+        helpers build one: a header plus a line pointing back at the EW."""
+        invoice = Invoice.objects.create(
+            company=ew.company,
+            customer=ew.customer,
+            building=None,
+            status=status,
+            created_by=self.admin,
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice, ordering=0, description=ew.title, extra_work=ew
+        )
+        return invoice
+
+    def test_a_row_on_a_sent_invoice_is_skipped_and_named(self):
+        """A SENT invoice's amounts are immutable, so repairing the Extra
+        Work alone would leave the two disagreeing with nothing recording
+        it. The repo freezes an EW's LABELS at ISSUED for the same reason
+        (`extra_work/label_validation.py`); money deserves at least that."""
+        ew = self._stale_row()
+        self._invoice(ew, Invoice.Status.SENT)
+
+        output = self._run()
+
+        self.assertIn("SKIPPED", output)
+        self.assertIn(f"EW #{ew.id}", output)
+        self.assertIn("Wrote 0 row(s)", output)
+        ew.refresh_from_db()
+        self.assertEqual(ew.total_amount, Decimal("0.00"))
+
+    def test_an_issued_invoice_settles_a_row_just_as_a_sent_one_does(self):
+        ew = self._stale_row()
+        self._invoice(ew, Invoice.Status.ISSUED)
+
+        self._run()
+
+        ew.refresh_from_db()
+        self.assertEqual(ew.total_amount, Decimal("0.00"))
+
+    def test_include_invoiced_is_the_deliberate_escape_hatch(self):
+        ew = self._stale_row()
+        self._invoice(ew, Invoice.Status.SENT)
+
+        self._run("--include-invoiced")
+
+        ew.refresh_from_db()
+        self.assertEqual(ew.total_amount, Decimal("585.64"))
+
+    def test_a_row_on_a_draft_invoice_is_repaired_but_flagged(self):
+        """A draft IS the correction window, so the row is repaired — but
+        that draft was built from the old number and the operator has to
+        be told to regenerate it."""
+        ew = self._stale_row()
+        self._invoice(ew, Invoice.Status.DRAFT)
+
+        output = self._run()
+
+        self.assertIn("draft invoice", output)
+        self.assertIn("regenerate", output)
+        ew.refresh_from_db()
+        self.assertEqual(ew.total_amount, Decimal("585.64"))
+
+    # ---- Sprint 187C — the summary line has to be true ----------------
+
+    def test_the_written_count_counts_writes_and_not_candidates(self):
+        """`changed - len(failed)` mixed two populations: a COMPUTE
+        failure was appended to `failed` BEFORE `changed` was incremented,
+        then subtracted from it anyway. One good write beside one compute
+        failure printed 'Wrote 0' after having written a row — and the
+        owner reads that number to decide whether the run worked."""
+        good = self._stale_row()
+        bad = self._stale_row()
+        real = quoted_totals
+
+        def explode(ew):
+            if ew.id == bad.id:
+                raise RuntimeError("boom")
+            return real(ew)
+
+        with patch(
+            "extra_work.management.commands."
+            "backfill_quoted_totals.quoted_totals",
+            side_effect=explode,
+        ):
+            output = self._run()
+
+        self.assertIn("Wrote 1 row(s)", output)
+        self.assertIn(f"EW #{bad.id}: failed", output)
+        good.refresh_from_db()
+        self.assertEqual(good.total_amount, Decimal("585.64"))
+
+    def test_a_right_total_with_a_wrong_vat_split_is_still_repaired(self):
+        """Comparing only the total called this row 'already correct' and
+        left it broken. All three columns are the quote cache."""
+        ew = self._stale_row()
+        ew.subtotal_amount = Decimal("585.64")
+        ew.vat_amount = Decimal("0.00")
+        ew.total_amount = Decimal("585.64")
+        ew.save(
+            update_fields=[
+                "subtotal_amount",
+                "vat_amount",
+                "total_amount",
+            ]
+        )
+
+        self._run("--include-nonzero")
+
+        ew.refresh_from_db()
+        self.assertEqual(ew.subtotal_amount, Decimal("484.00"))
+        self.assertEqual(ew.vat_amount, Decimal("101.64"))
+        self.assertEqual(ew.total_amount, Decimal("585.64"))
+
+    def test_include_nonzero_never_writes_zero_over_a_real_total(self):
+        """`active_priced_lines` resolves to nothing when the latest
+        approved proposal has no spawn-approved lines. Under
+        --include-nonzero that would ERASE a real total rather than supply
+        a missing one, which is the opposite of this command's job."""
+        ew = self._stale_row()
+        ew.total_amount = Decimal("250.00")
+        ew.subtotal_amount = Decimal("250.00")
+        ew.save(update_fields=["total_amount", "subtotal_amount"])
+        ew.proposals.first().lines.update(is_approved_for_spawn=False)
+
+        output = self._run("--include-nonzero")
+
+        self.assertIn("REFUSED", output)
+        ew.refresh_from_db()
+        self.assertEqual(ew.total_amount, Decimal("250.00"))
 
 
 class QuotedTotalsReadEndpointTests(_QuotedTotalsFixture):

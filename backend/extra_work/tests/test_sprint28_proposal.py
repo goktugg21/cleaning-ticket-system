@@ -346,11 +346,18 @@ class ProposalSendAdvancesParentTests(ProposalFixtureMixin, TestCase):
 
         Sprint 187 §2a — this used to be reached through the CREATE
         endpoint: a proposal built on a REQUESTED parent, then a Send
-        that 400'd. That combination is no longer reachable (creating a
-        proposal now starts the review — see
-        `ProposalCreateAdvancesParentTests` below), so the proposal is
-        built directly in the ORM here. The state-machine guard is what
-        this test is about and it is unchanged; only the route to it is.
+        that 400'd. Creating a proposal now starts the review (see
+        `ProposalCreateAdvancesParentTests` below), so that ROUTE no
+        longer produces the combination, and the proposal is built
+        directly in the ORM here instead. The state-machine guard is what
+        this test is about and it is unchanged.
+
+        Sprint 187C — the original wording said the combination was "no
+        longer reachable" at all. That was too strong: the same commit
+        added the `_ParentAdvanceBlocked` arm, which deliberately creates
+        a proposal while LEAVING the parent at REQUESTED. The pairing is
+        still reachable in production by that arm — which is exactly why
+        this guard has to keep being tested rather than retired as dead.
         """
         ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
         proposal = Proposal.objects.create(
@@ -1079,6 +1086,25 @@ class ProposalCreateAdvancesParentTests(ProposalFixtureMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertTrue(response.data["actions"]["can_send"])
 
+    def test_can_send_is_true_on_the_201_body_itself(self):
+        """Sprint 187C — the test above is named for the create response
+        but asserts on a follow-up GET, so it could not see the bug it
+        was named for: `apply_transition` writes through its own locked
+        instance, and the caller's stale copy (cached on the proposal by
+        `Proposal.objects.create`) still said REQUESTED, making the 201
+        body answer can_send=False on the exact path §2a exists to open.
+
+        The page happens to refetch immediately and never showed it. The
+        payload is still a contract, so it is asserted here directly."""
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        response = self._api(self.admin).post(
+            self._proposals_url(ew.id),
+            {"lines": [self._line_payload()]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data["actions"]["can_send"])
+
     def test_create_response_reports_no_block_on_the_normal_path(self):
         ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
         response = self._api(self.admin).post(
@@ -1089,3 +1115,38 @@ class ProposalCreateAdvancesParentTests(ProposalFixtureMixin, TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIn("parent_advance_blocked", response.data)
         self.assertEqual(response.data["parent_advance_blocked"], "")
+
+    def test_a_blocked_parent_advance_still_creates_and_reports_why(self):
+        """Sprint 187C — the `_ParentAdvanceBlocked` arm had no test at
+        all: every assertion pinned the empty string on the happy path.
+
+        The arm catches any `TransitionError`, so it is driven here by
+        making the transition itself fail. What it must guarantee is the
+        pair: the proposal is STILL created (refusing it would take away
+        a capability the operator already had), and the reason is on the
+        response instead of the failure being swallowed."""
+        from extra_work.state_machine import TransitionError
+
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        # The helper imports `apply_transition` at call time, so patching
+        # it on its own module is what the running code will resolve.
+        with patch(
+            "extra_work.state_machine.apply_transition",
+            side_effect=TransitionError("Extra Work status changed."),
+        ):
+            response = self._api(self.admin).post(
+                self._proposals_url(ew.id),
+                {"lines": [self._line_payload()]},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIn(
+            "Extra Work status changed.",
+            response.data["parent_advance_blocked"],
+        )
+        ew.refresh_from_db()
+        self.assertEqual(ew.status, ExtraWorkStatus.REQUESTED)
+        self.assertEqual(
+            Proposal.objects.filter(extra_work_request=ew).count(), 1
+        )

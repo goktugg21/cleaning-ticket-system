@@ -23,12 +23,35 @@ SAFE TO RE-RUN. `recompute_quoted_totals` is a pure recomputation from
 the approved proposal's lines — running it twice writes the same numbers.
 
 DELIBERATELY NARROW. Only rows that have an approved proposal AND whose
-stored total is still zero are touched. A row someone has already priced
+stored quote cache is still zero are touched. A row someone has already priced
 by hand through the legacy surface is left exactly as it is: this command
 repairs an absence, it does not arbitrate between two present numbers. Use
 `--include-nonzero` to widen it to every approved-proposal row, which is
 the escape hatch for a total that is wrong rather than missing; the table
 then prints the old value beside the new one so a change is never silent.
+
+## Sprint 187C — what an invoice does to this
+
+An Extra Work that already sits on an invoice is NOT this command's to
+re-price unasked, and the repo already says so in a neighbouring case:
+`extra_work/label_validation.py` freezes an EW's department / work type
+once it is carried by an ISSUED invoice, and prescribes credit -> relabel
+-> re-invoice instead of an in-place edit. Money deserves at least that.
+
+The invoice's OWN amounts are never at risk — they are snapshotted into
+`InvoiceLine` when the draft is built and re-derive only from those lines,
+so nothing here can alter what a customer was billed. The risk is quieter:
+the Extra Work row would start displaying a number that disagrees with the
+invoice that billed it, with no record of who changed it.
+
+So rows are classified before anything is written:
+
+  * on an ISSUED or SENT invoice -> SETTLED. Skipped, listed, and only
+    reachable with the explicit `--include-invoiced`.
+  * on a DRAFT invoice only -> DRAFT. Repaired (a draft IS the correction
+    window) but flagged, because that draft was built from the old number
+    and should be regenerated afterwards.
+  * on no invoice -> repaired silently.
 """
 from __future__ import annotations
 
@@ -39,6 +62,7 @@ from django.db import transaction
 
 from extra_work.final_amounts import quoted_totals, recompute_quoted_totals
 from extra_work.models import ExtraWorkRequest, ProposalStatus
+from invoicing.models import Invoice
 
 
 class Command(BaseCommand):
@@ -73,11 +97,45 @@ class Command(BaseCommand):
                 "overwrite unasked."
             ),
         )
+        parser.add_argument(
+            "--include-invoiced",
+            action="store_true",
+            help=(
+                "Also repair rows already carried by an ISSUED or SENT "
+                "invoice. Off by default: the invoice's own amounts are "
+                "immutable, so repairing the Extra Work makes the two "
+                "disagree unless you are correcting the invoice too."
+            ),
+        )
+
+    @staticmethod
+    def _invoice_claim(ew) -> tuple[str, str]:
+        """How firmly an invoice has hold of `ew`.
+
+        Returns `("SETTLED", "<statuses>")` when any invoice carrying it
+        is ISSUED or SENT — past the point where an in-place correction
+        is honest — `("DRAFT", "draft")` when only drafts carry it, and
+        `("", "")` when nothing does.
+        """
+        statuses = {
+            line.invoice.status
+            for line in ew.invoice_lines.all()
+            if line.invoice_id is not None
+        }
+        settled = sorted(
+            statuses & {Invoice.Status.ISSUED, Invoice.Status.SENT}
+        )
+        if settled:
+            return "SETTLED", "/".join(settled)
+        if Invoice.Status.DRAFT in statuses:
+            return "DRAFT", "draft"
+        return "", ""
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
         company_id = options["company"]
         include_nonzero = options["include_nonzero"]
+        include_invoiced = options["include_invoiced"]
 
         qs = (
             ExtraWorkRequest.objects.filter(
@@ -86,6 +144,9 @@ class Command(BaseCommand):
             )
             .distinct()
             .order_by("id")
+            # One query for the invoice claim of every row, instead of
+            # two per row inside the loop below.
+            .prefetch_related("invoice_lines__invoice")
         )
         if company_id is not None:
             qs = qs.filter(company_id=company_id)
@@ -96,7 +157,7 @@ class Command(BaseCommand):
         self.stdout.write(
             f"\n{len(rows)} Extra Work row(s) with an approved proposal"
             + ("" if include_nonzero else " and a zero total")
-            + (f" in company {company_id}" if company_id else "")
+            + (f" in company {company_id}" if company_id is not None else "")
             + "."
         )
         if not rows:
@@ -106,34 +167,62 @@ class Command(BaseCommand):
             f"  {'EW':>6}  {'old total':>12}  {'new total':>12}  title"
         )
 
-        changed, unchanged, failed = 0, 0, []
+        would_change, wrote, unchanged = 0, 0, 0
+        skipped_invoiced, refused_zero, failed = [], [], []
+
         for ew in rows:
-            old_total = ew.total_amount
+            claim, claim_label = self._invoice_claim(ew)
+            if claim == "SETTLED" and not include_invoiced:
+                skipped_invoiced.append((ew, claim_label))
+                continue
+
+            # All THREE columns, not just the total. A row whose total
+            # happens to match while its subtotal/VAT split is wrong is
+            # still a broken row, and comparing only the total would
+            # report it as "already correct" and never repair it.
+            old = (ew.subtotal_amount, ew.vat_amount, ew.total_amount)
             try:
                 # `quoted_totals` COMPUTES and returns; only
                 # `recompute_quoted_totals` below writes. That split is
                 # what lets --dry-run print the real number it would
                 # have written, from the one live formula rather than
                 # from a second copy of it.
-                _subtotal, _vat, new_total = quoted_totals(ew)
+                new = quoted_totals(ew)
             except Exception as exc:  # noqa: BLE001 - reported, not hidden
                 failed.append((ew, exc))
                 continue
 
-            marker = " " if new_total == old_total else "*"
+            differs = new != old
+            flag = ""
+            if claim == "DRAFT":
+                flag = "  [on a draft invoice - regenerate it]"
+            elif claim == "SETTLED":
+                flag = f"  [on a {claim_label} invoice]"
             self.stdout.write(
-                f"  {ew.id:>6}  {old_total:>12}  {new_total:>12}{marker} "
-                f"{ew.title[:48]}"
+                f"  {ew.id:>6}  {old[2]:>12}  {new[2]:>12}"
+                f"{'*' if differs else ' '} {ew.title[:48]}{flag}"
             )
-            if new_total == old_total:
+            if not differs:
                 unchanged += 1
                 continue
-            changed += 1
+
+            # Never blank out a total that is present. Reached only under
+            # --include-nonzero, where an EW whose latest approved
+            # proposal has no spawn-approved lines resolves to 0.00 — a
+            # recomputation that would ERASE a real number rather than
+            # supply a missing one, which is the opposite of this
+            # command's job.
+            if new[2] == Decimal("0.00") and old[2] != Decimal("0.00"):
+                refused_zero.append(ew)
+                continue
+
+            would_change += 1
             if dry_run:
                 continue
             try:
                 with transaction.atomic():
                     recompute_quoted_totals(ew)
+                wrote += 1
             except Exception as exc:  # noqa: BLE001 - reported, not hidden
                 failed.append((ew, exc))
 
@@ -141,7 +230,7 @@ class Command(BaseCommand):
         if dry_run:
             self.stdout.write(
                 self.style.WARNING(
-                    f"Dry run. {changed} row(s) WOULD change, "
+                    f"Dry run. {would_change} row(s) WOULD change, "
                     f"{unchanged} already correct. Re-run without "
                     f"--dry-run to write them."
                 )
@@ -149,10 +238,38 @@ class Command(BaseCommand):
         else:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"Wrote {changed - len(failed)} row(s); "
+                    f"Wrote {wrote} row(s); "
                     f"{unchanged} were already correct."
                 )
             )
+
+        if skipped_invoiced:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"\n{len(skipped_invoiced)} row(s) SKIPPED — already "
+                    f"carried by an issued or sent invoice. Their invoice "
+                    f"amounts are immutable, so repairing the Extra Work "
+                    f"alone would make the two disagree. Correct the "
+                    f"invoice by reversal, or pass --include-invoiced if "
+                    f"you know what you are doing."
+                )
+            )
+            for ew, label in skipped_invoiced:
+                self.stdout.write(f"  EW #{ew.id}: on a {label} invoice")
+
+        if refused_zero:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"\n{len(refused_zero)} row(s) REFUSED — recomputing "
+                    f"would replace a real total with 0.00. Nothing was "
+                    f"written; check the approved proposal's lines."
+                )
+            )
+            for ew in refused_zero:
+                self.stdout.write(
+                    f"  EW #{ew.id}: kept {ew.total_amount}"
+                )
+
         for ew, exc in failed:
             self.stdout.write(
                 self.style.ERROR(f"  EW #{ew.id}: failed - {exc}")

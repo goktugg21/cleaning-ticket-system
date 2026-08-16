@@ -2545,16 +2545,24 @@ def _advance_parent_to_under_review(
     provider-driven transition, present in `ALLOWED_TRANSITIONS` and not
     system-only.
 
-    ## When the actor may not drive it
+    ## When the advance does not happen
 
-    A provider operator who lacks `osius.ticket.view_building` at this
-    building cannot advance the parent. The proposal creation still
-    succeeds — refusing it would take away a capability the operator
-    already had — but the failure is NOT swallowed: the reason is
-    attached to the returned proposal as `parent_advance_blocked`, and
-    the builder renders a disabled Send button carrying it. Silence is
-    the actual defect being fixed here; a second silent skip would just
-    move it.
+    Sprint 187C — an earlier draft of this docstring gave "an operator
+    lacking `osius.ticket.view_building`" as the example, and that case
+    cannot reach here: `_require_provider_in_scope`
+    (`views_proposals.py`) 403s that exact actor on that exact key
+    before `create()` runs. What DOES reach this arm is any other
+    `TransitionError` — most realistically a concurrent status change
+    between the read and the locked write, and any role that clears the
+    view's scope check but not `_user_can_drive_transition`.
+
+    Whatever the cause, the proposal creation still succeeds — refusing
+    it would take away a capability the operator already had — and the
+    failure is NOT swallowed: it is logged, and the reason is attached
+    to the returned proposal as `parent_advance_blocked` so the caller
+    can say something instead of hiding the button. Silence is the
+    actual defect being fixed here; a second silent skip would just move
+    it.
     """
     if extra_work_request.status != ExtraWorkStatus.REQUESTED:
         # Idempotent: already UNDER_REVIEW (the normal arrival), or
@@ -2564,7 +2572,7 @@ def _advance_parent_to_under_review(
     from .state_machine import apply_transition as ew_apply_transition
 
     try:
-        ew_apply_transition(
+        locked = ew_apply_transition(
             extra_work_request,
             actor,
             ExtraWorkStatus.UNDER_REVIEW,
@@ -2573,6 +2581,16 @@ def _advance_parent_to_under_review(
                 "(Sprint 187 §2a)."
             ),
         )
+        # Sprint 187C — `apply_transition` writes through its OWN locked
+        # instance and returns it; the caller's copy still says
+        # REQUESTED. `Proposal.objects.create` then caches that stale
+        # copy as `proposal.extra_work_request`, so the 201 body's
+        # `actions.can_send` would read False on the very path this
+        # sprint exists to make True. The page happens to refetch
+        # immediately and never sees it — but the payload is a contract,
+        # not an implementation detail of one caller.
+        extra_work_request.status = locked.status
+        extra_work_request.updated_at = locked.updated_at
     except EwTransitionError as exc:
         logger.warning(
             "Proposal created on EW #%s but the parent could not be "
@@ -3059,8 +3077,14 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
         # / contract-price validations — and then states the governing
         # rule for everything else: a gate that is cheap and accurate
         # belongs in the action flag. That is why the parent-status guard
-        # is already inside `can_send`. Both of these are one attribute
-        # read and one cached permission resolve.
+        # is already inside `can_send`. Gate 4 is a plain attribute read;
+        # gate 3 costs at most ONE `EXISTS` query, and only for a
+        # CA / BM — SUPER_ADMIN short-circuits before touching the DB.
+        # (Sprint 187C: an earlier version of this comment called that
+        # resolve "cached". It is not — `user_has_provider_dangerous_
+        # permission` has no memoisation. One query on a per-record
+        # detail serializer is still cheap, which is the point being
+        # made; "cached" was simply the wrong word for why.)
         #
         # H-11: reflecting a permission gate in an action flag is
         # REPORTING authority, not granting it. The endpoint's own checks

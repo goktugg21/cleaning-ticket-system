@@ -438,7 +438,21 @@ class ProposalActionsBlockShapeTests(_ActionsFixtureMixin, TestCase):
         }
         self.bma.save(update_fields=["permission_overrides"])
 
+        # Sprint 187C — the other two gates are opened deliberately, so
+        # that the override key is the ONLY thing left deciding
+        # can_direct_publish. Without this the assertion below passes for
+        # the wrong reason: §3's new dangerous-grant and REQUEST_QUOTE
+        # gates force the flag False for every EW this fixture builds, so
+        # the test stayed green with the override key RESTORED, and the
+        # BM distinction it exists for went untested.
+        self.company.provider_admin_may_quote_override_start = True
+        self.company.save(
+            update_fields=["provider_admin_may_quote_override_start"]
+        )
         ew = self._make_ew()
+        ew.request_intent = ExtraWorkRequestIntent.REQUEST_QUOTE
+        ew.save(update_fields=["request_intent"])
+
         proposal = self._make_proposal(ew, status=ProposalStatus.DRAFT)
         response = self._proposal_detail(self.bm, ew, proposal)
         self.assertEqual(response.status_code, 200, response.data)
@@ -450,11 +464,24 @@ class ProposalActionsBlockShapeTests(_ActionsFixtureMixin, TestCase):
         # Direct-publish requires BOTH keys -> False.
         self.assertFalse(actions["can_direct_publish"])
 
+        # The control that makes the assertion above mean something:
+        # restore the override key, change nothing else, and the same
+        # request now answers True.
+        self.bma.permission_overrides = {}
+        self.bma.save(update_fields=["permission_overrides"])
+        actions = self._proposal_detail(self.bm, ew, proposal).data["actions"]
+        self.assertTrue(actions["can_direct_publish"])
+
     # -----------------------------------------------------------------
     # Tightened-precondition tests: can_send and can_direct_publish are
     # False when the parent EW is NOT in UNDER_REVIEW even for actors
-    # who hold full mutation + override authority. can_direct_publish
-    # is derived from can_send so they cannot drift.
+    # who hold full mutation + override authority.
+    #
+    # Sprint 187C — this block used to end "can_direct_publish is derived
+    # from can_send so they cannot drift". Since §3 that is no longer
+    # true: the flag STARTS from can_send and is then narrowed by the
+    # dangerous-grant and REQUEST_QUOTE gates, so can_send=True with
+    # can_direct_publish=False is now the ordinary default answer.
     # -----------------------------------------------------------------
     def test_draft_with_parent_requested_can_send_and_direct_publish_false_for_sa(self):
         # Parent EW in REQUESTED — the send-time gate would 400, so
