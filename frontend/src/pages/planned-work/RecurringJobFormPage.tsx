@@ -146,9 +146,14 @@ export function RecurringJobFormPage() {
     departments: CustomerLabel[];
     workTypes: CustomerLabel[];
   } | null>(null);
-  const [companyCategories, setCompanyCategories] = useState<ServiceCategory[]>(
-    [],
-  );
+  // Sprint 187C — carries the company it was fetched FOR, mirroring
+  // `customerFolders` below. Without that, an empty list cannot be told
+  // apart from a list that has not arrived yet, and the save path treats
+  // the two identically. See `categoriesLoaded` further down.
+  const [companyCategories, setCompanyCategories] = useState<{
+    companyId: number;
+    rows: ServiceCategory[];
+  } | null>(null);
   const [customerFolders, setCustomerFolders] = useState<{
     customerId: number;
     rows: CustomerPriceFolder[];
@@ -337,20 +342,30 @@ export function RecurringJobFormPage() {
   // there are no company categories to offer. Clearing the state inside
   // the effect below would be a synchronous setState in an effect body,
   // which CLAUDE.md forbids and the lint baseline is already at.
-  const offeredCategories =
-    selectedCustomerCompany === null ? EMPTY_CATEGORIES : companyCategories;
+  const categoriesLoaded =
+    selectedCustomerCompany !== null &&
+    companyCategories !== null &&
+    companyCategories.companyId === selectedCustomerCompany;
+  const offeredCategories = categoriesLoaded
+    ? companyCategories.rows
+    : EMPTY_CATEGORIES;
   useEffect(() => {
     if (selectedCustomerCompany === null) return;
+    const companyId = selectedCustomerCompany;
     let cancelled = false;
     listServiceCategories({
       is_active: true,
-      company: selectedCustomerCompany,
+      company: companyId,
     })
       .then((rows) => {
-        if (!cancelled) setCompanyCategories(rows);
+        if (!cancelled) setCompanyCategories({ companyId, rows });
       })
       .catch(() => {
-        if (!cancelled) setCompanyCategories(EMPTY_CATEGORIES);
+        // Sprint 187C — a failed fetch stays UNLOADED rather than
+        // becoming an empty loaded list. An empty loaded list would tell
+        // the save path "this company genuinely has no categories", and
+        // the job's stored one would be written away on the next save.
+        if (!cancelled) setCompanyCategories(null);
       });
     return () => {
       cancelled = true;
@@ -411,6 +426,35 @@ export function RecurringJobFormPage() {
         ? categoryChoice
         : ""
       : "";
+
+  // Sprint 187C — the collapse above cannot tell "this id does not belong
+  // to the chosen customer" (deliberate: a selection must not carry
+  // across customers) from "the list it checks against has not arrived
+  // yet". Sending an explicit null in the second case WIPES the job's
+  // stored category on save, and §6b widened the window that makes it
+  // reachable: the category fetch now waits for the customer to resolve
+  // out of the sequential load chain, while `loading` has already gone
+  // false and Save is clickable.
+  //
+  // So the keys are OMITTED until the lists they validate against are
+  // loaded for the current selection — an omitted key leaves the stored
+  // value untouched. This is the same rule the crew payload below states
+  // for the same reason. On CREATE there is nothing to protect and both
+  // lists resolve before anything is stored, so the keys are always sent.
+  const foldersLoaded =
+    customerFolders !== null && customerFolders.customerId === Number(customer);
+  const categoryChoiceIsTrustworthy =
+    id === undefined || (categoriesLoaded && foldersLoaded);
+  const categoryPayload = categoryChoiceIsTrustworthy
+    ? {
+        service_category: effectiveCategoryChoice.startsWith("cat:")
+          ? Number(effectiveCategoryChoice.slice(4))
+          : null,
+        price_folder: effectiveCategoryChoice.startsWith("fol:")
+          ? Number(effectiveCategoryChoice.slice(4))
+          : null,
+      }
+    : {};
 
   function toggleId(list: number[], value: number): number[] {
     return list.includes(value)
@@ -525,12 +569,7 @@ export function RecurringJobFormPage() {
       // clearing a field on EDIT actually clears it.
       department: effectiveDepartmentId ? Number(effectiveDepartmentId) : null,
       work_type: effectiveWorkTypeId ? Number(effectiveWorkTypeId) : null,
-      service_category: effectiveCategoryChoice.startsWith("cat:")
-        ? Number(effectiveCategoryChoice.slice(4))
-        : null,
-      price_folder: effectiveCategoryChoice.startsWith("fol:")
-        ? Number(effectiveCategoryChoice.slice(4))
-        : null,
+      ...categoryPayload,
     };
     // Only touch crew when eligible crew loaded for this building, so a
     // transient fetch error on edit does not wipe the job's existing crew
