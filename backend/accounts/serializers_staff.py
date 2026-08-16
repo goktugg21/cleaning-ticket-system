@@ -14,7 +14,8 @@ rows directly.
 """
 from rest_framework import serializers
 
-from buildings.models import BuildingStaffVisibility
+from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
+from companies.models import CompanyUserMembership
 
 from .models import StaffProfile, User
 
@@ -257,10 +258,23 @@ class ProviderEmployeeSerializer(serializers.ModelSerializer):
     The prompt asked for "prefer StaffProfile.phone, fall back to
     User.phone" on this page. That would breach the floor above, so it is
     deliberately not done; see the sprint report.
+
+    Sprint 187B §2 — `companies` was added here, which AMENDS the floor
+    above, deliberately rather than casually. **A provider company name
+    is not customer linkage.** The floor bans leaking which CUSTOMERS a
+    person is tied to — the client organisations they serve. This names
+    the PROVIDER that employs them, which is the page's entire purpose:
+    a SUPER_ADMIN looking at people across Osius Demo, Bright Facilities
+    and xyz amsterdam could not tell whose staff they were looking at.
+    No customer is named, no building is named, and nothing here can be
+    narrowed to a customer. `internal_note`, `StaffProfile.phone` and
+    every pricing field remain absent, and the exact-key-set assertion in
+    `accounts.tests.test_employees_directory` remains exact.
     """
 
     full_name = serializers.CharField(read_only=True)
     employment_type = serializers.SerializerMethodField()
+    companies = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -271,9 +285,56 @@ class ProviderEmployeeSerializer(serializers.ModelSerializer):
             "phone",
             "role",
             "employment_type",
+            # Sprint 187B §2 — the PROVIDER company(ies) employing this
+            # person. See the class docstring for why this does not
+            # breach the privacy floor.
+            "companies",
             "is_active",
         ]
         read_only_fields = fields
+
+    def get_companies(self, obj):
+        """The provider company names this employee belongs to.
+
+        A plain sorted list of names — no "all" sentinel, unlike the
+        Users list. This directory only ever lists COMPANY_ADMIN /
+        BUILDING_MANAGER / STAFF rows and none of those roles is global,
+        so there is no all-companies case to represent; inventing one
+        would be a shape the page can never render.
+
+        Normally reads `_company_names`, which
+        `ProviderEmployeesView.paginate_queryset` resolves in three
+        queries for the whole page. Resolved there rather than per row
+        here because this endpoint uses `UnboundedPagination` — a per-row
+        lookup would be three SELECTs times the entire workforce.
+
+        The fallback below is a real resolution, not an empty list, so a
+        caller that renders this serializer outside that view gets the
+        right answer slowly rather than a wrong answer quickly. An empty
+        default would have made "this employee belongs to no company"
+        indistinguishable from "nobody attached the names", and the first
+        is a claim while the second is a bug.
+        """
+        attached = getattr(obj, "_company_names", None)
+        if attached is not None:
+            return attached
+        return sorted(
+            set(
+                CompanyUserMembership.objects.filter(user=obj).values_list(
+                    "company__name", flat=True
+                )
+            )
+            | set(
+                BuildingManagerAssignment.objects.filter(
+                    user=obj
+                ).values_list("building__company__name", flat=True)
+            )
+            | set(
+                BuildingStaffVisibility.objects.filter(user=obj).values_list(
+                    "building__company__name", flat=True
+                )
+            )
+        )
 
     def get_employment_type(self, obj):
         # OneToOne reverse accessor; present only for STAFF rows (PA/BM have

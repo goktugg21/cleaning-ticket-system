@@ -1147,6 +1147,17 @@ export interface UserScopeSummary {
   count: number;
 }
 
+// Sprint 187B §1a — WHICH companies a user belongs to, beside
+// `UserScopeSummary`'s HOW MANY. A sibling of `scope_summary`, not an
+// extension of it: that field's `count` means a different thing per role
+// (buildings for a building manager), so company names inside it would
+// put two axes in one object. `all: true` is the SUPER_ADMIN sentinel and
+// renders as "All companies", exactly as the scope chip already does.
+export interface UserCompanies {
+  all: boolean;
+  names: string[];
+}
+
 export interface UserAdmin {
   id: number;
   email: string;
@@ -1164,6 +1175,8 @@ export interface UserAdmin {
   // payload without it the type-check here flags it at the call
   // site rather than silently rendering an empty chip.
   scope_summary: UserScopeSummary;
+  // Sprint 187B §1a — the companies this user belongs to, by name.
+  companies: UserCompanies;
   // Sprint 2c — read-only single HIGHEST effective customer access role the
   // user holds (CUSTOMER_COMPANY_ADMIN > CUSTOMER_LOCATION_MANAGER >
   // CUSTOMER_USER), company-scoped to the viewer; null for provider-side
@@ -1193,6 +1206,13 @@ export interface ProviderEmployee {
   phone: string;
   role: Role;
   employment_type: EmploymentType | null;
+  // Sprint 187B §2 — the PROVIDER company(ies) employing this person. A
+  // plain list, with no "all" sentinel: this directory lists only
+  // COMPANY_ADMIN / BUILDING_MANAGER / STAFF rows and none of those roles
+  // is global, so there is no all-companies case to represent. A provider
+  // company name is not customer linkage; the serializer's docstring
+  // carries the reasoning for amending that privacy floor.
+  companies: string[];
   is_active: boolean;
 }
 

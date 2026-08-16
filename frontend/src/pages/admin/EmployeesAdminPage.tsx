@@ -6,11 +6,13 @@ import { getApiError } from "../../api/client";
 import {
   bulkLinkBuildings,
   listAllBuildings,
+  listAllCompanies,
   listProviderEmployees,
   updateStaffProfile,
 } from "../../api/admin";
 import type {
   BuildingAdmin,
+  CompanyAdmin,
   EmploymentType,
   ProviderEmployee,
   Role,
@@ -90,6 +92,13 @@ export function EmployeesAdminPage() {
   const [error, setError] = useState("");
 
   const [roleFilter, setRoleFilter] = useState<Role | "">("");
+  // Sprint 187B §2 — the company filter, same established pattern as
+  // Buildings and the Users page: loaded once, auto-selected and disabled
+  // when exactly one company comes back (a single-company admin has
+  // nothing to choose between).
+  const [companyFilter, setCompanyFilter] = useState<number | "">("");
+  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [employmentTypeFilter, setEmploymentTypeFilter] = useState<
     EmploymentType | ""
   >("");
@@ -182,15 +191,39 @@ export function EmployeesAdminPage() {
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
 
+  // Loaded exhaustively so a tenant with more than one page of companies
+  // gets a complete dropdown rather than a silently truncated one.
+  useEffect(() => {
+    let cancelled = false;
+    listAllCompanies({ is_active: "true" })
+      .then((response) => {
+        if (cancelled) return;
+        setCompanies(response);
+        if (response.length === 1) {
+          setCompanyFilter(response[0].id);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCompaniesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const companyDropdownDisabled = companiesLoaded && companies.length <= 1;
+
   const queryParams = useMemo(() => {
     const params: {
       role?: Role;
       employment_type?: EmploymentType;
+      company?: number;
     } = {};
     if (roleFilter) params.role = roleFilter;
     if (employmentTypeFilter) params.employment_type = employmentTypeFilter;
+    if (companyFilter !== "") params.company = companyFilter;
     return params;
-  }, [roleFilter, employmentTypeFilter]);
+  }, [roleFilter, employmentTypeFilter, companyFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -323,6 +356,27 @@ export function EmployeesAdminPage() {
               ))}
             </select>
           </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("company")}</span>
+            <select
+              className="filter-control"
+              style={{ maxWidth: 220 }}
+              data-testid="employees-filter-company"
+              value={companyFilter === "" ? "" : String(companyFilter)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCompanyFilter(value === "" ? "" : Number(value));
+              }}
+              disabled={companyDropdownDisabled}
+            >
+              <option value="">{t("admin.all_companies")}</option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="filter-actions">
             {hasActiveFilters && (
               <button
@@ -401,6 +455,7 @@ export function EmployeesAdminPage() {
                 <th>{t("employees.col_email")}</th>
                 <th>{t("users.col_phone")}</th>
                 <th>{t("employees.col_role")}</th>
+                <th>{t("company")}</th>
                 <th>{t("employees.col_employment_type")}</th>
                 <th>{t("status")}</th>
               </tr>
@@ -464,6 +519,30 @@ export function EmployeesAdminPage() {
                     </td>
                     <td data-testid="employee-row-role">
                       <RoleBadge role={row.role} compact />
+                    </td>
+                    {/* Sprint 187B §2 — bounded like the Users page: two
+                        names then "+N more", full set in the title. A
+                        person spanning many companies must not print
+                        them all into a cell. */}
+                    <td
+                      data-testid="employee-row-companies"
+                      title={row.companies.join(", ")}
+                    >
+                      {row.companies.length === 0 ? (
+                        <span className="muted small">—</span>
+                      ) : (
+                        <>
+                          {row.companies.slice(0, 2).join(", ")}
+                          {row.companies.length > 2 && (
+                            <span className="muted small">
+                              {" "}
+                              {t("users.companies_more", {
+                                count: row.companies.length - 2,
+                              })}
+                            </span>
+                          )}
+                        </>
+                      )}
                     </td>
                     <td data-testid="employee-row-employment-type">
                       {isEditing ? (
