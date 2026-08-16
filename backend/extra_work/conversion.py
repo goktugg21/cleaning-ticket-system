@@ -143,6 +143,19 @@ def convert_ticket_to_extra_work(
             manager_note=internal_note,
             source_ticket=ticket,
             status=ExtraWorkStatus.REQUESTED,
+            # Sprint 184 §3 — the customer's wanted date survives.
+            #
+            # `Ticket.customer_wanted_date` and
+            # `ExtraWorkRequest.preferred_date` are the SAME thing under
+            # two names: the customer's wish, on a melding and on an
+            # extra work respectively. A date somebody typed that
+            # silently disappears the moment a provider converts their
+            # melding is worse than never having asked for it.
+            #
+            # NULL stays NULL: a melding with no wanted date makes an
+            # extra work with no preferred date, rather than inventing
+            # one out of the conversion day.
+            preferred_date=ticket.customer_wanted_date,
         )
 
         # 4. Create one ExtraWorkRequestItem per line, mirroring the

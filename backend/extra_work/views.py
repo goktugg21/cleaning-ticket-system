@@ -648,11 +648,24 @@ class ExtraWorkRequestViewSet(
         if error is not None:
             return Response(error, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response(
-            ExtraWorkRequestDetailSerializer(
-                extra_work, context={"request": request}
-            ).data
+        payload = ExtraWorkRequestDetailSerializer(
+            extra_work, context={"request": request}
+        ).data
+        # Sprint 184 §1 — say what happened to the spawned tickets.
+        #
+        # Planning an extra work for a day moves its tickets onto that
+        # day, EXCEPT any a person rescheduled by hand with a written
+        # reason — those keep their own date. Reported alongside the row
+        # rather than swallowed: an operator who plans a job and later
+        # finds its ticket still on the old day deserves to be told why,
+        # at the moment they did it.
+        ticket_result = getattr(
+            extra_work, "planned_date_ticket_result", None
         )
+        if ticket_result is not None:
+            payload["tickets_moved"] = ticket_result["moved"]
+            payload["tickets_kept_own_date"] = ticket_result["kept_own_date"]
+        return Response(payload)
 
     @action(detail=True, methods=["post"], url_path="actual-hours")
     def actual_hours(self, request, pk=None):

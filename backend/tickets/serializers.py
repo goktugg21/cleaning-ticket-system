@@ -144,17 +144,33 @@ def is_photo_attachment(attachment) -> bool:
     return mime_ok and ext_ok
 
 
+def _iso_date(value):
+    """Sprint 184 §1 — a date as an ISO string, or None.
+
+    Used for the dates carried on `extra_work_origin`, which is a plain
+    dict returned from a `SerializerMethodField` and therefore never
+    passes through a DRF field that would format it.
+    """
+    return value.isoformat() if value is not None else None
+
+
 def resolve_extra_work_origin_core(ticket) -> dict | None:
     """Shared Extra Work origin resolution for the ticket list + detail
     serializers.
 
-    Returns the SIX keys the frontend `TicketExtraWorkOrigin` type
-    consumes, or None when no parent Extra Work request can be resolved
-    by any path:
+    Returns the keys the frontend `TicketExtraWorkOrigin` type consumes,
+    or None when no parent Extra Work request can be resolved by any
+    path:
 
         extra_work_request_id, extra_work_request_title,
         extra_work_request_status, extra_work_request_item_id,
         service_name, origin
+
+    plus, since Sprint 184 §1, the parent's DATES — borrowed, never
+    copied onto the ticket:
+
+        preferred_date, planned_end_date, deadline,
+        provider_planned_date
 
     Resolution order (Sprint 6A):
       * Resolve the parent EW via the CANONICAL `ticket.extra_work_request`
@@ -216,6 +232,41 @@ def resolve_extra_work_origin_core(ticket) -> dict | None:
         "extra_work_request_item_id": item_id,
         "service_name": service.name if service is not None else None,
         "origin": origin,
+        # ------------------------------------------------------------
+        # Sprint 184 §1 — THE EXTRA WORK'S DATES, CARRIED ON THE LINK.
+        #
+        # The owner: the preferred date entered when the extra work is
+        # opened, and any deadline added later, must keep travelling
+        # once that work becomes an operational ticket.
+        #
+        # They are exposed HERE rather than copied onto the Ticket, and
+        # that is the whole point. A copy is one fact stored twice: edit
+        # the deadline on the extra work and the ticket's copy is
+        # silently wrong from that moment on. This month has been spent
+        # removing exactly that shape. The extra work owns these dates;
+        # the ticket borrows them through the link it already has.
+        #
+        # No N+1: `ew_request` is already resolved and in hand above —
+        # these are attribute reads on an object this function fetched
+        # for its other keys, not new queries. The ticket list's
+        # `select_related` chain (tickets/views.py) already spans the
+        # canonical FK, so a page of EW-spawned tickets costs exactly
+        # what it did before this sprint.
+        #
+        # `provider_planned_date` appears here for READING only. Its
+        # write half moves the spawned ticket's own `scheduled_start_at`
+        # (`extra_work/planned_date.py`) — when the provider plans a day
+        # the WORK moves, and that is an action, not a copy.
+        # ------------------------------------------------------------
+        # ISO strings, not `date` objects. Every other value in this dict
+        # is already a scalar, and the dict is returned RAW from a
+        # `SerializerMethodField` — so a `date` here would read as a
+        # `date` in `response.data` and as a string on the wire, which is
+        # two shapes for one field depending on who is looking at it.
+        "preferred_date": _iso_date(ew_request.preferred_date),
+        "planned_end_date": _iso_date(ew_request.planned_end_date),
+        "deadline": _iso_date(ew_request.deadline),
+        "provider_planned_date": _iso_date(ew_request.provider_planned_date),
     }
 
 
@@ -528,6 +579,9 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "rejected_at",
             "resolved_at",
             "closed_at",
+            # Sprint 184 §3 — the customer's wanted date, so the provider
+            # can see what was asked for. A wish; it never decides late.
+            "customer_wanted_date",
             "status_history",
             "allowed_next_statuses",
             "actions",
@@ -1112,6 +1166,10 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             "building",
             "customer",
             "status",
+            # Sprint 184 §3 — the customer's WANTED DATE (a wish, never a
+            # deadline). Writable at create so a customer opening a
+            # melding can say when they would like it done.
+            "customer_wanted_date",
             "created_at",
         ]
         read_only_fields = ["id", "ticket_no", "status", "created_at"]

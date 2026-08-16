@@ -152,6 +152,13 @@ class ExtraWorkBulkDatesView(APIView):
         # before it written — property (1).
         with transaction.atomic():
             updated = 0
+            # Sprint 184 §1 — tickets a person rescheduled BY HAND keep
+            # their own date. Collected across the batch so the response
+            # can say so once: an operator who bulk-plans twelve rows
+            # needs to know which of them did not follow, and silence is
+            # not an answer they can act on.
+            moved: list[int] = []
+            kept_own_date: list[int] = []
             for extra_work in requests.values():
                 error = apply_extra_work_dates(extra_work, fields)
                 if error is not None:
@@ -163,6 +170,19 @@ class ExtraWorkBulkDatesView(APIView):
                     return Response(
                         error, status=status.HTTP_400_BAD_REQUEST
                     )
+                ticket_result = getattr(
+                    extra_work, "planned_date_ticket_result", None
+                )
+                if ticket_result:
+                    moved.extend(ticket_result["moved"])
+                    kept_own_date.extend(ticket_result["kept_own_date"])
                 updated += 1
 
-        return Response({"updated": updated}, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "updated": updated,
+                "tickets_moved": moved,
+                "tickets_kept_own_date": kept_own_date,
+            },
+            status=status.HTTP_200_OK,
+        )
