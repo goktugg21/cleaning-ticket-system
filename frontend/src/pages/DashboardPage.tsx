@@ -2001,16 +2001,7 @@ export function DashboardPage({
         />
 
           <section
-            /* Sprint 188 — Chargeable work carries TWO columns the
-               tickets page does not (Extra work + Route, in place of its
-               single Priority), so the same `1fr 340px` grid left the
-               table wider than its track and it scrolled sideways. The
-               table needs that 340px more than the by-building card
-               does, so this variant drops to one column and the card
-               stacks underneath it instead of beside it. */
-            className={`work-layout${
-              isChargeableWork ? " work-layout-wide" : ""
-            }`}
+            className="work-layout"
             data-testid="dashboard-tickets-section"
           >
             <div className="dash-main">
@@ -2370,7 +2361,20 @@ export function DashboardPage({
                 )}
 
                 <div className="table-wrap ticket-list-wrap">
-                  <table className="data-table">
+                  {/* Sprint 188 — Chargeable work carries two columns the
+                      tickets page does not (Extra work + Route, in place of
+                      its single Priority), so at the same cell padding the
+                      table was wider than its track and the list scrolled
+                      sideways. `data-table-dense` is the repo's existing
+                      density modifier (Sprint 153 §3.6): same layout, same
+                      columns, tighter cells. */}
+                  <table
+                    className={`data-table${
+                      isChargeableWork
+                        ? " data-table-dense data-table-fit"
+                        : ""
+                    }`}
+                  >
                     <thead>
                       <tr>
                         {bulkMode && (

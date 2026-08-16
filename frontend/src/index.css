@@ -1528,6 +1528,36 @@ table.data-table {
 .data-table-dense tbody td { padding: 8px 14px; }
 .data-table-dense tbody td:first-child { padding-left: 16px; }
 
+/* Sprint 188 — the Chargeable work table only. It carries 9 columns
+   where the tickets page carries 8 (Extra work + Route in place of
+   Priority), and MEASURED at a 1650px viewport the table rendered
+   1230px inside a 978px track: 252px of horizontal scroll. Density
+   alone did not close that, because `thead th` is `nowrap` and the two
+   long text columns push their full string onto one line.
+   So this variant lets headers wrap and caps the two text columns.
+   Layout, columns and the side card are all unchanged — the owner
+   asked for it to fit, not to be rearranged. */
+.data-table-fit thead th { white-space: normal; }
+.data-table-fit tbody td { white-space: normal; }
+.data-table-fit tbody td:nth-child(2),
+.data-table-fit tbody td:nth-child(3) {
+  max-width: 190px;
+  overflow-wrap: anywhere;
+}
+/* Wrapping took 1230px down to 1058px, still 80px over the 978px track,
+   so this variant also tightens the horizontal cell padding by 6px a
+   side on top of `data-table-dense`. Nine columns x 12px is what closes
+   the gap. Vertical padding is untouched, so row height does not move. */
+.data-table-fit thead th,
+.data-table-fit tbody td {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.data-table-fit thead th:first-child,
+.data-table-fit tbody td:first-child {
+  padding-left: 14px;
+}
+
 /* Sprint 153 §3.3 — sortable column header. The clickable thing is a
    real <button> inside the <th> so it is reachable and operable from the
    keyboard; an onClick on the <th> would not be. */
@@ -4990,15 +5020,6 @@ a.attn-row:hover {
   grid-template-columns: 1fr 340px;
   gap: 18px;
   align-items: start;
-}
-
-/* Sprint 188 — the Chargeable work variant. Its table has one more
-   column than the tickets page's, and at 1fr it did not fit the track,
-   so the whole list scrolled sideways. One column here gives the table
-   the sidebar's 340px and stacks the by-building card below it, which
-   is the right trade on a page whose job is reading that table. */
-.work-layout-wide {
-  grid-template-columns: 1fr;
 }
 
 @media (max-width: 1100px) {
