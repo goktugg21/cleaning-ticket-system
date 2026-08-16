@@ -35,7 +35,8 @@ import {
 } from "../api/invoices";
 import type {
   Invoice,
-  InvoiceDueRow as InvoiceDueRowBase,
+  InvoiceDueRow,
+  InvoiceNothingReason,
   InvoiceStatus,
 } from "../api/types";
 // Sprint 183 §1 — the shared billing controls, used identically by
@@ -57,30 +58,17 @@ type StatusFilter = InvoiceStatus | "ALL";
  *  Sprint 183 §2 "why is there nothing" diagnosis. `api/types.ts`
  *  belongs to another agent this round, so the shape is narrowed here.
  *  Optional throughout, so a server that predates either still renders. */
-type NothingReason = {
-  reason:
-    | "NO_EXTRA_WORK"
-    | "NONE_FINISHED"
-    | "ALL_INVOICED"
-    | "NOT_IN_PERIOD"
-    | "NOTHING_TO_EXPLAIN";
-  unbilled_count: number;
-  finished_count: number;
-  invoiced_count: number;
-};
-
-type InvoiceDueRow = InvoiceDueRowBase & {
-  invoice_billing_target?: InvoiceBillingTarget;
-  invoice_split?: InvoiceSplit;
-  nothing_reason?: NothingReason;
-};
+// Sprint 184 §5 — the local narrowings that stood here are gone.
+// `InvoiceDueRow` in `api/types.ts` now describes the billing pair and
+// the nothing-reason, and `Invoice` describes `created_by_label`. They
+// were narrowed here only because that file belonged to another agent.
 
 /** The one sentence, from the one diagnosis. Sprint 183 §2 — the same
  *  function answers for the Due panel and the preview, so this renderer
  *  is shared between them too rather than written twice. */
 function nothingSentence(
   t: (key: string, opts?: Record<string, unknown>) => string,
-  nothing: NothingReason | undefined,
+  nothing: InvoiceNothingReason | undefined,
 ): string | null {
   if (!nothing || nothing.reason === "NOTHING_TO_EXPLAIN") return null;
   if (nothing.reason === "NO_EXTRA_WORK") {
@@ -804,8 +792,7 @@ export function FacturenPage({
                       never a frontend guess, and never renders blank or
                       "Unassigned". */}
                   <td className="muted small" data-testid="facturen-created-by">
-                    {(inv as Invoice & { created_by_label?: string })
-                      .created_by_label ?? t("invoices:created_by.system")}
+                    {inv.created_by_label || t("invoices:created_by.system")}
                   </td>
                   <td>
                     {/* Sprint 122 (B1) — an ISSUED-but-unsent credit note

@@ -414,6 +414,20 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.customer_submenu.tickets")}
                   </NavLink>
+                  {/* Sprint 184 §3b — chargeable work, the customer's
+                      copy of the top-level sub-page. Beside Tickets
+                      because it answers the neighbouring question:
+                      which of this customer's tickets are billable. */}
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/chargeable`}
+                    className={navClass}
+                    data-testid="sidebar-customer-chargeable"
+                  >
+                    <span className="nav-icon">
+                      <Receipt size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.chargeable")}
+                  </NavLink>
                   {/* #108 Part E — customer-scoped Invoices + Reports. */}
                   <NavLink
                     to={`/admin/customers/${sidebar.customerId}/invoices`}

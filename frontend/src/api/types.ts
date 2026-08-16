@@ -3,6 +3,10 @@
 // fns). `TicketDetail` carries the nested read-only `sub_tasks`, so it
 // re-uses that type. Type-only import — erased at build, no runtime cycle.
 import type { SubTask } from "./admin";
+// Sprint 184 §5 — the billing pair is declared beside the calls that
+// write it (`api/invoices.ts`); a type-only import keeps ONE definition
+// rather than a second copy of the same two unions here.
+import type { InvoiceBillingTarget, InvoiceSplit } from "./invoices";
 
 export type Role =
   | "SUPER_ADMIN"
@@ -2669,6 +2673,15 @@ export interface Invoice {
   sent_at: string | null;
   created_at: string;
   updated_at: string;
+  // Sprint 183 §3 / Sprint 184 §5 — who generated this invoice. The FK
+  // is nullable and a NULL means the SYSTEM created it (the month-end
+  // run), which is why the label is computed server-side rather than
+  // joined here: the frontend must not have to decide what an absent
+  // creator is called. Folded in from `FacturenPage.tsx`, which was
+  // casting `inv as Invoice & { created_by_label?: string }` at the
+  // render site because this file belonged to another agent that round.
+  created_by: number | null;
+  created_by_label: string;
   lines: InvoiceLine[];
 }
 
@@ -2717,6 +2730,27 @@ export interface CustomerInvoice {
 
 // One row of GET /api/invoices/due/ — informational "who's due" data
 // (driven by Customer.invoice_day_rule; gates nothing).
+/**
+ * Sprint 183 §2 — why a due row has nothing to invoice, diagnosed by the
+ * server so the Due panel and the preview say the same sentence.
+ *
+ * Sprint 184 §5 — folded in from `FacturenPage.tsx`, where it was
+ * narrowed locally because `api/types.ts` belonged to another agent that
+ * round. A shape described in the page that renders it is a shape the
+ * next caller has to rediscover.
+ */
+export interface InvoiceNothingReason {
+  reason:
+    | "NO_EXTRA_WORK"
+    | "NONE_FINISHED"
+    | "ALL_INVOICED"
+    | "NOT_IN_PERIOD"
+    | "NOTHING_TO_EXPLAIN";
+  unbilled_count: number;
+  finished_count: number;
+  invoiced_count: number;
+}
+
 export interface InvoiceDueRow {
   customer: number;
   customer_name: string;
@@ -2729,4 +2763,12 @@ export interface InvoiceDueRow {
   unbilled_count: number;
   unbilled_total: string;
   is_due: boolean;
+  // Sprint 182 §3 — the customer's SAVED billing pair, echoed on the row
+  // so the generate dialog opens on what that customer is set to rather
+  // than on a global default. Optional: a row from a server that predates
+  // the split carries neither.
+  invoice_billing_target?: InvoiceBillingTarget;
+  invoice_split?: InvoiceSplit;
+  // Sprint 183 §2 — present only when there is nothing to invoice.
+  nothing_reason?: InvoiceNothingReason;
 }

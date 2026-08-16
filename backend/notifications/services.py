@@ -22,6 +22,7 @@ from .models import (
     NotificationStatus,
     NotificationType,
 )
+from .status_labels import ticket_status_label_nl
 
 # `send_mail` is re-exported here so that test code patching
 # notifications.services.send_mail can intercept the actual SMTP call. The
@@ -671,20 +672,12 @@ def emit_extra_work_published_notifications(ew, actor=None):
     )
 
 
-# Dutch status labels for email rendering. The model's TextChoices labels
-# remain English (canonical machine label) and stay in sync with frontend
-# i18n keys; this lookup table only governs how statuses appear in email
-# bodies and subjects, which Sprint B5 standardised on Dutch.
-_STATUS_LABEL_NL = {
-    TicketStatus.OPEN: "Open",
-    TicketStatus.IN_PROGRESS: "In behandeling",
-    TicketStatus.WAITING_CUSTOMER_APPROVAL: "Wacht op goedkeuring",
-    TicketStatus.WAITING_MANAGER_REVIEW: "Wacht op controle beheerder",
-    TicketStatus.REJECTED: "Afgewezen",
-    TicketStatus.APPROVED: "Goedgekeurd",
-    TicketStatus.CLOSED: "Gesloten",
-    TicketStatus.REOPENED_BY_ADMIN: "Heropend",
-}
+# Sprint 184 §1 — the Dutch status vocabulary moved to
+# `notifications/status_labels.py`, and three of its eight words changed
+# because they disagreed with the screens. The customer was still being
+# emailed "Goedgekeurd", the exact word the app dropped for being
+# ambiguous. See that module for why the backend cannot read the
+# frontend bundle at runtime and what keeps the two identical instead.
 
 
 # WAITING_MANAGER_REVIEW is an internal provider/manager-review state (the
@@ -720,10 +713,10 @@ _PRIORITY_LABEL_NL = {
 
 
 def _status_label(value):
-    try:
-        return _STATUS_LABEL_NL[TicketStatus(value)]
-    except (ValueError, KeyError):
-        return str(value)
+    # One line, one source. The old body fell back to `str(value)`, which
+    # is how a customer could receive the literal text
+    # `CONVERTED_TO_EXTRA_WORK` in an email.
+    return ticket_status_label_nl(value)
 
 
 def _role_label(value):

@@ -75,6 +75,7 @@ import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage"
 import { CustomerDocumentsPage } from "./pages/admin/customer/CustomerDocumentsPage";
 import { CustomerLabelsPage } from "./pages/admin/customer/CustomerLabelsPage";
 import { CustomerTicketsPage } from "./pages/admin/customer/CustomerTicketsPage";
+import { CustomerChargeableWorkPage } from "./pages/admin/customer/CustomerChargeableWorkPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
@@ -589,6 +590,17 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerContractsPage />
+              </AdminRoute>
+            }
+          />
+          {/* Sprint 184 §3b — the customer's chargeable work. The same
+              ticket list as the sibling route above, with a second pin
+              from the route rather than a second implementation. */}
+          <Route
+            path="/admin/customers/:id/chargeable"
+            element={
+              <AdminRoute>
+                <CustomerChargeableWorkPage />
               </AdminRoute>
             }
           />

@@ -2367,5 +2367,6 @@
   "chargeable_work.subtitle": "Tickets that came from an approved extra work.",
   "chargeable_work.pill": "Chargeable",
   "chargeable_work.pill_title": "This ticket came from an extra work. Open the extra work.",
-  "ticket_status.converted_to_extra_work": "Converted to extra work"
+  "ticket_status.converted_to_extra_work": "Converted to extra work",
+  "nav.customer_submenu.chargeable": "Chargeable work"
 }

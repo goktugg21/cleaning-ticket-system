@@ -94,7 +94,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
 import { useToast } from "../components/ToastProvider";
 import { rowAmounts } from "../lib/billing";
-import { extraWorkStatusLabelKey } from "../lib/enumLabels";
+import { extraWorkStatusLabelKey, ticketStatusLabelKey } from "../lib/enumLabels";
 import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
 import { formatPlannedWindow } from "../lib/plannedWindow";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
@@ -3108,7 +3108,15 @@ export function ExtraWorkDetailPage() {
                 <ul style={{ margin: 0, paddingLeft: 20 }}>
                   {activeSpawnedTickets.map((ticket) => (
                     <li key={ticket.id}>
-                      #{ticket.id} — {ticket.title} ({ticket.status})
+                      {/* Sprint 184 §3 — the last raw enum on a screen.
+                          This printed "(WAITING_CUSTOMER_APPROVAL)"
+                          while the page behind it said "Wacht op klant",
+                          and it is a CONFIRMATION dialog — the worst
+                          place in the app to make somebody decode a
+                          machine value before answering yes. */}
+                      #{ticket.id} — {ticket.title} (
+                      {t(ticketStatusLabelKey(ticket.status), { ns: "common" })}
+                      )
                     </li>
                   ))}
                 </ul>
