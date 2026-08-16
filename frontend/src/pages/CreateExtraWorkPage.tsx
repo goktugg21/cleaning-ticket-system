@@ -1010,9 +1010,24 @@ export function CreateExtraWorkPage({
   // Applied upstream of BOTH the category filter and the search, so a
   // customer cannot reach past it by typing a name.
   const catalogForActor = useMemo(() => {
-    if (!isCustomerActor) return services;
+    // A service with no agreed price for THIS customer is not orderable:
+    // it has no price to order at. The provider used to see the whole
+    // catalog here, so a customer with no price list at all still showed
+    // a full dropdown of things that could not be ordered -- the owner
+    // hit exactly that on City Office Rotterdam.
+    //
+    // NO exception, not even in quote mode, and the owner was explicit
+    // about why: a customer must never be shown something that was not
+    // entered for them. Either there is an agreement with a price, or
+    // the line is written as Custom -- which is exactly what the Custom
+    // option at the bottom of this picker is for, and what carries an
+    // unpriced request into the proposal flow.
+    //
+    // The SAME rule applies to the provider and the super admin. Two
+    // different catalogs for two audiences is how the two of them end up
+    // discussing different lists on one phone call.
     return services.filter((svc) => agreedPriceByServiceId.has(svc.id));
-  }, [services, isCustomerActor, agreedPriceByServiceId]);
+  }, [services, agreedPriceByServiceId]);
 
   const searchMatches = useMemo(() => {
     if (!serviceSearchTerm) return null;

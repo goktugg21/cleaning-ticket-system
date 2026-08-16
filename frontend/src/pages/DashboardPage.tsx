@@ -666,6 +666,10 @@ export function DashboardPage({
         statsParams.is_extra_work = "true";
       else if (isTicketsPage && workTypeFilter === "tickets")
         statsParams.is_extra_work = "false";
+      // The customer's own page pins the list to that customer; the
+      // chips must be pinned to the same thing or they describe the
+      // whole company while sitting above one customer's rows.
+      if (customerId !== undefined) statsParams.customer = String(customerId);
       const response = await api.get<TicketStats>("/tickets/stats/", {
         params: Object.keys(statsParams).length ? statsParams : undefined,
       });
@@ -673,7 +677,7 @@ export function DashboardPage({
     } catch {
       // KPI cards fall back to "—" placeholders if the endpoint fails.
     }
-  }, [isTicketsPage, hideFinishedExtraWork, workTypeFilter]);
+  }, [isTicketsPage, hideFinishedExtraWork, workTypeFilter, customerId]);
 
   // M6.3 — "my work" summary counts (provider-management only). Each
   // count is the PaginatedResponse.count for a created_by=me query;
