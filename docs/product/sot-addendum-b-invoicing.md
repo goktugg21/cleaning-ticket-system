@@ -177,3 +177,91 @@ existing schedule-hint semantics (billing day reached AND unbilled_count >
 report the current cutoff period). Covered by
 `InvoiceDueApiTests.test_due_includes_unbilled_work_from_a_prior_month` in
 `backend/invoicing/tests/test_api.py`.
+
+## B.11 The document is FROZEN at SEND (Sprint 180)
+Until Sprint 180 the invoice PDF was **re-rendered from live data on every
+download** (`views.py` called `render_invoice_pdf` on each request) and the
+model carried **no file field and no snapshot field at all**. A SENT
+invoice's document could therefore render differently later if anything
+behind it changed — a renamed customer, a relabelled department, a changed
+brand slug. An invoice is a legal artefact, not a view.
+
+**The rule: snapshot it, save it, never recompute.**
+
+* **Frozen at SEND**, inside `send_invoice`'s existing `transaction.atomic()`
+  block. SEND is where the gapless number is assigned (§B.2) and where the
+  invoice becomes immutable (§B.4), so it is the first moment the document is
+  finished and the last at which it still describes what was decided. The
+  freeze shares that transaction: if the file or its digest cannot be
+  written, the send fails with it — "SENT with no frozen document" is exactly
+  the state this removes and must not be reachable through the happy path.
+* **A DRAFT keeps rendering fresh.** So does an ISSUED-but-unsent invoice. A
+  draft is still changing and its preview is taken from it. Freezing at issue
+  was considered and rejected; do not re-open it.
+* **Four fields** on `Invoice`: `pdf_file` (the bytes), `pdf_frozen_at`,
+  `pdf_sha256` (the integrity witness) and `pdf_page_count`. Migration
+  `invoicing/0006_sprint180_frozen_invoice_pdf`. Additive and nullable; it
+  backfills nothing.
+* **Invoices sent before the field existed** freeze **lazily on first
+  access** (`invoice_pdf.invoice_pdf_bytes`, row-locked and re-checked under
+  the lock so two concurrent downloads cannot both write), **and** can be
+  done deliberately in bulk with `python manage.py freeze_invoice_pdfs`
+  (`--company`, `--limit`, `--dry-run`). The backfill is an OPERATIONAL
+  command, not a data migration: rendering every historic invoice inside a
+  deploy is the wrong place for real work, and a half-failed migration fails
+  the deploy with it.
+* **Nothing is ever re-frozen.** `freeze_invoice_pdf` returns untouched an
+  invoice that already has a file, and the command has no `--force`. The
+  frozen document IS the artefact.
+
+`pdf_frozen_at` and `pdf_page_count` are exposed on the PROVIDER serializer
+(so an operator can see which documents are frozen and how long they are).
+`pdf_sha256` and `pdf_file` are not exposed anywhere: the digest is an
+integrity witness for tests and audit, and the storage path is internal.
+
+## B.12 The invoice is a summary page plus a SPECIFICATION annex (Sprint 180)
+The owner showed how his father's invoices are actually assembled: **page 1
+is the summary** — one line, "3 meerwerken - Zie bijlage voor specificatie",
+with the total — and **from page 2 onward the per-building extra-works detail
+is appended, page after page**. An invoice can run to eight pages. That was
+being stapled together by hand.
+
+```
+Page 1   FACTUUR - samenvatting
+         "3 meerwerken - Zie bijlage voor specificatie"   157,40 + 21% = 190,45
+Page 2+  BIJLAGE - specificatie, grouped building -> department -> work type
+         #  Titel                                Week  Uitgevoerd    Excl. BTW
+         1  Louis + Atrium // B.3                 27   03-07-2026       110,18
+         2  The Sheryl                            28   07-07-2026        31,48
+```
+
+* Built in `backend/invoicing/annex.py`, on the SAME `fpdf2` instance and the
+  same shared brand helpers (`config/pdf_branding.py`) — **no new PDF
+  library**, which the repo forbids.
+* `build_annex(invoice)` returns plain dataclasses, so the grouping is
+  testable as data with no PDF involved. Page 1's count and the annex's rows
+  are read from the SAME `Annex`, so they cannot drift.
+* **Every appended page repeats the branded header and the column headers.**
+  A page that arrives on its own must still say what it is.
+* Amounts are read from `invoice.lines` and never re-derived from the extra
+  works: the invoice is the source of truth for its own money.
+* Row numbering is continuous across the whole annex; an unset department or
+  work type sorts LAST within its building rather than first.
+* **This REPLACED** the previous fixed page 2, a flat per-line table carrying
+  quantity / unit price / VAT% columns. The owner's own invoices do not carry
+  those — the specification says what was done, when, and the amount
+  excluding VAT, and the VAT is summarised once on page 1. Keeping both would
+  print the same money twice in two shapes.
+* **A credit note has no work to list.** `reverse_invoice` mirrors every line
+  with `extra_work=None` (§B.4), so a reversal's annex **references the
+  original invoice number** instead of inventing line data that is not there.
+* The reference system's reports carry a "members" section. The owner has
+  said explicitly to ignore it; it is not part of this.
+
+**Privacy.** The annex reads nothing from an Extra Work request except its
+building / department / work-type NAMES, all three of which the customer
+serializer already exposes. `test_sprint180_frozen_pdf_and_annex.py` asserts
+the absence of an EW description and an internal cost note on **every page**
+of a multi-page document, not only page 1 — an annex that leaks onto page 4
+is the same failure as leaking on page 1, and a page-1-only check will not
+see it.

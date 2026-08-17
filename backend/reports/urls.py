@@ -1,6 +1,16 @@
 from django.urls import path
 
 from .views import (
+    EmployeeHoursByBuildingView,
+    EmployeeHoursByExtraWorkView,
+    EmployeeHoursWeeklyView,
+    HourSourceOptionsView,
+    PeriodReportSummariesView,
+    MeldingenByCategoryView,
+    TicketReportView,
+    WorkerHoursExportView,
+    WorkerHoursReportView,
+    HoursComparisonView,
     AgeBucketsView,
     ExtraWorkByDepartmentCSVView,
     ExtraWorkByDepartmentPDFView,
@@ -32,6 +42,98 @@ from .views import (
 
 
 urlpatterns = [
+    # Sprint 177 §7 — the source picker. A plain literal path, before the
+    # report routes, in keeping with the ordering rule below.
+    path(
+        "hour-sources/",
+        HourSourceOptionsView.as_view(),
+        name="report-hour-sources",
+    ),
+    # Sprint 180 §2 — the four report CARDS, in one request. A literal
+    # path, before the report routes, in keeping with the ordering rule
+    # below.
+    path(
+        "period-report-summaries/",
+        PeriodReportSummariesView.as_view(),
+        name="report-period-summaries",
+    ),
+    # Sprint 178 §2 — the four reports. EXPORT literal before the report
+    # route in each pair, the ordering this repo keeps so a later
+    # converter change cannot let one swallow the other.
+    path(
+        "employee-hours-by-building/export.<str:fmt>",
+        EmployeeHoursByBuildingView.as_view(),
+        name="report-employee-hours-by-building-export",
+    ),
+    path(
+        "employee-hours-by-building/",
+        EmployeeHoursByBuildingView.as_view(),
+        name="report-employee-hours-by-building",
+    ),
+    path(
+        "employee-hours-weekly/export.<str:fmt>",
+        EmployeeHoursWeeklyView.as_view(),
+        name="report-employee-hours-weekly-export",
+    ),
+    path(
+        "employee-hours-weekly/",
+        EmployeeHoursWeeklyView.as_view(),
+        name="report-employee-hours-weekly",
+    ),
+    path(
+        "employee-hours-by-extra-work/export.<str:fmt>",
+        EmployeeHoursByExtraWorkView.as_view(),
+        name="report-employee-hours-by-extra-work-export",
+    ),
+    path(
+        "employee-hours-by-extra-work/",
+        EmployeeHoursByExtraWorkView.as_view(),
+        name="report-employee-hours-by-extra-work",
+    ),
+    # Sprint 185 E §1 — the export literal BEFORE the report route, the
+    # ordering this repo keeps so a later converter change cannot let one
+    # swallow the other.
+    path(
+        "meldingen-by-category/export.<str:fmt>",
+        MeldingenByCategoryView.as_view(),
+        name="report-meldingen-by-category-export",
+    ),
+    path(
+        "meldingen-by-category/",
+        MeldingenByCategoryView.as_view(),
+        name="report-meldingen-by-category",
+    ),
+    path(
+        "ticket-report/export.<str:fmt>",
+        TicketReportView.as_view(),
+        name="report-ticket-report-export",
+    ),
+    path(
+        "ticket-report/",
+        TicketReportView.as_view(),
+        name="report-ticket-report",
+    ),
+    # Sprint 171 §4 — the export literals BEFORE the report route, the
+    # ordering this repo keeps so a later converter change cannot let
+    # one swallow the other.
+    path(
+        "worker-hours/export.<str:fmt>",
+        WorkerHoursExportView.as_view(),
+        name="report-worker-hours-export",
+    ),
+    path(
+        "worker-hours/",
+        WorkerHoursReportView.as_view(),
+        name="report-worker-hours",
+    ),
+    # Sprint 165 §5 — contracted vs worked hours. Lives in `reports`
+    # because it reads BOTH `contracts` and `timesheets`, neither of
+    # which may import the other.
+    path(
+        "hours-comparison/",
+        HoursComparisonView.as_view(),
+        name="reports-hours-comparison",
+    ),
     path(
         "status-distribution/",
         StatusDistributionView.as_view(),

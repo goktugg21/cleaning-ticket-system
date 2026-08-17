@@ -14,7 +14,8 @@ rows directly.
 """
 from rest_framework import serializers
 
-from buildings.models import BuildingStaffVisibility
+from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
+from companies.models import CompanyUserMembership
 
 from .models import StaffProfile, User
 
@@ -34,6 +35,12 @@ class StaffProfileSerializer(serializers.ModelSerializer):
             "user_email",
             "user_full_name",
             "phone",
+            # Sprint 180 §4 — the payroll join key, on the READ shape too.
+            # It has been on the model since Sprint 172 §5 and the worker
+            # hour report has printed it ("Personeelsnr.") ever since, but
+            # it appeared on no serializer at all: a column the report
+            # joins on and nobody could see, let alone fill in.
+            "personnel_number",
             "internal_note",
             "can_request_assignment",
             "is_active",
@@ -65,6 +72,16 @@ class StaffProfileUpdateSerializer(serializers.ModelSerializer):
         model = StaffProfile
         fields = [
             "phone",
+            # Sprint 180 §4 — WRITABLE. The field existed, the report read
+            # it, and no write path anywhere could set it: the number had
+            # to be put in the database by hand or stay empty forever.
+            # `blank=True` on the model, so DRF derives
+            # `allow_blank=True` and clearing it is a legitimate edit.
+            #
+            # No audit wiring needed: StaffProfile is registered for the
+            # generic full-CRUD trio in `audit/signals.py`, so the field
+            # becomes audited by the same rows the moment it is writable.
+            "personnel_number",
             "internal_note",
             "can_request_assignment",
             "is_active",
@@ -222,13 +239,42 @@ class ProviderEmployeeSerializer(serializers.ModelSerializer):
     COMPANY_ADMIN / BUILDING_MANAGER / STAFF rows. `employment_type` is the
     StaffProfile category for STAFF rows and ``None`` for PA/BM (who hold no
     profile). Privacy floor: this is the same provider read surface as the
-    roster — it MUST NOT leak `internal_note`, `phone`, customer linkage, or
-    any pricing field; only name / email / role / employment category /
-    active flag are exposed.
+    roster — it MUST NOT leak `internal_note`, `StaffProfile.phone`,
+    customer linkage, or any pricing field.
+
+    Sprint 154 §K/§I.1 — `phone` here is `User.phone`, the account's OWN
+    contact number, and NOT `StaffProfile.phone`. The two are different
+    fields and only one of them is safe on this surface:
+
+      * `StaffProfile.phone` is a STAFF-only number whose visibility is
+        governed by `Customer.show_assigned_staff_phone` / the
+        CustomerCompanyPolicy mirror. The privacy floor above names it
+        explicitly, and this sprint does NOT lift that — putting it here
+        would expose a gated number on an ungated read.
+      * `User.phone` is additive, ungated, and set by the user or an
+        admin on the account record. It is the right one for a directory
+        column.
+
+    The prompt asked for "prefer StaffProfile.phone, fall back to
+    User.phone" on this page. That would breach the floor above, so it is
+    deliberately not done; see the sprint report.
+
+    Sprint 187B §2 — `companies` was added here, which AMENDS the floor
+    above, deliberately rather than casually. **A provider company name
+    is not customer linkage.** The floor bans leaking which CUSTOMERS a
+    person is tied to — the client organisations they serve. This names
+    the PROVIDER that employs them, which is the page's entire purpose:
+    a SUPER_ADMIN looking at people across Osius Demo, Bright Facilities
+    and xyz amsterdam could not tell whose staff they were looking at.
+    No customer is named, no building is named, and nothing here can be
+    narrowed to a customer. `internal_note`, `StaffProfile.phone` and
+    every pricing field remain absent, and the exact-key-set assertion in
+    `accounts.tests.test_employees_directory` remains exact.
     """
 
     full_name = serializers.CharField(read_only=True)
     employment_type = serializers.SerializerMethodField()
+    companies = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -236,11 +282,49 @@ class ProviderEmployeeSerializer(serializers.ModelSerializer):
             "id",
             "full_name",
             "email",
+            "phone",
             "role",
             "employment_type",
+            # Sprint 187B §2 — the PROVIDER company(ies) employing this
+            # person. See the class docstring for why this does not
+            # breach the privacy floor.
+            "companies",
             "is_active",
         ]
         read_only_fields = fields
+
+    def get_companies(self, obj):
+        """The provider company names this employee belongs to.
+
+        A plain sorted list of names — no "all" sentinel, unlike the
+        Users list. This directory only ever lists COMPANY_ADMIN /
+        BUILDING_MANAGER / STAFF rows and none of those roles is global,
+        so there is no all-companies case to represent; inventing one
+        would be a shape the page can never render.
+
+        Normally reads `_company_names`, which
+        `ProviderEmployeesView.paginate_queryset` resolves in three
+        queries for the whole page. Resolved there rather than per row
+        here because this endpoint uses `UnboundedPagination` — a per-row
+        lookup would be three SELECTs times the entire workforce.
+
+        The fallback below is a real resolution, not an empty list, so a
+        caller that renders this serializer outside that view gets the
+        right answer slowly rather than a wrong answer quickly. An empty
+        default would have made "this employee belongs to no company"
+        indistinguishable from "nobody attached the names", and the first
+        is a claim while the second is a bug.
+        """
+        attached = getattr(obj, "_company_names", None)
+        if attached is not None:
+            return attached
+        # Sprint 188 — the union moved to `scoping.
+        # employing_company_names_for` so the Users detail page can ask
+        # the same question and get the same answer. One definition of
+        # "employed by", not two.
+        from .scoping import employing_company_names_for
+
+        return employing_company_names_for(obj)
 
     def get_employment_type(self, obj):
         # OneToOne reverse accessor; present only for STAFF rows (PA/BM have

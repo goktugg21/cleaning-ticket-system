@@ -27,7 +27,7 @@ import type {
   TimelineStatusHistoryRow,
 } from "../api/types";
 import { formatDate } from "../lib/intl";
-import { prettyEnum } from "../lib/enumLabels";
+import { prettyEnum, ticketStatusLabelKey } from "../lib/enumLabels";
 import { ChangeDiff } from "./ChangeDiff";
 import { StatusBadge } from "./StatusBadge";
 
@@ -98,7 +98,11 @@ export function UnifiedTimeline({ rows }: { rows: TicketTimelineRow[] }) {
 
   const tStatus = (status: string | null): string => {
     if (!status) return t("status_default_created");
-    return t(`common:status.${status.toLowerCase()}`);
+    // Sprint 182 integration -- the crisp set. `common:status.*` says
+    // "Waiting approval" where `ticket_status.*` says "Waiting customer
+    // approval": the same row read one way in the list and another way
+    // in the timeline beside it.
+    return t(`common:${ticketStatusLabelKey(status)}`);
   };
   const unassigned = t("unassigned");
 
@@ -117,7 +121,7 @@ export function UnifiedTimeline({ rows }: { rows: TicketTimelineRow[] }) {
     return (
       <TimelineRow color={color} timestamp={row.timestamp}>
         <div className="timeline-text">
-          <b>{humanName(row.changed_by_email, unassigned)}</b>
+          <b>{row.changed_by_email ? humanName(row.changed_by_email, unassigned) : t("common:audit_logs.system_actor")}</b>
           {row.old_status ? (
             <>
               {t("timeline_status_changed_from_to")}
@@ -196,7 +200,7 @@ export function UnifiedTimeline({ rows }: { rows: TicketTimelineRow[] }) {
     return (
       <TimelineRow color="muted" timestamp={row.timestamp}>
         <div className="timeline-text">
-          <b>{humanName(row.changed_by_email, unassigned)}</b>{" "}
+          <b>{row.changed_by_email ? humanName(row.changed_by_email, unassigned) : t("common:audit_logs.system_actor")}</b>{" "}
           {t("timeline_ew_status_change", { id: row.extra_work_id })}{" "}
           <StatusBadge
             status={{ kind: "extra-work", value: row.old_status }}

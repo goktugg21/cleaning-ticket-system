@@ -3,6 +3,10 @@
 // fns). `TicketDetail` carries the nested read-only `sub_tasks`, so it
 // re-uses that type. Type-only import — erased at build, no runtime cycle.
 import type { SubTask } from "./admin";
+// Sprint 184 §5 — the billing pair is declared beside the calls that
+// write it (`api/invoices.ts`); a type-only import keeps ONE definition
+// rather than a second copy of the same two unions here.
+import type { InvoiceBillingTarget, InvoiceSplit } from "./invoices";
 
 export type Role =
   | "SUPER_ADMIN"
@@ -124,6 +128,29 @@ export interface CustomerActions {
   allowed_target_customer_access_roles: CustomerAccessRole[];
 }
 
+/** Sprint 185 §3 — proposed, and awaiting the owner's veto. Mirrors
+ *  `customers.models.CustomerLifecycle`. Nothing branches on the value;
+ *  it is what the screens say, not what anyone may do. */
+/** Sprint 185 §3 — the ONE ordered lifecycle list. Both the list page's
+ *  filter and the form's picker iterate this; a second local copy is how
+ *  a newly added state renders on one screen and silently not the other
+ *  (CLAUDE.md — Sprint 126/130). Adding a state here and to the union
+ *  below is the whole change. */
+export const CUSTOMER_LIFECYCLE_VALUES = [
+  "PROSPECT",
+  "ONBOARDING",
+  "ACTIVE",
+  "NOTICE",
+  "CHURNED",
+] as const;
+
+export type CustomerLifecycle =
+  | "PROSPECT"
+  | "ONBOARDING"
+  | "ACTIVE"
+  | "NOTICE"
+  | "CHURNED";
+
 export interface Customer {
   id: number;
   company: number;
@@ -142,7 +169,21 @@ export interface Customer {
   contact_email: string;
   phone: string;
   language: string;
+  // Sprint 185 §1 — the BILLING address. Every invoice carries the
+  // CUSTOMER's address, never the building's: a building's address is
+  // the work site.
+  address: string;
+  postal_code: string;
+  city: string;
+  country: string;
+  /** Server-derived: street AND city are filled in. One definition
+   *  (`Customer.has_billing_address`) so the screen's warning and the
+   *  document cannot disagree about what counts as an address. */
+  has_billing_address: boolean;
   is_active: boolean;
+  /** Sprint 185 §3 — where the relationship is. DESCRIPTIVE ONLY:
+   *  `is_active` above still decides access. */
+  lifecycle: CustomerLifecycle;
   // RF-1 — customer company logo URL (null when unset).
   logo_url?: string | null;
   // Per-current-user, per-customer capability block. Optional so
@@ -159,11 +200,33 @@ export type SLAStatus =
 
 export type SLADisplayState = SLAStatus | "PAUSED";
 
+/** Sprint 185 E §1 — one row of the per-company work-category catalog
+ *  (`GET /api/tickets/categories/`). The `CatalogTab` shape, shared with
+ *  building types, hour types, work types, contract types and managed
+ *  units. */
+export interface WorkCategory {
+  id: number;
+  company: number;
+  company_name: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+  usage_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TicketList {
   id: number;
   ticket_no: string;
   title: string;
   type: string;
+  /** Sprint 185 E §1 — the kind of WORK, from the company's own
+   *  catalog. `type` above says what kind of MESSAGE it is; the two
+   *  answer different questions and a melding carries both. Null until
+   *  somebody classifies it, which is a real and common state. */
+  category: number | null;
+  category_name: string | null;
   priority: string;
   status: TicketStatus;
   company: number;
@@ -195,8 +258,12 @@ export interface TicketStatusHistory {
   id: number;
   old_status: TicketStatus;
   new_status: TicketStatus;
-  changed_by: number;
-  changed_by_email: string;
+  // Sprint 180 Batch 2 — a system transition (auto-close on customer
+  // approval) writes changed_by NULL, and the serializer OMITS
+  // changed_by_email entirely rather than emitting null, because DRF
+  // turns the null-FK traversal into SkipField.
+  changed_by: number | null;
+  changed_by_email?: string | null;
   note: string;
   // Sprint 27F-B1 — workflow override columns. Required on the
   // wire because the backend always emits them (`is_override`
@@ -663,17 +730,111 @@ export const COMPANY_POLICY_FLAGS = [
 ] as const;
 export type CompanyPolicyFlag = (typeof COMPANY_POLICY_FLAGS)[number];
 
+/** Sprint 178 §1 — one row of a company's own building-type catalog. */
+export interface BuildingTypeOption {
+  id: number;
+  company: number;
+  company_name?: string;
+  name: string;
+  is_active: boolean;
+  sort_order?: number;
+  usage_count?: number;
+}
+
 export interface BuildingAdmin {
   id: number;
   company: number;
   name: string;
+  /** Sprint 178 §1 — the type's id, and its resolved name alongside.
+   *  Both null when the building is unclassified; the keys are always
+   *  present, so a client never has to tell "absent" from "null". */
+  building_type?: number | null;
+  building_type_name?: string | null;
   address: string;
   city: string;
   country: string;
   postal_code: string;
   is_active: boolean;
+  // Sprint 154 §I.5 — per-row counts, annotated on the list queryset (no
+  // N+1). Optional because the create/update responses and older cached
+  // payloads may predate them.
+  customer_count?: number;
+  manager_count?: number;
+  staff_count?: number;
+  contact_count?: number;
+  /** Bounded preview for the list's Customers column: the first few
+   *  names plus the TRUE total, so the cell can render "A, B +3" without
+   *  a second request and without an unbounded list. */
+  customer_names?: { names: string[]; total: number };
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Sprint 154 §I.6 — GET /api/buildings/<id>/summary/.
+ *
+ * Same contract as `CustomerSummary`: `null` means "this module is not
+ * yours to read" and renders an em dash; `0` means "readable and empty".
+ * Never collapse the two with `?? 0`.
+ *
+ * `room_count` is ALWAYS null: this system has no room concept — no
+ * model, no app, no field. The key exists so the shape is stable.
+ */
+export interface BuildingSummary {
+  room_count: number | null;
+  customer_count: number | null;
+  manager_count: number | null;
+  staff_count: number | null;
+  contact_count: number | null;
+  ticket_count: number | null;
+  open_ticket_count: number | null;
+  extra_work_count: number | null;
+  open_extra_work_count: number | null;
+}
+
+/** Sprint 154 §G.2 — one staff member linked to a building. The
+ *  per-BUILDING view of `BuildingStaffVisibility`; the per-USER view is
+ *  `StaffVisibilityRow`. `user_phone` is `User.phone`, NOT the
+ *  staff-only, visibility-gated `StaffProfile.phone`. */
+export interface BuildingStaffRow {
+  id: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_phone: string;
+  visibility_level: string;
+  can_request_assignment: boolean;
+  created_at: string;
+}
+
+/** Sprint 154 §G.2 — one contact person linked to a building. A contact
+ *  may or may not have a login, which `has_login` reports. */
+export interface BuildingContactRow {
+  id: number;
+  contact_id: number;
+  full_name: string;
+  email: string;
+  phone: string;
+  role_label: string;
+  customer_id: number;
+  customer_name: string;
+  has_login: boolean;
+  created_at: string;
+}
+
+/** Sprint 154 §I.2 — the four relations the bulk link/unlink endpoint
+ *  understands. One endpoint, four bindings. */
+export type BuildingLinkRelation =
+  | "customers"
+  | "managers"
+  | "staff"
+  | "contacts";
+
+export interface BuildingBulkLinkResult {
+  created: number;
+  removed: number;
+  already_linked: number;
+  not_linked: number;
 }
 
 export interface CustomerAdmin {
@@ -683,11 +844,30 @@ export interface CustomerAdmin {
   // consolidated customers can be created with no anchor and linked
   // to multiple buildings via the M:N CustomerBuildingMembership.
   building: number | null;
+  // Sprint 153 — per-row counts, annotated on the list queryset (no
+  // N+1). `linked_building_count` counts M:N membership rows only; it
+  // deliberately ignores the deprecated `building` anchor above.
+  linked_building_count: number;
+  user_count: number;
+  contact_count: number;
   name: string;
   contact_email: string;
   phone: string;
   language: string;
   is_active: boolean;
+  /** Sprint 185 §1 — the BILLING address, printed on every invoice.
+   *  A building's address is the work site and is NOT this. */
+  address: string;
+  postal_code: string;
+  city: string;
+  country: string;
+  /** Server-computed: street AND city both filled. Read-only — the
+   *  screen must not re-derive the rule the PDF actually applies. */
+  has_billing_address: boolean;
+  /** Sprint 185 §3 — where the relationship IS. Descriptive only:
+   *  `is_active` above still decides access, and nothing here may
+   *  change it. */
+  lifecycle: CustomerLifecycle;
   // Sprint 23B — assigned-staff contact-visibility policy. Defaults
   // True. The CustomerFormPage exposes these as three checkboxes
   // for OSIUS Admin / Company Admin only.
@@ -711,13 +891,146 @@ export interface CustomerAdmin {
   actions?: CustomerActions;
 }
 
+/**
+ * Sprint 153 §2.4 — GET /api/customers/<id>/summary/.
+ *
+ * Every field is nullable ON PURPOSE. `null` means "this module is not
+ * yours to read" and renders as an unlinked em dash; `0` means "you can
+ * read it and it is empty". Do not collapse the two with `?? 0` — that
+ * would tell a staff user there is no extra work when in fact there is
+ * extra work they may not see.
+ */
+export interface CustomerSummary {
+  linked_building_count: number | null;
+  user_count: number | null;
+  contact_count: number | null;
+  pricing_rule_count: number | null;
+  open_ticket_count: number | null;
+  ticket_count: number | null;
+  open_extra_work_count: number | null;
+  extra_work_count: number | null;
+  unpaid_invoice_count: number | null;
+  /** Decimal STRING (e.g. "1250.00") — money never goes through a float. */
+  unpaid_invoice_total: string | null;
+}
+
 // Sprint 14 — Customer ↔ Building (M:N) link.
+/** Sprint 156 §1 — the company detail page's stat tiles.
+ *
+ * Every count may be `null`, and `null` is NOT `0`: it means the block
+ * was not answerable for this actor (the server wraps each one so a
+ * single unreadable module degrades rather than 500s). The page renders
+ * an em dash for null, never a zero. */
+export interface CompanySummary {
+  building_count: number | null;
+  customer_count: number | null;
+  admin_count: number | null;
+  employee_count: number | null;
+  ticket_count: number | null;
+  open_ticket_count: number | null;
+  extra_work_count: number | null;
+  open_extra_work_count: number | null;
+}
+
+/** One COMPANY_ADMIN of a company. `phone` is `User.phone` — the ungated
+ *  account field, never the visibility-gated `StaffProfile.phone`. */
+export interface CompanyAdminPerson {
+  id: number;
+  email: string;
+  full_name: string;
+  phone: string;
+  is_active: boolean;
+}
+
+/** One provider-side employee, with the buildings they are on — the
+ *  "who can do what, where" row. */
+export interface CompanyEmployee {
+  id: number;
+  email: string;
+  full_name: string;
+  phone: string;
+  role: string;
+  is_active: boolean;
+  buildings: { id: number; name: string }[];
+}
+
+export interface CompanyBuildingRow {
+  id: number;
+  name: string;
+  address: string;
+  city: string;
+  postal_code: string;
+  is_active: boolean;
+  customer_count: number;
+}
+
+export interface CompanyCustomerRow {
+  id: number;
+  name: string;
+  is_active: boolean;
+  building_count: number;
+  user_count: number;
+}
+
+/** Sprint 157 §2 — who is assigned to an Extra Work request.
+ *
+ *  `role` is the ASSIGNMENT role (what they are doing on this request),
+ *  deliberately not the same thing as `user_role`, the account role. A
+ *  BUILDING_MANAGER may be assigned as a WORKER on a small job. */
+export type ExtraWorkAssignmentRole = "WORKER" | "MANAGER";
+
+export interface ExtraWorkAssignment {
+  id: number;
+  extra_work_request: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  /** `User.phone` — the ungated account field, never the
+   *  visibility-gated `StaffProfile.phone`. */
+  user_phone: string;
+  user_role: string;
+  role: ExtraWorkAssignmentRole;
+  assigned_at: string;
+}
+
+/** Sprint 158 §1 — one eligible person for a given (request, role) or
+ *  (ticket, role). The server decides eligibility from the BUILDING; the
+ *  client never computes it. */
+export interface AssignmentCandidate {
+  id: number;
+  email: string;
+  full_name: string;
+  role: string;
+}
+
+export interface ExtraWorkBulkAssignResult {
+  created: number;
+  removed: number;
+  already_assigned: number;
+  not_assigned: number;
+}
+
 export interface CustomerBuildingMembership {
   id: number;
   customer: number;
   building_id: number;
   building_name: string;
   building_address: string;
+  // Sprint 153 §4.3 — "" when the building has no city on file.
+  building_city: string;
+  // Sprint 154 §G.2 — the row is read from BOTH ends now (the customer's
+  // buildings page and the building's customers card), so it carries the
+  // customer's name too.
+  customer_name: string;
+  // Sprint 155 §2 — what the customer overview's Linked buildings card
+  // fills its empty right-hand half with. All annotated server-side; the
+  // two counts are numbers, never null, because zero is a real answer.
+  building_postal_code: string;
+  building_is_active: boolean;
+  building_customer_count: number;
+  building_manager_count: number;
+  // Sprint 157 §8 — the third count, annotated in the same pass.
+  building_contact_count: number;
   created_at: string;
 }
 
@@ -803,6 +1116,10 @@ export interface DocumentFolder {
   is_system: boolean;
   system_slug: string;
   origin: DocumentOrigin;
+  // Sprint 155 §3 — this folder's OWN files, not its subtree's. Annotated
+  // on the list queryset, so the number is free; it is the headline
+  // figure on the folder cards.
+  file_count: number;
   created_at: string;
 }
 
@@ -830,10 +1147,25 @@ export interface UserScopeSummary {
   count: number;
 }
 
+// Sprint 187B §1a — WHICH companies a user belongs to, beside
+// `UserScopeSummary`'s HOW MANY. A sibling of `scope_summary`, not an
+// extension of it: that field's `count` means a different thing per role
+// (buildings for a building manager), so company names inside it would
+// put two axes in one object. `all: true` is the SUPER_ADMIN sentinel and
+// renders as "All companies", exactly as the scope chip already does.
+export interface UserCompanies {
+  all: boolean;
+  names: string[];
+}
+
 export interface UserAdmin {
   id: number;
   email: string;
   full_name: string;
+  // Sprint 154 §I.1 — the user's OWN contact number. Distinct from
+  // `StaffProfile.phone`, which is staff-only and gated on the customer
+  // side by `show_assigned_staff_phone`. "" when unset, never null.
+  phone: string;
   role: Role;
   language: string;
   is_active: boolean;
@@ -843,6 +1175,8 @@ export interface UserAdmin {
   // payload without it the type-check here flags it at the call
   // site rather than silently rendering an empty chip.
   scope_summary: UserScopeSummary;
+  // Sprint 187B §1a — the companies this user belongs to, by name.
+  companies: UserCompanies;
   // Sprint 2c — read-only single HIGHEST effective customer access role the
   // user holds (CUSTOMER_COMPANY_ADMIN > CUSTOMER_LOCATION_MANAGER >
   // CUSTOMER_USER), company-scoped to the viewer; null for provider-side
@@ -852,6 +1186,12 @@ export interface UserAdmin {
 }
 
 export interface UserAdminDetail extends UserAdmin {
+  // Sprint 188 — the provider companies that EMPLOY this person, by name.
+  // An OWN property, deliberately not reusing the list's `companies`:
+  // that field includes the provider a CUSTOMER_USER buys from, which is
+  // the exact conflation this one exists to end. Empty for a customer
+  // user and for a SUPER_ADMIN (a platform admin is nobody's employee).
+  employed_by: string[];
   company_ids: number[];
   building_ids: number[];
   customer_ids: number[];
@@ -865,8 +1205,20 @@ export interface ProviderEmployee {
   id: number;
   full_name: string;
   email: string;
+  // Sprint 154 §K — `User.phone`, the account's own number. NOT
+  // `StaffProfile.phone`: that one is staff-only and gated by
+  // `show_assigned_staff_phone`, and this directory's serializer has a
+  // documented privacy floor that forbids it.
+  phone: string;
   role: Role;
   employment_type: EmploymentType | null;
+  // Sprint 187B §2 — the PROVIDER company(ies) employing this person. A
+  // plain list, with no "all" sentinel: this directory lists only
+  // COMPANY_ADMIN / BUILDING_MANAGER / STAFF rows and none of those roles
+  // is global, so there is no all-companies case to represent. A provider
+  // company name is not customer linkage; the serializer's docstring
+  // carries the reasoning for amending that privacy floor.
+  companies: string[];
   is_active: boolean;
 }
 
@@ -902,6 +1254,7 @@ export interface StaffProfileAdmin {
   user_email: string;
   user_full_name: string;
   phone: string;
+  personnel_number: string;
   internal_note: string;
   can_request_assignment: boolean;
   is_active: boolean;
@@ -1135,8 +1488,41 @@ export type ExtraWorkUnitType =
   | "ITEM"
   | "OTHER";
 
+/** Sprint 180 §3 — WHO the finished work is charged to. Exactly two
+ *  values, and the pair is the feature: the building (the answer 99% of
+ *  the time, and the default) or the customer organisation.
+ *
+ *  NOT the customer's `invoice_granularity_default`
+ *  (CUSTOMER / PER_BUILDING / PER_BUILDING_DEPARTMENT_WORK_TYPE), which
+ *  decides how many invoice DOCUMENTS a month's work is cut into. That
+ *  one is a property of the customer's paperwork; this one is a
+ *  property of the job. Mirrors `extra_work.models.ExtraWorkBilledTo`. */
+export type ExtraWorkBilledTo = "BUILDING" | "CUSTOMER";
+
+/** Sprint 180 §2 — an operational ticket born from an Extra Work.
+ *
+ *  Resolved through the CANONICAL FK (`Ticket.extra_work_request`) and
+ *  nothing else, which is the same definition the invoice run uses.
+ *  `ticket_no` is null only for a ticket whose number has not been
+ *  stamped yet. Mirrors `extra_work/serializers.py
+ *  ::_serialize_spawned_tickets`. */
+export interface ExtraWorkSpawnedTicket {
+  id: number;
+  ticket_no: string | null;
+  status: TicketStatus;
+}
+
 // List shape (lean — no description / notes / line items).
 export interface ExtraWorkRequestList {
+  /** Sprint 173 §4 / Sprint 174 §1 — the deadline, the planned window's
+   *  end, and the two facts DERIVED from them server-side so the list,
+   *  the detail page and the Work Plan cannot disagree about what
+   *  "late" or "started early" means. */
+  deadline: string | null;
+  planned_end_date: string | null;
+  preferred_date: string | null;
+  is_overdue: boolean;
+  started_before_plan: boolean;
   id: number;
   company: number;
   company_name: string;
@@ -1165,6 +1551,11 @@ export interface ExtraWorkRequestList {
   subtotal_amount: string;
   vat_amount: string;
   total_amount: string;
+  // Sprint 188 — has anyone priced this yet? Zero is a legal price, so
+  // the three columns above cannot answer that on their own. Optional:
+  // an older cached payload omits it, and `isPriced()` reads absent as
+  // "priced" so a stale client never blanks out a real amount.
+  is_priced?: boolean;
   // RF-13 (#106) — final (actual-hours) amounts on the list shape so
   // the invoices overview can apply the final-with-quoted-fallback
   // rule without a per-row detail fetch. Present for every audience
@@ -1182,6 +1573,20 @@ export interface ExtraWorkRequestList {
   // every list row so the EW list can render an at-a-glance
   // Instant/Proposal badge per row without a per-row detail fetch.
   routing_decision: RoutingDecision;
+  // Sprint 180 §1/§2 — which TRACK this row is on, and the operational
+  // ticket(s) it produced.
+  //
+  // `has_operational_ticket` is the ONE question the two list tracks
+  // split on: has a ticket been born from this extra work? It is
+  // answered server-side by the canonical FK alone (the same definition
+  // the invoice run uses), so the list cannot drift from the money.
+  // Present for every audience — a customer is entitled to know their
+  // extra work turned into scheduled work.
+  has_operational_ticket: boolean;
+  spawned_tickets: ExtraWorkSpawnedTicket[];
+  // Sprint 180 §3 — who the finished work is charged to. Not
+  // provider-only: the customer picks it on their own create form.
+  billed_to: ExtraWorkBilledTo;
   // M4 — billing month / invoice run. Provider-only (the backend redacts
   // these for CUSTOMER_USER), hence optional.
   invoice_date?: string | null;
@@ -1442,6 +1847,11 @@ export interface EwMessageRecipient {
 // client side. The backend keeps the existing parent fields and
 // adds `line_items` as the authoritative cart.
 export interface ExtraWorkRequestCartCreatePayload {
+  /** Sprint 174 §1 — the planned window's end and the deadline. Sprint
+   *  173 added both fields and no form offered them, so every record
+   *  was created with them empty. */
+  planned_end_date?: string | null;
+  deadline?: string | null;
   title: string;
   description: string;
   building: number;
@@ -1469,6 +1879,11 @@ export interface ExtraWorkRequestCartCreatePayload {
   // (`derive_default_intent`) when omitted, so older callers and the
   // graceful-degradation path (preview unavailable) stay valid.
   request_intent?: ExtraWorkRequestIntent;
+  // Sprint 180 §3 — who the finished work is charged to. Optional on
+  // the wire: the backend defaults to BUILDING, so every existing
+  // caller keeps working and takes the answer that is right 99% of the
+  // time.
+  billed_to?: ExtraWorkBilledTo;
   // Each line is either a catalog service (`service`) OR a free-text
   // custom line (`custom_description`) — XOR, the create form guarantees
   // exactly one is set. A custom line carries no `service`; the backend
@@ -1684,6 +2099,12 @@ export interface Proposal {
 // reflects what we use.
 export interface ProposalDetail extends Proposal {
   lines: ProposalLine[];
+  /** Sprint 187 §2a — non-empty ONLY on the create response, and only
+   *  when the parent Extra Work was still REQUESTED and this actor was
+   *  not permitted to move it to UNDER_REVIEW. The proposal was still
+   *  created; this is the reason Send will refuse it, so the builder can
+   *  say so instead of hiding the button. Absent on every read. */
+  parent_advance_blocked?: string;
 }
 
 // Mirrors backend `extra_work/serializers.py::ProposalDetailSerializer.get_actions`.
@@ -1700,9 +2121,18 @@ export interface ProposalActions {
   can_cancel: boolean;
   can_approve: boolean;
   can_reject: boolean;
-  // Direct-publish (DRAFT proposal → SENT → CUSTOMER_APPROVED) is
-  // tightened to include all cheap send preconditions PLUS, for BM,
-  // the override key. See backend/extra_work/views_proposals.py.
+  // Direct-publish (DRAFT proposal → SENT → CUSTOMER_APPROVED).
+  //
+  // Sprint 187 §3 — now mirrors ALL FOUR of the endpoint's gates, not
+  // two. The two it was missing are the reason this button used to fail
+  // by default rather than as an edge case:
+  //   * the DEDICATED dangerous grant `provider.extra_work.
+  //     quote_override_start`, which is OFF by default and which the
+  //     generic B6 override key does NOT satisfy (H-11);
+  //   * `request_intent == REQUEST_QUOTE`, since the other two intents
+  //     have no customer-decision step to bypass.
+  // See backend/extra_work/views_proposals.py — the endpoint's own
+  // checks remain the authority; this flag only reports them.
   can_direct_publish: boolean;
 }
 
@@ -1722,6 +2152,8 @@ export interface CompanyAdminMembership {
   user_id: number;
   user_email: string;
   user_full_name: string;
+  // Sprint 154 §K — `User.phone`; see UserAdmin.phone.
+  user_phone: string;
   user_role: Role;
   created_at: string;
 }
@@ -1765,6 +2197,8 @@ export interface CustomerUserMembership {
   user_id: number;
   user_email: string;
   user_full_name: string;
+  // Sprint 154 §K — `User.phone`; see UserAdmin.phone.
+  user_phone: string;
   user_role: Role;
   // SoT Addendum A.1 — company-wide Customer Company Admin flag. A
   // membership with `is_company_admin: true` is CCA across ALL of the
@@ -1810,6 +2244,10 @@ export interface Contact {
   notes: string;
   // Sprint 12B — contact taxonomy + the promote-to-user bridge.
   contact_type: string;
+  /** Sprint 185 §2 — send this person the invoice. Separate from
+   *  `contact_type === "BILLING"`: that says what they do, this says
+   *  what they receive. */
+  receives_invoices: boolean;
   is_primary: boolean;
   // `user` is the read-only FK set ONLY by the promote/link flow (null
   // until promoted). `promotion_status` is server-computed:
@@ -1836,6 +2274,8 @@ export interface ContactCreatePayload {
   phone?: string;
   role_label?: string;
   notes?: string;
+  /** Sprint 185 §2 — mark this contact as an invoice recipient. */
+  receives_invoices?: boolean;
 }
 
 // PATCH semantics — every field optional.
@@ -2327,6 +2767,11 @@ export interface Invoice {
   number: string | null;
   year: number | null;
   company: number;
+  /** Sprint 187 §6a — the issuing provider company's name. Numbering is
+   *  gapless per company per year, so the number alone does not identify
+   *  an invoice. PROVIDER-SIDE ONLY: `CustomerInvoice` deliberately does
+   *  not carry it. */
+  company_name: string;
   customer: number;
   customer_name: string;
   building: number | null;
@@ -2357,6 +2802,15 @@ export interface Invoice {
   sent_at: string | null;
   created_at: string;
   updated_at: string;
+  // Sprint 183 §3 / Sprint 184 §5 — who generated this invoice. The FK
+  // is nullable and a NULL means the SYSTEM created it (the month-end
+  // run), which is why the label is computed server-side rather than
+  // joined here: the frontend must not have to decide what an absent
+  // creator is called. Folded in from `FacturenPage.tsx`, which was
+  // casting `inv as Invoice & { created_by_label?: string }` at the
+  // render site because this file belonged to another agent that round.
+  created_by: number | null;
+  created_by_label: string;
   lines: InvoiceLine[];
 }
 
@@ -2405,6 +2859,27 @@ export interface CustomerInvoice {
 
 // One row of GET /api/invoices/due/ — informational "who's due" data
 // (driven by Customer.invoice_day_rule; gates nothing).
+/**
+ * Sprint 183 §2 — why a due row has nothing to invoice, diagnosed by the
+ * server so the Due panel and the preview say the same sentence.
+ *
+ * Sprint 184 §5 — folded in from `FacturenPage.tsx`, where it was
+ * narrowed locally because `api/types.ts` belonged to another agent that
+ * round. A shape described in the page that renders it is a shape the
+ * next caller has to rediscover.
+ */
+export interface InvoiceNothingReason {
+  reason:
+    | "NO_EXTRA_WORK"
+    | "NONE_FINISHED"
+    | "ALL_INVOICED"
+    | "NOT_IN_PERIOD"
+    | "NOTHING_TO_EXPLAIN";
+  unbilled_count: number;
+  finished_count: number;
+  invoiced_count: number;
+}
+
 export interface InvoiceDueRow {
   customer: number;
   customer_name: string;
@@ -2417,4 +2892,12 @@ export interface InvoiceDueRow {
   unbilled_count: number;
   unbilled_total: string;
   is_due: boolean;
+  // Sprint 182 §3 — the customer's SAVED billing pair, echoed on the row
+  // so the generate dialog opens on what that customer is set to rather
+  // than on a global default. Optional: a row from a server that predates
+  // the split carries neither.
+  invoice_billing_target?: InvoiceBillingTarget;
+  invoice_split?: InvoiceSplit;
+  // Sprint 183 §2 — present only when there is nothing to invoice.
+  nothing_reason?: InvoiceNothingReason;
 }

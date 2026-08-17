@@ -196,6 +196,160 @@ class ProviderEmployeesTests(TestCase):
 
     # ---- forbidden roles ----------------------------------------------
 
+    # ---- Sprint 187B §2 — company identity + the company filter -------
+
+    def test_every_row_names_the_company_that_employs_it(self):
+        """The field is rendered, for each of the three roles this
+        directory lists, by the endpoint that actually serves it.
+
+        A filter test would not catch a missing `fields` entry — that is
+        what took the Extra Work page down in Sprint 173 — so this reads
+        the rendered row.
+        """
+        by_email = {
+            r["email"]: r
+            for r in self._rows(self._api(self.super_admin).get(URL))
+        }
+        self.assertEqual(
+            by_email[self.admin_a.email]["companies"], ["Emp Co A"]
+        )
+        self.assertEqual(
+            by_email[self.manager_b.email]["companies"], ["Emp Co B"]
+        )
+        self.assertEqual(
+            by_email[self.staff_a.email]["companies"], ["Emp Co A"]
+        )
+
+    def test_a_person_in_two_companies_names_both_once(self):
+        """Company identity is a SET, not a row count.
+
+        A building manager assigned to several buildings of one company
+        must name it once; one assigned across two companies must name
+        both. `company_ids_for` carries a .distinct() for this same
+        fan-out on these same relations.
+        """
+        second_a = Building.objects.create(
+            company=self.company_a, name="Emp A2"
+        )
+        BuildingManagerAssignment.objects.create(
+            user=self.manager_a, building=second_a
+        )
+        BuildingManagerAssignment.objects.create(
+            user=self.manager_a, building=self.building_b
+        )
+        row = next(
+            r
+            for r in self._rows(self._api(self.super_admin).get(URL))
+            if r["email"] == self.manager_a.email
+        )
+        self.assertEqual(row["companies"], ["Emp Co A", "Emp Co B"])
+
+    def test_company_filter_narrows_for_a_super_admin(self):
+        emails = self._emails(
+            self._api(self.super_admin).get(f"{URL}?company={self.company_a.id}")
+        )
+        self.assertIn(self.admin_a.email, emails)
+        self.assertIn(self.staff_a.email, emails)
+        self.assertNotIn(self.admin_b.email, emails)
+        self.assertNotIn(self.staff_b.email, emails)
+
+    def test_company_filter_invalid_returns_400_with_a_named_code(self):
+        resp = self._api(self.super_admin).get(URL + "?company=NOPE")
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertEqual(resp.data["code"], "company_invalid")
+
+    def test_a_company_admin_cannot_read_another_company_by_passing_its_id(
+        self,
+    ):
+        """H-1/H-2. The parameter INTERSECTS with the caller's scope; it
+        never replaces it.
+
+        admin_a holds company A only. Passing company B's id must narrow
+        A's scope to nothing — never return B's people — and must not
+        signal that B exists, which is why this asserts 200-with-no-rows
+        rather than a 400 or a 404. An error code here would itself
+        confirm the id.
+        """
+        resp = self._api(self.admin_a).get(f"{URL}?company={self.company_b.id}")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(self._emails(resp), set())
+
+    def test_a_company_admin_passing_its_own_id_still_sees_its_own_people(
+        self,
+    ):
+        """The control for the test above.
+
+        Without it, an implementation that returned nothing for EVERY
+        ?company= value would pass the cross-tenant test while being
+        completely broken.
+        """
+        emails = self._emails(
+            self._api(self.admin_a).get(f"{URL}?company={self.company_a.id}")
+        )
+        self.assertIn(self.admin_a.email, emails)
+        self.assertIn(self.staff_a.email, emails)
+        self.assertNotIn(self.admin_b.email, emails)
+
+    def test_an_unknown_company_id_is_empty_not_an_error(self):
+        """An id nobody holds must look exactly like an id with no
+        employees. A 404 would leak which ids are real."""
+        resp = self._api(self.admin_a).get(f"{URL}?company=99999999")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(self._emails(resp), set())
+
+    def test_naming_the_companies_costs_a_constant_number_of_queries(self):
+        """This endpoint is UnboundedPagination — it returns the WHOLE
+        workforce in one response. A per-row company lookup would be an
+        N+1 across every provider employee in the system, so the cost is
+        pinned rather than assumed.
+
+        Asserted as constant across two very different result sizes
+        rather than as one magic number, because the number itself is an
+        implementation detail and a hardcoded one would be rewritten to
+        whatever the code happened to do.
+        """
+        # Warm-up request first: the very first call in a test can carry
+        # one-off queries (session/content-type lookups) that would make
+        # the baseline artificially high and the comparison flaky.
+        self._count_queries_for(self.super_admin)
+        baseline = self._count_queries_for(self.super_admin)
+
+        # Twelve more employees across both companies.
+        for index in range(12):
+            extra = _mk(f"emp-bulk-{index}@example.com", UserRole.STAFF)
+            StaffProfile.objects.create(
+                user=extra,
+                employment_type=StaffProfile.EmploymentType.INTERNAL_STAFF,
+            )
+            BuildingStaffVisibility.objects.create(
+                user=extra,
+                building=self.building_a if index % 2 else self.building_b,
+            )
+
+        grown = self._count_queries_for(self.super_admin)
+        self.assertEqual(
+            baseline,
+            grown,
+            f"query count grew with the number of employees: "
+            f"{baseline} -> {grown} (N+1)",
+        )
+
+    def _count_queries_for(self, user):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        client = self._api(user)
+        with CaptureQueriesContext(connection) as ctx:
+            resp = client.get(URL)
+            self.assertEqual(resp.status_code, 200, resp.data)
+            # Read the rows INSIDE the context: any lazy query the
+            # serializer defers would otherwise fire after it closed and
+            # go uncounted, which is exactly the N+1 being measured.
+            rows = self._rows(resp)
+            self.assertTrue(rows, "no rows to measure")
+            self.assertTrue(all("companies" in r for r in rows))
+        return len(ctx.captured_queries)
+
     def test_staff_and_customer_forbidden(self):
         self.assertEqual(self._api(self.staff_a).get(URL).status_code, 403)
         self.assertEqual(self._api(self.cust_user).get(URL).status_code, 403)
@@ -203,12 +357,80 @@ class ProviderEmployeesTests(TestCase):
     # ---- privacy floor -------------------------------------------------
 
     def test_privacy_floor_exact_fields(self):
+        """The allow-list for `/api/employees/`. Read gate is
+        `IsProviderRosterReader` — SUPER_ADMIN, COMPANY_ADMIN and
+        BUILDING_MANAGER; STAFF and customer users are 403.
+
+        Sprint 154 §K/§I.1 added `phone`, and the addition is
+        DELIBERATE — recorded here rather than left to a reader to
+        infer from a diff:
+
+          * It is `User.phone`, the account's own contact number, added
+            in `accounts.0009`. It is ungated by design and is the same
+            class of datum as `email`, which this surface has always
+            exposed.
+          * It is NOT `StaffProfile.phone`. That one is STAFF-only and
+            its visibility is governed by
+            `Customer.show_assigned_staff_phone` / the
+            CustomerCompanyPolicy mirror, and it remains forbidden here
+            — see the assertion below, which is the half of this floor
+            that must never be relaxed.
+
+        Sprint 187B §2 added `companies`, and this assertion failing is
+        exactly how that addition was noticed — the mechanism working,
+        not the mechanism in the way. The amendment in one sentence:
+        **a provider company name is not customer linkage** — the floor
+        bans naming the CUSTOMERS a person is tied to, while this names
+        the PROVIDER that employs them, which is the page's whole
+        purpose. No customer and no building is named by it.
+
+        Everything else the floor exists to keep out — `internal_note`,
+        `StaffProfile.phone`, customer linkage, any pricing field — is
+        still absent, and the set below is still EXACT (a subset check
+        would defeat the whole point), so the next field cannot arrive
+        here unnoticed either.
+        """
         resp = self._api(self.super_admin).get(URL)
-        for r in self._rows(resp):
+        rows = self._rows(resp)
+        self.assertTrue(rows, "no rows to assert the privacy floor against")
+        for r in rows:
             self.assertEqual(
                 set(r.keys()),
-                {"id", "full_name", "email", "role", "employment_type", "is_active"},
+                {
+                    "id",
+                    "full_name",
+                    "email",
+                    "phone",
+                    "role",
+                    "employment_type",
+                    "companies",
+                    "is_active",
+                },
             )
+
+    def test_privacy_floor_never_exposes_the_gated_staff_phone(self):
+        """The half of the floor that must never be relaxed.
+
+        `StaffProfile.phone` is a DIFFERENT field from `User.phone` and
+        is customer-visibility-gated. A staff member with BOTH set must
+        surface only the ungated one on this directory.
+        """
+        profile = self.staff_a.staff_profile
+        profile.phone = "+31 6 9999 0000"
+        profile.save(update_fields=["phone"])
+        self.staff_a.phone = "+31 20 555 0100"
+        self.staff_a.save(update_fields=["phone"])
+
+        resp = self._api(self.super_admin).get(URL)
+        row = next(
+            r for r in self._rows(resp) if r["email"] == self.staff_a.email
+        )
+        self.assertEqual(row["phone"], "+31 20 555 0100")
+        self.assertNotIn(
+            "+31 6 9999 0000",
+            str(resp.data),
+            "StaffProfile.phone leaked onto the employees directory",
+        )
 
     # ---- employment_type EDIT (reuse the staff-profile PATCH) ----------
 

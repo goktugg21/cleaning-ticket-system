@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from test_utils import TenantFixtureMixin
-from tickets.models import Ticket, TicketPriority, TicketStatus
+from tickets.models import Ticket, TicketPriority, TicketStatus, WorkCategory
 
 
 class TicketStatsTests(TenantFixtureMixin, APITestCase):
@@ -95,3 +95,102 @@ class TicketStatsTests(TenantFixtureMixin, APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["waiting_customer_approval"], 1)
+
+
+class TicketStatsWorkCategoryTests(TenantFixtureMixin, APITestCase):
+    """Sprint 187 §5 — the chips count the rows they sit above.
+
+    Sprint 185 gave the Tickets page a work-category dropdown and taught
+    it to the LIST only: `/tickets/stats/` never learned the filter at
+    all. Choosing a category narrowed the rows and left the counts above
+    them describing the whole company — the same defect as the work-type
+    dash (Sprint 183 §2) and the customer's "25" (the `customer` block
+    beside this one), one filter later.
+
+    Both lookups the page can send are covered, and the pairing test is
+    the one that actually matters: the stats endpoint and the list
+    endpoint must answer for the same population, because a chip that
+    disagrees with the table under it is worse than no chip.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.category = WorkCategory.objects.create(
+            company=self.company, name="Sanitair"
+        )
+        self.other_category = WorkCategory.objects.create(
+            company=self.company, name="Glasbewassing"
+        )
+        self.ticket.category = self.category
+        self.ticket.save(update_fields=["category"])
+        self.untagged = Ticket.objects.create(
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            created_by=self.customer_user,
+            title="Untagged",
+            description="no category yet",
+            status=TicketStatus.OPEN,
+        )
+
+    def _stats(self, **params):
+        response = self.client.get("/api/tickets/stats/", params)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response.data
+
+    def _list_count(self, **params):
+        response = self.client.get("/api/tickets/", params)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response.data["count"]
+
+    def test_unfiltered_stats_count_every_in_scope_ticket(self):
+        self.authenticate(self.company_admin)
+        self.assertEqual(self._stats()["total"], 2)
+
+    def test_category_narrows_the_counts(self):
+        self.authenticate(self.company_admin)
+        self.assertEqual(self._stats(category=self.category.id)["total"], 1)
+        self.assertEqual(
+            self._stats(category=self.other_category.id)["total"], 0
+        )
+
+    def test_category_isnull_counts_the_untagged_queue(self):
+        self.authenticate(self.company_admin)
+        data = self._stats(category__isnull="true")
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["by_status"][TicketStatus.OPEN], 1)
+
+    def test_stats_and_list_agree_for_every_value_the_page_sends(self):
+        """The actual contract. If these two ever disagree the chips are
+        describing a different population than the rows."""
+        self.authenticate(self.company_admin)
+        for params in (
+            {},
+            {"category": self.category.id},
+            {"category": self.other_category.id},
+            {"category__isnull": "true"},
+        ):
+            with self.subTest(params=params):
+                self.assertEqual(
+                    self._stats(**params)["total"],
+                    self._list_count(**params),
+                )
+
+    def test_a_junk_category_is_no_opinion_rather_than_a_500(self):
+        """The same tolerant parse `customer` uses directly above it: an
+        unparseable value leaves the queryset alone."""
+        self.authenticate(self.company_admin)
+        self.assertEqual(self._stats(category="not-a-number")["total"], 2)
+
+    def test_the_category_filter_cannot_widen_scope(self):
+        """H-1: narrowing runs INSIDE `scope_tickets_for`, so a company
+        admin naming another company's ticket category still sees only
+        their own — never the other tenant's rows."""
+        other_category = WorkCategory.objects.create(
+            company=self.other_company, name="Other-co category"
+        )
+        self.other_ticket.category = other_category
+        self.other_ticket.save(update_fields=["category"])
+
+        self.authenticate(self.company_admin)
+        self.assertEqual(self._stats(category=other_category.id)["total"], 0)

@@ -39,6 +39,7 @@ from buildings.models import (
     Building,
     BuildingManagerAssignment,
     BuildingStaffVisibility,
+    BuildingType,
 )
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
@@ -56,7 +57,9 @@ from documents.models import MAX_FOLDER_DEPTH, Document, DocumentFolder
 from extra_work.models import (
     CustomerCustomPrice,
     CustomerServicePrice,
+    ExtraWorkAssignment,
     ExtraWorkRequestItem,
+    ManagedUnit,
     Proposal,
     ProposalLine,
     Service,
@@ -76,8 +79,27 @@ from tickets.models import (
     TicketManagerAssignment,
     TicketMessage,
     TicketStaffAssignment,
+    WorkCategory,
 )
-from timesheets.models import HourType, TimeEntry, WeekLock
+from timesheets.models import (
+    ContractHours,
+    HourType,
+    TimeEntry,
+    WeekLock,
+)
+# ALIASED, and it has to be: `customers.WorkType` (the per-customer
+# Extra Work label list, Sprint 127) is already imported flat above, and
+# a second bare `WorkType` here would shadow it silently — registering
+# the timesheets one twice and the customers one not at all. Two
+# different nouns that happen to share a word.
+from timesheets.models import WorkType as TimesheetWorkType
+from contracts.models import (
+    Contract,
+    ContractBuilding,
+    ContractLine,
+    ContractRevision,
+    ContractType,
+)
 
 from . import context
 from .diff import (
@@ -834,6 +856,20 @@ _EW_TRACKED_FIELDS = (
     "invoiced_at",
     "department_id",
     "work_type_id",
+    # Sprint 180 §3 — who the finished work is charged to. It belongs
+    # here for the same reason the two label FKs above do: it decides
+    # where money lands, and a later change to it makes an already-sent
+    # invoice look wrong to whoever reads it next, so the change has to
+    # be attributable.
+    #
+    # Today the only write path is CREATE (`ExtraWorkRequestCreate
+    # Serializer`; the `/billing/` PATCH action writes invoice_date
+    # only), and this handler is deliberately UPDATE-only, so in the
+    # shipped flows it emits nothing yet. That is the correct ordering,
+    # not a gap: the tracking is in place BEFORE the edit surface that
+    # will need it, rather than bolted on after the first correction
+    # has already gone unrecorded.
+    "billed_to",
 )
 
 
@@ -1434,6 +1470,38 @@ def _connect():
         ServiceCategory,
         Service,
         CustomerServicePrice,
+        # Sprint 180 §5 — the two catalogs that were never registered.
+        # Every other per-company catalog in this trio (ServiceCategory,
+        # Service, HourType, TimesheetWorkType, ContractType, Department,
+        # WorkType) is here for the same reason, and these two were
+        # simply missed:
+        #
+        #   * `BuildingType` (Sprint 178) — a RENAME is the change worth
+        #     auditing, exactly as for `HourType`: every building points
+        #     at the type by id, so renaming "Kantoor" silently
+        #     reclassifies every building carrying it, and the buildings
+        #     list filter changes underneath whoever was using it.
+        #   * `ManagedUnit` (Sprint 123) — the same, and with money
+        #     attached: `Service` / `CustomerCustomPrice` rows keep
+        #     `custom_unit_label` in sync with the unit's current label
+        #     at every write, so relabelling "m³" restates the unit a
+        #     price is quoted in on every row that adopted it.
+        #
+        # Both carry editable fields (name/label, is_active, sort_order)
+        # that produce meaningful UPDATE diffs, no FileField, and no
+        # `*StatusHistory` to double-write against (H-11) — neither has
+        # a state machine. So the full CRUD trio is the right shape.
+        BuildingType,
+        ManagedUnit,
+        # Sprint 185 E §1 — the work-category catalog, registered with
+        # its five siblings for the reason `BuildingType` is: every
+        # melding points at the category by id, so RENAMING one silently
+        # reclassifies every melding carrying it, and the category report
+        # and the meldingen filter both change underneath whoever was
+        # reading them. Editable name / is_active / sort_order, no
+        # FileField, no `*StatusHistory` to double-write against (H-11) —
+        # the full CRUD trio is the right shape.
+        WorkCategory,
         # M5 A — customer custom price lines (ad-hoc, no service FK)
         # carry the same provider price / VAT / validity data and have
         # create / update / soft-delete endpoints, so they get the same
@@ -1537,6 +1605,47 @@ def _connect():
         HourType,
         TimeEntry,
         WeekLock,
+        # Sprint 168 §3 — the timesheets work-type catalog, registered
+        # for the same reason `HourType` is: a RENAME is the change
+        # worth auditing. Every contract-hours row points at the type by
+        # id, so renaming "Vast werk" silently restates what every one
+        # of those agreements says. Aliased at the import — see there.
+        TimesheetWorkType,
+        # Sprint 167 §3/§4 — the standing hours agreement. The full CRUD
+        # trio, and the UPDATE half is the point: a status move
+        # (DRAFT -> SAVED -> APPROVED, and a reopen back) lands as a
+        # diff naming both states, which is the audit trail §4 requires
+        # for every transition. The seven weekday columns diff too, so
+        # "who changed Tuesday from 4 to 8" is answerable.
+        ContractHours,
+        # Sprint 160 — contracts. Four of the five models take the full
+        # CRUD trio; the fifth (`ContractBuilding`) is membership-shaped
+        # and is registered below.
+        #
+        #   * `ContractType` mirrors `HourType` exactly — a per-company
+        #     catalog whose `name` renames are the point of auditing it.
+        #   * `Contract` carries the commercial terms. A change to
+        #     `billing_day`, `billing_type` or `start_proration` moves
+        #     real money, and `lifecycle` is how a contract is cancelled,
+        #     so the before/after diff is what makes any of that
+        #     attributable.
+        #   * `ContractRevision` and `ContractLine` are the agreed scope
+        #     and its prices. These need auditing MORE than most rows
+        #     here, not less: a revision is immutable once it is in
+        #     force, so any UPDATE that does land on one is either a
+        #     future-dated edit (legitimate, and worth a record) or a
+        #     bug, and the audit row is how the difference is told
+        #     afterwards.
+        #
+        # The generic introspection covers every field on all four —
+        # they carry no FileField (the reason `Document` needs
+        # hand-written handlers) and no `*StatusHistory` to double-write
+        # against (H-11): this module has no state machine, and a
+        # revision is a business version rather than a status history.
+        ContractType,
+        Contract,
+        ContractRevision,
+        ContractLine,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
@@ -1570,6 +1679,29 @@ def _connect():
         # CREATE/DELETE). Contact itself stays in the full-CRUD trio; the
         # new user/contact_type/is_primary fields are auto-introspected.
         ContactBuildingLink,
+        # Sprint 157 §2 — who is assigned to an Extra Work request.
+        # Membership shape rather than the full CRUD trio, and that is
+        # the correct shape rather than a shortcut: the row has NO
+        # editable field. `role` is part of `unique_together`, so
+        # changing it is a delete plus a create, which is two audit rows
+        # that each say what happened — an UPDATE handler here would
+        # have nothing to diff. Exactly how TicketStaffAssignment is
+        # registered, which §2 asked this to mirror.
+        #
+        # Not added to `_MEMBERSHIP_ENTITY_ATTR` for the same reason
+        # TicketStaffAssignment is not: `ExtraWorkRequest` has no
+        # `.name`, so the row is audited with the correct target_model /
+        # target_id / actor and an empty `changes` payload.
+        ExtraWorkAssignment,
+        # Sprint 160 — which buildings ("locations") a contract covers.
+        # Membership shape, and correct rather than convenient: the row
+        # has NO editable field (contract + building is its whole
+        # content and its uniqueness constraint), so adding or removing
+        # a location is a create or a delete, each of which says what
+        # happened on its own. An UPDATE handler would have nothing to
+        # diff. Same registration as ContactBuildingLink, which is the
+        # closest existing analogue.
+        ContractBuilding,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).

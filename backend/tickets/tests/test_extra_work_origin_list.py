@@ -36,6 +36,21 @@ SHARED_ORIGIN_KEYS = {
     "extra_work_request_item_id",
     "service_name",
     "origin",
+    # Sprint 184 B — "the dates travel with the work". The origin
+    # resolver started carrying the parent Extra Work's dates and this
+    # set was not updated with it, so this assertion has been failing on
+    # the integration tip since that branch landed. Verified against
+    # `092b0e4` with nothing of Sprint 185 E applied: same four keys,
+    # same failure.
+    #
+    # Added rather than the assertion loosened: an EXACT key set is the
+    # point of this test — the frontend's `TicketExtraWorkOrigin` type
+    # consumes these keys, and a payload that silently grows one is how
+    # the list and the detail drift apart.
+    "preferred_date",
+    "planned_end_date",
+    "deadline",
+    "provider_planned_date",
 }
 
 

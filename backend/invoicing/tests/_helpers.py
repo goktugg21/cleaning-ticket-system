@@ -1,16 +1,26 @@
-"""Shared fixtures for the invoicing Phase 2a tests.
+"""Shared fixtures for the invoicing tests.
 
 Not a test module (name does not match `test*.py`, so the runner does not
 auto-collect it). Imported explicitly by the test files.
+
+Sprint 180 §3 — MEDIA_ROOT ISOLATION. Sending an invoice now WRITES A FILE:
+`send_invoice` freezes the PDF onto `Invoice.pdf_file`. A `TestCase` rolls
+its database rows back, but nothing rolls a file back, so without isolation
+every send in the suite would deposit a real PDF into the developer's
+`backend/media/` and leave it there. `MediaRootIsolation` gives each test
+CLASS its own temporary MEDIA_ROOT and deletes it afterwards, which also
+means one test can never read a file another test wrote.
 """
 from __future__ import annotations
 
+import shutil
+import tempfile
 from datetime import datetime
 from datetime import timezone as dt_timezone
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import UserRole
@@ -42,9 +52,55 @@ def dt(year: int, month: int, day: int) -> datetime:
 _UNSET = object()
 
 
-class InvoicingFixture(TestCase):
+class MediaRootIsolation:
+    """Point MEDIA_ROOT at a throwaway directory for the whole test class.
+
+    Mix in FIRST, before the `TestCase` base, so its `setUpClass` runs the
+    override BEFORE `setUpTestData` builds any fixture that might write a
+    file.
+
+    `setUpClass`/`tearDownClass` rather than `setUp`/`tearDown`: Django
+    builds `setUpTestData` fixtures once per class, and an override that
+    only existed per-test would not cover them.
+
+    **Do not combine with a class-level `@override_settings(MEDIA_ROOT=...)`.**
+    Django enables a class's own `_overridden_settings` inside
+    `SimpleTestCase.setUpClass`, which this mixin calls through `super()` —
+    so the decorator is enabled LAST and wins. Measured, not assumed. If a
+    test genuinely needs its own MEDIA_ROOT it should not mix this in at all,
+    rather than mix it in and be quietly overruled.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._media_dir = tempfile.mkdtemp(prefix="invoicing-media-")
+        cls._media_override = override_settings(MEDIA_ROOT=cls._media_dir)
+        cls._media_override.enable()
+        try:
+            super().setUpClass()
+        except Exception:
+            # A failure in the rest of setUpClass must not leave the
+            # override enabled for whatever class runs next — that would
+            # point a LATER test's files at a directory this one is about
+            # to delete.
+            cls._media_override.disable()
+            shutil.rmtree(cls._media_dir, ignore_errors=True)
+            raise
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._media_override.disable()
+        shutil.rmtree(cls._media_dir, ignore_errors=True)
+
+
+class InvoicingFixture(MediaRootIsolation, TestCase):
     """Two tenants (A + B). Company A has two buildings under one customer
-    so per-building vs per-customer generation can be exercised."""
+    so per-building vs per-customer generation can be exercised.
+
+    Carries `MediaRootIsolation` because sending an invoice writes its
+    frozen PDF (Sprint 180 §1) — see the module docstring.
+    """
 
     @classmethod
     def setUpTestData(cls):
@@ -53,7 +109,13 @@ class InvoicingFixture(TestCase):
         cls.building = Building.objects.create(company=cls.company, name="A-B1")
         cls.building2 = Building.objects.create(company=cls.company, name="A-B2")
         cls.customer = Customer.objects.create(
-            company=cls.company, name="Cust A", building=cls.building
+            company=cls.company,
+            name="Cust A",
+            building=cls.building,
+            # Sprint 186 — SEND refuses an invoice for a customer with no
+            # billing address, so every fixture that sends one needs one.
+            address="Teststraat 1",
+            city="Amsterdam",
         )
         CustomerBuildingMembership.objects.create(
             customer=cls.customer, building=cls.building
@@ -87,7 +149,11 @@ class InvoicingFixture(TestCase):
             company=cls.company_b, name="B-B1"
         )
         cls.customer_b = Customer.objects.create(
-            company=cls.company_b, name="Cust B", building=cls.building_b
+            company=cls.company_b,
+            name="Cust B",
+            building=cls.building_b,
+            address="Testweg 2",
+            city="Rotterdam",
         )
         CustomerBuildingMembership.objects.create(
             customer=cls.customer_b, building=cls.building_b

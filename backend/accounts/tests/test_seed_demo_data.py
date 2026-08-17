@@ -31,9 +31,11 @@ to make sure Sprint 19's pilot-safety gate is still in place.
 """
 from __future__ import annotations
 
+from datetime import date
 from io import StringIO
 
 from django.core.management import CommandError, call_command
+from django.utils import timezone
 from django.db.models import Q
 from django.test import TestCase, override_settings
 
@@ -52,7 +54,12 @@ from customers.models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
-from tickets.models import Ticket
+from extra_work.models import (
+    ExtraWorkAssignment,
+    ExtraWorkAssignmentRole,
+    ExtraWorkRequest,
+)
+from tickets.models import Ticket, TicketStaffAssignment
 
 
 COMPANY_A_NAME = "Osius Demo"
@@ -213,8 +220,9 @@ class SeedDemoDataShapeTests(TestCase):
         # Work request (Sprint 6A — one ticket per request; its title
         # now inherits the EW's "[DEMO] ..." marker, so it is counted
         # here) + the #108 Part G enrichment (3 attention/my-work
-        # tickets + 3 spawned billing-history tickets), and 2 in B.
-        self.assertEqual(len(tickets_a), 11)
+        # tickets + 3 spawned billing-history tickets) + Sprint 179A's
+        # 8 Work Plan tickets, and 2 in B.
+        self.assertEqual(len(tickets_a), 19)
         self.assertEqual(len(tickets_b), 2)
         # No ticket in Company A points at a Company B building, and
         # vice versa.
@@ -311,10 +319,11 @@ class SeedDemoDataIsolationTests(TestCase):
         # Sprint 29 Batch 29.8.5 demo Extra Work fixture in Company A
         # (an INSTANT-routed EW that auto-spawns one operational
         # ticket on B1 Amsterdam) PLUS the #108 Part G enrichment
-        # (3 attention/my-work tickets + 3 spawned billing tickets).
+        # (3 attention/my-work tickets + 3 spawned billing tickets)
+        # PLUS Sprint 179A's 8 Work Plan tickets.
         # Cross-company isolation is the actual signal; the absolute
         # counts are a sanity check.
-        self.assertEqual(a_ticket_qs.filter(company=self.company_a).count(), 11)
+        self.assertEqual(a_ticket_qs.filter(company=self.company_a).count(), 19)
         self.assertEqual(b_ticket_qs.filter(company=self.company_b).count(), 2)
 
     def test_cross_company_customer_visibility_is_blocked(self):
@@ -463,6 +472,14 @@ class SeedDemoDataIdempotencyTests(TestCase):
             "customer_memberships": CustomerUserMembership.objects.count(),
             "customer_user_building_access": CustomerUserBuildingAccess.objects.count(),
             "customer_building_links": CustomerBuildingMembership.objects.count(),
+            # Sprint 179A — the Work Plan fixture adds dated slots,
+            # extra-work requests and people assigned to them. Its rows
+            # are re-STAMPED on a re-run (dates move with today) but
+            # must never be re-CREATED, and only counting tickets would
+            # not have noticed the difference.
+            "staff_slots": TicketStaffAssignment.objects.count(),
+            "extra_work": ExtraWorkRequest.objects.count(),
+            "extra_work_assignments": ExtraWorkAssignment.objects.count(),
         }
         _seed()
         second_counts = {
@@ -476,12 +493,91 @@ class SeedDemoDataIdempotencyTests(TestCase):
             "customer_memberships": CustomerUserMembership.objects.count(),
             "customer_user_building_access": CustomerUserBuildingAccess.objects.count(),
             "customer_building_links": CustomerBuildingMembership.objects.count(),
+            # Sprint 179A — the Work Plan fixture adds dated slots,
+            # extra-work requests and people assigned to them. Its rows
+            # are re-STAMPED on a re-run (dates move with today) but
+            # must never be re-CREATED, and only counting tickets would
+            # not have noticed the difference.
+            "staff_slots": TicketStaffAssignment.objects.count(),
+            "extra_work": ExtraWorkRequest.objects.count(),
+            "extra_work_assignments": ExtraWorkAssignment.objects.count(),
         }
         self.assertEqual(
             first_counts,
             second_counts,
             f"Idempotency violation:\n  first:  {first_counts}\n  second: {second_counts}",
         )
+
+
+class SeedDemoDataWorkPlanTests(TestCase):
+    """Sprint 179A §6 — the Work Plan fixture.
+
+    The seeder exists so a fresh demo shows a POPULATED week: every
+    count chip with a non-zero number, an overdue list with entries in
+    it, and the owner's acceptance case present as data rather than as
+    something an operator has to build by hand before he can look at it.
+    """
+
+    AHMET = "ahmet-staff-osius@b-amsterdam.demo"
+    LATE_EW_TITLE = "[DEMO] Werkplan — EW gevelreiniging (te laat)"
+
+    def setUp(self):
+        _seed()
+
+    def test_the_week_has_dated_slots_across_several_days(self):
+        slots = TicketStaffAssignment.objects.filter(
+            user__email=self.AHMET,
+            ticket__title__startswith="[DEMO] Werkplan —",
+        )
+        self.assertGreaterEqual(slots.count(), 8)
+        dated = [
+            s.scheduled_start_at.date()
+            for s in slots
+            if s.scheduled_start_at is not None
+        ]
+        self.assertGreaterEqual(len(set(dated)), 4, dated)
+        # One deliberately UNdated slot, so the "not scheduled" note has
+        # something to say.
+        self.assertTrue(slots.filter(scheduled_start_at__isnull=True).exists())
+
+    def test_every_slot_state_the_chips_count_is_represented(self):
+        states = set(
+            TicketStaffAssignment.objects.filter(
+                user__email=self.AHMET,
+                ticket__title__startswith="[DEMO] Werkplan —",
+            ).values_list("slot_status", flat=True)
+        )
+        self.assertEqual(
+            states, {"ASSIGNED", "COMPLETED", "UNABLE_TO_COMPLETE"}
+        )
+
+    def test_the_acceptance_case_is_seeded(self):
+        """An extra work assigned to Ahmet as a WORKER, past its
+        deadline. This is the row the owner checks himself."""
+        late = ExtraWorkRequest.objects.filter(title=self.LATE_EW_TITLE).first()
+        self.assertIsNotNone(late)
+        self.assertIsNotNone(late.deadline)
+        self.assertLess(late.deadline, timezone.localdate())
+        self.assertTrue(late.is_overdue)
+        self.assertTrue(
+            ExtraWorkAssignment.objects.filter(
+                extra_work_request=late,
+                user__email=self.AHMET,
+                role=ExtraWorkAssignmentRole.WORKER,
+            ).exists()
+        )
+
+    def test_a_second_run_re_stamps_the_dates_instead_of_freezing_them(self):
+        """The property that makes this seeder useful a week later: the
+        rows are the same rows, and their dates still land on today."""
+        late = ExtraWorkRequest.objects.get(title=self.LATE_EW_TITLE)
+        late.deadline = date(2020, 1, 1)
+        late.save(update_fields=["deadline"])
+        before = ExtraWorkRequest.objects.count()
+        _seed()
+        late.refresh_from_db()
+        self.assertEqual(ExtraWorkRequest.objects.count(), before)
+        self.assertGreater(late.deadline, date(2020, 1, 1))
 
 
 CANONICAL_USER_EMAILS = (

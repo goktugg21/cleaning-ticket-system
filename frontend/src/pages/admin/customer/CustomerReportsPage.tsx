@@ -153,7 +153,9 @@ export function CustomerReportsPage() {
   if (numericId === null) {
     return (
       <div className="alert-error" role="alert">
-        {t("admin.load_error")}
+        {/* Sprint 179B §5 — see `CustomerInvoicesPage`: same branch, same
+            missing key, same existing one the sibling tabs use. */}
+        {t("bm_customer_detail.invalid_id")}
       </div>
     );
   }

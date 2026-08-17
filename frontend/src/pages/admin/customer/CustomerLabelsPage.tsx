@@ -27,6 +27,7 @@ import {
   type ConfirmDialogHandle,
 } from "../../../components/ConfirmDialog";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
+import { customerLabelName } from "../../../lib/customerLabelName";
 
 /** Map a coded label API error to an i18n key, else null (caller falls back
  *  to getApiError). Both list kinds share the same message keys. */
@@ -308,7 +309,7 @@ function LabelSection({
                     <>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500 }}>
-                          {row.name}
+                          {customerLabelName(row.name, t)}
                           {!row.is_active && (
                             <span className="cell-tag cell-tag-closed" style={{ marginLeft: 8 }}>
                               <i />
@@ -365,8 +366,15 @@ function LabelSection({
         ref={deleteDialogRef}
         title={t("labels.delete_confirm_title")}
         body={
+          // Sprint 187 §4 — the ROW above renders
+          // `customerLabelName(row.name, t)`; this dialog, on the same
+          // screen and about the same row, asked "delete Algemeen?" in
+          // English. One line away from a call site that was already
+          // correct, which is exactly how it survived.
           deleteTarget
-            ? t("labels.delete_confirm_body", { name: deleteTarget.name })
+            ? t("labels.delete_confirm_body", {
+                name: customerLabelName(deleteTarget.name, t),
+              })
             : ""
         }
         confirmLabel={t("labels.delete_confirm_button")}

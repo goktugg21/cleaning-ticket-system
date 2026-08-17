@@ -14,7 +14,7 @@ from unittest.mock import patch
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from customers.models import Customer
+from customers.models import Customer, CustomerUserMembership
 
 from invoicing.line_services import add_invoice_line
 from invoicing.models import Invoice, InvoiceLine
@@ -550,3 +550,100 @@ class InvoiceCrossTenantApiTests(InvoiceApiBase):
             self._lines_url(inv_b.id), {"unit_price": "10.00"}, format="json"
         )
         self.assertEqual(resp.status_code, 404)
+
+
+class InvoiceCompanyNameFieldTests(InvoiceApiBase):
+    """Sprint 187 §6a — WHICH provider company issued this invoice.
+
+    Numbering is gapless per company per YEAR, so two different invoices
+    legitimately both display `2026-0001` and the list had nothing at all
+    to tell them apart. Live on crmtest: one Osius Demo, one Bright
+    Facilities.
+
+    These tests are the Sprint 173 rule applied: a field that is exposed
+    gets a test that RENDERS the endpoint carrying it. A missing `fields`
+    entry took the whole Extra Work page down once, and no filter or
+    serializer-unit test would have caught it, because neither
+    serialises a row through the real view.
+    """
+
+    def test_list_rows_carry_company_name(self):
+        inv = self._draft()
+        self.client.force_authenticate(self.admin)
+        resp = self.client.get(reverse("invoice-list"))
+        self.assertEqual(resp.status_code, 200)
+        row = next(r for r in resp.data["results"] if r["id"] == inv.id)
+        self.assertIn("company_name", row)
+        self.assertEqual(row["company_name"], self.company.name)
+
+    def test_detail_carries_company_name(self):
+        inv = self._draft()
+        self.client.force_authenticate(self.admin)
+        resp = self.client.get(f"/api/invoices/{inv.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["company_name"], self.company.name)
+
+    def test_the_same_number_in_two_companies_is_distinguishable(self):
+        """The defect, stated as a test.
+
+        Numbering is per company per year, so `2026-0001` exists twice
+        and legitimately so. Before this field the two rows were
+        identical on screen; now the company name separates them.
+        """
+        inv_a = Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            status=Invoice.Status.SENT,
+            created_by=self.admin,
+            year=2026,
+            number="2026-0001",
+        )
+        inv_b = Invoice.objects.create(
+            company=self.company_b,
+            customer=self.customer_b,
+            status=Invoice.Status.SENT,
+            created_by=self.admin_b,
+            year=2026,
+            number="2026-0001",
+        )
+
+        self.client.force_authenticate(self.admin)
+        row_a = self.client.get(f"/api/invoices/{inv_a.id}/").data
+        self.client.force_authenticate(self.admin_b)
+        row_b = self.client.get(f"/api/invoices/{inv_b.id}/").data
+
+        self.assertEqual(row_a["number"], row_b["number"])
+        self.assertNotEqual(row_a["company_name"], row_b["company_name"])
+        self.assertEqual(row_a["company_name"], self.company.name)
+        self.assertEqual(row_b["company_name"], self.company_b.name)
+
+    def test_the_customer_read_shape_does_NOT_leak_company_name(self):
+        """A customer has no business learning the provider's internal
+        company structure. `CustomerInvoiceSerializer` is deliberately
+        untouched and this is what keeps it that way."""
+        inv = Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            status=Invoice.Status.SENT,
+            created_by=self.admin,
+            year=2026,
+            number="2026-0002",
+        )
+        # The shared fixture's `customer_user` carries no membership (it
+        # exists to prove 403 on the PROVIDER endpoints), and the customer
+        # scope is membership-based — without this the read is a 404 and
+        # the test would pass for the wrong reason.
+        CustomerUserMembership.objects.create(
+            customer=self.customer, user=self.customer_user
+        )
+
+        self.client.force_authenticate(self.customer_user)
+        resp = self.client.get(f"/api/invoices/my/{inv.id}/")
+        self.assertEqual(resp.status_code, 200, getattr(resp, "data", None))
+        self.assertNotIn("company_name", resp.data)
+        self.assertNotIn("company", resp.data)
+        # ...and the provider shape for the SAME invoice does carry it,
+        # so this is a redaction and not an absent field on both sides.
+        self.client.force_authenticate(self.admin)
+        provider = self.client.get(f"/api/invoices/{inv.id}/")
+        self.assertEqual(provider.data["company_name"], self.company.name)

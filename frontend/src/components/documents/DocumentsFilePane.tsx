@@ -9,6 +9,7 @@ import {
   Download,
   File as FileIcon,
   FolderInput,
+  FolderOpen,
   Lock,
   Pencil,
   Trash2,
@@ -177,9 +178,25 @@ export function DocumentsFilePane({
       ) : files === null ? (
         <p className="muted">{t("documents.loading")}</p>
       ) : files.length === 0 ? (
-        <p className="muted" data-testid="doc-empty-folder">
-          {t("documents.empty_folder")}
-        </p>
+        // Sprint 154 §L.1 — says what to DO, not just that the folder is
+        // empty. The Upload button in the toolbar above is unconditional
+        // in this pane (access is gated upstream in DocumentsExplorer,
+        // and that gating is untouched), so the actionable hint is always
+        // the true one here.
+        <div className="doc-empty-state" data-testid="doc-empty-folder">
+          <FolderOpen
+            size={30}
+            strokeWidth={1.5}
+            className="doc-empty-state-icon"
+            aria-hidden="true"
+          />
+          <span className="doc-empty-state-title">
+            {t("documents.empty_folder_title")}
+          </span>
+          <span className="doc-empty-state-hint">
+            {t("documents.empty_folder_hint")}
+          </span>
+        </div>
       ) : (
         <BoundedList
           size="lg"

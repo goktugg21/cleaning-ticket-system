@@ -69,6 +69,23 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
 
     full_name = models.CharField(max_length=255, blank=True)
+    # Sprint 154 §I.1 — a phone number for ANY user, so the Users /
+    # Employees / Customer-users lists can show one. Additive, blank by
+    # default, no backfill: empty IS the correct value for every existing
+    # row, because nobody has ever been asked for it.
+    #
+    # NOT the same field as `StaffProfile.phone`, which stays exactly as
+    # it is. That one is STAFF-ONLY and is gated on the customer side by
+    # `Customer.show_assigned_staff_phone` / the CustomerCompanyPolicy
+    # mirror — it is the number a customer may or may not be allowed to
+    # see for the cleaner assigned to their building. This one is the
+    # user's own contact number on their account record, with no
+    # customer-visibility rule attached. The two are deliberately NOT
+    # merged and NOT mirrored into each other: merging them would either
+    # leak a staff member's gated number onto an ungated surface, or drag
+    # the visibility gate onto every provider user who has nothing to do
+    # with it. Read sites choose explicitly (see EmployeesAdminPage).
+    phone = models.CharField(max_length=64, blank=True)
     role = models.CharField(
         max_length=32,
         choices=UserRole.choices,
@@ -151,6 +168,21 @@ class StaffProfile(models.Model):
         related_name="staff_profile",
     )
     phone = models.CharField(max_length=64, blank=True)
+    # Sprint 172 §5 — the reference report's "Personeelsnr." column.
+    # On the PROFILE and not on User: it is a provider-side employment
+    # fact about a field worker, and a customer-side user has no
+    # personnel number to hold. Blank rather than null so "not filled
+    # in" has ONE representation, the convention this model follows.
+    personnel_number = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text=(
+            "The employer's own number for this worker, as it appears "
+            "on the payroll. Free text: every payroll numbers its "
+            "people differently."
+        ),
+    )
     internal_note = models.TextField(blank=True)
     can_request_assignment = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)

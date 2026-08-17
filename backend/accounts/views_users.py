@@ -26,6 +26,7 @@ from .effective_actions import (
 )
 from .models import User, UserRole
 from .permissions import CanManageUser, IsSuperAdmin
+from .scoping import manageable_user_ids_for
 from .permissions_effective import effective_permissions as compose_effective_permissions
 from .serializers_users import (
     UserDetailSerializer,
@@ -70,32 +71,14 @@ class UserViewSet(viewsets.ModelViewSet):
             )
             if not actor_company_ids:
                 return User.objects.none()
-            in_scope_user_ids = (
-                CompanyUserMembership.objects.filter(
-                    company_id__in=actor_company_ids
-                ).values_list("user_id", flat=True)
-            )
-            in_scope_user_ids = set(in_scope_user_ids).union(
-                BuildingManagerAssignment.objects.filter(
-                    building__company_id__in=actor_company_ids
-                ).values_list("user_id", flat=True)
-            )
-            in_scope_user_ids = in_scope_user_ids.union(
-                CustomerUserMembership.objects.filter(
-                    customer__company_id__in=actor_company_ids
-                ).values_list("user_id", flat=True)
-            )
-            # Sprint 24A — STAFF users with visibility on any of the
-            # actor's buildings are in scope. Pairs with the
-            # `_user_in_actor_company` extension in scoping.py so the
-            # Users admin page surfaces the company's STAFF persona
-            # alongside the Sprint-7 membership rows.
-            in_scope_user_ids = in_scope_user_ids.union(
-                BuildingStaffVisibility.objects.filter(
-                    building__company_id__in=actor_company_ids
-                ).values_list("user_id", flat=True)
-            )
-            base = qs.filter(id__in=in_scope_user_ids)
+            # Sprint 154 §I.2 — the four-axis union (company membership,
+            # building-manager assignment, customer membership and the
+            # Sprint 24A STAFF `BuildingStaffVisibility` axis) moved to
+            # `accounts.scoping.manageable_user_ids_for` so the new bulk
+            # link/unlink endpoint enforces the SAME rule instead of
+            # carrying a second copy of it. Behaviour here is unchanged.
+            in_scope_user_ids = manageable_user_ids_for(actor)
+            base = qs.filter(id__in=in_scope_user_ids or set())
         else:
             return User.objects.none()
 
@@ -104,10 +87,109 @@ class UserViewSet(viewsets.ModelViewSet):
             roles = [r.strip() for r in role_filter.split(",") if r.strip()]
             base = base.filter(role__in=roles)
 
+        # Sprint 187B §1b — ?company=<id> narrows the list to users holding
+        # a membership in that company.
+        #
+        # H-1/H-2: this INTERSECTS with what the caller may already see, it
+        # never widens it. `base` above has already been cut down to the
+        # caller's own scope (SUPER_ADMIN: everything; COMPANY_ADMIN: the
+        # four-axis `manageable_user_ids_for` set; everyone else: nothing),
+        # and this filter only ever removes rows from it. So a COMPANY_ADMIN
+        # in company A who passes company B's id gets their OWN scope
+        # narrowed by a membership test nobody in it satisfies — zero rows,
+        # HTTP 200, and no signal that B exists. That is the required shape:
+        # an error or a 404 here would itself confirm the id, which is why
+        # an unknown id is treated exactly like an id with no matching users.
+        #
+        # Parsed tolerantly, like the other list endpoints: junk is ignored
+        # rather than raising, so no query string can 500 this page.
+        company_filter = self.request.query_params.get("company")
+        if company_filter not in (None, ""):
+            try:
+                company_id = int(company_filter)
+            except (TypeError, ValueError):
+                company_id = None
+            if company_id is not None:
+                # The four "belongs to a company" axes, matching
+                # `accounts.scoping.company_ids_for` and the serializer's
+                # `companies` field, so the filter and the column cannot
+                # disagree about what membership means. Exists() subqueries
+                # keyed on OuterRef("pk") rather than joins, so a user in
+                # several buildings of one company cannot duplicate rows.
+                base = base.filter(
+                    Q(
+                        Exists(
+                            CompanyUserMembership.objects.filter(
+                                user=OuterRef("pk"), company_id=company_id
+                            )
+                        )
+                    )
+                    | Q(
+                        Exists(
+                            BuildingManagerAssignment.objects.filter(
+                                user=OuterRef("pk"),
+                                building__company_id=company_id,
+                            )
+                        )
+                    )
+                    | Q(
+                        Exists(
+                            BuildingStaffVisibility.objects.filter(
+                                user=OuterRef("pk"),
+                                building__company_id=company_id,
+                            )
+                        )
+                    )
+                    | Q(
+                        Exists(
+                            CustomerUserMembership.objects.filter(
+                                user=OuterRef("pk"),
+                                customer__company_id=company_id,
+                            )
+                        )
+                    )
+                )
+
         # Company scope for the customer-access surfaces: SUPER_ADMIN is
         # unrestricted (None); a COMPANY_ADMIN is limited to their own
         # provider companies. (Other roles never reach here.)
         scope_company_ids = None if is_super else actor_company_ids
+
+        # Sprint 188 — ?customer=<id>. The owner could filter Users by
+        # company but not by customer, which is the question he actually
+        # asks: "who at this customer can log in?"
+        #
+        # H-1/H-2: this runs AFTER the tenant cut above, so it can only
+        # remove rows — and the extra `customer__company_id__in` clause is
+        # load-bearing, not belt-and-braces. A person holding memberships
+        # under TWO providers is legitimately in `base` for either admin;
+        # without that clause, passing the OTHER provider's customer id
+        # would return them, turning the filter into an existence oracle
+        # for a customer id the caller may not see.
+        #
+        # `Exists` on OuterRef("pk"), never a join: (customer, user) is
+        # unique, but the reverse accessor would still fan rows out and
+        # corrupt `count` for the pagination the page renders.
+        #
+        # Tolerant parse, matching `?company=` on this same endpoint: junk
+        # is no opinion, not a 500 and not a 400. An id the caller cannot
+        # see yields an empty 200 rather than a 404 — a 404 would confirm
+        # the id exists.
+        customer_filter = self.request.query_params.get("customer")
+        if customer_filter not in (None, ""):
+            try:
+                customer_id = int(customer_filter)
+            except (TypeError, ValueError):
+                customer_id = None
+            if customer_id is not None:
+                sub = CustomerUserMembership.objects.filter(
+                    user=OuterRef("pk"), customer_id=customer_id
+                )
+                if scope_company_ids is not None:
+                    sub = sub.filter(
+                        customer__company_id__in=scope_company_ids
+                    )
+                base = base.filter(Exists(sub))
 
         # Sprint 2c follow-up — ?access_role= filters by the EFFECTIVE
         # (single highest) customer access role, company-scoped to the
@@ -184,15 +266,38 @@ class UserViewSet(viewsets.ModelViewSet):
         # `customer` (select_related, for the per-grant company_id scope
         # check) and `building_access` rows, for the list serializer's
         # `customer_access_role` projection (no N+1).
+        # Sprint 187B §1a — the same four prefetches, each now carrying the
+        # COMPANY that the list serializer's `companies` field names. The
+        # `select_related` sits INSIDE each prefetch queryset, so naming a
+        # company is a JOIN on a query that already ran: the number of
+        # queries for a list of N users is unchanged, and an
+        # `assertNumQueries` test pins that. Adding the field without this
+        # would have fired one SELECT per membership row per user — the
+        # exact "you have made the page worse" §1a warned about.
         if self.action == "list":
             base = base.prefetch_related(
-                "company_memberships",
-                "building_assignments",
-                "building_visibility",
+                Prefetch(
+                    "company_memberships",
+                    queryset=CompanyUserMembership.objects.select_related(
+                        "company"
+                    ),
+                ),
+                Prefetch(
+                    "building_assignments",
+                    queryset=BuildingManagerAssignment.objects.select_related(
+                        "building__company"
+                    ),
+                ),
+                Prefetch(
+                    "building_visibility",
+                    queryset=BuildingStaffVisibility.objects.select_related(
+                        "building__company"
+                    ),
+                ),
                 Prefetch(
                     "customer_memberships",
                     queryset=CustomerUserMembership.objects.select_related(
-                        "customer"
+                        "customer__company"
                     ).prefetch_related("building_access"),
                 ),
             )

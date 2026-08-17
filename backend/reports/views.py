@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.db.models import Count
 from django.db.models.functions import TruncDate
@@ -14,7 +15,26 @@ from accounts.models import UserRole
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
 from tickets.models import TicketStatus
+from timesheets.permissions import IsTimesheetUser
 
+from .hour_sources import available_sources
+from .employee_hours import (
+    build_employee_hours_by_building,
+    build_employee_hours_by_extra_work,
+    build_employee_hours_summaries,
+    build_employee_hours_weekly,
+    default_period as employee_hours_default_period,
+)
+from .ticket_report import (
+    build_ticket_report,
+    build_ticket_report_summary,
+    default_period as ticket_report_default_period,
+)
+from .category_report import (
+    build_meldingen_by_category,
+    build_meldingen_by_category_summary,
+    meldingen_by_category_default_period,
+)
 from .dimensions import (
     DimensionFilters,
     OriginInvalid,
@@ -29,6 +49,16 @@ from .dimensions import (
     compute_tickets_by_type,
 )
 from .exports import (
+    build_employee_hours_by_building_csv,
+    build_employee_hours_by_building_pdf,
+    build_employee_hours_by_extra_work_csv,
+    build_employee_hours_by_extra_work_pdf,
+    build_employee_hours_weekly_csv,
+    build_employee_hours_weekly_pdf,
+    build_meldingen_by_category_csv,
+    build_meldingen_by_category_pdf,
+    build_ticket_report_csv,
+    build_ticket_report_pdf,
     build_extra_work_by_department_csv,
     build_extra_work_by_department_pdf,
     build_extra_work_revenue_by_building_csv,
@@ -99,13 +129,22 @@ class StatusDistributionView(_ReportView):
         if customer is not None:
             qs = qs.filter(customer_id=customer.id)
         counts = dict(qs.values_list("status").annotate(c=Count("id")))
+        # Sprint 184 §2 — the CODE, and only the code.
+        #
+        # This used to emit `TicketStatus.choices`' English label beside
+        # it ("Approved", "Waiting Customer Approval") and the chart
+        # printed it as it arrived, so a Dutch-first screen carried a
+        # fourth status vocabulary that never passed through the
+        # translation layer at all. The label is gone rather than merely
+        # unused: leaving a display-shaped string on the wire is how the
+        # next caller renders it again. The client labels the code with
+        # `ticketStatusLabelKey`, the way every other screen now does.
         buckets = [
             {
                 "status": str(value),
-                "label": label,
                 "count": int(counts.get(value, 0)),
             }
-            for value, label in TicketStatus.choices
+            for value in TicketStatus.values
         ]
         return Response(
             {
@@ -811,4 +850,527 @@ class ExtraWorkByDepartmentPDFView(APIView):
         return _pdf_response(
             f"extra-work-by-department_{payload['from']}_{payload['to']}.pdf",
             build_extra_work_by_department_pdf(payload),
+        )
+
+
+class HoursComparisonView(APIView):
+    """
+    Sprint 165 §5 — contracted hours against worked hours, per building.
+
+        GET /api/reports/hours-comparison/?year=&month=&company=
+
+    Read-only. Provider-side only: `IsRevenueReportConsumer` is reused
+    rather than a new class, because this report answers the same
+    question about who may see it — it puts a company's contracted
+    commitments beside its people's hours, which is provider-internal
+    on both counts. STAFF and every CUSTOMER_* role are 403'd.
+
+    The computation lives in `reports/hours_comparison.py`; see that
+    module for why it is here and not in `contracts` or `timesheets`.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        from .hours_comparison import build_comparison, month_bounds
+        from .scoping import _allowed_company_ids
+
+        today = timezone.localdate()
+        try:
+            year = int(request.query_params.get("year") or today.year)
+            month = int(request.query_params.get("month") or today.month)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "year and month must be integers."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= month <= 12:
+            return Response(
+                {"detail": "month must be between 1 and 12."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        # `None` from the scoping helper means SUPER_ADMIN — no company
+        # filter. Everyone else gets their own set, and a `?company=`
+        # narrows WITHIN it and can never widen it.
+        allowed = _allowed_company_ids(request.user)
+        if allowed is None:
+            from companies.models import Company
+
+            company_ids = list(Company.objects.values_list("id", flat=True))
+        else:
+            company_ids = list(allowed)
+
+        requested = request.query_params.get("company")
+        if requested:
+            try:
+                requested_id = int(requested)
+            except (TypeError, ValueError):
+                company_ids = []
+            else:
+                company_ids = [c for c in company_ids if c == requested_id]
+
+        # Sprint 182 §1 — the actor decides whose lines appear in the
+        # per-employee breakdown; the building totals are unaffected.
+        rows = build_comparison(company_ids, year, month, actor=request.user)
+        first, last = month_bounds(year, month)
+        return Response(
+            {
+                "year": year,
+                "month": month,
+                "from": first.isoformat(),
+                "to": last.isoformat(),
+                "rows": [
+                    {
+                        "building": row.building_id,
+                        "building_name": row.building_name,
+                        "contracted_hours": row.contracted_hours,
+                        "worked_hours": row.worked_hours,
+                        "difference": row.difference,
+                        # Worked only. A contract has no employee
+                        # dimension — see the module docstring.
+                        "employees": row.employees,
+                    }
+                    for row in rows
+                ],
+                "totals": {
+                    "contracted_hours": sum(
+                        (row.contracted_hours for row in rows), Decimal("0.00")
+                    ),
+                    "worked_hours": sum(
+                        (row.worked_hours for row in rows), Decimal("0.00")
+                    ),
+                    "difference": sum(
+                        (row.difference for row in rows), Decimal("0.00")
+                    ),
+                },
+            }
+        )
+
+
+class WorkerHoursReportView(APIView):
+    """
+    Sprint 171 §4 — the Worker Hour Report.
+
+        GET /api/reports/worker-hours/?year=&week=&weeks=
+
+    One row per (ISO week, worker, building, hour type) with Mon-Sun and
+    a total, plus the four tiles the reference shows.
+
+    `IsRevenueReportConsumer` is reused rather than a new class: this is
+    a per-PERSON breakdown of hours worked, which is provider-internal
+    on the same grounds the comparison is — STAFF must not read the
+    whole team's hours, and no customer-side role reads personnel data
+    at all. A new class answering the same question differently is how
+    two gates drift.
+
+    The computation lives in `reports/worker_hours.py`.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        from .worker_hours import build_worker_hours
+
+        today = timezone.localdate()
+        default_year, default_week, _ = today.isocalendar()
+        try:
+            iso_year = int(request.query_params.get("year") or default_year)
+            first_week = int(request.query_params.get("week") or default_week)
+            # Four at a time is the reference's span; capped at 13 so a
+            # hand-edited URL cannot ask for a five-year table.
+            week_count = min(
+                13, max(1, int(request.query_params.get("weeks") or 4))
+            )
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "year, week and weeks must be integers."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= first_week <= 53:
+            return Response(
+                {"detail": "week must be between 1 and 53."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            build_worker_hours(request.user, iso_year, first_week, week_count)
+        )
+
+
+class WorkerHoursExportView(APIView):
+    """
+    GET /api/reports/worker-hours/export.csv  (Excel opens it directly)
+    GET /api/reports/worker-hours/export.pdf
+
+    Same permission and same computation as the report above — the
+    export renders the payload the screen shows, so a downloaded file
+    can never disagree with the table it came from.
+
+    CSV rather than a real xlsx: `reports/exports.py` already builds
+    CSV for every other report here and Excel opens it without a
+    prompt, so this adds no dependency. The PDF goes through
+    `config/pdf_branding.py`, which the invoicing app already uses.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request, fmt: str):
+        from .exports import (
+            build_worker_hours_csv,
+            build_worker_hours_pdf,
+        )
+        from .worker_hours import build_worker_hours
+
+        today = timezone.localdate()
+        default_year, default_week, _ = today.isocalendar()
+        try:
+            iso_year = int(request.query_params.get("year") or default_year)
+            first_week = int(request.query_params.get("week") or default_week)
+            week_count = min(
+                13, max(1, int(request.query_params.get("weeks") or 4))
+            )
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "year, week and weeks must be integers."},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = build_worker_hours(
+            request.user, iso_year, first_week, week_count
+        )
+        stem = f"worker-hours-{iso_year}-W{first_week}"
+        if fmt == "pdf":
+            body = build_worker_hours_pdf(payload)
+            content_type = "application/pdf"
+            name = f"{stem}.pdf"
+        else:
+            body = build_worker_hours_csv(payload)
+            content_type = "text/csv; charset=utf-8"
+            name = f"{stem}.csv"
+        response = HttpResponse(body, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{name}"'
+        return response
+
+
+class HourSourceOptionsView(APIView):
+    """
+    Sprint 177 §7 — the jobs an operator may log hours AGAINST.
+
+        GET /api/reports/hour-sources/?q=<search>
+
+    Returns `[{source_type, source_id, title, building}]` — open extra
+    work first, then open tickets, each already narrowed to what this
+    actor can see.
+
+    ## Why this endpoint had to exist
+
+    Sprint 173 put `(source_type, source_id)` on `TimeEntry`; Sprint 174
+    added the list filter and taught the week-grid endpoint to ACCEPT a
+    source per cell. Nothing ever SUPPLIED one. So every hour in the
+    system read as untagged, the Source column showed the same value for
+    every row, and "employee hours by extra work" was a report over a
+    column nobody fills. This is the missing half.
+
+    ## Why it lives in `reports/`
+
+    `timesheets` imports nothing from `tickets` or `extra_work` — that is
+    a hard rule in CLAUDE.md, and it is why a `TimeEntry` stores a type
+    and an id and resolves neither. Cross-module reads live here.
+    `hour_sources.resolve_sources` already goes the other way (pair ->
+    title) for exactly this reason; this is its list direction, in the
+    same module, sharing the same scoping.
+
+    ## The permission is deliberately NOT a reports one
+
+    `IsTimesheetUser`, not `IsReportsConsumer`. A STAFF member logs their
+    own hours and must be able to say which job they worked on; the
+    reports classes exclude STAFF because they expose commercial and
+    whole-team figures. Using a reports gate here would lock the picker
+    away from most of the people who need it.
+
+    Safety does not rest on the gate anyway: the two scoping helpers
+    decide what comes back, so an actor is only ever offered work they
+    could already open. An out-of-scope job is absent, exactly as if it
+    did not exist (H-1).
+    """
+
+    permission_classes = [IsAuthenticated, IsTimesheetUser]
+
+    def get(self, request):
+        query = _first_param(request.query_params, "q") or ""
+        return Response(
+            {"results": available_sources(request.user, query=query)}
+        )
+
+
+# ---- Sprint 178 §2 — the four reports ---------------------------------------
+
+
+def _report_period(request, default_fn):
+    """`?from=&to=` as dates, or the module default.
+
+    A malformed date is a 400 rather than a silent fallback to the
+    default period: a report that quietly answers a different question
+    than the one asked is worse than one that refuses.
+    """
+    from datetime import date as _date
+
+    raw_from = _first_param(request.query_params, "from")
+    raw_to = _first_param(request.query_params, "to")
+    if not raw_from and not raw_to:
+        return default_fn(), None
+    try:
+        default_from, default_to = default_fn()
+        date_from = _date.fromisoformat(raw_from) if raw_from else default_from
+        date_to = _date.fromisoformat(raw_to) if raw_to else default_to
+    except ValueError:
+        return None, Response(
+            {
+                "detail": "from and to must be ISO dates (YYYY-MM-DD).",
+                "code": "invalid_period",
+            },
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    return (date_from, date_to), None
+
+
+def _report_scope(request):
+    """The `?company=` / `?building=` narrowing, or None when neither was asked.
+
+    Sprint 180 §1. Resolution is SKIPPED when no filter is present, and
+    that is deliberate rather than an optimisation detail:
+    `resolve_scope` runs two membership lookups to decide what the actor
+    may reach, and an unfiltered report must not pay for a question
+    nobody asked. It also keeps the no-filter query counts the Sprint 178
+    tests measure exactly where they were.
+    """
+    raw_company = _first_param(request.query_params, "company")
+    raw_building = _first_param(request.query_params, "building")
+    if not raw_company and not raw_building:
+        return None
+    # Raises PermissionDenied (403) for a company/building the actor may
+    # not reach and ValidationError (400) for a malformed id or a
+    # building/company mismatch — the same contract the twelve charts on
+    # the same page already answer to, which is the point: one page, one
+    # filter bar, one meaning.
+    return resolve_scope(request.user, raw_company, raw_building)
+
+
+EMPTY_SCOPE = {
+    "company_id": None,
+    "company_name": None,
+    "building_id": None,
+    "building_name": None,
+}
+
+
+class _PeriodReportView(APIView):
+    """Shared plumbing for the Sprint 178 reports.
+
+    `IsRevenueReportConsumer` on every one of them — SUPER_ADMIN,
+    COMPANY_ADMIN, BUILDING_MANAGER. STAFF and every CUSTOMER_* role are
+    denied. These are per-PERSON hour breakdowns and whole-period ticket
+    durations: provider-internal management figures on exactly the
+    grounds the worker-hour report is.
+
+    Subclasses set `build`, `csv_builder`, `pdf_builder`, `stem` and
+    `default_period`. One class rather than four near-identical ones,
+    because four copies of a permission gate is how two of them drift.
+
+    Sprint 180 §1 — these four took NO filters. The page computed a
+    company, a building and a date range, handed them to the twelve
+    charts, and rendered the four report cards with no props at all, so
+    "this building, last month" was answerable on one half of the page
+    and not the other. It is the daily question. The scope now reaches
+    the builders, and it is echoed back in `scope` so the screen, the CSV
+    and the PDF all state which slice they are showing.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    build = None
+    csv_builder = None
+    pdf_builder = None
+    stem = "report"
+    default_period = None
+
+    def get(self, request, fmt=None):
+        period, error = _report_period(request, self.default_period)
+        if error is not None:
+            return error
+        date_from, date_to = period
+        scope = _report_scope(request)
+        payload = self.build(request.user, date_from, date_to, scope=scope)
+        # Echoed on EVERY response, filtered or not, so no consumer has
+        # to test for the key's presence to know what it is looking at.
+        payload["scope"] = scope.to_dict() if scope is not None else dict(EMPTY_SCOPE)
+        payload["generated_at"] = timezone.now()
+
+        if fmt is None:
+            # `generated_at` is for the documents; the JSON keeps the
+            # ISO string so the client never has to parse a datetime
+            # object rendered by DRF's default encoder.
+            payload["generated_at"] = payload["generated_at"].isoformat()
+            return Response(payload)
+
+        name = f"{self.stem}-{payload['from']}-to-{payload['to']}"
+        if fmt == "pdf":
+            body = self.pdf_builder(payload)
+            content_type = "application/pdf"
+            filename = f"{name}.pdf"
+        elif fmt == "csv":
+            body = self.csv_builder(payload)
+            content_type = "text/csv; charset=utf-8"
+            filename = f"{name}.csv"
+        else:
+            return Response(
+                {"detail": "Unsupported format.", "code": "invalid_format"},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        response = HttpResponse(body, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+
+class EmployeeHoursByBuildingView(_PeriodReportView):
+    """GET /api/reports/employee-hours-by-building/[export.<fmt>]"""
+
+    build = staticmethod(build_employee_hours_by_building)
+    csv_builder = staticmethod(build_employee_hours_by_building_csv)
+    pdf_builder = staticmethod(build_employee_hours_by_building_pdf)
+    stem = "employee-hours-by-building"
+    default_period = staticmethod(employee_hours_default_period)
+
+
+class EmployeeHoursWeeklyView(_PeriodReportView):
+    """GET /api/reports/employee-hours-weekly/[export.<fmt>]"""
+
+    build = staticmethod(build_employee_hours_weekly)
+    csv_builder = staticmethod(build_employee_hours_weekly_csv)
+    pdf_builder = staticmethod(build_employee_hours_weekly_pdf)
+    stem = "employee-hours-weekly"
+    default_period = staticmethod(employee_hours_default_period)
+
+
+class EmployeeHoursByExtraWorkView(_PeriodReportView):
+    """GET /api/reports/employee-hours-by-extra-work/[export.<fmt>]
+
+    Answerable for the first time in Sprint 178: it reads the
+    `(source_type, source_id)` pair, which nothing filled until Sprint
+    177's job picker. On data entered before that, this returns an empty
+    list — a correct report with an empty answer, not a broken screen.
+    """
+
+    build = staticmethod(build_employee_hours_by_extra_work)
+    csv_builder = staticmethod(build_employee_hours_by_extra_work_csv)
+    pdf_builder = staticmethod(build_employee_hours_by_extra_work_pdf)
+    stem = "employee-hours-by-extra-work"
+    default_period = staticmethod(employee_hours_default_period)
+
+
+class TicketReportView(_PeriodReportView):
+    """GET /api/reports/ticket-report/[export.<fmt>]
+
+    Duration comes from `TicketStatusHistory`, never from a column — see
+    `reports/ticket_report.py` for why.
+    """
+
+    build = staticmethod(build_ticket_report)
+    csv_builder = staticmethod(build_ticket_report_csv)
+    pdf_builder = staticmethod(build_ticket_report_pdf)
+    stem = "ticket-report"
+    default_period = staticmethod(ticket_report_default_period)
+
+
+class MeldingenByCategoryView(_PeriodReportView):
+    """GET /api/reports/meldingen-by-category/[export.<fmt>]
+
+    Sprint 185 E §1 — "how many meldingen per category per building",
+    which is the monthly customer review and was unanswerable before this
+    sprint because nothing classified the WORK. See
+    `reports/category_report.py` for the shape and for why an
+    uncategorised melding is a row rather than a gap.
+
+    Same base as the four Sprint 178 reports, so it inherits their
+    permission gate (`IsRevenueReportConsumer`: SUPER_ADMIN,
+    COMPANY_ADMIN, BUILDING_MANAGER — STAFF and every customer role
+    denied), their period parsing, their company/building scope and
+    their CSV + PDF exports. Provider-side only, as asked.
+    """
+
+    build = staticmethod(build_meldingen_by_category)
+    csv_builder = staticmethod(build_meldingen_by_category_csv)
+    pdf_builder = staticmethod(build_meldingen_by_category_pdf)
+    stem = "meldingen-by-category"
+    default_period = staticmethod(meldingen_by_category_default_period)
+
+
+class PeriodReportSummariesView(APIView):
+    """GET /api/reports/period-report-summaries/?from=&to=&company=&building=
+
+    Sprint 180 §2 — what the four report cards SAY before they are opened.
+
+    ## Why one endpoint and not four
+
+    The obvious build is a summary fetch per card. That is four extra
+    requests on every visit to a page that already fires thirteen, to
+    print a dozen numbers. One request returns all four summaries, which
+    is why this view exists at all rather than each card fetching its own
+    report and reading the total off it.
+
+    ## What it costs
+
+    Five queries, flat, whatever the period holds: three aggregates for
+    the hours cards (`build_employee_hours_summaries`) and two for the
+    ticket card (`build_ticket_report_summary`). No report is built and
+    no row list is materialised. Pinned by `assertNumQueries`.
+
+    ## Why the numbers cannot drift from the reports
+
+    Every figure comes from the same scoped querysets and the same
+    helpers the reports themselves use — `_base` for the hours,
+    `_scoped_tickets` + `_first_terminal_by_ticket` for the tickets. A
+    card saying 41 hours and the report it opens saying 38 is the one
+    failure that would make the whole panel untrustworthy, so there is no
+    second implementation to disagree with.
+
+    Same permission gate as the reports it summarises: a summary of a
+    figure is the figure.
+    """
+
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        period, error = _report_period(request, employee_hours_default_period)
+        if error is not None:
+            return error
+        date_from, date_to = period
+        if date_from > date_to:
+            # The builders order the bounds themselves; the envelope has
+            # to say the same thing they used or the card would print a
+            # period the numbers do not belong to.
+            date_from, date_to = date_to, date_from
+        scope = _report_scope(request)
+
+        summaries = build_employee_hours_summaries(
+            request.user, date_from, date_to, scope=scope
+        )
+        summaries["tickets"] = build_ticket_report_summary(
+            request.user, date_from, date_to, scope=scope
+        )
+        # Sprint 185 E §1 — the fifth card. Two more aggregates over the
+        # same scoped queryset the report itself uses, so the card and
+        # the report it opens can never disagree.
+        summaries["meldingen_category"] = build_meldingen_by_category_summary(
+            request.user, date_from, date_to, scope=scope
+        )
+        return Response(
+            {
+                "from": date_from.isoformat(),
+                "to": date_to.isoformat(),
+                "scope": scope.to_dict() if scope is not None else dict(EMPTY_SCOPE),
+                "cards": summaries,
+                "generated_at": timezone.now().isoformat(),
+            }
         )

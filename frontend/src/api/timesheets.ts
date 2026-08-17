@@ -175,6 +175,53 @@ export async function deleteTimeEntry(id: number): Promise<void> {
   await api.delete(`/timesheets/entries/${id}/`);
 }
 
+/**
+ * Sprint 154 §M — save a whole week of hours in ONE request.
+ *
+ * All-or-nothing on the server: one invalid cell rolls the entire week
+ * back, so there is no partial-success shape to handle here. A closed
+ * week refuses the whole grid with the server's own `week_closed`
+ * message, which the caller surfaces verbatim.
+ *
+ * `hours: "0"` CLEARS a cell (deletes the row). A cell the grid does not
+ * send is left untouched, so saving a filtered view can never wipe rows
+ * the operator could not see.
+ */
+export async function saveWeekGrid(payload: {
+  /** The DEFAULT employee for cells that omit one. Sprint 154 sent only
+   *  this; Sprint 155 sends it per cell so one request can file several
+   *  people's weeks. Both shapes are accepted by the endpoint. */
+  employee?: number | null;
+  company?: number | null;
+  iso_year: number;
+  iso_week: number;
+  cells: {
+    employee?: number | null;
+    hour_type: number;
+    building?: number | null;
+    date: string;
+    hours: string;
+    /** Sprint 180 §3 — the same hole as `TimeEntryWritePayload`, on the
+     *  bulk path. The grid has attached a job to every cell it sends
+     *  since Sprint 177 §7 (`GridCell.source_type` / `source_id`), and
+     *  since Sprint 179B the endpoint keys a row on that pair — but
+     *  this wire type never mentioned it, so the one place that
+     *  documents what `bulk-week` accepts was missing the field that
+     *  decides WHICH row a cell addresses. Optional, because an
+     *  untagged cell omits both keys entirely and the endpoint reads
+     *  key presence. */
+    source_type?: string;
+    source_id?: number | null;
+  }[];
+}): Promise<{ created: number; updated: number; deleted: number }> {
+  const response = await api.post<{
+    created: number;
+    updated: number;
+    deleted: number;
+  }>("/timesheets/entries/bulk-week/", payload);
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // Week locks
 // ---------------------------------------------------------------------------

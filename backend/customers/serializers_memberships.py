@@ -31,6 +31,9 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(source="user.id", read_only=True)
     user_email = serializers.CharField(source="user.email", read_only=True)
     user_full_name = serializers.CharField(source="user.full_name", read_only=True)
+    # Sprint 154 §K — `User.phone`, the account's own number. Not the
+    # staff-only, visibility-gated `StaffProfile.phone`.
+    user_phone = serializers.CharField(source="user.phone", read_only=True)
     user_role = serializers.CharField(source="user.role", read_only=True)
     # Per-current-user per-customer actions block. Duplicated per row
     # is acceptable: the membership list is bounded (one customer at
@@ -50,6 +53,7 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
             "user_id",
             "user_email",
             "user_full_name",
+            "user_phone",
             "user_role",
             # SoT Addendum A.1 — company-wide Customer Company Admin flag.
             # Read-only on the wire; toggled via the dedicated
@@ -125,6 +129,48 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
     building_address = serializers.CharField(
         source="building.address", read_only=True
     )
+    # Sprint 153 §4.3 — the linked-buildings card shows the city under
+    # the name. Additive read-only field; `Building.city` is blank=True,
+    # so this is "" for a building that has none, never null.
+    building_city = serializers.CharField(
+        source="building.city", read_only=True
+    )
+    # Sprint 154 §G.2 — this serializer is now read from BOTH ends: the
+    # customer's buildings page (where the customer is implied by the
+    # URL) and the building's customers card (where it is not). The
+    # customer's name is what the second one renders, so it has to be on
+    # the row. Additive read-only field.
+    customer_name = serializers.CharField(
+        source="customer.name", read_only=True
+    )
+    # Sprint 155 §2 — the customer overview's "Linked buildings" card sat
+    # beside About showing a name and a city, so its right-hand half was
+    # visibly empty. These four fields are what the card fills it with,
+    # and they are all facts about THAT link's building — not filler.
+    #
+    # `postal_code` completes the address line (a Dutch city alone does
+    # not locate a building; "Amsterdam, 1012 AB" does). `is_active`
+    # matters because a customer can stay linked to a building that has
+    # been deactivated, and today nothing on this card says so.
+    building_postal_code = serializers.CharField(
+        source="building.postal_code", read_only=True
+    )
+    building_is_active = serializers.BooleanField(
+        source="building.is_active", read_only=True
+    )
+    # The two counts are ANNOTATED by every list queryset that uses this
+    # serializer — never computed per row. `_annotated_or_count` below is
+    # the same shape `BuildingSerializer` (Sprint 154 §I.5) uses, and for
+    # the same reason: the annotation is the real path, the related-manager
+    # fallback exists only for the single-instance paths (the POST-link
+    # response) where one extra query is not an N+1.
+    building_customer_count = serializers.SerializerMethodField()
+    building_manager_count = serializers.SerializerMethodField()
+    # Sprint 157 §8 — the third count the customer's Buildings page's
+    # stat strip needed. Annotated in the same pass as the other two, so
+    # it costs nothing extra: the strip is filled from rows the page had
+    # already fetched, not from a new request.
+    building_contact_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerBuildingMembership
@@ -134,9 +180,66 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
             "building_id",
             "building_name",
             "building_address",
+            "building_city",
+            "building_postal_code",
+            "building_is_active",
+            "building_customer_count",
+            "building_manager_count",
+            "building_contact_count",
+            "customer_name",
             "created_at",
         ]
         read_only_fields = fields
+
+    @staticmethod
+    def _annotated_or_count(obj, attr, related_manager_name):
+        # `is not None`, never a truthiness test: an annotated 0 is a
+        # legitimate answer and must not fall through to a query.
+        annotated = getattr(obj, attr, None)
+        if annotated is not None:
+            return annotated
+        return getattr(obj.building, related_manager_name).count()
+
+    def get_building_customer_count(self, obj) -> int:
+        return self._annotated_or_count(
+            obj, "_building_customer_count", "customer_memberships"
+        )
+
+    def get_building_manager_count(self, obj) -> int:
+        return self._annotated_or_count(
+            obj, "_building_manager_count", "manager_assignments"
+        )
+
+    def get_building_contact_count(self, obj) -> int:
+        return self._annotated_or_count(
+            obj, "_building_contact_count", "contact_links"
+        )
+
+
+def annotate_building_membership_counts(queryset):
+    """The two Sprint 155 §2 counts, for any `CustomerBuildingMembership`
+    queryset that `CustomerBuildingMembershipSerializer` will render.
+
+    Lives here, next to the serializer that reads it, so the two cannot
+    drift: the serializer names `_building_customer_count` /
+    `_building_manager_count` and exactly one function produces them.
+    Both call sites (the customer's buildings list and the building's
+    customers list) call this.
+
+    `distinct=True` is mandatory — two joined Counts in one query
+    multiply each other's rows otherwise.
+    """
+    from django.db.models import Count
+
+    return queryset.annotate(
+        _building_customer_count=Count(
+            "building__customer_memberships", distinct=True
+        ),
+        _building_manager_count=Count(
+            "building__manager_assignments", distinct=True
+        ),
+        _building_contact_count=Count("building__contact_links", distinct=True),
+    )
 
 
 class CustomerUserBuildingAccessSerializer(serializers.ModelSerializer):

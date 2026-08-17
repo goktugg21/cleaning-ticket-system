@@ -16,6 +16,7 @@ import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { useSavedBanner } from "../../../hooks/useSavedBanner";
 
+import { CustomerFacturatieSection } from "./CustomerFacturatieSection";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 import { ZoneHeader } from "./permissions/ZoneHeader";
 import { Toggle } from "../../../components/Toggle";
@@ -23,10 +24,15 @@ import { Toggle } from "../../../components/Toggle";
 /**
  * Sprint 28 Batch 13 (rework) — Customer Settings page (admin variant).
  *
- * Two cards stacked: Assigned-staff visibility (the three boolean
- * flags) and Lifecycle (deactivate / reactivate). Each carries its
- * own consequence copy so an operator does not need to consult the
- * RBAC matrix to predict what the button does.
+ * Three cards stacked: Facturatie (billing schedule + contract PDF),
+ * Assigned-staff visibility (the three boolean flags) and Lifecycle
+ * (deactivate / reactivate). Each carries its own consequence copy so an
+ * operator does not need to consult the RBAC matrix to predict what the
+ * button does.
+ *
+ * Sprint 153 §4.2 — Facturatie MOVED here from the Overview page. It is
+ * a setting, not an overview fact. The component file itself stays where
+ * it is and keeps its name; only the mount moved.
  */
 export function CustomerSettingsPage() {
   const { id } = useParams();
@@ -190,6 +196,11 @@ export function CustomerSettingsPage() {
           >
             {t("customer_view.settings.explainer", { customer: customerName })}
           </p>
+
+          <CustomerFacturatieSection
+            customer={customer}
+            onUpdated={setCustomer}
+          />
 
           <form
             className="card permissions-zone"

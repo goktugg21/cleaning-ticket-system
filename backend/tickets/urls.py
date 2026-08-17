@@ -18,6 +18,7 @@ from .views_staff_assignments import (
     TicketStaffAssignmentListCreateView,
 )
 from .views_staff_requests import StaffAssignmentRequestViewSet
+from .views_work_plan import WorkPlanView
 from .views_sub_tasks import (
     TicketSubTaskDetailView,
     TicketSubTaskListCreateView,
@@ -37,7 +38,42 @@ staff_request_router.register(
     basename="staff-assignment-request",
 )
 
+from .views_bulk_assign import (
+    TicketAssignableUsersView,
+    TicketBulkAssignView,
+)
+from .views_work_categories import (
+    WorkCategoryDetailView,
+    WorkCategoryListCreateView,
+)
+
 urlpatterns = [
+    # Sprint 185 E §1 — the work-category catalog. Before the router for
+    # the same reason `bulk-assign/` and `my-slots/` are: the router's
+    # `<pk>` detail pattern would otherwise swallow the literal.
+    path(
+        "categories/",
+        WorkCategoryListCreateView.as_view(),
+        name="work-category-list",
+    ),
+    path(
+        "categories/<int:category_id>/",
+        WorkCategoryDetailView.as_view(),
+        name="work-category-detail",
+    ),
+    # Sprint 158 §1 — bulk assign, and the picker's candidate read.
+    # Before the router for the same reason `my-slots/` is: the router's
+    # `<pk>` detail pattern would otherwise swallow the literal.
+    path(
+        "bulk-assign/",
+        TicketBulkAssignView.as_view(),
+        name="ticket-bulk-assign",
+    ),
+    path(
+        "<int:pk>/assignments/candidates/",
+        TicketAssignableUsersView.as_view(),
+        name="ticket-assignment-candidates",
+    ),
     # Sprint 14E — STAFF agenda of their own dated assignment slots.
     # Listed before the router so the `my-slots` literal is not eaten by
     # the router's `<pk>` detail pattern.
@@ -45,6 +81,14 @@ urlpatterns = [
         "my-slots/",
         StaffAssignmentSlotAgendaView.as_view(),
         name="ticket-my-slots",
+    ),
+    # Sprint 179A — the Work Plan: one week, both sources, the §12B
+    # placement rule and server-side counts. Before the router for the
+    # same reason `my-slots/` is.
+    path(
+        "work-plan/",
+        WorkPlanView.as_view(),
+        name="ticket-work-plan",
     ),
     path(
         "<int:ticket_id>/attachments/<int:attachment_id>/download/",

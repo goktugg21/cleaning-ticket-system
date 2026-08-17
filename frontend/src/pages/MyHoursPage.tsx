@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../api/client";
 import { listAllBuildings } from "../api/admin";
+import { listHourSources } from "../api/reports";
+import type { HourSourceOption } from "../api/reports";
 import {
   createTimeEntry,
   deleteTimeEntry,
@@ -38,6 +40,13 @@ import {
   toDateString,
 } from "../lib/isoWeek";
 import type { IsoWeek } from "../lib/isoWeek";
+import {
+  decodeSource,
+  encodeSource,
+  hourSourceLabel,
+} from "../lib/hourSource";
+import { HoursWeekGrid } from "../components/timesheets/HoursWeekGrid";
+import { useAuth } from "../auth/AuthContext";
 
 interface EntryFormState {
   date: string;
@@ -45,10 +54,14 @@ interface EntryFormState {
   hours: string;
   building: string;
   note: string;
+  /** Sprint 180 §3 — "TYPE:id", or bare "TYPE" for a type-only source
+   *  (Contract / Other), or "" for none. The `lib/hourSource` encoding
+   *  the entries table already uses, so one decoder serves both. */
+  source: string;
 }
 
 function emptyForm(date: string): EntryFormState {
-  return { date, hour_type: "", hours: "", building: "", note: "" };
+  return { date, hour_type: "", hours: "", building: "", note: "", source: "" };
 }
 
 function formatDayLabel(value: string, locale: string): string {
@@ -85,9 +98,39 @@ export function MyHoursPage() {
 
   const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  // Sprint 154 §M — the week grid, collapsed by default.
+  const [gridOpen, setGridOpen] = useState(false);
+  const { me } = useAuth();
+  // On THIS page the employee is always the signed-in user. The server
+  // enforces that independently (a non-manager naming someone else is a
+  // 403), so this only decides what the grid writes, never what it may.
+  const myEmployeeId = me?.id ?? null;
+  // Sprint 155 §5 — the grid's two props, for a one-person page. Both
+  // are derived (no effect, no second copy of `entries` to keep in
+  // step): the block list is this user, and every entry on the page is
+  // already theirs.
+  const gridEmployees = useMemo(
+    () =>
+      myEmployeeId === null
+        ? []
+        : [
+            {
+              id: myEmployeeId,
+              name: me?.full_name?.trim() || me?.email || "",
+            },
+          ],
+    [myEmployeeId, me?.full_name, me?.email],
+  );
+  const gridEntries = useMemo(
+    () => (myEmployeeId === null ? {} : { [myEmployeeId]: entries }),
+    [myEmployeeId, entries],
+  );
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [weekClosed, setWeekClosed] = useState(false);
+  /** Sprint 179B §2 — the pickable jobs, purely so a stored
+   *  `(source_type, source_id)` can be printed as words. */
+  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
   const [loadError, setLoadError] = useState("");
 
   // `loading` is DERIVED, not stored: it is true exactly while the week
@@ -212,6 +255,29 @@ export function MyHoursPage() {
     };
   }, []);
 
+  /**
+   * Sprint 179B §2 — the JOB titles, for the Job column below and for
+   * the week grid's own.
+   *
+   * Non-fatal on failure, the same way the week wizard's picker is: the
+   * job is a refinement of an hours row, and a list that could not load
+   * must not stop somebody seeing or entering their week. Without it the
+   * column falls back to "Ticket #41" — a label, not a blank.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    listHourSources()
+      .then((options) => {
+        if (!cancelled) setSourceOptions(options);
+      })
+      .catch(() => {
+        /* non-fatal: the rows still render, from their type and id */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const totalHours = useMemo(
     () => sumDecimalStrings(entries.map((entry) => entry.hours)),
     [entries],
@@ -257,6 +323,7 @@ export function MyHoursPage() {
       hours: entry.hours,
       building: entry.building === null ? "" : String(entry.building),
       note: entry.note,
+      source: encodeSource(entry.source_type, entry.source_id),
     });
     setFormError("");
   }
@@ -281,6 +348,11 @@ export function MyHoursPage() {
       hours: form.hours.trim(),
       building: form.building === "" ? null : Number(form.building),
       note: form.note.trim(),
+      // Sprint 180 §3 — the decoder turns "" back into OTHER with no id,
+      // which is the column's own default, so clearing the field puts
+      // the row back to the state an untagged row has rather than
+      // leaving whatever was there before.
+      ...decodeSource(form.source),
     };
     try {
       if (mode === "create") {
@@ -328,8 +400,13 @@ export function MyHoursPage() {
     }
   }
 
+  // Sprint 162 — this wrapper used to carry a `page` class that had no
+  // rule behind it and never has; the other pages use a bare wrapper.
+  // Found by the Sprint 161 undefined-class gate while this file was
+  // open for §1c. (The gate greps for class literals textually, so
+  // naming the class here would make it report itself.)
   return (
-    <div className="page">
+    <div>
       <PageHeader
         title={t("my_hours.title")}
         subtitle={t("my_hours.subtitle")}
@@ -443,6 +520,66 @@ export function MyHoursPage() {
           <div className="loading-bar-fill" />
         </div>
       ) : (
+        <>
+        {/* Sprint 154 §M — the week grid, collapsed by default so the
+            page still opens on the list it always showed. `employee` is
+            omitted: a non-manager may only ever write their own hours,
+            and the server forces that regardless of what is sent. */}
+        <div
+          className="card"
+          style={{ marginBottom: 16, padding: "16px 18px" }}
+          data-testid="my-hours-week-grid-card"
+        >
+          <div className="section-head" style={{ marginBottom: gridOpen ? 12 : 0 }}>
+            <div>
+              <div className="section-head-title">
+                {t("hours_week_grid.title")}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setGridOpen((open) => !open)}
+              data-testid="my-hours-week-grid-toggle"
+            >
+              {gridOpen
+                ? t("hours_week_grid.close_grid")
+                : t("hours_week_grid.open_grid")}
+            </button>
+          </div>
+          {gridOpen && (
+            <HoursWeekGrid
+              /* Sprint 180 §2 — keyed by the week, for the same reason
+                 the week wizard is: the grid's cells are keyed by date
+                 and Save posts one week, so anything typed for the week
+                 you just paged away from was invisible AND unsaveable. */
+              key={weekKey}
+              week={week}
+              /* Sprint 155 §5 — the grid renders a block per employee it
+                 is given. Here that is exactly one person: this page
+                 writes only the signed-in user's own hours, so there is
+                 no selector and nothing to choose. Same component as the
+                 admin page, one member in the list. */
+              employees={gridEmployees}
+              hourTypes={hourTypes}
+              buildings={buildings}
+              entriesByEmployee={gridEntries}
+              /* Sprint 157 §1 — no setup modal on this page: it writes
+                 only the signed-in user's own hours, and there is
+                 nothing to choose. Rows come from the week's existing
+                 entries plus Add row, exactly as before. */
+              seedBuildingIds={[]}
+              /* Sprint 179B §2 — this page's rows come from whatever the
+                 week already holds, and those can be tagged to a job by
+                 the admin wizard, so the column belongs here too. */
+              sourceOptions={sourceOptions}
+              showSource
+              weekClosed={weekClosed}
+              onSaved={refresh}
+            />
+          )}
+        </div>
+
         <div className="card" data-testid="my-hours-list">
           <BoundedList
             size="lg"
@@ -455,7 +592,7 @@ export function MyHoursPage() {
                 style={{ padding: "32px 24px", textAlign: "center" }}
                 data-testid="my-hours-empty"
               >
-                <h3 style={{ marginBottom: 8 }}>{t("my_hours.empty_title")}</h3>
+                <h3 className="empty-title" style={{ marginBottom: 8 }}>{t("my_hours.empty_title")}</h3>
                 <p className="muted" style={{ margin: 0 }}>
                   {t("my_hours.empty_description")}
                 </p>
@@ -470,6 +607,10 @@ export function MyHoursPage() {
                   <th>{t("my_hours.col_hours")}</th>
                   <th>{t("my_hours.col_weighted")}</th>
                   <th>{t("my_hours.col_building")}</th>
+                  {/* Sprint 179B §2 — the same column the week grid
+                      gained. A row that belongs to a ticket or an extra
+                      work said so nowhere on this page. */}
+                  <th>{t("my_hours.col_job")}</th>
                   <th>{t("my_hours.col_note")}</th>
                   <th>{t("my_hours.col_actions")}</th>
                 </tr>
@@ -492,6 +633,15 @@ export function MyHoursPage() {
                     <td>{entry.hours}</td>
                     <td className="muted">{entry.weighted_hours}</td>
                     <td className="muted small">{entry.building_name ?? "—"}</td>
+                    <td className="muted small" data-testid="my-hours-job">
+                      {hourSourceLabel(
+                        entry.source_type,
+                        entry.source_id,
+                        sourceOptions,
+                        t,
+                        "—",
+                      )}
+                    </td>
                     <td className="muted small">{entry.note || "—"}</td>
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
@@ -521,6 +671,7 @@ export function MyHoursPage() {
             </table>
           </BoundedList>
         </div>
+        </>
       )}
 
       <section
@@ -590,7 +741,7 @@ export function MyHoursPage() {
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {mode === "create"
                 ? t("my_hours.add_modal_title")
                 : t("my_hours.edit_modal_title")}
@@ -697,6 +848,61 @@ export function MyHoursPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Sprint 180 §3 — WHICH JOB, editable at last.
+                Sprint 179B put the job in the list on this page and left
+                it read-only, so the one screen that showed a wrong job
+                was the one screen that could not correct it. The options
+                and the encoding are the entries table's — the same
+                `listHourSources()` list and the same
+                `encodeSource`/`decodeSource` pair — so the two paths
+                cannot drift on what a valid source is. */}
+            <div className="field">
+              <label className="field-label" htmlFor="my-hours-source">
+                {t("my_hours.field_job")}
+              </label>
+              <select
+                id="my-hours-source"
+                className="field-select"
+                value={form.source}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, source: event.target.value }))
+                }
+                data-testid="my-hours-input-source"
+                disabled={formBusy}
+              >
+                <option value="">{t("my_hours.field_job_empty")}</option>
+                {/* The row's CURRENT job stays offerable even when the
+                    job has since closed and left the picker: without it,
+                    editing the hours of a finished ticket would silently
+                    retag them. Same guard the entries table carries. */}
+                {form.source &&
+                  !sourceOptions.some(
+                    (option) =>
+                      encodeSource(option.source_type, option.source_id) ===
+                      form.source,
+                  ) && (
+                    <option value={form.source}>
+                      {hourSourceLabel(
+                        decodeSource(form.source).source_type,
+                        decodeSource(form.source).source_id,
+                        sourceOptions,
+                        t,
+                        t("hours_week_grid.no_source"),
+                      )}
+                    </option>
+                  )}
+                {sourceOptions.map((option) => (
+                  <option
+                    key={encodeSource(option.source_type, option.source_id)}
+                    value={encodeSource(option.source_type, option.source_id)}
+                  >
+                    {option.title}
+                  </option>
+                ))}
+              </select>
+              <div className="field-hint">{t("my_hours.field_job_hint")}</div>
             </div>
 
             <div className="field">

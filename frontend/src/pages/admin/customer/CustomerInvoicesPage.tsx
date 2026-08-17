@@ -10,11 +10,18 @@ import { FacturenPage } from "../../FacturenPage";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
- * Invoicing Phase 4b — the customer-detail Invoices tab: the new Facturen
- * invoice list scoped to THIS customer (view-only). The due panel + the
- * generate control live on the standalone Facturen page — this embedded
- * variant shows a pointer link to it instead. All rendering is the shared
- * FacturenPage with `customerId` + `embedded` (reuse, not a copy).
+ * Invoicing Phase 4b — the customer-detail Invoices tab. All rendering is
+ * the shared `FacturenPage` with `customerId` + `embedded` (reuse, not a
+ * copy).
+ *
+ * Sprint 186 §2 — it is now THE Facturen page with this customer pinned,
+ * not a view-only slice of it. The due panel, the preview and Generate
+ * were all suppressed here and replaced by a link back to the standalone
+ * page; an operator who was already standing on the customer had to leave
+ * and find them again in a provider-wide list to invoice them. The pin
+ * itself is unchanged and still not removable: no customer picker, no
+ * clear button, and the due panel narrows to this customer rather than
+ * listing everyone else's on their page.
  */
 export function CustomerInvoicesPage() {
   const { id } = useParams();
@@ -47,7 +54,12 @@ export function CustomerInvoicesPage() {
   if (numericId === null) {
     return (
       <div className="alert-error" role="alert">
-        {t("admin.load_error")}
+        {/* Sprint 179B §5 — `admin.load_error` is in no bundle and this
+            box rendered that string verbatim. The branch is not a load
+            failure at all: it fires only when the `:id` in the URL is
+            not a positive number, which is what the four sibling
+            customer tabs already call `bm_customer_detail.invalid_id`. */}
+        {t("bm_customer_detail.invalid_id")}
       </div>
     );
   }
@@ -64,7 +76,11 @@ export function CustomerInvoicesPage() {
           {error}
         </div>
       )}
-      <FacturenPage customerId={numericId} embedded />
+      {/* Sprint 184 §3b — keyed by customer id, like the three sibling
+          sub-pages. Two routes rendering one component do not remount,
+          so without this the previous customer's status filter and
+          billing period survive into the next customer's invoices. */}
+      <FacturenPage key={numericId} customerId={numericId} embedded />
     </div>
   );
 }

@@ -28,7 +28,9 @@ def send_mail(*args, **kwargs):
     retry_jitter=True,
     max_retries=3,
 )
-def send_email_task(self, *, log_id, recipient_email, subject, body):
+def send_email_task(
+    self, *, log_id, recipient_email, subject, body, attachment=None
+):
     """
     Send an email synchronously inside the worker.
 
@@ -50,13 +52,42 @@ def send_email_task(self, *, log_id, recipient_email, subject, body):
         return
 
     try:
-        sent_count = send_mail(
-            subject=subject,
-            message=body,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[recipient_email],
-            fail_silently=False,
-        )
+        if attachment is None:
+            sent_count = send_mail(
+                subject=subject,
+                message=body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[recipient_email],
+                fail_silently=False,
+            )
+        else:
+            # Sprint 185 §2 — the SAME sender, carrying a document.
+            #
+            # `send_mail` cannot attach, so an attachment takes the
+            # EmailMessage path. Deliberately still inside this task and
+            # still against this NotificationLog row: a second sender is
+            # how two systems start disagreeing about what was sent, and
+            # the log is the answer to "did they get it".
+            #
+            # `attachment` is (filename, base64_content, mimetype) —
+            # plain JSON-safe data, because this project leaves Celery's
+            # task serializer at its default of JSON and raw `bytes`
+            # cannot cross that boundary. `send_logged_email` does the
+            # encoding; this undoes it.
+            import base64
+
+            from django.core.mail import EmailMessage
+
+            filename, encoded, mimetype = attachment
+            content = base64.b64decode(encoded)
+            message = EmailMessage(
+                subject=subject,
+                body=body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[recipient_email],
+            )
+            message.attach(filename, content, mimetype)
+            sent_count = message.send(fail_silently=False)
     except Exception as exc:
         retries_exhausted = self.request.retries >= self.max_retries
         if retries_exhausted or self.app.conf.task_always_eager:

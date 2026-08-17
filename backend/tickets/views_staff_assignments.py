@@ -59,6 +59,7 @@ from rest_framework.response import Response
 from accounts.models import StaffProfile, User, UserRole
 from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
 from accounts.permissions_v2 import user_has_osius_permission
+from accounts.permissions import is_provider_management_role
 from accounts.scoping import scope_tickets_for
 from buildings.models import BuildingStaffVisibility
 from notifications.services import send_slot_unable_to_complete_email
@@ -269,6 +270,13 @@ class _MySlotSerializer(serializers.ModelSerializer):
     ticket_no = serializers.CharField(source="ticket.ticket_no", read_only=True)
     ticket_title = serializers.CharField(source="ticket.title", read_only=True)
     ticket_status = serializers.CharField(source="ticket.status", read_only=True)
+    # Sprint 168 §7 — the Work Plan filters by TYPE, and a card that
+    # already carries the ticket's title and status may as well carry
+    # the one more field that saves a detail fetch per card.
+    ticket_type = serializers.CharField(source="ticket.type", read_only=True)
+    ticket_customer_name = serializers.CharField(
+        source="ticket.customer.name", read_only=True, default=None
+    )
     building_id = serializers.IntegerField(
         source="ticket.building_id", read_only=True
     )
@@ -284,6 +292,8 @@ class _MySlotSerializer(serializers.ModelSerializer):
             "ticket_no",
             "ticket_title",
             "ticket_status",
+            "ticket_type",
+            "ticket_customer_name",
             "building_id",
             "building_name",
             "scheduled_start_at",
@@ -599,12 +609,40 @@ class StaffAssignmentSlotAgendaView(generics.ListAPIView):
     serializer_class = _MySlotSerializer
 
     def get_queryset(self):
-        return (
-            TicketStaffAssignment.objects.filter(
-                user=self.request.user,
-                ticket__deleted_at__isnull=True,
+        """The caller's own slots, or — for a provider admin asking —
+        every slot on a ticket they can already see.
+
+        Sprint 170 §1. The Work Plan was built on this endpoint and its
+        nav entry was gated to STAFF and BUILDING_MANAGER, so a
+        SUPER_ADMIN could not reach the feature at all. Opening the nav
+        entry alone would not have been enough: an admin holds no
+        assignment rows of their own, so the page would have rendered a
+        permanently empty week. A nav entry leading to an empty page is
+        the same defect as one leading to a 403.
+
+        `?scope=company` therefore widens to the TEAM's slots, and only
+        for a role that may manage them. The widening is expressed
+        through `scope_tickets_for`, the same helper the ticket list
+        uses, so it cannot show a ticket the actor could not open — it
+        is the existing scope, not a new one.
+        """
+        queryset = TicketStaffAssignment.objects.filter(
+            ticket__deleted_at__isnull=True
+        )
+        wants_team = self.request.query_params.get("scope") == "company"
+        if wants_team and is_provider_management_role(self.request.user):
+            queryset = queryset.filter(
+                ticket__in=scope_tickets_for(self.request.user)
             )
-            .select_related("ticket", "ticket__building")
+        else:
+            # The default and the only thing a STAFF user can get: their
+            # own rows. Inherently caller-scoped, so no cross-tenant
+            # surface exists on this path.
+            queryset = queryset.filter(user=self.request.user)
+        return (
+            queryset.select_related(
+                "ticket", "ticket__building", "ticket__customer", "user"
+            )
             .order_by("scheduled_start_at", "id")
         )
 

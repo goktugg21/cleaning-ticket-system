@@ -24,6 +24,7 @@ import type {
   CustomerBuildingMembership,
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { Toggle } from "../../components/Toggle";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
@@ -55,6 +56,10 @@ interface ContactFormState {
   phone: string;
   role_label: string;
   notes: string;
+  /** Sprint 185 §2 — this person is e-mailed the invoice when it is
+   *  sent. Distinct from `contact_type === "BILLING"`, which says what
+   *  they do; this says what they receive. */
+  receives_invoices: boolean;
   // A contact may be linked to several buildings; empty = company-wide.
   building_ids: number[];
 }
@@ -65,6 +70,7 @@ const EMPTY_FORM: ContactFormState = {
   phone: "",
   role_label: "",
   notes: "",
+  receives_invoices: false,
   building_ids: [],
 };
 
@@ -275,6 +281,7 @@ export function CustomerContactsPage() {
       phone: contact.phone,
       role_label: contact.role_label,
       notes: contact.notes,
+      receives_invoices: contact.receives_invoices ?? false,
       building_ids: [...(contact.linked_building_ids ?? [])],
     });
     setBuildingFilter("");
@@ -314,6 +321,7 @@ export function CustomerContactsPage() {
       phone: form.phone.trim(),
       role_label: form.role_label.trim(),
       notes: form.notes,
+      receives_invoices: form.receives_invoices,
       // building_ids is the authority for the contact's building links
       // (replace-set on the backend; [] = company-wide). We omit the legacy
       // single `building` so it never silently re-injects an extra link.
@@ -776,6 +784,21 @@ export function CustomerContactsPage() {
                 </div>
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">
+                    {t("contacts.receives_invoices")}
+                  </span>
+                  <span
+                    className="detail-kv-val"
+                    data-testid="customer-contact-detail-receives-invoices"
+                  >
+                    {selected.receives_invoices
+                      ? selected.email
+                        ? t("contacts.receives_invoices_yes")
+                        : t("contacts.receives_invoices_needs_email")
+                      : t("contacts.receives_invoices_no")}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
                     {t("customer_contacts.field_notes")}
                   </span>
                   <span
@@ -1114,6 +1137,39 @@ export function CustomerContactsPage() {
                 data-testid="customer-contact-input-notes"
                 disabled={formBusy}
               />
+            </div>
+
+            {/* Sprint 185 §2 — the only recipient switch in the system
+                that points at a Contact rather than a user account. */}
+            <div className="field">
+              <label
+                htmlFor="contact-receives-invoices"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <Toggle
+                  id="contact-receives-invoices"
+                  checked={form.receives_invoices}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      receives_invoices: event.target.checked,
+                    }))
+                  }
+                  data-testid="customer-contact-input-receives-invoices"
+                  disabled={formBusy}
+                />
+                <span>{t("contacts.receives_invoices")}</span>
+              </label>
+              <div className="muted small" style={{ marginTop: 4 }}>
+                {form.receives_invoices && form.email.trim() === ""
+                  ? t("contacts.receives_invoices_needs_email")
+                  : t("contacts.receives_invoices_hint")}
+              </div>
             </div>
 
             <div

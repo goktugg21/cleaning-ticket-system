@@ -11,10 +11,29 @@
 //     customer / building / status / period filters), each row linking to
 //     the dedicated invoice-detail page.
 //
-// Reusable, mirroring the old InvoicesPage contract: with `customerId` set
-// the page is customer-scoped (list only, no due panel / generate, a pointer
-// to the standalone Facturen page) and `embedded` drops the standalone header
-// (the customer sub-page header renders instead). Used by CustomerInvoicesPage.
+// Reusable: with `customerId` set the page is customer-scoped, and
+// `embedded` drops the standalone header (the customer sub-page header
+// renders instead). Used by CustomerInvoicesPage.
+//
+// Sprint 186 §2 — "customer-scoped" used to mean a LESSER page: no due
+// panel, no preview, no generate, and a card whose only content was a
+// link to the real one. Three of the four customer work sub-pages mount
+// the main component with the customer pinned; this was the one that
+// mounted a reduced copy, so an operator standing on a customer had to
+// leave, find that customer again in a provider-wide list, and generate
+// from there. It is now the SAME page with one pin.
+//
+// What "pinned" means, precisely — and what the `customerScoped` guards
+// below are protecting:
+//   * `customer` is passed to the list endpoint, server-side;
+//   * the customer FILTER dropdown is not rendered, so the pin cannot be
+//     widened from inside the page;
+//   * the customer COLUMN is not rendered, because every row is that one
+//     customer;
+//   * the Due panel is narrowed to that customer client-side (see the
+//     effect). Leaving it provider-wide would list OTHER customers on
+//     this customer's page, which is the cross-tenant surprise the
+//     customer chips shipped last week.
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -22,22 +41,73 @@ import { BadgeEuro } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
+  fetchInvoicePreviewPdf,
   generateInvoices,
   getInvoiceDueList,
+  getInvoicePreview,
+  granularityFor,
   listAllInvoices,
+  pairForGranularity,
+  type InvoiceBillingTarget,
+  type InvoicePreview,
+  type InvoiceSplit,
 } from "../api/invoices";
 import type {
   Invoice,
   InvoiceDueRow,
-  InvoiceGranularity,
+  InvoiceNothingReason,
   InvoiceStatus,
 } from "../api/types";
+// Sprint 183 §1 — the shared billing controls, used identically by
+// customer settings so the two screens cannot word this differently.
+import { BillingTargetFields } from "../components/BillingTargetFields";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { useToast } from "../components/ToastProvider";
-import { formatInvoiceGroupLabel, formatMoney } from "../lib/intl";
+import { customerLabelName } from "../lib/customerLabelName";
+import {
+  formatDateTime,
+  formatInvoiceGroupLabel,
+  formatMoney,
+} from "../lib/intl";
 
 type StatusFilter = InvoiceStatus | "ALL";
+
+/** Sprint 183 — the /due/ row carries three fields `api/types.ts` does
+ *  not describe yet: the saved billing pair (Sprint 182 §3) and the
+ *  Sprint 183 §2 "why is there nothing" diagnosis. `api/types.ts`
+ *  belongs to another agent this round, so the shape is narrowed here.
+ *  Optional throughout, so a server that predates either still renders. */
+// Sprint 184 §5 — the local narrowings that stood here are gone.
+// `InvoiceDueRow` in `api/types.ts` now describes the billing pair and
+// the nothing-reason, and `Invoice` describes `created_by_label`. They
+// were narrowed here only because that file belonged to another agent.
+
+/** The one sentence, from the one diagnosis. Sprint 183 §2 — the same
+ *  function answers for the Due panel and the preview, so this renderer
+ *  is shared between them too rather than written twice. */
+function nothingSentence(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  nothing: InvoiceNothingReason | undefined,
+): string | null {
+  if (!nothing || nothing.reason === "NOTHING_TO_EXPLAIN") return null;
+  if (nothing.reason === "NO_EXTRA_WORK") {
+    return t("invoices:nothing.no_extra_work");
+  }
+  if (nothing.reason === "NONE_FINISHED") {
+    return t("invoices:nothing.none_finished", {
+      count: nothing.unbilled_count,
+    });
+  }
+  if (nothing.reason === "NOT_IN_PERIOD") {
+    return t("invoices:nothing.not_in_period", {
+      count: nothing.finished_count,
+    });
+  }
+  return t("invoices:nothing.all_invoiced", {
+    count: nothing.invoiced_count,
+  });
+}
 
 const STATUS_LABEL_KEY: Record<InvoiceStatus, string> = {
   DRAFT: "facturen.status_draft",
@@ -70,13 +140,13 @@ export function FacturenPage({
   customerId?: number;
   embedded?: boolean;
 } = {}) {
-  const { t } = useTranslation("common");
+  const { t } = useTranslation(["common", "invoices"]);
   const { push: pushToast } = useToast();
   const navigate = useNavigate();
   const customerScoped = customerId !== undefined;
 
   const [dueRows, setDueRows] = useState<InvoiceDueRow[]>([]);
-  const [dueLoading, setDueLoading] = useState(!customerScoped);
+  const [dueLoading, setDueLoading] = useState(true);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -92,18 +162,50 @@ export function FacturenPage({
   // Generate control — opened from a due row; a single inline panel.
   const [genRow, setGenRow] = useState<InvoiceDueRow | null>(null);
   const [genMonth, setGenMonth] = useState("");
-  const [genGranularity, setGenGranularity] =
-    useState<InvoiceGranularity>("CUSTOMER");
+  // Sprint 183 §1 — the dialog speaks the SAME two controls as customer
+  // settings. It used to offer the old three-value granularity list,
+  // because Sprint 182 split the customer setting and never came back
+  // here — so the two screens described one decision in two
+  // vocabularies. Seeded from the customer's saved pair below; changing
+  // it here overrides THIS RUN only and never writes the setting back.
+  const [genTarget, setGenTarget] =
+    useState<InvoiceBillingTarget>("CUSTOMER");
+  const [genSplit, setGenSplit] = useState<InvoiceSplit>("NONE");
   const [genBusy, setGenBusy] = useState(false);
 
-  // Due panel (skipped when customer-scoped / embedded).
+  // Sprint 182 §2 — the preview. NOTHING IS STORED server-side, so this
+  // state is the only copy and it is thrown away when the panel closes;
+  // reopening recomputes. That is the point: a stored preview is a draft
+  // in all but name, and two kinds of draft is how you invoice twice.
+  const [previewRow, setPreviewRow] = useState<InvoiceDueRow | null>(null);
+  const [preview, setPreview] = useState<InvoicePreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+
+  // Due panel. Sprint 186 §2 — loaded in BOTH modes and narrowed to the
+  // pinned customer when there is one.
+  //
+  // The narrowing is client-side because `/invoices/due/` takes no
+  // customer parameter — it answers "who is due" over the caller's whole
+  // scope, one row per scheduled customer, unpaginated. Adding the
+  // parameter is a backend change and this is a frontend-only branch, so
+  // the page filters the response instead. That is a display narrowing
+  // over a response the server already tenant-scoped
+  // (`scope_customers_for`), not a substitute for one; and the guard on
+  // `/due/` is the SAME `_forbid_non_operator` that already gates the
+  // invoice list this page loads either way, so no caller reaches this
+  // fetch that was not already reaching that one.
   useEffect(() => {
-    if (customerScoped) return;
     let cancelled = false;
     async function loadDue() {
       try {
         const rows = await getInvoiceDueList();
-        if (!cancelled) setDueRows(rows);
+        if (!cancelled) {
+          setDueRows(
+            customerId === undefined
+              ? rows
+              : rows.filter((row) => row.customer === customerId),
+          );
+        }
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
       } finally {
@@ -114,7 +216,7 @@ export function FacturenPage({
     return () => {
       cancelled = true;
     };
-  }, [customerScoped, refreshKey]);
+  }, [customerId, refreshKey]);
 
   // Invoice list. Sprint 120 — listAllInvoices pages exhaustively (the
   // plain listInvoices requests page_size=100 and never follows `next`,
@@ -183,7 +285,60 @@ export function FacturenPage({
         ? `${row.period_year}-${String(row.period_month).padStart(2, "0")}`
         : currentMonthValue(),
     );
-    setGenGranularity(row.invoice_granularity_default);
+    // Seed from the customer's SAVED pair. The /due/ row carries both
+    // (Sprint 182), with the legacy granularity as the fallback for a
+    // server that predates them.
+    if (row.invoice_billing_target) {
+      setGenTarget(row.invoice_billing_target);
+      setGenSplit(row.invoice_split ?? "NONE");
+    } else {
+      const pair = pairForGranularity(row.invoice_granularity_default);
+      setGenTarget(pair.target);
+      setGenSplit(pair.split);
+    }
+  }
+
+  // Sprint 182 §2 — recomputed on every open, never cached across opens.
+  async function openPreview(row: InvoiceDueRow) {
+    setPreviewRow(row);
+    setPreview(null);
+    setPreviewBusy(true);
+    setError("");
+    try {
+      setPreview(
+        await getInvoicePreview({
+          customer: row.customer,
+          year: row.period_year,
+          month: row.period_month,
+        }),
+      );
+    } catch (err) {
+      setError(getApiError(err));
+      setPreviewRow(null);
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function handleDownloadPreview() {
+    if (!previewRow) return;
+    try {
+      const blob = await fetchInvoicePreviewPdf({
+        customer: previewRow.customer,
+        year: previewRow.period_year,
+        month: previewRow.period_month,
+      });
+      // Opened in a tab rather than force-downloaded: the operator is
+      // checking numbers, not filing a document, and the PDF is stamped
+      // PREVIEW on every page so a stray tab cannot be mistaken for an
+      // invoice.
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      // Revoked on the next tick so the opened tab has taken the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      setError(getApiError(err));
+    }
   }
 
   async function handleGenerate() {
@@ -197,7 +352,11 @@ export function FacturenPage({
         customer: genRow.customer,
         year: parsed.year,
         month: parsed.month,
-        granularity: genGranularity,
+        // Sprint 183 §1 — the UI speaks the pair; the WIRE keeps the
+        // legacy `granularity` field. Cheaper and lower-risk than a new
+        // request shape: the endpoint already accepts it and the
+        // customer serializer already translates a legacy write.
+        granularity: granularityFor(genTarget, genSplit),
       });
       pushToast({
         variant: created.length > 0 ? "success" : "info",
@@ -228,187 +387,314 @@ export function FacturenPage({
         </div>
       )}
 
-      {customerScoped ? (
-        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-          <Link to="/invoices" className="link" data-testid="facturen-manage-link">
-            {t("facturen.manage_link")}
-          </Link>
-        </div>
-      ) : (
-        // ---- Due panel ----
-        <section
-          className="card"
-          style={{ padding: 16, marginBottom: 16 }}
-          data-testid="facturen-due-panel"
-        >
-          <div className="section-head" style={{ marginBottom: 10 }}>
-            <div>
-              <div className="section-head-title">{t("facturen.due_title")}</div>
-              <div className="section-head-sub">{t("facturen.due_sub")}</div>
+      {/* ---- Due panel ---- */}
+      <section
+        className="card"
+        style={{ padding: 16, marginBottom: 16 }}
+        data-testid="facturen-due-panel"
+      >
+        <div className="section-head" style={{ marginBottom: 10 }}>
+          <div>
+            <div className="section-head-title">{t("facturen.due_title")}</div>
+            <div className="section-head-sub">
+              {customerScoped
+                ? t("facturen.due_sub_customer")
+                : t("facturen.due_sub")}
             </div>
           </div>
-          {dueLoading ? (
-            <div className="loading-bar">
-              <div className="loading-bar-fill" />
-            </div>
-          ) : dueRows.length === 0 ? (
-            <p className="muted small" data-testid="facturen-due-empty">
-              {t("facturen.due_empty")}
-            </p>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" data-testid="facturen-due-table">
-                <thead>
-                  <tr>
-                    <th>{t("facturen.col_customer")}</th>
-                    <th>{t("facturen.due_col_schedule")}</th>
-                    <th style={{ textAlign: "right" }}>
-                      {t("facturen.due_col_unbilled")}
-                    </th>
-                    <th style={{ textAlign: "right" }}>
-                      {t("facturen.col_total")}
-                    </th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {dueRows.map((row) => (
-                    <tr key={row.customer} data-testid="facturen-due-row">
-                      <td>
-                        {row.customer_name}
-                        {row.is_due && (
-                          <span
-                            className="cell-tag cell-tag-open"
-                            style={{ marginLeft: 8 }}
-                            data-testid="facturen-due-badge"
-                          >
-                            <i />
-                            {t("facturen.due_now")}
-                          </span>
-                        )}
-                      </td>
-                      <td className="muted small">
-                        {row.invoice_day_rule === "FIRST_OF_MONTH"
-                          ? t("facturatie.day_first")
-                          : row.invoice_day_rule === "LAST_OF_MONTH"
-                            ? t("facturatie.day_last")
-                            : "—"}
-                      </td>
-                      <td style={{ textAlign: "right" }}>{row.unbilled_count}</td>
-                      <td style={{ textAlign: "right" }}>
-                        {formatMoney(row.unbilled_total)}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => openGenerate(row)}
-                          disabled={row.unbilled_count === 0}
-                          data-testid="facturen-generate-open"
+        </div>
+        {dueLoading ? (
+          <div className="loading-bar">
+            <div className="loading-bar-fill" />
+          </div>
+        ) : dueRows.length === 0 ? (
+          <p className="muted small" data-testid="facturen-due-empty">
+            {/* Sprint 186 §2 — an empty panel means two different
+                things. Provider-wide it means nobody is due. On ONE
+                customer it almost always means that customer has no
+                billing schedule at all, because `/due/` only reports
+                scheduled customers — so the page says which it is and
+                where the schedule is set, instead of a "nothing due"
+                that reads as a broken screen. */}
+            {customerScoped
+              ? t("facturen.due_empty_customer")
+              : t("facturen.due_empty")}
+          </p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table" data-testid="facturen-due-table">
+              <thead>
+                <tr>
+                  <th>{t("facturen.col_customer")}</th>
+                  <th>{t("facturen.due_col_schedule")}</th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("facturen.due_col_unbilled")}
+                  </th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("facturen.col_total")}
+                  </th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {dueRows.map((row) => (
+                  <tr key={row.customer} data-testid="facturen-due-row">
+                    <td>
+                      {row.customer_name}
+                      {row.is_due && (
+                        <span
+                          className="cell-tag cell-tag-open"
+                          style={{ marginLeft: 8 }}
+                          data-testid="facturen-due-badge"
                         >
-                          {t("facturen.generate")}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                          <i />
+                          {t("facturen.due_now")}
+                        </span>
+                      )}
+                    </td>
+                    <td className="muted small">
+                      {row.invoice_day_rule === "FIRST_OF_MONTH"
+                        ? t("facturatie.day_first")
+                        : row.invoice_day_rule === "LAST_OF_MONTH"
+                          ? t("facturatie.day_last")
+                          : "—"}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {row.unbilled_count}
+                      {/* Sprint 183 §2 — "I cannot generate anything
+                          in Due now" was correct behaviour with no
+                          explanation. The count alone says 0; this
+                          says WHY it is 0 and what to go and look
+                          at. */}
+                      {nothingSentence(t, row.nothing_reason) && (
+                        <span
+                          className="muted small"
+                          style={{ display: "block", textAlign: "left" }}
+                          data-testid="facturen-due-nothing"
+                        >
+                          {nothingSentence(t, row.nothing_reason)}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {formatMoney(row.unbilled_total)}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {/* Sprint 182 §2 — look before you cut. The
+                          preview shows what a run WOULD produce, from
+                          the same calculation that produces it. */}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => openPreview(row)}
+                        disabled={row.unbilled_count === 0}
+                        data-testid="facturen-preview-open"
+                        style={{ marginRight: 8 }}
+                      >
+                        {t("facturen.preview_open")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => openGenerate(row)}
+                        disabled={row.unbilled_count === 0}
+                        data-testid="facturen-generate-open"
+                      >
+                        {t("facturen.generate")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-          {genRow && (
-            <div
-              className="card"
-              style={{ padding: 14, marginTop: 12 }}
-              data-testid="facturen-generate-panel"
-            >
-              <div className="section-head-title" style={{ marginBottom: 8 }}>
-                {t("facturen.gen_title", { name: genRow.customer_name })}
+        {/* Sprint 182 §2 — the preview panel. Read-only: it creates
+            nothing and claims nothing, so it is safe to open at any
+            time and safe to close without deciding anything. */}
+        {previewRow && (
+          <div
+            className="card"
+            style={{ padding: 14, marginTop: 12 }}
+            data-testid="facturen-preview-panel"
+          >
+            <div className="section-head-title" style={{ marginBottom: 4 }}>
+              {t("facturen.preview_title", {
+                name: previewRow.customer_name,
+              })}
+            </div>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {t("facturen.preview_disclaimer")}
+            </p>
+
+            {previewBusy && (
+              <div className="loading-bar">
+                <div className="loading-bar-fill" />
               </div>
-              <div
-                className="invoices-toolbar"
-                style={{ display: "flex", gap: 16, flexWrap: "wrap" }}
+            )}
+
+            {!previewBusy && preview && preview.invoice_count === 0 && (
+              <>
+                {/* Sprint 187 §7.2 — the heading this empty state was
+                    always supposed to have. It has been translated in
+                    BOTH bundles since Sprint 183 and rendered by
+                    nothing, so the panel showed a lone diagnostic
+                    sentence with no title above it and read like a
+                    stray line rather than an answer. */}
+                <div
+                  className="section-head-title"
+                  data-testid="facturen-preview-empty-heading"
+                >
+                  {t("invoices:nothing.heading")}
+                </div>
+                <p className="muted small" data-testid="facturen-preview-empty">
+                  {/* Sprint 183 §2 — the SAME sentence the Due panel
+                      shows, from the same server-side diagnosis. The old
+                      "no unbilled extra work" line was true and told an
+                      operator nothing they could act on. */}
+                  {nothingSentence(t, preview.nothing_reason) ??
+                    t("facturen.preview_empty")}
+                </p>
+              </>
+            )}
+
+            {!previewBusy && preview && preview.invoice_count > 0 && (
+              <>
+                <div className="table-wrap">
+                  <table
+                    className="data-table"
+                    data-testid="facturen-preview-table"
+                  >
+                    <thead>
+                      <tr>
+                        <th>{t("facturen.preview_col_addressed_to")}</th>
+                        <th style={{ textAlign: "right" }}>
+                          {t("facturen.preview_col_lines")}
+                        </th>
+                        <th style={{ textAlign: "right" }}>
+                          {t("facturen.preview_col_total")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.invoices.map((planned, index) => (
+                        <tr
+                          key={`${planned.building ?? "customer"}-${planned.department ?? "d"}-${planned.work_type ?? "w"}-${index}`}
+                          data-testid="facturen-preview-row"
+                        >
+                          <td>
+                            {planned.building_name ??
+                              t("facturen.preview_customer_level")}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {planned.line_count}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {formatMoney(planned.total_amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p
+                  className="muted small"
+                  data-testid="facturen-preview-computed-at"
+                >
+                  {t("facturen.preview_computed_at", {
+                    when: formatDateTime(preview.computed_at),
+                  })}
+                </p>
+              </>
+            )}
+
+            <div className="form-actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setPreviewRow(null);
+                  setPreview(null);
+                }}
               >
-                <label className="field">
-                  <span className="field-label">{t("facturen.gen_month")}</span>
-                  <input
-                    className="field-input"
-                    type="month"
-                    value={genMonth}
-                    onChange={(e) => setGenMonth(e.target.value)}
-                    data-testid="facturen-generate-month"
-                  />
-                </label>
-                <fieldset
-                  className="field"
-                  style={{ border: 0, padding: 0, margin: 0 }}
-                >
-                  <span className="field-label">
-                    {t("facturen.gen_granularity")}
-                  </span>
-                  <div style={{ display: "flex", gap: 14, marginTop: 4 }}>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        type="radio"
-                        name="gen-granularity"
-                        checked={genGranularity === "CUSTOMER"}
-                        onChange={() => setGenGranularity("CUSTOMER")}
-                        data-testid="facturen-granularity-customer"
-                      />
-                      {t("facturatie.granularity_customer")}
-                    </label>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        type="radio"
-                        name="gen-granularity"
-                        checked={genGranularity === "PER_BUILDING"}
-                        onChange={() => setGenGranularity("PER_BUILDING")}
-                        data-testid="facturen-granularity-building"
-                      />
-                      {t("facturatie.granularity_building")}
-                    </label>
-                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input
-                        type="radio"
-                        name="gen-granularity"
-                        checked={
-                          genGranularity === "PER_BUILDING_DEPARTMENT_WORK_TYPE"
-                        }
-                        onChange={() =>
-                          setGenGranularity(
-                            "PER_BUILDING_DEPARTMENT_WORK_TYPE",
-                          )
-                        }
-                        data-testid="facturen-granularity-department-work-type"
-                      />
-                      {t("facturatie.granularity_department_work_type")}
-                    </label>
-                  </div>
-                </fieldset>
-              </div>
-              <div className="form-actions" style={{ marginTop: 12 }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => setGenRow(null)}
+                {t("facturen.preview_close")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleDownloadPreview}
+                disabled={previewBusy || !preview?.invoice_count}
+                data-testid="facturen-preview-download"
+              >
+                {t("facturen.preview_download")}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {genRow && (
+          <div
+            className="card"
+            style={{ padding: 14, marginTop: 12 }}
+            data-testid="facturen-generate-panel"
+          >
+            <div className="section-head-title" style={{ marginBottom: 8 }}>
+              {t("facturen.gen_title", { name: genRow.customer_name })}
+            </div>
+            <div
+              className="invoices-toolbar"
+              style={{ display: "flex", gap: 16, flexWrap: "wrap" }}
+            >
+              <label className="field">
+                <span className="field-label">{t("facturen.gen_month")}</span>
+                <input
+                  className="field-input"
+                  type="month"
+                  value={genMonth}
+                  onChange={(e) => setGenMonth(e.target.value)}
+                  data-testid="facturen-generate-month"
+                />
+              </label>
+              <div style={{ flexBasis: "100%" }}>
+                {/* Sprint 183 §1 — the SAME component customer
+                    settings uses, so both screens describe this
+                    decision in identical words. */}
+                <BillingTargetFields
+                  idPrefix="facturen-gen"
+                  target={genTarget}
+                  split={genSplit}
+                  onTargetChange={setGenTarget}
+                  onSplitChange={setGenSplit}
                   disabled={genBusy}
-                >
-                  {t("facturen.gen_cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={handleGenerate}
-                  disabled={genBusy || !parseMonth(genMonth)}
-                  data-testid="facturen-generate-confirm"
-                >
-                  {t("facturen.generate")}
-                </button>
+                />
+                <p className="muted small" style={{ marginBottom: 0 }}>
+                  {t("invoices:billing.this_run_only")}
+                </p>
               </div>
             </div>
-          )}
-        </section>
-      )}
+            <div className="form-actions" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setGenRow(null)}
+                disabled={genBusy}
+              >
+                {t("facturen.gen_cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleGenerate}
+                disabled={genBusy || !parseMonth(genMonth)}
+                data-testid="facturen-generate-confirm"
+              >
+                {t("facturen.generate")}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* ---- Invoice list ---- */}
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
@@ -490,10 +776,20 @@ export function FacturenPage({
             <thead>
               <tr>
                 <th>{t("facturen.col_number")}</th>
+                {/* Sprint 187 §6a — WHICH company issued it. Numbering
+                    is gapless per company per YEAR, so two rows in this
+                    list legitimately both read `2026-0001` and nothing
+                    told them apart. Shown on every deployment, including
+                    a single-company one where the column repeats: the
+                    alternative is a column that appears and disappears
+                    depending on data, which is harder to trust than one
+                    that is always there. */}
+                <th>{t("facturen.col_company")}</th>
                 {!customerScoped && <th>{t("facturen.col_customer")}</th>}
                 <th>{t("facturen.col_building")}</th>
                 <th>{t("facturen.col_department_work_type")}</th>
                 <th>{t("facturen.col_period")}</th>
+                <th>{t("invoices:created_by.label")}</th>
                 <th>{t("facturen.col_status")}</th>
                 <th style={{ textAlign: "right" }}>{t("facturen.col_total")}</th>
               </tr>
@@ -541,18 +837,34 @@ export function FacturenPage({
                       )}
                     </Link>
                   </td>
+                  <td className="muted small">{inv.company_name}</td>
                   {!customerScoped && <td>{inv.customer_name}</td>}
                   <td className="muted small">
                     {inv.building_name ?? t("facturen.all_buildings")}
                   </td>
                   <td className="muted small">
+                    {/* Sprint 187 §4 — the LIST said "Algemeen" while
+                        the invoice DETAIL, one click away, said
+                        "General" for the same invoice. Both go through
+                        `customerLabelName` now: it translates ONLY the
+                        auto-seeded name and passes an operator-typed one
+                        through untouched. */}
                     {formatInvoiceGroupLabel(
-                      inv.department_name,
-                      inv.work_type_name,
+                      customerLabelName(inv.department_name, t),
+                      customerLabelName(inv.work_type_name, t),
                     ) || "—"}
                   </td>
                   <td className="muted small">
                     {formatPeriod(inv.period_year, inv.period_month)}
+                  </td>
+                  {/* Sprint 183 §3 — WHO created it. The nightly run's
+                      invoices used to borrow a COMPANY_ADMIN's name
+                      because `created_by` was NOT NULL; they say System
+                      now. The server resolves the label so "System" is
+                      never a frontend guess, and never renders blank or
+                      "Unassigned". */}
+                  <td className="muted small" data-testid="facturen-created-by">
+                    {inv.created_by_label || t("invoices:created_by.system")}
                   </td>
                   <td>
                     {/* Sprint 122 (B1) — an ISSUED-but-unsent credit note

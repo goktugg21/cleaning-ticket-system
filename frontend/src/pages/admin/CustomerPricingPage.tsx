@@ -993,7 +993,25 @@ export function CustomerPricingPage() {
   // Plain derived value (the filter is cheap and the React Compiler memoizes
   // it): a manual useMemo here trips react-hooks/preserve-manual-memoization
   // because the earlier-defined openCreateModal captures it.
-  const activeServices = services.filter((s) => s.is_active);
+  // Sprint 187 §6b — active AND belonging to THIS customer's provider
+  // company.
+  //
+  // Sprint 142 narrowed the CATEGORY list to the customer's company for
+  // exactly this reason (see the load effect above) and stopped there,
+  // so the "add a price" dropdown beneath those headings still offered
+  // every company's services to a SUPER_ADMIN. Choosing one was then
+  // refused server-side with "Service belongs to a different provider
+  // company than the customer" — a dropdown offering options the save
+  // will reject.
+  //
+  // Narrowed client-side, not by `?company=`, for the reason the
+  // category filter states: the customer's company is only known once
+  // `getCustomer` resolves, and these six calls are deliberately
+  // parallel. `services` itself deliberately keeps the FULL catalog so
+  // the Default-price column still resolves for an archived service.
+  const activeServices = services.filter(
+    (s) => s.is_active && (!customer || s.company === customer.company),
+  );
 
   // M5 C — active catalog prices are the only rows the bulk-raise modal
   // can act on. Plain derived value (same rationale as activeServices:
@@ -1612,7 +1630,7 @@ export function CustomerPricingPage() {
                   style={{ padding: "32px 24px", textAlign: "center" }}
                   data-testid="customer-pricing-empty"
                 >
-                  <h3 style={{ marginBottom: 8 }}>
+                  <h3 className="empty-title" style={{ marginBottom: 8 }}>
                     {t("customer_pricing.empty_title")}
                   </h3>
                   <p className="muted" style={{ margin: 0 }}>
@@ -1646,7 +1664,12 @@ export function CustomerPricingPage() {
                             </span>
                           )}
                         </span>
-                        <span className="muted small">
+                        {/* Sprint 154 §L.2 — the count is the card's
+                            headline figure now, not a muted sub-line. */}
+                        <span className="pricing-category-card-count">
+                          {card.count}
+                        </span>
+                        <span className="pricing-category-card-count-label">
                           {card.count === 0
                             ? t("customer_pricing.category_card_empty")
                             : t("customer_pricing.category_card_count", {
@@ -1655,6 +1678,26 @@ export function CustomerPricingPage() {
                         </span>
                       </button>
                     ))}
+                    {/* Sprint 154 §L.2 — a large "+" tile at the end of
+                        the grid, opening the EXISTING create-folder flow.
+                        Styled as a card so the grid reads as one row of
+                        tiles rather than a row plus a stray button. */}
+                    <button
+                      type="button"
+                      className="pricing-category-card pricing-category-card-add"
+                      data-testid="customer-pricing-category-add-card"
+                      onClick={openCreateFolder}
+                    >
+                      <span
+                        className="pricing-category-card-add-plus"
+                        aria-hidden="true"
+                      >
+                        +
+                      </span>
+                      <span className="pricing-category-card-name">
+                        {t("customer_pricing.folder_new_button")}
+                      </span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -2162,6 +2205,7 @@ export function CustomerPricingPage() {
             }}
           >
             <h3
+              className="section-title"
               style={{ marginTop: 0, marginBottom: 12 }}
               data-testid="customer-pricing-modal-title"
             >
@@ -2496,7 +2540,7 @@ export function CustomerPricingPage() {
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.bulk_raise_button")}
             </h3>
 
@@ -2742,7 +2786,7 @@ export function CustomerPricingPage() {
             style={{ maxWidth: 460, width: "100%", padding: 24 }}
             onSubmit={submitFolder}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {folderEditTarget
                 ? t("customer_pricing.folder_rename_title")
                 : t("customer_pricing.folder_new_title")}
@@ -2800,7 +2844,14 @@ export function CustomerPricingPage() {
           data-testid="customer-pricing-folder-delete-modal"
           role="dialog"
           aria-modal="true"
-          aria-label={t("customer_pricing.folder_delete_title")}
+          // Sprint 187 §7.1 — the interpolation values, which were
+          // missing. `role="dialog" aria-modal="true"` makes this the
+          // dialog's ACCESSIBLE NAME, so a screen reader announced the
+          // literal "Delete {{name}}" while the heading two lines below
+          // read correctly.
+          aria-label={t("customer_pricing.folder_delete_title", {
+            name: folderDeleteTarget.name,
+          })}
           style={{
             position: "fixed",
             inset: 0,
@@ -2816,7 +2867,7 @@ export function CustomerPricingPage() {
             className="card"
             style={{ maxWidth: 520, width: "100%", padding: 24 }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_delete_title", {
                 name: folderDeleteTarget.name,
               })}
@@ -2896,7 +2947,7 @@ export function CustomerPricingPage() {
             }}
             onSubmit={submitFromCategory}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_from_category_title")}
             </h3>
             <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
@@ -3038,7 +3089,11 @@ export function CustomerPricingPage() {
           data-testid="customer-pricing-move-folder-modal"
           role="dialog"
           aria-modal="true"
-          aria-label={t("customer_pricing.folder_move_title")}
+          // Sprint 187 §7.1 — same defect, same screen: announced as
+          // "Move {{count}} row(s)".
+          aria-label={t("customer_pricing.folder_move_title", {
+            count: activeBulkSelection.length,
+          })}
           style={{
             position: "fixed",
             inset: 0,
@@ -3054,7 +3109,7 @@ export function CustomerPricingPage() {
             className="card"
             style={{ maxWidth: 460, width: "100%", padding: 24 }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_move_title", {
                 count: activeBulkSelection.length,
               })}
@@ -3148,7 +3203,7 @@ export function CustomerPricingPage() {
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+            <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.copy_from_default_title")}
             </h3>
 

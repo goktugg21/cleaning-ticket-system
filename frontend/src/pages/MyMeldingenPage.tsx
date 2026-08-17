@@ -9,6 +9,7 @@ import type { TicketList } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
+import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatDate } from "../lib/intl";
@@ -132,6 +133,21 @@ export function MyMeldingenPage() {
                       >
                         <td className="td-subject">
                           <Link to={`/tickets/${row.id}`}>{row.title}</Link>
+                          {/* Sprint 180 §3 — a melding that grew into
+                              paid extra work says so here too. The
+                              customer is the one person who most needs
+                              to know a row became chargeable work, and
+                              the link goes to the request they can read
+                              the price on. */}
+                          {row.extra_work_origin && (
+                            <ExtraWorkOriginPill
+                              ewId={
+                                row.extra_work_origin.extra_work_request_id
+                              }
+                              testId="my-meldingen-row-extra-work-origin"
+                              style={{ marginLeft: 8 }}
+                            />
+                          )}
                         </td>
                         <td>
                           <StatusBadge

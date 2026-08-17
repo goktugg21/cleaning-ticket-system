@@ -5,11 +5,15 @@
 // mounted at `/api/tickets/` (the api client adds the `/api` prefix).
 import { api } from "./client";
 import type {
+  AssignmentCandidate,
+  ExtraWorkBulkAssignResult,
   PaginatedResponse,
   TicketBulkStatusResponse,
   TicketConvertToExtraWorkPayload,
   TicketConvertToExtraWorkResponse,
+  TicketDetail,
   TicketList,
+  WorkCategory,
 } from "./types";
 
 // M6.1 (frontend) — provider customer-detail ticket lists. The backend
@@ -21,6 +25,10 @@ import type {
 export interface ListTicketsParams {
   customer?: number;
   type?: string;
+  /** Sprint 185 E §1 — narrow to one KIND OF WORK. The filter is the
+   *  whole point of the catalog: a taxonomy whose values do not reach
+   *  the filters is a dropdown. */
+  category?: number;
   exclude_type?: string;
   // Sprint 111 — building-manager "My tickets": narrows to tickets the
   // caller MANAGES (union of the legacy `Ticket.assigned_to` FK and the
@@ -89,6 +97,82 @@ export async function bulkConfirmTickets(
   const response = await api.post<TicketBulkStatusResponse>(
     "/tickets/bulk-status/",
     { ticket_ids: ticketIds, to_status: "WAITING_CUSTOMER_APPROVAL" },
+  );
+  return response.data;
+}
+
+// ---- Sprint 158/159 — people on a ticket ------------------------------
+
+/** The people who may be assigned to THIS ticket in THIS role, from the
+ *  server's own eligibility helper (`buildings.assignment_eligibility`).
+ *
+ *  Deliberately not "the company's employees": eligibility comes from
+ *  the ticket's BUILDING and differs per role, and the picker must call
+ *  the same helper the write validator uses or it will offer options
+ *  that always fail (Sprint 152.1 §1a). */
+export async function listTicketAssignmentCandidates(
+  ticketId: number,
+  role: "WORKER" | "MANAGER",
+): Promise<AssignmentCandidate[]> {
+  const response = await api.get<AssignmentCandidate[]>(
+    `/tickets/${ticketId}/assignments/candidates/`,
+    { params: { role } },
+  );
+  return response.data;
+}
+
+/** Sprint 159 §2 — assign managers AND workers to many tickets in ONE
+ *  call. All-or-nothing server-side across BOTH roles: an ineligible
+ *  manager rejects the workers with it, so there is no half-staffed
+ *  state for the caller to reconcile. */
+export async function bulkAssignTickets(payload: {
+  tickets: number[];
+  managers?: number[];
+  workers?: number[];
+  mode?: "assign" | "unassign";
+}): Promise<ExtraWorkBulkAssignResult> {
+  const response = await api.post<ExtraWorkBulkAssignResult>(
+    "/tickets/bulk-assign/",
+    payload,
+  );
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 185 E §1 — the work-category catalog, and one melding's category
+// ---------------------------------------------------------------------------
+
+/** Every work category this actor may see, newest catalog shape.
+ *
+ *  `is_active` narrows to the ones still OFFERABLE, which is what a
+ *  picker wants; the meldingen FILTER deliberately asks for all of them,
+ *  because an archived category still has last month's meldingen on it
+ *  and they must stay findable. */
+export async function listWorkCategories(params?: {
+  company?: number | "";
+  is_active?: "true" | "false";
+}): Promise<WorkCategory[]> {
+  const response = await api.get<{ results: WorkCategory[] }>(
+    "/tickets/categories/",
+    { params },
+  );
+  return response.data.results;
+}
+
+/** Set or CLEAR one melding's category.
+ *
+ *  `null` clears it and is a real edit — "this was tagged wrong" has to
+ *  be expressible or the first mistake is permanent. A dedicated action
+ *  rather than a PATCH on the ticket because the ticket viewset carries
+ *  no update mixin: every single-field ticket edit in this system is its
+ *  own endpoint. */
+export async function setTicketCategory(
+  ticketId: number,
+  categoryId: number | null,
+): Promise<TicketDetail> {
+  const response = await api.patch<TicketDetail>(
+    `/tickets/${ticketId}/category/`,
+    { category: categoryId },
   );
   return response.data;
 }

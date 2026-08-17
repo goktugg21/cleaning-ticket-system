@@ -3,7 +3,101 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.db import models, transaction
+from django.db.models.functions import Lower, Trim
 from django.utils import timezone
+
+
+class WorkCategory(models.Model):
+    """
+    Sprint 185 E §1 — a per-provider-company catalog of KINDS OF WORK.
+
+    ## Why this exists BESIDE `TicketType` rather than instead of it
+
+    `TicketType` classifies the MESSAGE: report, complaint, request,
+    suggestion, quote request, other. Nothing in this system has ever
+    classified the WORK — sanitair, glasbewassing, vloeren, afval — and
+    the monthly customer review is exactly "how many meldingen per
+    category per building". Today no tenant can answer that, and no
+    tenant can add a category without a developer.
+
+    The two answer different questions and both are kept. The customer
+    portal reads the type; repurposing that column would break a surface
+    for a classification it was never holding.
+
+    ## Deliberately the `BuildingType` shape, field for field
+
+    That shape is settled (Sprint 178 §1, itself the `HourType` shape):
+    company FK under PROTECT, a `name` that is NOT `unique=True`,
+    `is_active` for archiving, `sort_order` for picker order, and
+    case/whitespace-insensitive uniqueness as an expression constraint
+    created WITH the table — so there is never a window in which the
+    column exists without its constraint.
+
+    This is the sixth catalog on that shape. It is copied rather than
+    reinvented, and it is a tab in the existing Catalogs area rather
+    than a page of its own, because a catalog whose management screen
+    lives somewhere new is a catalog operators do not find.
+
+    NO `standard_slot`. `HourType` and `WorkType` have recognised
+    standard kinds worth naming in the reader's language; the kinds of
+    cleaning work a company distinguishes are its own vocabulary, which
+    is the whole reason this is a catalog and not an enum.
+
+    `Ticket.category` is SET_NULL for the reason `Building.building_type`
+    is: a melding outlives its classification, and refusing to delete a
+    category because one ticket once carried it would make the catalog
+    unmanageable. Deleting a category still in use is refused at the
+    endpoint, which tells the operator to archive instead.
+    """
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.PROTECT,
+        related_name="work_categories",
+        help_text=(
+            "Provider company that owns this category. PROTECT mirrors "
+            "BuildingType.company: a Company cannot be hard-deleted "
+            "while it still owns categories."
+        ),
+    )
+    # NOT `unique=True`: uniqueness is per-company and
+    # case/whitespace-insensitive, expressed as the constraint below.
+    name = models.CharField(
+        max_length=128,
+        help_text='Operator-facing name, e.g. "Sanitair", "Glasbewassing".',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "Archived categories stay on the meldingen that carry them "
+            "but are not offerable for new ones."
+        ),
+    )
+    sort_order = models.PositiveIntegerField(
+        default=0,
+        help_text="Ascending display order in the pickers; ties break on name.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "name", "id"]
+        verbose_name = "work category"
+        verbose_name_plural = "work categories"
+        constraints = [
+            # Trim() first so leading/trailing whitespace cannot bypass a
+            # Lower()-only dedupe, Lower() for case — the BuildingType
+            # shape, created with the table.
+            models.UniqueConstraint(
+                Lower(Trim("name")),
+                "company",
+                name="uniq_work_category_name_per_company_ci",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
 
 
 class TicketType(models.TextChoices):
@@ -184,6 +278,28 @@ class Ticket(models.Model):
         choices=TicketType.choices,
         default=TicketType.REPORT,
     )
+    # Sprint 185 E §1 — WHAT KIND OF WORK, beside `type`'s what kind of
+    # MESSAGE. Optional: a melding may arrive before anyone knows which
+    # trade it belongs to, and forcing a guess at intake would fill the
+    # report this exists to feed with noise.
+    #
+    # SET_NULL rather than PROTECT: the ticket outlives its
+    # classification. The endpoint refuses to delete a category that is
+    # still in use and points the operator at archiving, so this only
+    # fires for the paths that bypass it.
+    category = models.ForeignKey(
+        "tickets.WorkCategory",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+        related_name="tickets",
+        help_text=(
+            "Sprint 185 — the kind of WORK this melding is about, from "
+            "the company's own catalog. Independent of `type`, which "
+            "says what kind of MESSAGE it is."
+        ),
+    )
     priority = models.CharField(
         max_length=32,
         choices=TicketPriority.choices,
@@ -225,6 +341,41 @@ class Ticket(models.Model):
     rejected_at = models.DateTimeField(null=True, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+
+    # ------------------------------------------------------------------
+    # Sprint 184 §3 — THE CUSTOMER'S WANTED DATE. A WISH, NOT A DEADLINE.
+    #
+    # A customer opening a melding can now say when they would like it
+    # done, the same way they already can on an extra work.
+    #
+    # The distinction this system settled in Sprint 176 §3 and must keep:
+    #
+    #   a WISH     is the customer's — "I would like it around then".
+    #              `ExtraWorkRequest.preferred_date` is the same thing on
+    #              the extra work; this is its melding counterpart.
+    #   a DEADLINE is a PROVIDER COMMITMENT — "it will be finished by".
+    #              It stays provider-only and is deliberately NOT added
+    #              here: a customer who could type a deadline would be
+    #              setting the provider's commitment, and the overdue
+    #              rule reads deadlines.
+    #
+    # So this field never feeds `is_overdue` and never decides late. It
+    # records what the customer asked for, so the provider can see it and
+    # so it survives conversion into `ExtraWorkRequest.preferred_date`
+    # (`extra_work/conversion.py`) — a date a customer typed that
+    # vanishes at conversion is worse than never having asked for it.
+    # ------------------------------------------------------------------
+    customer_wanted_date = models.DateField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Sprint 184 — the date the CUSTOMER would like this done. A "
+            "wish, not a commitment: it never decides whether the ticket "
+            "is late. Carried into ExtraWorkRequest.preferred_date on "
+            "conversion."
+        ),
+    )
 
     # Sprint 28 Batch 7 — link back to the ExtraWorkRequestItem this
     # Ticket was spawned from. NULL for tickets created by any other
@@ -548,9 +699,27 @@ class TicketStatusHistory(models.Model):
 
     old_status = models.CharField(max_length=64, blank=True)
     new_status = models.CharField(max_length=64)
+    # Sprint 180 §1 — nullable for SYSTEM-driven transitions.
+    #
+    # `changed_by IS NULL` means "no person drove this row, the system
+    # did", which is exactly what the customer-approval auto-close is
+    # (`tickets/auto_close.py`). The rest of the codebase was already
+    # written for it and only the column was still NOT NULL:
+    # `TicketStatusHistorySerializer.to_representation` documents "rows
+    # whose `changed_by` is None (system transitions)", and
+    # `audit/views_ticket_timeline.py` already emits
+    # `changed_by_email: None` for such a row.
+    # `ExtraWorkStatusHistory.changed_by` has been nullable for the
+    # same reason since Sprint 29 Batch 29.8.
+    #
+    # `on_delete` stays PROTECT (deliberately unchanged): a real actor
+    # still cannot be hard-deleted out from under their own history.
+    # NULL is only ever WRITTEN by the system path, never by a cascade.
     changed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="ticket_status_changes",
     )
     note = models.TextField(blank=True)

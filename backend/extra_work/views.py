@@ -22,7 +22,16 @@ from __future__ import annotations
 import logging
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import (
+    BooleanField,
+    Case,
+    Count,
+    Exists,
+    OuterRef,
+    Prefetch,
+    Q,
+    When,
+)
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, mixins, serializers, status, viewsets
@@ -50,16 +59,23 @@ from .models import (
     ExtraWorkRequest,
     ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
+    ExtraWorkRoutingDecision,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
+    Proposal,
+    ProposalLine,
+    ProposalStatus,
 )
 from .scoping import scope_extra_work_for
 from .label_validation import (
     issued_invoice_locking_labels,
     validate_labels_for_customer,
 )
+from .dates import apply_extra_work_dates
 from .serializers import (
+    ERR_DEADLINE_PROVIDER_ONLY,
     ActualHoursEntrySerializer,
+    ExtraWorkDatesSerializer,
     ExtraWorkLabelsSerializer,
     ExtraWorkPreviewSerializer,
     ExtraWorkPricingLineItemCustomerSerializer,
@@ -138,11 +154,95 @@ class ExtraWorkRequestViewSet(
     filterset_class = ExtraWorkRequestFilter
 
     def get_queryset(self):
-        return scope_extra_work_for(self.request.user).select_related(
-            # Sprint 127 — department / work_type joined so the list
-            # serializer's `*_name` fields never trigger a per-row lookup.
-            "company", "building", "customer", "created_by",
-            "department", "work_type",
+        from tickets.models import Ticket
+
+        # Sprint 180 §1 — "has an operational ticket been born from this
+        # extra work?" is the ONE question the two list tracks split on,
+        # and it is answered by the CANONICAL FK (`Ticket.
+        # extra_work_request`) alone — the same definition
+        # `extra_work.billing.build_ticket_map` and
+        # `reports.dimensions` already use to decide what is earned and
+        # what may be invoiced. `tickets.filters` unions two more legacy
+        # chains for its `?extra_work_request=` filter; where the two
+        # disagree, the money definition wins.
+        #
+        # ONE EXISTS subquery for the whole page, not a query per row —
+        # the `views_catalog.ServiceListCreateView` precedent
+        # (`annotated_has_price_rows`). Soft-deleted tickets are
+        # excluded, mirroring `build_ticket_map`: a deleted ticket
+        # cannot make work "started".
+        spawned = Ticket.objects.filter(
+            extra_work_request_id=OuterRef("pk"), deleted_at__isnull=True
+        )
+        # Sprint 188 — "has anyone put a price on this yet?", so a list can
+        # print an em dash instead of EUR 0,00 for work nobody has priced.
+        # Zero is a LEGAL price (free work, a goodwill line); the two must
+        # not render the same. This mirrors `active_priced_lines`'
+        # resolution order exactly — approved proposal wins, then the cart
+        # for an INSTANT route, then the legacy rows — because a display
+        # that disagreed with the money rule would be worse than no
+        # display at all. Three EXISTS subqueries for the whole page.
+        priced_proposal = ProposalLine.objects.filter(
+            proposal__extra_work_request_id=OuterRef("pk"),
+            proposal__status=ProposalStatus.CUSTOMER_APPROVED,
+            is_approved_for_spawn=True,
+        )
+        any_approved_proposal = Proposal.objects.filter(
+            extra_work_request_id=OuterRef("pk"),
+            status=ProposalStatus.CUSTOMER_APPROVED,
+        )
+        cart_rows = ExtraWorkRequestItem.objects.filter(
+            extra_work_request_id=OuterRef("pk")
+        )
+        # NB the FK on the legacy row is `extra_work`, not
+        # `extra_work_request` like the other two.
+        legacy_rows = ExtraWorkPricingLineItem.objects.filter(
+            extra_work_id=OuterRef("pk")
+        )
+        is_priced = Case(
+            When(Exists(any_approved_proposal), then=Exists(priced_proposal)),
+            When(
+                routing_decision=ExtraWorkRoutingDecision.INSTANT,
+                then=Exists(cart_rows),
+            ),
+            default=Exists(legacy_rows),
+            output_field=BooleanField(),
+        )
+        return (
+            scope_extra_work_for(self.request.user)
+            .select_related(
+                # Sprint 127 — department / work_type joined so the list
+                # serializer's `*_name` fields never trigger a per-row
+                # lookup.
+                "company", "building", "customer", "created_by",
+                "department", "work_type",
+            )
+            .annotate(
+                annotated_has_operational_ticket=Exists(spawned),
+                annotated_is_priced=is_priced,
+            )
+            .prefetch_related(
+                # Sprint 180 §2 — the spawned ticket(s) themselves, so
+                # the list can print the ticket number and link to it
+                # without a fetch per row. `.only()` because the list
+                # needs four columns of a ticket, not a ticket.
+                Prefetch(
+                    "operational_tickets",
+                    queryset=Ticket.objects.filter(
+                        deleted_at__isnull=True
+                    )
+                    .only("id", "ticket_no", "status", "extra_work_request_id")
+                    .order_by("id"),
+                    to_attr="prefetched_operational_tickets",
+                ),
+                # Sprint 180 §2 — kills a REAL N+1 that predates this
+                # sprint: `started_before_plan` is declared on the list
+                # serializer and its model property read the status
+                # history per row. The property now iterates
+                # `status_history.all()`, which this prefetch answers
+                # once for the whole page.
+                "status_history",
+            )
         )
 
     def get_serializer_class(self):
@@ -516,6 +616,107 @@ class ExtraWorkRequestViewSet(
             ).data
         )
 
+    @action(detail=True, methods=["patch"], url_path="dates")
+    def dates(self, request, pk=None):
+        """Sprint 176 §3 — set / clear `deadline` and `planned_end_date` on
+        an existing Extra Work AFTER creation.
+
+        Until now both were write-once on the create form, which is the
+        wrong shape for a deadline: a deadline is exactly the kind of thing
+        agreed after the fact, on the phone, once someone has looked at the
+        job. Sprint 173 put the fields in the database and Sprint 174 put
+        them on the create form; neither gave anyone a way to change one.
+
+        Deliberately the SAME shape as the `labels` action above rather
+        than a new update mixin — the ViewSet has no update action by
+        design, and adding one just to move two dates would expose every
+        field on the model to PATCH.
+
+        Role gate FIRST (before `get_object`) so customer-side / STAFF get
+        a stable 403 rather than a scope-driven 404, exactly as `labels`
+        and `actual_hours` do. That gate IS the §3 decision: the customer's
+        wish is `preferred_date`; the deadline is the provider's
+        commitment.
+
+        Unlike the labels, an issued invoice does NOT lock these. A date is
+        an operational fact about when the work was due, not a billing fact
+        on the document — moving it changes no amount and no invoice line.
+        """
+        user = request.user
+
+        if user.role not in PROVIDER_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot set Extra Work dates. A "
+                    "deadline is a provider commitment.",
+                    "code": ERR_DEADLINE_PROVIDER_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        extra_work = self.get_object()  # 404 if out-of-scope (cross-tenant)
+
+        # Provider scope, identical to `labels`: SUPER_ADMIN global;
+        # COMPANY_ADMIN / BUILDING_MANAGER need provider-side building
+        # scope on this EW's building.
+        if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+            user,
+            "osius.ticket.view_building",
+            building_id=extra_work.building_id,
+        ):
+            return Response(
+                {
+                    "detail": "You do not have provider-side scope for this "
+                    "Extra Work request.",
+                    "code": ERR_DEADLINE_PROVIDER_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        payload = ExtraWorkDatesSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        # Key presence distinguishes "sent as null" (clear) from "absent"
+        # (leave unchanged) — the convention the bulk dialog's "leave
+        # unchanged" default depends on. An empty body changes nothing.
+        if (
+            "deadline" not in data
+            and "planned_end_date" not in data
+            and "provider_planned_date" not in data
+        ):
+            return Response(
+                {
+                    "detail": "Provide deadline, planned_end_date and/or "
+                    "provider_planned_date to set or clear.",
+                    "code": "no_dates_provided",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        error = apply_extra_work_dates(extra_work, data)
+        if error is not None:
+            return Response(error, status=status.HTTP_400_BAD_REQUEST)
+
+        payload = ExtraWorkRequestDetailSerializer(
+            extra_work, context={"request": request}
+        ).data
+        # Sprint 184 §1 — say what happened to the spawned tickets.
+        #
+        # Planning an extra work for a day moves its tickets onto that
+        # day, EXCEPT any a person rescheduled by hand with a written
+        # reason — those keep their own date. Reported alongside the row
+        # rather than swallowed: an operator who plans a job and later
+        # finds its ticket still on the old day deserves to be told why,
+        # at the moment they did it.
+        ticket_result = getattr(
+            extra_work, "planned_date_ticket_result", None
+        )
+        if ticket_result is not None:
+            payload["tickets_moved"] = ticket_result["moved"]
+            payload["tickets_kept_own_date"] = ticket_result["kept_own_date"]
+        return Response(payload)
+
     @action(detail=True, methods=["post"], url_path="actual-hours")
     def actual_hours(self, request, pk=None):
         """
@@ -581,14 +782,61 @@ class ExtraWorkRequestViewSet(
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # Sprint 182 §1 — THE INVOICE LOCK, on the money path.
+        #
+        # Checked BEFORE the ticket-status lock below, and that order is
+        # the point. The ticket lock's own message invites the operator
+        # to "reopen it to edit actual hours" — and reopening a ticket
+        # was a legitimate thing to do until you notice that the work is
+        # already on an invoice the customer has been sent. Doing it
+        # then rewrites the amount behind a document that has left the
+        # building. Offering that instruction on a row we already know
+        # is invoiced is the defect, so this check gets there first and
+        # says something else.
+        #
+        # `issued_invoice_locking_labels` is the SAME predicate the
+        # label lock uses (ISSUED/SENT, not soft-deleted, not reversed;
+        # a DRAFT deliberately does not lock, because the draft window
+        # is the correction window). Reused rather than re-expressed:
+        # "may this extra work still change" must not have two answers,
+        # and money is the half that was missing.
+        #
+        # The way out is the same as for a mislabel and it is the
+        # correct business action rather than a workaround: reverse the
+        # invoice, which releases the extra work, then edit, then
+        # re-invoice.
+        locking_invoice = issued_invoice_locking_labels(extra_work)
+        if locking_invoice is not None:
+            return Response(
+                {
+                    "detail": (
+                        "Actual hours are locked: this extra work is on "
+                        f"invoice {locking_invoice.number or 'CONCEPT'}, "
+                        "which has been issued. Reverse that invoice "
+                        "first if the amount is wrong."
+                    ),
+                    "code": "actual_hours_invoice_locked",
+                    "invoice_id": locking_invoice.id,
+                    "invoice_number": locking_invoice.number,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Lock: once the operational ticket is APPROVED/CLOSED, the
         # final amount is frozen. Reopen required to edit further.
+        #
+        # Sprint 182 §4 — `deleted_at__isnull=True`: a soft-deleted
+        # ticket is not an operational ticket, and letting one hold this
+        # lock froze the amount of an extra work that no longer had a
+        # live ticket at all.
         locked_statuses = {
             str(TicketStatus.APPROVED),
             str(TicketStatus.CLOSED),
         }
         if (
-            Ticket.objects.filter(extra_work_request=extra_work)
+            Ticket.objects.filter(
+                extra_work_request=extra_work, deleted_at__isnull=True
+            )
             .filter(status__in=list(locked_statuses))
             .exists()
         ):
@@ -839,9 +1087,18 @@ class ExtraWorkRequestViewSet(
         # exactly ONE operational Ticket; when it already exists, return
         # 200 with the existing id(s) instead of a 400 error so the
         # retry endpoint is safe to re-fire.
+        #
+        # Sprint 182 §4 — `deleted_at__isnull=True`. Without it a
+        # SOFT-DELETED ticket still occupied the slot: the retry button
+        # reported "already spawned" and handed back the id of a ticket
+        # nobody can open, so an extra work whose ticket had been
+        # deleted could never get another one. The delete is refused
+        # outright now (`tickets/views.py` destroy), but this query was
+        # wrong on its own terms and a guard elsewhere is not a reason
+        # to leave it that way.
         existing_ids = list(
             Ticket.objects.filter(
-                extra_work_request=extra_work
+                extra_work_request=extra_work, deleted_at__isnull=True
             ).values_list("id", flat=True)
         )
         if existing_ids:
@@ -1062,6 +1319,40 @@ def _resolve_extra_work_or_404(request, ew_id: int) -> ExtraWorkRequest:
     return get_object_or_404(qs, pk=ew_id)
 
 
+def _require_legacy_pricing_is_the_owner(extra_work):
+    """Sprint 188 — the legacy `/pricing-items/` surface must not
+    overwrite a quote the Proposal route froze.
+
+    `ExtraWorkRequest.recompute_totals()` and
+    `final_amounts.recompute_quoted_totals()` write the SAME three
+    columns from DIFFERENT line sets. Sprint 187 gave the proposal route
+    a writer without noticing the legacy one already had the pen: with a
+    CUSTOMER_APPROVED proposal in place, `active_priced_lines` resolves
+    to that proposal's lines, so posting one legacy pricing row here
+    would replace an approved EUR 484.00 quote with the sum of whatever
+    was posted — no override recorded, no history row, and the customer
+    still approved the old number.
+
+    Once a proposal is approved it owns the money. Corrections go
+    through the proposal, not around it.
+    """
+    if extra_work.proposals.filter(
+        status=ProposalStatus.CUSTOMER_APPROVED
+    ).exists():
+        return Response(
+            {
+                "detail": (
+                    "This extra work is priced by an approved proposal. "
+                    "Change the price on the proposal; the legacy pricing "
+                    "lines no longer decide what it costs."
+                ),
+                "code": "legacy_pricing_locked_by_proposal",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return None
+
+
 def _require_provider_pricing_permission(request, extra_work):
     """Pricing line items can only be mutated by SUPER_ADMIN /
     COMPANY_ADMIN inside the company / BUILDING_MANAGER assigned
@@ -1111,6 +1402,9 @@ class ExtraWorkPricingLineItemListCreateView(generics.GenericAPIView):
         guard = _require_provider_pricing_permission(request, extra_work)
         if guard is not None:
             return guard
+        locked = _require_legacy_pricing_is_the_owner(extra_work)
+        if locked is not None:
+            return locked
         serializer = ExtraWorkPricingLineItemSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         item = serializer.save(extra_work=extra_work)
@@ -1141,6 +1435,9 @@ class ExtraWorkPricingLineItemDetailView(generics.GenericAPIView):
         guard = _require_provider_pricing_permission(request, extra_work)
         if guard is not None:
             return guard
+        locked = _require_legacy_pricing_is_the_owner(extra_work)
+        if locked is not None:
+            return locked
         serializer = ExtraWorkPricingLineItemSerializer(
             item, data=request.data, partial=True
         )
@@ -1154,6 +1451,9 @@ class ExtraWorkPricingLineItemDetailView(generics.GenericAPIView):
         guard = _require_provider_pricing_permission(request, extra_work)
         if guard is not None:
             return guard
+        locked = _require_legacy_pricing_is_the_owner(extra_work)
+        if locked is not None:
+            return locked
         item.delete()
         extra_work.recompute_totals()
         return Response(status=status.HTTP_204_NO_CONTENT)

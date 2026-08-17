@@ -34,7 +34,7 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { FileSearch, FileText } from "lucide-react";
+import { FileSearch, FileText, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import axios from "axios";
@@ -55,12 +55,14 @@ import {
   listProposalsForEw,
   listSpawnedTickets,
   relabelExtraWork,
+  updateExtraWorkDates,
   retrySpawnTicketsForExtraWork,
   submitActualHours,
   transitionExtraWork,
   updateExtraWorkBilling,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
+import { ExtraWorkAssignmentCard } from "../components/extra-work/ExtraWorkAssignmentCard";
 import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
 import type {
   Contact,
@@ -86,11 +88,16 @@ import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { PageHeader } from "../components/PageHeader";
 import { ProposalBuilder } from "../components/ProposalBuilder";
+import { customerLabelName } from "../lib/customerLabelName";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
 import { useToast } from "../components/ToastProvider";
+import { rowAmounts } from "../lib/billing";
+import { extraWorkStatusLabelKey, ticketStatusLabelKey } from "../lib/enumLabels";
 import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
+import { formatPlannedWindow } from "../lib/plannedWindow";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 import { Avatar } from "../components/Avatar";
 
@@ -104,17 +111,20 @@ const TERMINAL_TICKET_STATUSES: ReadonlySet<TicketStatus> = new Set<TicketStatus
 ]);
 
 
-const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
-  REQUESTED: "status.requested",
-  UNDER_REVIEW: "status.under_review",
-  PRICING_PROPOSED: "status.pricing_proposed",
-  CUSTOMER_APPROVED: "status.customer_approved",
-  // Sprint 29 Batch 29.8 — operational segment status labels.
-  IN_PROGRESS: "status.in_progress",
-  COMPLETED: "status.completed",
-  CUSTOMER_REJECTED: "status.customer_rejected",
-  CANCELLED: "status.cancelled",
-};
+// Sprint 182 §2 — this page's private status-label map is gone, for the
+// reason the list's was: it read `extra_work:status.*` ("Customer
+// approved") while the badge in this page's own header rendered
+// `common:extra_work_status.*` ("Price approved"). The workflow button
+// therefore offered to move a request to a status spelled differently
+// from the one the header would show once it got there.
+//
+// `extraWorkStatusLabelKey` is the one source. It lives in `common`, so
+// every call passes `{ ns: "common" }` — this page's default namespace
+// is `extra_work`.
+const tStatusLabel = (
+  t: (key: string, options?: Record<string, unknown>) => string,
+  status: ExtraWorkStatus,
+) => t(extraWorkStatusLabelKey(status), { ns: "common" });
 
 // Sprint 31 — meaningful provider action labels per transition so the
 // EW workflow reads as a guided flow (Start review -> Propose price ->
@@ -445,14 +455,149 @@ const LABELS_ERROR_I18N_KEY: Record<string, string> = {
 // (`ew.labels_locked`) the labels are read-only text + a reason naming the
 // invoice; otherwise two dropdowns + Save calling PATCH .../labels/. Options
 // always include the CURRENT value so an archived label still shows.
+/** Sprint 176 §3 — the deadline and the planned end, editable after the
+ *  request exists.
+ *
+ *  Until now both were write-once on the create form. That is the wrong
+ *  shape for a deadline in particular: a deadline is exactly the kind of
+ *  thing agreed after the fact, once someone has looked at the job.
+ *
+ *  Behind an explicit Edit affordance rather than always-live inputs, so
+ *  the Details card stays a card you READ and a date cannot be changed by
+ *  a stray click on a page an operator opened to check something else.
+ *
+ *  Provider-only at the call site. The customer's `preferred_date` is
+ *  shown right above and is NOT editable here — the customer states a
+ *  wish, the provider answers it with a commitment.
+ *
+ *  Sprint 177 §2 — this component is now ONLY the open form. The trigger
+ *  moved up into the deadline cell so it sits beside the date it edits,
+ *  and the parent owns the open/closed state. The component is therefore
+ *  mounted only while open, which is also why the drafts below can seed
+ *  straight from the row in `useState` rather than needing a reset on
+ *  open: a fresh mount IS the reset. */
+function DatesEditor({
+  ew,
+  onUpdated,
+  onClose,
+}: {
+  ew: ExtraWorkRequestDetail;
+  onUpdated: (detail: ExtraWorkRequestDetail) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const { push: pushToast } = useToast();
+  const [deadline, setDeadline] = useState(ew.deadline ?? "");
+  const [plannedEnd, setPlannedEnd] = useState(ew.planned_end_date ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      // Both keys are sent deliberately: this editor SHOWS both fields, so
+      // an operator who emptied one meant to clear it. The absent-key
+      // "leave unchanged" path belongs to the bulk dialog, where the
+      // operator is not looking at the current values.
+      const updated = await updateExtraWorkDates(ew.id, {
+        deadline: deadline || null,
+        planned_end_date: plannedEnd || null,
+      });
+      onUpdated(updated);
+      pushToast({ variant: "success", title: t("detail.dates_saved") });
+      onClose();
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="form-section" data-testid="extra-work-dates-editor">
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "flex-end",
+          gap: 8,
+          marginTop: 4,
+        }}
+      >
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="muted small">
+            {t("detail.field_planned_end_date")}
+          </span>
+          <input
+            type="date"
+            className="field-input"
+            value={plannedEnd}
+            onChange={(e) => setPlannedEnd(e.target.value)}
+            data-testid="extra-work-dates-planned-end"
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="muted small">{t("detail.deadline")}</span>
+          <input
+            type="date"
+            className="field-input"
+            value={deadline}
+            onChange={(e) => setDeadline(e.target.value)}
+            data-testid="extra-work-dates-deadline"
+          />
+        </label>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          onClick={save}
+          disabled={saving}
+          data-testid="extra-work-dates-save"
+        >
+          {saving ? t("detail.dates_saving") : t("common:save")}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={onClose}
+          disabled={saving}
+        >
+          {t("common:cancel")}
+        </button>
+      </div>
+      {/* The customer's wish, restated beside the field that answers it —
+          §3 asks for it prominently wherever a deadline is set. */}
+      <div className="muted small" style={{ marginTop: 6 }}>
+        {t("detail.dates_preferred_hint", {
+          date: ew.preferred_date
+            ? formatDate(ew.preferred_date)
+            : t("detail.empty_dash"),
+        })}
+      </div>
+      {error && (
+        <div className="alert-error" style={{ marginTop: 6 }}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LabelsCard({
   ew,
   onUpdated,
   onRefresh,
+  collapsible = false,
 }: {
   ew: ExtraWorkRequestDetail;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
   onRefresh: () => void;
+  /** Sprint 176 §2 — render as a COLLAPSIBLE card rather than a plain
+   *  one, for the right column. A flag on the existing component, not a
+   *  wrapper: wrapping would nest a card inside a card, which is what
+   *  Sprint 175 avoided by leaving the card open and is the thing this
+   *  sprint was told to solve properly. */
+  collapsible?: boolean;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
@@ -536,14 +681,13 @@ function LabelsCard({
     }
   }
 
-  return (
-    <div
-      className="card"
-      style={{ marginBottom: 16 }}
-      data-testid="extra-work-labels"
-    >
-      <div className="form-section">
-        <div className="form-section-title">{t("detail.labels_section_title")}</div>
+  const body = (
+    <div className="form-section">
+      {!collapsible && (
+        <div className="form-section-title">
+          {t("detail.labels_section_title")}
+        </div>
+      )}
         {ew.labels_locked ? (
           <div
             className="alert-warning"
@@ -552,10 +696,18 @@ function LabelsCard({
           >
             <div>
               {t("detail.labels_field_department")}:{" "}
-              <strong>{ew.department_name ?? t("detail.empty_dash")}</strong>
+              <strong>
+                {ew.department_name
+                  ? customerLabelName(ew.department_name, t)
+                  : t("detail.empty_dash")}
+              </strong>
               {"  ·  "}
               {t("detail.labels_field_work_type")}:{" "}
-              <strong>{ew.work_type_name ?? t("detail.empty_dash")}</strong>
+              <strong>
+                {ew.work_type_name
+                  ? customerLabelName(ew.work_type_name, t)
+                  : t("detail.empty_dash")}
+              </strong>
             </div>
             <div style={{ marginTop: 6 }}>
               {/* Sprint 129 §2b — the backend sends the NUMBER or null; the
@@ -595,7 +747,7 @@ function LabelsCard({
                   <option value="">{t("detail.labels_none")}</option>
                   {deptOptions.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {d.name}
+                      {customerLabelName(d.name, t)}
                     </option>
                   ))}
                 </select>
@@ -613,7 +765,7 @@ function LabelsCard({
                   <option value="">{t("detail.labels_none")}</option>
                   {wtOptions.map((w) => (
                     <option key={w.id} value={w.id}>
-                      {w.name}
+                      {customerLabelName(w.name, t)}
                     </option>
                   ))}
                 </select>
@@ -635,8 +787,35 @@ function LabelsCard({
             )}
           </>
         )}
-      </div>
     </div>
+  );
+
+  if (!collapsible) {
+    return (
+      <div
+        className="card"
+        style={{ marginBottom: 16 }}
+        data-testid="extra-work-labels"
+      >
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <CollapsibleCard
+      title={t("detail.labels_section_title")}
+      /* Collapsed is not hidden: the header carries how many of the two
+         labels are actually set, so the operator knows whether there is
+         anything inside without opening it. */
+      meta={t("detail.card_count", {
+        count: [ew.department, ew.work_type].filter(Boolean).length,
+      })}
+      defaultOpen={false}
+      testId="extra-work-labels"
+    >
+      {body}
+    </CollapsibleCard>
   );
 }
 
@@ -649,6 +828,10 @@ export function ExtraWorkDetailPage() {
   const messageLocale = useLocaleCode();
 
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
+  // Sprint 177 §2 — the dates editor is opened from a trigger that sits
+  // beside the deadline, so the open state lives here rather than inside
+  // the editor it opens.
+  const [datesOpen, setDatesOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -697,6 +880,10 @@ export function ExtraWorkDetailPage() {
   // Sprint 31 — proposal builder: create CTA busy/error.
   const [proposalBusy, setProposalBusy] = useState(false);
   const [proposalError, setProposalError] = useState("");
+  // Sprint 188 — set once, when the create response says the parent
+  // could not be advanced. Read by the builder to explain why Send is
+  // not there yet, in place of the generic line.
+  const [parentAdvanceBlocked, setParentAdvanceBlocked] = useState(false);
   // Direct-publish flow state.
   const [directPublishOpen, setDirectPublishOpen] = useState(false);
   const [directPublishReason, setDirectPublishReason] = useState("");
@@ -1224,7 +1411,7 @@ export function ExtraWorkDetailPage() {
     const key = PROVIDER_ACTION_I18N[`${ew.status}->${target}`];
     return key
       ? t(key)
-      : t("detail.workflow_move_to", { label: t(STATUS_I18N_KEY[target]) });
+      : t("detail.workflow_move_to", { label: tStatusLabel(t, target) });
   };
   // One-line provider guidance for the current step (early steps only).
   const stepHintKey =
@@ -1335,7 +1522,22 @@ export function ExtraWorkDetailPage() {
     try {
       // Empty body — the backend auto-seeds one ProposalLine per cart
       // item, pre-filling contract prices (SoT §8.3).
-      await createProposal(ewId);
+      const created = await createProposal(ewId);
+      // Sprint 187 §2a — creating a proposal now also starts the review
+      // (REQUESTED -> UNDER_REVIEW), which is what makes Send reachable
+      // whichever way the operator arrived. When the actor was not
+      // permitted to move the parent, the proposal is still created and
+      // the backend hands back the reason rather than failing silently.
+      // `reloadProposals()` re-reads the proposal WITHOUT this field, so
+      // it is captured here, at the one moment it exists.
+      //
+      // Sprint 188 — it used to go into `proposalError`, whose only
+      // render site is the prepare-proposal card; `reloadProposals()`
+      // below makes a proposal exist, the card unmounts, and the message
+      // was gone in the same tick. It also arrived as raw backend
+      // English. It is now a flag carried into the builder, which says
+      // the actionable thing in the user's own language.
+      setParentAdvanceBlocked(Boolean(created.parent_advance_blocked));
       await reloadProposals();
     } catch (err) {
       setProposalError(getApiError(err));
@@ -1585,7 +1787,83 @@ export function ExtraWorkDetailPage() {
         title={ew.title}
         meta={
           <div className="ew-detail-header-meta">
-            <StatusBadge status={{ kind: "extra-work", value: ew.status }} />
+            {/* Sprint 183 §3 — an extra work that WENT OPERATIONAL shows
+                its TICKET's status here, exactly as its row already does
+                in the list (Sprint 181 §1). Same component, same
+                resolver, same string, same colour.
+
+                The owner, twice: "an extra work that went operational
+                has a ticket page and an extra work page. The statuses
+                must be identical — not similar, identical — and come
+                from the same place."
+
+                They did not. The list learned to read the ticket in
+                Sprint 181; this page was left reading `ew.status`, so
+                one screen said "Price approved" while the other said
+                "Open" about the same job. The extra work's own status is
+                the COMMERCIAL state and remains the truth for anything
+                not yet started; once a ticket exists, the ticket is what
+                is happening.
+
+                Nothing about the extra work's status is CHANGED — this
+                is a display change to this one block, which is all this
+                branch may touch in this file. */}
+            <StatusBadge
+              status={
+                ew.spawned_tickets.length > 0
+                  ? { kind: "ticket", value: ew.spawned_tickets[0].status }
+                  : { kind: "extra-work", value: ew.status }
+              }
+              testId="extra-work-header-status"
+            />
+            {/* Sprint 182 §3 — the money, beside the status.
+                The owner: "when I open an extra work from Chargeable
+                work, show me its money too — the way the row does."
+                It WAS on this page, in the meta line of a collapsed
+                card near the bottom, and only once a final amount
+                existed — so a priced-but-not-yet-finished request
+                showed an amount in the list and nothing at all here.
+
+                `rowAmounts` is the one billing-total rule (CLAUDE.md:
+                final-with-quoted-fallback), and `formatMoney` is the
+                list's own formatter, so this figure is the row's figure
+                — same number, same rounding, same currency. */}
+            <span
+              className="cell-tag cell-tag-muted"
+              data-testid="extra-work-header-total"
+              title={t("detail.header_total_hint")}
+            >
+              {t("list.column_total")}:{" "}
+              {ew.is_priced === false
+                ? "\u2014"
+                : formatMoney(rowAmounts(ew).total)}
+            </span>
+            {/* Sprint 174 §3 — the deadline and started-early markers
+                live in the HEADER, beside the status. A warning you
+                have to open a collapsed card to find is not a warning.
+                Both use the status colours this app already has: a
+                second colour vocabulary for "something is wrong" is how
+                two screens end up disagreeing about severity. */}
+            {ew.deadline && (
+              <span
+                className={`cell-tag ${
+                  ew.is_overdue ? "cell-tag-rejected" : "cell-tag-muted"
+                }`}
+                data-testid="ew-header-deadline"
+              >
+                {t("detail.deadline")}: {formatDate(ew.deadline)}
+                {ew.is_overdue ? ` — ${t("list.overdue")}` : ""}
+              </span>
+            )}
+            {ew.started_before_plan && (
+              <span
+                className="cell-tag cell-tag-open"
+                title={t("list.startedEarlyWhy")}
+                data-testid="ew-header-started-early"
+              >
+                {t("list.startedEarly")}
+              </span>
+            )}
             <RouteBadge value={ew.routing_decision} />
             <span className="muted small">
               {/* Sprint 144 §1 — the real classifier when the request
@@ -1635,6 +1913,71 @@ export function ExtraWorkDetailPage() {
                   <div className="muted small">{t("detail.field_customer")}</div>
                   <div>{ew.customer_name}</div>
                 </div>
+                {/* Sprint 180 §3 — who pays, next to the two names it
+                    chooses between. Read-only here: the value is set on
+                    the create form and the Extra Work ViewSet has no
+                    update action, so an editable control would be a
+                    promise no endpoint keeps. */}
+                <div>
+                  <div className="muted small">
+                    {t("detail.field_billed_to")}
+                  </div>
+                  <div data-testid="extra-work-billed-to">
+                    {ew.billed_to === "CUSTOMER"
+                      ? t("billed_to.customer")
+                      : t("billed_to.building")}
+                  </div>
+                </div>
+                {/* Sprint 180 §2 — the ticket this Extra Work became.
+                    The ticket page has shown its Extra Work origin for
+                    sprints; the reverse had no field at all. The panel
+                    lower down lists every spawned ticket with its
+                    status; this cell answers "did this become work, and
+                    which one" without scrolling for it. */}
+                <div>
+                  <div className="muted small">{t("detail.field_ticket")}</div>
+                  <div data-testid="extra-work-ticket-link">
+                    {/* Sprint 181 §1b — one renderer, with a real
+                        separator. `max` is higher here than in the list
+                        because this is the page somebody opens to see
+                        all of them. */}
+                    <SpawnedTicketLinks
+                      tickets={ew.spawned_tickets}
+                      max={4}
+                      emptyLabel={t("detail.ticket_none")}
+                    />
+                  </div>
+                </div>
+                {/* Sprint 181 §1 — the operational state, and where it
+                    comes from. When a ticket exists this IS the ticket's
+                    status, with the number beside it so nobody wonders
+                    where the value came from, or why the workflow
+                    buttons below no longer offer to move it. The Extra
+                    Work's own status stays on this page (the Workflow
+                    card) for an operator debugging a stuck row — the
+                    LIST is where one status had to win. */}
+                {ew.spawned_tickets.length > 0 && (
+                  <div>
+                    <div className="muted small">
+                      {t("detail.operational_state")}
+                    </div>
+                    <div data-testid="extra-work-operational-state">
+                      <StatusBadge
+                        status={{
+                          kind: "ticket",
+                          value: ew.spawned_tickets[0].status,
+                        }}
+                      />
+                    </div>
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("detail.operational_state_hint", {
+                        ticket:
+                          ew.spawned_tickets[0].ticket_no ??
+                          `#${ew.spawned_tickets[0].id}`,
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="form-2col">
                 <div>
@@ -1647,13 +1990,67 @@ export function ExtraWorkDetailPage() {
                   <div className="muted small">
                     {t("detail.field_preferred_date")}
                   </div>
-                  <div>
-                    {ew.preferred_date
-                      ? formatDate(ew.preferred_date)
-                      : t("detail.empty_dash")}
+                  <div data-testid="extra-work-planned-window">
+                    {/* Sprint 177 §1 — all FOUR cases, not two ternaries
+                        that read as a range with one end missing. An end
+                        without a start used to print "— – 16 Aug 2026". */}
+                    {formatPlannedWindow(
+                      ew.preferred_date,
+                      ew.planned_end_date,
+                      formatDate,
+                      {
+                        empty: t("detail.empty_dash"),
+                        endOnly: (end) =>
+                          t("detail.planned_window_until", { date: end }),
+                      },
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="muted small">{t("detail.deadline")}</div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span>
+                      {ew.deadline
+                        ? formatDate(ew.deadline)
+                        : t("detail.empty_dash")}
+                    </span>
+                    {/* Sprint 177 §2 — the trigger sits BESIDE the date it
+                        edits, in the same cell, rather than floating in its
+                        own row under the whole grid where the owner could
+                        not find it. Sprint 176 §3's rule is unchanged:
+                        provider-only, and `preferred_date` (the customer's
+                        wish, one cell to the left) is not editable here. */}
+                    {isProvider && !datesOpen && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setDatesOpen(true)}
+                        data-testid="extra-work-dates-edit"
+                      >
+                        <Pencil size={13} strokeWidth={2} />
+                        {t("detail.dates_edit")}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
+              {/* The form itself opens BELOW the grid, where it has room for
+                  two date inputs, the customer's preferred date and an
+                  error, without reflowing the three cells above it. */}
+              {isProvider && datesOpen && (
+                <DatesEditor
+                  ew={ew}
+                  onUpdated={(detail) => setEw(detail)}
+                  onClose={() => setDatesOpen(false)}
+                />
+              )}
               <div className="field">
                 <div className="muted small">{t("detail.field_description")}</div>
                 <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
@@ -2023,7 +2420,7 @@ export function ExtraWorkDetailPage() {
                                     {overrideBusy
                                       ? t("detail.override_submitting")
                                       : t("detail.override_confirm", {
-                                          label: t(STATUS_I18N_KEY[target]),
+                                          label: tStatusLabel(t, target),
                                         })}
                                   </button>
                                 </div>
@@ -2084,6 +2481,26 @@ export function ExtraWorkDetailPage() {
                   </button>
                 )}
               </div>
+              {/* Sprint 187 §2d — say where the decision went.
+                  At PRICING_PROPOSED with an open proposal this card
+                  renders no decision buttons AT ALL, and correctly so:
+                  the `!hasOpenProposal` guard above is load-bearing,
+                  because the customer decision has deliberately moved
+                  onto the quote and a second decision surface here would
+                  be two places to approve one price. What was missing is
+                  not a button, it is the sentence — the operator saw an
+                  empty card and no explanation.
+                  Purely additive: no guard is relaxed, nothing new can
+                  be pressed from here. */}
+              {ew.status === "PRICING_PROPOSED" && hasOpenProposal && (
+                <p
+                  className="muted small"
+                  style={{ margin: "10px 0 0" }}
+                  data-testid="extra-work-workflow-decision-on-proposal"
+                >
+                  {t("detail.workflow_decision_on_proposal")}
+                </p>
+              )}
             </div>
           </div>
           </div>{/* end .ew-detail-top-row */}
@@ -2092,10 +2509,16 @@ export function ExtraWorkDetailPage() {
               B8 polishes the visuals. The backend chokepoint filters which
               messages this viewer receives; the composer offers only the
               tiers the backend will accept. */}
+          {/* Sprint 175 §1 — the SECOND two-column row. Messages on
+              the left at the Details card's width, and the right column
+              takes four COLLAPSED cards. A collapsed card is only its
+              header bar, so four of them sit under Workflow without the
+              right column growing taller than Messages — which is the
+              question the owner asked and the reason they fit. */}
+          <div className="ew-detail-second-row">
           <section
             className="card ew-messages-card"
             data-testid="extra-work-messages-panel"
-            style={{ marginBottom: 16 }}
           >
             <div className="form-section">
               <div className="form-section-title">{t("messages.title")}</div>
@@ -2252,21 +2675,24 @@ export function ExtraWorkDetailPage() {
             </div>
           </section>
 
+          <aside className="ew-detail-aside" data-testid="ew-detail-aside">
           {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
               Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the
               backend gate; other roles never see this card). Pure
               informational — full management lives on
               /admin/customers/:id/contacts. */}
           {canSeeCustomerContacts && (
-            <div
-              className="card"
-              data-testid="extra-work-customer-contacts-panel"
-              style={{ marginBottom: 16 }}
+            <CollapsibleCard
+              key={`contacts-${ew.id}`}
+              title={t("customer_contacts.panel_title", { ns: "common" })}
+              /* Collapsed is not HIDDEN: the count rides in the header,
+                 so the operator knows whether there is anything inside
+                 without opening it. */
+              meta={t("detail.card_count", { count: customerContacts.length })}
+              defaultOpen={false}
+              testId="extra-work-customer-contacts-panel"
             >
               <div className="form-section">
-                <div className="form-section-title">
-                  {t("customer_contacts.panel_title", { ns: "common" })}
-                </div>
                 {customerContacts.length === 0 ? (
                   <div
                     className="muted small"
@@ -2321,7 +2747,72 @@ export function ExtraWorkDetailPage() {
                   </ul>
                 )}
               </div>
-            </div>
+            </CollapsibleCard>
+          )}
+
+          {/* Sprint 176 §1b — the EDITABLE labels card (Sprint 128)
+              lives here now. Sprint 175 added a READ-ONLY copy above a
+              working one further down, which is two cards claiming the
+              same fact and only one of them able to change it. The
+              read-only copy is gone; this is the real one, moved. */}
+          {isProvider && (
+            <LabelsCard
+              key={`labels-${ew.id}-${ew.department ?? ""}-${
+                ew.work_type ?? ""
+              }-${String(ew.labels_locked)}`}
+              ew={ew}
+              onUpdated={(detail) => setEw(detail)}
+              onRefresh={() => void refresh()}
+              collapsible
+            />
+          )}
+
+          {/* Sprint 175 §1 — Preview. The proposal PDF was a button
+              inside the Workflow card, where an operator looking for
+              "the document" would not think to look. Collapsed by
+              default: it fetches a PDF, and the operator usually does
+              not want one. */}
+          {hasActiveProposal && canViewProposalPdf && (
+            <CollapsibleCard
+              key={`preview-${ew.id}`}
+              title={t("detail.preview_card_title")}
+              defaultOpen={false}
+              testId="extra-work-preview-panel"
+            >
+              <div className="form-section">
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.preview_card_hint")}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => void handleDownloadPdf()}
+                  disabled={pdfBusy}
+                  data-testid="extra-work-preview-pdf"
+                >
+                  {pdfBusy
+                    ? t("detail.proposal_pdf_busy")
+                    : t("detail.proposal_pdf")}
+                </button>
+              </div>
+            </CollapsibleCard>
+          )}
+          </aside>
+          </div>{/* end .ew-detail-second-row */}
+
+          {/* Sprint 176 §2 — People on this request: FULL WIDTH,
+              collapsed, directly below Messages and above Requested
+              services. Rendered `bare` so its body sits inside the
+              collapsible without a card inside a card. */}
+          {isProvider && ew !== null && (
+            <CollapsibleCard
+              key={`people-${ew.id}`}
+              title={t("assign.card_title")}
+              defaultOpen={false}
+              testId="extra-work-assignments-card"
+            >
+              <ExtraWorkAssignmentCard extraWorkId={ew.id} bare />
+            </CollapsibleCard>
           )}
 
           {/* ----- Cart line items (Sprint 28 Batch 6; RF-14 collapsible:
@@ -2420,20 +2911,6 @@ export function ExtraWorkDetailPage() {
             />
           )}
 
-          {/* Sprint 128 — provider relabel (Afdeling / Werktype). Keyed on
-              the label + lock state so the card re-seeds its prop-derived
-              selection after any external EW refresh, per CLAUDE.md §3
-              (no set-state-in-effect resync). */}
-          {isProvider && (
-            <LabelsCard
-              key={`labels-${ew.id}-${ew.department ?? ""}-${
-                ew.work_type ?? ""
-              }-${String(ew.labels_locked)}`}
-              ew={ew}
-              onUpdated={(detail) => setEw(detail)}
-              onRefresh={() => void refresh()}
-            />
-          )}
 
           {/* Draft proposal lines — read-only display of the DRAFT
               proposal's nested `lines` array. Gated on the per-record
@@ -2460,6 +2937,7 @@ export function ExtraWorkDetailPage() {
                 ewId={ewId}
                 proposal={draftProposalDetail}
                 onChanged={reloadProposals}
+                parentAdvanceBlocked={parentAdvanceBlocked}
               />
             )}
 
@@ -2682,7 +3160,15 @@ export function ExtraWorkDetailPage() {
                 <ul style={{ margin: 0, paddingLeft: 20 }}>
                   {activeSpawnedTickets.map((ticket) => (
                     <li key={ticket.id}>
-                      #{ticket.id} — {ticket.title} ({ticket.status})
+                      {/* Sprint 184 §3 — the last raw enum on a screen.
+                          This printed "(WAITING_CUSTOMER_APPROVAL)"
+                          while the page behind it said "Wacht op klant",
+                          and it is a CONFIRMATION dialog — the worst
+                          place in the app to make somebody decode a
+                          machine value before answering yes. */}
+                      #{ticket.id} — {ticket.title} (
+                      {t(ticketStatusLabelKey(ticket.status), { ns: "common" })}
+                      )
                     </li>
                   ))}
                 </ul>

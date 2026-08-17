@@ -21,14 +21,24 @@ Allowed transitions (customer-pricing loop — Sprint 26B):
 Operational segment (Sprint 29 Batch 29.8):
 
   CUSTOMER_APPROVED -> IN_PROGRESS          (SYSTEM auto when first spawned
-                                             ticket goes IN_PROGRESS; or
-                                             provider manual override)
+                                             ticket goes IN_PROGRESS;
+                                             provider manual ONLY while the
+                                             request has no ticket — §181.1)
   IN_PROGRESS       -> COMPLETED            (SYSTEM auto when all spawned
-                                             tickets are terminal; or
-                                             provider manual)
+                                             tickets are terminal;
+                                             provider manual ONLY while the
+                                             request has no ticket — §181.1)
   IN_PROGRESS       -> CANCELLED            (provider override — needs reason)
   COMPLETED         -> IN_PROGRESS          (edge-recovery, provider-only,
                                              needs reason)
+
+Sprint 181 §1 — once an Extra Work HAS an operational ticket, "is the
+work done?" is answered by the ticket and by nothing else. The two
+forward pairs above used to end "or provider manual" unconditionally,
+and that clause is how eight rows on crmtest came to read COMPLETED
+against a ticket that was still OPEN. See
+`_operational_status_is_derived` for the rule and what it deliberately
+leaves manual.
 
 The CUSTOMER_APPROVED -> IN_PROGRESS and IN_PROGRESS -> COMPLETED
 pairs are also listed in `SYSTEM_AUTO_TRANSITIONS` so the auto-sync
@@ -124,12 +134,88 @@ SYSTEM_AUTO_TRANSITIONS: set[tuple[str, str]] = {
 }
 
 
+# Sprint 181 §3 — the ONE backwards pair a system actor may drive, and
+# only the reconciliation command drives it.
+#
+# `COMPLETED -> IN_PROGRESS` is the edge-recovery pair: normally a
+# provider correcting the record, with a written reason. The
+# reconciliation command is that same correction made by the system
+# after §1 closed the door the drift came through, so it goes through
+# the same gate rather than around it — `reconcile_extra_work_status`
+# supplies the reason, `is_override` is coerced on, and the correction
+# lands on `ExtraWorkStatusHistory` like any other.
+#
+# Kept as its own named set rather than folded into
+# `SYSTEM_AUTO_TRANSITIONS`: the auto-sync hook in
+# `tickets.state_machine` must NOT gain the ability to walk an Extra
+# Work backwards as a side effect of a ticket transition.
+SYSTEM_RECONCILE_TRANSITIONS: set[tuple[str, str]] = {
+    (ExtraWorkStatus.COMPLETED, ExtraWorkStatus.IN_PROGRESS),
+}
+
+
 class TransitionError(Exception):
     """Raised when a transition is rejected (mirrors Ticket pattern)."""
 
     def __init__(self, message: str, code: str = "invalid_transition"):
         super().__init__(message)
         self.code = code
+
+
+def _has_spawned_tickets(extra_work: ExtraWorkRequest) -> bool:
+    """Does this Extra Work have a live operational ticket?
+
+    The CANONICAL FK (`Ticket.extra_work_request`) and nothing else —
+    the definition `extra_work.billing.build_ticket_map`,
+    `reports.dimensions` and the Sprint 180 track split already share.
+    Memoised on the instance because `allowed_next_statuses` asks the
+    same question once per candidate status.
+    """
+    cached = getattr(extra_work, "_sprint181_has_tickets", None)
+    if cached is None:
+        cached = extra_work.operational_tickets.filter(
+            deleted_at__isnull=True
+        ).exists()
+        extra_work._sprint181_has_tickets = cached
+    return cached
+
+
+def _operational_status_is_derived(
+    extra_work: ExtraWorkRequest, to_status: str
+) -> bool:
+    """Sprint 181 §1 — THE authority rule, in one predicate.
+
+    Once an Extra Work has a ticket, "is the work done?" is answered by
+    the ticket and by nothing else.
+
+    An Extra Work carries its own status AND its spawned ticket carries
+    one. They are two copies of one fact, and `IN_PROGRESS ->
+    COMPLETED` was documented above as "SYSTEM auto when all spawned
+    tickets are terminal; OR PROVIDER MANUAL". That last clause is how
+    eight rows on crmtest came to read COMPLETED against a ticket that
+    was still OPEN — impossible in the owner's model of the system, and
+    not merely untidy: `extra_work.billing.is_earned` reads the TICKET,
+    so those rows were never invoiceable while claiming to be finished.
+
+    So the two forward operational pairs become SYSTEM-ONLY as soon as
+    there is a ticket to derive them from. They are exactly
+    `SYSTEM_AUTO_TRANSITIONS`, which is the point: a pair the auto-sync
+    hook drives is a pair a human must not also drive.
+
+    Deliberately NOT gated:
+      * `COMPLETED -> IN_PROGRESS` — edge recovery. Provider-only and
+        requires a written reason, which is the opposite of silent
+        drift: a human correcting the record and signing for it.
+      * `IN_PROGRESS -> CANCELLED` — cancelling is a decision about the
+        job, not a claim about how far it got.
+      * Everything, on an Extra Work with NO tickets. There is nothing
+        to derive from, so the manual path is all there is.
+
+    One gate on one segment. The rest of the state machine is unchanged.
+    """
+    if (extra_work.status, to_status) not in SYSTEM_AUTO_TRANSITIONS:
+        return False
+    return _has_spawned_tickets(extra_work)
 
 
 def _is_provider_operator(user) -> bool:
@@ -198,7 +284,17 @@ def _user_can_drive_transition(
     # operators with the right scope still fall through to the role
     # branches below for the same pair.
     if user is None:
-        return (from_status, to_status) in SYSTEM_AUTO_TRANSITIONS
+        return (from_status, to_status) in (
+            SYSTEM_AUTO_TRANSITIONS | SYSTEM_RECONCILE_TRANSITIONS
+        )
+
+    # Sprint 181 §1 — once there is a ticket, the operational status is
+    # DERIVED from it and no human drives it by hand. Checked here (and
+    # not only in `apply_transition`) so `allowed_next_statuses` stops
+    # offering a button that would 400 — one predicate, two callers, no
+    # second copy of the rule to drift.
+    if _operational_status_is_derived(extra_work, to_status):
+        return False
 
     if user.role == UserRole.SUPER_ADMIN:
         # Super admin can drive any allowed transition globally.
@@ -353,6 +449,20 @@ def apply_transition(
             code="invalid_transition",
         )
 
+    # Sprint 181 §1 — checked BEFORE the role gate so the caller is told
+    # WHY, rather than being handed a generic "not allowed" that reads
+    # like a permissions problem. No role can pass this; it is not about
+    # who is asking.
+    if user is not None and _operational_status_is_derived(
+        extra_work, to_status
+    ):
+        raise TransitionError(
+            "This Extra Work already has an operational ticket, so its "
+            "operational status follows that ticket. Move the ticket "
+            "instead.",
+            code="operational_status_follows_ticket",
+        )
+
     if not _user_can_drive_transition(user, extra_work, to_status):
         raise TransitionError(
             f"Not allowed to move Extra Work to '{to_status}'.",
@@ -432,16 +542,17 @@ def apply_transition(
     # client sent `is_override=True`:
     #   IN_PROGRESS -> CANCELLED  (corrective cancel of in-flight work)
     #   COMPLETED  -> IN_PROGRESS (edge-recovery reopen)
-    # System-driven transitions (`user is None`) are never these pairs;
-    # `SYSTEM_AUTO_TRANSITIONS` only contains the two forward pairs.
-    operational_provider_override = user is not None and (
-        extra_work.status,
-        to_status,
-    ) in {
+    # Sprint 181 §3 — the system actor reaches ONE of these pairs
+    # (`SYSTEM_RECONCILE_TRANSITIONS`, the reconciliation command), and
+    # it is held to the same standard: reason required, `is_override`
+    # coerced on, history row written. So the `user is not None` guard
+    # that used to be here is gone — the requirement is a property of
+    # the PAIR, not of who is driving it.
+    operational_override_pairs = {
         (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.CANCELLED),
         (ExtraWorkStatus.COMPLETED, ExtraWorkStatus.IN_PROGRESS),
     }
-    if operational_provider_override:
+    if (extra_work.status, to_status) in operational_override_pairs:
         is_override = True
 
     if is_override:

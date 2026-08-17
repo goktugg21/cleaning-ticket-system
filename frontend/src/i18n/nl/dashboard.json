@@ -49,6 +49,12 @@
   "attention.view_all": "Alles bekijken",
   "attention.empty": "Niets op dit moment",
   "attention.unassigned_chip": "Alleen niet-toegewezen items worden getoond",
+  "attention.approval_overdue_title": "Goedkeuring te laat ({{days}}+ dagen)",
+  "attention.approval_overdue_chip": "Werk dat {{days}}+ dagen op klantgoedkeuring wacht wordt getoond",
+  "finished_extra_work.hidden_chip": "Afgerond extra werk is verborgen",
+  "finished_extra_work.show_all": "Alles tonen",
+  "finished_extra_work.shown_chip": "Afgerond extra werk wordt getoond",
+  "finished_extra_work.hide_again": "Afgerond verbergen",
   "widgets.inbox": "Ongelezen berichten",
   "widgets.awaiting_pricing": "Wacht op prijsvoorstel",
   "widgets.awaiting_customer": "Wacht op klantbeslissing",
@@ -103,5 +109,12 @@
   "bottom.billing_title": "Facturatie {{month}}",
   "bottom.billing_empty": "Geen facturatie deze maand.",
   "bottom.billing_open_count": "{{count}} open",
-  "bottom.recent_title": "Laatste tickets / extra werk"
+  "bottom.recent_title": "Laatste tickets / extra werk",
+  "work_type.label": "Tonen",
+  "work_type.all": "Al het werk",
+  "work_type.tickets_only": "Alleen tickets",
+  "work_type.chargeable": "Meerwerk",
+  "work_type.include_chargeable": "Inclusief meerwerk",
+  "chargeable.col_extra_work": "Meerwerk",
+  "chargeable.col_route": "Route"
 }

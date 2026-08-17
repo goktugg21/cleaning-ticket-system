@@ -169,6 +169,25 @@ ALLOWED_TRANSITIONS = {
 }
 
 
+# Sprint 180 §1 — transitions the SYSTEM may drive with `user=None`.
+#
+# Mirrors `extra_work.state_machine.SYSTEM_AUTO_TRANSITIONS`. A `None`
+# actor is admitted for these pairs and NOTHING else; the same pairs
+# stay available to qualified humans through the role table above (a
+# SUPER_ADMIN or in-scope COMPANY_ADMIN can still close by hand).
+#
+# The single member is the customer-approval auto-close, driven from
+# `tickets/auto_close.py`. Adding a pair here grants an unauthenticated,
+# unattributed write path to that transition — do it deliberately.
+SYSTEM_AUTO_TRANSITIONS = {
+    (TicketStatus.APPROVED, TicketStatus.CLOSED),
+}
+
+_SYSTEM_AUTO_TRANSITION_KEYS = {
+    (str(a), str(b)) for (a, b) in SYSTEM_AUTO_TRANSITIONS
+}
+
+
 # Each entry stamps the field with the most-recent timestamp on entry to that
 # status. Loop transitions (REJECTED -> IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
 # -> APPROVED again) overwrite the value. For first/last/duration analytics use
@@ -258,6 +277,16 @@ def _user_passes_scope(user, ticket, scope):
 
 
 def can_transition(user, ticket, to_status):
+    # Sprint 180 §1 — the SYSTEM actor. `user=None` is admitted ONLY
+    # for the pairs in `SYSTEM_AUTO_TRANSITIONS`; it is not a super-role
+    # and it does not fall through to any of the branches below. Same
+    # shape as `extra_work.state_machine._user_can_drive_transition`.
+    if user is None:
+        return (
+            str(ticket.status),
+            str(to_status),
+        ) in _SYSTEM_AUTO_TRANSITION_KEYS
+
     # SUPER_ADMIN_CAN_TRANSITION_ANY_STATUS
     if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
         # #109 Part C (audit P3-3) — CONVERTED_TO_EXTRA_WORK is excluded
@@ -300,8 +329,13 @@ def apply_transition(
         )
 
     if not can_transition(user, ticket, to_status):
+        # Sprint 180 §1 — `user` may be the system actor (None), so the
+        # role label has to survive a missing user. "system" is the
+        # honest label: the pair is simply not in
+        # `SYSTEM_AUTO_TRANSITIONS`.
+        role_label = getattr(user, "role", None) or "system"
         raise TransitionError(
-            f"Transition {ticket.status} -> {to_status} not allowed for role {user.role}.",
+            f"Transition {ticket.status} -> {to_status} not allowed for role {role_label}.",
             code="forbidden_transition",
         )
 
@@ -352,10 +386,47 @@ def apply_transition(
                 )
         is_override = True
 
+    # Sprint 184 §2 — A JUMP OUTSIDE THE STATE MACHINE IS AN OVERRIDE.
+    #
+    # Only a SUPER_ADMIN can reach this: `can_transition` lets that role
+    # past any pair, which is a power worth keeping — an admin genuinely
+    # has to be able to rescue a stuck ticket, and removing it would
+    # leave no way to. What it must not be is INVISIBLE.
+    #
+    # It was. The history row was written with `is_override=False` and
+    # no reason, so a hand-typed jump was indistinguishable in the
+    # timeline from an ordinary step somebody earned. Measured on
+    # crmtest: 28 such jumps, every one by the same super-admin account,
+    # every one unflagged and unexplained. The most common was
+    # WAITING_MANAGER_REVIEW -> APPROVED (13), which skips the
+    # customer's decision entirely while reading exactly like the
+    # customer made it.
+    #
+    # This is money rather than tidiness. CLOSED is what makes work
+    # invoiceable and `closed_at` sets the billing month, so a typed
+    # jump to CLOSED manufactures billable work nobody performed — and
+    # 7 of the 28 were CLOSED -> OPEN, which un-bills it again.
+    #
+    # H-11 says the status-history row IS the audit trail for a workflow
+    # change. This makes it tell the truth, using the same mechanism as
+    # the customer-decision coercion directly above and the same
+    # `override_reason_required` gate below — no new vocabulary.
+    #
+    # `user is not None` guards the SYSTEM actor: it drives its own
+    # `SYSTEM_AUTO_TRANSITIONS` pairs and there is nobody to ask for a
+    # reason.
+    out_of_machine_jump = (
+        user is not None
+        and (ticket.status, to_status) not in ALLOWED_TRANSITIONS
+    )
+    if out_of_machine_jump:
+        is_override = True
+
     if is_override and not override_reason.strip():
         raise TransitionError(
             "Override reason is required when a provider operator "
-            "drives a customer-decision transition.",
+            "drives a customer-decision transition, or moves a ticket "
+            "outside its normal workflow.",
             code="override_reason_required",
         )
 
@@ -493,7 +564,15 @@ def apply_transition(
     # Sprint 29 Batch 29.8 — sync parent EW state.
     _sync_parent_extra_work_after_ticket_transition(locked, old_status, to_status)
 
-    return locked
+    # Sprint 180 §1 — customer approval closes the ticket. Runs AFTER
+    # the EW sync so the Sprint 8B `final_*` freeze still happens while
+    # the ticket is APPROVED. Returns `locked` untouched on every
+    # transition that is not the customer-approval leg, and the CLOSED
+    # ticket when it fires — so callers always see the true final
+    # state. Imported lazily: `auto_close` imports back from here.
+    from .auto_close import maybe_auto_close_after_customer_approval
+
+    return maybe_auto_close_after_customer_approval(locked, old_status)
 
 
 def _sync_parent_extra_work_after_ticket_transition(
@@ -649,12 +728,32 @@ def _sync_parent_extra_work_after_ticket_transition(
 
 
 def allowed_next_statuses(user, ticket):
+    # Sprint 180 §1 — this answers "what may this PERSON do next" and
+    # feeds the UI's transition buttons. The system actor has no UI, so
+    # it gets an empty list rather than falling into `user.role` below.
+    if user is None:
+        return []
+
     # SUPER_ADMIN_ALLOWED_NEXT_ALL_STATUSES
     if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
+        # Sprint 184 §2 — every status EXCEPT the one the endpoint would
+        # then refuse.
+        #
+        # `can_transition` has excluded CONVERTED_TO_EXTRA_WORK in both
+        # directions since #109 Part C: only the convert machinery may
+        # enter it and nothing leaves it. This list did not know that, so
+        # the API advertised a target its own `/status/` endpoint
+        # rejects — an offer that cannot be accepted.
+        #
+        # Fixed at the SOURCE rather than in the page. The frontend had
+        # already filtered the value out of both render groups, which
+        # left two places holding one rule and only one of them right;
+        # any other consumer of this list still saw the dead option.
+        converted = str(TicketStatus.CONVERTED_TO_EXTRA_WORK)
         return [
             status
             for status, _label in TicketStatus.choices
-            if str(status) != str(ticket.status)
+            if str(status) != str(ticket.status) and str(status) != converted
         ]
 
     candidates = [

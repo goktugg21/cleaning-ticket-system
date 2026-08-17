@@ -1,16 +1,28 @@
 import { api } from "./client";
 import type {
+  BuildingTypeOption,
   AuditLog,
   BuildingAdmin,
+  BuildingBulkLinkResult,
+  BuildingContactRow,
+  BuildingStaffRow,
+  BuildingLinkRelation,
+  BuildingSummary,
   BuildingManagerMembership,
   BuildingStaffVisibilityAdmin,
   CompanyAdmin,
   CompanyAdminMembership,
+  CompanyAdminPerson,
+  CompanyBuildingRow,
+  CompanyCustomerRow,
+  CompanyEmployee,
+  CompanySummary,
   Contact,
   ContactCreatePayload,
   ContactUpdatePayload,
   CustomerAccessRole,
   CustomerAdmin,
+  CustomerLifecycle,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
   CustomerCustomPrice,
@@ -27,6 +39,7 @@ import type {
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   CustomerServicePriceUpdatePayload,
+  CustomerSummary,
   CustomerEmployee,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
@@ -89,12 +102,26 @@ export interface AdminListParams {
   page?: number;
   company?: number;
   building?: number;
+  /** Sprint 188 — narrow /api/users/ to the people holding a
+   *  CustomerUserMembership for this customer. */
+  customer?: number;
+  /** Sprint 178 §1 — narrow the buildings list to one building
+   *  type from that company's own catalog. */
+  building_type?: number;
   page_size?: number;
   role?: string;
   // Sprint 2c — comma-separated customer access roles; narrows the user
   // list to users with >=1 CustomerUserBuildingAccess row of that role.
   // cleanParams() passes it through to ?access_role=.
   access_role?: string;
+  // Sprint 185 §3 — narrow the customer list to one relationship state.
+  // A SEPARATE axis from `is_active` above: filtering by one must never
+  // imply the other, they answer different questions.
+  lifecycle?: string;
+  // Sprint 153 — DRF OrderingFilter field, "-" prefixed for descending.
+  // The endpoint's `ordering_fields` allowlist decides what is honoured;
+  // an unlisted field is ignored, not an error.
+  ordering?: string;
 }
 
 function cleanParams(input: AdminListParams): Record<string, string | number> {
@@ -192,6 +219,23 @@ export interface BuildingWritePayload {
   city?: string;
   country?: string;
   postal_code?: string;
+  /** Sprint 178 §1 — `null` CLEARS the classification; omitted leaves it
+   *  alone. Never `""`: the field is a nullable integer server-side. */
+  building_type?: number | null;
+}
+
+/** Sprint 178 §1 — a company's building-type catalog.
+ *
+ *  Unbounded server-side by design: this feeds a `<select>` and a list
+ *  filter, and neither has pagination UI. */
+export async function listBuildingTypes(
+  companyId?: number | "",
+): Promise<BuildingTypeOption[]> {
+  const response = await api.get<{ results: BuildingTypeOption[] }>(
+    "/buildings/types/",
+    { params: companyId ? { company: companyId } : undefined },
+  );
+  return response.data.results ?? [];
 }
 
 export async function listBuildings(
@@ -250,6 +294,105 @@ export async function reactivateBuilding(id: number): Promise<BuildingAdmin> {
   return response.data;
 }
 
+// ---- Sprint 154 bulk writes ------------------------------------------
+//
+// All four are ALL-OR-NOTHING on the server: one unresolvable id rejects
+// the whole batch with zero writes, so there is no partial-success shape
+// to handle in any caller.
+
+/** §I.2 — link or unlink N buildings against M targets of ONE relation,
+ *  in one request. Replaces the N x M client-side POST loop that the
+ *  checklist's NEXT queue records twice as an anti-pattern. */
+export async function bulkLinkBuildings(payload: {
+  buildings: number[];
+  relation: BuildingLinkRelation;
+  targets: number[];
+  mode: "link" | "unlink";
+}): Promise<BuildingBulkLinkResult> {
+  const response = await api.post<BuildingBulkLinkResult>(
+    "/buildings/bulk-link/",
+    payload,
+  );
+  return response.data;
+}
+
+/** §I.3 — archive many buildings. "Delete" in the UI; the row survives
+ *  (tickets and extra work PROTECT it) and a Super Admin can restore it. */
+export async function bulkDeactivateBuildings(
+  ids: number[],
+): Promise<{ deactivated: number }> {
+  const response = await api.post<{ deactivated: number }>(
+    "/buildings/bulk-deactivate/",
+    { buildings: ids },
+  );
+  return response.data;
+}
+
+/** §I.4 — patch an allow-listed field set on many buildings. A key
+ *  outside the server's allow-list is a 400, never a silent skip. */
+export async function bulkUpdateBuildings(
+  ids: number[],
+  patch: Record<string, string>,
+): Promise<{ updated: number }> {
+  const response = await api.post<{ updated: number }>(
+    "/buildings/bulk-update/",
+    { buildings: ids, patch },
+  );
+  return response.data;
+}
+
+/** §I.4 — the customer twin of `bulkUpdateBuildings`. */
+export async function bulkUpdateCustomers(
+  ids: number[],
+  patch: Record<string, string>,
+): Promise<{ updated: number }> {
+  const response = await api.post<{ updated: number }>(
+    "/customers/bulk-update/",
+    { customers: ids, patch },
+  );
+  return response.data;
+}
+
+/** §I.5 — the inverse of `listCustomerBuildings`: which customers are
+ *  linked to THIS building. Saves the building page fetching every
+ *  customer and filtering in the browser. */
+export async function listBuildingCustomers(
+  buildingId: number,
+): Promise<CustomerBuildingMembership[]> {
+  const response = await api.get<
+    PaginatedResponse<CustomerBuildingMembership> | CustomerBuildingMembership[]
+  >(`/buildings/${buildingId}/customers/`);
+  return Array.isArray(response.data) ? response.data : response.data.results;
+}
+
+/** §G.2 — the per-building read of BuildingStaffVisibility. */
+export async function listBuildingStaff(
+  buildingId: number,
+): Promise<BuildingStaffRow[]> {
+  const response = await api.get<
+    PaginatedResponse<BuildingStaffRow> | BuildingStaffRow[]
+  >(`/buildings/${buildingId}/staff/`);
+  return Array.isArray(response.data) ? response.data : response.data.results;
+}
+
+/** §G.2 — the per-building read of ContactBuildingLink. */
+export async function listBuildingContacts(
+  buildingId: number,
+): Promise<BuildingContactRow[]> {
+  const response = await api.get<
+    PaginatedResponse<BuildingContactRow> | BuildingContactRow[]
+  >(`/buildings/${buildingId}/contacts/`);
+  return Array.isArray(response.data) ? response.data : response.data.results;
+}
+
+/** §I.6 — the building detail dashboard read. */
+export async function getBuildingSummary(
+  id: number,
+): Promise<BuildingSummary> {
+  const response = await api.get<BuildingSummary>(`/buildings/${id}/summary/`);
+  return response.data;
+}
+
 // ---- Building-scoped eligible crew (planned work) ---------------------
 //
 // GET /api/buildings/<id>/eligible-crew/ → the STAFF + BUILDING_MANAGER
@@ -291,6 +434,16 @@ export interface CustomerWritePayload {
   contact_email?: string;
   phone?: string;
   language?: string;
+  // Sprint 185 §1 — the billing address that lands on the invoice PDF.
+  // Empty strings clear a field; `has_billing_address` is read-only and
+  // is deliberately absent here.
+  address?: string;
+  postal_code?: string;
+  city?: string;
+  country?: string;
+  // Sprint 185 §3 — the relationship state. Descriptive only; it does
+  // NOT gate access, `is_active` still does.
+  lifecycle?: CustomerLifecycle;
   // Sprint 23B — assigned-staff contact-visibility flags. The
   // backend serializer accepts these on PATCH; the CustomerViewSet
   // permission gate is IsSuperAdminOrCompanyAdmin, so only
@@ -358,6 +511,87 @@ export async function deactivateCustomer(id: number): Promise<void> {
   await api.delete(`/customers/${id}/`);
 }
 
+// Sprint 153 §2.3 — deactivate many customers in ONE request. All-or-
+// nothing on the server: one unresolvable id rejects the whole batch
+// with zero writes, so there is no partial-success shape to handle here.
+export async function bulkDeactivateCustomers(
+  ids: number[],
+): Promise<{ deactivated: number }> {
+  const response = await api.post<{ deactivated: number }>(
+    "/customers/bulk-deactivate/",
+    { customers: ids },
+  );
+  return response.data;
+}
+
+// Sprint 153 §2.4 — the customer overview dashboard read. ONE call
+// instead of six list calls counted by array length.
+export async function getCustomerSummary(
+  id: number,
+): Promise<CustomerSummary> {
+  const response = await api.get<CustomerSummary>(`/customers/${id}/summary/`);
+  return response.data;
+}
+
+// ---- Companies: the Sprint 156 §1 detail reads ------------------------
+
+/** Sprint 157 §3 — deactivate many companies. All-or-nothing
+ *  server-side; SUPER_ADMIN only, because `Company` IS the tenant. */
+export async function bulkDeactivateCompanies(
+  ids: number[],
+): Promise<{ deactivated: number }> {
+  const response = await api.post<{ deactivated: number }>(
+    "/companies/bulk-deactivate/",
+    { companies: ids },
+  );
+  return response.data;
+}
+
+export async function getCompanySummary(id: number): Promise<CompanySummary> {
+  const response = await api.get<CompanySummary>(`/companies/${id}/summary/`);
+  return response.data;
+}
+
+/** Every one of these four is UnboundedPagination server-side, so the
+ *  response is `{count, results}` and one request is the whole list. The
+ *  UI still bounds each list — the page must not grow with a company
+ *  that has ninety buildings (CLAUDE.md §8). */
+export async function listCompanyAdminPeople(
+  id: number,
+): Promise<CompanyAdminPerson[]> {
+  const response = await api.get<{ results: CompanyAdminPerson[] }>(
+    `/companies/${id}/admins-detail/`,
+  );
+  return response.data.results ?? [];
+}
+
+export async function listCompanyEmployees(
+  id: number,
+): Promise<CompanyEmployee[]> {
+  const response = await api.get<{ results: CompanyEmployee[] }>(
+    `/companies/${id}/employees/`,
+  );
+  return response.data.results ?? [];
+}
+
+export async function listCompanyBuildings(
+  id: number,
+): Promise<CompanyBuildingRow[]> {
+  const response = await api.get<{ results: CompanyBuildingRow[] }>(
+    `/companies/${id}/buildings/`,
+  );
+  return response.data.results ?? [];
+}
+
+export async function listCompanyCustomers(
+  id: number,
+): Promise<CompanyCustomerRow[]> {
+  const response = await api.get<{ results: CompanyCustomerRow[] }>(
+    `/companies/${id}/customers/`,
+  );
+  return response.data.results ?? [];
+}
+
 export async function reactivateCustomer(id: number): Promise<CustomerAdmin> {
   const response = await api.post<CustomerAdmin>(`/customers/${id}/reactivate/`);
   return response.data;
@@ -367,6 +601,8 @@ export async function reactivateCustomer(id: number): Promise<CustomerAdmin> {
 
 export interface UserUpdatePayload {
   full_name?: string;
+  // Sprint 154 §I.1 — writable on the admin user endpoints.
+  phone?: string;
   language?: string;
   role?: Role;
   is_active?: boolean;
@@ -384,6 +620,31 @@ export async function listUsers(
     params: cleanParams(params),
   });
   return response.data;
+}
+
+/**
+ * Sprint 154 §G.2 — every user of one role, paged EXHAUSTIVELY.
+ *
+ * The building detail page's Add pickers need the full candidate set:
+ * a provider with sixty staff must not silently see the first page.
+ * Same loop shape as `listAllCustomers` / `listAllBuildings` (the
+ * Sprint 120/135 pattern) rather than loosening the endpoint's
+ * `pagination_class`, which is a contract with every other caller.
+ */
+export async function listAllUsersByRole(
+  role: string,
+): Promise<UserAdmin[]> {
+  const all: UserAdmin[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<UserAdmin>>("/users/", {
+      params: { role, is_active: "true", page_size: 200, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function getUser(id: number): Promise<UserAdminDetail> {
@@ -427,6 +688,10 @@ export async function reactivateUser(id: number): Promise<UserAdminDetail> {
 export interface ProviderEmployeeListParams {
   role?: Role;
   employment_type?: EmploymentType;
+  // Sprint 187B §2 — narrow to one provider company. Intersects with the
+  // caller's own scope server-side; a non-integer is a 400 with the
+  // stable code `company_invalid`.
+  company?: number;
 }
 
 export async function listProviderEmployees(
@@ -942,6 +1207,11 @@ export async function promoteCustomerContact(
 
 export interface StaffProfileUpdatePayload {
   phone?: string;
+  /** Sprint 180 §4 — the employer's own number for this worker, as it
+   *  appears on the payroll. Free text: every payroll numbers its people
+   *  differently. Blank is a legitimate value (the model is
+   *  `blank=True`), so clearing the box clears the number. */
+  personnel_number?: string;
   internal_note?: string;
   can_request_assignment?: boolean;
   is_active?: boolean;
@@ -1193,6 +1463,8 @@ export interface MySlot {
   ticket_no: string;
   ticket_title: string;
   ticket_status: string;
+  ticket_type: string;
+  ticket_customer_name: string | null;
   building_id: number;
   building_name: string;
   scheduled_start_at: string | null;
@@ -1319,12 +1591,22 @@ export async function removeTicketStaffAssignment(
 const _MY_SLOTS_PAGE_SIZE = 200;
 const _MY_SLOTS_MAX_PAGES = 25; // 25 * 200 = 5000 slots — far beyond any agenda.
 
-export async function getMySlots(): Promise<MySlot[]> {
+/** Sprint 170 §1 — `teamWeek` asks for every slot the actor may see
+ *  rather than only their own. The server admits it for a
+ *  provider-management role and ignores it otherwise, so passing it is
+ *  never a way to widen what a STAFF user gets. */
+export async function getMySlots(teamWeek = false): Promise<MySlot[]> {
   const results: MySlot[] = [];
   for (let page = 1; page <= _MY_SLOTS_MAX_PAGES; page += 1) {
     const response = await api.get<PaginatedResponse<MySlot>>(
       "/tickets/my-slots/",
-      { params: { page_size: _MY_SLOTS_PAGE_SIZE, page } },
+      {
+        params: {
+          page_size: _MY_SLOTS_PAGE_SIZE,
+          page,
+          ...(teamWeek ? { scope: "company" } : {}),
+        },
+      },
     );
     const data = response.data;
     results.push(...data.results);

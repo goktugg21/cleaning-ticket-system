@@ -18,6 +18,31 @@ class NotificationEventType(models.TextChoices):
     TICKET_SLOT_UNABLE = "TICKET_SLOT_UNABLE", "Staff slot unable to complete"
     PASSWORD_RESET = "PASSWORD_RESET", "Password reset"
     INVITATION_SENT = "INVITATION_SENT", "Invitation sent"
+    # Sprint 183 §3 — the nightly invoice run finished and created
+    # drafts. Sprint 182 wrote this value as a bare string constant in
+    # `invoicing/tasks.py` because that agent did not own this file: the
+    # rows persisted and the mails sent, but the value sat outside the
+    # enum, so `get_event_type_display()` returned the raw string and any
+    # label lookup showed "INVOICE_RUN_COMPLETED" instead of a name.
+    #
+    # Deliberately NOT in USER_MUTABLE_EVENT_TYPES: an operator who muted
+    # this would stop hearing that their month's invoices were drafted,
+    # and the drafts would then sit unsent. Like TICKET_SLOT_UNABLE it is
+    # operational follow-up that has to arrive.
+    INVOICE_RUN_COMPLETED = (
+        "INVOICE_RUN_COMPLETED",
+        "Invoice run completed",
+    )
+    # Sprint 185 §2 — an invoice was SENT and the document went out.
+    #
+    # Distinct from INVOICE_RUN_COMPLETED above, which says drafts were
+    # created and goes to the operator. This one carries the PDF and goes
+    # to the debtor's people, so "did they get it" is answered by its own
+    # log rows rather than inferred from a run notification.
+    #
+    # Like its sibling, deliberately NOT user-mutable: a recipient who
+    # muted this would stop receiving invoices and nobody would know.
+    INVOICE_SENT = ("INVOICE_SENT", "Invoice sent")
 
 
 class NotificationStatus(models.TextChoices):

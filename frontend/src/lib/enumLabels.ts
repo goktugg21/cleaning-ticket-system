@@ -172,6 +172,13 @@ export function ticketStatusLabelKey(status: TicketStatus | string): string {
       return "ticket_status.closed";
     case "REOPENED_BY_ADMIN":
       return "ticket_status.reopened_by_admin";
+    // Sprint 182 §2 gave the ninth status a case here but pointed it at
+    // the OLDER `common:status.*` block, reasoning that the string was
+    // already crisp so a twin would be drift. Sprint 183 §3 deletes that
+    // block, so the key moves into the one surviving namespace. Same
+    // string, same `t()`, one vocabulary — which is the whole point.
+    case "CONVERTED_TO_EXTRA_WORK":
+      return "ticket_status.converted_to_extra_work";
     default:
       return "ticket_status.fallback";
   }
@@ -207,6 +214,11 @@ export function ticketStatusTone(status: TicketStatus | string): StatusTone {
       return "closed";
     case "REOPENED_BY_ADMIN":
       return "reopened";
+    // Sprint 182 §2 — terminal, and NOT a success: the ticket's work
+    // never happened here. The closed (grey) tone rather than the
+    // approved (green) one, which would read as "finished well".
+    case "CONVERTED_TO_EXTRA_WORK":
+      return "closed";
     default:
       return "neutral";
   }

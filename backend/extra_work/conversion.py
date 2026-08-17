@@ -25,6 +25,7 @@ from rest_framework.exceptions import ErrorDetail
 
 from tickets.models import Ticket, TicketStatus, TicketStatusHistory
 
+from .label_validation import default_labels_for_customer
 from .classification import (
     ACTOR_PROVIDER,
     IntentValidationError,
@@ -52,6 +53,7 @@ def convert_ticket_to_extra_work(
     line_items_data: list,
     customer_visible_note: str = "",
     internal_note: str = "",
+    billed_to: str | None = None,
 ) -> Tuple[ExtraWorkRequest, List[Ticket]]:
     """Convert `ticket` into a new `ExtraWorkRequest`.
 
@@ -62,6 +64,19 @@ def convert_ticket_to_extra_work(
     service owns the intent validation, the EW + line-item creation, the
     routing decision, the optional instant spawn, and the source-ticket
     flip.
+
+    Sprint 182 §6 — `billed_to` defaults to None, meaning "follow the
+    customer's setting", which is the same default the model now
+    carries. It defaulted to BUILDING while the column was non-null;
+    leaving it that way after 0032 set the whole table to NULL would
+    have made CONVERTED requests the only rows in the system carrying a
+    billing target nobody chose, and that value would then override the
+    customer's own setting.
+
+    The keyword stays because this is still the seam where a converted
+    request's billing target would be chosen: the convert ENDPOINT and
+    its serializer live in `tickets/`, which this agent does not own, so
+    the control that would pass a real value is still not built.
 
     Returns `(extra_work_request, spawned_tickets)`. The spawned list is
     non-empty only on the INSTANT route (a single operational ticket);
@@ -98,7 +113,19 @@ def convert_ticket_to_extra_work(
             )
 
         # 3. Create the parent ExtraWorkRequest from the source ticket.
+        #
+        # Sprint 154 §I.7 — a converted request is labelled like any
+        # other. This path builds its row with `objects.create()` and
+        # never touches `ExtraWorkRequestCreateSerializer`, so a
+        # serializer-level rule could not reach it; stamping the
+        # customer's "Algemeen" pair here is what makes "every Extra Work
+        # has a Department and a Work Type" true on EVERY write path
+        # rather than only on the form's. Both callers resolve the pair
+        # through the one helper in `label_validation`.
         source_label = ticket.ticket_no or ticket.id
+        default_department, default_work_type = default_labels_for_customer(
+            ticket.customer
+        )
         ew = ExtraWorkRequest.objects.create(
             company=ticket.company,
             building=ticket.building,
@@ -108,11 +135,27 @@ def convert_ticket_to_extra_work(
             description=ticket.description,
             category=ExtraWorkCategory.OTHER,
             category_other_text=f"Converted from ticket {source_label}",
+            department=default_department,
+            work_type=default_work_type,
+            billed_to=billed_to,
             request_intent=request_intent,
             customer_visible_note=customer_visible_note,
             manager_note=internal_note,
             source_ticket=ticket,
             status=ExtraWorkStatus.REQUESTED,
+            # Sprint 184 §3 — the customer's wanted date survives.
+            #
+            # `Ticket.customer_wanted_date` and
+            # `ExtraWorkRequest.preferred_date` are the SAME thing under
+            # two names: the customer's wish, on a melding and on an
+            # extra work respectively. A date somebody typed that
+            # silently disappears the moment a provider converts their
+            # melding is worse than never having asked for it.
+            #
+            # NULL stays NULL: a melding with no wanted date makes an
+            # extra work with no preferred date, rather than inventing
+            # one out of the conversion day.
+            preferred_date=ticket.customer_wanted_date,
         )
 
         # 4. Create one ExtraWorkRequestItem per line, mirroring the

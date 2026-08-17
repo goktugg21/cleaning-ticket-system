@@ -36,6 +36,18 @@ interface ModuleSpec {
   key: "meldingen" | "extra_werk" | "documenten";
   icon: LucideIcon;
   titleKey: string;
+  /** Sprint 157 §5 — one line saying what this module lets the
+   *  customer's people DO.
+   *
+   *  The Documents card is `masterOnly`, so its toggle region renders
+   *  nothing and the whole card read "Documents / Module enabled" — a
+   *  title and a state, with no statement of what the module is. Its two
+   *  siblings at least had descriptive sub-toggles to infer from.
+   *
+   *  Every card carries the line, not just Documents: a description that
+   *  appears on one card and not the others reads as an exception rather
+   *  than as information. */
+  descriptionKey: string;
   toggles: ReadonlyArray<{ field: PolicyField; labelKey: string }>;
   // Sprint 126 — a single-key module (Documenten) is JUST a master toggle:
   // the master IS the one field, so the redundant sub-toggle row is hidden.
@@ -47,6 +59,7 @@ const MODULES: ReadonlyArray<ModuleSpec> = [
     key: "meldingen",
     icon: Ticket,
     titleKey: "customer_permissions.modules.meldingen.title",
+    descriptionKey: "customer_permissions.modules.meldingen.description",
     toggles: [
       {
         field: "customer_users_can_create_tickets",
@@ -62,6 +75,7 @@ const MODULES: ReadonlyArray<ModuleSpec> = [
     key: "extra_werk",
     icon: Wrench,
     titleKey: "customer_permissions.modules.extra_werk.title",
+    descriptionKey: "customer_permissions.modules.extra_werk.description",
     toggles: [
       {
         field: "customer_users_can_create_extra_work",
@@ -78,6 +92,7 @@ const MODULES: ReadonlyArray<ModuleSpec> = [
     key: "documenten",
     icon: FolderArchive,
     titleKey: "customer_permissions.modules.documenten.title",
+    descriptionKey: "customer_permissions.modules.documenten.description",
     masterOnly: true,
     toggles: [
       {
@@ -156,6 +171,9 @@ export function ModuleBundleCards({
                 />
               </label>
             </div>
+            <p className="module-bundle-description">
+              {t(module.descriptionKey)}
+            </p>
             <div className="module-bundle-toggles">
               {!module.masterOnly &&
                 module.toggles.map((toggle) => (

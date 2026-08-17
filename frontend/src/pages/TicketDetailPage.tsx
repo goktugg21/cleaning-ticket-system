@@ -27,6 +27,7 @@ import {
   listCustomerContacts,
   listStaffAssignmentRequests,
 } from "../api/admin";
+import { listWorkCategories, setTicketCategory } from "../api/tickets";
 import { getMessageRecipients } from "../api/notifications";
 import { downloadDocumentFromUrl } from "../api/staffCredentials";
 import { formatDateTime } from "../lib/intl";
@@ -47,6 +48,7 @@ import type {
   TicketMessageType,
   TicketStatus,
   TicketStatusChangePayload,
+  WorkCategory,
   TicketTimelineRow,
 } from "../api/types";
 import { getTicketAuditTimeline } from "../api/ticketTimeline";
@@ -70,6 +72,7 @@ import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
 import { useSLALabel } from "../utils/useSLALabel";
+import { ticketStatusLabelKey } from "../lib/enumLabels";
 
 // B7 four-tier note taxonomy — per-tier UI vocabulary. The bubble class
 // flags "private to provider" tiers ("internal") so existing CSS keeps
@@ -326,7 +329,8 @@ export function TicketDetailPage() {
 
   const tStatus = (status: TicketStatus | string | null): string => {
     if (!status) return t("status_default_created");
-    return t(`common:status.${status.toLowerCase()}`);
+    // Sprint 182 integration -- one vocabulary. See UnifiedTimeline.
+    return t(`common:${ticketStatusLabelKey(status)}`);
   };
 
   const priorityLabelLong = (priority: string): string => {
@@ -353,6 +357,12 @@ export function TicketDetailPage() {
   };
 
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
+  /** Sprint 185 E §1 — the company's own kinds of WORK, for the picker.
+   *  Loaded once; non-fatal on failure, like every other optional picker
+   *  here — a catalog that would not load must not stop somebody reading
+   *  the melding. */
+  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+  const [categoryBusy, setCategoryBusy] = useState(false);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   // Sprint 32 — unified audit timeline for provider-audit roles (SA / CA /
@@ -909,6 +919,48 @@ export function TicketDetailPage() {
     me?.role === "STAFF" &&
     ticket.status === "IN_PROGRESS" &&
     ticket.is_assigned_staff === true;
+
+  /** Sprint 185 E §1 — set or clear the melding's work category.
+   *
+   *  Its own endpoint (`PATCH /tickets/<id>/category/`) because the
+   *  ticket viewset carries no update mixin; every single-field ticket
+   *  edit in this system is an action of its own. The response is the
+   *  full detail payload, so the page re-renders from the server's
+   *  answer rather than from an optimistic guess. */
+  // Sprint 185 E §1 — the pickable categories, loaded once. Non-fatal:
+  // a catalog that would not load must not stop somebody reading the
+  // melding, and the row falls back to the stored name.
+  useEffect(() => {
+    if (!isProviderManagementRole(me?.role)) return;
+    let cancelled = false;
+    listWorkCategories()
+      .then((rows) => {
+        if (!cancelled) setWorkCategories(rows);
+      })
+      .catch(() => {
+        /* non-fatal: the melding still reads */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [me?.role]);
+
+  async function saveCategory(categoryId: number | null) {
+    if (!id) return;
+    setError("");
+    setCategoryBusy(true);
+    try {
+      const updated = await setTicketCategory(Number(id), categoryId);
+      setTicket(updated);
+      // A category change writes an AuditLog row and no status history,
+      // so the timeline needs the same nudge assignment gives it.
+      setAuditReloadNonce((n) => n + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
 
   async function submitAssignment(event: FormEvent) {
     event.preventDefault();
@@ -1873,11 +1925,20 @@ export function TicketDetailPage() {
                         {formatDate(entry.created_at)}
                       </div>
                       <div className="timeline-text">
+                        {/* Sprint 180 §1 — a status-history row with no
+                            `changed_by` is a SYSTEM transition (today,
+                            the customer-approval auto-close). Falling
+                            through to the generic "unassigned" label
+                            would read as "Unassigned closed the
+                            ticket": it names nobody and still implies
+                            somebody. */}
                         <b>
-                          {humanName(
-                            entry.changed_by_email,
-                            t("unassigned"),
-                          )}
+                          {entry.changed_by_email
+                            ? humanName(
+                                entry.changed_by_email,
+                                t("unassigned"),
+                              )
+                            : t("common:audit_logs.system_actor")}
                         </b>
                         {entry.old_status ? (
                           <>
@@ -2601,6 +2662,55 @@ export function TicketDetailPage() {
                   <span className="detail-kv-label">{t("details_category")}</span>
                   <span className="detail-kv-val">{ticket.type}</span>
                 </div>
+                {/* Sprint 185 E §1 — the kind of WORK, beside the kind of
+                    MESSAGE above it. The label above says "category" and
+                    holds `ticket.type`, which is the confusion this item
+                    exists to end; that key is in the `ticket_detail`
+                    bundle and is not this batch's to rename, so the new
+                    row states what it is in its own words instead.
+
+                    Editable in place for provider operators — the
+                    dedicated action endpoint, since the ticket viewset
+                    has no PATCH — and read-only for everyone else. */}
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("common:work_categories.field_label")}
+                  </span>
+                  <span className="detail-kv-val">
+                    {isProviderManagementRole(me?.role) ? (
+                      <select
+                        className="field-select"
+                        value={ticket.category ?? ""}
+                        disabled={categoryBusy}
+                        data-testid="ticket-detail-category"
+                        onChange={(event) => {
+                          const raw = event.target.value;
+                          void saveCategory(raw === "" ? null : Number(raw));
+                        }}
+                      >
+                        <option value="">
+                          {t("common:work_categories.none")}
+                        </option>
+                        {/* An ARCHIVED category stays offerable when the
+                            melding already carries it: otherwise opening
+                            an old melding and touching anything would
+                            silently retag it. */}
+                        {workCategories
+                          .filter(
+                            (row) =>
+                              row.is_active || row.id === ticket.category,
+                          )
+                          .map((row) => (
+                            <option key={row.id} value={row.id}>
+                              {row.name}
+                            </option>
+                          ))}
+                      </select>
+                    ) : (
+                      ticket.category_name || "—"
+                    )}
+                  </span>
+                </div>
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">{t("details_created_by")}</span>
                   <span className="detail-kv-val">
@@ -2840,7 +2950,7 @@ export function TicketDetailPage() {
                 ? t("card_workflow_title_staff_complete")
                 : t("card_workflow_title")
             }
-            meta={t(`common:status.${ticket.status.toLowerCase()}`)}
+            meta={t(`common:${ticketStatusLabelKey(ticket.status)}`)}
             defaultOpen
             testId="side-card-workflow"
           >
@@ -3414,6 +3524,10 @@ export function TicketDetailPage() {
           // offer that customer's price folders beside the company's
           // categories without asking for anything.
           customerId={ticket.customer}
+          // Sprint 187 §6b — and its provider company, which scopes the
+          // service + category pickers to the catalog this ticket's
+          // customer can actually be charged from.
+          companyId={ticket.company}
           onClose={() => setConvertOpen(false)}
           onConverted={(extraWorkRequestId) => {
             setConvertOpen(false);

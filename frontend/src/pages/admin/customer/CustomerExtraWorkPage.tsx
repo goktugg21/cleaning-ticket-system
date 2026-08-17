@@ -1,130 +1,63 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
-import { FileText, Sparkles } from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 
-import { getApiError } from "../../../api/client";
 import { getCustomer } from "../../../api/admin";
-import { listAllExtraWork } from "../../../api/extraWork";
-import type {
-  CustomerAdmin,
-  ExtraWorkCategory,
-  ExtraWorkRequestList,
-} from "../../../api/types";
-import { ClickableRow } from "../../../components/ClickableRow";
-import { EmptyState } from "../../../components/EmptyState";
-import { RouteBadge } from "../../../components/RouteBadge";
-import { StatusBadge } from "../../../components/StatusBadge";
-import { formatDate, formatMoney } from "../../../lib/intl";
-
+import { getApiError } from "../../../api/client";
+import { ExtraWorkList } from "../../ExtraWorkListPage";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
- * Sprint 31 — Customer Extra Work tab.
+ * Sprint 169 §8 — one customer's Extra Work, using THE extra-work list.
  *
- * Mirrors the existing customer-scoped sub-page family (Overview /
- * Buildings / Users / Contacts / Settings) and consumes the
- * backend-supplied `GET /api/extra-work/?customer=<id>` filter. Scope
- * is enforced server-side by `extra_work.scoping.scope_extra_work_for`
- * BEFORE the filterset narrows, so the response respects the caller's
- * scope regardless of the query-param value. View-first per spec §3 —
- * the rows are a list, not an editor; each row's title links to the
- * existing `/extra-work/<id>` detail page where the read/edit surface
- * already lives.
+ * This file used to be a 296-line re-implementation of a 1202-line
+ * page: a read-only table with no checkbox column, no
+ * `MultiSelectToolbar`, no `useEditMode`, no bulk assignment and no
+ * bulk status action. Everything Sprints 158-164 built on the
+ * standalone list was missing here, because the two were independently
+ * maintained copies of the same list.
+ *
+ * The owner's rule, and it is a good one: a list must behave the same
+ * whether you reach it from the sidebar or from inside a customer. So
+ * this page is now a header plus the real list with its customer fixed
+ * — not a copy of the features, which would drift again.
+ *
+ * Extra Work is deliberately NOT one of the pages that redirects to the
+ * main list with a filter applied. That option is on the table for
+ * Buildings and Users, where the customer-scoped view really is just a
+ * filtered look. Extra Work is where the daily work happens and has to
+ * carry its full function in place, inside the customer.
  */
-const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
-  DEEP_CLEANING: "category.deep_cleaning",
-  WINDOW_CLEANING: "category.window_cleaning",
-  FLOOR_MAINTENANCE: "category.floor_maintenance",
-  SANITARY_SERVICE: "category.sanitary_service",
-  WASTE_REMOVAL: "category.waste_removal",
-  FURNITURE_MOVING: "category.furniture_moving",
-  EVENT_CLEANING: "category.event_cleaning",
-  EMERGENCY_CLEANING: "category.emergency_cleaning",
-  OTHER: "category.other",
-};
-
-type EwChip = "all" | "quote_requests";
-
 export function CustomerExtraWorkPage() {
-  const { id } = useParams();
-  const { t } = useTranslation(["common", "extra_work"]);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { id: customerId } = useParams<{ id: string }>();
+  const id = Number(customerId);
 
-  // IA 2026-06-25 — the separate Quote-requests tab merged into this
-  // page (one model, sliced by request_intent). Chip state rides in
-  // ?filter= so the retired /quote-requests route redirects here with
-  // the chip pre-applied.
-  const chip: EwChip =
-    searchParams.get("filter") === "quote_requests" ? "quote_requests" : "all";
-  const setChip = (next: EwChip) => {
-    setSearchParams(next === "all" ? {} : { filter: next }, { replace: true });
-  };
-  const quoteOnly = chip === "quote_requests";
-  const v = quoteOnly ? "quote_requests" : "extra_work"; // i18n segment
-  const tv = quoteOnly ? "quote-requests" : "extra-work"; // testid segment
-
-  const numericId = useMemo(() => {
-    if (!id) return null;
-    const parsed = Number(id);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  }, [id]);
-
-  const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
-  const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!Number.isFinite(id)) return;
     let cancelled = false;
-    if (numericId === null) {
-      queueMicrotask(() => {
-        if (!cancelled) setError(t("bm_customer_detail.invalid_id"));
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
-    setError("");
-    // Two parallel fetches: the customer (for the header name +
-    // active-status pill) and the scoped Extra Work list. The list
-    // is filtered server-side via `?customer=<id>`; the
-    // scope-respecting `get_queryset` runs before the filter so a
-    // caller without access to this customer gets zero rows rather
-    // than a 403 — same defence-in-depth shape the ticket list uses.
-    Promise.all([
-      getCustomer(numericId),
-      listAllExtraWork({
-        customer: numericId,
-        ...(quoteOnly ? { request_intent: "REQUEST_QUOTE" } : {}),
-      }),
-    ])
-      .then(([customerData, ewRows]) => {
+    getCustomer(id)
+      .then((customer) => {
         if (cancelled) return;
-        setCustomer(customerData);
-        setRows(ewRows);
+        setCustomerName(customer.name);
+        setIsActive(customer.is_active);
+        setError("");
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [numericId, quoteOnly, t]);
+  }, [id]);
 
-  const customerName = customer?.name ?? "";
-  const isActive = customer?.is_active ?? true;
+  if (!Number.isFinite(id)) return null;
 
   return (
     <div data-testid="customer-extra-work-page">
-      <CustomerSubPageHeader
-        customerName={customerName}
-        isActive={isActive}
-      />
+      <CustomerSubPageHeader customerName={customerName} isActive={isActive} />
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
@@ -132,122 +65,10 @@ export function CustomerExtraWorkPage() {
         </div>
       )}
 
-      {loading && !customer ? (
-        <div className="loading-bar">
-          <div className="loading-bar-fill" />
-        </div>
-      ) : customer ? (
-        <>
-          <p
-            className="section-explainer"
-            data-testid={`customer-${tv}-explainer`}
-          >
-            {t(`customer_view.${v}.explainer`, {
-              customer: customerName,
-            })}
-          </p>
-
-          {/* IA — the merged filter strip (Alle / Offerteaanvragen). */}
-          <div
-            className="work-strip-toggle"
-            style={{ marginBottom: 14 }}
-            data-testid="customer-extra-work-chips"
-          >
-            {(["all", "quote_requests"] as EwChip[]).map((c) => (
-              <button
-                key={c}
-                type="button"
-                className="btn btn-secondary btn-sm"
-                aria-pressed={chip === c}
-                onClick={() => setChip(c)}
-                data-testid={`customer-extra-work-chip-${c}`}
-              >
-                {t(`customer_view.chip_${c === "all" ? "all" : "quote_requests"}`)}
-              </button>
-            ))}
-          </div>
-
-          {rows.length === 0 ? (
-            <EmptyState
-              icon={quoteOnly ? FileText : Sparkles}
-              title={t(`customer_view.${v}.empty_title`)}
-              description={t(`customer_view.${v}.empty_desc`)}
-              testId={`customer-${tv}-empty`}
-            />
-          ) : (
-            <section
-              className="card"
-              data-testid={`customer-${tv}-section`}
-              style={{ padding: "20px 22px", overflow: "hidden" }}
-            >
-              <div className="section-head" style={{ marginBottom: 12 }}>
-                <div>
-                  <div className="section-head-title">
-                    {t(`customer_view.${v}.list_title`)}
-                  </div>
-                  <div className="section-head-sub">
-                    {t(`customer_view.${v}.list_subtitle`, {
-                      count: rows.length,
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="table-wrap">
-                <table
-                  className="data-table"
-                  data-testid={`customer-${tv}-table`}
-                >
-                  <thead>
-                    <tr>
-                      <th>{t("extra_work:list.column_title")}</th>
-                      <th>{t("extra_work:list.column_status")}</th>
-                      <th>{t("extra_work:list.column_route")}</th>
-                      <th>{t("extra_work:list.column_category")}</th>
-                      <th>{t("extra_work:list.column_building")}</th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("extra_work:list.column_total")}
-                      </th>
-                      <th>{t("extra_work:list.column_requested")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => (
-                      <ClickableRow
-                        key={row.id}
-                        to={`/extra-work/${row.id}`}
-                        testId={`customer-${tv}-row`}
-                      >
-                        <td className="td-subject">
-                          <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
-                        </td>
-                        <td>
-                          <StatusBadge
-                            status={{ kind: "extra-work", value: row.status }}
-                          />
-                        </td>
-                        <td>
-                          <RouteBadge value={row.routing_decision} />
-                        </td>
-                        <td>
-                          {t(
-                            `extra_work:${CATEGORY_I18N_KEY[row.category] ?? row.category}`,
-                          )}
-                        </td>
-                        <td>{row.building_name}</td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMoney(row.total_amount)}
-                        </td>
-                        <td>{formatDate(row.requested_at)}</td>
-                      </ClickableRow>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-        </>
-      ) : null}
+      {/* Keyed by customer id: navigating between two customers remounts
+          the list rather than syncing a changed prop into its state
+          through an effect, which is the pattern CLAUDE.md bans. */}
+      <ExtraWorkList key={id} customerId={id} hideHeader />
     </div>
   );
 }

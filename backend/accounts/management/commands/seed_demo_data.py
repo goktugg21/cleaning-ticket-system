@@ -77,6 +77,8 @@ tickets that may have been created during a manual walkthrough.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
@@ -321,6 +323,11 @@ COMPANIES = [
                 "type": TicketType.REPORT,
                 "priority": TicketPriority.HIGH,
                 "target_status": TicketStatus.WAITING_CUSTOMER_APPROVAL,
+                # Sprint 180 §1 — the work-the-customer-never-answered
+                # fixture. Backdates `sent_for_approval_at` so the
+                # dashboard's "approval overdue" attention row has
+                # something in it on a fresh seed.
+                "stalled_approval_days": 21,
             },
             {
                 "title": f"{DEMO_TICKET_PREFIX} Closed kitchen tap",
@@ -470,6 +477,13 @@ class Command(BaseCommand):
         # and the Facturen page all have content on a fresh seed.
         # Idempotent (marker titles / marker message bodies).
         self._seed_owner_batch2_enrichment(User, super_admin)
+
+        # Sprint 179A §6 — the Work Plan's own fixture: dated ticket
+        # slots and assigned extra work across several days, states and
+        # buildings, so every count chip has a non-zero number and the
+        # overdue list has entries. Idempotent, and re-stamps its dates
+        # relative to today on every run (see the helper's docstring).
+        self._seed_work_plan_demo(User, super_admin)
 
         self._print_summary(prune_summary=prune_summary)
 
@@ -644,6 +658,25 @@ class Command(BaseCommand):
                 status=TicketStatus.OPEN,
             )
             self._walk_to_status(ticket, tspec["target_status"], super_admin)
+
+            # Sprint 180 §1 — a fixture for the "customer never
+            # answered" case. Without one, the dashboard's new
+            # "approval overdue" attention row reads 0 on every fresh
+            # seed and there is nothing to click through: freshly
+            # walked tickets were sent for approval seconds ago.
+            #
+            # Backdating `sent_for_approval_at` directly (rather than
+            # walking through a fake clock) is deliberate — it is the
+            # one column the age filter reads, and the walk that set it
+            # has already written its real history row.
+            stalled_days = tspec.get("stalled_approval_days")
+            if stalled_days and str(ticket.status) == str(
+                TicketStatus.WAITING_CUSTOMER_APPROVAL
+            ):
+                ticket.sent_for_approval_at = timezone.now() - timedelta(
+                    days=stalled_days
+                )
+                ticket.save(update_fields=["sent_for_approval_at"])
 
         # Sprint 25C audit-followup — make the demo seed actually
         # exercise the staff workflow features Sprints 23B and 25A
@@ -906,16 +939,41 @@ class Command(BaseCommand):
         apply_transition so timestamps and TicketStatusHistory rows
         populate correctly. Uses the super admin actor — they can
         perform any transition without the per-role scope checks.
+
+        Sprint 180 §1 — the customer-approval leg
+        (WAITING_CUSTOMER_APPROVAL -> APPROVED) auto-closes now, which
+        breaks two assumptions this walk used to make: the ticket can
+        overshoot the hop it was asked for, and the old unconditional
+        CLOSED hop would then re-drive an already-CLOSED ticket and
+        raise `no_op_transition`, aborting the entire seed. So the path
+        is chosen per target instead of being one list with an early
+        return.
         """
-        if target_status == TicketStatus.OPEN:
+        if str(target_status) == str(TicketStatus.OPEN):
             return
-        path = [
-            TicketStatus.IN_PROGRESS,
-            TicketStatus.WAITING_CUSTOMER_APPROVAL,
-            TicketStatus.APPROVED,
-            TicketStatus.CLOSED,
-        ]
+
+        if str(target_status) == str(TicketStatus.APPROVED):
+            # A fixture parked on APPROVED is, after Sprint 180, by
+            # definition one that NO customer approved — every customer
+            # approval closes. The super admin's cross-status privilege
+            # produces exactly that: an administrative APPROVED with no
+            # customer decision behind it, which is a real state the
+            # auto-close deliberately leaves alone (see
+            # `tickets.auto_close.should_auto_close`).
+            path = [TicketStatus.IN_PROGRESS, TicketStatus.APPROVED]
+        else:
+            path = [
+                TicketStatus.IN_PROGRESS,
+                TicketStatus.WAITING_CUSTOMER_APPROVAL,
+                TicketStatus.APPROVED,
+                TicketStatus.CLOSED,
+            ]
+
         for stop in path:
+            # The APPROVED hop auto-closes, so the ticket may already BE
+            # the next hop; re-driving it would raise `no_op_transition`.
+            if str(ticket.status) == str(stop):
+                continue
             # Sprint 27F-B1 — provider-driven customer-decision transitions
             # (WAITING_CUSTOMER_APPROVAL → APPROVED/REJECTED) are now coerced
             # to is_override=True with a mandatory reason. The seed walks
@@ -929,7 +987,11 @@ class Command(BaseCommand):
                 note=f"seed_demo_data → {stop}",
                 override_reason="seed_demo_data fixture walk",
             )
-            if str(stop) == str(target_status):
+            # Compare against the ticket's ACTUAL status, not against the
+            # hop we asked for: Sprint 180's auto-close means the APPROVED
+            # hop can land on CLOSED, which is the target for every
+            # `target_status=CLOSED` spec in this file.
+            if str(ticket.status) == str(target_status):
                 return
 
     # -----------------------------------------------------------------
@@ -1686,6 +1748,14 @@ class Command(BaseCommand):
             ew.recompute_final_amounts()
             # Completed: drive the spawned ticket to CLOSED so the EW
             # is EARNED (the invoice run's own predicate).
+            #
+            # Sprint 180 §1 — the APPROVED hop auto-closes, so the
+            # CLOSED hop below usually finds the ticket already there;
+            # driving it again would raise `no_op_transition` and abort
+            # the seed. The hop is kept (rather than deleted) so this
+            # fixture still reaches CLOSED if the auto-close is ever
+            # narrowed — it is the CLOSED status, not the route to it,
+            # that `extra_work.billing.is_earned` cares about.
             for spawned_ticket in spawned:
                 t = spawned_ticket
                 for stop in (
@@ -1694,6 +1764,8 @@ class Command(BaseCommand):
                     TicketStatus.APPROVED,
                     TicketStatus.CLOSED,
                 ):
+                    if str(t.status) == str(stop):
+                        continue
                     t = ticket_apply(
                         t,
                         super_admin,
@@ -1724,6 +1796,23 @@ class Command(BaseCommand):
             and is_earned(ticket_map.get(e.id))
             and billing_month(e, ticket_map.get(e.id)) == oldest_key
         ]
+        # Sprint 184 §4 — WHY these rows carry no invoice, and why that is
+        # not the defect it looks like.
+        #
+        # An audit of crmtest found Extra Works flagged invoiced with no
+        # invoice line and reported them as stranded data. They are
+        # written HERE: this block sets the DENORMALISED flag directly so
+        # a demo database opens with one month already billed, and it
+        # never creates an `Invoice`. In the running product the flag is
+        # a consequence of an invoice line existing, so this is a state
+        # the application itself cannot reach.
+        #
+        # Left as it is, deliberately. The alternative — driving the real
+        # invoice generator from the seeder — would push demo data
+        # through the gapless per-company-per-year numbering sequence,
+        # which is a production-shaped side effect for a demo
+        # convenience. Anyone auditing such a row should start here and
+        # not in `invoicing/`.
         if to_mark:
             now = timezone.now()
             for e in to_mark:
@@ -1800,6 +1889,344 @@ class Command(BaseCommand):
         self._owner_batch2_summary = summary
 
     # -----------------------------------------------------------------
+    # Sprint 179A §6 — the Work Plan fixture
+    # -----------------------------------------------------------------
+    def _seed_work_plan_demo(self, User, super_admin):
+        """
+        Dated ticket slots and assigned extra work for Ahmet, spread
+        across the week and across every state the Work Plan chips
+        count, so a fresh seed shows a populated week rather than an
+        empty one that looks broken.
+
+        **What "idempotent" means here, precisely.** Running the command
+        twice must not double the data — every row is looked up by a
+        stable marker title first and created only when missing. But the
+        dates ARE re-stamped on every run, relative to today. That is
+        deliberate and is the difference between an idempotent seeder
+        and a frozen one: a fixture pinned to the day it was first
+        seeded drifts out of the current week within days, and then the
+        demo it exists for shows an empty Monday-to-Sunday. Re-stamping
+        keeps the same rows in the right week; it creates nothing.
+
+        **The shapes seeded**, one per branch of the §12B rule:
+
+          * planned this week (three days, three buildings),
+          * one started, planned a month out    -> "started early",
+          * one past its date and unfinished    -> "overdue",
+          * one completed and one unable        -> the closed chips,
+          * one with no date at all             -> the undated note,
+          * extra work planned this week, extra work planned next month
+            (-> "upcoming"), extra work IN_PROGRESS planned later, one
+            completed, and — the owner's acceptance test —
+            **an extra work assigned to Ahmet, past its deadline**,
+            which his Work Plan must show as overdue.
+
+        Assignments are written as real `objects.create()` rows so the
+        audit receivers fire, exactly as the bulk-assign endpoint does.
+        """
+        from datetime import datetime, time, timedelta
+
+        from buildings.models import BuildingStaffVisibility
+        from extra_work.models import (
+            ExtraWorkAssignment,
+            ExtraWorkAssignmentRole,
+            ExtraWorkRequest,
+            ExtraWorkStatus,
+        )
+        from tickets.models import StaffAssignmentSlotStatus
+
+        marker = f"{DEMO_TICKET_PREFIX} Werkplan —"
+        summary = {"tickets": 0, "slots": 0, "extra_work": 0, "assignments": 0}
+
+        company = Company.objects.filter(slug="osius-demo").first()
+        customer = (
+            Customer.objects.filter(company=company, name="B Amsterdam").first()
+            if company
+            else None
+        )
+        buildings = {
+            name: Building.objects.filter(company=company, name=name).first()
+            for name in ("B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam")
+        }
+        ahmet = User.objects.filter(
+            email="ahmet-staff-osius@b-amsterdam.demo", role=UserRole.STAFF
+        ).first()
+        ramazan = User.objects.filter(
+            email="ramazan-admin-osius@b-amsterdam.demo"
+        ).first()
+        if not all([company, customer, ahmet, *buildings.values()]):
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping the Work Plan fixture — Osius "
+                "demo fixtures incomplete."
+            ))
+            return
+
+        today = timezone.localdate()
+        monday = today - timedelta(days=today.weekday())
+
+        def at(day, hour):
+            """An aware datetime, or None for a slot nobody has dated."""
+            if day is None:
+                return None
+            return timezone.make_aware(
+                datetime.combine(day, time(hour, 0))
+            )
+
+        # (title, building, ticket status, start day, end day, slot status)
+        slot_specs = [
+            (
+                f"{marker} trappenhuis dweilen",
+                "B1 Amsterdam",
+                TicketStatus.OPEN,
+                monday,
+                monday,
+                StaffAssignmentSlotStatus.ASSIGNED,
+            ),
+            (
+                f"{marker} glasbewassing voorgevel",
+                "B2 Amsterdam",
+                TicketStatus.IN_PROGRESS,
+                today,
+                today,
+                StaffAssignmentSlotStatus.ASSIGNED,
+            ),
+            (
+                f"{marker} vloeronderhoud kantoorlaag",
+                "B3 Amsterdam",
+                TicketStatus.OPEN,
+                monday + timedelta(days=3),
+                monday + timedelta(days=3),
+                StaffAssignmentSlotStatus.ASSIGNED,
+            ),
+            (
+                f"{marker} kelderberging opruimen",
+                "B1 Amsterdam",
+                TicketStatus.OPEN,
+                today - timedelta(days=4),
+                today - timedelta(days=4),
+                StaffAssignmentSlotStatus.ASSIGNED,
+            ),
+            (
+                f"{marker} entree gereinigd",
+                "B2 Amsterdam",
+                TicketStatus.OPEN,
+                today - timedelta(days=1),
+                today - timedelta(days=1),
+                StaffAssignmentSlotStatus.COMPLETED,
+            ),
+            (
+                f"{marker} dakgoot niet bereikbaar",
+                "B3 Amsterdam",
+                TicketStatus.OPEN,
+                today - timedelta(days=2),
+                today - timedelta(days=2),
+                StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE,
+            ),
+            (
+                f"{marker} najaarsronde alvast begonnen",
+                "B1 Amsterdam",
+                TicketStatus.IN_PROGRESS,
+                today + timedelta(days=24),
+                today + timedelta(days=25),
+                StaffAssignmentSlotStatus.ASSIGNED,
+            ),
+            (
+                f"{marker} nog niet ingepland",
+                "B2 Amsterdam",
+                TicketStatus.OPEN,
+                None,
+                None,
+                StaffAssignmentSlotStatus.ASSIGNED,
+            ),
+        ]
+
+        for title, bname, tstatus, start, end, slot_status in slot_specs:
+            building = buildings[bname]
+            ticket = Ticket.objects.filter(
+                customer=customer, title=title
+            ).first()
+            if ticket is None:
+                ticket = Ticket.objects.create(
+                    company=company,
+                    building=building,
+                    customer=customer,
+                    created_by=super_admin,
+                    title=title,
+                    description=(
+                        "Seeded by seed_demo_data (Sprint 179A) for the "
+                        "Work Plan week view."
+                    ),
+                    type=TicketType.REQUEST,
+                    priority=TicketPriority.NORMAL,
+                    status=tstatus,
+                )
+                summary["tickets"] += 1
+            elif ticket.status != tstatus:
+                # Set directly rather than through the state machine:
+                # this is fixture construction, and walking a demo row
+                # through transitions would write a history that says an
+                # operator did something they did not.
+                ticket.status = tstatus
+                ticket.save(update_fields=["status", "updated_at"])
+
+            slot = TicketStaffAssignment.objects.filter(
+                ticket=ticket, user=ahmet
+            ).first()
+            if slot is None:
+                TicketStaffAssignment.objects.create(
+                    ticket=ticket,
+                    user=ahmet,
+                    assigned_by=super_admin,
+                    scheduled_start_at=at(start, 9),
+                    scheduled_end_at=at(end, 12),
+                    time_window_label="Ochtend" if start else "",
+                    slot_status=slot_status,
+                    completion_note=(
+                        "Klaar, geen bijzonderheden."
+                        if slot_status == StaffAssignmentSlotStatus.COMPLETED
+                        else ""
+                    ),
+                    unable_to_complete_reason=(
+                        "Geen ladder aanwezig op locatie."
+                        if slot_status
+                        == StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE
+                        else ""
+                    ),
+                )
+                summary["slots"] += 1
+            else:
+                slot.scheduled_start_at = at(start, 9)
+                slot.scheduled_end_at = at(end, 12)
+                slot.slot_status = slot_status
+                slot.save(
+                    update_fields=[
+                        "scheduled_start_at",
+                        "scheduled_end_at",
+                        "slot_status",
+                    ]
+                )
+
+        # (title, building, EW status, preferred, planned_end, deadline)
+        ew_specs = [
+            (
+                f"{marker} EW kozijnen schilderen",
+                "B1 Amsterdam",
+                ExtraWorkStatus.CUSTOMER_APPROVED,
+                monday + timedelta(days=1),
+                monday + timedelta(days=2),
+                monday + timedelta(days=4),
+            ),
+            (
+                # THE acceptance test: assigned to Ahmet, past its
+                # deadline, and therefore overdue in Ahmet's Work Plan.
+                f"{marker} EW gevelreiniging (te laat)",
+                "B2 Amsterdam",
+                ExtraWorkStatus.CUSTOMER_APPROVED,
+                today - timedelta(days=12),
+                None,
+                today - timedelta(days=3),
+            ),
+            (
+                f"{marker} EW tapijtreiniging (al begonnen)",
+                "B3 Amsterdam",
+                ExtraWorkStatus.IN_PROGRESS,
+                today + timedelta(days=21),
+                None,
+                today + timedelta(days=28),
+            ),
+            (
+                f"{marker} EW voorjaarsronde volgende maand",
+                "B1 Amsterdam",
+                ExtraWorkStatus.CUSTOMER_APPROVED,
+                today + timedelta(days=30),
+                today + timedelta(days=31),
+                today + timedelta(days=35),
+            ),
+            (
+                f"{marker} EW ramen binnenzijde (afgerond)",
+                "B2 Amsterdam",
+                ExtraWorkStatus.COMPLETED,
+                today - timedelta(days=2),
+                None,
+                today - timedelta(days=1),
+            ),
+        ]
+
+        for title, bname, ew_status, preferred, planned_end, deadline in ew_specs:
+            request = ExtraWorkRequest.objects.filter(
+                customer=customer, title=title
+            ).first()
+            if request is None:
+                request = ExtraWorkRequest.objects.create(
+                    company=company,
+                    building=buildings[bname],
+                    customer=customer,
+                    created_by=super_admin,
+                    title=title,
+                    description=(
+                        "Seeded by seed_demo_data (Sprint 179A) for the "
+                        "Work Plan week view."
+                    ),
+                    status=ew_status,
+                    preferred_date=preferred,
+                    planned_end_date=planned_end,
+                    deadline=deadline,
+                )
+                summary["extra_work"] += 1
+            else:
+                request.status = ew_status
+                request.preferred_date = preferred
+                request.planned_end_date = planned_end
+                request.deadline = deadline
+                request.save(
+                    update_fields=[
+                        "status",
+                        "preferred_date",
+                        "planned_end_date",
+                        "deadline",
+                        "updated_at",
+                    ]
+                )
+
+            # A WORKER must hold BuildingStaffVisibility on the request's
+            # building — the same precondition the assign endpoint
+            # enforces. The per-company staff seed already grants Ahmet
+            # all three, but a demo DB predating that would silently
+            # produce an assignment the real endpoint would refuse.
+            BuildingStaffVisibility.objects.get_or_create(
+                user=ahmet,
+                building=buildings[bname],
+                defaults={"can_request_assignment": True},
+            )
+            if not ExtraWorkAssignment.objects.filter(
+                extra_work_request=request,
+                user=ahmet,
+                role=ExtraWorkAssignmentRole.WORKER,
+            ).exists():
+                ExtraWorkAssignment.objects.create(
+                    extra_work_request=request,
+                    user=ahmet,
+                    role=ExtraWorkAssignmentRole.WORKER,
+                    assigned_by=super_admin,
+                )
+                summary["assignments"] += 1
+            # One responsible manager, so the team week shows both hats.
+            if ramazan is not None and not ExtraWorkAssignment.objects.filter(
+                extra_work_request=request,
+                user=ramazan,
+                role=ExtraWorkAssignmentRole.MANAGER,
+            ).exists():
+                ExtraWorkAssignment.objects.create(
+                    extra_work_request=request,
+                    user=ramazan,
+                    role=ExtraWorkAssignmentRole.MANAGER,
+                    assigned_by=super_admin,
+                )
+                summary["assignments"] += 1
+
+        self._work_plan_summary = summary
+
+    # -----------------------------------------------------------------
     # Output
     # -----------------------------------------------------------------
     def _print_summary(self, *, prune_summary=None):
@@ -1832,6 +2259,18 @@ class Command(BaseCommand):
                     f"  already present (skipped): {len(batch2['skipped'])} "
                     "marker rows."
                 )
+        work_plan = getattr(self, "_work_plan_summary", None)
+        if work_plan:
+            out("")
+            out(
+                "Work Plan fixture (Sprint 179A): "
+                f"{work_plan['tickets']} tickets, "
+                f"{work_plan['slots']} dated slots, "
+                f"{work_plan['extra_work']} extra-work requests, "
+                f"{work_plan['assignments']} people assigned. "
+                "Zeroes on a re-run mean the rows were already there — "
+                "their dates are re-stamped relative to today either way."
+            )
         demo_ew = getattr(self, "_demo_extra_work_summary", None)
         if demo_ew:
             out("")

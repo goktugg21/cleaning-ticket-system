@@ -8,11 +8,13 @@ shape based on `context["request"].user.role`.
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 from rest_framework import serializers
 
 from accounts.models import UserRole
+from accounts.permissions import is_customer_side
 from buildings.models import Building
 from companies.models import Company
 from customers.models import (
@@ -39,6 +41,7 @@ from .classification import (
 )
 from .models import (
     CustomerCustomPrice,
+    ExtraWorkBilledTo,
     ExtraWorkLinePriceSource,
     ExtraWorkPricingLineItem,
     ExtraWorkPricingUnitType,
@@ -55,12 +58,22 @@ from .models import (
     Service,
 )
 from .label_validation import (
+    default_labels_for_customer,
     issued_invoice_locking_labels,
     validate_labels_for_customer,
 )
 from .pricing import resolve_price
 from .proposal_state_machine import allowed_next_proposal_statuses
 from .state_machine import allowed_next_statuses
+
+
+logger = logging.getLogger(__name__)
+
+
+# Sprint 176 §3 — one error code for "a customer tried to set a deadline",
+# shared by the create serializer and the dates endpoint so the frontend has
+# a single string to map to a localized message.
+ERR_DEADLINE_PROVIDER_ONLY = "deadline_provider_only"
 
 
 def _is_customer(user) -> bool:
@@ -619,9 +632,99 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
+# Sprint 180 §1/§2 — the operational-ticket link, shared by the list and
+# the detail serializer.
+# ---------------------------------------------------------------------------
+def _spawned_tickets_for(obj):
+    """The operational tickets born from this Extra Work, lowest id first.
+
+    Resolves through the CANONICAL FK (`Ticket.extra_work_request`) and
+    nothing else — the same definition `extra_work.billing.
+    build_ticket_map` and `reports.dimensions` use to decide what is
+    earned and what may be invoiced. `tickets.filters` unions two more
+    legacy chains for its `?extra_work_request=` query param; where the
+    two disagree, the money definition wins, and one list must not show
+    a row as "work started" that the invoice run considers unstarted.
+
+    Reads the view's prefetched list when it is there and falls back to
+    a query when it is not (a create read-back, or a detail serializer
+    nested in another module's response). Same accessor-with-fallback
+    shape as `ServiceSerializer.get_has_price_rows`.
+    """
+    prefetched = getattr(obj, "prefetched_operational_tickets", None)
+    if prefetched is not None:
+        return prefetched
+    return list(
+        obj.operational_tickets.filter(deleted_at__isnull=True).order_by("id")
+    )
+
+
+def _serialize_spawned_tickets(obj):
+    return [
+        {
+            "id": ticket.id,
+            "ticket_no": ticket.ticket_no,
+            "status": ticket.status,
+        }
+        for ticket in _spawned_tickets_for(obj)
+    ]
+
+
+def _has_operational_ticket(obj) -> bool:
+    """Sprint 180 §1 — the ONE question the two list tracks split on.
+
+    Prefers the view's single `Exists` annotation over the whole page
+    (`views_catalog`'s `annotated_has_price_rows` precedent); falls back
+    to the prefetched list, and only then to a query.
+    """
+    annotated = getattr(obj, "annotated_has_operational_ticket", None)
+    if annotated is not None:
+        return bool(annotated)
+    prefetched = getattr(obj, "prefetched_operational_tickets", None)
+    if prefetched is not None:
+        return bool(prefetched)
+    return obj.operational_tickets.filter(deleted_at__isnull=True).exists()
+
+
+# ---------------------------------------------------------------------------
 # Extra Work — list (lean)
 # ---------------------------------------------------------------------------
+def _is_priced(obj) -> bool:
+    """Sprint 188 — has anyone put a price on this Extra Work yet?
+
+    ZERO IS A LEGAL PRICE. Free work and a goodwill line are ordinary
+    business, so `total_amount == 0.00` cannot be read as "unpriced" —
+    the lists need to tell "nobody has priced this" from "this costs
+    nothing", and print an em dash for the first.
+
+    Prefers `annotated_is_priced` from `ExtraWorkRequestViewSet.
+    get_queryset` (one EXISTS per page, not per row); falls back to
+    `active_priced_lines` so the detail serializer and any un-annotated
+    caller still answer correctly. Both follow the SAME resolution order
+    as the money rule, which is the point: a display that disagreed with
+    `rowAmounts()` would be worse than no display.
+    """
+    annotated = getattr(obj, "annotated_is_priced", None)
+    if annotated is not None:
+        return bool(annotated)
+    from .final_amounts import active_priced_lines
+
+    _kind, lines = active_priced_lines(obj)
+    return bool(lines)
+
+
 class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
+    is_overdue = serializers.BooleanField(read_only=True)
+    started_before_plan = serializers.BooleanField(read_only=True)
+    is_priced = serializers.SerializerMethodField()
+
+    # Sprint 180 §1/§2 — the reverse of `Ticket.extra_work_origin`,
+    # which had no serializer field at all in either direction from the
+    # Extra Work side. `has_operational_ticket` is the track split;
+    # `spawned_tickets` is the number and the link.
+    has_operational_ticket = serializers.SerializerMethodField()
+    spawned_tickets = serializers.SerializerMethodField()
+
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -672,15 +775,50 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "category",
             "urgency",
             "status",
+            # Sprint 173 §4 — the deadline, the planned window's end, and
+            # the two derived flags. These were declared on this
+            # serializer but only added to the DETAIL serializer's
+            # `fields`, so DRF asserted on every list call and
+            # /api/extra-work/ returned 500 for everyone. They belong on
+            # the list precisely because the list is where an operator
+            # scans for what is overdue.
+            # Sprint 174 §1 — the planned window's START travels with
+            # its end: the list's planned/unplanned filter reads it, and
+            # a filter reading `undefined` silently calls every row
+            # unplanned.
+            "preferred_date",
+            "deadline",
+            "planned_end_date",
+            # Sprint 182 §6 — the PROVIDER's planned day. `preferred_date`
+            # above is the CUSTOMER's wish (Sprint 176 §3); this is when
+            # the provider says the work will actually happen, and it is
+            # what lets the Work Plan schedule an extra work at all.
+            "provider_planned_date",
+            "is_overdue",
+            "started_before_plan",
             # Sprint 28 Batch 6 — cart routing taxonomy. Surfaced on
             # the lean list shape so the inbox / overview UIs can
             # branch on INSTANT vs PROPOSAL without a detail fetch.
             "routing_decision",
             # Sprint 2A — explicit customer-facing intent.
             "request_intent",
+            # Sprint 180 §1/§2 — which TRACK this row is on, and the
+            # operational ticket(s) it produced. Visible to every
+            # audience: the customer is entitled to know that their
+            # extra work turned into scheduled work.
+            "has_operational_ticket",
+            "spawned_tickets",
+            # Sprint 180 §3 — who the finished work is charged to. Not
+            # provider-only: the customer picks it on their own create
+            # form, so hiding it from them afterwards would hide their
+            # own answer.
+            "billed_to",
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            # Sprint 188 — lets a reader tell "nobody has priced this"
+            # from "this costs nothing". Both render 0.00 otherwise.
+            "is_priced",
             # RF-13 (#106) — final (actual-hours) amounts on the list
             # shape so the invoices overview can compute month totals
             # with the same final-with-quoted-fallback rule the revenue
@@ -710,6 +848,15 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     # never sees billing metadata on the list either.
     _PROVIDER_ONLY_FIELDS = ("invoice_date", "is_invoiced", "invoiced_at")
 
+    def get_has_operational_ticket(self, obj) -> bool:
+        return _has_operational_ticket(obj)
+
+    def get_is_priced(self, obj) -> bool:
+        return _is_priced(obj)
+
+    def get_spawned_tickets(self, obj):
+        return _serialize_spawned_tickets(obj)
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         user = self.context.get("request").user if self.context.get("request") else None
@@ -733,6 +880,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    # Sprint 188 — same question, same answer, on the detail shape. No
+    # annotation here, so `_is_priced` falls back to `active_priced_lines`.
+    is_priced = serializers.SerializerMethodField()
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
@@ -775,6 +925,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     # an N+1 across every row (Sprint 120's whole reason for existing).
     labels_locked = serializers.SerializerMethodField()
     labels_locked_invoice = serializers.SerializerMethodField()
+    # Sprint 180 §1/§2 — same pair as the list serializer, so a page
+    # that has the detail does not have to re-derive the track or refetch
+    # the ticket list to name the ticket.
+    has_operational_ticket = serializers.SerializerMethodField()
+    spawned_tickets = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkRequest
@@ -800,6 +955,19 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "category_other_text",
             "urgency",
             "preferred_date",
+            # Sprint 173 §4 — the planned WINDOW and the deadline, plus
+            # the two derived facts. Derived server-side so the list,
+            # the detail page and the Work Plan cannot disagree about
+            # what "late" or "started early" means.
+            "planned_end_date",
+            # Sprint 182 §6 — the PROVIDER's planned day. `preferred_date`
+            # above is the CUSTOMER's wish (Sprint 176 §3); this is when
+            # the provider says the work will actually happen, and it is
+            # what lets the Work Plan schedule an extra work at all.
+            "provider_planned_date",
+            "deadline",
+            "is_overdue",
+            "started_before_plan",
             "status",
             # Sprint 28 Batch 6 — cart routing taxonomy + nested line
             # items. routing_decision is computed at submission time by
@@ -808,6 +976,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "routing_decision",
             # Sprint 2A — explicit customer-facing intent.
             "request_intent",
+            # Sprint 180 §1/§2 — the track and the operational ticket(s).
+            "has_operational_ticket",
+            "spawned_tickets",
+            # Sprint 180 §3 — who the finished work is charged to.
+            "billed_to",
             "line_items",
             "customer_visible_note",
             "pricing_note",
@@ -822,6 +995,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            # Sprint 188 — lets a reader tell "nobody has priced this"
+            # from "this costs nothing". Both render 0.00 otherwise.
+            "is_priced",
             # Sprint 8B — final billable amounts (NULL until actual
             # hours are entered / frozen at customer approval). Visible
             # to the customer per SoT §5.12.
@@ -863,9 +1039,20 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "status",
             "routing_decision",
             "request_intent",
+            # Sprint 180 — the track, the ticket link and the billing
+            # target are all read-only HERE. `billed_to` is written at
+            # CREATE time (ExtraWorkRequestCreateSerializer); this
+            # ViewSet has no update action at all, so listing it as
+            # writable would be a promise no endpoint keeps.
+            "has_operational_ticket",
+            "spawned_tickets",
+            "billed_to",
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            # Sprint 188 — lets a reader tell "nobody has priced this"
+            # from "this costs nothing". Both render 0.00 otherwise.
+            "is_priced",
             "final_subtotal_amount",
             "final_vat_amount",
             "final_total_amount",
@@ -892,6 +1079,15 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         "is_invoiced",
         "invoiced_at",
     )
+
+    def get_has_operational_ticket(self, obj) -> bool:
+        return _has_operational_ticket(obj)
+
+    def get_spawned_tickets(self, obj):
+        return _serialize_spawned_tickets(obj)
+
+    def get_is_priced(self, obj) -> bool:
+        return _is_priced(obj)
 
     def get_pricing_line_items(self, obj):
         user = self.context.get("request").user if self.context.get("request") else None
@@ -1179,6 +1375,25 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
     # rule (the label must belong to THIS request's customer). Queryset is
     # unscoped here because the customer is not known until validate(); the
     # same-customer check there is the real gate.
+    # Sprint 186 — an extra work always ENDS UP with both, but the wire
+    # stays permissive.
+    #
+    # The owner's requirement is that no extra work is untagged: an
+    # untagged row falls out of every report that groups by them, and the
+    # invoice granularity option `PER_BUILDING_DEPARTMENT_WORK_TYPE`
+    # groups on exactly this pair, so a null there is an invoice nobody
+    # asked for.
+    #
+    # The first cut of this made both fields `required=True`. That is the
+    # blunt instrument: it 400s EVERY caller that ever omitted them --
+    # 130 existing tests, the customer portal, and any integration -- to
+    # enforce something the server can simply supply. Every customer is
+    # seeded one Department and one Work type when it is created
+    # (`customers/signals.py`), so the value is never in doubt.
+    #
+    # So: the FORM requires a choice (and pre-selects the seeded pair),
+    # and `validate()` below fills in that same pair when a caller omits
+    # them. Same guarantee, nobody broken.
     department = serializers.PrimaryKeyRelatedField(
         queryset=Department.objects.all(),
         required=False,
@@ -1200,6 +1415,26 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
     # because that flow skips customer approval and must be opt-in).
     request_intent = serializers.ChoiceField(
         choices=ExtraWorkRequest._meta.get_field("request_intent").choices,
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    # Sprint 180 §3 — who the finished work is charged to, asked at
+    # create time on BOTH create surfaces (the customer-facing and the
+    # provider-facing one are the same React page in two roles).
+    #
+    # OPTIONAL on the wire and NULLABLE, which are two different things
+    # and both deliberate (Sprint 182 §6). Omitting the key and sending
+    # `null` now mean the same thing — "follow the customer's setting" —
+    # which is the right answer for a form field nobody touched.
+    #
+    # The `default=BUILDING` that stood here is GONE: defaulting it
+    # would write a decision nobody made, which is exactly the state
+    # migration 0032 had to undo across the whole table. An explicit
+    # BUILDING / CUSTOMER still overrides the customer for this one job;
+    # anything else is a 400 rather than a silent fallback.
+    billed_to = serializers.ChoiceField(
+        choices=ExtraWorkBilledTo.choices,
         required=False,
         allow_null=True,
         default=None,
@@ -1228,7 +1463,22 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "work_type",
             "urgency",
             "preferred_date",
+            # Sprint 173 §4 — the planned WINDOW and the deadline, plus
+            # the two derived facts. Derived server-side so the list,
+            # the detail page and the Work Plan cannot disagree about
+            # what "late" or "started early" means.
+            "planned_end_date",
+            # Sprint 182 §6 — the PROVIDER's planned day. `preferred_date`
+            # above is the CUSTOMER's wish (Sprint 176 §3); this is when
+            # the provider says the work will actually happen, and it is
+            # what lets the Work Plan schedule an extra work at all.
+            "provider_planned_date",
+            "deadline",
+            "is_overdue",
+            "started_before_plan",
             "request_intent",
+            # Sprint 180 §3 — the billing target, chosen at create time.
+            "billed_to",
             "line_items",
         ]
         read_only_fields = ["id"]
@@ -1269,6 +1519,60 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         building = attrs["building"]
         customer = attrs["customer"]
 
+        # Sprint 186 — no extra work is left untagged.
+        #
+        # An untagged row falls out of every report that groups by
+        # department or work type, and `PER_BUILDING_DEPARTMENT_WORK_TYPE`
+        # invoices group on exactly this pair. The FORM makes the operator
+        # choose (and pre-selects the seeded pair); this is the floor
+        # underneath it, for every other caller.
+        #
+        # Filled rather than refused: every customer is seeded one of
+        # each when it is created, so the answer is never in doubt, and
+        # 400-ing a caller over a value the server already knows would
+        # break the customer portal and every integration to enforce
+        # something it can simply supply.
+        if attrs.get("department") is None:
+            attrs["department"] = (
+                Department.objects.filter(customer=customer, is_active=True)
+                .order_by("id")
+                .first()
+            )
+        if attrs.get("work_type") is None:
+            attrs["work_type"] = (
+                WorkType.objects.filter(customer=customer, is_active=True)
+                .order_by("id")
+                .first()
+            )
+
+        # Sprint 176 §3 — the deadline is a PROVIDER commitment, so the
+        # create form refuses one from a customer-side actor.
+        #
+        # Customers can and do create Extra Work here
+        # (`customer_users_can_create_extra_work`, default on), and they
+        # already have `preferred_date` — "I would like it around then".
+        # The `deadline` is different in kind: it is what turns a row red
+        # on the list and in the Work Plan, and what an operator is
+        # measured against. A customer who could set it could make the
+        # provider late by typing a date. So the customer states a wish;
+        # the provider decides what it commits to.
+        #
+        # Read from `attrs` (the parsed field) rather than `initial_data`,
+        # so this does not depend on how the serializer was constructed.
+        # An explicit `null` is a no-op, not an attempt to commit the
+        # provider to anything, so truthiness is the right test here.
+        if is_customer_side(user) and attrs.get("deadline"):
+            raise serializers.ValidationError(
+                {
+                    "deadline": (
+                        "Only provider staff can set a deadline. Use "
+                        "preferred_date to say when you would like this "
+                        "done."
+                    ),
+                    "code": ERR_DEADLINE_PROVIDER_ONLY,
+                }
+            )
+
         # Single-company invariant: the customer's company is the
         # only valid `company` for this Extra Work request, and the
         # building must belong to it.
@@ -1295,6 +1599,34 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             department=attrs.get("department"),
             work_type=attrs.get("work_type"),
         )
+
+        # Sprint 154 §I.7 — every Extra Work carries BOTH labels.
+        #
+        # The owner's requirement is that Department and Work Type are
+        # mandatory, with an "Algemeen" option always available when a
+        # customer has defined none of their own. `customers.signals
+        # .ensure_default_labels` guarantees that row exists for every
+        # customer (and migration 0017 backfilled the existing ones), so
+        # the UI can always offer a valid pick and defaults to it.
+        #
+        # Here we resolve an OMITTED label to that same "Algemeen" row
+        # rather than rejecting the request. See the sprint report for
+        # the full reasoning; the short version is that this makes the
+        # data invariant ("no unlabelled Extra Work") hold on EVERY write
+        # path, including `extra_work.conversion`, which builds its row
+        # with `objects.create()` and never sees this serializer at all.
+        # A serializer-level `required=True` would leave that path
+        # unlabelled while breaking every existing API client.
+        #
+        # An explicitly-supplied label always wins; this only fills a gap.
+        if attrs.get("department") is None or attrs.get("work_type") is None:
+            default_department, default_work_type = default_labels_for_customer(
+                customer
+            )
+            if attrs.get("department") is None:
+                attrs["department"] = default_department
+            if attrs.get("work_type") is None:
+                attrs["work_type"] = default_work_type
 
         # Sprint 3B — every catalog-linked line's service must be
         # owned by the same provider company as the customer.
@@ -1576,10 +1908,18 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             # — validate_intent_for_cart guarantees that any other
             # intent on an all-agreed cart is rejected, and an
             # all-agreed cart with no explicit intent derives to
-            # DIRECT. The one-ticket-per-request refactor is
-            # explicitly deferred (see Sprint 2A non-goals); this
-            # spawn still emits one Ticket per ExtraWorkRequestItem
-            # for now.
+            # DIRECT.
+            #
+            # Sprint 180 §5 — this comment used to end "this spawn
+            # still emits one Ticket per ExtraWorkRequestItem for now".
+            # That has been false since Sprint 6A: the refactor it calls
+            # deferred was DONE, and `instant_tickets.spawn_tickets_for
+            # _request` creates exactly ONE Ticket per request (see the
+            # request-level idempotency guard there and
+            # `test_sprint6_one_ticket_per_request`). One ticket per
+            # request is now the assumption the whole Extra Work billing
+            # chain rests on, so a comment saying otherwise is worse
+            # than no comment.
             if request.routing_decision == ExtraWorkRoutingDecision.INSTANT:
                 # Imported lazily to avoid circular import:
                 # `instant_tickets.py` imports from this app's models +
@@ -1863,6 +2203,33 @@ class ExtraWorkLabelsSerializer(serializers.Serializer):
     work_type = serializers.PrimaryKeyRelatedField(
         queryset=WorkType.objects.all(), required=False, allow_null=True
     )
+
+
+class ExtraWorkDatesSerializer(serializers.Serializer):
+    """Sprint 176 §3 — the NARROW date surface for
+    `PATCH /api/extra-work/<id>/dates/`: `deadline` + `planned_end_date`
+    only.
+
+    Same shape and same reasoning as `ExtraWorkLabelsSerializer` above: the
+    EW ViewSet has no update mixin by design, so a date agreed AFTER
+    creation had no way in at all — both fields were write-once on the
+    create form. A general update serializer would expose every model
+    field; this exposes two.
+
+    Both optional, both `allow_null`, so the view can tell "absent" (leave
+    unchanged) from "sent as null" (clear) by key presence — the same
+    convention the relabel action uses, and the same one the bulk dialog's
+    "leave unchanged" default needs.
+
+    `preferred_date` is deliberately NOT here. It is the CUSTOMER's wish,
+    recorded at request time; the provider answers it with a `deadline`
+    rather than editing it. Letting the provider rewrite what the customer
+    asked for would erase the very thing the deadline is judged against.
+    """
+
+    deadline = serializers.DateField(required=False, allow_null=True)
+    planned_end_date = serializers.DateField(required=False, allow_null=True)
+    provider_planned_date = serializers.DateField(required=False, allow_null=True)
 
 
 # ---------------------------------------------------------------------------
@@ -2178,6 +2545,114 @@ class ProposalLineCustomerSerializer(serializers.ModelSerializer):
         return _decimal_str(self._classified(obj)[2])
 
 
+def _advance_parent_to_under_review(
+    extra_work_request: ExtraWorkRequest, actor
+) -> None:
+    """Sprint 187 §2a — move a REQUESTED parent to UNDER_REVIEW when a
+    proposal is created against it.
+
+    ## The trap this closes
+
+    The detail page offers "Prepare proposal" on a REQUESTED **or**
+    UNDER_REVIEW parent, and `ProposalCreateSerializer.validate`
+    deliberately admits both. But `can_send` requires UNDER_REVIEW, so an
+    operator who reached the builder from REQUESTED could build a
+    complete quote and then find the Send button simply absent — and,
+    because `can_direct_publish` is derived from `can_send`, the escape
+    hatch was hidden too. Both terminal actions on the builder were dead,
+    with nothing on screen saying why. The page even contradicted itself:
+    the REQUESTED step hint says "Start the review, then prepare a
+    pricing proposal" while the CTA below let you do it in the other
+    order.
+
+    Creating a proposal IS starting the review, so the order the hint
+    describes is now simply true whichever way the operator arrives.
+
+    ## Why `apply_transition` and not the `_advance_parent_on_send`
+    ## bypass
+
+    `_advance_parent_on_send` bypasses `apply_transition` for one
+    specific reason, stated in its own docstring: that path enforces
+    `pricing_line_items_required`, which counts LEGACY
+    `ExtraWorkPricingLineItem` rows the proposal flow never writes.
+
+    That precondition is scoped to `to_status == PRICING_PROPOSED`
+    (`state_machine.py`), and this transition is
+    `REQUESTED -> UNDER_REVIEW`. It cannot trip. So the reason for the
+    bypass does not exist here, and the normal path is correct — which
+    also means we inherit the role gate, the concurrency lock, the
+    history row and the timestamp bookkeeping instead of hand-rolling
+    a third copy of them.
+
+    `is_override=False` and no reason: this is an ordinary
+    provider-driven transition, present in `ALLOWED_TRANSITIONS` and not
+    system-only.
+
+    ## When the advance does not happen
+
+    Sprint 187C — an earlier draft of this docstring gave "an operator
+    lacking `osius.ticket.view_building`" as the example, and that case
+    cannot reach here: `_require_provider_in_scope`
+    (`views_proposals.py`) 403s that exact actor on that exact key
+    before `create()` runs. What DOES reach this arm is any other
+    `TransitionError` — most realistically a concurrent status change
+    between the read and the locked write, and any role that clears the
+    view's scope check but not `_user_can_drive_transition`.
+
+    Whatever the cause, the proposal creation still succeeds — refusing
+    it would take away a capability the operator already had — and the
+    failure is NOT swallowed: it is logged, and the reason is attached
+    to the returned proposal as `parent_advance_blocked` so the caller
+    can say something instead of hiding the button. Silence is the
+    actual defect being fixed here; a second silent skip would just move
+    it.
+    """
+    if extra_work_request.status != ExtraWorkStatus.REQUESTED:
+        # Idempotent: already UNDER_REVIEW (the normal arrival), or
+        # somewhere `validate` would have rejected.
+        return
+    from .state_machine import TransitionError as EwTransitionError
+    from .state_machine import apply_transition as ew_apply_transition
+
+    try:
+        locked = ew_apply_transition(
+            extra_work_request,
+            actor,
+            ExtraWorkStatus.UNDER_REVIEW,
+            note=(
+                "Review started by preparing a pricing proposal "
+                "(Sprint 187 §2a)."
+            ),
+        )
+        # Sprint 187C — `apply_transition` writes through its OWN locked
+        # instance and returns it; the caller's copy still says
+        # REQUESTED. `Proposal.objects.create` then caches that stale
+        # copy as `proposal.extra_work_request`, so the 201 body's
+        # `actions.can_send` would read False on the very path this
+        # sprint exists to make True. The page happens to refetch
+        # immediately and never sees it — but the payload is a contract,
+        # not an implementation detail of one caller.
+        extra_work_request.status = locked.status
+        extra_work_request.updated_at = locked.updated_at
+    except EwTransitionError as exc:
+        logger.warning(
+            "Proposal created on EW #%s but the parent could not be "
+            "advanced to UNDER_REVIEW (%s: %s). Send will be blocked "
+            "until the parent moves.",
+            extra_work_request.pk,
+            getattr(exc, "code", "transition_error"),
+            exc,
+        )
+        raise _ParentAdvanceBlocked(str(exc)) from exc
+
+
+class _ParentAdvanceBlocked(Exception):
+    """Carries the human-readable reason the parent could not advance,
+    from `_advance_parent_to_under_review` up to `create()`. Never
+    reaches the wire as an exception — `create()` turns it into the
+    `parent_advance_blocked` field."""
+
+
 class ProposalCreateSerializer(serializers.ModelSerializer):
     """
     Write serializer for `POST /api/extra-work/<id>/proposals/`.
@@ -2354,6 +2829,18 @@ class ProposalCreateSerializer(serializers.ModelSerializer):
                 customer_visible=True,
                 metadata={},
             )
+            # Sprint 187 §2a — creating a proposal IS starting the
+            # review. Inside the same atomic block, so the parent's
+            # status write and its history row commit with the proposal
+            # or not at all.
+            try:
+                _advance_parent_to_under_review(extra_work_request, actor)
+                proposal._parent_advance_blocked = ""
+            except _ParentAdvanceBlocked as blocked:
+                # The proposal still gets created — see the helper's
+                # docstring. The reason rides back on the response so
+                # the builder can say it rather than hide the button.
+                proposal._parent_advance_blocked = str(blocked)
         return proposal
 
 
@@ -2481,7 +2968,10 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
             _any_customer_approve_key,
             _target_provider_in_scope,
         )
-        from accounts.permissions_v2 import user_has_osius_permission
+        from accounts.permissions_v2 import (
+            user_has_osius_permission,
+            user_has_provider_dangerous_permission,
+        )
 
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
@@ -2617,12 +3107,61 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
         # True iff can_send AND the override key is granted (direct-
         # publish then does the SENT->CUSTOMER_APPROVED override leg).
         # Customer / STAFF: always False.
+        #
+        # Sprint 187 §3 — this flag used to mirror TWO of the endpoint's
+        # gates and the endpoint applies FOUR. The consequence was not an
+        # edge case: the dedicated dangerous grant below is OFF BY
+        # DEFAULT, so in a default deployment an in-scope COMPANY_ADMIN
+        # was shown "Publish directly" on a perfectly ordinary DRAFT and
+        # it failed 403 every single time.
+        #
+        # The class docstring's precedent does not cover these. It
+        # excuses exactly one kind of gate — the expensive cart-coverage
+        # / contract-price validations — and then states the governing
+        # rule for everything else: a gate that is cheap and accurate
+        # belongs in the action flag. That is why the parent-status guard
+        # is already inside `can_send`. Gate 4 is a plain attribute read;
+        # gate 3 costs at most ONE `EXISTS` query, and only for a
+        # CA / BM — SUPER_ADMIN short-circuits before touching the DB.
+        # (Sprint 187C: an earlier version of this comment called that
+        # resolve "cached". It is not — `user_has_provider_dangerous_
+        # permission` has no memoisation. One query on a per-record
+        # detail serializer is still cheap, which is the point being
+        # made; "cached" was simply the wrong word for why.)
+        #
+        # H-11: reflecting a permission gate in an action flag is
+        # REPORTING authority, not granting it. The endpoint's own checks
+        # in `views_proposals.py` are untouched and remain the authority;
+        # this only stops the UI offering a button that authority will
+        # refuse.
         if is_super or is_ca_in:
             can_direct_publish = can_send
         elif is_bm_in:
             can_direct_publish = can_send and bm_has_override
         else:
             can_direct_publish = False
+
+        if can_direct_publish:
+            # Gate 3 — the DEDICATED dangerous quote-bypass grant
+            # (`views_proposals.py`). Holding the generic B6 override key
+            # is explicitly NOT sufficient (SoT §5.5, matrix H-11 —
+            # separate concepts). SA resolves True; CA / BM only when
+            # their provider company carries the Super-Admin grant.
+            can_direct_publish = user_has_provider_dangerous_permission(
+                user,
+                "provider.extra_work.quote_override_start",
+                company_id=extra_work.company_id,
+            )
+
+        if can_direct_publish:
+            # Gate 4 — the bypass is only meaningful for a
+            # Request-a-Quote request. DIRECT_AGREED_PRICE_ORDER spawns
+            # immediately and AUTO_START_AFTER_PRICING auto-approves on
+            # SEND, so neither has a customer decision to override.
+            can_direct_publish = (
+                extra_work.request_intent
+                == ExtraWorkRequestIntent.REQUEST_QUOTE
+            )
 
         return {
             "allowed_next_statuses": list(allowed),

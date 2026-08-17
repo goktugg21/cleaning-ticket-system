@@ -543,8 +543,23 @@ export function UserDetailPage() {
     </>
   ) : null;
 
+  // Sprint 188 — WHO EMPLOYS this person. Distinct from `companies`
+  // below, which is the SCOPE array: for a CUSTOMER_USER that one is
+  // filled by `customer.company`, i.e. the provider that serves them, so
+  // rendering it under "belongs to" told the owner his customer's
+  // contact person was a member of his own company.
+  const employedBy = user?.employed_by ?? [];
+  const isCustomerUser = user?.role === "CUSTOMER_USER";
+  // ...and for that same reason the scope-companies group is not shown
+  // to a customer user at all: the one entry it would carry is the
+  // provider, and naming it here is the confusion being fixed.
+  const showScopeCompanies = companies.length > 0 && !isCustomerUser;
+
   const hasAnyMembership =
-    companies.length > 0 || buildings.length > 0 || customers.length > 0;
+    employedBy.length > 0 ||
+    showScopeCompanies ||
+    buildings.length > 0 ||
+    customers.length > 0;
 
   return (
     <div data-testid="user-detail-page">
@@ -688,7 +703,20 @@ export function UserDetailPage() {
               />
             ) : (
               <>
-                {companies.length > 0 && (
+                {employedBy.length > 0 && (
+                  <div className="user-detail-membership-group">
+                    <div className="user-detail-membership-group-title">
+                      {t("user_detail.memberships.employed_by_title")}
+                    </div>
+                    <ul className="readonly-list">
+                      {employedBy.map((name) => (
+                        <li key={name}>{name}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {showScopeCompanies && (
                   <div className="user-detail-membership-group">
                     <div className="user-detail-membership-group-title">
                       {t("user_detail.memberships.companies_title")}
@@ -699,7 +727,7 @@ export function UserDetailPage() {
                       ariaLabel={t("user_detail.memberships.companies_title")}
                       testIdPrefix="user-detail-companies"
                     >
-                      <ul className="user-detail-membership-list">
+                      <ul className="readonly-list">
                         {companies.map((c) => (
                           <li key={c.id}>
                             <Link to={`/admin/companies/${c.id}`}>{c.name}</Link>
@@ -720,7 +748,7 @@ export function UserDetailPage() {
                       ariaLabel={t("user_detail.memberships.buildings_title")}
                       testIdPrefix="user-detail-membership-buildings"
                     >
-                      <ul className="user-detail-membership-list">
+                      <ul className="readonly-list">
                         {buildings.map((b) => (
                           <li key={b.id}>
                             <Link to={`/admin/buildings/${b.id}`}>{b.name}</Link>
@@ -735,13 +763,23 @@ export function UserDetailPage() {
                     <div className="user-detail-membership-group-title">
                       {t("user_detail.memberships.customers_title")}
                     </div>
+                    {/* Sprint 188 — a bare list of customer names does not
+                        say what the relation IS, and it differs by role:
+                        for a customer user these are the organisations
+                        they act on behalf of; for a provider operator
+                        they are the customers in their scope. */}
+                    <div className="muted small" style={{ marginBottom: 6 }}>
+                      {isCustomerUser
+                        ? t("user_detail.memberships.customers_hint_customer")
+                        : t("user_detail.memberships.customers_hint_provider")}
+                    </div>
                     <BoundedList
                       size="sm"
                       count={customers.length}
                       ariaLabel={t("user_detail.memberships.customers_title")}
                       testIdPrefix="user-detail-membership-customers"
                     >
-                      <ul className="user-detail-membership-list">
+                      <ul className="readonly-list">
                         {customers.map((c) => (
                           <li key={c.id}>
                             <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>

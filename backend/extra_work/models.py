@@ -199,6 +199,32 @@ class ExtraWorkRoutingDecision(models.TextChoices):
     PROPOSAL = "PROPOSAL", "Proposal"
 
 
+class ExtraWorkBilledTo(models.TextChoices):
+    """Sprint 180 §3 — WHO the finished work is charged to.
+
+    Exactly two values, and the pair is the whole feature: the owner
+    said the answer is the building 99% of the time and the customer
+    the rest. A third value would be a grouping rule wearing a billing
+    target's clothes.
+
+    NOT `Customer.invoice_granularity_default`
+    (CUSTOMER / PER_BUILDING / PER_BUILDING_DEPARTMENT_WORK_TYPE) —
+    that one decides how many invoice DOCUMENTS a month's work is cut
+    into for one customer, and it lives on the customer because it is a
+    property of the customer's paperwork. This one is a property of the
+    JOB and says who the charge belongs to. They read alike and are not
+    alike: a customer invoiced PER_BUILDING can still have a single
+    extra work that the customer's own head office pays for.
+
+    Nothing in `generate_draft_invoices` reads this field yet. That is
+    deliberate — the month-end job is a separate piece of work; this
+    sprint records the answer so the job has something to read.
+    """
+
+    BUILDING = "BUILDING", "Building"
+    CUSTOMER = "CUSTOMER", "Customer"
+
+
 def _two_places(value: Decimal) -> Decimal:
     """Quantize a Decimal to 2 places, the canonical money rounding
     used everywhere in the Extra Work domain."""
@@ -360,13 +386,177 @@ class ExtraWorkRequest(models.Model):
         choices=ExtraWorkUrgency.choices,
         default=ExtraWorkUrgency.NORMAL,
     )
+    # Sprint 173 §4 — the PLANNED WINDOW, not a single date.
+    #
+    # `preferred_date` keeps its name deliberately: everything that
+    # reads it today keeps working, and renaming it would be a
+    # migration's worth of risk for a word. Read the pair as
+    # start -> end; an end with no start is not a window and the
+    # serializer refuses it.
+    #
+    # A window is what lets a week view place a job that spans days,
+    # which is the whole reason the reference holds two.
     preferred_date = models.DateField(null=True, blank=True)
+    planned_end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Last planned day. With `preferred_date` this is the "
+            "planned WINDOW; NULL means the job is planned for the one "
+            "day rather than for a span."
+        ),
+    )
+    # "By when this must be finished." Distinct from the planned window:
+    # a job can be planned for next week and due at the end of the
+    # month, and only the deadline decides whether it is late.
+    deadline = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "The date by which this must be finished. A record past it "
+            "and not finished is marked overdue."
+        ),
+    )
 
     status = models.CharField(
         max_length=32,
         choices=ExtraWorkStatus.choices,
         default=ExtraWorkStatus.REQUESTED,
     )
+
+    # Sprint 180 §3 / Sprint 182 §6 — who pays for this one. See
+    # `ExtraWorkBilledTo` for why this is NOT the customer's invoice
+    # granularity.
+    #
+    # NULLABLE since Sprint 182, and the null is the point: NULL means
+    # "follow the customer's setting", a SET value overrides it for this
+    # one job.
+    #
+    # Sprint 180 shipped it non-null with `default=BUILDING`, which was
+    # right while nothing read it and wrong the moment something did: if
+    # invoice generation simply started reading the column, every
+    # customer configured for one-invoice-per-customer would silently
+    # begin to be invoiced per building, because every pre-182 row says
+    # BUILDING whether or not anybody chose it. Migration 0032 sets
+    # every existing row to NULL for exactly that reason — those rows
+    # took a default, they did not record a decision, and NULL is how
+    # the column says so.
+    #
+    # PRECEDENCE, in one line: the extra work wins when it is set,
+    # being the more specific statement; NULL defers to the customer.
+    billed_to = models.CharField(
+        max_length=16,
+        choices=ExtraWorkBilledTo.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Who the finished work is charged to: the BUILDING or the "
+            "CUSTOMER organisation. NULL means follow the customer's "
+            "own setting; a value set here overrides it for this job."
+        ),
+    )
+
+    # Sprint 182 §6 — WHEN THE PROVIDER WILL DO IT.
+    #
+    # The only date this row had was `preferred_date`, and Sprint 176 §3
+    # settled what that is: the CUSTOMER's wish. "I would like it around
+    # then" is not a plan, and the provider had nowhere to write one —
+    # which is why extra work shows up in the Work Plan as undated and
+    # cannot be planned from there.
+    #
+    # So this is the provider's own answer, deliberately a SEPARATE
+    # column rather than a reinterpretation of the customer's:
+    #
+    #   preferred_date        the customer's wish (unchanged, untouched)
+    #   provider_planned_date the provider's commitment to a day
+    #   planned_end_date      the last planned day, when the job spans
+    #                         several (Sprint 173's window END)
+    #   deadline              by when it must be finished; the only one
+    #                         that decides whether a row is late
+    #
+    # Nullable and with no default: an extra work nobody has planned yet
+    # must be distinguishable from one planned for today, which is the
+    # whole distinction the Work Plan's undated lane rests on.
+    provider_planned_date = models.DateField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Sprint 182 — the day the PROVIDER plans to do the work. "
+            "Distinct from `preferred_date` (the customer's wish) and "
+            "from `deadline` (when it must be finished). NULL means "
+            "nobody has planned it yet."
+        ),
+    )
+
+    @property
+    def is_overdue(self) -> bool:
+        """Past its deadline and not finished.
+
+        Sprint 173 §4. One rule, here, so the list badge, the detail
+        page and the Work Plan cannot disagree about what "late" means —
+        three copies of a date comparison is how two screens end up
+        marking different rows.
+
+        A record with no deadline is never overdue: nobody said when it
+        was due, and inventing a due date to call something late is
+        worse than not marking it.
+        """
+        from django.utils import timezone
+
+        if self.deadline is None:
+            return False
+        # Finished work is never late, whatever its deadline says.
+        if self.status in {
+            ExtraWorkStatus.COMPLETED,
+            ExtraWorkStatus.CANCELLED,
+            ExtraWorkStatus.CUSTOMER_REJECTED,
+        }:
+            return False
+        return self.deadline < timezone.localdate()
+
+    @property
+    def started_before_plan(self) -> bool:
+        """Work began before its planned window opened.
+
+        The father's own example: a job entered today, started today,
+        and planned for September. That is not blocked — he was explicit
+        that people do it deliberately — but it IS shown, so it can be
+        found and cleaned up rather than discovered months later.
+
+        Derived from the STATUS HISTORY rather than a started_at column,
+        for the reason recorded in the product docs: eleven date columns
+        are that history flattened, and a flattened history cannot say
+        who did something or whether it went backwards.
+
+        Sprint 180 §2 — the narrowing happens in PYTHON over
+        `status_history.all()`, deliberately, and it is the whole fix
+        for the list's N+1. A `.filter(...)` on the related manager
+        builds a NEW queryset, which ignores any prefetch cache and
+        issues one query per row; `.all()` on a prefetched relation is
+        free. The list queryset prefetches `status_history`, so a page
+        of a hundred rows costs one extra query instead of a hundred.
+        A single-object read (detail, create read-back) has no prefetch
+        and pays exactly one query here, same as before.
+
+        The rule itself is unchanged, and `ExtraWorkRequestFilter.
+        filter_started_early` still expresses the same rule as a
+        database `Min(...)` for the ?started_early= filter — a filter
+        must not materialise the table to answer one question. A test
+        pins that the two agree.
+        """
+        if self.preferred_date is None:
+            return False
+        starts = [
+            row.created_at
+            for row in self.status_history.all()
+            if row.new_status
+            in (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.COMPLETED)
+        ]
+        if not starts:
+            return False
+        return min(starts).date() < self.preferred_date
 
     # Sprint 28 Batch 6 — routing taxonomy computed at submission time
     # by `ExtraWorkRequestCreateSerializer.create()` from the cart's
@@ -1956,3 +2146,83 @@ class ExtraWorkMessage(models.Model):
 
     def __str__(self):
         return f"{self.extra_work_id}: {self.message_type}"
+
+
+class ExtraWorkAssignmentRole(models.TextChoices):
+    """Which hat a person wears on a request.
+
+    Deliberately NOT the same thing as `User.role`. A BUILDING_MANAGER
+    may be assigned as a WORKER on a small job, and a STAFF member is
+    never a MANAGER here — the assignment role says what they are doing
+    on THIS request, and the endpoint checks the account role separately.
+    """
+
+    WORKER = "WORKER", "Worker"
+    MANAGER = "MANAGER", "Manager"
+
+
+class ExtraWorkAssignment(models.Model):
+    """
+    Sprint 157 §2 — who is doing an Extra Work request.
+
+    `ExtraWorkRequest` had NO people-assignment of any kind before this:
+    no field, no through-model. `tickets.TicketStaffAssignment` is the
+    equivalent for tickets and this mirrors its SHAPE — a thin link row
+    with the role gate and the scoping enforced above it — while
+    importing nothing from `tickets`. The two modules are separate and
+    stay separate; sharing a model would couple an extra-work change to
+    the ticket state machine.
+
+    What this deliberately does NOT copy from `TicketStaffAssignment`:
+    its dated operational slots (Sprint 14E's scheduled_start_at /
+    time_window_label / per-slot completion evidence). Extra work has no
+    slot concept, and inventing one here would be building a scheduling
+    subsystem nobody asked for.
+
+    `unique_together (extra_work_request, user, role)` — the same person
+    may be BOTH a worker and a manager on one request, which is why
+    `role` is in the key. Assigning somebody twice in the same role is a
+    no-op rather than an error; the bulk endpoint counts it as
+    `already_assigned`.
+
+    `user` is PROTECT: an assignment is a record of who was put on a job,
+    and deleting the account should not silently erase it. The request
+    side is CASCADE — if the request itself is gone there is nothing to
+    be assigned to.
+    """
+
+    extra_work_request = models.ForeignKey(
+        ExtraWorkRequest,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="extra_work_assignments",
+    )
+    role = models.CharField(
+        max_length=16,
+        choices=ExtraWorkAssignmentRole.choices,
+        default=ExtraWorkAssignmentRole.WORKER,
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="extra_work_assignments_made",
+    )
+
+    class Meta:
+        unique_together = [("extra_work_request", "user", "role")]
+        ordering = ["role", "id"]
+        indexes = [
+            models.Index(fields=["extra_work_request", "role"]),
+            # The "what am I assigned to" query, from the person's side.
+            models.Index(fields=["user", "role"]),
+        ]
+
+    def __str__(self):
+        return f"{self.extra_work_request_id}: {self.user_id} ({self.role})"

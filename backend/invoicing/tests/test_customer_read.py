@@ -30,6 +30,8 @@ from customers.models import (
 )
 from invoicing.models import Invoice, InvoiceLine
 
+from ._helpers import MediaRootIsolation
+
 User = get_user_model()
 PASSWORD = "StrongerTestPassword123!"
 
@@ -42,10 +44,16 @@ def _mk(email, role):
     )
 
 
-class _CustomerReadFixture(TestCase):
+class _CustomerReadFixture(MediaRootIsolation, TestCase):
     """Company A with two customers (A1, A2); a CUSTOMER_USER who is a MEMBER
     of A1 ONLY. Company B (separate tenant) with customer B1. Invoices in
-    every relevant state so the scope can be pinned exactly."""
+    every relevant state so the scope can be pinned exactly.
+
+    Sprint 180 §3 — carries `MediaRootIsolation`: these SENT invoices are
+    built directly, so they have no frozen PDF, and the customer PDF endpoint
+    therefore takes the LAZY-FREEZE path and writes a real file. Without the
+    isolation that file would land in the developer's own `backend/media/`
+    and stay there."""
 
     @classmethod
     def setUpTestData(cls):

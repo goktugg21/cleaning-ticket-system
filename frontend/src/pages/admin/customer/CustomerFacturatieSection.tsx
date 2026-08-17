@@ -1,24 +1,39 @@
-// Invoicing Phase 4b — the "Facturatie" section on the Customer Overview
-// page: the informational contract PDF (upload / view / replace / remove) +
-// the billing-schedule settings (invoice_day_rule + invoice_granularity_
-// default). Provider-admin-gated in the UI (the backend enforces OSIUS-admin
-// on write; the controls hide for non-admins). Self-contained so the overview
-// page only imports + mounts it.
-import { useEffect, useRef, useState } from "react";
+// The "Facturatie" section: the billing-schedule settings
+// (invoice_day_rule + invoice_granularity_default). Provider-admin-gated in
+// the UI (the backend enforces OSIUS-admin on write; the controls hide for
+// non-admins). Self-contained so the host page only imports + mounts it.
+//
+// Sprint 153 §4.2 — this section mounts on the customer SETTINGS page, not
+// the Overview. The file keeps its name and location; only the mount moved.
+//
+// Sprint 154 §C — the contract-PDF half is GONE from this UI: the upload
+// input, the View / Replace / Remove buttons and the media imports. Sprint
+// 153 had removed only the inline preview; the owner wants the whole thing
+// off the screen.
+//
+// THIS IS A UI REMOVAL, NOT DATA LOSS. `CustomerContractPdfView`, the
+// `Customer.contract_pdf` model field, the upload path and every stored
+// file are untouched — `contract_pdf_url` is still on the serializer and
+// still populated. Any PDF a customer already has is still on disk and
+// still reachable through the API; there is simply no button for it here
+// any more. Restoring the UI is a frontend change with no migration.
+//
+// What remains is the half that does something: the billing schedule.
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
-import { updateCustomer } from "../../../api/admin";
-import {
-  deleteCustomerContractPdf,
-  fetchCustomerContractPdf,
-  uploadCustomerContractPdf,
-} from "../../../api/media";
+import { updateCustomerBillingSettings } from "../../../api/invoices";
 import type {
-  CustomerAdmin,
-  InvoiceDayRule,
-  InvoiceGranularity,
-} from "../../../api/types";
+  CustomerBillingSettings,
+  InvoiceBillingTarget,
+  InvoiceSplit,
+} from "../../../api/invoices";
+// Sprint 183 §1 — the two controls live in ONE component now, shared
+// with the Invoices page's generate dialog, so the two screens cannot
+// describe the same decision in different words again.
+import { BillingTargetFields } from "../../../components/BillingTargetFields";
+import type { CustomerAdmin, InvoiceDayRule } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
 import { isProviderAdmin } from "../../../auth/permissions";
 import { useToast } from "../../../components/ToastProvider";
@@ -63,112 +78,64 @@ export function CustomerFacturatieSection({
   const { push: pushToast } = useToast();
   const canManage = isProviderAdmin(me?.role);
 
-  const fileRef = useRef<HTMLInputElement>(null);
   const [daySelection, setDaySelection] = useState<string>(() =>
     initialDaySelection(customer),
   );
-  const [granularity, setGranularity] = useState<InvoiceGranularity>(
-    customer.invoice_granularity_default ?? "CUSTOMER",
+  // Sprint 182 §3 — TWO controls, because these are two questions.
+  //
+  // The old single dropdown offered CUSTOMER / PER_BUILDING /
+  // PER_BUILDING_DEPARTMENT_WORK_TYPE. The first two decide WHO THE
+  // INVOICE IS ADDRESSED TO; the third is not a third addressee, it is
+  // "per building, split further". Sitting in one list made a split look
+  // like a target.
+  //
+  // `customer` is typed by `api/types.ts` (another agent's file this
+  // sprint), so the two new fields are read through a local narrowing
+  // rather than by widening that type. Falling back to the legacy value
+  // means this renders correctly even against a server that has not been
+  // migrated yet.
+  const billing = customer as CustomerAdmin & Partial<CustomerBillingSettings>;
+  const legacyGranularity = billing.invoice_granularity_default ?? "CUSTOMER";
+  const [billingTarget, setBillingTarget] = useState<InvoiceBillingTarget>(
+    billing.invoice_billing_target ??
+      (legacyGranularity === "CUSTOMER" ? "CUSTOMER" : "BUILDING"),
+  );
+  const [split, setSplit] = useState<InvoiceSplit>(
+    billing.invoice_split ??
+      (legacyGranularity === "PER_BUILDING_DEPARTMENT_WORK_TYPE"
+        ? "DEPARTMENT_WORK_TYPE"
+        : "NONE"),
   );
   const [savingSchedule, setSavingSchedule] = useState(false);
-  const [uploadBusy, setUploadBusy] = useState(false);
   const [error, setError] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState("");
 
-  const hasContract = Boolean(customer.contract_pdf_url);
-
-  // Inline live preview of the contract PDF. The serve endpoint is auth-gated
-  // (Bearer), so we fetch the blob via the API helper and render it through an
-  // object URL — the same idiom as the invoice / proposal preview. Keyed on
-  // contract_pdf_url so upload / replace (a fresh ?v= URL) refetches and remove
-  // (null) clears it; the object URL is revoked on cleanup. All setState runs
-  // inside the async helper, so no synchronous set-state-in-effect is added.
-  useEffect(() => {
-    let cancelled = false;
-    let created: string | null = null;
-    async function loadPreview() {
-      setPreviewError("");
-      if (!customer.contract_pdf_url) {
-        setPreviewUrl(null);
-        return;
-      }
-      try {
-        const blob = await fetchCustomerContractPdf(customer.id);
-        if (cancelled) return;
-        created = URL.createObjectURL(blob);
-        setPreviewUrl(created);
-      } catch (err) {
-        if (!cancelled) {
-          setPreviewUrl(null);
-          setPreviewError(getApiError(err));
-        }
-      }
-    }
-    loadPreview();
-    return () => {
-      cancelled = true;
-      if (created) URL.revokeObjectURL(created);
-    };
-  }, [customer.id, customer.contract_pdf_url]);
+  // The split cuts WITHIN a building, so it is meaningless against a
+  // customer-addressed invoice. Disabled rather than hidden: a control
+  // that vanishes reads as a bug, while a disabled one with a reason
+  // beside it teaches the rule.
+  const splitApplies = billingTarget === "BUILDING";
 
   async function handleSaveSchedule() {
     setSavingSchedule(true);
     setError("");
     try {
-      const fresh = await updateCustomer(customer.id, {
-        ...daySelectionToPayload(daySelection),
-        invoice_granularity_default: granularity,
-      });
+      const fresh = await updateCustomerBillingSettings<CustomerAdmin>(
+        customer.id,
+        {
+          ...daySelectionToPayload(daySelection),
+          invoice_billing_target: billingTarget,
+          // Never send a split the target cannot use — the server would
+          // resolve it to "no split" anyway, and storing one that does
+          // nothing is how a setting starts lying to the operator.
+          invoice_split: splitApplies ? split : "NONE",
+        },
+      );
       onUpdated(fresh);
       pushToast({ variant: "success", title: t("facturatie.schedule_saved") });
     } catch (err) {
       setError(getApiError(err));
     } finally {
       setSavingSchedule(false);
-    }
-  }
-
-  async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploadBusy(true);
-    setError("");
-    try {
-      const url = await uploadCustomerContractPdf(customer.id, file);
-      onUpdated({ ...customer, contract_pdf_url: url });
-      pushToast({ variant: "success", title: t("facturatie.contract_uploaded") });
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setUploadBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
-
-  async function handleRemove() {
-    setUploadBusy(true);
-    setError("");
-    try {
-      await deleteCustomerContractPdf(customer.id);
-      onUpdated({ ...customer, contract_pdf_url: null });
-      pushToast({ variant: "success", title: t("facturatie.contract_removed") });
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setUploadBusy(false);
-    }
-  }
-
-  async function handleView() {
-    setError("");
-    try {
-      const blob = await fetchCustomerContractPdf(customer.id);
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener");
-      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (err) {
-      setError(getApiError(err));
     }
   }
 
@@ -224,36 +191,25 @@ export function CustomerFacturatieSection({
               {t("facturatie.day_rule_helper")}
             </span>
           </label>
-          <label className="field" style={{ flex: "1 1 220px" }}>
-            <span className="field-label">
-              {t("facturatie.granularity_label")}
-            </span>
-            <select
-              className="field-select"
-              value={granularity}
-              onChange={(e) =>
-                setGranularity(e.target.value as InvoiceGranularity)
-              }
-              disabled={!canManage || savingSchedule}
-              data-testid="facturatie-granularity"
-            >
-              <option value="CUSTOMER">
-                {t("facturatie.granularity_customer")}
-              </option>
-              <option value="PER_BUILDING">
-                {t("facturatie.granularity_building")}
-              </option>
-              <option value="PER_BUILDING_DEPARTMENT_WORK_TYPE">
-                {t("facturatie.granularity_department_work_type")}
-              </option>
-            </select>
-            <span
-              className="muted small"
-              style={{ display: "block", marginTop: 4 }}
-            >
-              {t("facturatie.granularity_helper")}
-            </span>
-          </label>
+        </div>
+
+        {/* Sprint 183 §1 — the two billing controls, from the shared
+            component the Invoices page's generate dialog also uses.
+            They were two side-by-side dropdowns with a sentence
+            explaining when the second applied, and the owner's reaction
+            to that sentence was "what is this now, I am confused". The
+            dependency is shown by nesting now, and the copy is the
+            example that landed with him rather than a restatement of
+            the rule. */}
+        <div style={{ marginBottom: 16 }}>
+          <BillingTargetFields
+            idPrefix="facturatie"
+            target={billingTarget}
+            split={split}
+            onTargetChange={setBillingTarget}
+            onSplitChange={setSplit}
+            disabled={!canManage || savingSchedule}
+          />
         </div>
         {canManage && (
           <div className="form-actions" style={{ marginBottom: 20 }}>
@@ -269,98 +225,6 @@ export function CustomerFacturatieSection({
           </div>
         )}
 
-        {/* Contract PDF. */}
-        <div className="detail-field-label" style={{ marginBottom: 4 }}>
-          {t("facturatie.contract_title")}
-        </div>
-        <p className="muted small" style={{ marginBottom: 8 }}>
-          {t("facturatie.contract_hint")}
-        </p>
-        <div
-          style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}
-          data-testid="facturatie-contract-controls"
-        >
-          {hasContract ? (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleView}
-              data-testid="facturatie-contract-view"
-            >
-              {t("facturatie.contract_view")}
-            </button>
-          ) : (
-            <span className="muted small">{t("facturatie.contract_none")}</span>
-          )}
-          {canManage && (
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="application/pdf"
-                hidden
-                onChange={handleFile}
-                data-testid="facturatie-contract-input"
-              />
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => fileRef.current?.click()}
-                disabled={uploadBusy}
-                data-testid="facturatie-contract-upload"
-              >
-                {hasContract
-                  ? t("facturatie.contract_replace")
-                  : t("facturatie.contract_upload")}
-              </button>
-              {hasContract && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  style={{ color: "var(--red)" }}
-                  onClick={handleRemove}
-                  disabled={uploadBusy}
-                  data-testid="facturatie-contract-remove"
-                >
-                  {t("facturatie.contract_remove")}
-                </button>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Embedded live preview — primary affordance; the "View PDF"
-            button above stays as a secondary open-in-new-tab action. Only
-            renders when a contract is present; a fetch error surfaces inline
-            without crashing the section. */}
-        {hasContract && (
-          <div
-            style={{ marginTop: 12 }}
-            data-testid="facturatie-contract-preview"
-          >
-            {previewError ? (
-              <div className="alert-error" role="alert">
-                {previewError}
-              </div>
-            ) : previewUrl ? (
-              <iframe
-                title={t("facturatie.contract_preview_title")}
-                src={previewUrl}
-                data-testid="facturatie-contract-frame"
-                style={{
-                  width: "100%",
-                  height: 520,
-                  border: "1px solid var(--border, #e2e2e2)",
-                  borderRadius: 6,
-                }}
-              />
-            ) : (
-              <div className="loading-bar">
-                <div className="loading-bar-fill" />
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </section>
   );

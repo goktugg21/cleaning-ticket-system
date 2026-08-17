@@ -7,6 +7,7 @@ import type {
 } from "../../../api/reports.types";
 import { BoundedList } from "../../../components/BoundedList";
 import { useReport } from "../../../hooks/useReport";
+import { customerLabelName } from "../../../lib/customerLabelName";
 import { formatMoney } from "../../../lib/intl";
 import { ExportButtons } from "./ExportButtons";
 
@@ -161,7 +162,13 @@ function DepartmentNode({
       <details data-testid="ew-by-department-department">
         <summary className="ew-department-tree-summary ew-department-tree-summary-dept">
           <span className="ew-department-tree-name">
-            {dept.department_name ?? t("ew_by_department_untagged_department")}
+            {/* Sprint 187 §4 — most nodes of this tree read "Algemeen"
+                in the English UI, because nearly every record now
+                carries the auto-seeded label and this was the last
+                place printing it raw. Both levels, not just this
+                one. */}
+            {customerLabelName(dept.department_name, t) ||
+              t("ew_by_department_untagged_department")}
           </span>
           <span className="ew-department-tree-meta">
             {t("ew_by_department_item_count", { count: dept.count })} ·{" "}
@@ -176,7 +183,8 @@ function DepartmentNode({
               data-testid="ew-by-department-worktype"
             >
               <span className="ew-department-tree-name">
-                {wt.work_type_name ?? t("ew_by_department_untagged_work_type")}
+                {customerLabelName(wt.work_type_name, t) ||
+                  t("ew_by_department_untagged_work_type")}
               </span>
               <span className="ew-department-tree-meta">
                 {t("ew_by_department_item_count", { count: wt.count })} ·{" "}

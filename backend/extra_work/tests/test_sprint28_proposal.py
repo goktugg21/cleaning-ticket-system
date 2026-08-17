@@ -30,6 +30,7 @@ from extra_work.models import (
     ExtraWorkRequest,
     ExtraWorkRequestItem,
     ExtraWorkStatus,
+    ExtraWorkStatusHistory,
     Proposal,
     ProposalLine,
     ProposalStatus,
@@ -341,11 +342,40 @@ class ProposalSendAdvancesParentTests(ProposalFixtureMixin, TestCase):
         self.assertIsNotNone(ew.pricing_proposed_at)
 
     def test_proposal_send_rejects_when_parent_is_requested(self):
-        # Use REQUESTED parent. Need to bypass the proposal-create
-        # validator that ALSO requires REQUESTED-or-UNDER_REVIEW —
-        # that allows it, so we can build the row and try to SEND.
+        """The SEND precondition itself, still enforced.
+
+        Sprint 187 §2a — this used to be reached through the CREATE
+        endpoint: a proposal built on a REQUESTED parent, then a Send
+        that 400'd. Creating a proposal now starts the review (see
+        `ProposalCreateAdvancesParentTests` below), so that ROUTE no
+        longer produces the combination, and the proposal is built
+        directly in the ORM here instead. The state-machine guard is what
+        this test is about and it is unchanged.
+
+        Sprint 187C — the original wording said the combination was "no
+        longer reachable" at all. That was too strong: the same commit
+        added the `_ParentAdvanceBlocked` arm, which deliberately creates
+        a proposal while LEAVING the parent at REQUESTED. The pairing is
+        still reachable in production by that arm — which is exactly why
+        this guard has to keep being tested rather than retired as dead.
+        """
         ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
-        proposal = self._create_proposal(ew)
+        proposal = Proposal.objects.create(
+            extra_work_request=ew,
+            status=ProposalStatus.DRAFT,
+            created_by=self.admin,
+        )
+        ProposalLine.objects.create(
+            proposal=proposal,
+            service=self.service,
+            description="",
+            quantity=Decimal("2.00"),
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            unit_price=Decimal("50.00"),
+            vat_pct=Decimal("21.00"),
+            customer_explanation="",
+            internal_note="",
+        )
         response = self._api(self.admin).post(
             self._transition_url(ew.id, proposal.id),
             {"to_status": ProposalStatus.SENT},
@@ -971,3 +1001,152 @@ class UniqueOpenProposalTests(ProposalFixtureMixin, TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400, response.data)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 187 §2a — creating a proposal STARTS the review
+# ---------------------------------------------------------------------------
+class ProposalCreateAdvancesParentTests(ProposalFixtureMixin, TestCase):
+    """The order trap, closed.
+
+    The detail page offered "Prepare proposal" on a REQUESTED parent and
+    the create serializer deliberately admitted one, but `can_send`
+    requires UNDER_REVIEW — so an operator could build a whole quote and
+    find the Send button simply absent, with `can_direct_publish` (being
+    derived from `can_send`) hidden alongside it. Both terminal actions
+    on the builder were dead and nothing on screen said why. Live on
+    crmtest: proposal 17 on EW 68 and proposal 5 on EW 44.
+
+    Creating a proposal IS starting the review, so it now advances the
+    parent — through `apply_transition`, not through the
+    `_advance_parent_on_send` bypass: that bypass exists only because the
+    PRICING_PROPOSED leg enforces `pricing_line_items_required` against
+    the legacy line model, and this leg is REQUESTED -> UNDER_REVIEW,
+    which that precondition does not touch.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup_fixture()
+
+    def test_creating_a_proposal_advances_a_requested_parent(self):
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        self._create_proposal(ew)
+        ew.refresh_from_db()
+        self.assertEqual(ew.status, ExtraWorkStatus.UNDER_REVIEW)
+
+    def test_the_advance_writes_a_status_history_row(self):
+        """Every state mutation writes one, in the same transaction
+        (CLAUDE.md §3). A normal provider-driven transition, so
+        `is_override` is False and no reason is required."""
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        self._create_proposal(ew)
+        row = ExtraWorkStatusHistory.objects.get(
+            extra_work=ew,
+            old_status=ExtraWorkStatus.REQUESTED,
+            new_status=ExtraWorkStatus.UNDER_REVIEW,
+        )
+        self.assertFalse(row.is_override)
+        self.assertEqual(row.changed_by_id, self.admin.id)
+
+    def test_an_under_review_parent_is_left_alone(self):
+        """Idempotent: the normal arrival is already UNDER_REVIEW, and a
+        second history row for a transition that did not happen would be
+        a lie in the audit trail."""
+        ew = self._make_ew(status=ExtraWorkStatus.UNDER_REVIEW)
+        before = ExtraWorkStatusHistory.objects.filter(extra_work=ew).count()
+        self._create_proposal(ew)
+        ew.refresh_from_db()
+        self.assertEqual(ew.status, ExtraWorkStatus.UNDER_REVIEW)
+        self.assertEqual(
+            ExtraWorkStatusHistory.objects.filter(extra_work=ew).count(),
+            before,
+        )
+
+    def test_send_is_reachable_immediately_after_create_from_requested(self):
+        """The whole point: the quote the operator just built can now be
+        sent, instead of the button being absent."""
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        proposal = self._create_proposal(ew)
+        response = self._api(self.admin).post(
+            self._transition_url(ew.id, proposal.id),
+            {"to_status": ProposalStatus.SENT},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        ew.refresh_from_db()
+        self.assertEqual(ew.status, ExtraWorkStatus.PRICING_PROPOSED)
+
+    def test_can_send_is_true_on_the_create_response_path(self):
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        proposal = self._create_proposal(ew)
+        response = self._api(self.admin).get(
+            self._proposal_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data["actions"]["can_send"])
+
+    def test_can_send_is_true_on_the_201_body_itself(self):
+        """Sprint 187C — the test above is named for the create response
+        but asserts on a follow-up GET, so it could not see the bug it
+        was named for: `apply_transition` writes through its own locked
+        instance, and the caller's stale copy (cached on the proposal by
+        `Proposal.objects.create`) still said REQUESTED, making the 201
+        body answer can_send=False on the exact path §2a exists to open.
+
+        The page happens to refetch immediately and never showed it. The
+        payload is still a contract, so it is asserted here directly."""
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        response = self._api(self.admin).post(
+            self._proposals_url(ew.id),
+            {"lines": [self._line_payload()]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data["actions"]["can_send"])
+
+    def test_create_response_reports_no_block_on_the_normal_path(self):
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        response = self._api(self.admin).post(
+            self._proposals_url(ew.id),
+            {"lines": [self._line_payload()]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIn("parent_advance_blocked", response.data)
+        self.assertEqual(response.data["parent_advance_blocked"], "")
+
+    def test_a_blocked_parent_advance_still_creates_and_reports_why(self):
+        """Sprint 187C — the `_ParentAdvanceBlocked` arm had no test at
+        all: every assertion pinned the empty string on the happy path.
+
+        The arm catches any `TransitionError`, so it is driven here by
+        making the transition itself fail. What it must guarantee is the
+        pair: the proposal is STILL created (refusing it would take away
+        a capability the operator already had), and the reason is on the
+        response instead of the failure being swallowed."""
+        from extra_work.state_machine import TransitionError
+
+        ew = self._make_ew(status=ExtraWorkStatus.REQUESTED)
+        # The helper imports `apply_transition` at call time, so patching
+        # it on its own module is what the running code will resolve.
+        with patch(
+            "extra_work.state_machine.apply_transition",
+            side_effect=TransitionError("Extra Work status changed."),
+        ):
+            response = self._api(self.admin).post(
+                self._proposals_url(ew.id),
+                {"lines": [self._line_payload()]},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIn(
+            "Extra Work status changed.",
+            response.data["parent_advance_blocked"],
+        )
+        ew.refresh_from_db()
+        self.assertEqual(ew.status, ExtraWorkStatus.REQUESTED)
+        self.assertEqual(
+            Proposal.objects.filter(extra_work_request=ew).count(), 1
+        )

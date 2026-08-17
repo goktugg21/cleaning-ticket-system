@@ -34,6 +34,22 @@ export function rowAmounts(r: ExtraWorkRequestList): {
   };
 }
 
+// Sprint 188 — "has anyone priced this yet?" is NOT the same question as
+// "does this cost zero". Free work and a goodwill line are ordinary
+// business, so a row at 0.00 may be a real answer; a row nobody has
+// priced is an absence and must read as one (an em dash), never as
+// EUR 0,00.
+//
+// DISPLAY ONLY. Sums keep treating an unpriced row as zero, because zero
+// is what it contributes — `sumRows` below is deliberately untouched, and
+// so is `rowAmounts`, which stays the ONE billing-total rule.
+//
+// The field is optional on the type, so an older cached payload cannot
+// blank out a real amount: absent means "assume priced".
+export function isPriced(r: ExtraWorkRequestList): boolean {
+  return r.is_priced !== false;
+}
+
 export interface GroupTotals {
   count: number;
   open: number;

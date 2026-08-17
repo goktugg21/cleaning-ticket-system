@@ -14,6 +14,99 @@ from rest_framework import serializers
 from .models import Invoice, InvoiceLine
 
 
+class InvoicePreviewLineSerializer(serializers.Serializer):
+    """Sprint 182 §2 — one row of a PLANNED invoice.
+
+    Shaped from an `ExtraWorkRequest`, not an `InvoiceLine`, because no
+    line exists: nothing is stored. The field names deliberately mirror
+    `InvoiceLineSerializer` so the frontend renders a preview and a real
+    invoice through the same table.
+    """
+
+    extra_work = serializers.IntegerField(source="id", read_only=True)
+    description = serializers.CharField(source="title", read_only=True)
+    line_subtotal = serializers.SerializerMethodField()
+    line_vat = serializers.SerializerMethodField()
+    line_total = serializers.SerializerMethodField()
+
+    def _amounts(self, ew):
+        """This row's money FOR THE CUSTOMER being previewed.
+
+        Sprint 185 E §2 — the plan carries a per-Extra-Work amounts map
+        (the customer's share on a shared building, the whole earned
+        amount everywhere else) and the row has to read it. Without this
+        the preview contradicted itself: the totals came from the plan
+        and were the customer's part, while every LINE printed the
+        undivided figure — rows of 100 adding up to a total of 60.
+
+        The map arrives through the serializer context, put there by the
+        parent that owns the plan. Falling back to the earned amounts
+        keeps a line serialized outside a plan (tests, future callers)
+        honest rather than crashing.
+        """
+        from .services import _earned_amounts
+
+        amounts = self.context.get("plan_amounts") or {}
+        return amounts.get(ew.id) or _earned_amounts(ew)
+
+    def get_line_subtotal(self, ew):
+        return f"{self._amounts(ew)[0] or 0:.2f}"
+
+    def get_line_vat(self, ew):
+        return f"{self._amounts(ew)[1] or 0:.2f}"
+
+    def get_line_total(self, ew):
+        return f"{self._amounts(ew)[2] or 0:.2f}"
+
+
+class InvoicePreviewSerializer(serializers.Serializer):
+    """Sprint 182 §2 — one invoice that WOULD be created.
+
+    No `id` and no `number`, deliberately: a preview is not an invoice and
+    must never be mistaken for one. Numbering happens at Send and has to
+    stay gapless, so nothing on this shape can carry a number.
+    """
+
+    building = serializers.IntegerField(source="building_id", allow_null=True)
+    building_name = serializers.SerializerMethodField()
+    department = serializers.IntegerField(
+        source="department_id", allow_null=True
+    )
+    work_type = serializers.IntegerField(source="work_type_id", allow_null=True)
+    granularity = serializers.CharField()
+    subtotal_amount = serializers.SerializerMethodField()
+    vat_amount = serializers.SerializerMethodField()
+    total_amount = serializers.SerializerMethodField()
+    line_count = serializers.SerializerMethodField()
+    lines = serializers.SerializerMethodField()
+
+    def get_building_name(self, plan):
+        # The plan owns this, so the PREVIEW PDF labels the same plan the
+        # same way (`preview_pdf.render_preview_pdf`).
+        return plan.building_name
+
+    def get_subtotal_amount(self, plan):
+        return f"{plan.subtotal:.2f}"
+
+    def get_vat_amount(self, plan):
+        return f"{plan.vat:.2f}"
+
+    def get_total_amount(self, plan):
+        return f"{plan.total:.2f}"
+
+    def get_line_count(self, plan):
+        return len(plan.extra_works)
+
+    def get_lines(self, plan):
+        # Sprint 185 E §2 — the plan's own per-row amounts travel with
+        # the rows, so a line and the total above it are the same money.
+        context = dict(self.context)
+        context["plan_amounts"] = getattr(plan, "amounts", {}) or {}
+        return InvoicePreviewLineSerializer(
+            plan.extra_works, many=True, context=context
+        ).data
+
+
 class InvoiceLineSerializer(serializers.ModelSerializer):
     """Read shape for one invoice line (both origins). `extra_work` is the
     source-EW id (NULL for a hand-added line)."""
@@ -44,6 +137,22 @@ class InvoiceSerializer(serializers.ModelSerializer):
     """Read shape for one invoice (with its lines) for the Facturen UI."""
 
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    # Sprint 187 §6a — WHICH provider company issued this invoice.
+    #
+    # Numbering is gapless per company per YEAR, so two different
+    # invoices legitimately both display `2026-0001` and the list had
+    # nothing at all to tell them apart. Live on crmtest right now: one
+    # Osius Demo, one Bright Facilities.
+    #
+    # Free: `InvoiceViewSet.get_queryset` already `select_related`s
+    # `company`. `company` is NOT NULL on the model, so a plain
+    # `CharField(source=...)` is safe here — the SkipField-on-null trap
+    # that made `created_by_label` a method field does not apply.
+    #
+    # PROVIDER-SIDE ONLY. `CustomerInvoiceSerializer` is deliberately
+    # untouched: a customer has no business learning the provider's
+    # internal company structure.
+    company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.SerializerMethodField()
     # Sprint 132 — set only for an invoice generated at
     # PER_BUILDING_DEPARTMENT_WORK_TYPE granularity; null on every other
@@ -63,6 +172,24 @@ class InvoiceSerializer(serializers.ModelSerializer):
     # ("reversed_by")` queryset avoids N+1 on the list endpoint; sorted in
     # Python (not `.order_by()`) so that prefetch cache is actually used.
     credited_by_number = serializers.SerializerMethodField()
+    # Sprint 183 §3 — WHO created this invoice, and the label to show.
+    #
+    # `created_by` was WRITE-ONLY until this sprint: the column was
+    # populated and read by no serializer, PDF or list. That is precisely
+    # why the month-end job could attribute drafts to a COMPANY_ADMIN who
+    # had not created them and nobody noticed — nothing displayed it. It
+    # is exposed now BECAUSE the fix is otherwise invisible: an operator
+    # has to be able to see that the nightly run, not a colleague,
+    # produced these.
+    #
+    # `created_by_label` is a SerializerMethodField rather than a
+    # `source="created_by.email"` CharField deliberately. On a NULL FK,
+    # DRF turns the attribute traversal into `SkipField` and OMITS the
+    # key entirely — the exact shape that caught Sprint 180's
+    # status-history payload. A method field always emits, so a
+    # system-created invoice reads "System" instead of a missing key the
+    # frontend has to guess about.
+    created_by_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -72,6 +199,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "number",
             "year",
             "company",
+            "company_name",
             "customer",
             "customer_name",
             "building",
@@ -93,6 +221,21 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "credited_by_number",
             "issued_at",
             "sent_at",
+            # Sprint 180 §1 — is this document FROZEN, and how long is it?
+            # Provider-side only. `pdf_frozen_at` is NULL for every draft and
+            # for any invoice sent before the freeze existed (those freeze on
+            # first access or via `manage.py freeze_invoice_pdfs`), so it
+            # doubles as the operator-visible backfill progress indicator.
+            # `pdf_page_count` is what makes "an invoice can run to eight
+            # pages" checkable from the list without opening each one.
+            #
+            # `pdf_sha256` is deliberately NOT exposed: it is the integrity
+            # witness the tests and a future audit read from the row, and no
+            # screen has a use for a hex digest.
+            "pdf_frozen_at",
+            "pdf_page_count",
+            "created_by",
+            "created_by_label",
             "created_at",
             "updated_at",
             "lines",
@@ -111,6 +254,23 @@ class InvoiceSerializer(serializers.ModelSerializer):
     def get_credited_by_number(self, obj: Invoice):
         reversals = sorted(obj.reversed_by.all(), key=lambda r: r.id, reverse=True)
         return reversals[0].number if reversals else None
+
+    def get_created_by_label(self, obj: Invoice):
+        """Who to show as the author. Never blank, never "Unassigned".
+
+        Sprint 183 §3 — a NULL `created_by` means the system created this
+        invoice, and it has to READ that way. "Unassigned" was the wrong
+        fallback once already this month (Sprint 180's timeline rendered
+        a system row as "Unassigned", which names nobody and still
+        implies somebody); the label is resolved here, server-side, so
+        every consumer gets the same word without re-deciding it.
+
+        A real actor shows their email — the same identifier every other
+        provider-side surface in this app uses for a person.
+        """
+        if obj.created_by_id is None:
+            return "System"
+        return getattr(obj.created_by, "email", "") or "System"
 
 
 class CustomerInvoiceLineSerializer(serializers.ModelSerializer):

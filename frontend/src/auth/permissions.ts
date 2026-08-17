@@ -233,6 +233,35 @@ export function canManageTimesheets(role: Role | null | undefined): boolean {
   return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
 }
 
+// Sprint 160 — the contracts module. Two predicates, mirroring the
+// backend's two permission classes (`contracts.permissions`).
+//
+// READ admits BUILDING_MANAGER, unlike the hours module: a BM manages
+// buildings and needs to see what is contracted at them. The backend
+// additionally narrows a BM to the contracts covering THEIR buildings
+// (`contracts.scope.filter_contracts_for`), which no frontend predicate
+// can express — this one only decides whether the route is reachable.
+//
+// STAFF is admitted by neither. A contract carries the customer's
+// negotiated prices, and unlike hours there is no "your own" subset
+// that would make sense to show a field worker.
+//
+// `isProviderAdmin` is deliberately not reused for the manage
+// predicate, for the reason `canManageTimesheets` gives: a future
+// widening of THAT predicate must not silently hand anyone the power to
+// rewrite commercial terms.
+export function canAccessContracts(role: Role | null | undefined): boolean {
+  return (
+    role === "SUPER_ADMIN" ||
+    role === "COMPANY_ADMIN" ||
+    role === "BUILDING_MANAGER"
+  );
+}
+
+export function canManageContracts(role: Role | null | undefined): boolean {
+  return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
+}
+
 // `/agenda` (My Work) — role-adaptive since Sprint 111. Shown to STAFF and
 // BUILDING_MANAGER ONLY; HIDDEN for SUPER_ADMIN + COMPANY_ADMIN (owner
 // decision) and for CUSTOMER_USER. The surface adapts per role:
@@ -249,7 +278,42 @@ export function canManageTimesheets(role: Role | null | undefined): boolean {
 // them. NOTE: `isStaffRole` is intentionally NOT reused here — it still
 // admits SA + CA (it drives PROVIDER_INTERNAL note access etc.).
 export function canAccessAgenda(role: Role | null | undefined): boolean {
-  return role === "STAFF" || role === "BUILDING_MANAGER";
+  // Sprint 170 §1 — SUPER_ADMIN and COMPANY_ADMIN admitted.
+  //
+  // Sprint 168 built the Work Plan into this page and the gate above
+  // excluded exactly the person who had been asking for it for three
+  // sprints: the owner is a SUPER_ADMIN, so the nav entry never
+  // rendered and the whole feature was invisible to him.
+  //
+  // The gate was not wrong when it was written — SA/CA hold no
+  // assignment slots of their own, so the page had nothing to show
+  // them. What changed is that the endpoint now answers
+  // `?scope=company` for a provider-management role, so an admin sees
+  // the TEAM's week rather than their own empty one. Opening the gate
+  // without that would have swapped an invisible page for a
+  // permanently empty one, which is the same defect.
+  return (
+    role === "STAFF" ||
+    role === "BUILDING_MANAGER" ||
+    role === "SUPER_ADMIN" ||
+    role === "COMPANY_ADMIN"
+  );
+}
+
+/** True for the roles that see the TEAM's week rather than their own
+ *  slots. Kept beside the gate above so the two cannot drift.
+ *
+ *  Sprint 179A — BUILDING_MANAGER added. The backend has admitted it to
+ *  `?scope=company` since Sprint 170 §1 (`is_provider_management_role`
+ *  covers all three provider-management roles, and the widening runs
+ *  through `scope_tickets_for` / `scope_extra_work_for`), but the page
+ *  never asked for it, so a manager could not reach a scope the server
+ *  was already prepared to serve. A BM holds no assignment slots of
+ *  their own either, so the personal view is as empty for them as it is
+ *  for an admin — which is the exact defect Sprint 170 fixed one role
+ *  short of. */
+export function agendaShowsTeamWeek(role: Role | null | undefined): boolean {
+  return isProviderManagementRole(role);
 }
 
 // `/admin/staff-assignment-requests` — backend admits the BM for the

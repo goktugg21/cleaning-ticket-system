@@ -5,8 +5,8 @@
 //   Functional contract is unchanged; only the presentation layer moves.
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
   Clock,
@@ -21,30 +21,51 @@ import { useTranslation } from "react-i18next";
 import { listAllCustomers, listCustomerBuildings } from "../api/admin";
 import { listLabels } from "../api/customerLabels";
 import {
+  bulkAssignExtraWork,
+  bulkSetExtraWorkDates,
   listAllExtraWork,
+  listExtraWorkAssignmentCandidates,
   listExtraWorkCategoryOptions,
 } from "../api/extraWork";
 import type { ExtraWorkCategoryOptions } from "../api/extraWork";
 import type {
+  AssignmentCandidate,
   CustomerAdmin,
+  ExtraWorkAssignmentRole,
   CustomerBuildingMembership,
   CustomerLabel,
+  ExtraWorkBilledTo,
   ExtraWorkCategory,
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
+  TicketStatus,
 } from "../api/types";
 import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
+import { ChoiceDialog } from "../components/ChoiceDialog";
+import { StatusTiles } from "../components/StatusTiles";
+import { TrackTabs } from "../components/extra-work/TrackTabs";
+import type { ExtraWorkTrack } from "../components/extra-work/TrackTabs";
+import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
+import {
+  extraWorkStatusLabelKey,
+  ticketStatusLabelKey,
+} from "../lib/enumLabels";
+import { EditModeToggle } from "../components/EditModeToggle";
+import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
+import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
+import { useEditMode } from "../lib/useEditMode";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
-import { rowAmounts } from "../lib/billing";
+import { isPriced, rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
+import { customerLabelName } from "../lib/customerLabelName";
 
 const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   DEEP_CLEANING: "category.deep_cleaning",
@@ -58,33 +79,126 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   OTHER: "category.other",
 };
 
-const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
-  REQUESTED: "status.requested",
-  UNDER_REVIEW: "status.under_review",
-  PRICING_PROPOSED: "status.pricing_proposed",
-  CUSTOMER_APPROVED: "status.customer_approved",
-  // Sprint 29 Batch 29.8 — operational segment.
-  IN_PROGRESS: "status.in_progress",
-  COMPLETED: "status.completed",
-  CUSTOMER_REJECTED: "status.customer_rejected",
-  CANCELLED: "status.cancelled",
+// Sprint 182 §2 — this page's private status-label map is gone.
+//
+// It pointed at `extra_work:status.*`, where CUSTOMER_APPROVED reads
+// "Customer approved", while the badge two lines below rendered
+// `common:extra_work_status.*`, where the same status reads "Price
+// approved" — the crisp name, because what the customer approved is the
+// QUOTE. One row could therefore say one thing on screen and another in
+// the CSV taken from it. `extraWorkStatusLabelKey` is the one source now.
+
+/** Sprint 180 §3 — the two billing targets. A `Record` over the union
+ *  rather than a second array literal: adding a third value to
+ *  `ExtraWorkBilledTo` then fails the compiler here instead of rendering
+ *  a blank cell (CLAUDE.md — a hardcoded array defeats exhaustiveness
+ *  checking, which is how Sprint 126's headerless column shipped). */
+const BILLED_TO_I18N_KEY: Record<ExtraWorkBilledTo, string> = {
+  BUILDING: "billed_to.building",
+  CUSTOMER: "billed_to.customer",
 };
 
-const STATUS_FILTER_OPTIONS: ReadonlyArray<ExtraWorkStatus> = [
-  "REQUESTED",
-  "UNDER_REVIEW",
-  "PRICING_PROPOSED",
-  "CUSTOMER_APPROVED",
-  // Sprint 29 Batch 29.8 — surface the operational segment in the
-  // list filter so operators can narrow to in-progress / completed
-  // execution rows.
-  "IN_PROGRESS",
-  "COMPLETED",
-  "CUSTOMER_REJECTED",
-  "CANCELLED",
+/**
+ * Sprint 181 §2 — nine chips became four, twice.
+ *
+ * The list used to show all nine Extra Work statuses as chips on both
+ * tracks. The tracks already answer the biggest question, so the chips
+ * were repeating it — and worse, most of them were STRUCTURALLY zero
+ * wherever they sat. "In progress" and "Completed" cannot occur in a
+ * track defined as "has no ticket"; "Awaiting pricing" cannot occur in
+ * one defined as "the price is agreed and the work has begun". A chip
+ * that can only ever read 0 costs attention and returns nothing.
+ *
+ * So each track offers only what can be non-zero within it, and the two
+ * sets are of DIFFERENT KINDS, which is the whole of §1:
+ *
+ *   Quote & price   commercial states, read off the EXTRA WORK.
+ *   Work started    operational states, read off the TICKET.
+ *
+ * `REQUESTED` and `UNDER_REVIEW` collapse into one chip: they are two
+ * spellings of "nobody has priced this yet", and which one a row is in
+ * changes nothing anybody does next.
+ */
+interface ChipSpec<TStatus extends string> {
+  /** Group key. A chip can stand for several statuses, so this is not
+   *  necessarily an enum member. */
+  value: string;
+  statuses: ReadonlyArray<TStatus>;
+  labelKey: string;
+}
+
+const QUOTE_TRACK_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkStatus>> = [
+  {
+    value: "AWAITING_PRICING",
+    statuses: ["REQUESTED", "UNDER_REVIEW"],
+    labelKey: "list.chip_awaiting_pricing",
+  },
+  {
+    value: "PRICING_PROPOSED",
+    statuses: ["PRICING_PROPOSED"],
+    labelKey: "list.chip_with_customer",
+  },
+  {
+    value: "CUSTOMER_REJECTED",
+    statuses: ["CUSTOMER_REJECTED"],
+    labelKey: "list.chip_rejected",
+  },
+  {
+    value: "CANCELLED",
+    statuses: ["CANCELLED"],
+    labelKey: "list.chip_cancelled",
+  },
 ];
 
-type StatusFilter = ExtraWorkStatus | "ALL";
+/** Sprint 181 §1/§2 — the Work started chips are TICKET states, because
+ *  on that track the ticket is the only authority for how the work is
+ *  going. `WAITING_MANAGER_REVIEW` and `REOPENED_BY_ADMIN` fold into
+ *  "In progress" (internal hops, not states this list needs a chip for),
+ *  and both finished states fold into one "Finished" — an operator
+ *  scanning the list wants to know whether it is done, not which of two
+ *  doors it left by. */
+const STARTED_TRACK_CHIPS: ReadonlyArray<ChipSpec<TicketStatus>> = [
+  { value: "OPEN", statuses: ["OPEN"], labelKey: "list.chip_ticket_open" },
+  {
+    value: "IN_PROGRESS",
+    statuses: ["IN_PROGRESS", "WAITING_MANAGER_REVIEW", "REOPENED_BY_ADMIN"],
+    labelKey: "list.chip_ticket_in_progress",
+  },
+  {
+    value: "WAITING_CUSTOMER_APPROVAL",
+    statuses: ["WAITING_CUSTOMER_APPROVAL"],
+    labelKey: "list.chip_ticket_waiting_customer",
+  },
+  {
+    value: "FINISHED",
+    statuses: ["APPROVED", "CLOSED"],
+    labelKey: "list.chip_ticket_finished",
+  },
+];
+
+/** "" = no chip selected (the All tile). A chip value is a GROUP key,
+ *  not necessarily a raw enum member. */
+type StatusFilter = string;
+
+/** Sprint 181 §1 — the operational status of a row on the Work started
+ *  track, read off its ticket. The lowest-id ticket is the spawned one
+ *  (`build_ticket_map` picks the same row), and one ticket per Extra
+ *  Work has been the rule since Sprint 6A, so this is a lookup rather
+ *  than a reduction. */
+function operationalStatus(row: ExtraWorkRequestList): TicketStatus | null {
+  return row.spawned_tickets[0]?.status ?? null;
+}
+
+/** Sprint 180 §1(b) — a CUSTOMER_APPROVED request with zero operational
+ *  tickets. It stays on the Quote & price track (operationally nothing
+ *  has started, which is what the track means) but it is NOT normal: the
+ *  spawn is synchronous with approval, so zero tickets means the spawn
+ *  FAILED. A recovery button already exists on the detail page
+ *  (POST /api/extra-work/<id>/spawn/); silence here is how that work
+ *  gets lost. */
+function isSpawnAnomaly(row: ExtraWorkRequestList): boolean {
+  return row.status === "CUSTOMER_APPROVED" && !row.has_operational_ticket;
+}
 // Sprint 143 §6 — the filter is a catalog category NAME now, not an
 // `ExtraWorkCategory` enum member. "" = no filter. The enum still drives
 // the table's own "Categorie" COLUMN (a different field on the request,
@@ -97,6 +211,151 @@ interface ExtraWorkKpis {
   awaiting: number; // PRICING_PROPOSED
   approved: number; // CUSTOMER_APPROVED
   totalValue: string; // decimal-string sum of earned amounts (excludes CANCELLED)
+}
+
+/** Sprint 176 §3 — set the deadline and/or the planned end on a selection.
+ *
+ *  The whole point of this dialog is what it does NOT send. Every field
+ *  starts blank meaning "leave unchanged", exactly like every other bulk
+ *  field in the app, and a blank field is OMITTED from the payload rather
+ *  than sent as null — the server reads key presence, so an omitted key
+ *  leaves the stored date alone. Without that, bulk-setting a deadline
+ *  across ten rows would silently wipe the planned end date on the one row
+ *  that had one.
+ *
+ *  Which means this dialog can SET a date but not CLEAR one: a blank
+ *  field is already spoken for by "leave unchanged", and two different
+ *  intentions cannot share one blank input. Clearing is deliberate,
+ *  per-request work — the Details card's date editor does it. Offering a
+ *  bulk clear would need a third state (a checkbox per field), and the
+ *  operation it enables, wiping a date across a selection, is not one
+ *  worth making easy to reach by accident. */
+function BulkDatesDialog({
+  count,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  busy: boolean;
+  error: string;
+  onCancel: () => void;
+  onConfirm: (payload: {
+    deadline?: string;
+    planned_end_date?: string;
+  }) => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const [deadline, setDeadline] = useState("");
+  const [plannedEnd, setPlannedEnd] = useState("");
+
+  const nothingToDo = !deadline && !plannedEnd;
+
+  function confirm() {
+    const payload: { deadline?: string; planned_end_date?: string } = {};
+    if (deadline) payload.deadline = deadline;
+    if (plannedEnd) payload.planned_end_date = plannedEnd;
+    onConfirm(payload);
+  }
+
+  return (
+    // Same overlay idiom as `AssignPeopleDialog` next door — an inline
+    // positioned backdrop plus a `card`, NOT a native <dialog>. CLAUDE.md
+    // records why the imperative ones are trouble when mounted
+    // conditionally; this one is plain markup and mounts safely.
+    <div
+      role="presentation"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        padding: 16,
+      }}
+    >
+      <div
+        className="card"
+        role="dialog"
+        aria-modal="true"
+        style={{ maxWidth: 520, width: "100%", padding: 24 }}
+        data-testid="extra-work-bulk-dates-dialog"
+      >
+        <h2 className="form-section-title">{t("list.bulk_dates_title")}</h2>
+        <p className="muted small">
+          {t("list.bulk_dates_summary", { count })}
+        </p>
+        <div className="field">
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span className="muted small">{t("detail.deadline")}</span>
+            <input
+              type="date"
+              className="field-input"
+              value={deadline}
+              onChange={(event) => setDeadline(event.target.value)}
+              data-testid="extra-work-bulk-dates-deadline"
+            />
+          </label>
+          <label
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              marginTop: 8,
+            }}
+          >
+            <span className="muted small">
+              {t("detail.field_planned_end_date")}
+            </span>
+            <input
+              type="date"
+              className="field-input"
+              value={plannedEnd}
+              onChange={(event) => setPlannedEnd(event.target.value)}
+              data-testid="extra-work-bulk-dates-planned-end"
+            />
+          </label>
+          <div className="muted small" style={{ marginTop: 8 }}>
+            {t("list.bulk_dates_unchanged_hint")}
+          </div>
+        </div>
+        {error && (
+          <div className="alert-error" style={{ marginTop: 8 }}>
+            {error}
+          </div>
+        )}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            marginTop: 16,
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            {t("common:cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={confirm}
+            disabled={busy || nothingToDo}
+            data-testid="extra-work-bulk-dates-confirm"
+          >
+            {busy ? t("detail.dates_saving") : t("common:save")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function KpiCard({
@@ -126,16 +385,67 @@ function KpiCard({
   );
 }
 
-export function ExtraWorkListPage() {
+/**
+ * Sprint 169 §8 — ONE extra-work list, mounted twice.
+ *
+ * `CustomerExtraWorkPage` was a 296-line read-only re-implementation of
+ * this 1202-line page: no checkbox column, no `MultiSelectToolbar`, no
+ * `useEditMode`, no bulk assignment, no bulk status action. Everything
+ * Sprints 158-164 built here was missing there, because they were two
+ * independently-maintained copies of the same list — the failure mode
+ * CLAUDE.md names explicitly.
+ *
+ * Copying the features across would have produced two copies that drift
+ * again. So the list is this component, and the difference between the
+ * two entry points is ONE prop:
+ *
+ *   from the sidebar        no customer fixed, the customer filter is
+ *                           offered;
+ *   from inside a customer  the customer is fixed and its filter is not
+ *                           offered. Everything else is identical.
+ *
+ * Fixing the customer is a UI convenience and nothing more. The request
+ * carries `customer=<id>` exactly as the picker would have set it, and
+ * the SERVER still decides what the actor may see — a customer id the
+ * actor has no access to returns their own rows, not that customer's.
+ */
+export function ExtraWorkList({
+  customerId,
+  hideHeader = false,
+}: {
+  customerId?: number;
+  /** The customer page draws its own header, so this one is suppressed
+   *  rather than stacked under it. */
+  hideHeader?: boolean;
+}) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { me } = useAuth();
   // M6.3 — additive "my work" deep-link reads. With both params absent
   // these resolve to undefined below, so the fetch is unchanged.
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   // Provider-only: the billing-month picker, invoice-status filter, and the
   // invoiced column. The backend redacts the billing fields for CUSTOMER_USER
   // anyway; this also hides the controls from them.
   const isProvider = isProviderManagementRole(me?.role);
+  // Sprint 155 §1b — the create button asks which of the three.
+  const [chooserOpen, setChooserOpen] = useState(false);
+  // Sprint 157 §2 — assign people to several requests at once, behind
+  // the Sprint 155 §4 edit gate like every other list.
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState("");
+  // Sprint 176 §3 — bulk deadline / planned end, behind the same edit gate.
+  const [datesOpen, setDatesOpen] = useState(false);
+  const [datesBusy, setDatesBusy] = useState(false);
+  const [datesError, setDatesError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  // Sprint 159 §2 — BOTH roles at once, so both candidate lists are
+  // held. Keyed by role because eligibility differs between them and one
+  // shared list would offer a worker as a manager.
+  const [assignCandidates, setAssignCandidates] = useState<
+    Record<ExtraWorkAssignmentRole, AssignmentCandidate[]>
+  >({ WORKER: [], MANAGER: [] });
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -146,13 +456,34 @@ export function ExtraWorkListPage() {
   // so `rows` below is the FULL matching set regardless of how many pages
   // that takes, and filtering happens over the complete set, not one page.
   const [searchInput, setSearchInput] = useState("");
+  // Sprint 180 §1 — which of the two tracks is on screen. A VIEW, not a
+  // filter: one of the two is always selected, and each carries its own
+  // columns. Quote & price opens first because that is where work
+  // arrives and where somebody has to act on it. A deep link that lands
+  // on the wrong track is not left stranded — the empty state names the
+  // other one and offers the click (see the EmptyState `action` below).
+  const [track, setTrack] = useState<ExtraWorkTrack>("QUOTE");
   // RF-18 (#107) — dashboard widgets deep-link with ?status=<EW status>;
-  // read once at mount (validated), the dropdown owns the state after.
+  // read once at mount (validated), the chips own the state after.
+  //
+  // Sprint 181 §2 — the chips are GROUPS now, so a deep link naming a
+  // raw status is matched against the groups rather than compared to
+  // one. A link to `?status=REQUESTED` lands on the "Awaiting pricing"
+  // chip, which is where that row now lives; an unrecognised value
+  // falls through to no filter rather than to an empty screen.
+  //
+  // Sprint 158's "open on what has not been actioned" default is GONE,
+  // and deliberately: it only ever made sense for one of the two
+  // tracks, and since Sprint 180 the track already answers "what should
+  // I look at". Opening pre-filtered on a chip the operator did not
+  // pick is the same confusion §2 is removing, one level up.
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
-    return raw && (STATUS_FILTER_OPTIONS as readonly string[]).includes(raw)
-      ? (raw as StatusFilter)
-      : "ALL";
+    if (!raw || raw === "ALL") return "";
+    const match = QUOTE_TRACK_CHIPS.find((chip) =>
+      (chip.statuses as readonly string[]).includes(raw),
+    );
+    return match ? match.value : "";
   });
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
   const [categoryOptions, setCategoryOptions] =
@@ -172,7 +503,21 @@ export function ExtraWorkListPage() {
   // per-customer, so they are disabled until a customer is chosen and cleared
   // when it changes. Provider-only: a CUSTOMER_USER is already scoped to one
   // customer, so a customer picker is meaningless for them.
-  const [customerFilter, setCustomerFilter] = useState("");
+  // Seeded from the fixed customer when there is one. A plain initial
+  // value, not an effect: syncing a prop into state through an effect is
+  // the pattern CLAUDE.md bans, and the component is keyed by customer
+  // id at the mount site so a change remounts it.
+  const [deadlineSort, setDeadlineSort] = useState<"" | "asc" | "desc">("");
+  // Sprint 174 §4d — a FILTER, never a mode. Default ALL, and it is
+  // visible and clearable: the owner was explicit that planned extra
+  // work must still be findable if he changes his mind about planning
+  // it, so nothing may hide rows with no way back.
+  const [plannedFilter, setPlannedFilter] = useState<
+    "ALL" | "PLANNED" | "UNPLANNED"
+  >("ALL");
+  const [customerFilter, setCustomerFilter] = useState(
+    customerId === undefined ? "" : String(customerId),
+  );
   const [buildingFilter, setBuildingFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [workTypeFilter, setWorkTypeFilter] = useState("");
@@ -235,6 +580,12 @@ export function ExtraWorkListPage() {
     departmentFilter,
     workTypeFilter,
     categoryFilter,
+    // Sprint 176 §3 — a bulk date write changes rows this list is
+    // showing, so it bumps this counter to re-run the load. A counter
+    // rather than a hoisted `load()`: the fetch is guarded by the
+    // effect's own `cancelled` flag, and calling it from outside would
+    // escape that guard.
+    reloadKey,
   ]);
 
   // Sprint 143 §6 — the category dropdown's two groups. Own effect
@@ -311,13 +662,91 @@ export function ExtraWorkListPage() {
     };
   }, [customerFilter]);
 
+  // Sprint 180 §1 — the two tracks, split on the ONE question: has an
+  // operational ticket been born from this extra work? The answer comes
+  // from the server (`has_operational_ticket`, resolved through the
+  // canonical `Ticket.extra_work_request` FK — the same definition the
+  // invoice run uses), so this list cannot drift from the money.
+  const trackRows = useMemo(() => {
+    const quote: ExtraWorkRequestList[] = [];
+    const started: ExtraWorkRequestList[] = [];
+    for (const row of rows) {
+      (row.has_operational_ticket ? started : quote).push(row);
+    }
+    return { QUOTE: quote, STARTED: started };
+  }, [rows]);
+
+  const activeTrackRows = trackRows[track];
+  const isWorkStarted = track === "STARTED";
+  const otherTrack: ExtraWorkTrack = isWorkStarted ? "QUOTE" : "STARTED";
+
+  // Switching track is a VIEW change with two pieces of clean-up, and
+  // both belong in the event handler rather than an effect (syncing
+  // state through an effect body is the pattern CLAUDE.md bans).
+  const switchTrack = useCallback((value: ExtraWorkTrack) => {
+    setTrack(value);
+    // The two tracks hold different statuses almost by definition, so
+    // carrying "REQUESTED" onto Work started would show an empty table
+    // and read as "there is nothing here" rather than "you are still
+    // filtered".
+    setStatusFilter("ALL");
+    if (value === "QUOTE") {
+      // The two invoice filters have no control on this track, so they
+      // must not stay applied behind its back.
+      setBillingMonth("");
+      setInvoiceStatus("ALL");
+    }
+  }, []);
+
+  // §1(b) — approved-but-never-spawned rows, counted for the Quote &
+  // price tab's marker. They stay on this track (nothing operational has
+  // started) but they are a failure, not a state.
+  const spawnAnomalyCount = useMemo(
+    () => trackRows.QUOTE.filter(isSpawnAnomaly).length,
+    [trackRows],
+  );
+
+  // Sprint 181 §1/§2 — the chips for the ACTIVE track, with their real
+  // counts. Which set is on screen is the same question as which status
+  // the rows are judged by, so both come from one place: on Quote &
+  // price the Extra Work's own status, on Work started the ticket's.
+  //
+  // Counts come from the track's rows, not from `visibleRows` — every
+  // chip but the active one would otherwise read zero — and not from
+  // the whole set, or a chip would promise rows that live on the other
+  // track (Sprint 180).
+  const chips = isWorkStarted ? STARTED_TRACK_CHIPS : QUOTE_TRACK_CHIPS;
+
+  const chipMatches = useCallback(
+    (row: ExtraWorkRequestList, chipValue: string): boolean => {
+      const spec = (
+        chips as ReadonlyArray<ChipSpec<string>>
+      ).find((c) => c.value === chipValue);
+      if (!spec) return false;
+      const status = isWorkStarted ? operationalStatus(row) : row.status;
+      return status !== null && spec.statuses.includes(status);
+    },
+    [chips, isWorkStarted],
+  );
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const chip of chips) {
+      counts[chip.value] = activeTrackRows.filter((row) =>
+        chipMatches(row, chip.value),
+      ).length;
+    }
+    return counts;
+  }, [activeTrackRows, chips, chipMatches]);
+
   // KPI strip — computed from the full loaded set (not the filtered
-  // view) so the operator always sees the same headline numbers
-  // regardless of which filter is active. `rows` is now the COMPLETE
-  // matching set (Sprint 120 — listAllExtraWork exhausts every page), so
-  // these totals no longer silently undercount past 100 rows. A backend
-  // aggregation endpoint remains a future option if request volume on
-  // very large tenants becomes a real cost; not needed for correctness.
+  // view, and not the active track) so the operator always sees the same
+  // headline numbers regardless of which filter is active. `rows` is the
+  // COMPLETE matching set (Sprint 120 — listAllExtraWork exhausts every
+  // page), so these totals no longer silently undercount past 100 rows.
+  // A backend aggregation endpoint remains a future option if request
+  // volume on very large tenants becomes a real cost; not needed for
+  // correctness.
   const kpis = useMemo<ExtraWorkKpis>(() => {
     let open = 0;
     let awaiting = 0;
@@ -344,8 +773,10 @@ export function ExtraWorkListPage() {
 
   const visibleRows = useMemo(() => {
     const needle = searchInput.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
+    const filtered = activeTrackRows.filter((r) => {
+      // Sprint 181 §2 — a chip stands for a GROUP of statuses, and on
+      // the Work started track for a group of TICKET statuses.
+      if (statusFilter && !chipMatches(r, statusFilter)) return false;
       if (needle) {
         const hay = `${r.title} ${r.building_name ?? ""} ${
           r.customer_name ?? ""
@@ -354,7 +785,132 @@ export function ExtraWorkListPage() {
       }
       return true;
     });
-  }, [rows, searchInput, statusFilter]);
+    // Sprint 174 §1/§4d — the deadline sort and the planned filter.
+    // Both are CLIENT-side over rows the server already scoped: the
+    // list is a page of rows the operator can see, and a second server
+    // round-trip to reorder what is already on screen would be slower
+    // and no more correct.
+    const narrowed =
+      plannedFilter === "ALL"
+        ? filtered
+        : filtered.filter((r) =>
+            plannedFilter === "PLANNED"
+              ? Boolean(r.preferred_date)
+              : !r.preferred_date,
+          );
+    if (!deadlineSort) return narrowed;
+    return [...narrowed].sort((a, b) => {
+      // A row with NO deadline sorts last in both directions: "nobody
+      // said when" is not earlier or later than a date, and putting it
+      // first would bury the rows the sort exists to surface.
+      if (!a.deadline && !b.deadline) return 0;
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+      const order = a.deadline.localeCompare(b.deadline);
+      return deadlineSort === "asc" ? order : -order;
+    });
+  }, [
+    activeTrackRows,
+    chipMatches,
+    searchInput,
+    statusFilter,
+    deadlineSort,
+    plannedFilter,
+  ]);
+
+
+  // Sprint 157 §2 — the Edit gate + the bulk assign handlers. The
+  // controller is keyed on the CURRENTLY VISIBLE rows, so a selection
+  // cannot outlive a filter change (lib/useEditMode.ts derives both the
+  // mode and the selection for exactly this reason).
+  const edit = useEditMode(visibleRows.map((row) => row.id));
+
+  // Sprint 158 §1 — eligibility is per (request, role) and comes from
+  // the SERVER. With several requests selected the offer is the
+  // INTERSECTION: somebody eligible at one building but not another
+  // would be rejected for the whole batch (the endpoint is
+  // all-or-nothing), so offering them would be offering a guaranteed
+  // failure.
+  const loadAssignCandidates = useCallback(async (requestIds: number[]) => {
+    if (requestIds.length === 0) {
+      setAssignCandidates({ WORKER: [], MANAGER: [] });
+      return;
+    }
+    const forRole = async (role: ExtraWorkAssignmentRole) => {
+      const lists = await Promise.all(
+        requestIds.map((id) => listExtraWorkAssignmentCandidates(id, role)),
+      );
+      const [first, ...rest] = lists;
+      return first.filter((person) =>
+        rest.every((list) => list.some((other) => other.id === person.id)),
+      );
+    };
+    try {
+      const [workers, managers] = await Promise.all([
+        forRole("WORKER"),
+        forRole("MANAGER"),
+      ]);
+      setAssignCandidates({ WORKER: workers, MANAGER: managers });
+    } catch (err) {
+      setAssignError(getApiError(err));
+      setAssignCandidates({ WORKER: [], MANAGER: [] });
+    }
+  }, []);
+
+  async function openAssign() {
+    setAssignError("");
+    setAssignOpen(true);
+    await loadAssignCandidates(edit.selection);
+  }
+
+  /** ONE request for both roles — see `AssignPeopleDialog`. */
+  async function runAssign(managerIds: number[], workerIds: number[]) {
+    setAssignBusy(true);
+    setAssignError("");
+    try {
+      await bulkAssignExtraWork({
+        requests: edit.selection,
+        managers: managerIds,
+        workers: workerIds,
+        mode: "assign",
+      });
+      setAssignOpen(false);
+      edit.exit();
+    } catch (err) {
+      setAssignError(getApiError(err));
+    } finally {
+      setAssignBusy(false);
+    }
+  }
+
+  /** Sprint 176 §3 — one date across a selection.
+   *
+   *  The payload is built by OMITTING what the operator left alone, never
+   *  by spreading the dialog's state: a blank field must mean "leave
+   *  unchanged", and sending it as `null` would clear that date on every
+   *  selected row — a data-loss bug that looks like a successful save.
+   *  The dialog therefore hands back only the fields it was actually
+   *  given. */
+  async function runBulkDates(payload: {
+    deadline?: string;
+    planned_end_date?: string;
+  }) {
+    setDatesBusy(true);
+    setDatesError("");
+    try {
+      await bulkSetExtraWorkDates({
+        requests: edit.selection,
+        ...payload,
+      });
+      setDatesOpen(false);
+      edit.exit();
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setDatesError(getApiError(err));
+    } finally {
+      setDatesBusy(false);
+    }
+  }
 
   // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
   // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
@@ -384,7 +940,15 @@ export function ExtraWorkListPage() {
           row.title,
           row.customer_name,
           row.building_name,
-          t(STATUS_I18N_KEY[row.status] ?? row.status),
+          // Sprint 181 §1 — the export carries the SAME status the
+          // screen does. An export that disagreed with the list it was
+          // taken from would be the drift this sprint removes, in a
+          // spreadsheet.
+          isWorkStarted
+            ? t(ticketStatusLabelKey(operationalStatus(row) ?? "OPEN"), {
+                ns: "common",
+              })
+            : t(extraWorkStatusLabelKey(row.status), { ns: "common" }),
           amounts.subtotal.toFixed(2),
           amounts.vat.toFixed(2),
           amounts.total.toFixed(2),
@@ -427,22 +991,94 @@ export function ExtraWorkListPage() {
 
   return (
     <div data-testid="extra-work-list-page">
+      {!hideHeader && (
       <PageHeader
         backLink={{ to: "/", label: t("back_to_dashboard") }}
         eyebrow={t("common:ops")}
         title={t("list.page_title")}
         subtitle={t("list.page_subtitle")}
         actions={
-          <Link
+          /* Sprint 155 §1b — this button used to go straight to the
+             direct-order form, which is only ONE of the three things
+             "new extra work" can mean here. It now asks. */
+          <button
+            type="button"
             className="btn btn-primary btn-sm"
-            to="/extra-work/new"
+            onClick={() => setChooserOpen(true)}
             data-testid="extra-work-list-create-link"
           >
             <PlusCircle size={14} strokeWidth={2.2} />
             <span style={{ marginLeft: 6 }}>{t("list.create_button")}</span>
-          </Link>
+          </button>
         }
       />
+      )}
+
+      {assignOpen && (
+        <AssignPeopleDialog
+          summary={t("assign.summary_requests", {
+            count: edit.selection.length,
+          })}
+          managerCandidates={assignCandidates.MANAGER.map((person) => ({
+            id: person.id,
+            label: person.full_name || person.email,
+            sublabel: person.email,
+          }))}
+          workerCandidates={assignCandidates.WORKER.map((person) => ({
+            id: person.id,
+            label: person.full_name || person.email,
+            sublabel: person.email,
+          }))}
+          busy={assignBusy}
+          error={assignError}
+          onCancel={() => setAssignOpen(false)}
+          onConfirm={runAssign}
+        />
+      )}
+
+      {datesOpen && (
+        <BulkDatesDialog
+          count={edit.selection.length}
+          busy={datesBusy}
+          error={datesError}
+          onCancel={() => setDatesOpen(false)}
+          onConfirm={runBulkDates}
+        />
+      )}
+
+      {chooserOpen && (
+        <ChoiceDialog
+          title={t("list.create_chooser_title")}
+          subtitle={t("list.create_chooser_subtitle")}
+          onCancel={() => setChooserOpen(false)}
+          testIdPrefix="extra-work-create-chooser"
+          choices={[
+            {
+              key: "request",
+              label: t("list.create_chooser_request"),
+              description: t("list.create_chooser_request_desc"),
+              onSelect: () => navigate("/extra-work/new"),
+            },
+            {
+              key: "quote",
+              label: t("list.create_chooser_quote"),
+              description: t("list.create_chooser_quote_desc"),
+              onSelect: () => navigate("/extra-work/request-quote"),
+            },
+            {
+              key: "recurring",
+              label: t("list.create_chooser_recurring"),
+              description: t("list.create_chooser_recurring_desc"),
+              // Sprint 156 §2 — the recurring option was the odd one
+              // out: the other two open a FORM and this one opened the
+              // LIST, so "create" landed the operator on a page with
+              // nothing created. /planned-work/new is the existing
+              // create route (App.tsx) — no new route, no new page.
+              onSelect: () => navigate("/planned-work/new"),
+            },
+          ]}
+        />
+      )}
 
       {loading && (
         <div className="loading-bar">
@@ -488,6 +1124,60 @@ export function ExtraWorkListPage() {
         />
       </div>
 
+      {/* Sprint 180 §1 — the two tracks. An extra work has a commercial
+          life and an operational one; this is which of the two you are
+          looking at, and it decides the columns below. Above the status
+          tiles because it is the coarser question: first WHICH life,
+          then which step within it. */}
+      <TrackTabs
+        tabs={[
+          {
+            value: "QUOTE",
+            label: t("list.track_quote"),
+            count: trackRows.QUOTE.length,
+            anomalyCount: spawnAnomalyCount,
+            anomalyTitle: t("list.track_anomaly_title"),
+          },
+          {
+            value: "STARTED",
+            label: t("list.track_started"),
+            count: trackRows.STARTED.length,
+          },
+        ]}
+        active={track}
+        onChange={switchTrack}
+        testIdPrefix="extra-work-track"
+      />
+
+      <p className="ew-list-filters-hint muted small">
+        {track === "QUOTE"
+          ? t("list.track_quote_hint")
+          : t("list.track_started_hint")}
+      </p>
+
+      {/* Sprint 159 §3 — the statuses as TILES, the design the owner
+          picked for both work lists: the tile IS the filter, it carries
+          its own count, the active one is visibly selected.
+          Sprint 180 — counts are per TRACK, so a tile never promises
+          rows that live on the other one.
+          Sprint 181 §2 — FOUR tiles, not nine, and they change meaning
+          with the track: commercial states on Quote & price, TICKET
+          states on Work started. The old status dropdown that sat below
+          the search box is gone with them — it was a second control for
+          the same state, and nine options in a select was the least
+          readable of the two. */}
+      <StatusTiles
+        tiles={chips.map((chip) => ({
+          value: chip.value,
+          label: t(chip.labelKey),
+          count: statusCounts[chip.value] ?? 0,
+        }))}
+        active={statusFilter}
+        onChange={setStatusFilter}
+        totalCount={activeTrackRows.length}
+        testIdPrefix="extra-work-status"
+      />
+
       {/* Filter bar */}
       <div
         className="card ew-list-filters"
@@ -503,23 +1193,12 @@ export function ExtraWorkListPage() {
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
-        <div className="filter-field">
-          <span className="filter-label">{t("list.column_status")}</span>
-          <select
-            className="filter-control"
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as StatusFilter)
-            }
-          >
-            <option value="ALL">{t("list.filter_all_statuses")}</option>
-            {STATUS_FILTER_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {t(STATUS_I18N_KEY[s])}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Sprint 181 §2 — the status <select> that stood here is gone.
+            It was a SECOND control over the same state as the tiles
+            above, offering the same nine options in the less readable
+            of the two shapes. A control earns its place by changing
+            what somebody does next; this one only offered a second way
+            to do what the tiles already do. */}
         <div className="filter-field">
           <span className="filter-label">
             {t("list.filter_catalog_category")}
@@ -559,7 +1238,25 @@ export function ExtraWorkListPage() {
             )}
           </select>
         </div>
-        {isProvider && (
+        <div className="filter-field">
+          <span className="filter-label">{t("list.filter_planned")}</span>
+          <select
+            className="filter-control"
+            value={plannedFilter}
+            onChange={(event) =>
+              setPlannedFilter(
+                event.target.value as "ALL" | "PLANNED" | "UNPLANNED",
+              )
+            }
+            data-testid="extra-work-list-filter-planned"
+          >
+            <option value="ALL">{t("list.planned_all")}</option>
+            <option value="PLANNED">{t("list.planned_only")}</option>
+            <option value="UNPLANNED">{t("list.planned_none")}</option>
+          </select>
+        </div>
+
+        {isProvider && customerId === undefined && (
           <>
             {/* Sprint 128 — the label cascade: Customer -> Building ->
                 Department -> Work Type. The last three are per-customer, so
@@ -629,7 +1326,7 @@ export function ExtraWorkListPage() {
                 <option value="">{t("list.filter_all_departments")}</option>
                 {scopedDepartments.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.name}
+                    {customerLabelName(d.name, t)}
                   </option>
                 ))}
               </select>
@@ -653,11 +1350,20 @@ export function ExtraWorkListPage() {
                 <option value="">{t("list.filter_all_work_types")}</option>
                 {scopedWorkTypes.map((w) => (
                   <option key={w.id} value={w.id}>
-                    {w.name}
+                    {customerLabelName(w.name, t)}
                   </option>
                 ))}
               </select>
             </div>
+            {/* Sprint 180 §1 — the two INVOICE filters belong to the
+                Work started track for the same reason the invoice
+                column does: a request with no operational ticket cannot
+                be invoiceable yet, so offering to filter it by billing
+                month invites a question the data cannot answer. Both
+                are CLEARED when the operator switches back (see the
+                TrackTabs handler) — a hidden filter that is still
+                applied is worse than no filter. */}
+            {isWorkStarted && (
             <div className="filter-field">
               <span className="filter-label">
                 {t("list.filter_billing_month")}
@@ -687,6 +1393,8 @@ export function ExtraWorkListPage() {
                 )}
               </span>
             </div>
+            )}
+            {isWorkStarted && (
             <div className="filter-field">
               <span className="filter-label">
                 {t("list.filter_invoice_status")}
@@ -710,6 +1418,7 @@ export function ExtraWorkListPage() {
                 </option>
               </select>
             </div>
+            )}
           </>
         )}
         {/* Sprint 138 §6 — the cascade hint used to be its own
@@ -765,7 +1474,13 @@ export function ExtraWorkListPage() {
         </div>
       )}
 
-      {/* Empty / list */}
+      {/* Empty / list.
+          Sprint 180 §1 — the TRACK is a narrowing an operator did not
+          necessarily choose: a dashboard deep link (?status=COMPLETED)
+          lands on Quote & price, where by definition almost nothing
+          with that status lives. Rather than let the page read as
+          "there is nothing", the action below says how many rows are on
+          the other track and offers the one click. */}
       {!loading && visibleRows.length === 0 && !error && (
         <EmptyState
           icon={Sparkles}
@@ -781,8 +1496,64 @@ export function ExtraWorkListPage() {
               ? undefined
               : t("list.empty_filtered_desc")
           }
+          action={
+            trackRows[otherTrack].length > 0 ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => switchTrack(otherTrack)}
+                data-testid="extra-work-track-switch"
+              >
+                {t("list.track_switch_to", {
+                  count: trackRows[otherTrack].length,
+                  track: t(
+                    otherTrack === "QUOTE"
+                      ? "list.track_quote"
+                      : "list.track_started",
+                  ),
+                })}
+              </button>
+            ) : undefined
+          }
           testId="extra-work-list-empty"
         />
+      )}
+
+      {isProvider && visibleRows.length > 0 && (
+        <div className="ew-list-edit-bar">
+          {edit.editMode && (
+            <MultiSelectToolbar
+              selectedCount={edit.selection.length}
+              onSelectAll={edit.selectAll}
+              onClearAll={edit.clear}
+              disabled={assignBusy}
+              actions={[
+                {
+                  key: "assign",
+                  label: t("assign.button"),
+                  onClick: openAssign,
+                },
+                // Sprint 176 §3 — a batch of jobs agreed for the same
+                // week is the normal case, not an edge one.
+                {
+                  key: "dates",
+                  label: t("list.bulk_dates_button"),
+                  onClick: () => {
+                    setDatesError("");
+                    setDatesOpen(true);
+                  },
+                },
+              ]}
+              testIdPrefix="extra-work-bulk"
+            />
+          )}
+          <EditModeToggle
+            editMode={edit.editMode}
+            onToggle={edit.toggleMode}
+            disabled={assignBusy}
+            testId="extra-work-edit-mode-toggle"
+          />
+        </div>
       )}
 
       {visibleRows.length > 0 && (
@@ -791,6 +1562,20 @@ export function ExtraWorkListPage() {
             <table className="data-table">
               <thead>
                 <tr>
+                  {edit.editMode && (
+                    <th className="th-select">
+                      <input
+                        type="checkbox"
+                        checked={edit.allSelected}
+                        onChange={() =>
+                          edit.allSelected ? edit.clear() : edit.selectAll()
+                        }
+                        disabled={assignBusy}
+                        aria-label={t("assign.button")}
+                        data-testid="extra-work-select-all"
+                      />
+                    </th>
+                  )}
                   <th>{t("list.column_title")}</th>
                   <th>{t("list.column_status")}</th>
                   <th>{t("list.column_route")}</th>
@@ -800,8 +1585,46 @@ export function ExtraWorkListPage() {
                   <th style={{ textAlign: "right" }}>
                     {t("list.column_total")}
                   </th>
-                  {isProvider && <th>{t("list.column_billing")}</th>}
+                  {/* Sprint 180 §1/§2/§3 — the three columns that only
+                      make sense once work has actually started. The
+                      invoice column in particular: a row with no ticket
+                      CANNOT be invoiceable yet, so showing invoice state
+                      on the Quote & price track is exactly what confused
+                      people. It is not hidden there, it does not apply
+                      there. */}
+                  {isWorkStarted && <th>{t("list.column_ticket")}</th>}
+                  {isWorkStarted && isProvider && (
+                    <th>{t("list.column_billing")}</th>
+                  )}
+                  {isWorkStarted && <th>{t("list.column_billed_to")}</th>}
                   <th>{t("list.column_requested")}</th>
+                  {/* Sprint 174 §1 — the DEADLINE, sortable. Sprint 173
+                      added the field and the API filter; nothing on any
+                      screen showed it, which is where the owner looked
+                      for it. */}
+                  <th>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() =>
+                        setDeadlineSort((current) =>
+                          current === "asc"
+                            ? "desc"
+                            : current === "desc"
+                              ? ""
+                              : "asc",
+                        )
+                      }
+                      data-testid="ew-sort-deadline"
+                    >
+                      {t("list.column_deadline")}
+                      {deadlineSort === "asc"
+                        ? " ▲"
+                        : deadlineSort === "desc"
+                          ? " ▼"
+                          : ""}
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -811,13 +1634,67 @@ export function ExtraWorkListPage() {
                     to={`/extra-work/${row.id}`}
                     testId="extra-work-row"
                   >
+                    {edit.editMode && (
+                      <td
+                        className="td-select"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={edit.isSelected(row.id)}
+                          onChange={() => edit.toggle(row.id)}
+                          disabled={assignBusy}
+                          aria-label={row.title}
+                          data-testid={`extra-work-select-${row.id}`}
+                        />
+                      </td>
+                    )}
                     <td className="td-subject">
                       <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
                     </td>
                     <td>
-                      <StatusBadge
-                        status={{ kind: "extra-work", value: row.status }}
-                      />
+                      {/* Sprint 181 §1 — ONE status per row, and on the
+                          Work started track it is the TICKET's.
+                          The owner clicked an Extra Work reading
+                          "Completed", scrolled down, and its ticket read
+                          "Open". Both were "true"; they were two copies
+                          of one fact. Once a ticket exists it is the
+                          only authority for how the work is going, so
+                          the pricing-stage status does not appear here
+                          at all — not as a column, not as a smaller
+                          second line. That is also what fixes the row
+                          that read "Customer approved" in a track full
+                          of started work: it now reads the ticket's
+                          "Open", i.e. approved, not started. */}
+                      {isWorkStarted ? (
+                        <StatusBadge
+                          status={{
+                            kind: "ticket",
+                            value: operationalStatus(row) ?? "OPEN",
+                          }}
+                          testId={`ew-operational-status-${row.id}`}
+                        />
+                      ) : (
+                        <StatusBadge
+                          status={{ kind: "extra-work", value: row.status }}
+                        />
+                      )}
+                      {/* Sprint 180 §1(b) — approved, but the spawn that
+                          is supposed to be synchronous with approval
+                          produced no ticket. The row belongs on this
+                          track, but saying nothing about it is how the
+                          work gets lost. The detail page has the retry
+                          button. */}
+                      {isSpawnAnomaly(row) && (
+                        <span
+                          className="cell-tag cell-tag-rejected"
+                          style={{ marginLeft: 6 }}
+                          title={t("list.track_anomaly_title")}
+                          data-testid="ew-no-ticket-marker"
+                        >
+                          {t("list.track_anomaly_marker")}
+                        </span>
+                      )}
                     </td>
                     <td>
                       <RouteBadge value={row.routing_decision} />
@@ -830,9 +1707,28 @@ export function ExtraWorkListPage() {
                     <td>{row.building_name}</td>
                     <td>{row.customer_name}</td>
                     <td style={{ textAlign: "right" }}>
-                      {formatMoney(rowAmounts(row).total)}
+                      {isPriced(row) ? (
+                        formatMoney(rowAmounts(row).total)
+                      ) : (
+                        <span
+                          className="muted-empty"
+                          title={t("list.total_not_priced_hint")}
+                        >
+                          &mdash;
+                        </span>
+                      )}
                     </td>
-                    {isProvider && (
+                    {isWorkStarted && (
+                      <td data-testid={`ew-ticket-cell-${row.id}`}>
+                        {/* Sprint 181 §1b — one renderer for the ticket
+                            numbers, with a real separator. Sprint 180
+                            leaned on a margin here and joined with ", "
+                            in the mobile card below; two tickets rendered
+                            as `TCK-...207TCK-...208`. */}
+                        <SpawnedTicketLinks tickets={row.spawned_tickets} />
+                      </td>
+                    )}
+                    {isWorkStarted && isProvider && (
                       <td>
                         {row.is_invoiced ? (
                           <span className="badge badge-approved">
@@ -856,7 +1752,39 @@ export function ExtraWorkListPage() {
                         )}
                       </td>
                     )}
+                    {isWorkStarted && (
+                      <td data-testid={`ew-billed-to-cell-${row.id}`}>
+                        {t(BILLED_TO_I18N_KEY[row.billed_to])}
+                      </td>
+                    )}
                     <td>{formatDate(row.requested_at)}</td>
+                    <td className="td-date">
+                      {row.deadline ? formatDate(row.deadline) : (
+                        <span className="muted-empty">—</span>
+                      )}
+                      {/* The markers, in the status colours this app
+                          already has — a new pair would mean two
+                          vocabularies for "something is wrong". */}
+                      {row.is_overdue && (
+                        <span
+                          className="cell-tag cell-tag-rejected"
+                          style={{ marginLeft: 6 }}
+                          data-testid="ew-overdue-marker"
+                        >
+                          {t("list.overdue")}
+                        </span>
+                      )}
+                      {row.started_before_plan && (
+                        <span
+                          className="cell-tag cell-tag-open"
+                          style={{ marginLeft: 6 }}
+                          title={t("list.startedEarlyWhy")}
+                          data-testid="ew-started-early-marker"
+                        >
+                          {t("list.startedEarly")}
+                        </span>
+                      )}
+                    </td>
                   </ClickableRow>
                 ))}
               </tbody>
@@ -886,10 +1814,30 @@ export function ExtraWorkListPage() {
                         flexWrap: "wrap",
                       }}
                     >
-                      <StatusBadge
-                        status={{ kind: "extra-work", value: row.status }}
-                      />
+                      {/* Sprint 181 §1 — the card carries the same one
+                          status the table row does, from the same
+                          authority. */}
+                      {isWorkStarted ? (
+                        <StatusBadge
+                          status={{
+                            kind: "ticket",
+                            value: operationalStatus(row) ?? "OPEN",
+                          }}
+                        />
+                      ) : (
+                        <StatusBadge
+                          status={{ kind: "extra-work", value: row.status }}
+                        />
+                      )}
                       <RouteBadge value={row.routing_decision} />
+                      {isSpawnAnomaly(row) && (
+                        <span
+                          className="cell-tag cell-tag-rejected"
+                          title={t("list.track_anomaly_title")}
+                        >
+                          {t("list.track_anomaly_marker")}
+                        </span>
+                      )}
                     </span>
                   </div>
                   <dl className="admin-card-meta">
@@ -918,9 +1866,31 @@ export function ExtraWorkListPage() {
                     </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_total")}</dt>
-                      <dd>{formatMoney(rowAmounts(row).total)}</dd>
+                      <dd>
+                        {isPriced(row) ? (
+                          formatMoney(rowAmounts(row).total)
+                        ) : (
+                          <span className="muted-empty">&mdash;</span>
+                        )}
+                      </dd>
                     </div>
-                    {isProvider && (
+                    {/* Sprint 180 — the mobile card carries exactly the
+                        columns the table on this track carries. */}
+                    {isWorkStarted && (
+                      <div className="admin-card-meta-row">
+                        <dt>{t("list.column_ticket")}</dt>
+                        <dd>
+                          <SpawnedTicketLinks tickets={row.spawned_tickets} />
+                        </dd>
+                      </div>
+                    )}
+                    {isWorkStarted && (
+                      <div className="admin-card-meta-row">
+                        <dt>{t("list.column_billed_to")}</dt>
+                        <dd>{t(BILLED_TO_I18N_KEY[row.billed_to])}</dd>
+                      </div>
+                    )}
+                    {isWorkStarted && isProvider && (
                       <div className="admin-card-meta-row">
                         <dt>{t("list.column_billing")}</dt>
                         <dd>
@@ -955,4 +1925,10 @@ export function ExtraWorkListPage() {
   );
 }
 
-
+/**
+ * The sidebar route. A wrapper, so the route keeps its own name while
+ * the list itself is the shared component above.
+ */
+export function ExtraWorkListPage() {
+  return <ExtraWorkList />;
+}

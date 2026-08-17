@@ -142,6 +142,14 @@ def filter_hour_types_for(user, queryset):
     return _apply(user, queryset)
 
 
+def filter_work_types_for(user, queryset):
+    """Scope a `WorkType` queryset — the `filter_hour_types_for` shape,
+    for the sibling catalog Sprint 168 added. One named helper per noun,
+    so a call site reads as what it filters.
+    """
+    return _apply(user, queryset)
+
+
 def filter_time_entries_for(user, queryset):
     """Scope a `TimeEntry` queryset to the actor's companies.
 
@@ -175,11 +183,42 @@ def filter_buildings_for_timesheets(user, queryset):
 def restrict_entries_to_self(user, queryset):
     """Apply the own-entries-only rule for non-managers.
 
-    Managers (SA / CA) get the queryset back unchanged; everyone else is
-    narrowed to `employee=user`. Applied to EVERY entry queryset — list,
-    detail, summary and export all resolve through the same pair of
-    helpers, so there is no endpoint where a STAFF member can reach
-    another employee's row or learn their name.
+    Managers (SA / CA) get the queryset back unchanged; everyone else —
+    STAFF **and BUILDING_MANAGER** — is narrowed to `employee=user`.
+
+    **This is the PRIVACY floor and it is not optional.**
+    `filter_time_entries_for` answers the tenant question (H-1); this one
+    answers "whose row is it". A caller that applies only the first has a
+    company-wide leak of personnel data, not a tenant breach — which is
+    exactly why it is easy to miss in review and why it is written here
+    in capitals.
+
+    Sprint 182 §1: it WAS missed. `reports.worker_hours` and
+    `reports.employee_hours` called `filter_time_entries_for` alone, so a
+    BUILDING_MANAGER could read every colleague's hours, personnel number
+    and travel-cost claims company-wide through the Reports page. Both now
+    call this, as does `reports.hours_comparison`'s per-employee
+    breakdown. **Any new consumer of `TimeEntry` must call this too** —
+    the two helpers are a pair, and using one without the other is the
+    bug, not a shortcut.
+    """
+    if is_timesheet_manager(user):
+        return queryset
+    return queryset.filter(employee=user)
+
+
+def restrict_contract_hours_to_self(user, queryset):
+    """The `restrict_entries_to_self` rule, for standing agreements.
+
+    Sprint 182 §1. A `ContractHours` row says what a named person is
+    contracted to work and for how many hours a week — the same class of
+    wage-adjacent personnel fact a `TimeEntry` is, and arguably a more
+    sensitive one. It gets the same floor: managers (SA / CA) see the
+    company's, everyone else sees only their own.
+
+    Its own named helper rather than a second argument on the entries
+    one, following this module's one-helper-per-noun convention, so a
+    call site reads as what it restricts.
     """
     if is_timesheet_manager(user):
         return queryset
@@ -333,3 +372,15 @@ def eligible_employees_queryset(user):
     # `user_ids_in_companies` so the picker endpoint and this validator
     # queryset share ONE definition. See that helper's docstring.
     return base.filter(pk__in=user_ids_in_companies(scope))
+
+
+def filter_contract_hours_for(user, queryset):
+    """Scope a `ContractHours` queryset to the actor's companies.
+
+    Sprint 167 §3. Company-level, exactly like `filter_time_entries_for`
+    — and like it, CUSTOMER_USER resolves to an empty frozenset and
+    therefore to no rows. A standing agreement about a worker's hours is
+    personnel data; no customer-side role has any business reading it,
+    and the view layer 403s them before this is even reached.
+    """
+    return _apply(user, queryset)

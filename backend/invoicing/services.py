@@ -27,15 +27,23 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
-from customers.models import Customer
 from extra_work.billing import billing_month, build_ticket_map
 from extra_work.models import ExtraWorkRequest
 from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement)
 
 from .models import Invoice, InvoiceLine
-from .selectors import unbilled_extra_work
+# Sprint 182 §2 — the single "what would be billed" calculation. Grouping
+# and target resolution live there; this module persists the result.
+from .cost_shares import shares_for_buildings
+from .preview import plan_invoices
 
 _TWO_PLACES = Decimal("0.01")
+
+# Sprint 183 §3 — "the caller did not say" vs "the caller said nobody".
+# `created_by=None` is a MEANINGFUL value now (the system created this
+# invoice), so it cannot double as the "not supplied" default. This
+# sentinel is the default and resolves to the acting user.
+_ACTOR = object()
 
 
 def recompute_invoice_totals(invoice):
@@ -101,6 +109,39 @@ def _derive_vat_pct(subtotal, vat):
     return Decimal("21.00")
 
 
+def _every_share_claimed(ew) -> bool:
+    """Has EVERY share-holder of this Extra Work's building been billed
+    for it?
+
+    True only when each customer holding a cost share of the building has
+    a LIVE invoice line claiming this row — the same liveness test the
+    unbilled pool uses (not soft-deleted, not reversed), so "claimed"
+    means one thing in both places.
+
+    This is what lets `is_invoiced` keep meaning SETTLED on a shared row.
+    It is deliberately a question about the shares, not about a count of
+    lines: a customer can hold two lines for the same row across a
+    reversal and a re-issue, and counting would call that everybody.
+    """
+    from buildings.models import BuildingCostShare
+
+    share_holders = set(
+        BuildingCostShare.objects.filter(
+            building_id=ew.building_id
+        ).values_list("customer_id", flat=True)
+    )
+    if not share_holders:
+        return True
+    claimed = set(
+        InvoiceLine.objects.filter(
+            extra_work_id=ew.id,
+            invoice__deleted_at__isnull=True,
+            invoice__reversed_by__isnull=True,
+        ).values_list("invoice__customer_id", flat=True)
+    )
+    return share_holders.issubset(claimed)
+
+
 def _create_draft(
     actor,
     company_id,
@@ -113,6 +154,8 @@ def _create_draft(
     department_id=None,
     work_type_id=None,
     granularity=None,
+    created_by=_ACTOR,
+    amounts=None,
 ):
     """Create ONE draft Invoice for the given EW list and CLAIM them.
 
@@ -151,16 +194,33 @@ def _create_draft(
         year=None,
         period_year=year,
         period_month=month,
-        created_by=actor,
+        # Sprint 183 §3 — `created_by` is a SEPARATE question from
+        # `actor`. The actor says whose scope the read ran through;
+        # `created_by=None` says no person created this invoice. The
+        # `_ACTOR` sentinel keeps the default "the actor wrote it"
+        # while letting a caller state None deliberately, which a
+        # plain `created_by=None` default could not express.
+        created_by=(actor if created_by is _ACTOR else created_by),
     )
     ticket_map = build_ticket_map([e.id for e in ews])
     now = timezone.now()
     subtotal = Decimal("0.00")
     vat = Decimal("0.00")
     total = Decimal("0.00")
+    amounts = amounts or {}
+    # Sprint 185 E §2 — one query for the shares of every building in
+    # this draft, so the claim rule below knows which rows are shared
+    # without asking per row.
+    shared_building_ids = set(
+        shares_for_buildings({e.building_id for e in ews})
+    )
     for i, ew in enumerate(ews):
         ticket = ticket_map.get(ew.id)
-        line_sub, line_vat, line_tot = _earned_amounts(ew)
+        # The customer's PART when the building is shared, the whole
+        # earned amount when it is not — computed by `plan_invoices`,
+        # which is the single calculation. Generation executes the plan;
+        # it does not re-derive the money.
+        line_sub, line_vat, line_tot = amounts.get(ew.id) or _earned_amounts(ew)
         bm = billing_month(ew, ticket)  # (year, month) for included rows
         performed_on = None
         if ticket is not None and ticket.closed_at is not None:
@@ -187,8 +247,21 @@ def _create_draft(
         # CLAIM: the is_invoiced flag is the fast Option-1 exclusion; the
         # InvoiceLine.extra_work link is the durable claim. Both are set on
         # claim and cleared on release.
-        ew.is_invoiced = True
+        #
+        # Sprint 185 E §2 — on a SHARED building the flag is set only
+        # once every share-holder has been billed. It is one boolean on a
+        # row several customers are billed parts of, so setting it at the
+        # first part would say "settled" while the other tenants had not
+        # been invoiced at all — and the fast exclusion would then hide
+        # the row from their own runs. The durable per-customer claim
+        # (the `InvoiceLine` on an invoice for that customer) is the
+        # authority for shared rows; this flag stays the fast answer for
+        # the unshared ones, which is every row that exists today.
         ew.invoiced_at = now
+        if ew.building_id in shared_building_ids:
+            ew.is_invoiced = _every_share_claimed(ew)
+        else:
+            ew.is_invoiced = True
         ew.save(update_fields=["is_invoiced", "invoiced_at", "updated_at"])
 
     invoice.subtotal_amount = subtotal
@@ -206,28 +279,42 @@ def _create_draft(
 
 
 def generate_draft_invoices(
-    actor, company_id, customer_id, year, month, granularity=None
+    actor, company_id, customer_id, year, month, granularity=None, *,
+    system=False,
+    through=False,
 ):
     """
     Roll up (company, customer)'s unbilled EW for (year, month) into DRAFT
     invoice(s) and claim the consumed EW.
 
-    granularity:
-      * "CUSTOMER"     -> ONE draft (building=NULL) with every building's
-                          unbilled EW.
-      * "PER_BUILDING" -> one draft per building that has unbilled EW.
-      * "PER_BUILDING_DEPARTMENT_WORK_TYPE" -> one draft per distinct
-                          (building, department, work_type) combination
-                          that has unbilled EW (Sprint 132). An EW with no
-                          department and/or no work type groups into its
-                          own untagged draft — NOT skipped, NOT folded into
-                          a labelled one; it is still unbilled work that
-                          must be invoiced, the same rule the Sprint 131
-                          report applies.
-      * None           -> the customer's `invoice_granularity_default`.
-      * anything else (including an unrecognised string) -> CUSTOMER, the
-        existing fallback (unchanged — this function has never validated
-        the granularity string; that stays out of scope here).
+    Sprint 182 §3 — grouping is now TWO decisions, not one dropdown:
+
+      * TARGET (who the invoice is addressed to) is resolved PER ROW by
+        `billing_target.resolve_billing_target`: the EW's own `billed_to`
+        wins when set, otherwise the customer's `invoice_billing_target`.
+        Customer-addressed rows land on ONE draft with `building=NULL`;
+        building-addressed rows are grouped by building.
+      * SPLIT (how finely the building-addressed pile is cut) comes from
+        the customer's `invoice_split`: NONE gives one draft per building,
+        DEPARTMENT_WORK_TYPE gives one per distinct (building, department,
+        work_type). An EW with no department and/or work type groups into
+        its own untagged draft — NOT skipped, NOT folded into a labelled
+        one; it is still unbilled work that must be invoiced, the same
+        rule the Sprint 131 report applies.
+
+    Because the target is per-row, ONE run can legitimately produce both a
+    customer-level invoice and per-building invoices for the same customer.
+
+    `granularity` (the legacy single string, still accepted by the
+    `generate` endpoint) is translated to a (target, split) pair by
+    `billing_target.pair_for_granularity` and supplies the DEFAULT target
+    for rows that state none of their own — it does not overrule a row
+    that does. An unrecognised string still falls back to CUSTOMER + NONE,
+    exactly as before. `None` means "use the customer's setting".
+
+    Each created invoice records the equivalent legacy
+    `Customer.InvoiceGranularity` value in `Invoice.granularity`, because
+    `state_machine._resync_invoice_group_labels` keys off that vocabulary.
 
     Provider-operator only (403 otherwise). Every read is tenant-scoped via
     scope_extra_work_for, so an actor cannot generate across tenants — an
@@ -239,86 +326,53 @@ def generate_draft_invoices(
     if not _is_provider_operator(actor):
         raise PermissionDenied("Only provider operators can generate invoices.")
 
-    if granularity is None:
-        customer = Customer.objects.filter(
-            id=customer_id, company_id=company_id
-        ).first()
-        granularity = (
-            customer.invoice_granularity_default
-            if customer is not None
-            else Customer.InvoiceGranularity.CUSTOMER
-        )
-
-    unbilled = unbilled_extra_work(actor, company_id, customer_id, year, month)
-    if not unbilled:
+    # Sprint 182 §2 — THE SINGLE CALCULATION.
+    #
+    # Generation does not decide what would be billed; it EXECUTES the
+    # plan the preview shows. `plan_invoices` is the one function that
+    # answers "what would be billed, grouped how", and this function's
+    # only remaining job is to persist that answer and claim the rows.
+    #
+    # This is the structural guarantee behind §2's requirement, not a
+    # convention anyone has to remember: there is no second grouping
+    # implementation to drift, because there is no second implementation.
+    #
+    # Sprint 184 §1 — WHICH MONTHS THIS RUN SWEEPS, and it is now the
+    # caller's decision rather than a constant.
+    #
+    # `through=False` (the default) is the exact-period query the manual
+    # Generate button has always used: the operator picked "July", so
+    # give them July and nothing else.
+    #
+    # `through=True` is this period OR ANY EARLIER one — the same rule
+    # the /due/ panel and the preview use. THE NIGHTLY RUN PASSES IT,
+    # because an unattended job asking only about the current month was
+    # the most expensive defect in the system: on the 1st of the month
+    # nothing has finished in that month yet, so the run created nothing
+    # and last month was never picked up again — the job only fires once
+    # a month. It logged `invoices_created: 0`, which reads as "nothing
+    # outstanding".
+    #
+    # Widening the window cannot double-bill. What prevents that is the
+    # CLAIM (`is_invoiced` plus the live `InvoiceLine.extra_work` link),
+    # not the month filter, so a row already on an invoice is out of the
+    # pool whatever period is asked for.
+    planned = plan_invoices(
+        actor,
+        company_id,
+        customer_id,
+        year,
+        month,
+        granularity=granularity,
+        through=through,
+    )
+    if not planned:
         # Idempotent: nothing to claim -> do NOT create an empty draft.
         return []
 
     created = []
     with transaction.atomic():
-        if granularity == Customer.InvoiceGranularity.PER_BUILDING:
-            by_building: dict[int, list] = {}
-            for ew in unbilled:
-                by_building.setdefault(ew.building_id, []).append(ew)
-            # Deterministic order (by building id) for stable output.
-            for building_id in sorted(by_building):
-                created.append(
-                    _create_draft(
-                        actor,
-                        company_id,
-                        customer_id,
-                        year,
-                        month,
-                        building_id,
-                        by_building[building_id],
-                        granularity=Customer.InvoiceGranularity.PER_BUILDING,
-                    )
-                )
-        elif (
-            granularity
-            == Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_WORK_TYPE
-        ):
-            by_group: dict[tuple[int, int | None, int | None], list] = {}
-            for ew in unbilled:
-                key = (ew.building_id, ew.department_id, ew.work_type_id)
-                by_group.setdefault(key, []).append(ew)
-
-            # Deterministic order extending the PER_BUILDING rule above: by
-            # building id first (unchanged), then department id, then work
-            # type id — None sorts FIRST within its building (an untagged
-            # group reads as "the base group" ahead of its labelled
-            # siblings). None can't compare to int directly in Python 3, so
-            # -1 stands in for it (real ids start at 1, so this never
-            # collides with a genuine id).
-            def _group_sort_key(key):
-                b_id, d_id, w_id = key
-                return (
-                    b_id,
-                    d_id if d_id is not None else -1,
-                    w_id if w_id is not None else -1,
-                )
-
-            for key in sorted(by_group, key=_group_sort_key):
-                building_id, department_id, work_type_id = key
-                created.append(
-                    _create_draft(
-                        actor,
-                        company_id,
-                        customer_id,
-                        year,
-                        month,
-                        building_id,
-                        by_group[key],
-                        department_id=department_id,
-                        work_type_id=work_type_id,
-                        granularity=(
-                            Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_WORK_TYPE
-                        ),
-                    )
-                )
-        else:  # CUSTOMER (default) — also the fallback for an unrecognised
-            # granularity string; either way this branch is what actually
-            # ran, so `granularity` records CUSTOMER, not the raw input.
+        for plan in planned:
             created.append(
                 _create_draft(
                     actor,
@@ -326,9 +380,18 @@ def generate_draft_invoices(
                     customer_id,
                     year,
                     month,
-                    None,
-                    unbilled,
-                    granularity=Customer.InvoiceGranularity.CUSTOMER,
+                    plan.building_id,
+                    plan.extra_works,
+                    department_id=plan.department_id,
+                    work_type_id=plan.work_type_id,
+                    granularity=plan.granularity,
+                    # Sprint 185 E §2 — the money the plan computed.
+                    # Generation persists the plan; it never recomputes
+                    # it, which is the guarantee §2 asked for.
+                    amounts=plan.amounts,
+                    # Sprint 183 §3 — a system run's invoices have no
+                    # human author. `actor` above is the read scope.
+                    created_by=None if system else _ACTOR,
                 )
             )
     return created
@@ -365,6 +428,31 @@ def delete_draft_invoice(actor, invoice):
             ExtraWorkRequest.objects.filter(id__in=ew_ids).update(
                 is_invoiced=False, invoiced_at=None
             )
+        # Sprint 188 §CI — release the CONTRACT PERIOD claim too.
+        #
+        # `ContractInvoice` carries `UniqueConstraint(contract,
+        # period_start)` and IS the contract generator's idempotency
+        # mechanism: a period with a row is a period already invoiced.
+        # Its FK to Invoice is CASCADE precisely so "a deleted invoice
+        # releases its period to be generated again" — the model says so
+        # in its own help_text. But CASCADE only fires on a HARD delete,
+        # and this path is a SOFT delete, so the claim outlived the
+        # invoice it describes and the period became permanently
+        # unbillable: the next run found the row, skipped the period, and
+        # nothing on any screen explained why.
+        #
+        # Reached through the REVERSE ACCESSOR, never by importing
+        # `contracts`. The dependency between these two apps runs one
+        # way — `contracts` knows about `invoicing` and not the other
+        # way round, and `test_invoicing_gained_no_contract_column`
+        # pins it — so this uses the relation `contracts` itself hung on
+        # Invoice rather than naming its model. Django makes a missing
+        # reverse one-to-one raise a subclass of AttributeError, which is
+        # exactly why `getattr` with a default is the right shape here:
+        # an invoice with no contract behind it simply has no claim.
+        claim = getattr(invoice, "contract_period", None)
+        if claim is not None:
+            claim.delete()
         invoice.deleted_at = timezone.now()
         invoice.save(update_fields=["deleted_at", "updated_at"])
     return invoice

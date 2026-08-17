@@ -41,6 +41,7 @@ from extra_work.models import (
     ExtraWorkCategory,
     ExtraWorkPricingUnitType,
     ExtraWorkRequest,
+    ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
     ExtraWorkStatus,
     Proposal,
@@ -378,7 +379,15 @@ class ProposalActionsBlockShapeTests(_ActionsFixtureMixin, TestCase):
         self.assertTrue(actions["can_edit_lines"])
         self.assertTrue(actions["can_send"])
         self.assertTrue(actions["can_cancel"])
-        self.assertTrue(actions["can_direct_publish"])
+        # Sprint 187 §3 — this asserted True and was asserting the BUG.
+        # The fixture is the DEFAULT configuration: the dedicated
+        # dangerous grant `provider.extra_work.quote_override_start` is
+        # off, and the EW carries no `request_intent`. The endpoint
+        # refuses both (403 `quote_override_not_permitted`, then 400
+        # `quote_bypass_requires_quote_request`), so a True here was the
+        # UI offering a button that fails every time. The flag now
+        # mirrors all four of the endpoint's gates.
+        self.assertFalse(actions["can_direct_publish"])
         # Customer-decision booleans False — proposal is DRAFT, not SENT.
         self.assertFalse(actions["can_approve"])
         self.assertFalse(actions["can_reject"])
@@ -429,7 +438,21 @@ class ProposalActionsBlockShapeTests(_ActionsFixtureMixin, TestCase):
         }
         self.bma.save(update_fields=["permission_overrides"])
 
+        # Sprint 187C — the other two gates are opened deliberately, so
+        # that the override key is the ONLY thing left deciding
+        # can_direct_publish. Without this the assertion below passes for
+        # the wrong reason: §3's new dangerous-grant and REQUEST_QUOTE
+        # gates force the flag False for every EW this fixture builds, so
+        # the test stayed green with the override key RESTORED, and the
+        # BM distinction it exists for went untested.
+        self.company.provider_admin_may_quote_override_start = True
+        self.company.save(
+            update_fields=["provider_admin_may_quote_override_start"]
+        )
         ew = self._make_ew()
+        ew.request_intent = ExtraWorkRequestIntent.REQUEST_QUOTE
+        ew.save(update_fields=["request_intent"])
+
         proposal = self._make_proposal(ew, status=ProposalStatus.DRAFT)
         response = self._proposal_detail(self.bm, ew, proposal)
         self.assertEqual(response.status_code, 200, response.data)
@@ -441,11 +464,24 @@ class ProposalActionsBlockShapeTests(_ActionsFixtureMixin, TestCase):
         # Direct-publish requires BOTH keys -> False.
         self.assertFalse(actions["can_direct_publish"])
 
+        # The control that makes the assertion above mean something:
+        # restore the override key, change nothing else, and the same
+        # request now answers True.
+        self.bma.permission_overrides = {}
+        self.bma.save(update_fields=["permission_overrides"])
+        actions = self._proposal_detail(self.bm, ew, proposal).data["actions"]
+        self.assertTrue(actions["can_direct_publish"])
+
     # -----------------------------------------------------------------
     # Tightened-precondition tests: can_send and can_direct_publish are
     # False when the parent EW is NOT in UNDER_REVIEW even for actors
-    # who hold full mutation + override authority. can_direct_publish
-    # is derived from can_send so they cannot drift.
+    # who hold full mutation + override authority.
+    #
+    # Sprint 187C — this block used to end "can_direct_publish is derived
+    # from can_send so they cannot drift". Since §3 that is no longer
+    # true: the flag STARTS from can_send and is then narrowed by the
+    # dangerous-grant and REQUEST_QUOTE gates, so can_send=True with
+    # can_direct_publish=False is now the ordinary default answer.
     # -----------------------------------------------------------------
     def test_draft_with_parent_requested_can_send_and_direct_publish_false_for_sa(self):
         # Parent EW in REQUESTED — the send-time gate would 400, so
@@ -488,12 +524,36 @@ class ProposalActionsBlockShapeTests(_ActionsFixtureMixin, TestCase):
         )
 
     def test_draft_with_parent_under_review_can_direct_publish_true_for_sa(self):
-        # Positive control — parent UNDER_REVIEW + DRAFT proposal -> SA
-        # sees both can_send and the derived can_direct_publish True.
+        """Positive control — parent UNDER_REVIEW + DRAFT proposal.
+
+        Sprint 187 §3 — `can_send` alone is no longer enough, and this
+        test used to assert that it was. Direct-publish also needs the
+        dedicated dangerous grant (SA resolves it True) and a
+        Request-a-Quote intent, because the other two intents have no
+        customer-decision step to bypass. The intent is set here so the
+        control is a control: it asserts True for a configuration where
+        the endpoint would genuinely allow it.
+        """
         ew = self._make_ew(status=ExtraWorkStatus.UNDER_REVIEW)
+        ew.request_intent = ExtraWorkRequestIntent.REQUEST_QUOTE
+        ew.save(update_fields=["request_intent"])
         proposal = self._make_proposal(ew, status=ProposalStatus.DRAFT)
         response = self._proposal_detail(self.super_admin, ew, proposal)
         self.assertEqual(response.status_code, 200, response.data)
         actions = response.data["actions"]
         self.assertTrue(actions["can_send"])
         self.assertTrue(actions["can_direct_publish"])
+
+    def test_direct_publish_false_for_sa_without_a_quote_intent(self):
+        """Sprint 187 §3 — the negative half of the control above. SA
+        clears the dangerous grant automatically, so intent is the only
+        remaining gate, and it still applies."""
+        ew = self._make_ew(status=ExtraWorkStatus.UNDER_REVIEW)
+        ew.request_intent = ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER
+        ew.save(update_fields=["request_intent"])
+        proposal = self._make_proposal(ew, status=ProposalStatus.DRAFT)
+        response = self._proposal_detail(self.super_admin, ew, proposal)
+        self.assertEqual(response.status_code, 200, response.data)
+        actions = response.data["actions"]
+        self.assertTrue(actions["can_send"])
+        self.assertFalse(actions["can_direct_publish"])

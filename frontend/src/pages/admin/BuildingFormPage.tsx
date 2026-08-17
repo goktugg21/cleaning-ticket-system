@@ -6,23 +6,33 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addBuildingManager,
+  bulkLinkBuildings,
   createBuilding,
   getBuilding,
   listAllCompanies,
+  listAllCustomers,
+  listBuildingCustomers,
   listBuildingManagers,
   listUsers,
   removeBuildingManager,
   updateBuilding,
 } from "../../api/admin";
 import type { BuildingWritePayload } from "../../api/admin";
+import { listBuildingTypes } from "../../api/admin";
 import type {
+  BuildingTypeOption,
   BuildingAdmin,
   BuildingManagerMembership,
   CompanyAdmin,
+  CustomerAdmin,
+  CustomerBuildingMembership,
   UserAdmin,
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { BoundedList } from "../../components/BoundedList";
+import { EntityPicker } from "../../components/EntityPicker";
+import { useToast } from "../../components/ToastProvider";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
@@ -30,6 +40,7 @@ export function BuildingFormPage() {
   const { id } = useParams();
   const isCreate = id === undefined;
   const { t, i18n } = useTranslation("common");
+  const { push: pushToast } = useToast();
 
   const [savedBanner, setSavedBanner] = useSavedBanner({
     saved: t("buildings.banner_saved"),
@@ -44,11 +55,52 @@ export function BuildingFormPage() {
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const [postalCode, setPostalCode] = useState("");
+  // Sprint 178 §1 — the building's kind, from this company's own
+  // catalog. Optional everywhere: most buildings will never carry one.
+  const [buildingType, setBuildingType] = useState<number | "">("");
+  const [buildingTypes, setBuildingTypes] = useState<BuildingTypeOption[]>([]);
+
+  // Sprint 154 §H (building half) — the mirror image of the customer
+  // form's linked-buildings section: pick the CUSTOMERS served here, in
+  // create mode as well as edit mode.
+  const [linkedCustomers, setLinkedCustomers] = useState<
+    CustomerBuildingMembership[]
+  >([]);
+  const [companyCustomers, setCompanyCustomers] = useState<CustomerAdmin[]>([]);
+  const [customersToLink, setCustomersToLink] = useState<number[]>([]);
+  const [pendingCustomerIds, setPendingCustomerIds] = useState<number[]>([]);
+  const [customerLinkError, setCustomerLinkError] = useState("");
+  const [customerLinkBusy, setCustomerLinkBusy] = useState(false);
+  const [customerLinkToken, setCustomerLinkToken] = useState(0);
 
   const form = useEntityForm<BuildingAdmin, BuildingWritePayload>({
     id,
     fetchFn: getBuilding,
-    createFn: createBuilding,
+    // Sprint 154 §H — link the chosen customers in the same trip that
+    // creates the building. The M:N rows need a building id, so the
+    // create lands first. A link failure must NOT lose the created
+    // building: it is swallowed and surfaced as a toast, which survives
+    // the navigation to the detail page.
+    createFn: async (payload) => {
+      const created = await createBuilding(payload);
+      if (pendingCustomerIds.length > 0) {
+        try {
+          await bulkLinkBuildings({
+            buildings: [created.id],
+            relation: "customers",
+            targets: pendingCustomerIds,
+            mode: "link",
+          });
+        } catch (err) {
+          pushToast({
+            variant: "error",
+            title: t("building_form.create_link_failed"),
+            description: getApiError(err),
+          });
+        }
+      }
+      return created;
+    },
     updateFn: updateBuilding,
     validate: () => {
       if (isCreate && company === "") return { company: t("building_form.error_pick_company") };
@@ -61,6 +113,9 @@ export function BuildingFormPage() {
         city: city.trim(),
         country: country.trim(),
         postal_code: postalCode.trim(),
+        // "" means unclassified, and null is what clears the FK. Sending
+        // "" would be a 400 on a nullable integer field.
+        building_type: buildingType === "" ? null : Number(buildingType),
       };
       if (isCreate && company !== "") payload.company = Number(company);
       return payload;
@@ -72,11 +127,45 @@ export function BuildingFormPage() {
       setCity(entity.city);
       setCountry(entity.country);
       setPostalCode(entity.postal_code);
+      setBuildingType(entity.building_type ?? "");
     },
     successPath: (entity) => `/admin/buildings/${entity.id}?saved=ok`,
     onEditSuccess: () => setSavedBanner(t("buildings.banner_saved")),
   });
   const building = form.entity;
+
+  /** Sprint 178 §1 — this company's building types.
+   *
+   *  Keyed on the RESOLVED company (the picked one in create mode, the
+   *  building's own in edit mode) so switching company reloads the right
+   *  catalog rather than offering the previous company's types — which
+   *  the server would refuse anyway, but only after the operator had
+   *  chosen one.
+   *
+   *  Non-fatal on failure: an unreachable catalog must not stop somebody
+   *  saving a building's address. */
+  const typeCompany = isCreate ? company : (building?.company ?? "");
+  useEffect(() => {
+    let cancelled = false;
+    // Resolved rather than an early `setBuildingTypes([])`: a synchronous
+    // setState in an effect body is banned (`react-hooks/set-state-in-effect`),
+    // so the no-company case travels the same promise path as the rest.
+    const pending =
+      typeCompany === ""
+        ? Promise.resolve([] as BuildingTypeOption[])
+        : listBuildingTypes(typeCompany);
+    pending
+      .then((options) => {
+        if (!cancelled) setBuildingTypes(options);
+      })
+      .catch(() => {
+        if (!cancelled) setBuildingTypes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [typeCompany]);
+
   const numericId = form.numericId;
 
   // Membership section state.
@@ -157,7 +246,21 @@ export function BuildingFormPage() {
       .then((response) => {
         if (cancelled) return;
         setCompanies(response);
-        if (isCreate && response.length === 1) {
+        if (!isCreate) return;
+        // Sprint 159 §4 — `?company=<id>` pre-selects the provider on a
+        // CREATE, which is what the company page's "Add building" action
+        // needs. Validated against the list the ACTOR can see, so a
+        // hand-edited URL naming a company out of scope simply does
+        // nothing rather than seeding a value the form would then use —
+        // the same rule `CustomerFormPage` already applies to its own
+        // `?company=`. Falls back to the single-company convenience.
+        const requested = Number(
+          new URLSearchParams(window.location.search).get("company"),
+        );
+        const seeded = response.find((row) => row.id === requested);
+        if (seeded) {
+          setCompany(seeded.id);
+        } else if (response.length === 1) {
           setCompany(response[0].id);
         }
       })
@@ -186,6 +289,95 @@ export function BuildingFormPage() {
   const backLabel = isCreate
     ? t("building_form.back")
     : t("building_form.back_to_detail");
+
+  // Sprint 154 §H — the customer candidate universe and (in edit mode)
+  // the current links. Company-scoped: a customer of another provider
+  // can never be served at this building, so offering one would be a
+  // rejection waiting to happen.
+  useEffect(() => {
+    if (company === "") return;
+    let cancelled = false;
+    listAllCustomers({ is_active: "true", company })
+      .then((rows) => {
+        if (!cancelled) setCompanyCustomers(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyCustomers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [company]);
+
+  // DERIVED, not cleared in the effect above. Clearing the fetched list
+  // when `company` goes back to "" would be a synchronous setState in an
+  // effect body — the exact thing CLAUDE.md §3 and the ESLint baseline
+  // forbid. Deriving the empty case here is equivalent for the reader
+  // and costs no render pass: a stale list can never be shown, because
+  // "no company chosen" always resolves to [].
+  const companyCustomerOptions = useMemo(
+    () => (company === "" ? [] : companyCustomers),
+    [company, companyCustomers],
+  );
+
+  useEffect(() => {
+    if (isCreate || form.numericId === null) return;
+    let cancelled = false;
+    listBuildingCustomers(form.numericId)
+      .then((rows) => {
+        if (!cancelled) setLinkedCustomers(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedCustomers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCreate, form.numericId, customerLinkToken]);
+
+  const availableCustomersToLink = useMemo(() => {
+    const linked = new Set(linkedCustomers.map((l) => l.customer));
+    return companyCustomerOptions.filter((c) => !linked.has(c.id));
+  }, [companyCustomerOptions, linkedCustomers]);
+
+  async function handleAddCustomerLinks() {
+    if (form.numericId === null || customersToLink.length === 0) return;
+    setCustomerLinkError("");
+    setCustomerLinkBusy(true);
+    try {
+      await bulkLinkBuildings({
+        buildings: [form.numericId],
+        relation: "customers",
+        targets: customersToLink,
+        mode: "link",
+      });
+      setCustomersToLink([]);
+      setCustomerLinkToken((n) => n + 1);
+    } catch (err) {
+      setCustomerLinkError(getApiError(err));
+    } finally {
+      setCustomerLinkBusy(false);
+    }
+  }
+
+  async function handleRemoveCustomerLink(customerId: number) {
+    if (form.numericId === null) return;
+    setCustomerLinkError("");
+    setCustomerLinkBusy(true);
+    try {
+      await bulkLinkBuildings({
+        buildings: [form.numericId],
+        relation: "customers",
+        targets: [customerId],
+        mode: "unlink",
+      });
+      setCustomerLinkToken((n) => n + 1);
+    } catch (err) {
+      setCustomerLinkError(getApiError(err));
+    } finally {
+      setCustomerLinkBusy(false);
+    }
+  }
 
   return (
     <div>
@@ -316,6 +508,37 @@ export function BuildingFormPage() {
                 value={city}
                 onChange={(event) => setCity(event.target.value)}
               />
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="building-type">
+                {t("building_form.field_building_type")}
+              </label>
+              <select
+                id="building-type"
+                className="field-select"
+                value={buildingType}
+                onChange={(event) =>
+                  setBuildingType(
+                    event.target.value === "" ? "" : Number(event.target.value),
+                  )
+                }
+                data-testid="building-type-select"
+              >
+                <option value="">{t("building_form.building_type_none")}</option>
+                {/* ACTIVE types only, PLUS whatever this building already
+                    carries — so an archived type stays visible on the row
+                    that has it instead of silently resetting to "none"
+                    the next time somebody saves the form. */}
+                {buildingTypes
+                  .filter(
+                    (option) => option.is_active || option.id === buildingType,
+                  )
+                  .map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+              </select>
             </div>
             <div className="field">
               <label className="field-label" htmlFor="building-postal">
@@ -463,6 +686,135 @@ export function BuildingFormPage() {
           </form>
         </section>
       )}
+
+      {/* Sprint 154 §H — the linked-customers section, in BOTH modes.
+          In create mode the links cannot be written yet (there is no
+          building id), so the choice is held and applied straight after
+          the create; see the `createFn` wrapper above. */}
+      <section
+        className="card"
+        data-testid="section-building-customers"
+        style={{ marginTop: 16, padding: "20px 22px" }}
+      >
+        <h3 className="section-title">
+          {t("building_form.section_customers_title")}
+        </h3>
+        <p className="muted small" style={{ marginBottom: 12 }}>
+          {isCreate
+            ? company === ""
+              ? t("customer_form.select_company_first")
+              : t("building_form.create_link_customers_hint")
+            : t("building_form.section_customers_desc")}
+        </p>
+
+        {customerLinkError && (
+          <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+            {customerLinkError}
+          </div>
+        )}
+
+        {isCreate ? (
+          company !== "" && (
+            <EntityPicker
+              options={companyCustomerOptions.map((c) => ({
+                id: c.id,
+                label: c.name,
+                sublabel: c.contact_email,
+              }))}
+              selectedIds={pendingCustomerIds}
+              onChange={setPendingCustomerIds}
+              disabled={form.submitting}
+              emptyText={t("building_form.no_eligible_customers")}
+              testIdPrefix="building-form-create-customers"
+              size="sm"
+            />
+          )
+        ) : (
+          <>
+            <BoundedList
+              size="md"
+              count={linkedCustomers.length}
+              ariaLabel={t("building_form.section_customers_title")}
+              testIdPrefix="building-form-linked-customers"
+              className="table-wrap"
+              emptyState={
+                <p className="muted small" style={{ padding: "12px 0" }}>
+                  {t("building_form.no_customers_linked")}
+                </p>
+              }
+            >
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("admin.col_name")}</th>
+                    <th aria-label={t("admin.col_actions")} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {linkedCustomers.map((link) => (
+                    <tr key={link.id}>
+                      <td className="td-subject">
+                        <Link to={`/admin/customers/${link.customer}`}>
+                          {link.customer_name || String(link.customer)}
+                        </Link>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleRemoveCustomerLink(link.customer)}
+                          disabled={customerLinkBusy}
+                          data-testid={`building-form-unlink-customer-${link.customer}`}
+                        >
+                          {t("admin_form.remove")}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </BoundedList>
+
+            <div style={{ marginTop: 14 }}>
+              <div className="detail-field-label" style={{ marginBottom: 6 }}>
+                {t("building_form.add_customers")}
+              </div>
+              <EntityPicker
+                options={availableCustomersToLink.map((c) => ({
+                  id: c.id,
+                  label: c.name,
+                  sublabel: c.contact_email,
+                }))}
+                selectedIds={customersToLink}
+                onChange={setCustomersToLink}
+                disabled={customerLinkBusy}
+                emptyText={t("building_form.no_eligible_customers")}
+                testIdPrefix="building-form-add-customers"
+                size="sm"
+              />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  marginTop: 10,
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleAddCustomerLinks}
+                  disabled={customerLinkBusy || customersToLink.length === 0}
+                  data-testid="building-form-add-customers-button"
+                >
+                  {customerLinkBusy
+                    ? t("admin_form.adding")
+                    : t("admin_form.add")}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
 
       <ConfirmDialog
         ref={removeDialogRef}

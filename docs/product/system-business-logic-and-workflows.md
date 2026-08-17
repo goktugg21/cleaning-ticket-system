@@ -788,6 +788,77 @@ When provider-side users approve/reject on behalf of the customer:
 
 Staff should not perform customer approval/rejection.
 
+### Approval closes the ticket (Sprint 180)
+
+**When the customer approves the work, the ticket becomes Closed
+automatically.** The approval is the decision; closing is the
+bookkeeping that follows from it, and an operator should not have to
+remember to do it.
+
+Why this matters more than it sounds. An Extra Work becomes invoiceable
+only when its spawned operational ticket is **Closed** specifically
+(`extra_work/billing.py::is_earned`), and the month it bills in is read
+off that ticket's close timestamp. But the Extra Work status sync treats
+Approved and Closed alike, so before this rule an Extra Work could read
+"Completed" on screen, be genuinely finished, and never become
+invoiceable — silently, with nobody warned. Closing on approval closes
+most of that hole.
+
+Exactly which transition closes:
+
+- **Waiting for customer approval → Approved** closes, whether the
+  customer clicked it themselves or a provider recorded their decision
+  on their behalf through the reasoned override above. The on-behalf
+  route is the common one in the field (the customer approves by
+  phone), so leaving it out would leave the hole open for the usual
+  case.
+- **Rejected does not close.** Rejected work goes back to In progress
+  for rework; it is live work.
+- **An administrative Approved does not close.** A Super Admin moving a
+  stuck ticket straight into Approved involved no customer, so there is
+  no approval to close on. The ticket parks on Approved and is closed by
+  hand, exactly as before.
+- A **reopened** ticket that is completed and approved again closes
+  again, and the newer close timestamp is the one that bills.
+
+The close is recorded as a **system** transition — no person is named
+for it, because no person performed it. The approval row above it names
+the actor who approved, carrying the override flag and reason when the
+decision was recorded on the customer's behalf. Auto-close sends **no
+second notification**: the customer just acted, and telling them their
+own click changed something is noise.
+
+### Work the customer never answers
+
+Auto-close only helps when the customer answers. Work that sits in
+Waiting for customer approval forever is finished, unbillable and
+silent — the worst of the three.
+
+The system does **not** approve on a timer. Approving on the customer's
+behalf is a decision with money attached, and there is already a route
+for it that demands a written reason and records who did it; inventing
+that decision automatically would be an override with nobody behind it.
+
+Instead the queue is made visible: the dashboard carries an **Approval
+overdue** row counting tickets that have been awaiting approval for more
+than 14 days, deep-linking into the filtered list. A provider then
+chases the customer, or records the approval on their behalf through the
+existing reasoned override.
+
+### Finished Extra Work leaves the ticket list
+
+Completed Extra Work should not clutter the ticket list. "Finished" is
+read off the **ticket's own** status (Approved or Closed), never off the
+parent Extra Work's — a provider can mark an Extra Work Completed by
+hand while one of its spawned tickets is still open, and that ticket
+must not vanish from the list that exists to show it.
+
+The Tickets page hides finished Extra Work by default and says so, with
+a one-click "Show all". The status count chips above the list apply the
+same rule, so the chips and the rows always agree. The Extra Work detail
+page's own spawned-tickets panel is unaffected — there, showing every
+spawned ticket is the point.
+
 ---
 
 ## 7. Extra Work workflow
@@ -1405,6 +1476,150 @@ Actions that must be audited:
 - User membership changes
 
 ---
+
+## 12A. Where an hour came from, and why there is no date column per transition
+
+Sprint 173. Two decisions that the next person to touch hours or extra
+work must not re-derive.
+
+### An hour carries a SOURCE, as a type and an id
+
+`TimeEntry` records hours, a date, an employee, an hour type and an
+optional building. Since Sprint 173 it also records **which job
+produced it**: `source_type` (`CONTRACT` / `EXTRA_WORK` / `TICKET` /
+`OTHER`) plus a nullable `source_id`.
+
+**It is a type + id pair and NOT four nullable foreign keys.** That is
+not a shortcut, it is the module rule: `timesheets` imports nothing
+from `tickets` or `extra_work`, because the hours module has to keep
+working for a company that uses nothing else. Four FKs would make it
+depend on both. A test scans the package for those imports and fails on
+either.
+
+Resolving an id into a title therefore belongs in `reports/`, the app
+that may read across — `reports/hour_sources.py`, beside
+`hours_comparison.py`, which reaches into two modules for the same
+reason.
+
+Two consequences, handled rather than discovered:
+
+* **An id can stop resolving.** A ticket can be soft-deleted after its
+  hours were logged. The resolver returns no title and the caller
+  renders `Ticket #41` — never blank (reads as a bug) and never an
+  exception (turns a deleted ticket into a broken screen).
+* **A title must not leak.** The id sits on a row the actor may read,
+  but the title is another module's data. Resolution goes through the
+  same scoping helpers the ticket and extra-work lists use, so an actor
+  who could not open the ticket gets exactly what a fictional id gives.
+  Out of scope is indistinguishable from nonexistent (H-1).
+
+`OTHER` is the default because every row written before the column
+existed has a real source nobody recorded. Backfilling them as
+`CONTRACT` would be inventing an answer.
+
+### There is NO date column per transition, and none is to be added
+
+The reference system carries eleven date columns on an extra work —
+created, planned start, planned end, started, completed, approved,
+archived/rejected, deadline and more — and its own users report that
+date queries keep breaking as a result.
+
+**Those eleven columns are a status history, flattened.** We hold the
+history itself: `ExtraWorkStatusHistory` records `old_status`,
+`new_status`, `changed_by`, `note` and `created_at` for every
+transition. That answers questions a flattened column cannot — who
+approved it, whether it went backwards, how long it sat in a state.
+
+So: **"when was it approved" is a QUERY over the history, not a
+column.** Do not add `approved_at`, `started_at`, `completed_at` or
+their siblings. Sprint 173 added exactly two date fields and they are
+not transition stamps:
+
+* `deadline` — by when the work must be finished. A promise, not an
+  event.
+* `planned_end_date` — beside the existing `preferred_date`, forming
+  the planned WINDOW. A plan, not an event.
+
+`preferred_date` KEEPS its name: everything that reads it keeps
+working, and renaming it would be a migration's worth of risk for a
+word.
+
+### Started early is shown, never blocked
+
+A job entered today, started today and planned for September is the
+father's own example of the inconsistency that made date queries
+useless. It is **not blocked** — he was explicit that people do it
+deliberately — but `started_before_plan` is derived from the status
+history and is filterable, so it can be found and cleaned up rather
+than discovered months later.
+
+`is_overdue` and `started_before_plan` are each defined ONCE, on the
+model, and the list filters express the same rule in SQL. A test
+asserts the query and the property return the same set: two definitions
+of "late" is precisely the drift that rule exists to prevent.
+
+## 12B. Which week does a job appear in? (IMPLEMENTED, Sprint 179A)
+
+Sprint 173 §5. The owner and his father disagreed about this and the
+rule was settled; it is recorded here so the next person to touch the
+week view does not re-derive it.
+
+**Sprint 179A implements all four points.** The rule lives in
+`backend/tickets/work_plan.py` as pure functions over dates — one
+`Job` (planned window, due date, state) that BOTH sources are flattened
+onto, so a dated ticket slot and an extra work request are placed by the
+same code rather than by two copies of the same date arithmetic. The
+HTTP surface is `GET /api/tickets/work-plan/`
+(`backend/tickets/views_work_plan.py`); the screen is
+`frontend/src/pages/AgendaPage.tsx`.
+
+Two properties of that implementation are worth stating here because
+they are decisions, not details:
+
+* **Rules 2 and 3 only ever add to the CURRENT week.** Looking at any
+  other week shows planned placement alone. That is what makes rule 4
+  fall out for free in both directions — future work does not clutter
+  today, and today does not clutter September.
+* **The counts are the server's.** Every chip is a `COUNT(*)` over the
+  scoped queryset, not a length of whatever the browser fetched. The
+  rule is therefore expressed twice — as Python over a `Job` and as
+  querysets for the counts — and `WorkPlanRuleParityTests` asserts the
+  two agree over a fixture built to hit every branch. That is the same
+  discipline §12A already demands of `is_overdue`.
+
+His example: a job is entered today, started today, and planned for
+September. Today it is nowhere; in September it is nowhere either.
+
+Two obvious rules are each wrong alone:
+
+* **By planned dates only** — a job started today is invisible today,
+  and nobody can see what is actually being worked on.
+* **By status only** — starting it drags it into this week and it
+  vanishes from September, which is what the father objects to.
+
+**The rule: a job appears in every week it legitimately belongs to,
+because "what is planned for September" and "what is happening now" are
+different questions.**
+
+1. **Planned placement.** A job appears in the week(s) its planned
+   window (`preferred_date` -> `planned_end_date`) covers. That is its
+   home and it stays there whatever its status, so September shows
+   September's work.
+2. **Active placement.** A job that has been STARTED also appears in the
+   current week, whatever its planned dates say. A week view that hides
+   live work is useless.
+3. **Overdue placement.** A job past its `deadline` and unfinished also
+   appears in the current week, marked overdue. An overdue job needs
+   attention today, not on the date somebody once hoped for.
+4. **Untouched future work does NOT clutter today.** A job planned for
+   September and not started appears only in September, plus under a
+   "planned / upcoming" filter for anyone looking ahead.
+
+**A card shown outside its planned week must say why** — a short marker
+reading started early or overdue, with its planned date on the card.
+Otherwise the operator meets the same job in two weeks and cannot tell
+why. That marker is also how a job started before its planned window
+stays visible (see 12A).
 
 ## 13. Non-negotiable privacy rules
 

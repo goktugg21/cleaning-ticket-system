@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchStatusDistribution } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
+import { ticketStatusLabelKey } from "../../../lib/enumLabels";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -29,7 +30,7 @@ const STATUS_COLOR: Record<string, string> = {
 const FALLBACK_COLOR = "#94a3b8";
 
 export function StatusDistributionChart({ filters, refreshKey }: ChartProps) {
-  const { t } = useTranslation("reports");
+  const { t } = useTranslation(["reports", "common"]);
   const { data, loading, error, retry } = useReport({
     fetcher: fetchStatusDistribution,
     filters,
@@ -55,10 +56,18 @@ export function StatusDistributionChart({ filters, refreshKey }: ChartProps) {
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
+              {/* Sprint 184 §2 — the slice names come from the status
+                  CODE through the app's one status vocabulary, not from
+                  an English label the server used to send. */}
               <Pie
-                data={data.buckets}
+                data={data.buckets.map((bucket) => ({
+                  ...bucket,
+                  name: t(ticketStatusLabelKey(bucket.status), {
+                    ns: "common",
+                  }),
+                }))}
                 dataKey="count"
-                nameKey="label"
+                nameKey="name"
                 innerRadius={50}
                 outerRadius={90}
                 paddingAngle={2}

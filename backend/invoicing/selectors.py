@@ -30,13 +30,15 @@ M4 mark-invoiced run used.
 """
 from __future__ import annotations
 
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
+
+from buildings.models import BuildingCostShare
 
 from accounts.models import UserRole
 from accounts.scoping import scope_customers_for
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
-from extra_work.billing import billing_month, build_ticket_map, is_earned
+from extra_work.billing import billing_month, build_ticket_map, is_billable
 from extra_work.scoping import scope_extra_work_for
 
 from .models import Invoice, InvoiceLine
@@ -143,20 +145,56 @@ def _scoped_unbilled_ew_with_tickets(actor, company_id, customer_id, building_id
         # Phase 2b: a REVERSED original no longer holds its claim — its work
         # is released back to the pool by the reversal counter-entry.
         invoice__reversed_by__isnull=True,
+        # Sprint 185 E §2 — claimed BY THIS CUSTOMER.
+        #
+        # On an unshared building this changes nothing: the only invoices
+        # that can carry the Extra Work are that one customer's, so "any
+        # live claim" and "a live claim of this customer's" are the same
+        # set. On a SHARED building they are not, and they must not be:
+        # each share-holder is billed its own part, so customer A's
+        # invoice claiming the row must not settle it for customer B.
+        invoice__customer_id=customer_id,
     )
+    # Sprint 185 E §2 — the pool now includes work on a building this
+    # customer holds a COST SHARE of, whoever the Extra Work itself
+    # belongs to. That is what "the percentages actually split the
+    # invoice" means at the read end: the work is on the shared
+    # building, so every share-holder owes a part of it.
+    #
+    # A building with no shares contributes nothing to this second leg,
+    # so an unshared tenant's pool is exactly the rows it always was.
+    shared_building_ids = list(
+        BuildingCostShare.objects.filter(
+            customer_id=customer_id
+        ).values_list("building_id", flat=True)
+    )
+    ownership = Q(customer_id=customer_id)
+    if shared_building_ids:
+        ownership = ownership | Q(building_id__in=shared_building_ids)
+
     qs = (
         scope_extra_work_for(actor)
         .filter(
+            ownership,
             company_id=company_id,
-            customer_id=customer_id,
             deleted_at__isnull=True,
-            # Option-1 fast exclusion: is_invoiced rows (incl. the legacy
-            # M4 bulk-run settled rows) never resurface into the pool.
-            is_invoiced=False,
         )
         .annotate(_live_claim=Exists(live_claim))
         .filter(_live_claim=False)
     )
+    # Option-1 fast exclusion, now applied only where it still MEANS
+    # "settled": `is_invoiced` is one boolean on a row that several
+    # customers can be billed parts of, so on a shared building it can
+    # only ever say "somebody has been billed", not "everybody has". The
+    # per-customer claim above is the authority there. Unshared rows keep
+    # the flag as their fast exclusion, including the legacy M4 bulk-run
+    # rows that must never resurface.
+    if shared_building_ids:
+        qs = qs.filter(
+            Q(is_invoiced=False) | Q(building_id__in=shared_building_ids)
+        )
+    else:
+        qs = qs.filter(is_invoiced=False)
     if building_id is not None:
         qs = qs.filter(building_id=building_id)
 
@@ -181,7 +219,7 @@ def unbilled_extra_work(actor, company_id, customer_id, year, month, building_id
     return [
         e
         for e in ew_list
-        if is_earned(ticket_map.get(e.id))
+        if is_billable(e, ticket_map.get(e.id))
         and billing_month(e, ticket_map.get(e.id)) == (year, month)
     ]
 
@@ -214,7 +252,7 @@ def unbilled_extra_work_through(
     )
     result = []
     for e in ew_list:
-        if not is_earned(ticket_map.get(e.id)):
+        if not is_billable(e, ticket_map.get(e.id)):
             continue
         bm = billing_month(e, ticket_map.get(e.id))
         if bm is not None and bm <= (year, month):

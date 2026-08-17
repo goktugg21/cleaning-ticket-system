@@ -29,6 +29,13 @@ router = DefaultRouter()
 router.register(r"", ExtraWorkRequestViewSet, basename="extra-work")
 
 
+from .views_assignments import (
+    ExtraWorkAssignableUsersView,
+    ExtraWorkAssignmentListView,
+    ExtraWorkBulkAssignView,
+)
+from .views_dates import ExtraWorkBulkDatesView
+
 urlpatterns = [
     # Sprint 143 §6 — MUST precede the router: the DefaultRouter is
     # registered at the empty prefix, so its detail route would otherwise
@@ -38,7 +45,32 @@ urlpatterns = [
         ExtraWorkCategoryOptionsView.as_view(),
         name="extra-work-category-options",
     ),
+    # Sprint 157 §2 — MUST precede the router for the same reason
+    # `category-options/` does: the router is registered at the empty
+    # prefix and its detail route would swallow "bulk-assign" as a pk.
+    path(
+        "bulk-assign/",
+        ExtraWorkBulkAssignView.as_view(),
+        name="extra-work-bulk-assign",
+    ),
+    # Sprint 176 §3 — same ordering rule: "bulk-dates" would be read as a
+    # pk by the router's detail route if it came after.
+    path(
+        "bulk-dates/",
+        ExtraWorkBulkDatesView.as_view(),
+        name="extra-work-bulk-dates",
+    ),
     path("", include(router.urls)),
+    path(
+        "<int:pk>/assignments/",
+        ExtraWorkAssignmentListView.as_view(),
+        name="extra-work-assignments",
+    ),
+    path(
+        "<int:pk>/assignments/candidates/",
+        ExtraWorkAssignableUsersView.as_view(),
+        name="extra-work-assignment-candidates",
+    ),
     path(
         "<int:ew_id>/pricing-items/",
         ExtraWorkPricingLineItemListCreateView.as_view(),

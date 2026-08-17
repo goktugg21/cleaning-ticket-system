@@ -243,6 +243,12 @@ p { line-height: 1.6; }
 .badge-closed { background: var(--closed-soft); color: var(--closed); border-color: #CFDAD2; }
 .badge-normal { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
 .badge-low { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
+/* Sprint 180 §1 — used on the customer pricing page since Sprint 15.x
+   ("Inactive", "Custom", "Archived") and defined nowhere, so `.badge`
+   alone rendered it in the DEFAULT badge colours and an archived row's
+   tag looked like a live status. Same declarations as `.badge-normal`
+   and `.badge-low`, which are the family's existing quiet variants. */
+.badge-muted { background: var(--surface-2); color: var(--text-muted); border-color: var(--border); }
 .badge-high { background: var(--amber-soft); color: var(--amber); border-color: var(--amber-border); }
 .badge-urgent { background: var(--red-soft); color: var(--red); border-color: var(--red-border); }
 .badge-lg { height: 28px; padding: 0 12px; font-size: 12px; }
@@ -290,6 +296,24 @@ p { line-height: 1.6; }
   box-shadow: var(--shadow-sm);
 }
 
+/* Sprint 163 §3 — the padding every detail card needs, named once.
+
+   `.card` deliberately carries none, because plenty of cards hold a
+   full-bleed table or filter bar. The detail pages that hold FIELDS all
+   want the same inset, and the building, customer and company pages
+   each repeat it as `style={{ padding: "20px 22px" }}`. The contracts
+   page simply never did, which is the whole of this defect: no rule was
+   overriding anything, the padding was just absent, so the fields and
+   the section head sat flush against the border.
+
+   Adding it as a class rather than a fourth inline copy. The three
+   existing pages are left on their inline style: they render correctly
+   today, and converting four working pages for tidiness is risk with
+   no visible benefit in a sprint that has four items to land. */
+.card-detail-pad {
+  padding: 20px 22px;
+}
+
 /* Section head */
 .section-head {
   display: flex;
@@ -301,6 +325,24 @@ p { line-height: 1.6; }
   background: var(--surface);
 }
 .section-head-title { font-family: var(--f-head); font-size: 15px; font-weight: 700; color: var(--text); }
+
+/* Sprint 173 §6 — `.section-title`, defined at last.
+   Fifteen chart cards on the Reports page have used this class since
+   the cards were written and NO css file defined it, so every one has
+   been rendering as a bare <h3> — 16.38px, weight 700, no margin,
+   inheriting whatever the reset left. Two sprints recorded it and left
+   it because defining it restyles fifteen cards at once; this sprint
+   was asked to do it deliberately and measure the result.
+   It matches `.section-head-title`, which is the house style for a
+   section heading, plus the bottom margin the cards were faking with
+   an inline style on the subtitle underneath. */
+.section-title {
+  font-family: var(--f-head);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 2px;
+}
 .section-head-sub { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
 
 /* Eyebrow */
@@ -321,6 +363,17 @@ p { line-height: 1.6; }
   font-weight: 700;
   color: var(--text-muted);
   letter-spacing: 0.01em;
+}
+/* Sprint 180 §1 — the line UNDER a field that explains it. Used in three
+   places and defined nowhere, so it inherited the body's 14px and read as
+   ordinary copy rather than as help. Two of the three callers already
+   pair it with `muted small`, which is this same 12px/faint; the rule
+   makes the third (the account page) match them instead of the caller
+   having to remember two class names. */
+.field-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.45;
 }
 .field-input, .field-select, .field-textarea {
   width: 100%;
@@ -504,6 +557,41 @@ p { line-height: 1.6; }
   border-left-color: var(--shell-accent);
 }
 .nav-item.disabled { opacity: 0.42; pointer-events: none; }
+/* Sprint 155 §1 — a nav GROUP whose parent is a link, not a disclosure
+   button. The row lets the label take the full width (so the whole label
+   is the navigation target) with the chevron docked at the end. */
+.nav-parent-row {
+  display: flex;
+  align-items: stretch;
+}
+.nav-parent-row .nav-item {
+  flex: 1;
+  min-width: 0;
+}
+.nav-parent-toggle {
+  flex-shrink: 0;
+  width: 34px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--shell-faint);
+  transition: color 0.14s, background 0.14s;
+}
+.nav-parent-toggle:hover {
+  background: rgba(95,212,153,0.06);
+  color: #fff;
+}
+/* A MODIFIER on .nav-item, never a parallel class — a second copy of the
+   hover/active rules would drift the first time either is tweaked. The
+   only difference a child row needs is the indent. */
+.nav-item-child {
+  padding-left: 38px;
+  font-size: 12.5px;
+  height: 36px;
+}
 .nav-icon {
   width: 16px; height: 16px;
   flex-shrink: 0;
@@ -1216,6 +1304,38 @@ p { line-height: 1.6; }
   font-size: 12.5px;
 }
 .bld-row-name { font-family: var(--f-head); font-weight: 600; color: var(--text); }
+/* Sprint 155 §2 — the customer overview's Linked buildings row. Two
+   columns so the card's right-hand half carries the counts instead of
+   being empty; the whole row is the link through to the building. */
+.linked-building-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  margin: 0 -10px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.14s ease;
+}
+.linked-building-row:hover { background: var(--surface-2); }
+.linked-building-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.linked-building-counts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: right;
+}
 .bld-row-count {
   font-family: var(--f-head);
   font-variant-numeric: tabular-nums;
@@ -1278,16 +1398,58 @@ p { line-height: 1.6; }
    them. */
 
 /* Filter bar */
+/* Sprint 156 §5 — the four controls read as ONE group.
+   MEASURED before the change, at 1440px on /admin/customers: the grid
+   was `160px 160px 1fr auto`, so the THIRD control absorbed the 1fr and
+   rendered 608px wide — 3.8x its neighbours — which pushed the fourth
+   (Building) out to x=978 and made it look detached. The gutter was
+   never the problem; every gap measured exactly the 10px gutter. A
+   dropdown 608px wide is the problem.
+   The Users page was worse and nobody had reported it: five controls
+   against four tracks wrapped the bar to FOUR rows at every width.
+   Flex with a fixed basis fixes both at once. Every filter control is
+   the same width, SEARCH is the only one that grows (width helps a text
+   field and does nothing for a select), and the actions are pushed to
+   the far end where they belong. `.filter-bar` is shared by nine
+   screens, so all four representative ones were measured before and
+   after rather than only the page that prompted the change (the Sprint
+   134/135 lesson about changing a shared thing for one caller). */
 .filter-bar {
-  display: grid;
-  grid-template-columns: 160px 160px 1fr auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  align-items: end;
+  align-items: flex-end;
   padding: 14px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--border-soft);
 }
-.filter-field { display: flex; flex-direction: column; gap: 5px; }
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  /* Fixed basis, no grow: consistent control sizes across every list
+     page, which is also §9's "same control, same size, everywhere". */
+  flex: 0 0 180px;
+  min-width: 0;
+}
+/* Search gets a wider basis but does NOT grow. Letting it grow was
+   measurably worse: at 1024px on /admin/customers it stretched to 290px
+   and pushed the fourth control onto a THIRD row, where the old grid
+   managed two. Fixed widths keep the group aligned and the actions are
+   pushed to the far end by `margin-left: auto` instead. */
+.filter-field.search { flex: 0 1 240px; }
+/* Narrower desktops get a narrower basis. MEASURED: at 1024px the 180px
+   basis pushed the actions off the row on /admin/buildings (bar height
+   80 -> 120px) and cost /admin/customers 21px. The bar has ~670px of
+   inner width there, and 200 + 160 + 160 + the actions fits it. */
+@media (max-width: 1200px) {
+  .filter-field { flex: 0 0 145px; }
+  .filter-field.search { flex: 0 1 190px; }
+}
+/* The controls inside must fill the field, or a select keeps its
+   intrinsic content width and the alignment is undone by the widest
+   option's text. */
+.filter-field > .filter-control { width: 100%; }
 .filter-label {
   font-family: var(--f-head);
   font-size: 10px;
@@ -1308,12 +1470,21 @@ p { line-height: 1.6; }
   transition: border-color 0.14s;
 }
 .filter-control:focus { outline: none; border-color: var(--green); }
-.filter-actions { display: flex; gap: 6px; align-items: flex-end; }
+
+.filter-actions {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  /* Pushed to the far end of whichever row it lands on. */
+  margin-left: auto;
+}
 
 @media (max-width: 760px) {
-  .filter-bar { grid-template-columns: 1fr 1fr; }
-  .filter-field.search { grid-column: 1 / -1; }
-  .filter-actions { grid-column: 1 / -1; }
+  /* Phone: two per row, search and the actions full width. The old rules
+     were grid-column spans, which do nothing under flex. */
+  .filter-field { flex: 1 1 calc(50% - 5px); }
+  .filter-field.search { flex: 1 1 100%; }
+  .filter-actions { flex: 1 1 100%; margin-left: 0; }
 }
 
 /* Table */
@@ -1348,6 +1519,157 @@ table.data-table {
 .data-table tbody td:first-child { padding-left: 20px; }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table tbody tr:hover td { background: var(--green-faint); cursor: pointer; }
+/* Sprint 153 §3.6 — density MODIFIER. `.data-table` itself is used by
+   dozens of pages and is deliberately untouched; only a table that opts
+   in by adding `.data-table-dense` gets the tighter row box. Font size
+   stays at 13px and the row hover stays, per the prompt's floor. */
+.data-table-dense thead th { padding: 8px 14px; }
+.data-table-dense thead th:first-child { padding-left: 16px; }
+.data-table-dense tbody td { padding: 8px 14px; }
+.data-table-dense tbody td:first-child { padding-left: 16px; }
+
+/* Sprint 188 — the Chargeable work table only. It carries 9 columns
+   where the tickets page carries 8 (Extra work + Route in place of
+   Priority), and MEASURED at a 1650px viewport the table rendered
+   1230px inside a 978px track: 252px of horizontal scroll. Density
+   alone did not close that, because `thead th` is `nowrap` and the two
+   long text columns push their full string onto one line.
+   So this variant lets headers wrap and caps the two text columns.
+   Layout, columns and the side card are all unchanged — the owner
+   asked for it to fit, not to be rearranged. */
+.data-table-fit thead th { white-space: normal; }
+.data-table-fit tbody td { white-space: normal; }
+.data-table-fit tbody td:nth-child(2),
+.data-table-fit tbody td:nth-child(3) {
+  max-width: 190px;
+  overflow-wrap: anywhere;
+}
+/* Wrapping took 1230px down to 1058px, still 80px over the 978px track,
+   so this variant also tightens the horizontal cell padding by 6px a
+   side on top of `data-table-dense`. Nine columns x 12px is what closes
+   the gap. Vertical padding is untouched, so row height does not move. */
+.data-table-fit thead th,
+.data-table-fit tbody td {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.data-table-fit thead th:first-child,
+.data-table-fit tbody td:first-child {
+  padding-left: 14px;
+}
+
+/* Sprint 153 §3.3 — sortable column header. The clickable thing is a
+   real <button> inside the <th> so it is reachable and operable from the
+   keyboard; an onClick on the <th> would not be. */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.th-sort:hover { color: var(--text); }
+
+.th-sort:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.th-sort-caret {
+  font-size: 9px;
+  line-height: 1;
+  /* Reserve the caret's box on every sortable header so the columns do
+     not shift sideways when the active sort moves. */
+  width: 8px;
+  display: inline-block;
+  text-align: center;
+}
+
+/* `aria-sort` belongs on the column header cell, not on the button, so
+   the button carries a data attribute for styling only. */
+.th-sort[data-sort="none"] .th-sort-caret { opacity: 0; }
+.th-sort:hover .th-sort-caret { opacity: 0.45; }
+.th-sort[data-sort="ascending"] .th-sort-caret,
+.th-sort[data-sort="descending"] .th-sort-caret {
+  opacity: 1;
+  color: var(--green);
+}
+
+/* Sprint 153 §3.4 — the row-selection checkbox column. Narrow, and it
+   must not inherit the clickable-row cursor. */
+.data-table .td-select,
+.data-table .th-select {
+  width: 34px;
+  padding-right: 0;
+}
+
+.data-table tbody tr:hover .td-select { cursor: default; }
+
+/* Sprint 154 §E — the "+N" chip in the buildings list' Customers cell.
+   Muted on purpose: it is an overflow indicator, not a status, and must
+   not compete with the real cell-tag-open / cell-tag-closed badges in
+   the same row. */
+.cell-tag-muted {
+  background: var(--surface-2);
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+}
+
+.building-customers-cell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+/* Sprint 154 — the shared EntityPicker's row list. Sits inside a
+   BoundedList, so the scroll cap comes from there; this is only the row
+   shape. */
+.entity-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entity-picker-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.entity-picker-row:hover { background: var(--green-faint); }
+
+.entity-picker-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.entity-picker-label {
+  font-size: 13px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.entity-picker-sublabel {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
 .td-id {
   font-family: 'DM Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 11px;
@@ -3362,6 +3684,30 @@ a.attn-row:hover {
   flex-direction: column;
   gap: 2px;
 }
+/* Sprint 182 §5 — the same hole `active-filter-chip` had, one section
+   further down the same page.
+
+   `.mywork-section` wraps the "My work" block on the dashboard and was
+   defined in no CSS file, so the block rendered as a bare <section>:
+   no surface, no border, no separation from the attention card directly
+   above it, and its `.section-head` — which brings its OWN white
+   background and bottom rule — sat on the page background with nothing
+   around it. The chips inside it were styled; the thing holding them
+   was not.
+
+   The house card treatment, the same three tokens `.card` uses, so this
+   block reads as one of the page's cards rather than as a fourth
+   vocabulary. The head keeps its own inset; the chips get the card's. */
+.mywork-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.mywork-section .mywork-chips {
+  padding: 0 20px 16px;
+}
 .mywork-chips {
   display: flex;
   flex-wrap: wrap;
@@ -3385,7 +3731,13 @@ a.attn-row:hover {
 }
 .mywork-chip-count {
   font-family: var(--f-head);
-  font-weight: 800;
+  /* Sprint 175 §3 — the count no longer touches the word. "Draft0" is
+     what the owner saw: the chip had no left margin, so the number ran
+     straight into the label on the Approval tabs. 800 was also heavier
+     than anything else in a tab strip; 700 matches the label it sits
+     beside. */
+  margin-left: 6px;
+  font-weight: 700;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
@@ -3665,6 +4017,16 @@ a.attn-row:hover {
 /* Misc helpers */
 .muted { color: var(--text-muted); }
 .muted.small { font-size: 12px; }
+/* Sprint 180 §1 — "there is nothing here", as a BARE class.
+   `.detail-field-value.muted-empty` (further down) has styled this since
+   the detail pages were built, but only in that compound form — so the
+   seventeen other call sites, nearly all of them em dashes in table
+   cells, carried a class that did nothing and rendered at full text
+   weight, exactly like a real value. One rule here rather than an edit
+   in twenty-six page files, most of which belong to other batches. The
+   compound rule stays: same declarations, and it wins on specificity
+   wherever both apply. */
+.muted-empty { color: var(--text-faint); font-style: italic; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -3913,9 +4275,11 @@ a.attn-row:hover {
 @media (max-width: 480px) {
   .kpi-row { grid-template-columns: 1fr; gap: 10px; }
   .page-canvas { padding: 10px; }
-  .filter-bar { grid-template-columns: 1fr; }
-  .filter-field.search { grid-column: auto; }
-  .filter-actions { grid-column: auto; }
+  /* Sprint 156 §5 — one per row on the narrowest phones. These were
+     grid-column resets, which do nothing now the bar is flex. */
+  .filter-field,
+  .filter-field.search,
+  .filter-actions { flex: 1 1 100%; }
   .page-header-actions { width: 100%; }
   .page-header-actions .btn { flex: 1 0 auto; justify-content: center; }
 }
@@ -4387,8 +4751,15 @@ a.attn-row:hover {
     overflow-wrap: anywhere;
   }
 
+  /* Sprint 181 §4 — the workflow status and the SLA state answer
+     different questions ("how is this job going" vs "are we late") and
+     sat 8px apart in one row, which read as one string. `space-between`
+     puts them at opposite ends of the card so the eye stops joining
+     them; the gap stays as the floor when the row wraps. */
   .ticket-card-pills {
     display: flex;
+    justify-content: space-between;
+    align-items: center;
     gap: 8px;
     flex-wrap: wrap;
   }
@@ -4536,6 +4907,15 @@ a.attn-row:hover {
   .admin-card-actions .btn {
     width: 100%;
     justify-content: center;
+  }
+  /* Sprint 153 §3.5 — the customers card list moved its action OUT of
+     the card's <a> (a <button> nested in an <a> is invalid HTML and the
+     click would navigate instead of opening the edit dialog). As a
+     direct child of .admin-card it no longer inherits the link's
+     12px/14px padding, so restate it here. */
+  .admin-card > .admin-card-actions {
+    margin-top: 0;
+    padding: 8px 14px 12px;
   }
 
   /* Audit-log Changes details disclosure inside the card: behave as
@@ -4773,6 +5153,80 @@ a.attn-row:hover {
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* Sprint 153 §4.1 / Sprint 154 §A — the count-chip strip. It carries
+   SEVEN chips now and each one holds an icon, a count, a name and a
+   description, because §A folded the duplicate quicklink grid into it.
+   The base .summary-grid is a hard `repeat(4, 1fr)` used by a dozen
+   other pages, so this is a MODIFIER, not an edit to the base rule.
+   `auto-fit` + a minimum rather than a fixed count: seven does not
+   divide evenly into any sensible column count, and a fixed grid would
+   leave a ragged orphan at most widths. */
+.summary-grid-chips {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+/* Sprint 168 §6 — ONE row, whatever the count.
+   `.summary-grid-chips` is shared by five strips and its auto-fit rule
+   is right for them, so this is a MODIFIER rather than a change to the
+   shared class: loosening something five callers depend on to fix one
+   of them is the mistake Sprint 134 made and Sprint 135 had to undo.
+   Removing the eighth chip alone did not restore the single row —
+   measured, seven chips still wrapped to two at 1440 — because
+   auto-fit is width-driven, not count-driven. Columns instead of
+   auto-fit is what actually answers "one row". */
+.summary-grid-chips-one-row {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.summary-stat-chip {
+  gap: 4px;
+}
+
+.summary-stat-chip-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-faint);
+}
+
+.summary-stat-chip-head .summary-stat-label {
+  /* The label sits beside the icon rather than above the number, so it
+     must not also carry the block-level spacing the base class has. */
+  margin: 0;
+}
+
+.summary-stat-chip:hover .summary-stat-chip-head {
+  color: var(--green);
+}
+
+.summary-stat-chip .summary-stat-meta {
+  /* Two lines of description at most; a longer one is a writing problem,
+     not a layout one, and letting it grow makes the chips ragged. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Sprint 153 §4.1 — About and Linked buildings side by side. Each was
+   using a full-width card for a half-card of content. Stacks below the
+   900px breakpoint named in the prompt. */
+.customer-overview-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 900px) {
+  .customer-overview-split { grid-template-columns: 1fr; }
+}
+
+.customer-overview-split > .card { margin-bottom: 0; }
 
 .quicklink-grid {
   display: grid;
@@ -5786,13 +6240,13 @@ a.attn-row:hover {
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
-/* Sprint 129 — a lone last card (odd count, e.g. the 5th "manage documents"
-   toggle) spans the full width instead of sitting orphaned in a half-width
-   column. Only matches when the last card is the odd one out, so the even
-   (4-card) case and the single-column responsive mode are untouched. */
-.policy-toggle-grid > .policy-toggle-card:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
-}
+/* Sprint 154 §J — the Sprint 129 rule that made a lone last card span
+   both columns is GONE. The owner's complaint was exactly that: the
+   "Allow customer users to manage documents" toggle rendered at double
+   width and read as more important than the four above it, which it is
+   not. An odd last card now sits at normal width in the left column.
+   Deliberately NOT replaced with a 3-column or auto-fit grid — the
+   complaint was the double width, nothing else. */
 .policy-toggle-card {
   position: relative;
   display: grid;
@@ -6643,7 +7097,17 @@ a.attn-row:hover {
   font-size: 11px;
   line-height: 1.2;
   color: var(--text-muted);
-  white-space: nowrap;
+  /* Sprint 154 §N.2 — WRAPS, it does not clip.
+     Measured at 1024px: with `white-space: nowrap` the longest label
+     ("Catalogus-categorie") overflowed its own 140px column
+     (scrollWidth > clientWidth) while every other label fitted. Nothing
+     OVERLAPPED a neighbour at any width — 0 overlaps and 0px horizontal
+     overflow at 1024 / 1280 / 1440 — so the fix is to let the one long
+     label take a second line rather than be cut off. Two lines of an
+     11px label cost 13px of bar height on the narrowest breakpoint
+     only. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 /* The cascade hint spans the whole row beneath the controls it
    describes, rather than floating between them as a pseudo-field. */
@@ -6727,10 +7191,39 @@ a.attn-row:hover {
 .ew-detail-main {
   min-width: 0;
 }
+/* Sprint 177 §3 — the right column, as the owner settled it after seeing
+   both options.
+
+   Sprint 176 stretched the two COLLAPSED cards with `1fr 1fr` so the
+   column filled the Messages card's height and the gap beneath was zero.
+   That did not remove the dead space, it moved it INSIDE the cards:
+   ~188px of air under each header. The owner chose the other option, so
+   the cards keep their natural height and the column ends where they end.
+   A short column is fine; a padded one is not. */
 .ew-detail-aside {
   display: flex;
   flex-direction: column;
+  /* `start`, not `stretch` — this is what stops the column being pulled
+     to the height of Messages. It is the whole fix. */
+  align-self: start;
   gap: 12px;
+  min-height: 0;
+}
+.ew-detail-aside > * {
+  min-height: 0;
+}
+/* Opened, the two cards are the SAME size, so the column reads as a
+   matching pair rather than one large card and one small. Equal bodies +
+   equal headers = equal cards.
+
+   The same rule is the answer to a customer with twenty contacts: the
+   card scrolls inside itself instead of growing, so one long list cannot
+   stretch the column and the PAGE never gains a scrollbar. Collapsed
+   cards render no body at all, so this costs them nothing — they stay
+   exactly as tall as their header. */
+.ew-detail-aside .collapsible-card-body {
+  height: 190px;
+  overflow-y: auto;
 }
 @media (min-width: 1024px) {
   .ew-detail-aside {
@@ -6757,6 +7250,63 @@ a.attn-row:hover {
    stack. The Workflow card stays at least 240px wide so its full-
    width buttons stay readable; on viewports <=1024px the grid
    collapses to a single column (Workflow card drops below Details). */
+/* Sprint 175 §1 — the SECOND two-column row: Messages on the left at
+   the Details card's width, four collapsed cards on the right. Same
+   template as the top row so the two columns line up down the page;
+   `align-items: start` rather than the grid default so the collapsed
+   cards stack at their own height instead of stretching to Messages. */
+.ew-detail-second-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 16px;
+  /* Sprint 177 §3 — back to `stretch` on the row with `align-self: start`
+     on the aside itself, so Messages still governs the row's height while
+     the right column takes only the height its cards need. Setting
+     `start` here instead would also un-stretch Messages. */
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 1000px) {
+  .ew-detail-second-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Sprint 175 §5 — the six classes the sweep has flagged for two
+   sprints, defined here because §1 rebuilds the pages that use them.
+   Each matches what its neighbours already do rather than introducing
+   a new look. */
+.ew-workflow-card {
+  display: flex;
+  flex-direction: column;
+}
+.ew-auto-start {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ew-intent-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.ew-agreed-price-item-label {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.form-control {
+  width: 100%;
+}
+.link {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .ew-detail-top-row {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
@@ -6873,7 +7423,11 @@ a.attn-row:hover {
 }
 .reject-modal-title {
   margin: 0;
-  font-size: 16px;
+  /* Sprint 179B §4 — same slip as `.contract-forecast-header h3`: 16px
+     bold in the BODY face. The house dialog heading is Plus Jakarta
+     Sans 15/700. */
+  font-family: var(--f-head);
+  font-size: 15px;
   font-weight: 700;
 }
 .reject-modal-desc {
@@ -7288,6 +7842,21 @@ a.attn-row:hover {
    Used by the new view-first detail surfaces (CompanyDetailPage first;
    29.4 / 29.5 will reuse). Falls back to the existing --border-soft
    token when the optional --border-faint token isn't defined. */
+/* Sprint 161 §2 — the two-column layout for a block of detail fields.
+   Lives next to its family (`.detail-field-row` / `-label` / `-value`)
+   because it is the same primitive laid out differently, not a new one.
+   Collapses to a single column on phones, where two columns of
+   label/value would be unreadable. */
+.detail-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+}
+@media (max-width: 860px) {
+  .detail-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .detail-field-row {
   display: grid;
   grid-template-columns: 200px 1fr;
@@ -7333,11 +7902,19 @@ a.attn-row:hover {
   color: var(--text-muted);
   margin-bottom: 8px;
 }
-.user-detail-membership-list {
+/* Sprint 180 §1 — one plain read-only list of names, named for what it
+   IS rather than for the first page that wanted one.
+   `.user-detail-membership-list` styled exactly this and nothing else,
+   and the building-manager customer page had been asking for it under
+   the name `readonly-list` — which was defined nowhere, so its list
+   rendered with the reset's zero padding and its markers clipped. The
+   rule is generalised rather than duplicated; the user detail page's
+   three call sites move with it and look identical. */
+.readonly-list {
   margin: 0; padding: 0; list-style: none;
   display: flex; flex-direction: column; gap: 4px;
 }
-.user-detail-membership-list li { font-size: 14px; }
+.readonly-list li { font-size: 14px; }
 .user-detail-customer-access-list {
   margin: 0; padding: 0; list-style: none;
   display: flex; flex-direction: column; gap: 6px;
@@ -8162,11 +8739,434 @@ details[open] > .ew-department-tree-summary::before {
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 10px;
 }
+/* Sprint 154 §L.2 — the owner asked for these to be visibly bigger, with
+   the count as a real number rather than a muted sub-line. Roughly
+   double the vertical padding, a larger name, and the count promoted to
+   a display figure. */
 .pricing-category-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  gap: 8px;
+  padding: 22px 22px 20px;
+  min-height: 118px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.pricing-category-card:hover {
+  border-color: var(--green-2);
+  background: var(--green-faint);
+  box-shadow: var(--shadow-sm);
+}
+.pricing-category-card-name {
+  font-family: var(--f-head);
+  font-weight: 700;
+  /* Sprint 179B §4 — 15px, the house card-heading size. Was 15.5, a
+     half-pixel nobody chose deliberately. */
+  font-size: 15px;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+/* The count, promoted from a muted sub-line to the card's headline
+   number — it is the thing an operator scans the grid for. */
+.pricing-category-card-count {
+  font-family: var(--f-head);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-top: auto;
+}
+.pricing-category-card-count-label {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+/* The trailing "+" tile. Same footprint as a real card so the grid reads
+   as one row of tiles rather than a row plus a stray button. */
+.pricing-category-card-add {
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--text-faint);
   gap: 6px;
+}
+.pricing-category-card-add:hover { color: var(--green); }
+.pricing-category-card-add-plus {
+  font-family: var(--f-head);
+  font-size: 30px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+/* Sprint 155 §5 — the multi-employee week grid: an apply-to-all bar over
+   one block per employee. */
+/* Sprint 157 §2 — the Extra Work list's edit bar. Sits above the table
+   with the toggle at the far end, so the read view keeps the geometry it
+   had. */
+.ew-list-edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ew-list-edit-bar .list-edit-bar,
+.ew-list-edit-bar > :first-child:not(button) { flex: 1 1 auto; }
+
+/* Sprint 159 §2 — both roles at once, side by side. The Sprint 157
+   role TOGGLE is gone with the rules that styled it: choosing between
+   the two was never the operator's question, staffing the job was. Each
+   column keeps its own scroll so a company with sixty staff does not
+   make the dialog taller than the screen. */
+.assign-people-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+/* Sprint 157 §7 — chip groups (ROLES / ACCESS ROLES) share one
+   full-width row of the filter bar, in equal columns, so they line up
+   with each other and with Search and Status above rather than growing
+   into whatever slack is left on the line. `auto-fit` stacks them on a
+   narrow viewport instead of squeezing the chips. */
+.filter-chip-groups {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+.filter-chip-groups > .filter-field { flex: 1 1 auto; min-width: 0; }
+
+/* Sprint 157 §5 — the module card's description line. Sits between the
+   header and the sub-toggles, so a card with no sub-toggles (Documents)
+   still says what the module is. */
+.module-bundle-description {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+/* Sprint 159 §3 — ONE status filter design for both work lists: the
+   tile IS the filter, it carries its own count, the active one is
+   visibly selected, and clearing is a control (the All tile, or the ×
+   on the active one) rather than a sentence of prose underneath. The
+   Sprint 158 chip rules below are kept only for `status-chip-*` users
+   outside the two work lists. */
+/* Sprint 161 §4 — the status tiles sit on ONE row.
+   They used to `flex-wrap: wrap`, which put nine tiles across two rows
+   at 1440 and three at 1024, with REOPENED stranded on a line of its
+   own. The owner wants one row that looks deliberate.
+
+   So the tile SHRINKS and the row does not wrap: `min-width` drops from
+   132px to 88px, the padding and the count size come down, and each
+   tile is allowed to flex down to its content. `overflow-x: auto` is
+   the honest escape hatch for a viewport that genuinely cannot hold
+   nine of them — it scrolls sideways rather than hiding a status, which
+   is the standing rule that a feature must not become hard to find
+   (## NEXT item 19). No status is ever collapsed behind a "more"
+   control. */
+/* Sprint 163 §2 — the strip SHARES the row instead of scrolling in it.
+   Sprint 161 got the tiles onto one line by refusing to wrap, but the
+   strip stayed 840px of fixed-width tiles inside a 608-768px container,
+   so it overflowed and scrolled. A grid divides the width available
+   instead: nine tiles at 1440 are nine equal columns.
+
+   `auto-fit` + `minmax` is what makes the fallback honest. Above the
+   width where a column would be unreadably narrow the row holds nine
+   columns; below it the grid wraps to a second row rather than
+   shrinking further, which is the behaviour the brief asks for and is
+   not something `flex-wrap: nowrap` could express. */
+.status-tile-row {
+  display: grid;
+  /* 96px is chosen against the MEASURED container, not by eye: the
+     strip is 968px at 1280 and 1128px at 1440, so nine tiles plus eight
+     8px gaps need a floor of 100px and 118px respectively. 96 clears
+     both and still wraps at 1024, where the 712px container would give
+     each tile 72px — narrower than a wrapped label reads. */
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.status-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  /* Sprint 163 §2 — room for the text. The label and the count were
+     touching the border at 7px/10px. `min-width: 0` lets a grid column
+     shrink below its content's intrinsic width, which is what allows
+     the longest label to wrap instead of forcing the track wider. */
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--text-2);
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+.status-tile:hover { border-color: var(--green-2); color: var(--text); }
+.status-tile-active {
+  border-color: var(--green);
+  background: var(--green-faint);
+  color: var(--text);
+}
+.status-tile-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--f-head);
+  font-size: 10px;
+  /* Sprint 163 §2 — WRAPS rather than being clipped or overflowing.
+     "Waiting Manager Review" is the longest label in the system and
+     does not fit one line in an equal column; two clean lines with the
+     tile growing to match is the answer, and `nowrap` was what made it
+     spill. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.status-tile-active .status-tile-label { color: var(--green); }
+.status-tile-clear {
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 800;
+}
+.status-tile-count {
+  font-family: var(--f-head);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+/* Sprint 158 §2 — the status chips. Every status visible with its
+   count, the active one marked, and a clearable notice under them so a
+   default filter can never be mistaken for an empty system. */
+.status-chip-bar { margin-bottom: 14px; }
+.status-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-2);
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+.status-chip:hover { border-color: var(--green-2); color: var(--text); }
+.status-chip-active {
+  border-color: var(--green);
+  background: var(--green-faint);
+  color: var(--text);
+  font-weight: 700;
+}
+.status-chip-count {
+  font-family: var(--f-head);
+  font-weight: 800;
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.status-chip-active .status-chip-count { background: #fff; }
+.status-chip-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+/* Sprint 159 §1 — the hours page, rebuilt. The rules for the Sprint
+   156/158 accretion (the global fill row, the per-employee fill band,
+   the selected-rows divider, the "set up week" reminder strip and the
+   per-employee blocks) are deleted with the controls they styled. */
+
+/* The four choices in the week modal, SIDE BY SIDE — the owner asked
+   for that explicitly rather than stacked down the page. Each picker
+   keeps its own scroll, so a company with 200 buildings does not make
+   the modal taller than the screen. */
+.week-entry-setup-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+@media (max-width: 1100px) {
+  .week-entry-setup-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .week-entry-setup-row { grid-template-columns: 1fr; }
+}
+
+/* ONE line of filters (Sprint 156 §6a's rule, applied to the page as
+   well as to the apply bar): it scrolls inside itself rather than
+   wrapping, so the body never scrolls sideways. */
+.hours-filter-line {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.hours-filter-line > * { flex-shrink: 0; }
+.hours-filter-line .field { min-width: 150px; }
+.hours-filter-reset { margin-left: auto; }
+
+/* The stat tiles. Same visual weight as the Extra Work list's KPI
+   strip, because they are the same thing: four numbers describing the
+   rows underneath. */
+/* Sprint 164 §2 — the same treatment Sprint 163 §2 settled on for the
+   ticket and extra-work status tiles: a grid whose columns divide the
+   full content width, rather than flex items bunched at the left with
+   dead space beside them. Four tiles plus the Export button, so five
+   tracks; the export cell is the last one and is aligned to it. */
+/* Sprint 165 §1 — the columns come from the COMPONENT (`repeat(N, 1fr)`
+   inline, N = tile count), because only it knows how many tiles there
+   are. The `auto-fit` + `minmax` here was width-dependent: it packed as
+   many fixed tracks as fitted and left the rest of the row empty. */
+.hours-tile-row {
+  display: grid;
+  align-items: stretch;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.hours-tiles-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.hours-tiles-title {
+  font-family: var(--f-head);
+  /* Sprint 180 §1 — 15px, the house card-heading size that
+     `.section-title` and `.section-head-title` both carry. This was the
+     fifth member of Sprint 179B's typography set and the only one left
+     behind, because AgendaPage shares the class and was being rewritten
+     in parallel. Both branches merged, so it is one line now. */
+  font-size: 15px;
+  font-weight: 700;
+}
+.hours-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  /* `min-width: 0` lets a grid track shrink below its content's
+     intrinsic width, which is what allows a long label to wrap rather
+     than force the track wider. Sprint 163 §2's lesson. */
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.hours-tile-label {
+  font-family: var(--f-head);
+  font-size: 11.5px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.hours-tile-value {
+  font-family: var(--f-head);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--text);
+}
+.hours-tile-export { margin-left: auto; align-self: center; }
+
+/* The inline table editor's cells: sized to the column so switching
+   Edit on does not re-flow the table it is editing. */
+.hours-inline-input {
+  height: 30px;
+  font-size: 12.5px;
+  min-width: 110px;
+}
+.hours-inline-hours { min-width: 80px; }
+
+.week-setup-summary {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--green-faint);
+  font-family: var(--f-head);
+  font-weight: 700;
+  font-size: 13.5px;
+}
+
+/* Sprint 156 §6a — ONE row. The owner's colleague works along this bar
+   left to right, and a wrapped bar makes that a hunt. `nowrap` plus a
+   horizontal scroll on the bar itself: if the viewport genuinely cannot
+   hold six controls, the bar scrolls rather than the page (CLAUDE.md —
+   wide content scrolls inside its own container, the body never does). */
+/* Sprint 162 §1 — `.hours-week-apply-bar` and `.hours-week-row-select`
+   were deleted with the controls they styled: the six-control bulk bar
+   and the per-row hour-type / building selects that only ever appeared
+   on rows added in the same session. `.hours-week-apply-label` moved to
+   the Sprint 162 block below, where it labels a table header cell. */
+.hours-week-grand-total {
+  font-family: var(--f-head);
+  font-weight: 800;
+  font-size: 15px;
+}
+
+/* Sprint 155 §1b — the "which one did you mean" chooser. Each option is
+   a full-width card with its label above a plain-English line saying what
+   it is for; the description is the reason the dialog exists at all. */
+.choice-dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.choice-dialog-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -8175,17 +9175,25 @@ details[open] > .ew-department-tree-summary::before {
   text-align: left;
   font: inherit;
   color: var(--text);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease,
+    box-shadow 0.15s ease;
 }
-.pricing-category-card:hover {
+.choice-dialog-option:hover,
+.choice-dialog-option:focus-visible {
   border-color: var(--green-2);
   background: var(--green-faint);
+  box-shadow: var(--shadow-sm);
 }
-.pricing-category-card-name {
-  font-weight: 600;
-  font-size: 13.5px;
-  display: flex;
-  align-items: center;
+.choice-dialog-option-label {
+  font-family: var(--f-head);
+  font-weight: 700;
+  font-size: 14.5px;
+  line-height: 1.25;
+}
+.choice-dialog-option-desc {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-faint);
 }
 
 /* Sprint 137 item 7 — iOS-style list edit mode. The checkbox column
@@ -8251,4 +9259,1218 @@ details[open] > .ew-department-tree-summary::before {
 .list-row-archived {
   color: var(--text-muted);
   background: var(--surface-2);
+}
+
+/* ------------------------------------------------------------------
+   Sprint 161 §1 — contracts.
+
+   Sprint 160 shipped the contracts pages against a class vocabulary it
+   INVENTED: 41 class names with zero definitions in this file, so the
+   pages rendered as unstyled text while tsc, ESLint and vite all passed
+   (none of them can know a class is undefined). The fix was to rewrite
+   that markup against the existing system - page-header / card /
+   filter-bar / summary-grid / data-table / admin-card-list - not to
+   write 41 rules here.
+
+   What remains below is only what the system genuinely had no
+   equivalent for, and every class is prefixed so it reads as belonging
+   to this feature. `.contract-num` is the one that comes close to being
+   general: no numeric-cell class existed, and adding a global one is a
+   change every table would inherit, which is not this sprint's call to
+   make.
+   ------------------------------------------------------------------ */
+
+/* Right-aligned, tabular-figure money and hours cells. */
+.contract-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Sprint 169 §6 — the HEADER of a numeric column, right-aligned above
+   its values.
+   `.data-table th` sets `text-align: left` at a specificity the class
+   above cannot beat, so every numeric column had right-aligned numbers
+   under a left-aligned header. Measured on the comparison table, the
+   header's ink ended 53px left of the values' at 1024 and 104px at
+   1440 — the gap GREW with the viewport, which is exactly the "numbers
+   drifting in very wide columns" that was reported.
+   The width cap is the other half: an auto-sized numeric column takes
+   whatever the table has spare, so two figures that belong together end
+   up an inch apart. */
+.data-table th.contract-num {
+  text-align: right;
+  width: 9rem;
+}
+
+/* The Customer / Building summary group header row. */
+.contract-group-row td {
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+
+/* The row carrying the three view toggles and the edit-mode gate. */
+.contract-view-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px 12px;
+}
+
+/* The invoice forecast block on the contract detail Billing tab. */
+.contract-forecast {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.contract-forecast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.contract-forecast-header h3 {
+  margin: 0;
+  /* Sprint 179B §4 — was 14px/600 with no family, so it rendered in DM
+     Sans while every other card heading is Plus Jakarta Sans 15/700. A
+     heading in the body face is the one typographic slip that reads as
+     "different page" rather than "different size". */
+  font-family: var(--f-head);
+  font-size: 15px;
+  font-weight: 700;
+}
+.contract-forecast-caption {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.contract-forecast-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+/* The year stepper above the forecast table. */
+.contract-year-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.contract-year-value {
+  min-width: 56px;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The add-a-project row on the Projects tab. */
+.contract-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 12px;
+}
+.contract-inline-form .field {
+  margin-bottom: 0;
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* Sprint 162 §3 — `.contract-detail-grid` is GONE. It was a second copy
+   of `.detail-field-grid`, which already existed for the same job, and
+   the contracts detail page now uses that one. A duplicated primitive
+   is how two pages end up disagreeing about their own type scale. */
+
+/* The locations list inside a BoundedList on the detail page. */
+.contract-plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ------------------------------------------------------------------
+   Sprint 162 §1 — the hours grid as BLOCKS, the reference's shape.
+
+   One block per (worker, building): the building is a property of the
+   block and is printed once as a label, so there is no per-row building
+   control. Inside a block each row is one hour type, shown as a chip,
+   and `+ Add type` is the only way to reach another one.
+   ------------------------------------------------------------------ */
+
+/* The apply-to-all row sits in the head, in the data's own columns, so
+   a number typed under a weekday is visibly under that weekday. */
+.hours-week-apply-row th {
+  background: var(--surface-2);
+  border-bottom: 2px solid var(--border);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.hours-week-apply-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* The block header: who, where, and the block's own total. */
+.hours-week-block-head th {
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-weight: 600;
+}
+.hours-week-block-person {
+  font-weight: 700;
+}
+.hours-week-block-building {
+  margin-left: 10px;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.hours-week-add-type-row td {
+  padding-top: 4px;
+  padding-bottom: 10px;
+}
+.hours-week-add-type-select {
+  max-width: 220px;
+}
+
+/* Sprint 162 §1 — these two were REFERENCED by the hours grid and
+   defined nowhere, since before this sprint. The undefined-class gate
+   Sprint 161 added is what surfaced them: same defect as the contracts
+   pages, smaller blast radius, invisible to every other check. */
+.hours-week-grid-table {
+  table-layout: auto;
+}
+.hours-week-grid-table th,
+.hours-week-grid-table td {
+  vertical-align: middle;
+}
+.hours-week-grid-cell {
+  /* Sprint 166 §3 — 64px made the table 1191px against a 1130px
+     container, so it scrolled at every width. 54px x 7 days takes 70px
+     out and the table FITS from 1280 up; at 1024 the container still
+     scrolls, which is the documented fallback and not the modal. */
+  width: 54px;
+  max-width: 54px;
+  height: 28px;
+  padding: 2px 6px;
+  text-align: right;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------
+   Sprint 163 §1 — the one-line chip multi-select.
+
+   The week-entry modal used two tall scrolling checkbox lists that ate
+   its upper half and pushed the grid below the fold. The reference puts
+   Workers and Buildings on one compact line each, with the chosen
+   people as removable chips; this is that control.
+   ------------------------------------------------------------------ */
+.chip-multiselect {
+  min-width: 0;
+}
+.chip-multiselect-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.chip-multiselect-placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.chip-multiselect-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.chip-multiselect-remove,
+.chip-multiselect-caret {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  font-family: inherit;
+}
+.chip-multiselect-remove:hover,
+.chip-multiselect-caret:hover {
+  color: var(--text);
+}
+.chip-multiselect-caret {
+  margin-left: auto;
+}
+/* Sprint 164 §4 — the list is a real listbox that stays open, not a
+   native select that closes after one pick. Absolutely positioned so
+   opening it never reflows the modal's top row. */
+.chip-multiselect {
+  position: relative;
+}
+.chip-multiselect-control {
+  cursor: pointer;
+}
+.chip-multiselect-control:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.chip-multiselect-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+}
+/* Sprint 168 §4 — the portalled list. It is drawn on `document.body`
+   at the control's viewport rect, so no ancestor's overflow can clip
+   it; `position: fixed` rather than absolute because it no longer has
+   a positioned parent to be absolute to. */
+.chip-multiselect-list-floating {
+  position: fixed;
+  top: auto;
+  left: auto;
+  right: auto;
+  z-index: 200;
+}
+.chip-multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.chip-multiselect-option.is-active {
+  background: var(--surface-2);
+}
+.chip-multiselect-option.is-selected {
+  font-weight: 600;
+}
+.chip-multiselect-check {
+  width: 12px;
+  flex: 0 0 12px;
+  color: var(--green);
+}
+
+/* Sprint 163 §1 — the grid's own head, and the identity columns. */
+.hours-week-table-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.hours-week-table-title {
+  font-family: var(--f-head);
+  /* Sprint 179B §4 — 15px, the house card-heading size that
+     `.section-title` and `.section-head-title` both carry. Was 14. */
+  font-size: 15px;
+  font-weight: 700;
+}
+.hours-week-table-hint {
+  margin-left: auto;
+  text-align: right;
+}
+/* The GRID scrolls inside its own container, never the modal. */
+.hours-week-table-wrap {
+  /* Sprint 167 §1 — the grid is what scrolls once the modal has
+     stopped growing at 85vh. `flex: 1 1 auto` + `min-height: 0` is what
+     makes that work inside a column flex modal: without the zero
+     min-height a flex child refuses to shrink below its content and
+     pushes the dialog taller instead of scrolling. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.hours-week-identity {
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+.hours-week-group-first td {
+  border-top: 1px solid var(--border);
+}
+.hours-week-group-total {
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* ------------------------------------------------------------------
+   Sprint 164 §5 / §6 — the week-entry modal.
+
+   §5: a modal never scrolls sideways. The grid is the wide thing, so
+   the GRID gets `overflow-x: auto` and the modal is pinned to
+   `overflow-x: hidden`. `min-width: 0` on the flex/grid children is the
+   part that actually does the work: without it a wide table forces its
+   ancestors wider than the dialog, and no amount of overflow on the
+   dialog helps.
+
+   §6: the three top controls share the width in three columns on a wide
+   modal and stack when narrow, instead of two pickers on the left with
+   dead space beside them. The modal is NOT made wider to fill it.
+   ------------------------------------------------------------------ */
+.week-entry-modal {
+  overflow-x: hidden;
+}
+.week-entry-modal * {
+  min-width: 0;
+}
+.week-entry-setup-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+@media (max-width: 900px) {
+  .week-entry-setup-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.hours-week-table-wrap {
+  overflow-x: auto;
+}
+
+/* Sprint 165 §4 — the grand total closing each contracts view. */
+.contract-grand-total td {
+  border-top: 2px solid var(--border);
+  background: var(--surface-2);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.contract-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
+}
+
+/* ------------------------------------------------------------------
+   Sprint 166 §3 — what ACTUALLY overflows.
+
+   Reported three times and "measured as fixed" twice, because the
+   measurement only ever looked at the OUTER modal. Measuring all four
+   levels separately found it: the modal was clean, and the TABLE
+   inside `.hours-week-table-wrap` was wider than its container while
+   that container had `overflow-x: auto` only in a rule the later
+   Sprint 164 block re-declared without it.
+
+   So the rule is stated once, here, on the container that owns the
+   wide thing — and the modal is pinned shut in both axes so a future
+   wide child cannot push it again.
+   ------------------------------------------------------------------ */
+.week-entry-modal {
+  overflow-x: hidden;
+}
+.week-entry-modal > * {
+  max-width: 100%;
+}
+.hours-week-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.hours-week-grid-table {
+  /* The table may be wider than the modal; it scrolls inside its own
+     container rather than making the dialog wide. */
+  min-width: max-content;
+}
+
+/* Sprint 166 §4 — the per-worker rows under a building in the hours
+   comparison. Quieter than the building row they hang off, because they
+   are a breakdown of ONE side (worked) and not a comparison. */
+.hours-comparison-employee-row td {
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
+
+/* Sprint 168 §7 — the Work Plan's Mon-Sun frame. Seven columns wide,
+   two on a tablet, one on a phone. Always all seven day sections,
+   empty ones included: a week with nothing on Thursday must SHOW an
+   empty Thursday rather than close the gap and leave the reader
+   counting columns. */
+/* ===================================================================
+   Sprint 183 §1 — the week grid, sized by the space it actually has.
+
+   Every previous version of this rule guessed. Sprint 171 asserted
+   "seven columns hold down to 1024" and was wrong by measurement (67px
+   cards, 17-line titles). Sprint 182 replaced that with a ladder of
+   VIEWPORT breakpoints — 1/2/3/4/7 — which is a better guess and still
+   a guess: the viewport is not the grid's width. This app puts a ~300px
+   sidebar beside the content, so a 1440px viewport gives the week
+   1128px, and a ladder keyed on 1440 cannot know that.
+
+   `auto-fill` + `minmax` does not guess. It fits as many columns of at
+   least MIN as the container really has and shares the remainder, so
+   one rule is correct at every width and in every shell. MEASURED on
+   the rendered page, viewport -> content width -> columns per row and
+   card width:
+
+       1024 ->  712 -> 3 cols, card 209px   (Sprint 182: 3, 205px)
+       1280 ->  968 -> 4 cols, card 213px   (Sprint 182: 4, 209px)
+       1440 -> 1128 -> 4 cols, card 253px   (Sprint 182: 4, 249px)
+       1600 -> 1288 -> 5 cols, card 228px
+       1920 -> 1608 -> 6 cols, card 238px
+       2100 -> 1788 -> 7 cols, card 225px   the reference's whole week
+
+   230px is the minimum a dense card holds this product's real titles in
+   three lines. Below it we are back to the column of single words the
+   last two sprints were spent removing, so the week WRAPS instead — in
+   order, each day still carrying its own boxed header, reading
+   left-to-right then down the way a calendar already does.
+
+   `auto-fill`, not `auto-fit`: with seven items in a five-track row
+   auto-fit COLLAPSES the two empty tracks and stretches Saturday and
+   Sunday to double width. A week whose last two days are twice the size
+   of the others is not a week. auto-fill keeps the empty tracks, so
+   every day is the same width whatever the row holds.
+
+   The owner's reference shows seven columns in one row, and this rule
+   shows exactly that from 2100px up. On his 1440 laptop seven columns
+   would be 152px each and the title back to six lines, which is the
+   layout Sprint 182 measured and rejected. Kept ours, deliberately; the
+   report gives him the numbers and the one value to change if he wants
+   the trade the other way.
+   =================================================================== */
+/* Sprint 183 integration — SEVEN columns, always. A week that wraps is
+   not a week: Sunday dropping to a second row is what the owner objected
+   to, and auto-fill produced exactly that on a 1440 laptop because the
+   ~300px sidebar leaves the grid 1128px.
+
+   The previous answer was to wrap; the answer before that was to squeeze
+   seven columns into whatever was left, which gave 152px cards and
+   six-line titles. Both were rejected. So: seven fixed columns at a
+   minimum readable width, and the CONTAINER scrolls sideways when they do
+   not fit. The week keeps its shape and the cards keep their size; what
+   gives is the viewport, which is the only one of the three that can. */
+.agenda-week-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 6px;
+}
+.agenda-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(210px, 1fr));
+  gap: 10px;
+  align-items: start;
+  min-width: min-content;
+}
+/* Phone: one day at a time, scrolled vertically like a list. */
+@media (max-width: 700px) {
+  .agenda-week-scroll { overflow-x: visible; }
+  .agenda-week-grid {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+}
+
+/* -------------------------------------------------------------------
+   Sprint 183 §2 — the day column: a boxed header band over a body of
+   fixed generous height that scrolls inside itself.
+
+   Both halves come from the reference and both are about the week
+   keeping its SHAPE. A column that grows with its load renders a week
+   with one busy Thursday as one tall column and six stubs; a column
+   with a fixed body renders a week whatever Thursday is holding.
+   ------------------------------------------------------------------- */
+.wp-day {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.wp-day-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 6px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.wp-day-name {
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* The large day number is what the eye lands on when scanning a week
+   for a date, which is why the reference sets it two sizes above
+   everything else in the header. */
+.wp-day-number {
+  font-family: var(--f-head);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.wp-day-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+/* TODAY is marked. Seven identical columns give the reader nothing to
+   anchor on, and "which one is today" is the first thing anybody looks
+   for in a week view. */
+.wp-day-today {
+  border-color: var(--green-2, var(--border));
+}
+.wp-day-today .wp-day-head {
+  background: var(--green-faint, var(--surface-2));
+}
+.wp-day-today .wp-day-number { color: var(--green-2, var(--text)); }
+.wp-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  /* Generous and FIXED: the week keeps its shape whatever the load, and
+     a heavy day scrolls inside its own column rather than stretching
+     the row it sits in. */
+  min-height: 170px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+/* An empty day is a muted ICON, not a sentence.
+   The page printed "Nothing planned" in every empty column. On the live
+   database most of the week is legitimately empty, so the screen read
+   as seven repetitions of a complaint — which is what made it look
+   broken rather than quiet. The icon says the same thing once, and the
+   accessible name still says it in words for a screen reader. */
+.wp-day-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  opacity: 0.45;
+}
+
+/* Sprint 171 §1 — the comparison table's WIDTH DISTRIBUTION.
+   Sprint 170 measured header-to-value offset and got 0 at every width.
+   That measurement was correct and it was of the wrong property: the
+   BUILDING column was taking every pixel the table had spare, so the
+   numbers sat pinned at the far right with a 199-404px desert between
+   a row's label and its first figure. The eye reads a number that far
+   from its label as drifting, and it effectively is.
+   So: the building column shrinks to its content (capped, with an
+   ellipsis for a very long name), STATE absorbs the slack instead, and
+   the numeric columns sit next to the name where a row can be read
+   across in one glance. */
+.hours-comparison-table th:first-child,
+.hours-comparison-table td:first-child {
+  width: 1%;
+  max-width: 24rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hours-comparison-table th:last-child,
+.hours-comparison-table td:last-child {
+  width: auto;
+}
+
+/* Sprint 171 §3 — TODAY, marked. Seven identical columns give the
+   reader nothing to anchor on, and "which one is today" is the first
+   thing anybody looks for in a week view. */
+/* No negative margin: it shifted the column 6px up, which is both a
+   visual misalignment against its six neighbours and — measured — a
+   different `top` value, so a row-count check reads seven columns as
+   two rows. An inset outline marks the day without moving it. */
+.agenda-day-today {
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* Sprint 179A — work plan
+   ------------------------------------------------------------------
+   Appended as ONE block at the end of the file, opened by this
+   comment, because Sprint 179B is editing the same 9,680-line file in
+   parallel. Nothing above this line is touched, reordered or
+   reindented: a whitespace-only change anywhere in here turns a
+   trivial merge into a manual one. */
+
+/* The seven day columns had no rule of their own — only the
+   `.agenda-day-today` highlight did. `min-width: 0` is the load-bearing
+   half: a grid item defaults to `min-width: auto`, so one long
+   unbreakable building name pushes its column wider than its 1fr share
+   and drags the other six narrower. */
+.agenda-day {
+  min-width: 0;
+}
+
+/* WHY a card is in a week that is not its planned one (docs §12B). A
+   card at HOME renders none of this, which is the point — the marker
+   means "this is a visitor", so putting one on every card would tell
+   the reader nothing.
+
+   Sprint 183 §3 — the owner: "a large red overdue banner eating the
+   card". It was a full-width bordered block with its own background,
+   two lines high on a narrow column, on nine of fifteen cards. The rule
+   it expresses still has to be on the card — §12B's whole point is that
+   a card appearing outside its planned week says why — so it is now a
+   MARKER: one line, an icon, a date, the tone in the text colour rather
+   than in a filled box. Same information, a tenth of the weight. */
+.wp-why {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.wp-why svg {
+  flex: 0 0 auto;
+}
+/* Late reads red, running reads amber: the same two tones the status
+   badges already use for rejected / waiting, so a reader who has learnt
+   the palette anywhere else in the app has learnt it here. */
+.wp-why-overdue {
+  color: var(--red);
+}
+.wp-why-started {
+  color: var(--amber);
+}
+/* The "{{n}} days" tail inside an overdue marker — present, not shouted. */
+.wp-why-overdue span {
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+/* The kind tag, so the two sources are distinguishable at a glance
+   without reading the title.
+
+   Sprint 183 §3 — it is the card's FIRST line now, as in the reference,
+   and both kinds carry one. Sprint 182 tagged only extra work, which
+   left the reader inferring "no tag means ticket" — an absence is not a
+   label. Teal for extra work, slate for a ticket: green is the app's
+   primary-action colour and these are labels, not controls. */
+.wp-kind-tag {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.wp-kind-tag-ticket {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* -------------------------------------------------------------------
+   Sprint 183 §3 — the card, dense.
+
+   The reference's card is a kind tag, a title, a grey location line and
+   a status chip, in that order, and it is SMALL. Ours was a `.card`
+   with 12px padding carrying a heading row, an overdue banner, a
+   window/building line, a kind tag, an assignee line, a note and two
+   buttons — measured at 140px tall for one job.
+   ------------------------------------------------------------------- */
+.wp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.wp-card-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+a.wp-card-title:hover { text-decoration: underline; }
+/* building · customer — the reference's grey second line. It carries
+   the customer where the reference carries a department, because this
+   payload has no department on it and a cleaning operator reads the
+   customer. Said out loud in the report rather than quietly swapped. */
+.wp-card-where {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.wp-card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.wp-card-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* A list that hit its bound says so. Deliberately not `.alert-error` —
+   nothing has gone wrong; the reader is being told the difference
+   between what is listed and what is counted. */
+.wp-notice {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--amber-border);
+  border-radius: var(--r-sm);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 12px;
+}
+
+/* A card in a seven-column week is ~150px wide at 1440. The header row
+   used to be a non-wrapping flex row, so the status badge sat past the
+   column edge and was CLIPPED — measured on the rendered page, not
+   guessed. It wraps now, and long unbreakable strings (a ticket number,
+   a building name) break rather than widening the column. */
+.wp-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wp-card-head > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Same reason: two buttons side by side do not fit a narrow column. */
+.wp-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Sprint 183 §4 — the summary strip, the reference's row of counted
+   chips. Reuses the app's own `.status-tile` vocabulary rather than a
+   third one: the ticket list and the Extra Work list already answer
+   "how many, and click to filter" with exactly this control, and the
+   Work Plan asking the same question differently is how three screens
+   end up with three ideas of what a count chip is. */
+.wp-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+/* The one chip that is a WARNING rather than a bucket. Tinted only when
+   it is non-zero and only when it is not the active filter — a chip
+   shouting about nothing is the banner problem again, one level up. */
+.wp-strip .status-tile-warn:not(.status-tile-active) {
+  border-color: var(--red-border);
+}
+.wp-strip .status-tile-warn:not(.status-tile-active) .status-tile-count {
+  color: var(--red);
+}
+
+/* `.cell-tag` is `white-space: nowrap` app-wide, which is right in a
+   table cell and wrong in a 150px week column — "Unable to complete"
+   and "Customer approved" ran past the card's edge (measured). Scoped
+   to the work-plan card header ONLY: the shared class is not touched,
+   because every table in the app depends on its nowrap. */
+.wp-card-head .cell-tag {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+/* ------------------------------------------------------------------
+   Sprint 179B — design pass
+   ------------------------------------------------------------------
+   One appended block, per this round's split: Agent A is editing this
+   same file in parallel and a whitespace change anywhere above turns a
+   trivial merge into a manual one. Nothing above this line was
+   reformatted; the four value-only edits this sprint made to existing
+   rules (`.hours-week-table-title`, `.contract-forecast-header h3`,
+   `.reject-modal-title`, `.pricing-category-card-name`) are each a
+   single declaration, commented in place.
+
+   Class names are feature-prefixed, per the convention index.css
+   records at the Sprint 160 block: a generic rule every table would
+   inherit is out of scope for a feature sprint.                      */
+
+/* §1 — the Catalogs empty state that has to explain a control which has
+   not appeared yet. Its own line under the "no rows" sentence, at the
+   12px secondary size the rest of the app uses for a hint. */
+.catalog-empty-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-faint);
+  max-width: 62ch;
+  line-height: 1.5;
+}
+
+/* §2 — the JOB column. Same treatment as the worker and building
+   identity cells beside it (`.hours-week-identity`), plus a width cap:
+   an extra-work title can run long and the grid's day columns must not
+   be squeezed off screen by it. */
+.hours-week-job {
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* §3 — the fill rule, under the control it describes. The label is
+   uppercase 11px `nowrap`; the hint below it is a sentence, so it wraps
+   and drops the uppercase. */
+.hours-week-apply-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  color: var(--text-faint);
+  max-width: 46ch;
+  line-height: 1.45;
+}
+
+/* §3 — the two lines under the week setup's row count. */
+.week-setup-summary-hint,
+.week-setup-locked {
+  margin-top: 4px;
+  line-height: 1.45;
+}
+.week-setup-locked {
+  color: var(--amber);
+}
+
+/* §4 — the report modals' group titles and their totals. `.form-section-title`
+   carries no margins at all, so a group title sat 2px above its table
+   and the grand total abutted the one above it. */
+.report-group-title {
+  margin-bottom: 6px;
+}
+.report-grand-total {
+  margin-top: 10px;
+}
+.report-summary-line {
+  margin-bottom: 10px;
+}
+
+/* ---------------------------------------------------------------------------
+   Sprint 181 §7 — the chip that rendered as one word.
+
+   `active-filter-chip` and `active-filter-clear` were used five times in
+   DashboardPage.tsx and defined in NO css file. An undefined class is not
+   a missing decoration: the wrapper stayed a plain block and its <span>
+   and <Link> stayed inline, so "Finished extra work is hidden" and
+   "Show all" ran together into "...is hiddenShow all", with the clear
+   control indistinguishable from the sentence it followed.
+
+   Same shape as `.chip-multiselect-chip` (the app's existing pill) so the
+   two do not become two vocabularies for one idea. The clear control is a
+   real affordance rather than trailing text: underlined, in the link
+   colour, with a hit area.
+   --------------------------------------------------------------------------- */
+.active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+  /* The chip sits in a section header beside a title; without this it
+     stretches to the header's height and the pill stops reading as one. */
+  align-self: center;
+  max-width: 100%;
+}
+.active-filter-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.active-filter-clear {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--green);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.active-filter-clear:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Sprint 181 §4 — the SLA column is a different question from the
+   workflow status immediately to its left, and two adjacent columns of
+   small coloured pills scan as one string. A single hairline rule marks
+   the boundary: enough to stop the eye joining them, far less than a
+   second header row or a gap that would push the table wider. */
+.data-table th.td-sla,
+.data-table td.td-sla {
+  border-left: 1px solid var(--border-soft);
+  padding-left: 12px;
+}
+
+/* Sprint 181 §8 — a row of the Work Plan's "Not planned yet" lane.
+   Deliberately plain: a name, where it is, and the one button that
+   moves it into the week. The lane is the whole design; the row does
+   not need decoration to be understood. */
+.wp-undated-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.wp-undated-row:last-child {
+  border-bottom: none;
+}
+.wp-undated-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.wp-undated-row-main > a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===================================================================
+   Sprint 182 §3 (Agent D) — APPEND-ONLY block. Nothing above this line
+   is touched, reordered or reindented.
+
+   The week grid held seven columns from 1000px up. MEASURED on the
+   rendered page, that is not a week — it is a column of single words:
+
+       1024px   card 67px wide, title wraps to 17 lines
+       1280px   card 104px wide, title wraps to 9 lines
+       1440px   card 127px wide, title wraps to 7 lines
+
+   Sprint 179A's own comment claimed "seven columns hold down to 1024,
+   which is the narrowest width the owner measures at". The claim was
+   never measured; it does not hold. A title that takes seventeen lines
+   is not readable at any density.
+
+   So below 1500px the seven days WRAP instead of compressing. They stay
+   in order and every column still carries its own date heading, so the
+   week reads left-to-right then down — the way a calendar already does.
+   Seven readable days over two rows beats seven unreadable ones in one.
+   =================================================================== */
+/* Sprint 183 §1 — the ladder is gone; `auto-fill` above measures the
+   grid instead of guessing from the viewport. The reasoning Sprint 182
+   recorded here still stands and is quoted in the rule that replaced
+   it: below 230px a card is a column of single words. */
+
+/* ===================================================================
+   Sprint 184 §5 — classes that were used and defined nowhere.
+
+   An undefined class is not a missing decoration. `active-filter-chip`
+   was undefined for three sprints and rendered "Finished extra work is
+   hidden" and "Show all" as the single word "hiddenShow all", because
+   the wrapper stayed a plain block and its children stayed inline. The
+   Sprint 182 C sweep found more of the same family; this closes the
+   ones whose intent the markup states plainly.
+
+   Every rule here mirrors an existing house pattern rather than
+   inventing a look — `.filter-bar` for the filter bars, `.alert-error`
+   for the alert boxes, `.btn-sm` for the button size. The pages
+   themselves belong to other agents this round and are untouched: this
+   file is the one both halves already share.
+
+   NOT defined here, and listed in the report instead: the classes whose
+   intended LAYOUT cannot be read off the markup without opening the
+   page and deciding what it should look like (the permissions matrix,
+   the crew and weekday pickers, the recurring-window editor, the
+   invoice line row, the account photo block). Guessing a grid for
+   markup one has not read makes a page worse than leaving the class
+   inert, which is what it is today.
+   =================================================================== */
+
+/* The two filter bars the Sprint 182 sweep named. Same shape as
+   `.filter-bar`, minus its card chrome: both sit INSIDE a card that
+   already draws the surface and the bottom rule. */
+.customer-contacts-filter-bar,
+.customer-users-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+/* The wrapper `BoundedList` puts around a scrollable list. `min-width: 0`
+   is the load-bearing half: without it a long unbreakable name inside
+   the list pushes the wrapper past its grid or flex share. */
+.bounded-list-wrap {
+  min-width: 0;
+}
+
+/* The label half of an SLA badge, beside its remaining-time half. The
+   badge is a pill in a table cell; a wrapping label makes the row grow. */
+.sla-badge-label {
+  white-space: nowrap;
+}
+
+/* Error text under a field or beside a control — NOT a box. `.alert-error`
+   is the box; these two are the inline sentence, and they were rendering
+   in body colour, which is the one thing an error must not do. */
+.form-error,
+.field-error {
+  margin: 4px 0 0;
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* `.alert` is the neutral box `.alert-error` specialises; `.alert-warn`
+   is its amber sibling, used where something needs care rather than
+   correction (editing your own permissions). Same geometry as
+   `.alert-error` so the three cannot drift apart. */
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.alert-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--amber-soft);
+  border: 1px solid var(--amber-border);
+  color: var(--amber);
+}
+
+/* One step below `.btn-sm`, for a chip-sized link inside a table cell. */
+.btn-xs {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+/* A button carrying an icon and no text: square, so it does not read as
+   a text button that failed to load its label. */
+.btn.icon-only {
+  padding: 0;
+  width: 30px;
+  justify-content: center;
+}
+
+/* `.badge` is already pill-radiused; this modifier exists so a caller
+   can say so explicitly. Defined as a no-op-shaped rule rather than
+   left undefined, so the class means something when read. */
+.badge-pill {
+  border-radius: var(--r-pill);
+}
+
+/* Prev / next around a page number. */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The full-height centred shell the route guards render "Loading…" into
+   before the app shell exists. Without it the word sits in the top-left
+   corner of a blank page. */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* The Inbox's own page wrapper. It holds a `.page-header` and a
+   two-pane body; all it needs of its own is to not collapse its
+   children's widths. */
+.inbox-page {
+  min-width: 0;
 }

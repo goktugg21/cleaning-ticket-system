@@ -17,6 +17,8 @@
   "field_customer_placeholder": "Select customer…",
   "field_customer_no_options": "No customers in this location",
   "field_room_label": "Room / area",
+  "field_wanted_date_label": "When would you like this done? (optional)",
+  "field_wanted_date_helper": "Tell us the date that suits you. It is a wish, not a promise — we will confirm what is possible.",
   "field_room_placeholder": "e.g. Server Room A, Bldg 4",
   "field_title_label": "Short description *",
   "field_title_placeholder": "Brief summary of the issue",

@@ -65,17 +65,29 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // (`/admin/customers/:id/edit`).
 import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
+// Sprint 162 §4 — one customer's contracts, beside their other sections.
+import { CustomerContractsPage } from "./pages/admin/customer/CustomerContractsPage";
+// Sprint 166 §4 — the SCREEN for the hours comparison. Sprint 165
+// shipped the endpoint and no interface.
+import { HoursComparisonPage } from "./pages/reports/HoursComparisonPage";
 import { CustomerInvoicesPage } from "./pages/admin/customer/CustomerInvoicesPage";
 import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage";
 import { CustomerDocumentsPage } from "./pages/admin/customer/CustomerDocumentsPage";
 import { CustomerLabelsPage } from "./pages/admin/customer/CustomerLabelsPage";
 import { CustomerTicketsPage } from "./pages/admin/customer/CustomerTicketsPage";
+import { CustomerChargeableWorkPage } from "./pages/admin/customer/CustomerChargeableWorkPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
 import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
 import { HoursAdminPage } from "./pages/admin/HoursAdminPage";
+// Sprint 160 — contracts. Eagerly imported like the other admin
+// pages; the module is small and the route is behind its own guard.
+import { ContractsAdminPage } from "./pages/admin/contracts/ContractsAdminPage";
+import { ContractDetailPage } from "./pages/admin/contracts/ContractDetailPage";
+import { ContractsRoute } from "./components/ContractsRoute";
+import { CatalogsAdminPage } from "./pages/admin/CatalogsAdminPage";
 import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserDetailPage } from "./pages/admin/UserDetailPage";
@@ -210,7 +222,21 @@ export default function App() {
             path="/tickets"
             element={
               <ProtectedRoute>
-                <DashboardPage variant="tickets-page" />
+                <DashboardPage key="tickets-page" variant="tickets-page" />
+              </ProtectedRoute>
+            }
+          />
+          {/* Sprint 181 §5 — chargeable work: the tickets born from an
+              Extra Work, findable as a group. They ARE tickets and only
+              their origin differs, so this mounts the same list with one
+              server-side filter pinned on rather than a second
+              implementation. Static path, so it must sit above
+              /tickets/:id. */}
+          <Route
+            path="/tickets/chargeable"
+            element={
+              <ProtectedRoute>
+                <DashboardPage key="chargeable-work" variant="chargeable-work" />
               </ProtectedRoute>
             }
           />
@@ -560,6 +586,25 @@ export default function App() {
             }
           />
           <Route
+            path="/admin/customers/:id/contracts"
+            element={
+              <AdminRoute>
+                <CustomerContractsPage />
+              </AdminRoute>
+            }
+          />
+          {/* Sprint 184 §3b — the customer's chargeable work. The same
+              ticket list as the sibling route above, with a second pin
+              from the route rather than a second implementation. */}
+          <Route
+            path="/admin/customers/:id/chargeable"
+            element={
+              <AdminRoute>
+                <CustomerChargeableWorkPage />
+              </AdminRoute>
+            }
+          />
+          <Route
             path="/admin/customers/:id/tickets"
             element={
               <AdminRoute>
@@ -663,6 +708,17 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* Sprint 178 §1 — the Catalogs area. Same AdminRoute gate as
+              every other per-company admin screen; the individual
+              catalogs keep their own endpoint permissions unchanged. */}
+          <Route
+            path="/admin/catalogs"
+            element={
+              <AdminRoute>
+                <CatalogsAdminPage />
+              </AdminRoute>
+            }
+          />
           <Route
             path="/admin/users"
             element={
@@ -751,6 +807,27 @@ export default function App() {
               </TimesheetsRoute>
             }
           />
+          {/* Sprint 160 — contracts. Its own guard rather than
+              AdminRoute: BUILDING_MANAGER is a READER here (narrowed
+              server-side to the contracts covering their buildings) and
+              AdminRoute would lock them out, while widening AdminRoute
+              would hand them the whole admin group. */}
+          <Route
+            path="/admin/contracts"
+            element={
+              <ContractsRoute>
+                <ContractsAdminPage />
+              </ContractsRoute>
+            }
+          />
+          <Route
+            path="/admin/contracts/:contractId"
+            element={
+              <ContractsRoute>
+                <ContractDetailPage />
+              </ContractsRoute>
+            }
+          />
           <Route
             path="/reports"
             element={
@@ -764,6 +841,14 @@ export default function App() {
                 >
                   <ReportsPage />
                 </Suspense>
+              </ReportsRoute>
+            }
+          />
+          <Route
+            path="/reports/hours-comparison"
+            element={
+              <ReportsRoute>
+                <HoursComparisonPage />
               </ReportsRoute>
             }
           />

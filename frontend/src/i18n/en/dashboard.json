@@ -49,6 +49,12 @@
   "attention.view_all": "View all",
   "attention.empty": "Nothing right now",
   "attention.unassigned_chip": "Showing only unassigned",
+  "attention.approval_overdue_title": "Approval overdue ({{days}}+ days)",
+  "attention.approval_overdue_chip": "Showing work awaiting customer approval for {{days}}+ days",
+  "finished_extra_work.hidden_chip": "Finished extra work is hidden",
+  "finished_extra_work.show_all": "Show all",
+  "finished_extra_work.shown_chip": "Finished extra work is shown",
+  "finished_extra_work.hide_again": "Hide finished",
   "widgets.inbox": "Unread messages",
   "widgets.awaiting_pricing": "Awaiting pricing",
   "widgets.awaiting_customer": "Awaiting customer decision",
@@ -103,5 +109,12 @@
   "bottom.billing_title": "Billing {{month}}",
   "bottom.billing_empty": "No billing this month.",
   "bottom.billing_open_count": "{{count}} open",
-  "bottom.recent_title": "Latest tickets / extra work"
+  "bottom.recent_title": "Latest tickets / extra work",
+  "work_type.label": "Show",
+  "work_type.all": "All work",
+  "work_type.tickets_only": "Tickets only",
+  "work_type.chargeable": "Chargeable work",
+  "work_type.include_chargeable": "Include chargeable work",
+  "chargeable.col_extra_work": "Extra work",
+  "chargeable.col_route": "Route"
 }

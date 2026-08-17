@@ -15,10 +15,12 @@ in the table below, it is archived and unmaintained** — see the
 | [product/source-of-truth.md](product/source-of-truth.md) | Canonical product **target state**: what the system must become, what already works, what changes next, and the sprint order. The authoritative statement of *what the system is*. | Whenever the product target state changes. |
 | [product/sot-addendum-a-meeting2.md](product/sot-addendum-a-meeting2.md) | **Addendum A** (Ramazan Meeting 2, 2026-06-05): revises the base SoT — company-wide Customer Company Admin, people management (Contacts/Users/Employees), recurrence/calendar model. **Wins over the base SoT for the items it covers.** | When a later stakeholder meeting refines the SoT. |
 | [product/sot-addendum-b-invoicing.md](product/sot-addendum-b-invoicing.md) | **Addendum B** (2026-07-26): the invoicing subsystem — lifecycle (numbering at SEND), reversal/credit-note, billing schedule, granularity, the earned-amount rule, PDF branding, and the known `/due/` gap. **Wins over the base SoT for the items it covers.** | Whenever the invoicing subsystem changes. |
+| [product/sot-addendum-c-contracts.md](product/sot-addendum-c-contracts.md) | **Addendum C** (2026-08-10, Sprint 160): the contracts subsystem — a new business entity. Revisions as versioned agreed scope (not an audit log), gapless `CNT-YYYY-NNNN` numbering, derived status, the two-price-sources division against Extra Work, and the invoice FORECAST (a pure calculation; raising the real invoice is Sprint 158). **Wins over the base SoT for the items it covers.** | Whenever the contracts subsystem changes. |
 | [product/system-business-logic-and-workflows.md](product/system-business-logic-and-workflows.md) | Plain-English business logic: roles, permissions, ticket + Extra Work workflows, note-visibility taxonomy, audit rules, privacy floor. | Whenever business logic or a workflow changes. |
 | [product/requirements-meeting-2026-05-15.md](product/requirements-meeting-2026-05-15.md) | Stakeholder-meeting requirements (Contacts vs Users, modular per-location permissions, view-first UI, Extra Work cart, pricing model, proposal builder, override audit). The **product floor**, at the same authority as the RBAC matrix. | When the underlying stakeholder requirements change. |
 | [product/role-visibility-matrix.md](product/role-visibility-matrix.md) | Role → left-nav visibility matrix, every cell sourced from code (frontend nav gate **and** backend enforcement). | Whenever the frontend nav gate or backend role scoping changes. |
 | [planning/sprint-checklist.md](planning/sprint-checklist.md) | The living gap-closing sprint plan; boxes are ticked as each sprint completes. | Every sprint. |
+| [planning/contract-hours-from-contracts.md](planning/contract-hours-from-contracts.md) | Sprint 179B §6 investigation: what it would cost to have `timesheets.ContractHours` **proposed** from a `contracts.Contract` and still editable, without a foreign key across the module boundary. A decision page for the owner — nothing here is built. | When the owner decides, or when the `contracts` / `timesheets` boundary changes. |
 | [reference/rbac-matrix.md](reference/rbac-matrix.md) | Canonical RBAC / permissions / role-hierarchy source of truth, including the 11 hard invariants (H-1..H-11) — the **security floor**. | Whenever a role, permission key, scope rule, or hard invariant changes. |
 | [engineering/claude-code-operational-notes.md](engineering/claude-code-operational-notes.md) | WSL / shell / container gotchas (Edit drops the +x bit, SIGPIPE truncation, root-owned Playwright artifacts, heredoc-over-the-bridge). | Whenever a new operational gotcha is learned. |
 | [engineering/deployment.md](engineering/deployment.md) | Production deploy runbook: topology, env vars, the proxy headers Django expects, SES SMTP bootstrap, compose-level decisions. | Whenever the deploy topology or env contract changes. |
@@ -38,8 +40,9 @@ in the table below, it is archived and unmaintained** — see the
 
 1. **`product/source-of-truth.md` is authoritative for *what the system is*.**
 2. **An Addendum wins over the base Source of Truth for the items it covers**
-   (today: `product/sot-addendum-a-meeting2.md` and
-   `product/sot-addendum-b-invoicing.md`; each governs its own scope).
+   (today: `product/sot-addendum-a-meeting2.md`,
+   `product/sot-addendum-b-invoicing.md` and
+   `product/sot-addendum-c-contracts.md`; each governs its own scope).
 3. **Where the docs and the code disagree, the code is the truth.** The drift
    must be **reported**, not silently followed — stop, surface the mismatch,
    and propose a fix.

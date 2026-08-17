@@ -25,6 +25,16 @@ export interface HoursFilterValues {
   employee: number | "";
   hour_type: number | "";
   building: number | "";
+  /** Sprint 174 §1 — WHERE the hour came from. Sprint 173 added the
+   *  column and the API filter and stopped there; the owner looked for
+   *  the control and it was not on the screen.
+   *
+   *  OPTIONAL, and the control renders only when the caller passes it:
+   *  the Overview tab shares this row but reports on periods, where a
+   *  source filter would narrow a chart nobody asked to narrow. A
+   *  shared control that appears on every caller is how a filter row
+   *  grows past what any one screen needs. */
+  source_type?: string;
 }
 
 export interface HoursFilterRowProps {
@@ -76,6 +86,31 @@ export function HoursFilterRow({
           ))}
         </select>
       </div>
+
+      {values.source_type !== undefined && (
+      <div className="field" style={{ margin: 0 }}>
+        <label className="field-label" htmlFor={`${idPrefix}-filter-source`}>
+          {t("hours_admin.filter_source")}
+        </label>
+        <select
+          id={`${idPrefix}-filter-source`}
+          className="field-select"
+          value={values.source_type}
+          onChange={(event) => onChange({ source_type: event.target.value })}
+          data-testid={`${idPrefix}-filter-source`}
+          disabled={disabled}
+        >
+          <option value="">{t("hours_admin.filter_all_sources")}</option>
+          {(["CONTRACT", "EXTRA_WORK", "TICKET", "OTHER"] as const).map(
+            (value) => (
+              <option key={value} value={value}>
+                {t(`hour_source.${value}`)}
+              </option>
+            ),
+          )}
+        </select>
+      </div>
+      )}
 
       <div className="field" style={{ margin: 0 }}>
         <label className="field-label" htmlFor={`${idPrefix}-filter-hour-type`}>

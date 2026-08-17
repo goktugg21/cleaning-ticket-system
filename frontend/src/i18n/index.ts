@@ -12,6 +12,17 @@ import nlExtraWork from "./nl/extra_work.json";
 import nlPlannedWork from "./nl/planned_work.json";
 import nlStaffSlots from "./nl/staff_slots.json";
 import nlStaffCredentials from "./nl/staff_credentials.json";
+// Sprint 160 — contracts gets its OWN namespace rather than another
+// 2000 keys in common.json. A module-sized bundle is also the only
+// thing that keeps two sprints working in parallel from conflicting
+// on every line either of them adds.
+import nlContracts from "./nl/contracts.json";
+// Sprint 183 §1 — invoicing gets its own namespace. The Facturen page
+// and the customer Facturatie section keep "common" as their DEFAULT
+// (every existing bare key on those pages resolves there and must go
+// on doing so — this app sets no fallbackNS), and reference the new
+// strings explicitly as "invoices:...".
+import nlInvoices from "./nl/invoices.json";
 import enCommon from "./en/common.json";
 import enLogin from "./en/login.json";
 import enSettings from "./en/settings.json";
@@ -23,6 +34,8 @@ import enExtraWork from "./en/extra_work.json";
 import enPlannedWork from "./en/planned_work.json";
 import enStaffSlots from "./en/staff_slots.json";
 import enStaffCredentials from "./en/staff_credentials.json";
+import enContracts from "./en/contracts.json";
+import enInvoices from "./en/invoices.json";
 
 // Default language is "nl" so unauthenticated routes (Login) render in Dutch.
 // Once the user is authenticated, useLanguageSync re-fires changeLanguage
@@ -42,6 +55,8 @@ i18n.use(initReactI18next).init({
       planned_work: nlPlannedWork,
       staff_slots: nlStaffSlots,
       staff_credentials: nlStaffCredentials,
+      contracts: nlContracts,
+      invoices: nlInvoices,
     },
     en: {
       common: enCommon,
@@ -55,6 +70,8 @@ i18n.use(initReactI18next).init({
       planned_work: enPlannedWork,
       staff_slots: enStaffSlots,
       staff_credentials: enStaffCredentials,
+      contracts: enContracts,
+      invoices: enInvoices,
     },
   },
   lng: "nl",
@@ -72,6 +89,8 @@ i18n.use(initReactI18next).init({
     "planned_work",
     "staff_slots",
     "staff_credentials",
+    "contracts",
+    "invoices",
   ],
   interpolation: {
     escapeValue: false,

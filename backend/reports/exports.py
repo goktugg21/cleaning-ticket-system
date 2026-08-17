@@ -882,3 +882,558 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
         )
 
     return _pdf_bytes(pdf)
+
+
+# ---- Sprint 171 §4 — the Worker Hour Report --------------------------------
+
+# Sprint 172 §5 — the reference's column ORDER, so a downloaded file
+# reads like the screen and like the report it is replacing.
+WORKER_HOURS_CSV_COLUMNS = (
+    "iso_week",
+    "source",
+    "personnel_number",
+    "employee",
+    "cost_centre_name",
+    "cost_centre_code",
+    "order_number",
+    "place",
+    "action",
+    "debtor",
+    "authorised",
+    "hour_code",
+    "hour_type",
+    "contracted_hours",
+    "travel_costs",
+    "building",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "total",
+)
+
+
+def build_worker_hours_csv(payload: dict) -> bytes:
+    """The report's rows, as CSV.
+
+    CSV rather than a real xlsx: every other export in this module is
+    CSV, Excel opens it without a prompt, and adding an xlsx writer for
+    one report would be a dependency to carry forever. The column order
+    matches the on-screen table so a downloaded file reads like the
+    screen it came from.
+
+    A row with no building writes an EMPTY cell, not the word "none":
+    the reader is a spreadsheet, and a sentinel string would sort and
+    filter as data.
+    """
+    buffer, writer = _csv_writer(WORKER_HOURS_CSV_COLUMNS)
+    for row in payload["rows"]:
+        writer.writerow(
+            {
+                "iso_week": row["iso_week"],
+                "source": row.get("source_label") or "",
+                # An absent value writes an EMPTY cell, never a zero and
+                # never a sentinel word: the reader is a spreadsheet,
+                # where "unknown" would sort and filter as data.
+                "personnel_number": row["personnel_number"] or "",
+                "employee": row["employee_name"],
+                "cost_centre_name": row["cost_centre_name"] or "",
+                "cost_centre_code": row["cost_centre_code"] or "",
+                "order_number": row["order_number"] or "",
+                "place": row["place"] or "",
+                "action": row["action"] or "",
+                "debtor": row["debtor"] or "",
+                "authorised": "yes" if row["is_authorised"] else "",
+                "hour_code": row["hour_type_code"] or "",
+                "contracted_hours": row["contracted_hours"] or "",
+                "travel_costs": row["travel_costs"] or "",
+                "building": row["building_name"] or "",
+                "hour_type": row["hour_type_name"],
+                "monday": row["monday"],
+                "tuesday": row["tuesday"],
+                "wednesday": row["wednesday"],
+                "thursday": row["thursday"],
+                "friday": row["friday"],
+                "saturday": row["saturday"],
+                "sunday": row["sunday"],
+                "total": row["total"],
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_worker_hours_pdf(payload: dict) -> bytes:
+    """The same rows, branded, through the shared PDF header.
+
+    Landscape, because twelve columns on A4 portrait would be
+    unreadable — the one place this differs from its neighbours, and it
+    differs because the table is wider, not because it wants to.
+    """
+    pdf = _ReportPDF(orientation="L", unit="mm", format="A4")
+    register_fonts(pdf)
+    pdf.generated_on = f"{payload['from']} — {payload['to']}"
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    logo_bottom = draw_logo(pdf, None, y=10.0)
+    pdf.set_xy(pdf.l_margin + LOGO_WIDTH_MM + 8.0, 12.0)
+    pdf.set_font(FONT_FAMILY, "B", 15)
+    pdf.cell(0, 8, "Worker hours")
+    rule_y = max(logo_bottom, 25.0) + 3.0
+    accent_rule(pdf, rule_y, NEUTRAL_ACCENT_RGB)
+    pdf.set_y(rule_y + 5.0)
+
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0,
+        6,
+        f"Weeks {payload['first_week']}–"
+        f"{payload['first_week'] + payload['week_count'] - 1} "
+        f"({payload['from']} — {payload['to']})",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    totals = payload["totals"]
+    pdf.cell(
+        0,
+        6,
+        f"Rows {totals['rows']} · Hours {totals['hours']} · "
+        f"Weeks {totals['weeks']} · Workers {totals['workers']}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+
+    headers = (
+        ("Wk", 10),
+        ("Pers.", 16),
+        ("Worker", 34),
+        ("Cost centre", 34),
+        ("Code", 16),
+        ("Order", 18),
+        ("Place", 22),
+        ("Debtor", 30),
+        ("Code", 12),
+        ("Hour type", 26),
+        ("Contr.", 14),
+        ("Travel", 14),
+        ("Mo", 11),
+        ("Tu", 11),
+        ("We", 11),
+        ("Th", 11),
+        ("Fr", 11),
+        ("Sa", 11),
+        ("Su", 11),
+        ("Total", 14),
+    )
+    pdf.set_font(FONT_FAMILY, "B", 8.5)
+    for label, width in headers:
+        pdf.cell(width, 7, label, border="B")
+    pdf.ln(7)
+
+    pdf.set_font(FONT_FAMILY, "", 8.5)
+    for row in payload["rows"]:
+        values = (
+            str(row["iso_week"]),
+            (row["personnel_number"] or "-")[:9],
+            (row["employee_name"] or "")[:20],
+            (row["cost_centre_name"] or "-")[:20],
+            (row["cost_centre_code"] or "-")[:9],
+            (row["order_number"] or "-")[:10],
+            (row["place"] or "-")[:13],
+            (row["debtor"] or "-")[:18],
+            (row["hour_type_code"] or "-")[:6],
+            (row["hour_type_name"] or "")[:15],
+            (row["contracted_hours"] or "-"),
+            (row["travel_costs"] or "-"),
+            row["monday"],
+            row["tuesday"],
+            row["wednesday"],
+            row["thursday"],
+            row["friday"],
+            row["saturday"],
+            row["sunday"],
+            row["total"],
+        )
+        for (_, width), value in zip(headers, values):
+            pdf.cell(width, 6, str(value))
+        pdf.ln(6)
+
+    return bytes(pdf.output())
+
+
+# ---- Sprint 178 §2 — the four new reports -----------------------------------
+#
+# Each gets a CSV and a PDF built from the SAME payload the JSON endpoint
+# returns, so the three can never disagree about a number. No new library:
+# `_csv_writer`, `_branded_pdf` and `_draw_table` above are the whole
+# toolkit, which is what "via reports/exports.py and config/pdf_branding.py"
+# means.
+
+
+def _flat_pdf(title: str, payload: dict) -> FPDF:
+    """`_new_pdf` without the total block.
+
+    The Sprint 14A reports print a `Total:` line in the header; these
+    four carry decimal-string totals of different kinds (hours, tickets)
+    and print their own at the end, so the shared header would have to
+    fake a shape.
+
+    Sprint 180 §1 — the SCOPE line is here now, because these four take
+    a company and a building filter. A downloaded PDF that does not say
+    which building it covers is the document somebody files and cannot
+    later explain, and `_scope_summary_lines` already prints "Scope: All"
+    for the unfiltered case, so there is no branch to get wrong.
+    """
+    pdf = _branded_pdf(title, payload.get("generated_at"))
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0, 6, f"Period: {payload['from']} -- {payload['to']}",
+        new_x="LMARGIN", new_y="NEXT",
+    )
+    for line in _scope_summary_lines(payload.get("scope") or {}):
+        pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    return pdf
+
+
+EMPLOYEE_HOURS_BUILDING_CSV_COLUMNS = (
+    "building",
+    "building_name",
+    "employee",
+    "employee_name",
+    "hours",
+    "building_total",
+    "period_from",
+    "period_to",
+)
+
+
+def build_employee_hours_by_building_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(EMPLOYEE_HOURS_BUILDING_CSV_COLUMNS)
+    for bucket in payload["buildings"]:
+        for employee in bucket["employees"]:
+            writer.writerow(
+                {
+                    "building": bucket["building"] or "",
+                    "building_name": bucket["building_name"] or "",
+                    "employee": employee["employee"],
+                    "employee_name": employee["employee_name"],
+                    "hours": employee["hours"],
+                    "building_total": bucket["total"],
+                    "period_from": payload["from"],
+                    "period_to": payload["to"],
+                }
+            )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_employee_hours_by_building_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Employee hours by building", payload)
+    for bucket in payload["buildings"]:
+        pdf.set_font(FONT_FAMILY, "B", 10)
+        name = bucket["building_name"] or "(no building)"
+        pdf.cell(
+            0, 6, f"{name} -- {bucket['total']}",
+            new_x="LMARGIN", new_y="NEXT",
+        )
+        pdf.set_font(FONT_FAMILY, "", 10)
+        _draw_table(
+            pdf,
+            ["Employee", "Hours"],
+            [130, 40],
+            [[e["employee_name"], e["hours"]] for e in bucket["employees"]],
+        )
+        pdf.ln(2)
+    pdf.set_font(FONT_FAMILY, "B", 10)
+    pdf.cell(0, 6, f"Total: {payload['total']}", new_x="LMARGIN", new_y="NEXT")
+    return _pdf_bytes(pdf)
+
+
+WEEKLY_DAY_KEYS = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+
+# Sprint 180 §3 — the grain is (week, employee, HOUR TYPE) now. The
+# columns a payroll clerk reads are here rather than only on screen: an
+# export that could not tell normal hours from overtime was the reason
+# the screen figure had to be re-derived by hand every week.
+EMPLOYEE_HOURS_WEEKLY_CSV_COLUMNS = (
+    "iso_year",
+    "iso_week",
+    "employee",
+    "employee_name",
+    "hour_type",
+    "hour_type_code",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "total",
+)
+
+
+def build_employee_hours_weekly_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(EMPLOYEE_HOURS_WEEKLY_CSV_COLUMNS)
+    for week in payload["weeks"]:
+        for employee in week["employees"]:
+            for bucket in employee["hour_types"]:
+                row = {
+                    "iso_year": week["iso_year"],
+                    "iso_week": week["iso_week"],
+                    "employee": employee["employee"],
+                    "employee_name": employee["employee_name"],
+                    "hour_type": bucket["hour_type_name"] or "",
+                    "hour_type_code": bucket["hour_type_code"] or "",
+                    "total": bucket["total"],
+                }
+                row.update(bucket["days"])
+                writer.writerow(row)
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_employee_hours_weekly_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Employee hours per week", payload)
+    for week in payload["weeks"]:
+        pdf.set_font(FONT_FAMILY, "B", 10)
+        pdf.cell(
+            0,
+            6,
+            f"{week['iso_year']} week {week['iso_week']} -- {week['total']}",
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+        pdf.set_font(FONT_FAMILY, "", 9)
+        rows = []
+        for employee in week["employees"]:
+            # The person's own line first, then one per hour type under
+            # it. An indent rather than a second table: the split is a
+            # breakdown OF the row above, and two tables would let a
+            # reader take them for two populations.
+            rows.append(
+                [employee["employee_name"], ""]
+                + [employee["days"][day] for day in WEEKLY_DAY_KEYS]
+                + [employee["total"]]
+            )
+            for bucket in employee["hour_types"]:
+                label = bucket["hour_type_name"] or ""
+                if bucket["hour_type_code"]:
+                    label = f"{label} ({bucket['hour_type_code']})"
+                rows.append(
+                    ["   -", label]
+                    + [bucket["days"][day] for day in WEEKLY_DAY_KEYS]
+                    + [bucket["total"]]
+                )
+        # The weekday column totals, as the last row of the week's table.
+        rows.append(
+            ["Total", ""]
+            + [week["day_totals"][day] for day in WEEKLY_DAY_KEYS]
+            + [week["total"]]
+        )
+        _draw_table(
+            pdf,
+            ["Employee", "Hour type", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su", "Total"],
+            [42, 32, 13, 13, 13, 13, 13, 13, 13, 17],
+            rows,
+        )
+        pdf.ln(2)
+    pdf.set_font(FONT_FAMILY, "B", 10)
+    pdf.cell(0, 6, f"Total: {payload['total']}", new_x="LMARGIN", new_y="NEXT")
+    return _pdf_bytes(pdf)
+
+
+EMPLOYEE_HOURS_EXTRA_WORK_CSV_COLUMNS = (
+    "source_id",
+    "title",
+    "employee",
+    "employee_name",
+    "hours",
+    "extra_work_total",
+    "period_from",
+    "period_to",
+)
+
+
+def build_employee_hours_by_extra_work_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(EMPLOYEE_HOURS_EXTRA_WORK_CSV_COLUMNS)
+    for job in payload["extra_work"]:
+        for employee in job["employees"]:
+            writer.writerow(
+                {
+                    "source_id": job["source_id"],
+                    "title": job["title"] or "",
+                    "employee": employee["employee"],
+                    "employee_name": employee["employee_name"],
+                    "hours": employee["hours"],
+                    "extra_work_total": job["total"],
+                    "period_from": payload["from"],
+                    "period_to": payload["to"],
+                }
+            )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_employee_hours_by_extra_work_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Employee hours by extra work", payload)
+    for job in payload["extra_work"]:
+        pdf.set_font(FONT_FAMILY, "B", 10)
+        pdf.cell(
+            0, 6, f"{job['title'] or job['source_id']} -- {job['total']}",
+            new_x="LMARGIN", new_y="NEXT",
+        )
+        pdf.set_font(FONT_FAMILY, "", 10)
+        _draw_table(
+            pdf,
+            ["Employee", "Hours"],
+            [130, 40],
+            [[e["employee_name"], e["hours"]] for e in job["employees"]],
+        )
+        pdf.ln(2)
+    pdf.set_font(FONT_FAMILY, "B", 10)
+    pdf.cell(0, 6, f"Total: {payload['total']}", new_x="LMARGIN", new_y="NEXT")
+    return _pdf_bytes(pdf)
+
+
+TICKET_REPORT_CSV_COLUMNS = (
+    "ticket_no",
+    "title",
+    "status",
+    "building_name",
+    "customer_name",
+    "created_at",
+    "finished_at",
+    "duration_days",
+)
+
+
+def build_ticket_report_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(TICKET_REPORT_CSV_COLUMNS)
+    for row in payload["rows"]:
+        writer.writerow(
+            {
+                "ticket_no": row["ticket_no"],
+                "title": row["title"],
+                "status": row["status"],
+                "building_name": row["building_name"] or "",
+                "customer_name": row["customer_name"] or "",
+                "created_at": row["created_at"],
+                "finished_at": row["finished_at"] or "",
+                # Empty, not 0: an unfinished ticket has no duration, and
+                # a zero would read as "took no time".
+                "duration_days": (
+                    "" if row["duration_days"] is None else row["duration_days"]
+                ),
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_ticket_report_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Ticket report", payload)
+    pdf.set_font(FONT_FAMILY, "", 10)
+    average = payload.get("average_duration_days")
+    pdf.cell(
+        0,
+        6,
+        f"Tickets: {payload['total']} -- finished: {payload['finished']} -- "
+        f"average: {'--' if average is None else str(average) + ' days'}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+    pdf.set_font(FONT_FAMILY, "", 8)
+    _draw_table(
+        pdf,
+        ["No.", "Title", "Status", "Building", "Customer", "Days"],
+        [22, 52, 34, 34, 34, 14],
+        [
+            [
+                row["ticket_no"],
+                row["title"],
+                row["status"],
+                row["building_name"] or "",
+                row["customer_name"] or "",
+                "" if row["duration_days"] is None else str(row["duration_days"]),
+            ]
+            for row in payload["rows"]
+        ],
+    )
+    return _pdf_bytes(pdf)
+
+
+# Sprint 185 E §1 — meldingen per category per building.
+#
+# The CSV is FLAT — one row per (building, category) pair — while the
+# JSON is nested. A spreadsheet is opened to be sorted and pivoted, and
+# a nested shape flattened by hand is the first thing anyone does to it;
+# the PDF keeps the nesting because it is read top to bottom.
+MELDINGEN_BY_CATEGORY_CSV_COLUMNS = (
+    "building_name",
+    "category_name",
+    "count",
+)
+
+
+def build_meldingen_by_category_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(MELDINGEN_BY_CATEGORY_CSV_COLUMNS)
+    for bucket in payload["buildings"]:
+        for row in bucket["categories"]:
+            writer.writerow(
+                {
+                    # The dash is chosen HERE rather than server-side in
+                    # the payload: the JSON keeps `None` so each client
+                    # picks its own word, and this is that choice for the
+                    # spreadsheet.
+                    "building_name": bucket["building_name"] or "--",
+                    "category_name": row["category_name"] or "--",
+                    "count": row["count"],
+                }
+            )
+    return buffer.getvalue().encode("utf-8")
+
+
+def build_meldingen_by_category_pdf(payload: dict) -> bytes:
+    pdf = _flat_pdf("Meldingen by category", payload)
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0,
+        6,
+        f"Meldingen: {payload['total']} -- "
+        f"uncategorised: {payload['uncategorised']}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+    for bucket in payload["buildings"]:
+        pdf.set_font(FONT_FAMILY, "B", 9)
+        pdf.cell(
+            0,
+            6,
+            f"{bucket['building_name'] or '--'} -- {bucket['total']}",
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+        pdf.set_font(FONT_FAMILY, "", 8)
+        _draw_table(
+            pdf,
+            ["Category", "Meldingen"],
+            [120, 30],
+            [
+                [row["category_name"] or "--", str(row["count"])]
+                for row in bucket["categories"]
+            ],
+        )
+        pdf.ln(2)
+    return _pdf_bytes(pdf)

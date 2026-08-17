@@ -734,3 +734,94 @@ class DirectPublishOutOfScopeProviderTests(
         self.assertIn(response.status_code, (403, 404))
         proposal.refresh_from_db()
         self.assertEqual(proposal.status, ProposalStatus.DRAFT)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 187 §3 — `can_direct_publish` mirrors ALL FOUR endpoint gates
+# ---------------------------------------------------------------------------
+class DirectPublishActionFlagMirrorsEveryGateTests(
+    _DirectPublishFixtureMixin, TestCase
+):
+    """The flag used to mirror two of the endpoint's four gates, and the
+    two it was missing are the two that fail in the DEFAULT configuration:
+
+      * the dedicated dangerous grant `provider.extra_work.
+        quote_override_start`, which is OFF by default and which the
+        generic B6 override key does not satisfy (matrix H-11);
+      * `request_intent == REQUEST_QUOTE`.
+
+    So an in-scope COMPANY_ADMIN, on an ordinary DRAFT with an
+    UNDER_REVIEW parent, was shown "Publish directly" out of the box and
+    it 403'd every time. These tests pin flag and endpoint to the same
+    answer — the point is not the flag on its own, it is that the two
+    agree.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup()
+
+    def _flag(self, user, ew, proposal) -> bool:
+        response = self._api(user).get(
+            f"/api/extra-work/{ew.id}/proposals/{proposal.id}/"
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data["actions"]["can_direct_publish"]
+
+    def _endpoint_allows(self, user, ew, proposal) -> bool:
+        response = self._api(user).post(
+            self._publish_url(ew.id, proposal.id),
+            {"override_reason": "Flag-vs-endpoint agreement check."},
+            format="json",
+        )
+        return response.status_code == 200
+
+    def test_flag_is_false_without_the_dangerous_grant(self):
+        """The default configuration — the whole point of §3."""
+        self._grant_quote_override(False)
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        self.assertFalse(self._flag(self.admin, ew, proposal))
+
+    def test_flag_is_true_once_the_dangerous_grant_is_on(self):
+        self._grant_quote_override(True)
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        self.assertTrue(self._flag(self.admin, ew, proposal))
+
+    def test_flag_is_false_for_a_non_quote_intent(self):
+        """`AUTO_START_AFTER_PRICING` auto-approves on SEND, so there is
+        no customer decision to bypass and the endpoint 400s. The button
+        must not be offered."""
+        self._grant_quote_override(True)
+        ew = self._make_ew_under_review(
+            request_intent=ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING
+        )
+        proposal = self._make_draft_proposal(ew)
+        self.assertFalse(self._flag(self.admin, ew, proposal))
+
+    def test_flag_and_endpoint_agree_in_the_default_configuration(self):
+        self._grant_quote_override(False)
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        self.assertEqual(
+            self._flag(self.admin, ew, proposal),
+            self._endpoint_allows(self.admin, ew, proposal),
+        )
+
+    def test_flag_and_endpoint_agree_once_granted(self):
+        self._grant_quote_override(True)
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        flag = self._flag(self.admin, ew, proposal)
+        self.assertEqual(flag, self._endpoint_allows(self.admin, ew, proposal))
+        self.assertTrue(flag)
+
+    def test_super_admin_still_needs_a_quote_request(self):
+        """SA resolves the dangerous grant True, so intent is the only
+        gate left — and it still applies."""
+        ew = self._make_ew_under_review(
+            request_intent=ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER
+        )
+        proposal = self._make_draft_proposal(ew)
+        self.assertFalse(self._flag(self.super_admin, ew, proposal))

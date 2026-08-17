@@ -38,6 +38,7 @@ import type {
   CustomerLabel,
   CustomerPriceFolder,
   CustomerServicePrice,
+  ExtraWorkBilledTo,
   ExtraWorkIntentErrorCode,
   ExtraWorkPreviewLine,
   ExtraWorkPreviewPriceSource,
@@ -51,6 +52,7 @@ import type {
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { formatMoney, formatNumber } from "../lib/intl";
+import { customerLabelName } from "../lib/customerLabelName";
 
 
 interface ParentFormState {
@@ -64,6 +66,8 @@ interface ParentFormState {
   // `default=OTHER` server-side.
   urgency: ExtraWorkUrgency;
   preferred_date: string;
+  planned_end_date: string;
+  deadline: string;
 }
 
 interface CartLineState {
@@ -117,6 +121,8 @@ const EMPTY_PARENT: ParentFormState = {
   description: "",
   urgency: "NORMAL",
   preferred_date: "",
+  planned_end_date: "",
+  deadline: "",
 };
 
 const URGENCY_VALUES: ExtraWorkUrgency[] = ["NORMAL", "HIGH", "URGENT"];
@@ -384,6 +390,11 @@ export function CreateExtraWorkPage({
   } | null>(null);
   const [departmentId, setDepartmentId] = useState("");
   const [workTypeId, setWorkTypeId] = useState("");
+  // Sprint 180 §3 — who the finished work is charged to. Seeded to
+  // BUILDING, which is both the model default and the owner's own
+  // "99% of the time", so an operator who ignores the control gets the
+  // right answer rather than an empty one.
+  const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo>("BUILDING");
   // Search filter for the agreed-prices dropdown (scales to long
   // contract lists — the list scrolls and filters rather than dumping
   // every row inline).
@@ -540,16 +551,25 @@ export function CreateExtraWorkPage({
   // Neutralise a stale selection (from a previously chosen customer) without
   // a setState-in-effect: an id not in the current customer's active list
   // collapses to "" for both the dropdown value and the payload.
+  // Sprint 186 — both are REQUIRED now, so an id that does not belong to
+  // the current customer falls back to that customer's FIRST label
+  // rather than to "". Every customer is seeded one of each when it is
+  // created, so the fallback always exists; "" would render a blank
+  // select on a field that cannot be left blank.
   const effectiveDepartmentId = currentDepartments.some(
     (d) => String(d.id) === departmentId,
   )
     ? departmentId
-    : "";
+    : currentDepartments.length > 0
+      ? String(currentDepartments[0].id)
+      : "";
   const effectiveWorkTypeId = currentWorkTypes.some(
     (w) => String(w.id) === workTypeId,
   )
     ? workTypeId
-    : "";
+    : currentWorkTypes.length > 0
+      ? String(currentWorkTypes[0].id)
+      : "";
 
   // The cart is "previewable" once a building + customer are chosen and
   // every line carries a service, a positive quantity, and a date —
@@ -1000,9 +1020,24 @@ export function CreateExtraWorkPage({
   // Applied upstream of BOTH the category filter and the search, so a
   // customer cannot reach past it by typing a name.
   const catalogForActor = useMemo(() => {
-    if (!isCustomerActor) return services;
+    // A service with no agreed price for THIS customer is not orderable:
+    // it has no price to order at. The provider used to see the whole
+    // catalog here, so a customer with no price list at all still showed
+    // a full dropdown of things that could not be ordered -- the owner
+    // hit exactly that on City Office Rotterdam.
+    //
+    // NO exception, not even in quote mode, and the owner was explicit
+    // about why: a customer must never be shown something that was not
+    // entered for them. Either there is an agreement with a price, or
+    // the line is written as Custom -- which is exactly what the Custom
+    // option at the bottom of this picker is for, and what carries an
+    // unpriced request into the proposal flow.
+    //
+    // The SAME rule applies to the provider and the super admin. Two
+    // different catalogs for two audiences is how the two of them end up
+    // discussing different lists on one phone call.
     return services.filter((svc) => agreedPriceByServiceId.has(svc.id));
-  }, [services, isCustomerActor, agreedPriceByServiceId]);
+  }, [services, agreedPriceByServiceId]);
 
   const searchMatches = useMemo(() => {
     if (!serviceSearchTerm) return null;
@@ -1379,6 +1414,8 @@ export function CreateExtraWorkPage({
           : {}),
         urgency: form.urgency,
         preferred_date: form.preferred_date || null,
+        planned_end_date: form.planned_end_date || null,
+        deadline: form.deadline || null,
         // Sprint 128 — optional per-customer labels. `effective*` collapses a
         // stale (foreign-customer) selection to "" so it can never reach here.
         ...(effectiveDepartmentId
@@ -1387,6 +1424,11 @@ export function CreateExtraWorkPage({
         ...(effectiveWorkTypeId
           ? { work_type: Number(effectiveWorkTypeId) }
           : {}),
+        // Sprint 180 §3 — always sent (never omitted): the control has
+        // no unset state, so there is no case where "leave it to the
+        // server" and "the operator chose BUILDING" mean different
+        // things.
+        billed_to: billedTo,
         // Send the validated intent (a member of the latest preview's
         // allowed_intents). Omitted when no fresh preview exists: the
         // backend then derives a safe default — identical to the
@@ -1703,7 +1745,7 @@ export function CreateExtraWorkPage({
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="ew-department">
-                  {t("create.field_department")}
+                  {t("create.field_department")} *
                 </label>
                 <select
                   id="ew-department"
@@ -1713,10 +1755,19 @@ export function CreateExtraWorkPage({
                   onChange={(event) => setDepartmentId(event.target.value)}
                   disabled={currentDepartments.length === 0}
                 >
-                  <option value="">{t("create.field_department_none")}</option>
+                  {/* Sprint 186 — the field is required, so there is no
+                      empty CHOICE; but until a customer is picked there is
+                      nothing to choose from, and an empty dropdown reads
+                      as broken. A disabled placeholder says which step
+                      comes first instead. */}
+                  {currentDepartments.length === 0 && (
+                    <option value="">
+                      {t("create.field_label_pick_customer")}
+                    </option>
+                  )}
                   {currentDepartments.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {d.name}
+                      {customerLabelName(d.name, t)}
                     </option>
                   ))}
                 </select>
@@ -1728,7 +1779,7 @@ export function CreateExtraWorkPage({
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="ew-work-type">
-                  {t("create.field_work_type")}
+                  {t("create.field_work_type")} *
                 </label>
                 <select
                   id="ew-work-type"
@@ -1738,10 +1789,14 @@ export function CreateExtraWorkPage({
                   onChange={(event) => setWorkTypeId(event.target.value)}
                   disabled={currentWorkTypes.length === 0}
                 >
-                  <option value="">{t("create.field_work_type_none")}</option>
+                  {currentWorkTypes.length === 0 && (
+                    <option value="">
+                      {t("create.field_label_pick_customer")}
+                    </option>
+                  )}
                   {currentWorkTypes.map((w) => (
                     <option key={w.id} value={w.id}>
-                      {w.name}
+                      {customerLabelName(w.name, t)}
                     </option>
                   ))}
                 </select>
@@ -1750,6 +1805,42 @@ export function CreateExtraWorkPage({
                     {t("create.field_work_type_empty")}
                   </span>
                 )}
+              </div>
+            </div>
+            {/* Sprint 180 §3 — who pays for this one.
+                Asked HERE, in the parent section next to the building
+                and the customer, because those are the two things it
+                chooses between: the answer is only meaningful once you
+                can see both names on screen.
+                This page IS both create surfaces — the customer-facing
+                one (a CUSTOMER_USER, customer and building fixed by
+                their own access) and the provider-facing one (the
+                pickers above) — so a single control serves both, and
+                both post the same `billed_to` to the same endpoint.
+                Two options and no empty first option, because there is
+                no "unset": the field is non-null server-side with
+                BUILDING as its default, which is the honest answer 99%
+                of the time rather than a placeholder. */}
+            <div className="form-2col">
+              <div className="field">
+                <label className="field-label" htmlFor="ew-billed-to">
+                  {t("create.field_billed_to")}
+                </label>
+                <select
+                  id="ew-billed-to"
+                  data-testid="extra-work-create-billed-to"
+                  className="field-select"
+                  value={billedTo}
+                  onChange={(event) =>
+                    setBilledTo(event.target.value as ExtraWorkBilledTo)
+                  }
+                >
+                  <option value="BUILDING">{t("billed_to.building")}</option>
+                  <option value="CUSTOMER">{t("billed_to.customer")}</option>
+                </select>
+                <span className="muted small">
+                  {t("create.field_billed_to_hint")}
+                </span>
               </div>
             </div>
           </div>
@@ -1792,9 +1883,17 @@ export function CreateExtraWorkPage({
                   // provider's headings in front of a customer user.
                   disabled={!form.customer}
                 >
-                  <option value="">
-                    {t("create.catalog_filter.all_categories")}
-                  </option>
+                  {/* Sprint 186 §1 — "All categories" is filter wording
+                      on a field that files the request. There is no
+                      "General" ROW to select: `service_category` and
+                      `price_folder` are both nullable and nothing
+                      provisions a default one, so the empty value stays
+                      empty on the wire and only its LABEL changes. The
+                      word is the one this system already uses for the
+                      unclassified case — `customers/signals.py` seeds
+                      every customer an "Algemeen" department and work
+                      type — rather than a second name for one idea. */}
+                  <option value="">{t("create.field_category_none")}</option>
                   {/* Sprint 145 — ONE flat list: the categories that
                       belong to the selected customer. Archived ones are
                       excluded upstream (`currentFolders`), so the form
@@ -1885,6 +1984,44 @@ export function CreateExtraWorkPage({
                   update("preferred_date", event.target.value)
                 }
               />
+            </div>
+
+            {/* Sprint 174 §1 — the planned WINDOW's end and the
+                DEADLINE. Sprint 173 added both fields and no form ever
+                offered them, so every record was created with them
+                empty. */}
+            <div className="field">
+              <label className="field-label" htmlFor="ew-planned-end">
+                {t("detail.plannedEnd")}
+              </label>
+              <input
+                id="ew-planned-end"
+                className="field-input"
+                type="date"
+                value={form.planned_end_date}
+                onChange={(event) =>
+                  update("planned_end_date", event.target.value)
+                }
+              />
+              <p className="muted small" style={{ margin: "4px 0 0" }}>
+                {t("create.plannedEndHint")}
+              </p>
+            </div>
+
+            <div className="field">
+              <label className="field-label" htmlFor="ew-deadline">
+                {t("detail.deadline")}
+              </label>
+              <input
+                id="ew-deadline"
+                className="field-input"
+                type="date"
+                value={form.deadline}
+                onChange={(event) => update("deadline", event.target.value)}
+              />
+              <p className="muted small" style={{ margin: "4px 0 0" }}>
+                {t("create.deadlineHint")}
+              </p>
             </div>
           </div>
 

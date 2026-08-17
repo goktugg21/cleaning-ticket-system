@@ -1,7 +1,9 @@
-import type { CSSProperties, FormEvent } from "react";
+import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Layers, Plus, RefreshCw } from "lucide-react";
+// Sprint 180 §3 — `CSSProperties` and `Layers` left with
+// `ExtraWorkOriginPill`; they were only ever used by it.
+import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { getMySlots } from "../api/admin";
@@ -13,6 +15,7 @@ import {
 import { getInboxUnreadCount } from "../api/inbox";
 import { listNotifications, notificationHref } from "../api/notifications";
 import type {
+  AssignmentCandidate,
   ExtraWorkRequestList,
   ExtraWorkStats,
   Notification,
@@ -22,8 +25,14 @@ import type {
   TicketStatsByBuildingResponse,
   TicketStatsByBuildingRow,
   TicketStatus,
+  WorkCategory,
 } from "../api/types";
-import { bulkConfirmTickets } from "../api/tickets";
+import {
+  bulkAssignTickets,
+  bulkConfirmTickets,
+  listTicketAssignmentCandidates,
+  listWorkCategories,
+} from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
 import {
   canAccessBilling,
@@ -31,10 +40,22 @@ import {
   isProviderManagementRole,
   isStaffRole,
 } from "../auth/permissions";
+import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
+import { EditModeToggle } from "../components/EditModeToggle";
+import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { SLABadge } from "../components/sla/SLABadge";
+import { StatusTiles } from "../components/StatusTiles";
 import { useToast } from "../components/ToastProvider";
+import { useEditMode } from "../lib/useEditMode";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
+import { ticketStatusLabelKey } from "../lib/enumLabels";
+import {
+  TICKET_LIST_STATUSES,
+  ticketListStatusParam,
+  visibleTicketTotal,
+} from "../lib/ticketStatus";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
+import { StatusBadge } from "../components/StatusBadge";
 
 type SLAFilterValue =
   | ""
@@ -52,73 +73,86 @@ const PAGE_SIZE = 25;
 // Sprint 12: dashboard data refreshes silently every minute.
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
 
-const STATUS_OPTIONS: TicketStatus[] = [
-  "OPEN",
-  "IN_PROGRESS",
-  // Sprint 7 — surface the manager-review queue so provider management
-  // can preset the list to the bulk-confirm view ("te bevestigen").
-  "WAITING_MANAGER_REVIEW",
-  "WAITING_CUSTOMER_APPROVAL",
-  "APPROVED",
-  "REJECTED",
-  "CLOSED",
-  "REOPENED_BY_ADMIN",
-];
+// Sprint 182 §1 — the hand-written eight-status array that used to sit
+// here is gone. It listed eight of the nine `TicketStatus` members, and
+// nothing warned anyone: the chips omitted `CONVERTED_TO_EXTRA_WORK`
+// while the "All" tile counted it, which is the owner's "ALL says 142
+// but the chips add up to 138". `lib/ticketStatus.ts` derives the list
+// from a `Record` over the union, so a ninth status now fails the
+// compiler instead of quietly vanishing from a screen.
+
+/**
+ * Sprint 183 §1 — ONE chip, not three segments and a sub-page.
+ *
+ * The owner: "there is no need for both a chargeable-work filter on the
+ * tickets page AND a chargeable-work sub-page. Just a chip on tickets to
+ * show regular tickets only."
+ *
+ * So the sub-page, its route and its nav entry are gone, and what is
+ * left is exactly what he asked for: the list shows everything by
+ * default, and one labelled chip narrows it to ordinary tickets. Off is
+ * always one click away, which is the house rule — nothing hidden with
+ * no way back.
+ *
+ * `chargeable` survives as a PARSED value with no control that sets it,
+ * so a bookmarked `?work=chargeable` still resolves rather than throwing;
+ * it renders as "everything", which is the least surprising fallback for
+ * a link to a view that no longer exists.
+ */
+type WorkTypeFilter = "all" | "tickets" | "chargeable";
 
 // (RF-16 removed the dashboard Extra Work status breakdown — the EW
 // status vocabulary now lives with the list on ExtraWorkListPage.)
 
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 
-const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "">[] = [
+// Sprint 180 §1 — how long a ticket may sit in WAITING_CUSTOMER_APPROVAL
+// before the dashboard calls it overdue. Mirrors
+// `backend/tickets/auto_close.py::STALLED_CUSTOMER_APPROVAL_DAYS`; the
+// backend filter takes any number of days, this is only what the UI
+// asks for. Such work is DONE and unbillable — `is_earned` needs
+// CLOSED, and CLOSED is downstream of the customer's answer — so a
+// silent queue here is lost revenue, not just a stale list.
+const STALLED_APPROVAL_DAYS = 14;
+
+/**
+ * Sprint 181 §4 — `historical` is gone from the UI.
+ *
+ * It meant "this ticket predates the SLA engine": a migration artefact,
+ * not something an operator should ever have to read or reason about.
+ * The owner has confirmed the SLA engine is here to stay, and on
+ * crmtest all 79 historical tickets are already soft-deleted, so the
+ * option now matches nothing at all — a filter that can only return an
+ * empty list is worse than no filter.
+ *
+ * A UI removal only. `HISTORICAL` stays in the backend constant and in
+ * `sla_backfill`, which still writes it, and stays in `SLADisplayState`
+ * so a legacy row that does surface renders as something rather than
+ * breaking the badge.
+ */
+const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "" | "historical">[] = [
   "on_track",
   "at_risk",
   "breached",
   "paused",
   "completed",
-  "historical",
 ];
 
 function priorityCellClass(priority: string): string {
   return `cell-tag cell-tag-${priority.toLowerCase()}`;
 }
 
-function statusCellClass(status: TicketStatus): string {
-  return `cell-tag cell-tag-${status.toLowerCase()}`;
-}
+// Sprint 182 §2 — `statusCellClass` is gone with the two cells that
+// called it. It derived a CSS class by lowercasing the enum, which is a
+// second colour vocabulary beside `StatusBadge`'s tone map: the two
+// agreed for six statuses and quietly disagreed for the rest.
 
-// SoT (Osius_Source_of_Truth_FINAL_2026-05-30) §1.4 + §7.1 — an
-// Extra Work-origin ticket "must not disappear into the normal ticket
-// list" and the dashboard "must make Extra Work origin impossible to
-// miss". This single, prominent pill marks an EW-spawned ticket
-// identically in every dashboard rendering (the operational queue, the
-// fuller ticket table, the mobile cards) and deep-links to the parent
-// Extra Work request. `stopPropagation` keeps the click from also
-// triggering the row/card's own navigation to the ticket.
-function ExtraWorkOriginPill({
-  ewId,
-  testId,
-  style,
-}: {
-  ewId: number;
-  testId: string;
-  style?: CSSProperties;
-}) {
-  const { t } = useTranslation("dashboard");
-  return (
-    <Link
-      to={`/extra-work/${ewId}`}
-      className="work-type-pill work-type-pill-extra-work work-type-pill-link"
-      title={t("ticket_row_extra_work_origin_title")}
-      data-testid={testId}
-      style={style}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <Layers size={12} strokeWidth={2.5} aria-hidden />
-      {t("ops_type_extra_work")}
-    </Link>
-  );
-}
+// Sprint 180 §3 — `ExtraWorkOriginPill` moved to
+// `components/ExtraWorkOriginPill.tsx`. It lived here as a local
+// component, which is why the dashboard's ticket table showed a
+// ticket's Extra Work origin and the agenda and meldingen lists showed
+// nothing. Same markup, same testids, same translation keys — one
+// definition, three consumers.
 
 /**
  * Sprint 28 Batch 13 (rework) — unified operations dashboard.
@@ -146,17 +180,53 @@ function ExtraWorkOriginPill({
  */
 export function DashboardPage({
   variant = "dashboard",
+  customerId,
+  hideHeader = false,
 }: {
-  variant?: "dashboard" | "tickets-page";
+  /** Sprint 183 §1 — the `"chargeable-work"` variant is gone with its
+   *  sub-page. The narrowing it stood for is the list's own chip now. */
+  /** Sprint 181 §5 / restored at the Sprint 183 integration —
+   *  `"chargeable-work"` is this same page narrowed to tickets born from
+   *  an Extra Work. A variant rather than a second implementation, so the
+   *  two can never drift. Sprint 183 deleted it on a misread instruction:
+   *  the owner asked for the redundant CHIP to go, not the page. */
+  variant?: "dashboard" | "tickets-page" | "chargeable-work";
+  /** Sprint 169 §8 — mounted INSIDE a customer: the list is narrowed to
+   *  that customer and everything else is identical.
+   *
+   *  `CustomerTicketsPage` was a 295-line read-only re-implementation of
+   *  this list with no selection, no `MultiSelectToolbar` and no bulk
+   *  actions, because the two were independently maintained copies. The
+   *  owner's rule is that a list behaves the same whether you reach it
+   *  from the sidebar or from inside a customer, so the customer page
+   *  now mounts THIS list rather than keeping a second one.
+   *
+   *  Narrowing is a UI convenience: the request carries `customer=<id>`
+   *  and the SERVER still decides what the actor may see. */
+  customerId?: number;
+  /** The customer page draws its own header. */
+  hideHeader?: boolean;
 } = {}) {
-  const isTicketsPage = variant === "tickets-page";
+  const isChargeableWork = variant === "chargeable-work";
+  const isTicketsPage = variant === "tickets-page" || isChargeableWork;
   const navigate = useNavigate();
   const { me } = useAuth();
   const { push } = useToast();
   const { t } = useTranslation(["dashboard", "common"]);
   const userRole = me?.role ?? null;
+  // Sprint 182 §2 — ONE word per status, from the source every other
+  // screen reads.
+  //
+  // This page built its own i18n key by lowercasing the enum, which
+  // reached the OLDER `common:status.*` block — where APPROVED is the
+  // bare word "Approved". That bare word labels at least five different
+  // things in this product, and on a ticket it means one specific thing:
+  // the customer accepted the finished WORK. `ticket_status.approved`
+  // already says exactly that ("Work approved" / "Werk akkoord") and is
+  // what `StatusBadge` has rendered on the Extra Work list for a sprint.
+  // Two screens showing one fact now show one string.
   const tStatus = (status: TicketStatus) =>
-    t(`common:status.${status.toLowerCase()}`);
+    t(ticketStatusLabelKey(status), { ns: "common" });
   const tPriority = (priority: string) =>
     t(`common:priority.${priority.toLowerCase()}`);
   const tSLAFilter = (value: Exclude<SLAFilterValue, "">) =>
@@ -185,14 +255,86 @@ export function DashboardPage({
   // presets so the dashboard's attention cards can deep-link into the
   // full list with the right filter applied (read once at mount; the
   // dropdowns own the state afterwards).
+  // Sprint 158 §2 — the TICKETS page opens on what has not been
+  // actioned. `OPEN` is the genuinely-untouched status in
+  // `TicketStatus`: every spawn path creates a ticket OPEN and writes
+  // the initial history row at that status, so nothing has happened to
+  // an OPEN ticket yet.
+  //
+  // The DASHBOARD variant keeps "" — it is a summary of everything by
+  // definition, and defaulting it would make the dashboard disagree with
+  // its own attention cards.
+  //
+  // `?status=` still wins, and `?status=ALL` is how a link asks for
+  // everything, so the existing deep links from the dashboard widgets
+  // are unaffected.
+  /** Sprint 185 E §1 — narrow the meldingen list to one KIND OF WORK.
+   *  The filter is the whole point of the catalog: a taxonomy whose
+   *  values never reach the filters is a dropdown. */
+  // Sprint 187 §5 — `""` is no filter, a number is one category, and
+  // "none" is the backend's `category__isnull` (offered by
+  // `TicketFilter` since Sprint 185 with nothing in the UI emitting
+  // it). A sentinel rather than a second piece of state: one value
+  // decides the list params, the stats params and the "filters are
+  // active" test, so the three cannot disagree.
+  const [categoryFilter, setCategoryFilter] = useState<number | "" | "none">("");
+  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
-    return raw && (STATUS_OPTIONS as string[]).includes(raw)
-      ? (raw as TicketStatus)
-      : "";
+    if (raw === "ALL") return "";
+    if (raw && (TICKET_LIST_STATUSES as readonly string[]).includes(raw)) {
+      return raw as TicketStatus;
+    }
+    return variant === "tickets-page" ? "OPEN" : "";
+  });
+  /**
+   * Sprint 183 §1 — `?work=tickets`, URL-backed so the view survives a
+   * refresh and can be linked to. `?work=chargeable` from an old
+   * bookmark parses to "all": the view it named no longer exists, and
+   * showing everything is friendlier than showing nothing.
+   */
+  const [workTypeFilter, setWorkTypeFilter] = useState<WorkTypeFilter>(() => {
+    // The Chargeable work sub-page IS this page pinned to chargeable
+    // work, so the route decides the filter and the chip below never
+    // offers "chargeable" as a third state -- that redundancy is the
+    // thing the owner asked to remove.
+    if (variant === "chargeable-work") return "chargeable";
+    const raw = new URLSearchParams(window.location.search).get("work");
+    if (raw === "all" || raw === "tickets") return raw;
+    // The Tickets page is the ORDINARY tickets page. "Tickets only" was
+    // a confusing name for a chip on a page where everything is already
+    // a ticket -- and chargeable work has its own page, so showing it in
+    // both was the duplication the owner objected to. Default: ordinary
+    // tickets. The chip ADDS chargeable work back for the rare view of
+    // everything at once.
+    return variant === "tickets-page" ? "tickets" : "all";
   });
   const [unassignedFilter, setUnassignedFilter] = useState(
     () => new URLSearchParams(window.location.search).get("unassigned") === "1",
+  );
+  // Sprint 180 §1 — the "customer never answered" preset. Deep-linked
+  // from the dashboard's approval-overdue attention row; shows a
+  // clearable chip like every other preset on this page.
+  const [stalledApprovalFilter, setStalledApprovalFilter] = useState(
+    () => new URLSearchParams(window.location.search).get("stalled") === "1",
+  );
+  // Sprint 180 §2 — "completed extra works should not show inside
+  // tickets."
+  //
+  // ON by default because that is what was asked, and because a
+  // provider looking at the ticket list is looking for work to do.
+  // Clearable because the house rule is that nothing is hidden with no
+  // way back (the Sprint 158 escape-hatch shape): the chip below states
+  // that rows are hidden and turns it off in one click.
+  //
+  // A URL opt-out (`?finished_extra_work=1`) exists so a link can point
+  // straight at the unhidden list.
+  const [hideFinishedExtraWork, setHideFinishedExtraWork] = useState(
+    () =>
+      new URLSearchParams(window.location.search).get(
+        "finished_extra_work",
+      ) !== "1",
   );
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
   const [searchInput, setSearchInput] = useState("");
@@ -208,19 +350,26 @@ export function DashboardPage({
   );
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
+  // Sprint 159 §2 — assign managers AND workers to the selected tickets
+  // in one dialog and one request, the same surface the Extra Work list
+  // has had since Sprint 157.
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState("");
+  const [assignCandidates, setAssignCandidates] = useState<{
+    WORKER: AssignmentCandidate[];
+    MANAGER: AssignmentCandidate[];
+  }>({ WORKER: [], MANAGER: [] });
+
   const [searchParams, setSearchParams] = useSearchParams();
   const slaFilter: SLAFilterValue = (() => {
     const raw = searchParams.get("sla") || "";
-    const allowed: SLAFilterValue[] = [
-      "",
-      "on_track",
-      "at_risk",
-      "breached",
-      "paused",
-      "completed",
-      "historical",
-    ];
-    return allowed.includes(raw as SLAFilterValue)
+    // Sprint 181 §4 — validated against the OFFERED set, so a stale
+    // `?sla=historical` bookmark resolves to "no filter" (the full list)
+    // rather than to a state with no control to clear it. Derived from
+    // `SLA_FILTER_VALUES` rather than re-listed, so removing an option
+    // there cannot leave a reachable value here.
+    return (SLA_FILTER_VALUES as string[]).includes(raw)
       ? (raw as SLAFilterValue)
       : "";
   })();
@@ -255,17 +404,71 @@ export function DashboardPage({
 
   const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
+  // Sprint 185 E §1 — the catalog behind the filter above. Loaded once
+  // on the tickets page; non-fatal, and the filter is simply not
+  // rendered when the company has no categories yet.
+  useEffect(() => {
+    if (!isTicketsPage) return;
+    let cancelled = false;
+    listWorkCategories()
+      .then((rows) => {
+        if (!cancelled) setWorkCategories(rows);
+      })
+      .catch(() => {
+        /* non-fatal: the list still reads without its filter */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isTicketsPage]);
+
   const queryParams = useMemo(() => {
     const params: Record<string, string | number> = { page };
     if (statusFilter) params.status = statusFilter;
+    // Sprint 182 §1 — the ROWS agree with the chips above them.
+    //
+    // A converted ticket is not on this list (the owner's decision: its
+    // work did not finish, it became an Extra Work), so with no status
+    // chosen the query asks for exactly the statuses the chips count.
+    // Server-side via `status__in`, because filtering the current page
+    // in the client would leave `count` — and therefore the pager and
+    // the "All" tile — describing a different set than the rows.
+    else if (isTicketsPage) params.status__in = ticketListStatusParam();
     if (priorityFilter) params.priority = priorityFilter;
+    // Sprint 185 E §1 — server-side, so it survives pagination instead
+    // of filtering one page while `count` describes another set.
+    if (categoryFilter === "none") params.category__isnull = "true";
+    else if (categoryFilter !== "") params.category = categoryFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
     if (slaFilter) params.sla = slaFilter;
     // RF-16 — unassigned preset (attention-card deep link). Uses the
     // backend filterset's assigned_to isnull lookup.
     if (unassignedFilter) params.assigned_to__isnull = "true";
+    // Sprint 180 §1 — approval-overdue preset. The backend filter is
+    // the authority on what "overdue" means (it ages
+    // `sent_for_approval_at`, the column the transition stamps); the
+    // page only supplies the threshold.
+    if (stalledApprovalFilter) {
+      params.awaiting_customer_approval_days = STALLED_APPROVAL_DAYS;
+    }
+    // Sprint 180 §2 — hide finished Extra Work. Sent only on the
+    // Tickets page: it is a list-reading preference, and the dashboard
+    // widgets that share this component's fetch helpers count totals.
+    if (isTicketsPage && hideFinishedExtraWork) {
+      params.hide_finished_extra_work = "true";
+    }
     // M6.3 — "my work" deep-links. Only applied on the Tickets page
     // (where the clear chip is shown).
+    // The fixed customer, when this list is mounted inside one.
+    if (customerId !== undefined) params.customer = customerId;
+    // Sprint 183 §1 — the work-type narrowing, server-side
+    // (`TicketFilter.is_extra_work`) so it survives pagination instead
+    // of filtering one page. Sprint 183 §2 sends the SAME parameter to
+    // `/tickets/stats/`, which is what stopped the chips showing dashes.
+    if (isTicketsPage) {
+      if (workTypeFilter === "chargeable") params.is_extra_work = "true";
+      else if (workTypeFilter === "tickets") params.is_extra_work = "false";
+    }
     if (isTicketsPage) {
       if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
       const typeParam = searchParams.get("type");
@@ -275,15 +478,20 @@ export function DashboardPage({
     }
     return params;
   }, [
+    customerId,
     page,
     statusFilter,
     priorityFilter,
+    categoryFilter,
     searchActive,
     slaFilter,
     unassignedFilter,
+    stalledApprovalFilter,
+    hideFinishedExtraWork,
     searchParams,
     me,
     isTicketsPage,
+    workTypeFilter,
   ]);
 
   const loadTickets = useCallback(async () => {
@@ -312,14 +520,28 @@ export function DashboardPage({
     loadTickets();
   }, [loadTickets]);
 
-  // Sprint 7 — bulk manager-confirm. The affordance only appears for
-  // provider management while the list is filtered to the
-  // WAITING_MANAGER_REVIEW queue. The submittable set is always derived
-  // from the currently-visible rows, so changing filters/pages can
-  // never bulk-confirm a ticket that is no longer on screen.
-  const bulkMode =
-    isProviderManagementRole(userRole) &&
-    statusFilter === "WAITING_MANAGER_REVIEW";
+  // Sprint 7 — bulk manager-confirm, for provider management. The
+  // submittable set is always derived from the currently-visible rows,
+  // so changing filters or pages can never bulk-confirm a ticket that is
+  // no longer on screen.
+  //
+  // Sprint 159 §2 — the selection is behind the Sprint 155 §4 Edit gate
+  // now, like every other list. The hook supplies only the MODE: this
+  // page owns `selectedIds` because the set may legitimately span pages,
+  // and adopting the hook's own selection (filtered to the visible rows)
+  // would silently drop the off-screen half.
+  //
+  // The gate also widens what selection is FOR. It used to exist only in
+  // the WAITING_MANAGER_REVIEW queue, because bulk-confirm was the only
+  // thing it fed; assigning people is not queue-specific, so the mode is
+  // now available wherever a provider manager is looking and the
+  // CONFIRM button is what stays queue-specific.
+  const edit = useEditMode(
+    isProviderManagementRole(userRole) ? tickets.map((t) => t.id) : [],
+    { onExit: () => setSelectedIds(new Set<number>()) },
+  );
+  const bulkMode = edit.editMode;
+  const canBulkConfirm = statusFilter === "WAITING_MANAGER_REVIEW";
   const selectedVisibleIds = useMemo(
     () =>
       tickets
@@ -355,6 +577,71 @@ export function DashboardPage({
       return next;
     });
   }, [tickets]);
+
+  /** Sprint 159 §2 — the candidates for BOTH roles, from the server.
+   *
+   *  With several tickets selected the offer is the INTERSECTION:
+   *  somebody eligible at one building but not another would be
+   *  rejected for the whole batch (the endpoint is all-or-nothing), so
+   *  offering them would be offering a guaranteed failure. Same rule the
+   *  Extra Work list applies. */
+  const loadAssignCandidates = useCallback(async (ticketIds: number[]) => {
+    if (ticketIds.length === 0) {
+      setAssignCandidates({ WORKER: [], MANAGER: [] });
+      return;
+    }
+    const forRole = async (role: "WORKER" | "MANAGER") => {
+      const lists = await Promise.all(
+        ticketIds.map((id) => listTicketAssignmentCandidates(id, role)),
+      );
+      const [first, ...rest] = lists;
+      return first.filter((person) =>
+        rest.every((list) => list.some((other) => other.id === person.id)),
+      );
+    };
+    try {
+      const [workers, managers] = await Promise.all([
+        forRole("WORKER"),
+        forRole("MANAGER"),
+      ]);
+      setAssignCandidates({ WORKER: workers, MANAGER: managers });
+    } catch (err) {
+      setAssignError(getApiError(err));
+      setAssignCandidates({ WORKER: [], MANAGER: [] });
+    }
+  }, []);
+
+  const openAssign = useCallback(async () => {
+    setAssignError("");
+    setAssignOpen(true);
+    await loadAssignCandidates(selectedVisibleIds);
+  }, [loadAssignCandidates, selectedVisibleIds]);
+
+  const runAssign = useCallback(
+    async (managerIds: number[], workerIds: number[]) => {
+      setAssignBusy(true);
+      setAssignError("");
+      try {
+        const result = await bulkAssignTickets({
+          tickets: selectedVisibleIds,
+          managers: managerIds,
+          workers: workerIds,
+          mode: "assign",
+        });
+        setAssignOpen(false);
+        edit.exit();
+        push({
+          variant: "success",
+          title: t("common:assign_people.assigned", { count: result.created }),
+        });
+      } catch (err) {
+        setAssignError(getApiError(err));
+      } finally {
+        setAssignBusy(false);
+      }
+    },
+    [selectedVisibleIds, edit, push, t],
+  );
 
   const handleBulkConfirm = useCallback(async () => {
     const ids = tickets
@@ -397,12 +684,53 @@ export function DashboardPage({
 
   const loadStats = useCallback(async () => {
     try {
-      const response = await api.get<TicketStats>("/tickets/stats/");
+      // Sprint 180 §2 — the status tiles sit directly above the rows
+      // they count, so they must be counting the same rows. When the
+      // Tickets page is hiding finished Extra Work, the stats request
+      // carries the same flag and the endpoint applies the same
+      // exclusion. The DASHBOARD is a summary of everything and sends
+      // nothing, so its KPI strip is unchanged.
+      // Sprint 183 integration — the chips also carry the WORK-TYPE
+      // narrowing now. Sprint 183 gave `/tickets/stats/` the same
+      // `is_extra_work` the list takes, but the page never sent it and
+      // the tiles kept the old "we cannot know" em-dash fallback. Once
+      // the Tickets page started defaulting to ordinary tickets, that
+      // fallback fired on the DEFAULT view and every chip read as a dash.
+      const statsParams: Record<string, string> = {};
+      if (isTicketsPage && hideFinishedExtraWork)
+        statsParams.hide_finished_extra_work = "true";
+      if (isTicketsPage && workTypeFilter === "chargeable")
+        statsParams.is_extra_work = "true";
+      else if (isTicketsPage && workTypeFilter === "tickets")
+        statsParams.is_extra_work = "false";
+      // The customer's own page pins the list to that customer; the
+      // chips must be pinned to the same thing or they describe the
+      // whole company while sitting above one customer's rows.
+      if (customerId !== undefined) statsParams.customer = String(customerId);
+      // Sprint 187 §5 — the chips count the rows they sit above. Sprint
+      // 185 taught the category dropdown to the LIST only, so choosing a
+      // category narrowed the rows and left the chips describing the
+      // whole company: the same defect as the work-type dash directly
+      // above and the customer's "25" beside it, one filter later.
+      if (isTicketsPage) {
+        if (categoryFilter === "none") statsParams.category__isnull = "true";
+        else if (categoryFilter !== "")
+          statsParams.category = String(categoryFilter);
+      }
+      const response = await api.get<TicketStats>("/tickets/stats/", {
+        params: Object.keys(statsParams).length ? statsParams : undefined,
+      });
       setStats(response.data);
     } catch {
       // KPI cards fall back to "—" placeholders if the endpoint fails.
     }
-  }, []);
+  }, [
+    isTicketsPage,
+    hideFinishedExtraWork,
+    workTypeFilter,
+    customerId,
+    categoryFilter,
+  ]);
 
   // M6.3 — "my work" summary counts (provider-management only). Each
   // count is the PaginatedResponse.count for a created_by=me query;
@@ -481,6 +809,17 @@ export function DashboardPage({
     count: number;
     rows: TicketList[];
   } | null>(null);
+  // Sprint 180 §1 — finished work the customer has not answered on.
+  // This is the edge case auto-close CANNOT fix: nobody approves, so
+  // nothing closes, so `is_earned` never turns true and the work is
+  // never invoiced. We do not manufacture the approval on a timer —
+  // approving on the customer's behalf is a money decision and the
+  // system already has a reasoned, audited route for it. We make the
+  // queue visible instead, so somebody chases it.
+  const [attnStalledApproval, setAttnStalledApproval] = useState<{
+    count: number;
+    rows: TicketList[];
+  } | null>(null);
   const [attnActivity, setAttnActivity] = useState<Notification[] | null>(
     null,
   );
@@ -548,7 +887,7 @@ export function DashboardPage({
   const loadAttention = useCallback(async () => {
     if (isTicketsPage) return;
     try {
-      const [rev, una, act, recentTk, recentEw] = await Promise.all([
+      const [rev, una, stalled, act, recentTk, recentEw] = await Promise.all([
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: { status: "WAITING_MANAGER_REVIEW", page_size: 3 },
         }),
@@ -556,6 +895,15 @@ export function DashboardPage({
           params: {
             status: "OPEN",
             assigned_to__isnull: "true",
+            page_size: 3,
+          },
+        }),
+        // Sprint 180 §1 — the approval-overdue queue. The backend
+        // filter already narrows to WAITING_CUSTOMER_APPROVAL, so no
+        // status param is needed here.
+        api.get<PaginatedResponse<TicketList>>("/tickets/", {
+          params: {
+            awaiting_customer_approval_days: STALLED_APPROVAL_DAYS,
             page_size: 3,
           },
         }),
@@ -570,6 +918,10 @@ export function DashboardPage({
       ]);
       setAttnReview({ count: rev.data.count, rows: rev.data.results });
       setAttnUnassigned({ count: una.data.count, rows: una.data.results });
+      setAttnStalledApproval({
+        count: stalled.data.count,
+        rows: stalled.data.results,
+      });
       setAttnActivity(act.results.slice(0, 3));
       setRecentTickets(recentTk.data.results.slice(0, 5));
       setRecentExtraWork(recentEw.results.slice(0, 5));
@@ -646,6 +998,7 @@ export function DashboardPage({
   function clearFilters() {
     setPage(1);
     setStatusFilter("");
+    setCategoryFilter("");
     setPriorityFilter("");
     setSearchInput("");
     setSearchActive("");
@@ -656,7 +1009,8 @@ export function DashboardPage({
   }
 
   const hasActiveFilters = Boolean(
-    statusFilter || priorityFilter || searchActive || slaFilter ||
+    statusFilter || priorityFilter || categoryFilter !== "" ||
+      searchActive || slaFilter ||
       unassignedFilter,
   );
 
@@ -744,6 +1098,7 @@ export function DashboardPage({
 
   return (
     <div>
+      {!hideHeader && (
       <div className="page-header">
         <div>
           <nav className="breadcrumb" aria-label="Breadcrumb">
@@ -761,7 +1116,11 @@ export function DashboardPage({
             {isTicketsPage ? t("tickets_page.eyebrow") : t("eyebrow")}
           </div>
           <h2 className="page-title">
-            {isTicketsPage ? t("tickets_page.title") : t("title")}
+            {isChargeableWork
+              ? t("common:chargeable_work.title")
+              : isTicketsPage
+                ? t("tickets_page.title")
+                : t("title")}
           </h2>
           <p className="page-sub">
             {/* RF-16 — the dashboard loads no list, so the list-count
@@ -816,6 +1175,7 @@ export function DashboardPage({
           </Link>
         </div>
       </div>
+      )}
 
       {adminRequiredBanner && (
         <div
@@ -985,6 +1345,55 @@ export function DashboardPage({
                             </li>
                           ),
                         )}
+                      </ul>
+                    )}
+                  </li>
+                  {/* Sprint 180 §1 — finished work the customer never
+                      answered on. Unlike the row below it, this one IS
+                      provider-actionable (chase the customer, or record
+                      the approval on their behalf through the existing
+                      reasoned override), and unlike the rest of the
+                      list it is money: none of it can be invoiced until
+                      it closes. So it gets the warning tint. */}
+                  <li className="attn-item">
+                    <Link
+                      to={`/tickets?status=WAITING_CUSTOMER_APPROVAL&stalled=1`}
+                      className="attn-row"
+                      data-testid="attention-approval-overdue"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.approval_overdue_title", {
+                          days: STALLED_APPROVAL_DAYS,
+                        })}
+                      </span>
+                      <span
+                        className={attnBadge(
+                          attnStalledApproval?.count ?? null,
+                          true,
+                        )}
+                      >
+                        {fmt(attnStalledApproval?.count ?? null)}
+                      </span>
+                    </Link>
+                    {(attnStalledApproval?.rows ?? []).length > 0 && (
+                      <ul className="attn-sublist">
+                        {(attnStalledApproval?.rows ?? [])
+                          .slice(0, 3)
+                          .map((ticket) => (
+                            <li key={ticket.id}>
+                              <Link
+                                to={`/tickets/${ticket.id}`}
+                                className="attention-row"
+                              >
+                                <span className="attention-row-title">
+                                  {ticket.title}
+                                </span>
+                                <span className="muted small">
+                                  {formatDate(ticket.created_at)}
+                                </span>
+                              </Link>
+                            </li>
+                          ))}
                       </ul>
                     )}
                   </li>
@@ -1494,6 +1903,103 @@ export function DashboardPage({
         )}
 
         {isTicketsPage && (
+          <>
+        {/* Sprint 163 §2 — the status strip sits ABOVE the two-column
+            work-layout, not inside its narrow left column.
+
+            It used to live in `.dash-main`, which `work-layout`
+            sizes at 610px against a 340px side panel. Nine readable
+            tiles do not fit 610px at any padding, so the strip could
+            only ever wrap or scroll there however the tiles were
+            styled — Sprint 161 made it scroll, Sprint 163's grid
+            made it wrap, and both were treating the symptom. Full
+            content width was the actual instruction. */}
+        {/* Sprint 159 §3 — the same tiles the Extra Work list
+            uses. The owner asked for the pair to match and named
+            which way round.
+
+            The counts come from the SERVER: `/tickets/stats/`
+            already returns `by_status`, and the "Status
+            breakdown" panel in the side column has rendered
+            exactly these numbers since long before this sprint.
+            Reusing its source rather than inventing a second one
+            costs no extra request. Sprint 158's reasoning for
+            leaving the chips countless was right for the numbers
+            it had — the client holds one page — and that is
+            precisely why these come from the stats endpoint and
+            not from `tickets`. Until it resolves, `-1` renders
+            an em dash rather than a wrong number. */}
+        {/* Sprint 183 — ONE chip: "Tickets only". Pressed = ordinary
+            tickets; unpressed = everything, the default, always one click
+            away. The owner asked for the redundant CHARGEABLE chip to go,
+            not the Chargeable work sub-page — that page is the only way to
+            see chargeable work as a group and it stays. Sprint 183 read
+            the instruction the other way round and deleted the page; the
+            integration restored it. */}
+        {!isChargeableWork && (
+        <div className="work-strip" style={{ marginBottom: 12 }}>
+          <div className="work-strip-toggle" data-testid="tickets-work-type">
+            <button
+              type="button"
+              className={`btn btn-sm ${
+                workTypeFilter === "all" ? "btn-primary" : "btn-secondary"
+              }`}
+              aria-pressed={workTypeFilter === "all"}
+              data-testid="tickets-work-type-tickets"
+              onClick={() => {
+                const next_value =
+                  workTypeFilter === "all" ? "tickets" : "all";
+                setPage(1);
+                setSelectedIds(new Set<number>());
+                setWorkTypeFilter(next_value);
+                const next = new URLSearchParams(searchParams);
+                if (next_value === "tickets") next.delete("work");
+                else next.set("work", next_value);
+                setSearchParams(next, { replace: true });
+              }}
+            >
+              {t("work_type.include_chargeable")}
+            </button>
+          </div>
+        </div>
+        )}
+
+        {/* Sprint 182 §1/§4 — the counts and the rows describe the same
+            set, or the counts say they cannot know.
+
+            The stats request carries the SAME work-type and
+            hide-finished flags as the list, so the tiles count exactly
+            the rows beneath them. The em dash is now reserved for its
+            real meaning: the stats call itself failed. */}
+        <StatusTiles
+          tiles={TICKET_LIST_STATUSES.map((value) => ({
+            value,
+            // The page's OWN status label helper, the same one
+            // the dropdown below uses — a second labelling path
+            // here rendered raw enum names.
+            label: tStatus(value),
+            count: stats ? (stats.by_status[value] ?? 0) : -1,
+          }))}
+          active={statusFilter}
+          onChange={(value: string) => {
+            setStatusFilter(value as TicketStatus | "");
+            setPage(1);
+            setSelectedIds(new Set<number>());
+          }}
+          // "All" counts what the chips count: the same stats response,
+          // minus exactly the statuses this list does not show.
+          //
+          // It used to fall back to the list's own `count` under a
+          // work-type narrowing, and to an em dash when a status chip was
+          // also active — because the stats endpoint could not then be
+          // asked for a narrowed total. It can now (the request carries
+          // the same `is_extra_work`), so the fallbacks are gone: once the
+          // Tickets page began defaulting to ordinary tickets, "All" was
+          // reading a dash on the default view with a status selected.
+          totalCount={visibleTicketTotal(stats)}
+          testIdPrefix="tickets-status"
+        />
+
           <section
             className="work-layout"
             data-testid="dashboard-tickets-section"
@@ -1538,6 +2044,73 @@ export function DashboardPage({
                       </button>
                     </div>
                   )}
+                  {/* Sprint 180 §1 — approval-overdue preset chip. */}
+                  {stalledApprovalFilter && (
+                    <div
+                      className="active-filter-chip"
+                      data-testid="dashboard-stalled-approval-chip"
+                    >
+                      <span>
+                        {t("attention.approval_overdue_chip", {
+                          days: STALLED_APPROVAL_DAYS,
+                        })}
+                      </span>
+                      <button
+                        type="button"
+                        className="active-filter-clear"
+                        onClick={() => {
+                          setPage(1);
+                          setStalledApprovalFilter(false);
+                        }}
+                      >
+                        {t("my_work.filter_clear")}
+                      </button>
+                    </div>
+                  )}
+                  {/* Sprint 180 §2 — the escape hatch for the hide.
+                      Rendered whenever the hide is ON, so the list
+                      never quietly omits rows: it says what it is
+                      holding back and undoes it in one click. */}
+                  {hideFinishedExtraWork && (
+                    <div
+                      className="active-filter-chip"
+                      data-testid="dashboard-hide-finished-ew-chip"
+                    >
+                      <span>{t("finished_extra_work.hidden_chip")}</span>
+                      <button
+                        type="button"
+                        className="active-filter-clear"
+                        onClick={() => {
+                          setPage(1);
+                          setHideFinishedExtraWork(false);
+                        }}
+                        data-testid="dashboard-hide-finished-ew-show"
+                      >
+                        {t("finished_extra_work.show_all")}
+                      </button>
+                    </div>
+                  )}
+                  {/* ...and the way back to hiding, so the control is
+                      a toggle rather than a one-way door. */}
+                  {!hideFinishedExtraWork && (
+                    <div
+                      className="active-filter-chip"
+                      data-testid="dashboard-show-finished-ew-chip"
+                    >
+                      <span>{t("finished_extra_work.shown_chip")}</span>
+                      <button
+                        type="button"
+                        className="active-filter-clear"
+                        onClick={() => {
+                          setPage(1);
+                          setHideFinishedExtraWork(true);
+                        }}
+                        data-testid="dashboard-hide-finished-ew-hide"
+                      >
+                        {t("finished_extra_work.hide_again")}
+                      </button>
+                    </div>
+                  )}
                   <span
                     style={{
                       fontFamily: "var(--f-head)",
@@ -1550,9 +2123,66 @@ export function DashboardPage({
                   >
                     {t("rows_label", { count: tickets.length })}
                   </span>
+                  {isProviderManagementRole(userRole) && (
+                    <EditModeToggle
+                      editMode={edit.editMode}
+                      onToggle={edit.toggleMode}
+                      disabled={bulkSubmitting || assignBusy}
+                      testId="dashboard-tickets-edit-toggle"
+                    />
+                  )}
                 </div>
 
                 <form className="filter-bar" onSubmit={handleSearchSubmit}>
+                  {/* Sprint 185 E §1 — WHICH KIND OF WORK. Rendered only
+                      when the company has a catalog: an empty dropdown is
+                      a control that looks broken, and the Catalogs tab's
+                      empty state is what explains where it comes from
+                      (the Sprint 178 rule for the building-type filter,
+                      restated here rather than re-decided). */}
+                  {workCategories.length > 0 && (
+                    <div className="filter-field">
+                      <span className="filter-label">
+                        {t("common:work_categories.field_label")}
+                      </span>
+                      <select
+                        className="filter-control"
+                        value={String(categoryFilter)}
+                        data-testid="tickets-filter-category"
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setPage(1);
+                          setSelectedIds(new Set<number>());
+                          setCategoryFilter(
+                            value === ""
+                              ? ""
+                              : value === "none"
+                                ? "none"
+                                : Number(value),
+                          );
+                        }}
+                      >
+                        <option value="">
+                          {t("common:work_categories.filter_all")}
+                        </option>
+                        {/* Sprint 187 §5 — the backend has been able to
+                            list "not yet categorised" since the catalog
+                            shipped (`category__isnull`); the dropdown
+                            offered no way to ask for it, so the one
+                            state an operator most needs to work through
+                            was the one they could only find by reading
+                            every row. */}
+                        <option value="none">
+                          {t("common:work_categories.filter_uncategorised")}
+                        </option>
+                        {workCategories.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="filter-field">
                     <span className="filter-label">{t("common:status")}</span>
                     <select
@@ -1568,7 +2198,7 @@ export function DashboardPage({
                       }}
                     >
                       <option value="">{t("common:all_statuses")}</option>
-                      {STATUS_OPTIONS.map((status) => (
+                      {TICKET_LIST_STATUSES.map((status) => (
                         <option key={status} value={status}>
                           {tStatus(status)}
                         </option>
@@ -1651,6 +2281,30 @@ export function DashboardPage({
                   </div>
                 </form>
 
+                {assignOpen && (
+                  <AssignPeopleDialog
+                    summary={t("common:assign_people.summary_tickets", {
+                      count: selectedVisibleIds.length,
+                    })}
+                    managerCandidates={assignCandidates.MANAGER.map((p) => ({
+                      id: p.id,
+                      label: p.full_name || p.email,
+                      sublabel: p.email,
+                    }))}
+                    workerCandidates={assignCandidates.WORKER.map((p) => ({
+                      id: p.id,
+                      label: p.full_name || p.email,
+                      sublabel: p.email,
+                    }))}
+                    busy={assignBusy}
+                    error={assignError}
+                    onCancel={() => setAssignOpen(false)}
+                    onConfirm={(managerIds, workerIds) =>
+                      void runAssign(managerIds, workerIds)
+                    }
+                  />
+                )}
+
                 {bulkMode && selectedVisibleIds.length > 0 && (
                   <div
                     className="bulk-action-bar"
@@ -1670,19 +2324,32 @@ export function DashboardPage({
                       >
                         {t("bulk_confirm.clear_selection")}
                       </button>
+                      {/* Sprint 159 §2 — one dialog, both roles, one
+                          request. See `AssignPeopleDialog`. */}
                       <button
                         type="button"
-                        className="btn btn-primary btn-sm"
-                        data-testid="dashboard-bulk-confirm-button"
-                        onClick={handleBulkConfirm}
-                        disabled={bulkSubmitting}
+                        className="btn btn-secondary btn-sm"
+                        data-testid="dashboard-bulk-assign-button"
+                        onClick={() => void openAssign()}
+                        disabled={bulkSubmitting || assignBusy}
                       >
-                        {bulkSubmitting
-                          ? t("bulk_confirm.confirming")
-                          : t("bulk_confirm.confirm_action", {
-                              count: selectedVisibleIds.length,
-                            })}
+                        {t("common:assign_people.title")}
                       </button>
+                      {canBulkConfirm && (
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          data-testid="dashboard-bulk-confirm-button"
+                          onClick={handleBulkConfirm}
+                          disabled={bulkSubmitting}
+                        >
+                          {bulkSubmitting
+                            ? t("bulk_confirm.confirming")
+                            : t("bulk_confirm.confirm_action", {
+                                count: selectedVisibleIds.length,
+                              })}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1694,7 +2361,20 @@ export function DashboardPage({
                 )}
 
                 <div className="table-wrap ticket-list-wrap">
-                  <table className="data-table">
+                  {/* Sprint 188 — Chargeable work carries two columns the
+                      tickets page does not (Extra work + Route, in place of
+                      its single Priority), so at the same cell padding the
+                      table was wider than its track and the list scrolled
+                      sideways. `data-table-dense` is the repo's existing
+                      density modifier (Sprint 153 §3.6): same layout, same
+                      columns, tighter cells. */}
+                  <table
+                    className={`data-table${
+                      isChargeableWork
+                        ? " data-table-dense data-table-fit"
+                        : ""
+                    }`}
+                  >
                     <thead>
                       <tr>
                         {bulkMode && (
@@ -1711,9 +2391,22 @@ export function DashboardPage({
                         )}
                         <th>{t("common:ticket_no")}</th>
                         <th>{t("common:subject")}</th>
-                        <th>{t("common:priority")}</th>
+                        {/* Chargeable work exists to TRACK the extra works that
+                            went operational, so it shows the extra work and how
+                            it got here. On the ordinary tickets page neither
+                            column means anything, so it shows priority instead.
+                            Two pages, two jobs -- which is the point of having
+                            two pages. */}
+                        {isChargeableWork ? (
+                          <>
+                            <th>{t("chargeable.col_extra_work")}</th>
+                            <th>{t("chargeable.col_route")}</th>
+                          </>
+                        ) : (
+                          <th>{t("common:priority")}</th>
+                        )}
                         <th>{t("common:status")}</th>
-                        <th>{t("common:sla")}</th>
+                        <th className="td-sla">{t("common:sla")}</th>
                         <th>{t("common:facility")}</th>
                         <th>{t("common:customer")}</th>
                         <th>{t("common:created")}</th>
@@ -1785,19 +2478,66 @@ export function DashboardPage({
                                 </span>
                               )}
                           </td>
+                          {isChargeableWork ? (
+                            <>
+                              <td>
+                                {ticket.extra_work_origin ? (
+                                  <a
+                                    href={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
+                                    onClick={(event) => event.stopPropagation()}
+                                    data-testid={`chargeable-ew-${ticket.id}`}
+                                  >
+                                    {ticket.extra_work_origin
+                                      .extra_work_request_title ||
+                                      `#${ticket.extra_work_origin.extra_work_request_id}`}
+                                  </a>
+                                ) : (
+                                  <span className="muted-empty">—</span>
+                                )}
+                              </td>
+                              <td>
+                                {ticket.extra_work_origin?.origin ? (
+                                  <span className="badge badge-muted">
+                                    {ticket.extra_work_origin.origin ===
+                                    "INSTANT"
+                                      ? t("common:route_badge.instant")
+                                      : t("common:route_badge.proposal")}
+                                  </span>
+                                ) : (
+                                  <span className="muted-empty">—</span>
+                                )}
+                              </td>
+                            </>
+                          ) : (
+                            <td>
+                              <span className={priorityCellClass(ticket.priority)}>
+                                <i />
+                                {tPriority(ticket.priority)}
+                              </span>
+                            </td>
+                          )}
                           <td>
-                            <span className={priorityCellClass(ticket.priority)}>
-                              <i />
-                              {tPriority(ticket.priority)}
-                            </span>
+                            {/* Sprint 182 §2 — the shared badge, so a
+                                ticket's status is the same word and the
+                                same colour here as on the Extra Work
+                                list showing the same ticket. This cell
+                                built its own class and looked up its own
+                                label, which is how "Approved" here and
+                                "Work approved" there became two
+                                spellings of one fact. */}
+                            <StatusBadge
+                              status={{ kind: "ticket", value: ticket.status }}
+                              variant="cell"
+                              testId={`ticket-row-status-${ticket.id}`}
+                            />
                           </td>
-                          <td>
-                            <span className={statusCellClass(ticket.status)}>
-                              <i />
-                              {tStatus(ticket.status)}
-                            </span>
-                          </td>
-                          <td>
+                          {/* Sprint 181 §4 — the SLA is a DIFFERENT
+                              question from the workflow status beside
+                              it, and adjacent columns of small coloured
+                              pills read as one string. The rule marks
+                              where "how is this job going" ends and
+                              "are we late" begins. */}
+                          <td className="td-sla">
                             <SLABadge
                               state={ticket.sla_display_state}
                               remainingSeconds={
@@ -1869,10 +2609,15 @@ export function DashboardPage({
                             )}
                         </div>
                         <div className="ticket-card-pills">
-                          <span className={statusCellClass(ticket.status)}>
-                            <i />
-                            {tStatus(ticket.status)}
-                          </span>
+                          {/* The mobile card is the same row; it renders
+                              the same badge. Two renderers for one status
+                              is how the desktop table and the phone card
+                              start disagreeing. */}
+                          <StatusBadge
+                            status={{ kind: "ticket", value: ticket.status }}
+                            variant="cell"
+                            testId={`ticket-card-status-${ticket.id}`}
+                          />
                           <SLABadge
                             state={ticket.sla_display_state}
                             remainingSeconds={
@@ -2091,7 +2836,7 @@ export function DashboardPage({
                     <p className="muted small">{t("loading")}</p>
                   ) : (
                     <div className="bld-list">
-                      {STATUS_OPTIONS.map((key) => {
+                      {TICKET_LIST_STATUSES.map((key) => {
                         const value = stats.by_status[key] ?? 0;
                         return (
                           <div key={key} className="bld-row-head">
@@ -2147,6 +2892,7 @@ export function DashboardPage({
               </div>
             </div>
           </section>
+          </>
         )}
 
       </div>

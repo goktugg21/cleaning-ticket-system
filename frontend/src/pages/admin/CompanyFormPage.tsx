@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { CompanyRelationCards } from "../../components/CompanyRelationCards";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
@@ -482,7 +483,12 @@ export function CompanyFormPage() {
           data-testid="section-admins"
           style={{ marginTop: 16, padding: "20px 22px" }}
         >
-          <h3 className="section-title">{t("company_form.section_admins_title")}</h3>
+          {/* Sprint 163 — was a class with no rule behind it, so this
+              heading rendered as a bare h3 while every other section
+              head on the admin pages is styled. Found by the gate. */}
+          <h3 className="section-head-title">
+            {t("company_form.section_admins_title")}
+          </h3>
           <p className="muted small" style={{ marginBottom: 12 }}>
             {t("company_form.section_admins_desc")}
           </p>
@@ -572,6 +578,21 @@ export function CompanyFormPage() {
             </button>
           </form>
         </section>
+      )}
+
+      {/* Sprint 163 §4 — the same three relation cards the detail page
+          carries, from the SAME component. This page has never had them
+          and the deferral ran three sprints, each time because the only
+          cheap route was a second copy of ~460 lines of stateful markup
+          — and with it, a second copy of the company-boundary rule.
+          One component owning its own fetches, edit gates and dialogs
+          makes mounting it here a single line.
+
+          Only on EDIT: a company that does not exist yet has no
+          employees, buildings or customers to link, and the id these
+          reads need is the thing `isCreate` means we do not have. */}
+      {!isCreate && company && (
+        <CompanyRelationCards companyId={company.id} />
       )}
 
       <ConfirmDialog

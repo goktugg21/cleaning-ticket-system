@@ -175,7 +175,9 @@ class BuildingManagerCustomerDecisionOverrideTests(_B1Fixture):
             is_override=False,
             override_reason="Customer approved verbally over phone.",
         )
-        self.assertEqual(updated.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — the approval auto-closes; the override history
+        # row this test is about is asserted below and unchanged.
+        self.assertEqual(updated.status, TicketStatus.CLOSED)
 
         history_row = (
             TicketStatusHistory.objects.filter(
@@ -253,7 +255,10 @@ class BuildingManagerCustomerDecisionOverrideTests(_B1Fixture):
             TicketStatus.APPROVED,
             note="Looks good.",
         )
-        self.assertEqual(updated.status, TicketStatus.APPROVED)
+        # Sprint 180 §1 — the customer's own approval closes the ticket.
+        # The point of this test is the ABSENCE of override coercion on
+        # the customer path, asserted on the history row below.
+        self.assertEqual(updated.status, TicketStatus.CLOSED)
         history_row = (
             TicketStatusHistory.objects.filter(
                 ticket=self.ticket, new_status=TicketStatus.APPROVED

@@ -4,17 +4,26 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import {
+  bulkLinkBuildings,
+  listAllBuildings,
+  listAllCompanies,
   listProviderEmployees,
   updateStaffProfile,
 } from "../../api/admin";
 import type {
+  BuildingAdmin,
+  CompanyAdmin,
   EmploymentType,
   ProviderEmployee,
   Role,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { isProviderAdmin } from "../../auth/permissions";
+import { BulkAssignDialog } from "../../components/BulkAssignDialog";
 import { ClickableRow } from "../../components/ClickableRow";
+import { EditModeToggle } from "../../components/EditModeToggle";
+import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { useEditMode } from "../../lib/useEditMode";
 import { EmptyState } from "../../components/EmptyState";
 import { RoleBadge } from "../../components/RoleBadge";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -83,26 +92,138 @@ export function EmployeesAdminPage() {
   const [error, setError] = useState("");
 
   const [roleFilter, setRoleFilter] = useState<Role | "">("");
+  // Sprint 187B §2 — the company filter, same established pattern as
+  // Buildings and the Users page: loaded once, auto-selected and disabled
+  // when exactly one company comes back (a single-company admin has
+  // nothing to choose between).
+  const [companyFilter, setCompanyFilter] = useState<number | "">("");
+  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
+  const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [employmentTypeFilter, setEmploymentTypeFilter] = useState<
     EmploymentType | ""
   >("");
 
   // Inline-edit state: the STAFF row currently being edited + the
   // pending employment-type value + a per-row busy flag.
+  // Sprint 156 §8 — bulk assign workers to buildings, FROM the worker's
+  // side. The other direction has existed since Sprint 154 (the building
+  // page's Staff and Managers cards), and one worker at a time has been
+  // editable from their own page since Sprint 23A; what was missing was
+  // "these six people, onto these three buildings".
+  //
+  // It reuses `/api/buildings/bulk-link/` unchanged — that endpoint
+  // already takes N buildings x M targets, so this direction needed no
+  // new mechanism, only an entry point. Adding a second bulk endpoint
+  // for the mirror case is exactly what the prompt forbids and what the
+  // relation-spec table exists to make unnecessary.
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignBuildingIds, setAssignBuildingIds] = useState<number[]>([]);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState("");
+  const [buildingOptions, setBuildingOptions] = useState<BuildingAdmin[]>([]);
+
+  async function openAssign() {
+    setAssignBuildingIds([]);
+    setAssignError("");
+    setAssignOpen(true);
+    if (buildingOptions.length === 0) {
+      // Loaded on first open rather than on mount: most visits to this
+      // page never assign anybody, and `listAllBuildings` pages through
+      // the whole collection.
+      try {
+        setBuildingOptions(await listAllBuildings({ is_active: "true" }));
+      } catch (err) {
+        setAssignError(getApiError(err));
+      }
+    }
+  }
+
+  async function runAssign() {
+    // The selection can hold both roles, and the two go to DIFFERENT
+    // link tables — a STAFF member to `staff`, a BUILDING_MANAGER to
+    // `managers`. Splitting here rather than asking the operator which
+    // relation they mean: the person's role already answers it, and
+    // making them choose would let them choose wrong.
+    const staffIds = linkableRows
+      .filter((r) => edit.isSelected(r.id) && r.role === "STAFF")
+      .map((r) => r.id);
+    const managerIds = linkableRows
+      .filter((r) => edit.isSelected(r.id) && r.role === "BUILDING_MANAGER")
+      .map((r) => r.id);
+    setAssignBusy(true);
+    setAssignError("");
+    try {
+      // Two calls at most, each all-or-nothing on the server. Not one
+      // call: `relation` is per-request by design, and widening it to a
+      // per-target field would change the endpoint's shape for every
+      // existing caller.
+      if (staffIds.length > 0) {
+        await bulkLinkBuildings({
+          buildings: assignBuildingIds,
+          relation: "staff",
+          targets: staffIds,
+          mode: "link",
+        });
+      }
+      if (managerIds.length > 0) {
+        await bulkLinkBuildings({
+          buildings: assignBuildingIds,
+          relation: "managers",
+          targets: managerIds,
+          mode: "link",
+        });
+      }
+      setAssignOpen(false);
+      edit.exit();
+      await load();
+    } catch (err) {
+      setAssignError(getApiError(err));
+    } finally {
+      setAssignBusy(false);
+    }
+  }
+  const linkableRows = employees.filter(
+    (row) => row.role === "STAFF" || row.role === "BUILDING_MANAGER",
+  );
+  const edit = useEditMode(linkableRows.map((row) => row.id));
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState<EmploymentType>("INTERNAL_STAFF");
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
 
+  // Loaded exhaustively so a tenant with more than one page of companies
+  // gets a complete dropdown rather than a silently truncated one.
+  useEffect(() => {
+    let cancelled = false;
+    listAllCompanies({ is_active: "true" })
+      .then((response) => {
+        if (cancelled) return;
+        setCompanies(response);
+        if (response.length === 1) {
+          setCompanyFilter(response[0].id);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCompaniesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const companyDropdownDisabled = companiesLoaded && companies.length <= 1;
+
   const queryParams = useMemo(() => {
     const params: {
       role?: Role;
       employment_type?: EmploymentType;
+      company?: number;
     } = {};
     if (roleFilter) params.role = roleFilter;
     if (employmentTypeFilter) params.employment_type = employmentTypeFilter;
+    if (companyFilter !== "") params.company = companyFilter;
     return params;
-  }, [roleFilter, employmentTypeFilter]);
+  }, [roleFilter, employmentTypeFilter, companyFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,7 +240,14 @@ export function EmployeesAdminPage() {
   }, [queryParams]);
 
   useEffect(() => {
-    load(); // eslint-disable-line react-hooks/set-state-in-effect
+    // Sprint 156 §8 — the `eslint-disable-line
+    // react-hooks/set-state-in-effect` that lived here is gone: the rule
+    // stopped firing on this line and ESLint reported the directive
+    // itself as unused, which counted as a new warning against the
+    // frozen baseline. Removing a directive that no longer suppresses
+    // anything is the fix; adding a second one to silence the first
+    // would be the opposite of the rule.
+    load();
   }, [load]);
 
   const hasActiveFilters = Boolean(roleFilter || employmentTypeFilter);
@@ -228,6 +356,27 @@ export function EmployeesAdminPage() {
               ))}
             </select>
           </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("company")}</span>
+            <select
+              className="filter-control"
+              style={{ maxWidth: 220 }}
+              data-testid="employees-filter-company"
+              value={companyFilter === "" ? "" : String(companyFilter)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setCompanyFilter(value === "" ? "" : Number(value));
+              }}
+              disabled={companyDropdownDisabled}
+            >
+              <option value="">{t("admin.all_companies")}</option>
+              {companies.map((company) => (
+                <option key={company.id} value={company.id}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="filter-actions">
             {hasActiveFilters && (
               <button
@@ -242,8 +391,41 @@ export function EmployeesAdminPage() {
                 {t("clear")}
               </button>
             )}
+            {/* Sprint 156 §8 — the intent step, same gate as every other
+                list since Sprint 155 §4. */}
+            {linkableRows.length > 0 && (
+              <EditModeToggle
+                editMode={edit.editMode}
+                onToggle={edit.toggleMode}
+                disabled={assignBusy}
+                testId="employees-edit-mode-toggle"
+              />
+            )}
           </div>
         </div>
+
+        {edit.editMode && (
+          <div className="list-edit-bar">
+            <MultiSelectToolbar
+              selectedCount={edit.selection.length}
+              onSelectAll={edit.selectAll}
+              onClearAll={edit.clear}
+              disabled={assignBusy}
+              countLabel={t("employees.bulk_selected_count", {
+                count: edit.selection.length,
+                total: linkableRows.length,
+              })}
+              actions={[
+                {
+                  key: "assign-buildings",
+                  label: t("employees.assign_buildings"),
+                  onClick: openAssign,
+                },
+              ]}
+              testIdPrefix="employees-bulk"
+            />
+          </div>
+        )}
 
         {loading && (
           <div className="loading-bar" style={{ margin: 0 }}>
@@ -255,9 +437,25 @@ export function EmployeesAdminPage() {
           <table className="data-table">
             <thead>
               <tr>
+                {edit.editMode && (
+                  <th className="th-select">
+                    <input
+                      type="checkbox"
+                      checked={edit.allSelected}
+                      onChange={() =>
+                        edit.allSelected ? edit.clear() : edit.selectAll()
+                      }
+                      disabled={assignBusy}
+                      aria-label={t("employees.assign_buildings")}
+                      data-testid="employees-select-all"
+                    />
+                  </th>
+                )}
                 <th>{t("employees.col_name")}</th>
                 <th>{t("employees.col_email")}</th>
+                <th>{t("users.col_phone")}</th>
                 <th>{t("employees.col_role")}</th>
+                <th>{t("company")}</th>
                 <th>{t("employees.col_employment_type")}</th>
                 <th>{t("status")}</th>
               </tr>
@@ -282,10 +480,69 @@ export function EmployeesAdminPage() {
                         : undefined
                     }
                   >
+                    {edit.editMode && (
+                      <td
+                        className="td-select"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {/* Only STAFF and BUILDING_MANAGER are linkable:
+                            those are the two roles the building link
+                            tables accept. Anyone else gets no checkbox
+                            rather than a checkbox that always fails. */}
+                        {(row.role === "STAFF" ||
+                          row.role === "BUILDING_MANAGER") && (
+                          <input
+                            type="checkbox"
+                            checked={edit.isSelected(row.id)}
+                            onChange={() => edit.toggle(row.id)}
+                            disabled={assignBusy}
+                            aria-label={row.full_name || row.email}
+                            data-testid={`employees-select-${row.id}`}
+                          />
+                        )}
+                      </td>
+                    )}
                     <td className="td-subject">{row.full_name || "—"}</td>
                     <td>{row.email}</td>
+                    {/* Sprint 154 §K — this is `User.phone`. The STAFF-only
+                        `StaffProfile.phone` is deliberately NOT used here:
+                        it is gated by the customer's
+                        show_assigned_staff_phone policy and this
+                        directory's serializer has a privacy floor that
+                        forbids exposing it. Empty renders an em dash. */}
+                    <td data-testid="employee-row-phone">
+                      {row.phone ? (
+                        <a href={`tel:${row.phone}`}>{row.phone}</a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td data-testid="employee-row-role">
                       <RoleBadge role={row.role} compact />
+                    </td>
+                    {/* Sprint 187B §2 — bounded like the Users page: two
+                        names then "+N more", full set in the title. A
+                        person spanning many companies must not print
+                        them all into a cell. */}
+                    <td
+                      data-testid="employee-row-companies"
+                      title={row.companies.join(", ")}
+                    >
+                      {row.companies.length === 0 ? (
+                        <span className="muted small">—</span>
+                      ) : (
+                        <>
+                          {row.companies.slice(0, 2).join(", ")}
+                          {row.companies.length > 2 && (
+                            <span className="muted small">
+                              {" "}
+                              {t("users.companies_more", {
+                                count: row.companies.length - 2,
+                              })}
+                            </span>
+                          )}
+                        </>
+                      )}
                     </td>
                     <td data-testid="employee-row-employment-type">
                       {isEditing ? (
@@ -416,6 +673,33 @@ export function EmployeesAdminPage() {
           />
         )}
       </div>
+
+      {/* Sprint 156 §8 — the same dialog Sprint 154 built for the other
+          direction, with the same mandatory "N will be assigned to M"
+          summary line. A non-native overlay, conditionally mounted. */}
+      {assignOpen && (
+        <BulkAssignDialog
+          title={t("employees.assign_buildings")}
+          summary={t("employees.assign_summary", {
+            people: edit.selection.length,
+            buildings: assignBuildingIds.length,
+          })}
+          options={buildingOptions.map((b) => ({
+            id: b.id,
+            label: b.name,
+            sublabel: [b.city, b.address].filter(Boolean).join(" · "),
+          }))}
+          selectedIds={assignBuildingIds}
+          onChange={setAssignBuildingIds}
+          onCancel={() => setAssignOpen(false)}
+          onConfirm={runAssign}
+          confirmLabel={t("bulk_link.confirm")}
+          busy={assignBusy}
+          error={assignError}
+          emptyText={t("employees.assign_no_buildings")}
+          testIdPrefix="employees-assign"
+        />
+      )}
     </div>
   );
 }

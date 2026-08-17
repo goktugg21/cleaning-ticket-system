@@ -30,6 +30,7 @@ from .models import (
     TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
+    WorkCategory,
 )
 from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
@@ -144,17 +145,33 @@ def is_photo_attachment(attachment) -> bool:
     return mime_ok and ext_ok
 
 
+def _iso_date(value):
+    """Sprint 184 §1 — a date as an ISO string, or None.
+
+    Used for the dates carried on `extra_work_origin`, which is a plain
+    dict returned from a `SerializerMethodField` and therefore never
+    passes through a DRF field that would format it.
+    """
+    return value.isoformat() if value is not None else None
+
+
 def resolve_extra_work_origin_core(ticket) -> dict | None:
     """Shared Extra Work origin resolution for the ticket list + detail
     serializers.
 
-    Returns the SIX keys the frontend `TicketExtraWorkOrigin` type
-    consumes, or None when no parent Extra Work request can be resolved
-    by any path:
+    Returns the keys the frontend `TicketExtraWorkOrigin` type consumes,
+    or None when no parent Extra Work request can be resolved by any
+    path:
 
         extra_work_request_id, extra_work_request_title,
         extra_work_request_status, extra_work_request_item_id,
         service_name, origin
+
+    plus, since Sprint 184 §1, the parent's DATES — borrowed, never
+    copied onto the ticket:
+
+        preferred_date, planned_end_date, deadline,
+        provider_planned_date
 
     Resolution order (Sprint 6A):
       * Resolve the parent EW via the CANONICAL `ticket.extra_work_request`
@@ -216,6 +233,41 @@ def resolve_extra_work_origin_core(ticket) -> dict | None:
         "extra_work_request_item_id": item_id,
         "service_name": service.name if service is not None else None,
         "origin": origin,
+        # ------------------------------------------------------------
+        # Sprint 184 §1 — THE EXTRA WORK'S DATES, CARRIED ON THE LINK.
+        #
+        # The owner: the preferred date entered when the extra work is
+        # opened, and any deadline added later, must keep travelling
+        # once that work becomes an operational ticket.
+        #
+        # They are exposed HERE rather than copied onto the Ticket, and
+        # that is the whole point. A copy is one fact stored twice: edit
+        # the deadline on the extra work and the ticket's copy is
+        # silently wrong from that moment on. This month has been spent
+        # removing exactly that shape. The extra work owns these dates;
+        # the ticket borrows them through the link it already has.
+        #
+        # No N+1: `ew_request` is already resolved and in hand above —
+        # these are attribute reads on an object this function fetched
+        # for its other keys, not new queries. The ticket list's
+        # `select_related` chain (tickets/views.py) already spans the
+        # canonical FK, so a page of EW-spawned tickets costs exactly
+        # what it did before this sprint.
+        #
+        # `provider_planned_date` appears here for READING only. Its
+        # write half moves the spawned ticket's own `scheduled_start_at`
+        # (`extra_work/planned_date.py`) — when the provider plans a day
+        # the WORK moves, and that is an action, not a copy.
+        # ------------------------------------------------------------
+        # ISO strings, not `date` objects. Every other value in this dict
+        # is already a scalar, and the dict is returned RAW from a
+        # `SerializerMethodField` — so a `date` here would read as a
+        # `date` in `response.data` and as a string on the wire, which is
+        # two shapes for one field depending on who is looking at it.
+        "preferred_date": _iso_date(ew_request.preferred_date),
+        "planned_end_date": _iso_date(ew_request.planned_end_date),
+        "deadline": _iso_date(ew_request.deadline),
+        "provider_planned_date": _iso_date(ew_request.provider_planned_date),
     }
 
 
@@ -298,6 +350,12 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
 
 class TicketListSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
+    # Sprint 185 E §1 — the KIND OF WORK, beside `type`'s kind of
+    # message. `default=None` because the FK is nullable and traversing
+    # `category.name` on an untagged melding must render, not raise.
+    category_name = serializers.CharField(
+        source="category.name", read_only=True, default=None
+    )
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
@@ -324,6 +382,8 @@ class TicketListSerializer(serializers.ModelSerializer):
             "ticket_no",
             "title",
             "type",
+            "category",
+            "category_name",
             "priority",
             "status",
             "company",
@@ -434,6 +494,27 @@ class SubTaskWriteSerializer(serializers.ModelSerializer):
         fields = ["title", "description", "ordering"]
 
 
+class TicketCategorySerializer(serializers.Serializer):
+    """Sprint 185 E §1 — input for the set-category action.
+
+    A nullable primary key: `null` CLEARS the category, which is a real
+    edit ("this was tagged wrong") and not a no-op. `allow_null` plus
+    `required` says exactly that — a caller must state which of the two
+    they mean rather than have an omitted key silently clear the field.
+
+    The queryset is deliberately unscoped HERE and checked against the
+    ticket's own company in the view: this serializer has no ticket, and
+    a `PrimaryKeyRelatedField` over a queryset scoped by the ACTOR would
+    answer "this id exists but is not yours" differently from "this id
+    does not exist" — the existence oracle H-1 forbids.
+    """
+
+    category = serializers.PrimaryKeyRelatedField(
+        queryset=WorkCategory.objects.all(),
+        allow_null=True,
+    )
+
+
 class TicketAutoCompleteFlagSerializer(serializers.Serializer):
     """Sprint 4 — input for the dedicated PA/SA auto-complete-flag action.
     A required boolean; DRF parses "true"/"false"/true/false and 400s on a
@@ -444,6 +525,11 @@ class TicketAutoCompleteFlagSerializer(serializers.Serializer):
 
 class TicketDetailSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
+    # Sprint 185 E §1 — see `TicketListSerializer`: the kind of WORK,
+    # rendered beside the kind of MESSAGE. Nullable FK, so `default=None`.
+    category_name = serializers.CharField(
+        source="category.name", read_only=True, default=None
+    )
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     created_by_email = serializers.CharField(source="created_by.email", read_only=True)
@@ -504,6 +590,8 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "description",
             "room_label",
             "type",
+            "category",
+            "category_name",
             "priority",
             "status",
             "company",
@@ -528,6 +616,9 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "rejected_at",
             "resolved_at",
             "closed_at",
+            # Sprint 184 §3 — the customer's wanted date, so the provider
+            # can see what was asked for. A wish; it never decides late.
+            "customer_wanted_date",
             "status_history",
             "allowed_next_statuses",
             "actions",
@@ -1108,10 +1199,20 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             "description",
             "room_label",
             "type",
+            # Sprint 185 E §1 — the kind of WORK, offered at intake.
+            # Optional: a melding may arrive before anyone knows which
+            # trade it belongs to, and forcing a guess here would fill
+            # the category report with noise. Validated against the
+            # ticket's own company in `validate()` below.
+            "category",
             "priority",
             "building",
             "customer",
             "status",
+            # Sprint 184 §3 — the customer's WANTED DATE (a wish, never a
+            # deadline). Writable at create so a customer opening a
+            # melding can say when they would like it done.
+            "customer_wanted_date",
             "created_at",
         ]
         read_only_fields = ["id", "ticket_no", "status", "created_at"]
@@ -1133,6 +1234,18 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         ).exists():
             raise serializers.ValidationError(
                 {"customer": "Customer is not linked to the selected building."}
+            )
+
+        # Sprint 185 E §1 — a category belongs to ONE provider company,
+        # and the ticket's company is the building's. Naming another
+        # company's category would tag this melding with a row the
+        # actor cannot see and would put a foreign name into this
+        # tenant's category report, so it reads as nonexistent (H-1)
+        # rather than as a permission error.
+        category = attrs.get("category")
+        if category is not None and category.company_id != building.company_id:
+            raise serializers.ValidationError(
+                {"category": "Unknown work category."}
             )
 
         if not building.is_active:

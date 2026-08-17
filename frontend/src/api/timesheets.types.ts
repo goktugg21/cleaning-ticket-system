@@ -58,7 +58,14 @@ export interface StandardSetResult {
 }
 
 /** One amount of work, one employee, one day. */
+export type HourSourceType = "CONTRACT" | "EXTRA_WORK" | "TICKET" | "OTHER";
+
 export interface TimeEntry {
+  /** Sprint 173 §1 — which job produced this hour. A type + id pair,
+   *  never a foreign key: `timesheets` may not import `tickets` or
+   *  `extra_work`, so resolution happens in the reporting layer. */
+  source_type: HourSourceType;
+  source_id: number | null;
   id: number;
   company: number;
   company_name: string;
@@ -103,10 +110,28 @@ export interface TimeEntryWritePayload {
   hours: string;
   building?: number | null;
   note?: string;
+  /** Sprint 180 §3 — WHICH JOB, on the WRITE side.
+   *
+   *  The serializer has accepted these two since Sprint 173 and the
+   *  entries table has been sending them since Sprint 178 §4a — by
+   *  spreading `decodeSource(...)` into this payload, which TypeScript
+   *  permits from a spread and therefore never checked. The wire shape
+   *  and the type disagreed, and a new caller had no way to learn from
+   *  the type that a source could be written at all.
+   *
+   *  `string`, not the `HourSourceType` union the READ side uses:
+   *  `decodeSource` returns a plain string because it parses a
+   *  `<select>` value, and narrowing here would only push a cast into
+   *  every caller. The server validates against `HourSource.choices`
+   *  and 400s anything else, which is the check that matters. */
+  source_type?: string;
+  source_id?: number | null;
 }
 
 export interface TimeEntryFilters {
   company?: number | "";
+  /** Sprint 174 §1 — filter by where the hour came from. */
+  source_type?: string;
   employee?: number | "";
   hour_type?: number | "";
   building?: number | "";

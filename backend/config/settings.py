@@ -76,6 +76,11 @@ INSTALLED_APPS = [
     # planned_work. It records how much an employee worked, never what
     # work was performed.
     "timesheets",
+    # Sprint 160 — contracts (the recurring-revenue side). Independent
+    # in the same sense: it carries its OWN prices and never reads
+    # extra_work's CustomerServicePrice, and its invoice forecast is a
+    # pure calculation that writes nothing into invoicing.
+    "contracts",
 ]
 
 MIDDLEWARE = [
@@ -345,6 +350,21 @@ CELERY_BEAT_SCHEDULE = {
     # and ticket spawning. Task is created in Batch 2; referenced by string.
     "generate-planned-occurrences": {
         "task": "planned_work.tasks.run_daily_planned_work",
+        "schedule": 24 * 60 * 60,
+    },
+    # Sprint 182 §1 — the month-end invoice run. DAILY, because the
+    # question it asks is "is there a customer whose billing day is
+    # today?" — customers bill on different days, so it has to look every
+    # day even though on most days it finds nobody.
+    #
+    # Running it twice cannot double-create. The Extra Work CLAIM
+    # (`is_invoiced` plus the InvoiceLine link, both written inside the
+    # same atomic block as the draft) means a second pass finds an empty
+    # unbilled pool — the same mechanism the manual generate button has
+    # always relied on, not a new one. Full argument in
+    # `invoicing/tasks.py`.
+    "run-daily-invoice-run": {
+        "task": "invoicing.tasks.run_daily_invoice_run",
         "schedule": 24 * 60 * 60,
     },
 }

@@ -6,7 +6,11 @@
 // the `/api` prefix).
 import { api } from "./client";
 import type {
+  AssignmentCandidate,
   EwMessage,
+  ExtraWorkAssignment,
+  ExtraWorkAssignmentRole,
+  ExtraWorkBulkAssignResult,
   EwMessageRecipient,
   EwMessageType,
   EwMessageVisibility,
@@ -190,6 +194,53 @@ export async function relabelExtraWork(
 ): Promise<ExtraWorkRequestDetail> {
   const response = await api.patch<ExtraWorkRequestDetail>(
     `/extra-work/${id}/labels/`,
+    payload,
+  );
+  return response.data;
+}
+
+/** Sprint 176 §3 — set / clear the deadline and the planned end date on a
+ *  request that already exists.
+ *
+ *  Both fields OPTIONAL, and that is load-bearing rather than
+ *  convenience: the server reads key PRESENCE, so omitting a key leaves
+ *  the stored date alone and sending `null` clears it. Never build this
+ *  payload by spreading a form state object — an untouched field would
+ *  arrive as `null` and wipe a date nobody edited.
+ *
+ *  Provider-only (Sprint 176 §3's decision): a customer-side caller gets
+ *  403 `deadline_provider_only`. 400 codes: `no_dates_provided`,
+ *  `planned_end_before_start`. */
+export interface ExtraWorkDatesPayload {
+  deadline?: string | null;
+  planned_end_date?: string | null;
+}
+
+export async function updateExtraWorkDates(
+  id: number | string,
+  payload: ExtraWorkDatesPayload,
+): Promise<ExtraWorkRequestDetail> {
+  const response = await api.patch<ExtraWorkRequestDetail>(
+    `/extra-work/${id}/dates/`,
+    payload,
+  );
+  return response.data;
+}
+
+/** Sprint 176 §3 — the same two dates across a selection of requests.
+ *
+ *  All-or-nothing server-side, like `bulkAssignExtraWork`: one
+ *  unresolvable id rejects the batch with zero writes, and a row whose
+ *  planned end would fall before its planned start rolls the rest back
+ *  with it. The "leave unchanged" default is the same key-presence rule
+ *  as the single-row call above. */
+export async function bulkSetExtraWorkDates(payload: {
+  requests: number[];
+  deadline?: string | null;
+  planned_end_date?: string | null;
+}): Promise<{ updated: number }> {
+  const response = await api.post<{ updated: number }>(
+    "/extra-work/bulk-dates/",
     payload,
   );
   return response.data;
@@ -553,3 +604,60 @@ export async function getEwMessageRecipients(
 }
 
 
+
+
+// ---- Sprint 157 §2 — people on a request -----------------------------
+
+export async function listExtraWorkAssignments(
+  id: number,
+): Promise<ExtraWorkAssignment[]> {
+  const response = await api.get<ExtraWorkAssignment[]>(
+    `/extra-work/${id}/assignments/`,
+  );
+  return response.data;
+}
+
+/** Assign (or unassign) many people to many requests in ONE call.
+ *
+ *  All-or-nothing server-side: one unresolvable id rejects the whole
+ *  batch with zero writes, so there is no partial state for the caller
+ *  to reconcile.
+ *
+ *  Sprint 159 §2 — `managers` + `workers` name BOTH roles in one
+ *  request and one transaction. `users` + `role` is the Sprint 157
+ *  single-role shape, still accepted and still what the per-row remove
+ *  speaks. Naming both halves is the point: an ineligible manager
+ *  rejects the workers with it rather than leaving half a crew on. */
+export async function bulkAssignExtraWork(payload: {
+  requests: number[];
+  users?: number[];
+  role?: ExtraWorkAssignmentRole;
+  managers?: number[];
+  workers?: number[];
+  mode: "assign" | "unassign";
+}): Promise<ExtraWorkBulkAssignResult> {
+  const response = await api.post<ExtraWorkBulkAssignResult>(
+    "/extra-work/bulk-assign/",
+    payload,
+  );
+  return response.data;
+}
+
+
+/** Sprint 158 §1 — the people who may be assigned to THIS request in
+ *  THIS role, from the server's own eligibility helper.
+ *
+ *  Deliberately not "the company's employees" (Sprint 157's source):
+ *  eligibility comes from the request's BUILDING and differs per role,
+ *  and the picker must call the same helper the write validator uses or
+ *  it will offer options that always fail (Sprint 152.1 §1a). */
+export async function listExtraWorkAssignmentCandidates(
+  id: number,
+  role: ExtraWorkAssignmentRole,
+): Promise<AssignmentCandidate[]> {
+  const response = await api.get<AssignmentCandidate[]>(
+    `/extra-work/${id}/assignments/candidates/`,
+    { params: { role } },
+  );
+  return response.data;
+}

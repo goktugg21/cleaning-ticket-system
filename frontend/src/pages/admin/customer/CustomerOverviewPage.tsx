@@ -6,6 +6,7 @@ import {
   Receipt,
   ShieldCheck,
   Tag,
+  Ticket,
   UserCog,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -14,43 +15,56 @@ import { getApiError } from "../../../api/client";
 import {
   getCompany,
   getCustomer,
+  getCustomerSummary,
   listCustomerBuildings,
-  listCustomerContacts,
-  listCustomerPrices,
-  listCustomerUsers,
   reactivateCustomer,
 } from "../../../api/admin";
 import type {
   CompanyAdmin,
   CustomerAdmin,
   CustomerBuildingMembership,
+  CustomerSummary,
 } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
+import { BoundedList } from "../../../components/BoundedList";
+import {
+  LinkedBuildingCounts,
+  LinkedBuildingIdentity,
+} from "../../../components/LinkedBuildingCell";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 
-import { CustomerFacturatieSection } from "./CustomerFacturatieSection";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
- * Sprint 28 Batch 13 (rework) — Customer Overview page (admin variant).
+ * Customer Overview page (admin variant).
  *
- * View-first per the 2026-05-15 stakeholder doc §3. The page is a
- * useful operator dashboard for a single customer — not a tile menu.
- * Composition top-to-bottom:
+ * Sprint 153 §4 rebuilt the order. The owner's complaint was that the
+ * page opened with an explainer paragraph and an address card, and said
+ * nothing operational. Top-to-bottom now:
  *
  *   1. CustomerSubPageHeader (back link + name + Edit basics action).
- *   2. Explainer paragraph naming the provider company + linked-
- *      building count.
- *   3. Four-card clickable stat strip (Buildings / Users / Contacts /
- *      Pricing) routing into the sub-pages.
- *   4. Linked buildings preview (first 5 + View-all footer link), with
- *      a friendly empty-state when none are linked.
- *   5. Quicklink grid for the six management areas.
+ *   2. The six count-chips, IMMEDIATELY — Buildings / Users / Contacts /
+ *      Pricing / Extra work / Tickets, each routing to its sub-page.
+ *   3. A dashboard row of live operational numbers from the new
+ *      `/summary/` endpoint: open tickets, open extra work, outstanding
+ *      invoiced.
+ *   4. About and Linked buildings SIDE BY SIDE — each was spending a
+ *      full-width card on half a card of content.
  *
- * Nothing on this page mutates a permission, a policy, or a per-
- * building access row — those affordances live exclusively on the
- * Permissions sub-page. The Playwright spec locks that contract.
+ * Sprint 154 §A removed the quicklink grid that used to repeat the SAME
+ * six destinations at the bottom of the page as icon-and-description
+ * cards. Each chip now carries all four things the pair used to split
+ * between them — icon, count, name, description — so a destination
+ * appears exactly once, driven off one `chips` array rather than two
+ * independently-maintained lists.
+ *
+ * Gone: the `section-explainer` paragraph (the chips say it better) and
+ * the Facturatie section, which moved to the Settings tab.
+ *
+ * Nothing on this page mutates a permission, a policy, or a per-building
+ * access row — those affordances live exclusively on the Permissions
+ * sub-page. The Playwright spec locks that contract.
  */
 export function CustomerOverviewPage() {
   const { id } = useParams();
@@ -72,9 +86,7 @@ export function CustomerOverviewPage() {
   const [linkedBuildings, setLinkedBuildings] = useState<
     CustomerBuildingMembership[]
   >([]);
-  const [memberCount, setMemberCount] = useState<number | null>(null);
-  const [contactCount, setContactCount] = useState<number | null>(null);
-  const [pricingCount, setPricingCount] = useState<number | null>(null);
+  const [summary, setSummary] = useState<CustomerSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -93,10 +105,13 @@ export function CustomerOverviewPage() {
     }
     setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     setError("");
-    // Run the five reads in parallel. Each non-customer fetch falls
-    // back to a friendly "—" placeholder if the endpoint 403s or 404s
-    // for the current operator (e.g. a COMPANY_ADMIN looking at a
-    // legacy customer with no pricing rows yet).
+    // Sprint 153: THREE reads, down from five. The per-module counts
+    // that used to be `listCustomerUsers(...).count` /
+    // `listCustomerContacts(...).length` / `listCustomerPrices(...)
+    // .length` now arrive from the one `/summary/` call, which also
+    // brings the ticket / extra-work / invoice numbers the page needs.
+    // The buildings list is still fetched in full because the linked-
+    // buildings card renders names, not just a count.
     Promise.all([
       getCustomer(numericId),
       listCustomerBuildings(numericId).catch(() => ({
@@ -105,40 +120,24 @@ export function CustomerOverviewPage() {
         previous: null,
         results: [],
       })),
-      listCustomerUsers(numericId).catch(() => ({
-        count: 0,
-        next: null,
-        previous: null,
-        results: [],
-      })),
-      listCustomerContacts(numericId).catch(() => [] as never[]),
-      listCustomerPrices(numericId).catch(() => [] as never[]),
+      // A summary failure degrades the dashboard to em dashes; it must
+      // not take the whole page down.
+      getCustomerSummary(numericId).catch(() => null),
     ])
-      .then(
-        ([
-          customerData,
-          buildingsResponse,
-          usersResponse,
-          contactsResponse,
-          pricesResponse,
-        ]) => {
-          if (cancelled) return;
-          setCustomer(customerData);
-          setLinkedBuildings(buildingsResponse.results);
-          setMemberCount(usersResponse.count ?? usersResponse.results.length);
-          setContactCount(contactsResponse.length);
-          setPricingCount(pricesResponse.length);
-          // Provider company name is informational; if the lookup fails
-          // we fall back to the generic explainer.
-          getCompany(customerData.company)
-            .then((company) => {
-              if (!cancelled) setProviderCompany(company);
-            })
-            .catch(() => {
-              if (!cancelled) setProviderCompany(null);
-            });
-        },
-      )
+      .then(([customerData, buildingsResponse, summaryData]) => {
+        if (cancelled) return;
+        setCustomer(customerData);
+        setLinkedBuildings(buildingsResponse.results);
+        setSummary(summaryData);
+        // Provider company name is informational.
+        getCompany(customerData.company)
+          .then((company) => {
+            if (!cancelled) setProviderCompany(company);
+          })
+          .catch(() => {
+            if (!cancelled) setProviderCompany(null);
+          });
+      })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
       })
@@ -166,6 +165,23 @@ export function CustomerOverviewPage() {
     }
   }
 
+  // Sprint 188 — the billing address as one line: street, then postcode
+  // and city, then country. `has_billing_address` is the SERVER's rule
+  // (street AND city) and the screen must not re-derive it, so the empty
+  // state is driven by the parts actually present here only for the
+  // rendering; whether an invoice may be sent stays the server's answer.
+  const billingAddress = useMemo(() => {
+    if (!customer) return "";
+    return [
+      customer.address,
+      [customer.postal_code, customer.city].filter(Boolean).join(" "),
+      customer.country,
+    ]
+      .map((part) => (part ?? "").trim())
+      .filter(Boolean)
+      .join(", ");
+  }, [customer]);
+
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
   const buildingsCount = linkedBuildings.length;
@@ -192,17 +208,6 @@ export function CustomerOverviewPage() {
     </>
   ) : null;
 
-  const explainerText = providerCompany
-    ? t("customer_view.overview.explainer_with_provider", {
-        customer: customerName,
-        provider: providerCompany.name,
-        count: buildingsCount,
-      })
-    : t("customer_view.overview.explainer_generic", {
-        customer: customerName,
-        count: buildingsCount,
-      });
-
   // Mirror the languageLabel helper from CompanyDetailPage (Sprint 29.3).
   // Falls back to the raw code when the language isn't one of the two
   // bundled options.
@@ -216,6 +221,89 @@ export function CustomerOverviewPage() {
     }
     return customer.language;
   })();
+
+  // A `null` count means the module is not readable by this operator —
+  // render an em dash, never a zero. See `CustomerSummary` in types.ts.
+  const chipValue = (value: number | null | undefined) =>
+    value === null || value === undefined ? "—" : value;
+
+  // Sprint 154 §A — the six (now seven) destinations, ONCE. Driven off
+  // one array so a chip cannot exist with a count but no description, or
+  // a destination appear twice with two different labels — which is what
+  // the separate stat-strip + quicklink-grid pair had drifted into.
+  //
+  // `value: undefined` means "this chip has no count", which is
+  // different from `null` ("there is a count but it is not yours to
+  // read"). Permissions is the only one: there is no countable thing
+  // behind it, so it renders with no number at all rather than a 0.
+  const chips = customer
+    ? [
+        {
+          testId: "customer-overview-stat-buildings",
+          path: "buildings",
+          Icon: MapPin,
+          label: t("customer_view.overview.stat_linked_buildings"),
+          description: t("customer_view.overview.quicklink_buildings_desc"),
+          value:
+            summary?.linked_building_count ?? customer.linked_building_count,
+        },
+        {
+          testId: "customer-overview-stat-users",
+          path: "users",
+          Icon: UserCog,
+          label: t("customer_view.overview.stat_customer_users"),
+          description: t("customer_view.overview.quicklink_users_desc"),
+          value: summary?.user_count ?? customer.user_count,
+        },
+        {
+          testId: "customer-overview-stat-contacts",
+          path: "contacts",
+          Icon: Mail,
+          label: t("customer_view.overview.stat_contacts"),
+          description: t("customer_view.overview.quicklink_contacts_desc"),
+          value: summary?.contact_count ?? customer.contact_count,
+        },
+        {
+          testId: "customer-overview-stat-pricing",
+          path: "pricing",
+          Icon: Tag,
+          label: t("customer_view.overview.stat_pricing"),
+          description: t("customer_view.overview.quicklink_pricing_desc"),
+          value: summary?.pricing_rule_count,
+        },
+        // Sprint 168 §6 — the Contracts chip is GONE. It made eight
+        // chips, and eight wrap onto a second row, which broke the
+        // single-row strip this component exists to keep. The owner
+        // asked for a contracts PAGE for the customer, not a chip: the
+        // page and its sidebar entry both stay, and this strip is back
+        // to seven on one row. A chip with no count was the weakest of
+        // the eight anyway — it carried a link and nothing else.
+        {
+          testId: "customer-overview-stat-extra-work",
+          path: "extra-work",
+          Icon: Receipt,
+          label: t("customer_view.overview.stat_extra_work"),
+          description: t("customer_view.overview.quicklink_extra_work_desc"),
+          value: summary?.extra_work_count,
+        },
+        {
+          testId: "customer-overview-stat-tickets",
+          path: "tickets",
+          Icon: Ticket,
+          label: t("customer_view.overview.stat_tickets"),
+          description: t("customer_view.overview.quicklink_tickets_desc"),
+          value: summary?.ticket_count,
+        },
+        {
+          testId: "customer-overview-stat-permissions",
+          path: "permissions",
+          Icon: ShieldCheck,
+          label: t("customer_view.overview.quicklink_permissions"),
+          description: t("customer_view.overview.quicklink_permissions_desc"),
+          value: undefined,
+        },
+      ]
+    : [];
 
   return (
     <div data-testid="customer-overview-page">
@@ -237,297 +325,292 @@ export function CustomerOverviewPage() {
         </div>
       ) : customer ? (
         <>
-          <p
-            className="section-explainer"
-            data-testid="customer-overview-explainer"
-          >
-            {explainerText}
-          </p>
-
-          <section
-            className="card"
-            data-testid="customer-overview-about-card"
-            style={{ padding: "20px 22px", marginBottom: 16 }}
-          >
-            <div className="section-head" style={{ marginBottom: 8 }}>
-              <div>
-                <div className="section-head-title">
-                  {t("customer_view.overview.about_title")}
-                </div>
-                <div className="section-head-sub">
-                  {t("customer_view.overview.about_desc")}
-                </div>
-              </div>
-            </div>
-
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_company")}
-              </div>
-              <div className="detail-field-value">
-                {providerCompany ? (
-                  <Link to={`/admin/companies/${customer.company}`}>
-                    {providerCompany.name}
-                  </Link>
-                ) : (
-                  <span className="muted-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_contact_email")}
-              </div>
-              <div className="detail-field-value">
-                {customer.contact_email ? (
-                  <a href={`mailto:${customer.contact_email}`}>
-                    {customer.contact_email}
-                  </a>
-                ) : (
-                  <span className="muted-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_phone")}
-              </div>
-              <div className="detail-field-value">
-                {customer.phone ? (
-                  <a href={`tel:${customer.phone}`}>{customer.phone}</a>
-                ) : (
-                  <span className="muted-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_language")}
-              </div>
-              <div className="detail-field-value">{languageLabel}</div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_status")}
-              </div>
-              <div className="detail-field-value">
-                {isActive ? (
-                  <span className="cell-tag cell-tag-open">
-                    <i />
-                    {t("customer_view.overview.status_active")}
-                  </span>
-                ) : (
-                  <span className="cell-tag cell-tag-closed">
-                    <i />
-                    {t("customer_view.overview.status_inactive")}
-                  </span>
-                )}
-              </div>
-            </div>
-          </section>
-
+          {/* 1. The chips — the page's ONE navigation surface.
+              Sprint 154 §A: the quicklink grid that used to repeat these
+              same six destinations at the bottom of the page is gone.
+              Each chip now carries everything both used to say between
+              them — icon, count, name and the one-line description —
+              so a destination appears exactly once. */}
           <div
-            className="summary-grid"
+            className="summary-grid summary-grid-chips summary-grid-chips-one-row"
             data-testid="customer-overview-stat-strip"
           >
-            <Link
-              to={`/admin/customers/${customer.id}/buildings`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-buildings"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_linked_buildings")}
-              </span>
-              <span className="summary-stat-value">{buildingsCount}</span>
-              <span className="summary-stat-meta">
-                {t("customer_view.overview.quicklink_buildings_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/users`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-users"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_customer_users")}
-              </span>
-              <span className="summary-stat-value">
-                {memberCount ?? "—"}
-              </span>
-              <span className="summary-stat-meta">
-                {t("customer_view.overview.quicklink_users_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/contacts`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-contacts"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_contacts")}
-              </span>
-              <span className="summary-stat-value">
-                {contactCount ?? "—"}
-              </span>
-              <span className="summary-stat-meta">
-                {t("customer_view.overview.quicklink_contacts_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/pricing`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-pricing"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_pricing")}
-              </span>
-              <span className="summary-stat-value">
-                {pricingCount ?? "—"}
-              </span>
-              <span className="summary-stat-meta">
-                {t("customer_view.overview.quicklink_pricing_desc")}
-              </span>
-            </Link>
+            {chips.map((chip) => (
+              <Link
+                key={chip.testId}
+                to={`/admin/customers/${customer.id}/${chip.path}`}
+                className="summary-stat summary-stat-chip"
+                data-testid={chip.testId}
+              >
+                <span className="summary-stat-chip-head">
+                  <chip.Icon size={16} strokeWidth={2} aria-hidden="true" />
+                  <span className="summary-stat-label">{chip.label}</span>
+                </span>
+                {/* Permissions has no count. It renders with NO number
+                    rather than a 0, which would be a lie: there is no
+                    countable thing behind it. */}
+                {chip.value !== undefined && (
+                  <span className="summary-stat-value">
+                    {chipValue(chip.value)}
+                  </span>
+                )}
+                <span className="summary-stat-meta">{chip.description}</span>
+              </Link>
+            ))}
           </div>
 
-          <div
+          {/* 2. The dashboard row. Numbers with a label, not links to
+              nowhere: a null value renders an em dash and does NOT link,
+              because there is no page behind it for this operator. */}
+          <section
             className="card"
-            data-testid="customer-overview-buildings-preview"
+            data-testid="customer-overview-dashboard"
             style={{ marginBottom: 18 }}
           >
             <div className="section-head">
-              <div className="section-head-title">
-                {t("customer_view.overview.buildings_preview_title")}
-              </div>
-              {buildingsCount > 5 && (
-                <Link
-                  to={`/admin/customers/${customer.id}/buildings`}
-                  className="btn btn-ghost btn-sm"
-                >
-                  {t("customer_view.overview.buildings_preview_view_all", {
-                    count: buildingsCount,
-                  })}
-                </Link>
-              )}
-            </div>
-            <div style={{ padding: "14px 18px 18px" }}>
-              {buildingsCount === 0 ? (
-                <p className="muted small">
-                  {t("customer_view.overview.buildings_preview_empty")}
-                </p>
-              ) : (
-                <div className="bld-list">
-                  {linkedBuildings.slice(0, 5).map((link) => (
-                    <div
-                      key={link.id}
-                      className="bld-row-head"
-                      style={{ alignItems: "flex-start" }}
-                    >
-                      <div style={{ display: "flex", flexDirection: "column" }}>
-                        <span className="bld-row-name">{link.building_name}</span>
-                        {link.building_address && (
-                          <span
-                            className="muted small"
-                            style={{ marginTop: 2 }}
-                          >
-                            {link.building_address}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+              <div>
+                <div className="section-head-title">
+                  {t("customer_view.overview.dashboard_title")}
                 </div>
-              )}
+                <div className="section-head-sub">
+                  {t("customer_view.overview.dashboard_sub")}
+                </div>
+              </div>
             </div>
-          </div>
+            <div
+              className="summary-grid"
+              style={{
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                margin: 0,
+                padding: "14px 18px 18px",
+              }}
+            >
+              <DashboardMetric
+                testId="customer-overview-metric-open-tickets"
+                label={t("customer_view.overview.metric_open_tickets")}
+                value={summary?.open_ticket_count ?? null}
+                meta={
+                  summary?.ticket_count === null ||
+                  summary?.ticket_count === undefined
+                    ? t("customer_view.overview.metric_unreadable")
+                    : t("customer_view.overview.metric_of_total", {
+                        count: summary.ticket_count,
+                      })
+                }
+                to={`/admin/customers/${customer.id}/tickets`}
+              />
+              <DashboardMetric
+                testId="customer-overview-metric-open-extra-work"
+                label={t("customer_view.overview.metric_open_extra_work")}
+                value={summary?.open_extra_work_count ?? null}
+                meta={
+                  summary?.extra_work_count === null ||
+                  summary?.extra_work_count === undefined
+                    ? t("customer_view.overview.metric_unreadable")
+                    : t("customer_view.overview.metric_of_total", {
+                        count: summary.extra_work_count,
+                      })
+                }
+                to={`/admin/customers/${customer.id}/extra-work`}
+              />
+              <DashboardMetric
+                testId="customer-overview-metric-unpaid-invoices"
+                label={t("customer_view.overview.metric_unpaid_invoices")}
+                value={
+                  summary?.unpaid_invoice_total == null
+                    ? null
+                    : formatEuro(summary.unpaid_invoice_total)
+                }
+                meta={
+                  summary?.unpaid_invoice_count == null
+                    ? t("customer_view.overview.metric_unreadable")
+                    : t("customer_view.overview.metric_sent_invoices", {
+                        count: summary.unpaid_invoice_count,
+                      })
+                }
+                to={`/admin/customers/${customer.id}/invoices`}
+              />
+            </div>
+          </section>
 
-          <CustomerFacturatieSection
-            customer={customer}
-            onUpdated={setCustomer}
-          />
+          {/* 3. About + Linked buildings, side by side. */}
+          <div className="customer-overview-split">
+            <section
+              className="card"
+              data-testid="customer-overview-about-card"
+              style={{ padding: "20px 22px" }}
+            >
+              <div className="section-head" style={{ marginBottom: 8 }}>
+                <div>
+                  <div className="section-head-title">
+                    {t("customer_view.overview.about_title")}
+                  </div>
+                  <div className="section-head-sub">
+                    {t("customer_view.overview.about_desc")}
+                  </div>
+                </div>
+              </div>
 
-          <div
-            className="quicklink-grid"
-            data-testid="customer-overview-quicklinks"
-          >
-            <Link
-              to={`/admin/customers/${customer.id}/contacts`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-contacts"
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_company")}
+                </div>
+                <div className="detail-field-value">
+                  {providerCompany ? (
+                    <Link to={`/admin/companies/${customer.company}`}>
+                      {providerCompany.name}
+                    </Link>
+                  ) : (
+                    <span className="muted-empty">—</span>
+                  )}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_contact_email")}
+                </div>
+                <div className="detail-field-value">
+                  {customer.contact_email ? (
+                    <a href={`mailto:${customer.contact_email}`}>
+                      {customer.contact_email}
+                    </a>
+                  ) : (
+                    <span className="muted-empty">—</span>
+                  )}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_phone")}
+                </div>
+                <div className="detail-field-value">
+                  {customer.phone ? (
+                    <a href={`tel:${customer.phone}`}>{customer.phone}</a>
+                  ) : (
+                    <span className="muted-empty">—</span>
+                  )}
+                </div>
+              </div>
+              {/* Sprint 188 — the BILLING address. Sprint 153 removed the
+                  address CARD that used to open this page, and that stands:
+                  the page opens with operational numbers. But the address
+                  itself is what every invoice is addressed to, and an
+                  invoice cannot be SENT without a street and a city, so it
+                  belongs here as a row like any other fact about the
+                  customer. Missing is stated rather than left blank — the
+                  gap is the thing worth seeing. */}
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_billing_address")}
+                </div>
+                <div
+                  className="detail-field-value"
+                  data-testid="customer-overview-billing-address"
+                >
+                  {billingAddress ? (
+                    billingAddress
+                  ) : (
+                    <span className="muted-empty">
+                      {t("customer_view.overview.billing_address_missing")}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_language")}
+                </div>
+                <div className="detail-field-value">{languageLabel}</div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_status")}
+                </div>
+                <div className="detail-field-value">
+                  {isActive ? (
+                    <span className="cell-tag cell-tag-open">
+                      <i />
+                      {t("customer_view.overview.status_active")}
+                    </span>
+                  ) : (
+                    <span className="cell-tag cell-tag-closed">
+                      <i />
+                      {t("customer_view.overview.status_inactive")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <div
+              className="card"
+              data-testid="customer-overview-buildings-preview"
             >
-              <span className="quicklink-card-head">
-                <Mail size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_contacts")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_contacts_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/buildings`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-buildings"
-            >
-              <span className="quicklink-card-head">
-                <MapPin size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_buildings")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_buildings_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/users`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-users"
-            >
-              <span className="quicklink-card-head">
-                <UserCog size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_users")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_users_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/permissions`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-permissions"
-            >
-              <span className="quicklink-card-head">
-                <ShieldCheck size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_permissions")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_permissions_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/pricing`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-pricing"
-            >
-              <span className="quicklink-card-head">
-                <Tag size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_pricing")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_pricing_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/extra-work`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-extra-work"
-            >
-              <span className="quicklink-card-head">
-                <Receipt size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_extra_work")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_extra_work_desc")}
-              </span>
-            </Link>
+              <div className="section-head">
+                <div className="section-head-title">
+                  {t("customer_view.overview.buildings_preview_title")}
+                </div>
+                {/* Sprint 153 §4.3 — the view-all link is ALWAYS offered
+                    now, not only past five rows. */}
+                {buildingsCount > 0 && (
+                  <Link
+                    to={`/admin/customers/${customer.id}/buildings`}
+                    className="btn btn-ghost btn-sm"
+                    data-testid="customer-overview-buildings-view-all"
+                  >
+                    {t("customer_view.overview.buildings_preview_view_all", {
+                      count: buildingsCount,
+                    })}
+                  </Link>
+                )}
+              </div>
+              <div style={{ padding: "14px 18px 18px" }}>
+                {/* BoundedList replaces the hand-rolled `.slice(0, 5)`.
+                    Same rule (CLAUDE.md §8 — no unbounded server-
+                    collection list), but the app-wide primitive, so the
+                    scroll cap and the overflow count come for free. */}
+                <BoundedList
+                  size="sm"
+                  count={buildingsCount}
+                  ariaLabel={t("customer_view.overview.buildings_list_label")}
+                  testIdPrefix="customer-overview-buildings"
+                  emptyState={
+                    <p className="muted small">
+                      {t("customer_view.overview.buildings_preview_empty")}
+                    </p>
+                  }
+                >
+                  {/* Sprint 155 §2 — the card used to show a name and a
+                      city and stop, so its right-hand half was visibly
+                      empty next to About. It now carries the full
+                      address line, what is at that building, and an
+                      inactive marker — every field annotated on the row
+                      the card already fetched, so filling it costs no
+                      extra request (`test_sprint155_linked_buildings`
+                      pins that with assertNumQueries).
+
+                      The row is a LINK to the building. The prompt said
+                      Sprint 154 had already made it one; it had not —
+                      154 §G.3 added the click-through on the customer's
+                      Buildings SUB-PAGE, and this preview card was
+                      still plain divs. Adding it here rather than
+                      "keeping" it. */}
+                  <div className="bld-list">
+                    {linkedBuildings.map((link) => (
+                      <Link
+                        key={link.id}
+                        to={`/admin/buildings/${link.building_id}`}
+                        className="linked-building-row"
+                        data-testid={`customer-overview-building-${link.building_id}`}
+                      >
+                        <LinkedBuildingIdentity link={link} />
+                        <LinkedBuildingCounts link={link} />
+                      </Link>
+                    ))}
+                  </div>
+                </BoundedList>
+              </div>
+            </div>
           </div>
 
           <ConfirmDialog
@@ -546,3 +629,56 @@ export function CustomerOverviewPage() {
   );
 }
 
+/**
+ * One number on the operational dashboard row. When `value` is null the
+ * module is not readable by this operator: render an em dash and do NOT
+ * link, because there is no page behind it for them.
+ */
+function DashboardMetric({
+  label,
+  value,
+  meta,
+  to,
+  testId,
+}: {
+  label: string;
+  value: number | string | null;
+  meta: string;
+  to: string;
+  testId: string;
+}) {
+  const body = (
+    <>
+      <span className="summary-stat-label">{label}</span>
+      <span className="summary-stat-value">{value ?? "—"}</span>
+      <span className="summary-stat-meta">{meta}</span>
+    </>
+  );
+  if (value === null) {
+    return (
+      <div className="summary-stat" data-testid={testId}>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <Link to={to} className="summary-stat" data-testid={testId}>
+      {body}
+    </Link>
+  );
+}
+
+/**
+ * Format the decimal STRING the summary endpoint returns. Parsing is for
+ * display only — grouping and the decimal separator; the string from the
+ * server stays the authority for the amount. An unparseable value is
+ * shown verbatim rather than as NaN.
+ */
+function formatEuro(decimalString: string): string {
+  const parsed = Number(decimalString);
+  if (!Number.isFinite(parsed)) return decimalString;
+  return new Intl.NumberFormat("nl-NL", {
+    style: "currency",
+    currency: "EUR",
+  }).format(parsed);
+}

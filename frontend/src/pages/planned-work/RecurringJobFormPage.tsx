@@ -51,6 +51,7 @@ import type {
 } from "../../api/types";
 import { useToast } from "../../components/ToastProvider";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { customerLabelName } from "../../lib/customerLabelName";
 
 const FREQUENCIES: RecurringJobFrequency[] = ["WEEKLY", "BIWEEKLY", "MONTHLY"];
 const PRICING_MODES: SelectablePricingMode[] = ["CONTRACT_INCLUDED", "FIXED"];
@@ -82,6 +83,11 @@ function customerMatchesBuilding(customer: Customer, buildingId: number): boolea
     (customer.linked_building_ids?.includes(buildingId) ?? false)
   );
 }
+
+// Sprint 187 §6b — one stable empty array, so the derived
+// `offeredCategories` below does not hand a new reference to its
+// consumers on every render.
+const EMPTY_CATEGORIES: ServiceCategory[] = [];
 
 export function RecurringJobFormPage() {
   const { id } = useParams();
@@ -140,9 +146,14 @@ export function RecurringJobFormPage() {
     departments: CustomerLabel[];
     workTypes: CustomerLabel[];
   } | null>(null);
-  const [companyCategories, setCompanyCategories] = useState<ServiceCategory[]>(
-    [],
-  );
+  // Sprint 187C — carries the company it was fetched FOR, mirroring
+  // `customerFolders` below. Without that, an empty list cannot be told
+  // apart from a list that has not arrived yet, and the save path treats
+  // the two identically. See `categoriesLoaded` further down.
+  const [companyCategories, setCompanyCategories] = useState<{
+    companyId: number;
+    rows: ServiceCategory[];
+  } | null>(null);
   const [customerFolders, setCustomerFolders] = useState<{
     customerId: number;
     rows: CustomerPriceFolder[];
@@ -314,21 +325,52 @@ export function RecurringJobFormPage() {
     };
   }, [customer]);
 
-  // The company's ACTIVE catalog categories — fetched once. An archived
-  // category must never be offerable.
+  // The company's ACTIVE catalog categories. An archived category must
+  // never be offerable.
+  //
+  // Sprint 187 §6b — and neither must ANOTHER provider's. Fetched once
+  // with no company, this offered a SUPER_ADMIN every company's category
+  // headings under "the company's categories", none of which can hold a
+  // service this customer is priceable from. Re-fetched per customer
+  // now, like the folders effect directly below it, because the company
+  // is a property of the chosen customer and not of the page.
+  const selectedCustomerCompany =
+    customer === ""
+      ? null
+      : (customers.find((c) => c.id === Number(customer))?.company ?? null);
+  // DERIVED, not stored: with no customer chosen there is no company, so
+  // there are no company categories to offer. Clearing the state inside
+  // the effect below would be a synchronous setState in an effect body,
+  // which CLAUDE.md forbids and the lint baseline is already at.
+  const categoriesLoaded =
+    selectedCustomerCompany !== null &&
+    companyCategories !== null &&
+    companyCategories.companyId === selectedCustomerCompany;
+  const offeredCategories = categoriesLoaded
+    ? companyCategories.rows
+    : EMPTY_CATEGORIES;
   useEffect(() => {
+    if (selectedCustomerCompany === null) return;
+    const companyId = selectedCustomerCompany;
     let cancelled = false;
-    listServiceCategories({ is_active: true })
+    listServiceCategories({
+      is_active: true,
+      company: companyId,
+    })
       .then((rows) => {
-        if (!cancelled) setCompanyCategories(rows);
+        if (!cancelled) setCompanyCategories({ companyId, rows });
       })
       .catch(() => {
-        if (!cancelled) setCompanyCategories([]);
+        // Sprint 187C — a failed fetch stays UNLOADED rather than
+        // becoming an empty loaded list. An empty loaded list would tell
+        // the save path "this company genuinely has no categories", and
+        // the job's stored one would be written away on the next save.
+        if (!cancelled) setCompanyCategories(null);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedCustomerCompany]);
 
   // ...and the selected customer's ACTIVE folders.
   useEffect(() => {
@@ -380,10 +422,39 @@ export function RecurringJobFormPage() {
       ? categoryChoice
       : ""
     : categoryChoice.startsWith("cat:")
-      ? companyCategories.some((c) => `cat:${c.id}` === categoryChoice)
+      ? offeredCategories.some((c) => `cat:${c.id}` === categoryChoice)
         ? categoryChoice
         : ""
       : "";
+
+  // Sprint 187C — the collapse above cannot tell "this id does not belong
+  // to the chosen customer" (deliberate: a selection must not carry
+  // across customers) from "the list it checks against has not arrived
+  // yet". Sending an explicit null in the second case WIPES the job's
+  // stored category on save, and §6b widened the window that makes it
+  // reachable: the category fetch now waits for the customer to resolve
+  // out of the sequential load chain, while `loading` has already gone
+  // false and Save is clickable.
+  //
+  // So the keys are OMITTED until the lists they validate against are
+  // loaded for the current selection — an omitted key leaves the stored
+  // value untouched. This is the same rule the crew payload below states
+  // for the same reason. On CREATE there is nothing to protect and both
+  // lists resolve before anything is stored, so the keys are always sent.
+  const foldersLoaded =
+    customerFolders !== null && customerFolders.customerId === Number(customer);
+  const categoryChoiceIsTrustworthy =
+    id === undefined || (categoriesLoaded && foldersLoaded);
+  const categoryPayload = categoryChoiceIsTrustworthy
+    ? {
+        service_category: effectiveCategoryChoice.startsWith("cat:")
+          ? Number(effectiveCategoryChoice.slice(4))
+          : null,
+        price_folder: effectiveCategoryChoice.startsWith("fol:")
+          ? Number(effectiveCategoryChoice.slice(4))
+          : null,
+      }
+    : {};
 
   function toggleId(list: number[], value: number): number[] {
     return list.includes(value)
@@ -498,12 +569,7 @@ export function RecurringJobFormPage() {
       // clearing a field on EDIT actually clears it.
       department: effectiveDepartmentId ? Number(effectiveDepartmentId) : null,
       work_type: effectiveWorkTypeId ? Number(effectiveWorkTypeId) : null,
-      service_category: effectiveCategoryChoice.startsWith("cat:")
-        ? Number(effectiveCategoryChoice.slice(4))
-        : null,
-      price_folder: effectiveCategoryChoice.startsWith("fol:")
-        ? Number(effectiveCategoryChoice.slice(4))
-        : null,
+      ...categoryPayload,
     };
     // Only touch crew when eligible crew loaded for this building, so a
     // transient fetch error on edit does not wipe the job's existing crew
@@ -686,7 +752,7 @@ export function RecurringJobFormPage() {
                   <option value="">{t("form.field_label_none")}</option>
                   {currentDepartments.map((d) => (
                     <option key={d.id} value={String(d.id)}>
-                      {d.name}
+                      {customerLabelName(d.name, t)}
                     </option>
                   ))}
                 </select>
@@ -712,7 +778,7 @@ export function RecurringJobFormPage() {
                   <option value="">{t("form.field_label_none")}</option>
                   {currentWorkTypes.map((w) => (
                     <option key={w.id} value={String(w.id)}>
-                      {w.name}
+                      {customerLabelName(w.name, t)}
                     </option>
                   ))}
                 </select>
@@ -739,9 +805,9 @@ export function RecurringJobFormPage() {
                       company's categories, plus this customer's folders
                       once a customer is chosen. ACTIVE only on both
                       sides. */}
-                  {companyCategories.length > 0 && (
+                  {offeredCategories.length > 0 && (
                     <optgroup label={t("form.field_category_group_company")}>
-                      {companyCategories.map((c) => (
+                      {offeredCategories.map((c) => (
                         <option key={`cat-${c.id}`} value={`cat:${c.id}`}>
                           {c.name}
                         </option>

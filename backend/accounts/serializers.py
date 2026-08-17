@@ -90,6 +90,8 @@ class UserSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "full_name",
+            # Sprint 154 §I.1 — the user's own contact number.
+            "phone",
             "role",
             "language",
             "is_active",
@@ -121,6 +123,7 @@ class MeSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "full_name",
+            "phone",
             "role",
             "language",
             "is_active",
@@ -176,7 +179,8 @@ class MeUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["full_name", "language"]
+        # Sprint 154 §I.1 — a user may set their own phone number.
+        fields = ["full_name", "phone", "language"]
 
     def validate_full_name(self, value):
         cleaned = (value or "").strip()

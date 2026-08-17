@@ -159,6 +159,86 @@ def recompute_final_amounts(ew: ExtraWorkRequest) -> None:
     )
 
 
+def quoted_totals(
+    ew: ExtraWorkRequest,
+) -> Tuple[Decimal, Decimal, Decimal]:
+    """Sprint 187 §1 — the QUOTED `(subtotal, vat, total)` for `ew`,
+    computed and returned, never written.
+
+    Split out from `recompute_quoted_totals` so the backfill command can
+    show an operator what a `--dry-run` would write without writing it,
+    from THIS function rather than from a second copy of the formula.
+    """
+    kind, lines = active_priced_lines(ew)
+
+    subtotal = Decimal("0.00")
+    vat = Decimal("0.00")
+    for line in lines:
+        unit_price = _line_unit_price(kind, line)
+        vat_pct = _line_vat_pct(kind, line)
+        # ORDERED quantity — never `billable_quantity(line)`. See the
+        # docstring on `recompute_quoted_totals` below for why.
+        line_subtotal = _two_places(line.quantity * unit_price)
+        line_vat = _two_places(line_subtotal * vat_pct / Decimal("100"))
+        subtotal += line_subtotal
+        vat += line_vat
+
+    return (
+        _two_places(subtotal),
+        _two_places(vat),
+        _two_places(subtotal + vat),
+    )
+
+
+def recompute_quoted_totals(ew: ExtraWorkRequest) -> None:
+    """Sprint 187 §1 — recompute and persist `ew.subtotal_amount` /
+    `vat_amount` / `total_amount` from the active priced-line set.
+
+    ## Why this exists
+
+    Those three columns are the QUOTE cache that every list, widget,
+    report KPI, CSV export and detail header reads (through
+    `rowAmounts()` in `frontend/src/lib/billing.ts`, whose quoted
+    fallback is exactly `total_amount`). Until this function they were
+    written by ONE thing — `ExtraWorkRequest.recompute_totals()`, driven
+    only from the legacy `/pricing-items/` views. The Proposal route
+    never touched them, so an Extra Work priced at EUR 484.00 through a
+    Proposal, approved by the customer and spawned into a ticket, read
+    EUR 0,00 on every one of those surfaces.
+
+    The fix belongs here and not in the reader: `rowAmounts()` is the ONE
+    billing-total rule (CLAUDE.md §2A) and invoicing reads the same
+    columns server-side, so a frontend-only fallback would desync the
+    two the moment an invoice was generated.
+
+    ## The one line that differs from `recompute_final_amounts`
+
+    This uses the ORDERED `line.quantity`; `recompute_final_amounts`
+    uses `billable_quantity(line)`, which substitutes `actual_hours` on
+    hourly lines. That is the whole distinction between the two
+    functions, and it is deliberate: **a quote is what was ordered, a
+    final amount is what was delivered.** Using `billable_quantity` here
+    would silently rewrite the customer's agreed quote to whatever hours
+    the provider later entered.
+
+    Everything else — the three-route line resolution, the per-line
+    price and VAT accessors, the two-places rounding — is shared, so the
+    quote and the final amount cannot round differently.
+    """
+    subtotal, vat, total = quoted_totals(ew)
+    ew.subtotal_amount = subtotal
+    ew.vat_amount = vat
+    ew.total_amount = total
+    ew.save(
+        update_fields=[
+            "subtotal_amount",
+            "vat_amount",
+            "total_amount",
+            "updated_at",
+        ]
+    )
+
+
 def ew_has_unfinalized_hourly_lines(ew: ExtraWorkRequest) -> bool:
     """True iff any active priced line is HOURS-unit with
     `actual_hours is None`. Used by the ticket completion gate

@@ -20,6 +20,8 @@
 
 import type { TFunction } from "i18next";
 
+import { standardSlotLabel } from "./standardSlotLabel";
+
 /**
  * The six slot keys, mirroring
  * `backend/timesheets/standard_set.py::STANDARD_SLOTS`. A key that
@@ -68,12 +70,16 @@ export function hourTypeLabel(
   source: HourTypeLabelSource,
   t: TFunction,
 ): string {
-  const slot = source.standard_slot;
-  if (!slot || !KNOWN_SLOTS.has(slot)) return source.name;
-  const key = standardSlotLabelKey(slot);
-  const translated = t(key);
-  // i18next returns the KEY itself when a translation is missing.
-  return translated === key ? source.name : translated;
+  // Sprint 170 §5 — the shared rule. Three catalogs derive a slot and
+  // translate it; the rule is written once and each keeps its own slot
+  // list and key prefix.
+  return standardSlotLabel(
+    source.name,
+    source.standard_slot,
+    "hour_type_slot",
+    KNOWN_SLOTS,
+    t,
+  );
 }
 
 /**

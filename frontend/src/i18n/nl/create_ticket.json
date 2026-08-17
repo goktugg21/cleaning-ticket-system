@@ -17,6 +17,8 @@
   "field_customer_placeholder": "Selecteer klant…",
   "field_customer_no_options": "Geen klanten op deze locatie",
   "field_room_label": "Kamer / zone",
+  "field_wanted_date_label": "Wanneer wilt u dit graag uitgevoerd hebben? (optioneel)",
+  "field_wanted_date_helper": "Geef de datum door die u schikt. Het is een wens, geen toezegging — wij bevestigen wat mogelijk is.",
   "field_room_placeholder": "bijv. Serverruimte A, Gebouw 4",
   "field_title_label": "Korte beschrijving *",
   "field_title_placeholder": "Korte samenvatting van het probleem",

@@ -21,12 +21,15 @@ import {
   deleteProposalLine,
   fetchProposalPdf,
   transitionProposal,
+  updateProposalLine,
   type ProposalLineWritePayload,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import type { ExtraWorkUnitType, ProposalDetail, ProposalLine } from "../api/types";
 import { formatMoney } from "../lib/intl";
 import { CollapsibleCard } from "./CollapsibleCard";
+import { ConfirmDialog } from "./ConfirmDialog";
+import type { ConfirmDialogHandle } from "./ConfirmDialog";
 import { InvoiceLineRow, InvoiceLineTotalsRow } from "./InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "./invoiceLineColumns";
 import { NoteEditorDialog } from "./NoteEditorDialog";
@@ -458,30 +461,68 @@ function payloadFromForm(
   };
 }
 
-function ProposalAddLine({
+const EMPTY_LINE_FORM: LineFormState = {
+  description: "",
+  unit_type: "FIXED",
+  custom_unit_label: "",
+  quantity: "1.00",
+  unit_price: "0.00",
+  vat_pct: "21.00",
+  customer_explanation: "",
+  internal_note: "",
+};
+
+/** Sprint 187 §2c — a SAVED line's values, back in the composer's shape.
+ *
+ *  `unit_type` is `OTHER` on the wire whenever the operator typed a
+ *  custom unit, so the round trip has to put the label back in
+ *  `custom_unit_label` — otherwise reopening a "per pallet" line and
+ *  pressing Save would silently rewrite it to a bare "Other". */
+function formFromLine(line: ProposalLine): LineFormState {
+  return {
+    description: line.description ?? "",
+    unit_type: line.unit_type,
+    custom_unit_label: line.custom_unit_label ?? "",
+    quantity: String(line.quantity),
+    unit_price: String(line.unit_price),
+    vat_pct: String(line.vat_pct),
+    customer_explanation: line.customer_explanation ?? "",
+    internal_note: line.internal_note ?? "",
+  };
+}
+
+/**
+ * The composer, used for BOTH add and edit.
+ *
+ * Sprint 187 §2c — `PATCH .../lines/<id>/` and its typed client wrapper
+ * `updateProposalLine` have both existed since the endpoint shipped, with
+ * ZERO importers: the builder was add/delete only, so correcting one
+ * price meant deleting the line and retyping every field of it. Edit is
+ * wired now, and it reuses this component rather than growing a second
+ * form — one set of fields, one validation rule, one place a unit-type
+ * change has to be handled.
+ */
+function ProposalLineComposer({
   disabled,
-  onAdd,
+  initial,
+  submitLabel,
+  testIdPrefix,
+  onSubmit,
   onCancel,
 }: {
   disabled: boolean;
-  onAdd: (payload: ProposalLineWritePayload) => void;
+  initial: LineFormState;
+  submitLabel: string;
+  testIdPrefix: string;
+  onSubmit: (payload: ProposalLineWritePayload) => void;
   onCancel: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
-  const [form, setForm] = useState<LineFormState>({
-    description: "",
-    unit_type: "FIXED",
-    custom_unit_label: "",
-    quantity: "1.00",
-    unit_price: "0.00",
-    vat_pct: "21.00",
-    customer_explanation: "",
-    internal_note: "",
-  });
+  const [form, setForm] = useState<LineFormState>(initial);
   return (
     <div
       className="ew-line-row-card proposal-addline"
-      data-testid="proposal-add-line-form"
+      data-testid={`${testIdPrefix}-form`}
       style={{ marginTop: 12 }}
     >
       <LineFields
@@ -498,10 +539,10 @@ function ProposalAddLine({
               type="button"
               className="btn btn-primary btn-sm"
               disabled={disabled || !form.description.trim()}
-              onClick={() => onAdd(payloadFromForm(form, true))}
-              data-testid="proposal-add-line-submit"
+              onClick={() => onSubmit(payloadFromForm(form, true))}
+              data-testid={`${testIdPrefix}-submit`}
             >
-              {t("detail.proposal_add_line")}
+              {submitLabel}
             </button>
             <button
               type="button"
@@ -641,10 +682,16 @@ export function ProposalBuilder({
   ewId,
   proposal,
   onChanged,
+  parentAdvanceBlocked = false,
 }: {
   ewId: number | string;
   proposal: ProposalDetail;
   onChanged: () => Promise<void> | void;
+  // Sprint 188 — creating this proposal was meant to start the review,
+  // and did not. Without this the builder shows the generic "Send is not
+  // available yet" line, which is true but useless: the operator cannot
+  // tell that ONE click on the workflow card above fixes it.
+  parentAdvanceBlocked?: boolean;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [busy, setBusy] = useState(false);
@@ -658,6 +705,20 @@ export function ProposalBuilder({
     "CUSTOMER_APPROVED" | "CUSTOMER_REJECTED" | null
   >(null);
   const [overrideReason, setOverrideReason] = useState("");
+  // Sprint 187 §2c — the id of the saved line currently open for edit,
+  // or null. One at a time: two open editors on the same table is two
+  // sources of truth for a row.
+  const [editingLineId, setEditingLineId] = useState<number | null>(null);
+  // Sprint 187 §2b — discard a DRAFT / withdraw a SENT quote.
+  // Rendered UNCONDITIONALLY and driven through the ref (CLAUDE.md §3):
+  // wrapping a native <dialog> in `{cond && ...}` mounts an invisible
+  // dialog and the trigger button looks dead.
+  const cancelDialogRef = useRef<ConfirmDialogHandle>(null);
+  // The SENT leg is coerced to `is_override=True` by
+  // `provider_driven_sent_cancel` and REQUIRES a reason; the DRAFT leg
+  // is a plain transition. One dialog, one flag, rather than two.
+  const cancelNeedsReason = proposal.status === "SENT";
+  const [cancelReason, setCancelReason] = useState("");
   // RF-6 — bumped after every successful mutation (via `run`) so the live
   // PDF preview refetches. Not per-keystroke: only settled saves move it.
   const [previewNonce, setPreviewNonce] = useState(0);
@@ -686,6 +747,10 @@ export function ProposalBuilder({
   // proposal lines on approve.
   const canApprove = proposal.actions?.can_approve === true;
   const canReject = proposal.actions?.can_reject === true;
+  // Sprint 187 §2b — the serializer has advertised this for DRAFT and
+  // SENT since the endpoint shipped and nothing read it, so a sent quote
+  // had no non-override way back and a draft could not be thrown away.
+  const canCancel = proposal.actions?.can_cancel === true;
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -704,11 +769,42 @@ export function ProposalBuilder({
   }
 
   const removeLine = (lineId: number) =>
-    void run(() => deleteProposalLine(ewId, proposal.id, lineId));
+    void run(async () => {
+      await deleteProposalLine(ewId, proposal.id, lineId);
+      // Sprint 187C — Remove stays rendered on every row INCLUDING the
+      // one being edited, so deleting that row left `editingLineId`
+      // pointing at a line that no longer exists: the edit block's
+      // find() returns undefined and renders nothing, so the composer
+      // vanishes with no way back except reloading the page.
+      setEditingLineId((current) => (current === lineId ? null : current));
+    });
   const addLine = (payload: ProposalLineWritePayload) =>
     void run(async () => {
       await createProposalLine(ewId, proposal.id, payload);
       setAddOpen(false);
+    });
+  // Sprint 187 §2c — the PATCH that had no caller. Same `run()` helper
+  // as every other mutation here, so it gets the same refetch and the
+  // same live-preview refresh rather than a second refresh path.
+  const saveLine = (lineId: number, payload: ProposalLineWritePayload) =>
+    void run(async () => {
+      await updateProposalLine(ewId, proposal.id, lineId, payload);
+      setEditingLineId(null);
+    });
+  // Sprint 187 §2b — discard (DRAFT) / withdraw (SENT). The reason is
+  // sent ONLY on the SENT leg: the backend coerces `is_override` there
+  // and 400s `override_reason_required` without one, while the DRAFT leg
+  // takes neither.
+  const confirmCancel = () =>
+    void run(async () => {
+      await transitionProposal(ewId, proposal.id, {
+        to_status: "CANCELLED",
+        ...(cancelNeedsReason
+          ? { is_override: true, override_reason: cancelReason.trim() }
+          : {}),
+      });
+      cancelDialogRef.current?.close();
+      setCancelReason("");
     });
   const send = () =>
     void run(() => transitionProposal(ewId, proposal.id, { to_status: "SENT" }));
@@ -850,6 +946,12 @@ export function ProposalBuilder({
                     line={line}
                     editable={canEdit}
                     onRemove={canEdit ? () => removeLine(line.id) : undefined}
+                    // Sprint 187 §2c — `InvoiceLineRow` has rendered an
+                    // Edit button whenever `onEdit` is passed since it
+                    // was written; the builder simply never passed one.
+                    onEdit={
+                      canEdit ? () => setEditingLineId(line.id) : undefined
+                    }
                     rowTestId="extra-work-proposal-line-row"
                     subLabel={renderNoteSub(line)}
                   />
@@ -864,15 +966,42 @@ export function ProposalBuilder({
           </div>
         )}
 
-        {/* Add-line composer — the ONLY editing surface. Live per-line
-            Subtotal / VAT / Total + the note modals live in here; on save
-            the line drops into the read-only table above. */}
-        {canEdit && (
+        {/* Sprint 187 §2c — the edit composer for ONE saved line, opened
+            from that line's Edit button. Keyed by line id so switching
+            rows re-seeds the form rather than carrying the previous
+            line's values into the next one. */}
+        {canEdit && editingLineId !== null && (
+          <div className="ew-pricing-add-form">
+            {(() => {
+              const line = proposal.lines.find((l) => l.id === editingLineId);
+              if (!line) return null;
+              return (
+                <ProposalLineComposer
+                  key={line.id}
+                  disabled={busy}
+                  initial={formFromLine(line)}
+                  submitLabel={t("common:save")}
+                  testIdPrefix="proposal-edit-line"
+                  onSubmit={(payload) => saveLine(line.id, payload)}
+                  onCancel={() => setEditingLineId(null)}
+                />
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Add-line composer. Live per-line Subtotal / VAT / Total + the
+            note modals live in here; on save the line drops into the
+            read-only table above. */}
+        {canEdit && editingLineId === null && (
           <div className="ew-pricing-add-form">
             {addOpen ? (
-              <ProposalAddLine
+              <ProposalLineComposer
                 disabled={busy}
-                onAdd={addLine}
+                initial={EMPTY_LINE_FORM}
+                submitLabel={t("detail.proposal_add_line")}
+                testIdPrefix="proposal-add-line"
+                onSubmit={addLine}
                 onCancel={() => setAddOpen(false)}
               />
             ) : (
@@ -906,7 +1035,23 @@ export function ProposalBuilder({
           <strong>{formatMoney(proposal.total_amount)}</strong>
         </div>
 
-        {canSend && (
+        {/* Sprint 187 §2a — Send is never simply ABSENT on a draft the
+            operator may edit.
+            This used to be a bare `{canSend && (...)}` with no else
+            branch: an operator who reached the builder from a REQUESTED
+            parent built a whole quote and found no Send button, no
+            message and no tooltip — and since `can_direct_publish` is
+            derived from `can_send`, the escape hatch was hidden too, so
+            BOTH terminal actions on the screen were dead.
+            The backend has always carried a stable code for exactly this
+            (`proposal_send_requires_under_review`, whose own comment
+            says it exists "so the UI can explain the precondition"); the
+            UI never reached it because it hid the button instead of
+            pressing it. Creating a proposal now advances the parent, so
+            the case should not arise at all — but a disabled button with
+            the reason beside it is what any REMAINING case gets, rather
+            than silence. */}
+        {canSend ? (
           <div style={{ marginTop: 12 }}>
             <button
               type="button"
@@ -921,6 +1066,28 @@ export function ProposalBuilder({
               {t("detail.proposal_send_hint")}
             </p>
           </div>
+        ) : (
+          canEdit && (
+            <div style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled
+                data-testid="extra-work-proposal-send-blocked"
+              >
+                {t("detail.proposal_send")}
+              </button>
+              <p
+                className="muted small"
+                style={{ margin: "6px 0 0" }}
+                data-testid="extra-work-proposal-send-blocked-reason"
+              >
+                {parentAdvanceBlocked
+                  ? t("detail.proposal_send_blocked_parent")
+                  : t("detail.proposal_send_blocked_reason")}
+              </p>
+            </div>
+          )
         )}
 
         {(canApprove || canReject) && (
@@ -950,6 +1117,34 @@ export function ProposalBuilder({
                 {t("detail.proposal_reject")}
               </button>
             )}
+          </div>
+        )}
+
+        {/* Sprint 187 §2b — the way OUT of a quote.
+            A DRAFT could not be thrown away and a SENT quote could not
+            be withdrawn: `can_cancel` was advertised for both and read by
+            nothing, so the only exit from a sent quote was an override
+            approve/reject of a price nobody wanted. Live consequence:
+            proposal 13 on EW 58, SENT since 20 July with no way back.
+            One control, worded for the state it is in — discarding a
+            draft nobody has seen and withdrawing a quote a customer is
+            holding are not the same act. */}
+        {canCancel && (
+          <div style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={busy}
+              onClick={() => {
+                setCancelReason("");
+                cancelDialogRef.current?.open();
+              }}
+              data-testid="extra-work-proposal-cancel"
+            >
+              {cancelNeedsReason
+                ? t("detail.proposal_withdraw")
+                : t("detail.proposal_discard")}
+            </button>
           </div>
         )}
 
@@ -1009,6 +1204,55 @@ export function ProposalBuilder({
             </div>
           </div>
         )}
+        {/* Sprint 187 §2b — UNCONDITIONAL, ref-driven (CLAUDE.md §3).
+            `{canCancel && <ConfirmDialog/>}` would mount an invisible
+            native <dialog> and the trigger above would look dead — the
+            Sprint 128 bug, restated. */}
+        <ConfirmDialog
+          ref={cancelDialogRef}
+          title={
+            cancelNeedsReason
+              ? t("detail.proposal_withdraw_confirm_title")
+              : t("detail.proposal_discard_confirm_title")
+          }
+          body={
+            <>
+              <p style={{ marginTop: 0 }}>
+                {cancelNeedsReason
+                  ? t("detail.proposal_withdraw_confirm_body")
+                  : t("detail.proposal_discard_confirm_body")}
+              </p>
+              {cancelNeedsReason && (
+                <textarea
+                  className="field-textarea"
+                  data-testid="extra-work-proposal-cancel-reason"
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder={t(
+                    "detail.proposal_withdraw_reason_placeholder",
+                  )}
+                  rows={3}
+                  aria-label={t(
+                    "detail.proposal_withdraw_reason_placeholder",
+                  )}
+                />
+              )}
+            </>
+          }
+          confirmLabel={
+            cancelNeedsReason
+              ? t("detail.proposal_withdraw")
+              : t("detail.proposal_discard")
+          }
+          onConfirm={confirmCancel}
+          onCancel={() => setCancelReason("")}
+          busy={busy}
+          // The backend 400s `override_reason_required` on the SENT leg
+          // without a reason; disabling here says so before the round
+          // trip rather than after it.
+          confirmDisabled={cancelNeedsReason && cancelReason.trim() === ""}
+          destructive
+        />
       </div>
       {previewOpen && (
         <ProposalPreviewPane

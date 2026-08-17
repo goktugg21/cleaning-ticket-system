@@ -13,6 +13,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from django.db import IntegrityError
+from django.db.models import Count
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -113,7 +114,12 @@ class DocumentFolderListCreateView(_DocumentsBase):
         # per-node fetch). Bounded by the single customer; a customer's folder
         # count is small by construction.
         customer, _side = self.resolve_read(request, customer_id)
-        folders = DocumentFolder.objects.filter(customer=customer)
+        # Sprint 155 §3 — one annotated Count for the whole list. The
+        # folder cards render this number, and counting per row would
+        # turn one request into one-per-folder for a purely visual field.
+        folders = DocumentFolder.objects.filter(customer=customer).annotate(
+            _file_count=Count("documents", distinct=True)
+        )
         return Response(DocumentFolderReadSerializer(folders, many=True).data)
 
     def post(self, request, customer_id):

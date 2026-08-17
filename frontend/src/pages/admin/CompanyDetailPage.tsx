@@ -7,18 +7,22 @@ import { getApiError } from "../../api/client";
 import {
   deactivateCompany,
   getCompany,
-  listCompanyAdmins,
+  getCompanySummary,
+  listCompanyAdminPeople,
   reactivateCompany,
 } from "../../api/admin";
 import type {
   CompanyAdmin,
-  CompanyAdminMembership,
+  CompanyAdminPerson,
+  CompanySummary,
 } from "../../api/types";
+import { BoundedList } from "../../components/BoundedList";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { CompanyRelationCards } from "../../components/CompanyRelationCards";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 /**
@@ -38,7 +42,7 @@ import { useSavedBanner } from "../../hooks/useSavedBanner";
 export function CompanyDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { t, i18n } = useTranslation("common");
+  const { t } = useTranslation("common");
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
@@ -54,13 +58,25 @@ export function CompanyDetailPage() {
   });
 
   const [company, setCompany] = useState<CompanyAdmin | null>(null);
-  const [members, setMembers] = useState<CompanyAdminMembership[]>([]);
+  // Sprint 156 §1 — the four relation lists and the tile counts. Each is
+  // its OWN read with its own catch, so one unreadable block leaves the
+  // rest of the page intact; that mirrors the server, which wraps each
+  // summary block for the same reason.
+  const [summary, setSummary] = useState<CompanySummary | null>(null);
+  const [admins, setAdmins] = useState<CompanyAdminPerson[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const [actionBusy, setActionBusy] = useState(false);
+
+  // Sprint 163 §4 — the three relation cards' state, handlers and
+  // dialogs moved to `components/CompanyRelationCards`, which owns
+  // them for both this page and the company edit page.
+
+  // The reload token went with the cards: they were its only writer,
+  // and they now own their own. This page's reads happen once.
 
   useEffect(() => {
     let cancelled = false;
@@ -74,19 +90,19 @@ export function CompanyDetailPage() {
     }
     setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     setError("");
+    // The company itself is the only read that may fail the page; every
+    // other one degrades to an empty card or an em dash. A company whose
+    // extra-work module cannot be read must still show its buildings.
     Promise.all([
       getCompany(numericId),
-      listCompanyAdmins(numericId).catch(() => ({
-        count: 0,
-        next: null,
-        previous: null,
-        results: [] as CompanyAdminMembership[],
-      })),
+      getCompanySummary(numericId).catch(() => null),
+      listCompanyAdminPeople(numericId).catch(() => []),
     ])
-      .then(([companyData, membersResponse]) => {
+      .then(([companyData, summaryData, adminRows]) => {
         if (cancelled) return;
         setCompany(companyData);
-        setMembers(membersResponse.results);
+        setSummary(summaryData);
+        setAdmins(adminRows);
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
@@ -99,6 +115,10 @@ export function CompanyDetailPage() {
     };
   }, [numericId, t]);
 
+  // ---- Sprint 159 §4 — the three editable cards --------------------
+
+  /** Every write here goes through one wrapper so the busy flag, the
+   *  error surface and the re-read cannot drift apart between cards. */
   async function handleConfirmDeactivate() {
     if (numericId === null) return;
     setActionBusy(true);
@@ -142,8 +162,6 @@ export function CompanyDetailPage() {
 
   const companyName = company?.name ?? t("company_form.fallback");
   const isActive = company?.is_active ?? true;
-
-  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
 
   const languageLabel = (() => {
     if (!company) return "";
@@ -222,6 +240,7 @@ export function CompanyDetailPage() {
         </div>
       )}
 
+
       {loading && !company ? (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
@@ -244,6 +263,14 @@ export function CompanyDetailPage() {
               </div>
             </div>
 
+            {/* Sprint 161 §2 — a compact TWO-COLUMN field grid, not
+                nine full-width rows. Sprint 157 was right that the page
+                under-displayed what its Edit changes, and every field it
+                added stays; what changed here is only the layout, which
+                had turned the About block into a 417px column of single
+                lines and pushed the stat tiles and relation cards - the
+                things that actually carry the page - below the fold. */}
+            <div className="detail-field-grid">
             <div className="detail-field-row">
               <div className="detail-field-label">
                 {t("company_detail.field_name")}
@@ -261,6 +288,76 @@ export function CompanyDetailPage() {
                 {t("company_detail.field_default_language")}
               </div>
               <div className="detail-field-value">{languageLabel}</div>
+            </div>
+            {/* Sprint 157 §4 — the four provider-policy switches and the
+                logo. The Edit action already reached ALL of them: it
+                opens `CompanyFormPage`, which edits name, slug, default
+                language, logo and these four booleans, i.e. every
+                writable field `Company` has. What was missing was the
+                other half — the DETAIL page displayed four fields while
+                the form edited nine, so the Edit looked thin because the
+                page did not show what it changes.
+
+                Showing them here also makes the switches discoverable:
+                they govern what a provider ADMIN may do to a customer's
+                company admins, catalog and prices, and they were
+                previously invisible unless you opened the edit form. */}
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_policy.manage_cca_label")}
+              </div>
+              <div className="detail-field-value">
+                {company.provider_admin_may_manage_customer_company_admins
+                  ? t("admin.status_active")
+                  : t("company_detail.policy_off")}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_policy.manage_catalog_label")}
+              </div>
+              <div className="detail-field-value">
+                {company.provider_admin_may_manage_catalog
+                  ? t("admin.status_active")
+                  : t("company_detail.policy_off")}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_policy.manage_prices_label")}
+              </div>
+              <div className="detail-field-value">
+                {company.provider_admin_may_manage_customer_prices
+                  ? t("admin.status_active")
+                  : t("company_detail.policy_off")}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_policy.quote_override_label")}
+              </div>
+              <div className="detail-field-value">
+                {company.provider_admin_may_quote_override_start
+                  ? t("admin.status_active")
+                  : t("company_detail.policy_off")}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_detail.field_logo")}
+              </div>
+              <div className="detail-field-value">
+                {company.logo_url ? (
+                  <img
+                    src={company.logo_url}
+                    alt=""
+                    style={{ maxHeight: 40, maxWidth: 160 }}
+                    data-testid="company-detail-logo"
+                  />
+                ) : (
+                  <span className="muted-empty">—</span>
+                )}
+              </div>
             </div>
             <div className="detail-field-row">
               <div className="detail-field-label">
@@ -280,12 +377,48 @@ export function CompanyDetailPage() {
                 )}
               </div>
             </div>
+            </div>
           </section>
 
+          {/* Sprint 156 §1 — the tiles. A null count renders an em
+              dash, never a zero: the server returns null when a block is
+              not answerable for this actor, and 0 would be the different
+              and false claim that there are none. */}
+          <div
+            className="summary-grid summary-grid-chips"
+            data-testid="company-detail-stats"
+          >
+            {[
+              { key: "buildings", label: t("company_detail.stat_buildings"), value: summary?.building_count },
+              { key: "customers", label: t("company_detail.stat_customers"), value: summary?.customer_count },
+              { key: "admins", label: t("company_detail.stat_admins"), value: summary?.admin_count },
+              { key: "employees", label: t("company_detail.stat_employees"), value: summary?.employee_count },
+              { key: "open-tickets", label: t("company_detail.stat_open_tickets"), value: summary?.open_ticket_count },
+              { key: "open-extra-work", label: t("company_detail.stat_open_extra_work"), value: summary?.open_extra_work_count },
+            ].map((stat) => (
+              <div
+                className="summary-stat"
+                key={stat.key}
+                style={{ cursor: "default" }}
+                data-testid={`company-detail-stat-${stat.key}`}
+              >
+                <span className="summary-stat-label">{stat.label}</span>
+                <span className="summary-stat-value">
+                  {stat.value === null || stat.value === undefined
+                    ? "—"
+                    : stat.value}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Company admins. E-mail AND phone, and the name reaches the
+              person — the old card showed three columns of text with no
+              way to open anybody (§7). */}
           <section
             className="card"
             data-testid="company-detail-admins-card"
-            style={{ padding: "20px 22px" }}
+            style={{ padding: "20px 22px", marginBottom: 16 }}
           >
             <div className="section-head" style={{ marginBottom: 8 }}>
               <div>
@@ -298,40 +431,60 @@ export function CompanyDetailPage() {
               </div>
             </div>
 
-            {members.length === 0 ? (
-              <EmptyState
-                icon={Users}
-                title={t("company_detail.admins_empty")}
-                compact
-                testId="company-detail-admins-empty"
-              />
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>{t("users.col_email")}</th>
-                      <th>{t("users.col_full_name")}</th>
-                      <th>{t("admin_form.col_added")}</th>
+            <BoundedList
+              size="md"
+              count={admins.length}
+              ariaLabel={t("company_detail.admins_title")}
+              testIdPrefix="company-detail-admins"
+              className="table-wrap"
+              emptyState={
+                <EmptyState
+                  icon={Users}
+                  title={t("company_detail.admins_empty")}
+                  compact
+                  testId="company-detail-admins-empty"
+                />
+              }
+            >
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("users.col_full_name")}</th>
+                    <th>{t("users.col_email")}</th>
+                    <th>{t("customer_contacts.field_phone")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {admins.map((person) => (
+                    <tr key={person.id}>
+                      <td className="td-subject">
+                        <Link to={`/admin/users/${person.id}`}>
+                          {person.full_name || person.email}
+                        </Link>
+                      </td>
+                      <td>
+                        <a href={`mailto:${person.email}`}>{person.email}</a>
+                      </td>
+                      <td>
+                        {person.phone ? (
+                          <a href={`tel:${person.phone}`}>{person.phone}</a>
+                        ) : (
+                          <span className="muted-empty">—</span>
+                        )}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((membership) => (
-                      <tr key={membership.id}>
-                        <td className="td-subject">{membership.user_email}</td>
-                        <td>{membership.user_full_name || "—"}</td>
-                        <td className="td-date">
-                          {new Date(
-                            membership.created_at,
-                          ).toLocaleDateString(dateLocale)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  ))}
+                </tbody>
+              </table>
+            </BoundedList>
           </section>
+          {/* Sprint 163 §4 — the three relation cards, extracted so
+              the company EDIT page can carry them too. This page's
+              rendered output is unchanged: the component owns the
+              same fetches, the same three useEditMode controllers,
+              the same dialogs and the same handlers it used to hold
+              inline. */}
+          <CompanyRelationCards companyId={company.id} />
 
           <ConfirmDialog
             ref={deactivateDialogRef}
