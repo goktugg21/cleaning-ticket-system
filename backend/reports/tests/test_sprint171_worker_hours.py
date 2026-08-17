@@ -16,9 +16,11 @@ from __future__ import annotations
 
 from datetime import date
 
+from django.test import TestCase
 from rest_framework import status
 
 from timesheets.tests.fixtures import TimesheetsFixture
+from reports.worker_hours import week_span
 
 
 URL = "/api/reports/worker-hours/"
@@ -185,3 +187,31 @@ class ExportTests(WorkerHoursFixture):
                 self.assertEqual(
                     client.get(url).status_code, status.HTTP_403_FORBIDDEN
                 )
+
+
+class WeekSpanYearEndTests(TestCase):
+    """Sprint 188 §CI — a span that runs past the end of the year.
+
+    `week_span` used to catch the ValueError from an out-of-range week
+    and clamp to 52. In a 53-WEEK ISO year that silently dropped a whole
+    week of hours while the response still reported the week count asked
+    for. 2026 is such a year, which is why this was worth finding now.
+    """
+
+    def test_a_53_week_year_keeps_its_53rd_week(self):
+        # 2026 has 53 ISO weeks (Dec 28th is always in the last one).
+        self.assertEqual(date(2026, 12, 28).isocalendar()[1], 53)
+        _start, end = week_span(2026, 51, 4)
+        # W53 of 2026 ends on 2027-01-03; clamping to 52 would have
+        # stopped at 2026-12-27 and lost the week.
+        self.assertEqual(end, date(2027, 1, 3))
+
+    def test_a_52_week_year_still_clamps_to_52(self):
+        self.assertEqual(date(2025, 12, 28).isocalendar()[1], 52)
+        _start, end = week_span(2025, 51, 4)
+        self.assertEqual(end, date(2025, 12, 28))
+
+    def test_an_ordinary_span_is_untouched(self):
+        start, end = week_span(2026, 29, 4)
+        self.assertEqual(start, date(2026, 7, 13))
+        self.assertEqual(end, date(2026, 8, 9))

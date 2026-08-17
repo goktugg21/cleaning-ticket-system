@@ -100,13 +100,17 @@ def week_span(iso_year: int, first_week: int, week_count: int):
     """
     start = date.fromisocalendar(iso_year, first_week, 1)
     last_week = first_week + max(1, week_count) - 1
-    try:
-        end = date.fromisocalendar(iso_year, last_week, 7)
-    except ValueError:
-        # A year with 52 weeks asked for W53: clamp to its last week
-        # rather than raising. The operator asked for "four weeks from
-        # W51", which is a reasonable thing to ask in December.
-        end = date.fromisocalendar(iso_year, 52, 7)
+    # Clamp to the year's OWN last ISO week, which is 52 or 53 — never a
+    # hardcoded 52.
+    #
+    # Sprint 188 §CI: this used to catch the ValueError and clamp to 52.
+    # In a 53-WEEK ISO year that silently dropped a whole week: 2026 has
+    # 53, so `year=2026&week=51&weeks=4` covered W51-52 and lost W53's
+    # hours while the response still said four weeks. December 28th is in
+    # the last ISO week of its year by definition, which is the standard
+    # way to ask how many weeks a year has.
+    last_iso_week = date(iso_year, 12, 28).isocalendar()[1]
+    end = date.fromisocalendar(iso_year, min(last_week, last_iso_week), 7)
     return start, end
 
 

@@ -428,6 +428,31 @@ def delete_draft_invoice(actor, invoice):
             ExtraWorkRequest.objects.filter(id__in=ew_ids).update(
                 is_invoiced=False, invoiced_at=None
             )
+        # Sprint 188 §CI — release the CONTRACT PERIOD claim too.
+        #
+        # `ContractInvoice` carries `UniqueConstraint(contract,
+        # period_start)` and IS the contract generator's idempotency
+        # mechanism: a period with a row is a period already invoiced.
+        # Its FK to Invoice is CASCADE precisely so "a deleted invoice
+        # releases its period to be generated again" — the model says so
+        # in its own help_text. But CASCADE only fires on a HARD delete,
+        # and this path is a SOFT delete, so the claim outlived the
+        # invoice it describes and the period became permanently
+        # unbillable: the next run found the row, skipped the period, and
+        # nothing on any screen explained why.
+        #
+        # Reached through the REVERSE ACCESSOR, never by importing
+        # `contracts`. The dependency between these two apps runs one
+        # way — `contracts` knows about `invoicing` and not the other
+        # way round, and `test_invoicing_gained_no_contract_column`
+        # pins it — so this uses the relation `contracts` itself hung on
+        # Invoice rather than naming its model. Django makes a missing
+        # reverse one-to-one raise a subclass of AttributeError, which is
+        # exactly why `getattr` with a default is the right shape here:
+        # an invoice with no contract behind it simply has no claim.
+        claim = getattr(invoice, "contract_period", None)
+        if claim is not None:
+            claim.delete()
         invoice.deleted_at = timezone.now()
         invoice.save(update_fields=["deleted_at", "updated_at"])
     return invoice

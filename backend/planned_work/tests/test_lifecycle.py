@@ -40,7 +40,20 @@ class CompletionTests(PlannedWorkFixtureMixin, APITestCase):
         ticket = Ticket.objects.get(planned_occurrence=occ)
 
         # SA can jump straight to APPROVED (SUPER_ADMIN_CAN_TRANSITION_ANY).
-        apply_transition(ticket, self.super_admin, TicketStatus.APPROVED)
+        #
+        # Sprint 188 §CI — but APPROVED is a CUSTOMER decision, and since
+        # Sprint 27F-B1 a provider operator driving one is coerced to
+        # `is_override=True` and must say why (H-11: a permission override
+        # is not a workflow override, and the history row IS the audit
+        # trail). Being SUPER_ADMIN grants the power, not the silence.
+        # The subject of this test is the OCCURRENCE completing, so the
+        # reason is supplied rather than the rule being worked around.
+        apply_transition(
+            ticket,
+            self.super_admin,
+            TicketStatus.APPROVED,
+            override_reason="Planned-work lifecycle test: closing the occurrence.",
+        )
 
         occ.refresh_from_db()
         ticket.refresh_from_db()

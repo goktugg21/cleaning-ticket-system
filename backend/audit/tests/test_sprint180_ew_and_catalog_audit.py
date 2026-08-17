@@ -99,6 +99,14 @@ class BilledToAuditTests(_Sprint180AuditFixture):
 
     def test_changing_billed_to_writes_one_update_row_with_the_diff(self):
         ew = self._make_ew()
+        # Sprint 188 §CI — `billed_to` was BUILDING-by-default when this
+        # test was written; it is now `null=True, default=None`, and NULL
+        # carries a meaning of its own ("follow the customer's own
+        # setting"). The subject here is the DIFF a change writes, so the
+        # row is given an explicit starting value rather than leaning on
+        # a default that has since become a third state.
+        ew.billed_to = ExtraWorkBilledTo.BUILDING
+        ew.save(update_fields=["billed_to", "updated_at"])
         AuditLog.objects.all().delete()
 
         ew.billed_to = ExtraWorkBilledTo.CUSTOMER

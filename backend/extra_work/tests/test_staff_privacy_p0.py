@@ -506,6 +506,22 @@ class StaffTicketExtraWorkOriginIsSafeTests(_StaffPrivacyFixture):
         # of the origin payload for STAFF (staff-privacy floor). A leak
         # would make this strict key-equality assertion fail.
         "actual_hours_required",
+        # Sprint 188 §CI — the four DATES the Sprint 182/184 work added to
+        # the origin payload. This assertion caught them, which is exactly
+        # what a strict key set is for, and the question it forces is
+        # whether they belong on a STAFF surface.
+        #
+        # They do. The floor this class defends is COMMERCIAL: money and
+        # rates (see `final_total_amount` above, deliberately absent).
+        # None of these is money — they are when the work is wanted, when
+        # the provider intends to do it, and when it must be finished, and
+        # a worker executing the job needs all four. Added deliberately,
+        # with the set kept STRICT rather than relaxed into a subset
+        # check: that strictness is the mechanism, and it worked.
+        "preferred_date",
+        "provider_planned_date",
+        "planned_end_date",
+        "deadline",
     }
 
     # Substrings that, if they appear inside any string value of the

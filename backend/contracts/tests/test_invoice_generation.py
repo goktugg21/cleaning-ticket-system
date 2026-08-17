@@ -272,6 +272,56 @@ class DeletedInvoiceTests(GenerationTestBase):
         again = generate_invoices_for_contract(contract, actor=self.actor, on=date(2026, 1, 15))
         self.assertEqual(again.created_count, 1)
 
+    def test_soft_deleting_a_draft_also_releases_the_period(self):
+        """Sprint 188 §CI — the gap between the CASCADE above and what
+        the app actually does.
+
+        `delete_draft_invoice` is the ONLY way an operator removes an
+        invoice, and it SOFT-deletes: it stamps `deleted_at` so the
+        extra-work claims release and the row stays auditable. A soft
+        delete does not fire the FK's CASCADE, so the contract claim
+        outlived the invoice it describes and the period was blocked
+        forever — the next run found the row, skipped the period, and
+        nothing on any screen said why.
+
+        The release is now explicit, and this is the test the hard-delete
+        one above could never be: it goes through the real operator path.
+        """
+        from invoicing.services import delete_draft_invoice
+
+        contract = self.contract()
+        generate_invoices_for_contract(
+            contract, actor=self.actor, on=date(2026, 1, 15)
+        )
+        claim = ContractInvoice.objects.get(contract=contract)
+        invoice = claim.invoice
+
+        delete_draft_invoice(self.actor, invoice)
+
+        invoice.refresh_from_db()
+        self.assertIsNotNone(invoice.deleted_at, "still a SOFT delete")
+        self.assertFalse(ContractInvoice.objects.filter(pk=claim.pk).exists())
+
+        again = generate_invoices_for_contract(
+            contract, actor=self.actor, on=date(2026, 1, 15)
+        )
+        self.assertEqual(again.created_count, 1)
+
+    def test_deleting_a_draft_with_no_contract_behind_it_is_unaffected(self):
+        """The other half: an ordinary extra-work invoice has no claim,
+        and the release path must not care."""
+        from invoicing.services import delete_draft_invoice
+
+        invoice = Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            status=Invoice.Status.DRAFT,
+            created_by=self.actor,
+        )
+        delete_draft_invoice(self.actor, invoice)
+        invoice.refresh_from_db()
+        self.assertIsNotNone(invoice.deleted_at)
+
     def test_a_reversed_invoice_keeps_its_claim(self):
         contract = self.contract()
         generate_invoices_for_contract(contract, actor=self.actor, on=date(2026, 1, 15))

@@ -285,18 +285,33 @@ class TheFrozenDocumentIsNotRewrittenTests(_Fixture):
         )
         return send_invoice(self.admin, issue_invoice(self.admin, invoice))
 
-    def test_adding_an_address_later_does_not_change_a_sent_document(self):
+    def test_changing_an_address_later_does_not_change_a_sent_document(self):
+        """Sprint 188 §CI — this used to send an invoice for a customer
+        with NO address and fill it in afterwards. Sprint 187 made a
+        billing address a PRECONDITION of sending (an invoice must be
+        addressed to somewhere), so that scenario is no longer reachable
+        and the test errored on the send rather than on its subject.
+
+        The subject is unchanged and now stated more strongly: the
+        document is frozen at SEND, so a LATER CHANGE to the address must
+        not reach it. Changing an address is also the case that actually
+        happens — a customer moves — whereas filling a blank one was only
+        ever possible before the precondition existed.
+        """
         from invoicing.invoice_pdf import invoice_pdf_bytes
 
         bare = Customer.objects.create(
-            company=self.company, name="Later Address BV"
+            company=self.company,
+            name="Later Address BV",
+            address="Oude Straat 1",
+            city="Amsterdam",
         )
         sent = self._sent_invoice_for(bare)
         before = invoice_pdf_bytes(sent)
         digest_before = hashlib.sha256(before).hexdigest()
         self.assertEqual(digest_before, sent.pdf_sha256)
 
-        # Fill the address in AFTER the invoice was sent.
+        # Change the address AFTER the invoice was sent.
         bare.address = "Nieuwezijds Voorburgwal 3"
         bare.city = "Amsterdam"
         bare.save(update_fields=["address", "city"])
@@ -317,7 +332,10 @@ class TheFrozenDocumentIsNotRewrittenTests(_Fixture):
         from invoicing.invoice_pdf import render_invoice_pdf
 
         bare = Customer.objects.create(
-            company=self.company, name="Control BV"
+            company=self.company,
+            name="Control BV",
+            address="Oude Straat 1",
+            city="Amsterdam",
         )
         sent = self._sent_invoice_for(bare)
         bare.address = "Singel 5"
