@@ -7218,53 +7218,109 @@ a.attn-row:hover {
 .ew-detail-main {
   min-width: 0;
 }
-/* Sprint 177 §3 — the right column, as the owner settled it after seeing
-   both options.
+/* W2-B fix 2 — the lower half of the Details card, in two columns.
 
-   Sprint 176 stretched the two COLLAPSED cards with `1fr 1fr` so the
-   column filled the Messages card's height and the gap beneath was zero.
-   That did not remove the dead space, it moved it INSIDE the cards:
-   ~188px of air under each header. The owner chose the other option, so
-   the cards keep their natural height and the column ends where they end.
-   A short column is fine; a padded one is not. */
-.ew-detail-aside {
+   Everything from the description down (the notes, the billing month
+   and its override, routing) stays on the left; Customer contacts takes
+   the right. The right column is a fixed 300px at the wide end rather
+   than a fraction, because its content is names, e-mail addresses and
+   phone numbers — a fraction would keep growing it on a wide screen and
+   steal width from the prose beside it, which is the one thing on this
+   card that benefits from length.
+
+   `:only-child` is load-bearing, not tidiness. Customer contacts is
+   SUPER_ADMIN / COMPANY_ADMIN only (it mirrors a backend 403), so for a
+   building manager or a customer user the left block is the sole child
+   and must span both columns — otherwise those roles get a half-width
+   description with an empty half beside it. */
+.ew-detail-body-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  gap: 16px;
+  align-items: start;
+}
+.ew-detail-body-main {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  /* `start`, not `stretch` — this is what stops the column being pulled
-     to the height of Messages. It is the whole fix. */
-  align-self: start;
-  gap: 12px;
-  min-height: 0;
+  gap: 16px;
 }
-.ew-detail-aside > * {
-  min-height: 0;
+.ew-detail-body-main:only-child {
+  grid-column: 1 / -1;
 }
-/* Opened, the two cards are the SAME size, so the column reads as a
-   matching pair rather than one large card and one small. Equal bodies +
-   equal headers = equal cards.
-
-   The same rule is the answer to a customer with twenty contacts: the
-   card scrolls inside itself instead of growing, so one long list cannot
-   stretch the column and the PAGE never gains a scrollbar. Collapsed
-   cards render no body at all, so this costs them nothing — they stay
-   exactly as tall as their header. */
-/* Sprint 189 §1 — 190px -> 248px. Department & Work Type left this
-   column for the Details card, so the collapsed card header they
-   occupied (46px) plus the 12px column gap is free. Customer Contacts
-   extends downward into exactly that: the panel is otherwise unchanged
-   — same card, same list, same scroll-inside-itself rule. */
-.ew-detail-aside .collapsible-card-body {
-  height: 248px;
-  overflow-y: auto;
-}
-@media (min-width: 1024px) {
-  .ew-detail-aside {
-    position: sticky;
-    top: 16px;
+@media (max-width: 900px) {
+  .ew-detail-body-split {
+    grid-template-columns: 1fr;
   }
 }
-.ew-detail-aside .card {
-  margin-bottom: 0;
+
+/* Customer contacts, in the card instead of in the rail.
+
+   THE MAX-HEIGHT IS THE WHOLE SAFETY RULE. A customer can have dozens
+   of contacts and this panel now sits inside the card that governs the
+   top of the page, so an unbounded list would drag the page layout with
+   it. The list scrolls inside itself and the panel is capped whatever
+   the address book looks like. Measured at 1440px with twelve contacts
+   carrying a name, a role and both an e-mail and a phone number: 992px
+   of content inside a 300px box, panel 350px, page overflow 0. A row is
+   three lines at this column width, so 300px shows between three and
+   four of them — a window on the list, not the list. The alternative
+   was a taller box that pushed the card down for every customer,
+   including the ones with two contacts (panel 218px, no scrollbar). */
+.ew-contacts-panel {
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ew-contacts-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ew-contacts-panel-title {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.ew-contacts-panel-empty {
+  margin: 0;
+}
+.ew-contacts-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.ew-contacts-panel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.ew-contacts-panel-name {
+  font-weight: 600;
+  /* A long address or name wraps inside the column rather than pushing
+     the column — and therefore the page — wider. */
+  overflow-wrap: anywhere;
+}
+.ew-contacts-panel-reach {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
 }
 .ew-detail-actions-section-title {
   font-family: var(--f-head);
@@ -7282,27 +7338,16 @@ a.attn-row:hover {
    stack. The Workflow card stays at least 240px wide so its full-
    width buttons stay readable; on viewports <=1024px the grid
    collapses to a single column (Workflow card drops below Details). */
-/* Sprint 175 §1 — the SECOND two-column row: Messages on the left at
-   the Details card's width, four collapsed cards on the right. Same
-   template as the top row so the two columns line up down the page;
-   `align-items: start` rather than the grid default so the collapsed
-   cards stack at their own height instead of stretching to Messages. */
-.ew-detail-second-row {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
-  gap: 16px;
-  /* Sprint 177 §3 — back to `stretch` on the row with `align-self: start`
-     on the aside itself, so Messages still governs the row's height while
-     the right column takes only the height its cards need. Setting
-     `start` here instead would also un-stretch Messages. */
-  align-items: stretch;
-  margin-bottom: 16px;
-}
+/* W2-B fix 3 — Messages spans the full content width.
 
-@media (max-width: 1000px) {
-  .ew-detail-second-row {
-    grid-template-columns: 1fr;
-  }
+   It was the left column of `.ew-detail-second-row`, a 2fr/1fr grid
+   whose right column held Customer contacts. Contacts moved into the
+   Details card, Preview moved down to the full-width collapsed stack,
+   and the row had nothing left to be a row of — so it is gone and the
+   card takes the width. The 16px it used to get from the row's
+   `margin-bottom` now lives on the card itself. */
+.ew-messages-card {
+  margin-bottom: 16px;
 }
 
 /* Sprint 175 §5 — the six classes the sweep has flagged for two
@@ -7341,6 +7386,42 @@ a.attn-row:hover {
 .ew-labels-inline > div {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+/* W2-B fix 1 — the labels editor, open IN the cell rather than below
+   the whole grid.
+
+   Stacked, not side by side. Sprint 189 put the form under the grid on
+   the reasoning that two selects and a save button "do not fit in a
+   half-width grid cell" — they do not fit in a ROW in that cell, which
+   is a layout choice. One per line, they fit, and the control is where
+   the person who opened it is looking. The selects go full-width so a
+   long department name is readable at the cell's width. */
+.ew-labels-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.ew-labels-editor-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ew-labels-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ew-labels-editor-field .field-select {
+  width: 100%;
+}
+.ew-labels-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .ew-agreed-price-item-label {
   font-size: 12px;

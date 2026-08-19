@@ -141,6 +141,122 @@ const PROVIDER_ACTION_I18N: Record<string, string> = {
   "COMPLETED->IN_PROGRESS": "detail.action_reopen",
 };
 
+// W2-B fix 4 — WHICH provider workflow button is the forward action.
+//
+// Every status button on this card rendered `.btn-secondary`: an
+// outlined box, identical for "Start review" and for "Cancel request",
+// which sit one under the other at REQUESTED. Nothing on the card said
+// which one moves the job on and which one throws it away.
+//
+// This map is the same idiom `TicketDetailPage`'s `PRIMARY_TRANSITIONS`
+// uses, and it is a map rather than a rule for the same reason: "the
+// forward action" is not derivable from the status pair. Two of the
+// legal moves below go BACKWARD on purpose and must not be dressed as
+// progress —
+//
+//   PRICING_PROPOSED -> UNDER_REVIEW  ("Revise pricing")  is a retreat
+//     to fix a quote already shown to the customer;
+//   COMPLETED -> IN_PROGRESS          ("Reopen")          is a
+//     correction of work already declared finished, and it costs an
+//     override reason.
+//
+// — while CUSTOMER_REJECTED -> UNDER_REVIEW ("Revise after rejection")
+// IS the way forward from a rejection: it is how a rejected request
+// becomes a live one again, and it is the only move that state offers.
+//
+// Entries whose target never reaches this button (PRICING_PROPOSED is
+// filtered out in favour of the Proposal builder; the two customer
+// decisions route through the decision/override block) are recorded
+// anyway, because the record is the point: a `Record<ExtraWorkStatus,
+// ...>` is exhaustive, so adding a status to the enum fails the build
+// here until somebody states what its forward action is.
+const PRIMARY_FORWARD_TRANSITIONS: Record<
+  ExtraWorkStatus,
+  ExtraWorkStatus[]
+> = {
+  REQUESTED: ["UNDER_REVIEW"],
+  UNDER_REVIEW: ["PRICING_PROPOSED"],
+  PRICING_PROPOSED: ["CUSTOMER_APPROVED"],
+  CUSTOMER_APPROVED: ["IN_PROGRESS"],
+  IN_PROGRESS: ["COMPLETED"],
+  // Reopen is a correction, not a next step. No forward action here.
+  COMPLETED: [],
+  CUSTOMER_REJECTED: ["UNDER_REVIEW"],
+  // Terminal.
+  CANCELLED: [],
+};
+
+// The hard floor, checked SECOND and independently of the map above.
+//
+// The map says what IS forward; this says what can never be dressed as
+// forward however the map is edited later. A cancel or a rejection
+// rendered in the approving colour is a worse outcome than every button
+// staying grey — the operator's hand is already moving toward the green
+// one — so the guard is a separate test rather than an assumption that
+// nobody will ever add "CANCELLED" to a primary list by accident.
+const NEVER_PRIMARY_TARGETS: ReadonlySet<ExtraWorkStatus> = new Set<
+  ExtraWorkStatus
+>(["CANCELLED", "CUSTOMER_REJECTED"]);
+
+function isForwardTarget(
+  from: ExtraWorkStatus,
+  target: ExtraWorkStatus,
+): boolean {
+  if (NEVER_PRIMARY_TARGETS.has(target)) return false;
+  return (PRIMARY_FORWARD_TRANSITIONS[from] ?? []).includes(target);
+}
+
+function workflowButtonClass(
+  from: ExtraWorkStatus,
+  target: ExtraWorkStatus,
+  { hasRepair }: { hasRepair: boolean },
+): string {
+  // Destructive first. `.btn-danger` is the existing soft-red token
+  // pair (--red-soft / --red / --red-border); nothing new is invented
+  // and nothing is hardcoded.
+  if (NEVER_PRIMARY_TARGETS.has(target)) {
+    return "btn btn-danger btn-sm";
+  }
+  // `hasRepair` is the retry-spawn case: a CUSTOMER_APPROVED request
+  // with ZERO spawned operational tickets is broken data, and the
+  // button that fixes it is already filled. Measured at 1440px before
+  // this guard existed, CUSTOMER_APPROVED rendered "Mark in progress"
+  // and "Retry scheduling work" as TWO green buttons — which says
+  // "either of these" about a state where only one of them helps.
+  // Advancing an Extra Work that never got its tickets only buries the
+  // fault deeper, so the repair keeps the emphasis and the workflow
+  // move waits its turn.
+  if (hasRepair) {
+    return "btn btn-secondary btn-sm";
+  }
+  return isForwardTarget(from, target)
+    ? "btn btn-primary btn-sm"
+    : "btn btn-secondary btn-sm";
+}
+
+// Forward first, cancel LAST, everything else in between.
+//
+// The backend hands `allowed_next_statuses` in enum order, and at
+// REQUESTED that put "Cancel request" ABOVE "Start review" — measured,
+// not assumed. Colour alone does not fix a running order that offers
+// the destructive option first. Same reasoning as
+// `TicketDetailPage.partitionTransitions`, which reorders for exactly
+// this ("Approve renders above Reject on every customer-decision step,
+// regardless of how the backend orders allowed_next_statuses").
+function orderWorkflowTargets(
+  from: ExtraWorkStatus,
+  targets: ExtraWorkStatus[],
+): ExtraWorkStatus[] {
+  const rank = (t: ExtraWorkStatus) =>
+    NEVER_PRIMARY_TARGETS.has(t) ? 2 : isForwardTarget(from, t) ? 0 : 1;
+  // A stable sort, so two targets of equal rank keep the backend's
+  // order rather than acquiring an arbitrary one of ours.
+  return targets
+    .map((t, i) => ({ t, i, r: rank(t) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((e) => e.t);
+}
+
 // Sprint 31 — one-line "what to do at this step" hint for providers,
 // shown above the workflow buttons for the early steps users found
 // confusing. Other statuses rely on the buttons + the dedicated
@@ -590,9 +706,17 @@ function DatesEditor({
  *
  *  So what used to be `LabelsCard` is now the editor FORM only. The two
  *  values are rendered by the parent, in the cell, with an Edit trigger
- *  beside them — the same Sprint 177 §2 shape `DatesEditor` above uses
- *  on this same card, so the two editors behave identically and open in
- *  the same place.
+ *  beside them.
+ *
+ *  W2-B fix 1 — and the form now opens IN THAT CELL, directly under the
+ *  two values, instead of below the whole grid on the far LEFT of the
+ *  card. Sprint 189 put it there on the reasoning that "two selects and
+ *  a save button do not fit in a half-width grid cell"; they do not fit
+ *  SIDE BY SIDE, which is a layout choice, not a constraint. Stacked,
+ *  they fit, and the person who pressed Edit on the right of the card
+ *  no longer has to look across it to find what they opened. The one
+ *  rule this keeps from `DatesEditor` is that a save reseeds from the
+ *  row (the parent keys the mount), not the place it opens in.
  *
  *  Mounted only while open AND only while the labels are unlocked: a
  *  work frozen by an issued invoice has nothing to edit, and the parent
@@ -691,17 +815,9 @@ function LabelsEditor({
   }
 
   return (
-    <div className="form-section" data-testid="extra-work-labels-editor">
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "flex-end",
-          gap: 8,
-          marginTop: 4,
-        }}
-      >
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div className="ew-labels-editor" data-testid="extra-work-labels-editor">
+      <div className="ew-labels-editor-fields">
+        <label className="ew-labels-editor-field">
           <span className="muted small">
             {t("detail.labels_field_department")}
           </span>
@@ -719,7 +835,7 @@ function LabelsEditor({
             ))}
           </select>
         </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <label className="ew-labels-editor-field">
           <span className="muted small">
             {t("detail.labels_field_work_type")}
           </span>
@@ -737,6 +853,8 @@ function LabelsEditor({
             ))}
           </select>
         </label>
+      </div>
+      <div className="ew-labels-editor-actions">
         <button
           type="button"
           className="btn btn-primary btn-sm"
@@ -764,6 +882,85 @@ function LabelsEditor({
   );
 }
 
+
+/*  W2-B fix 2 — Customer contacts, as a panel INSIDE the Details card.
+ *
+ *  It was a collapsed card in the far-right rail: three columns away
+ *  from the request it belongs to, closed by default, and the first
+ *  thing an operator on the phone to a customer had to go hunting for.
+ *  It now sits in the Details card itself, in the right-hand column
+ *  beside the description / billing / routing text, open, with the
+ *  count in its own header.
+ *
+ *  THE BOUND IS THE POINT. A customer can have dozens of contacts, and
+ *  this panel is now inside the card that governs the top of the page —
+ *  so an unbounded list would drag the whole page layout with it. The
+ *  list scrolls inside its own box (`.ew-contacts-panel-list`,
+ *  max-height in CSS) and the panel's height is therefore capped
+ *  whatever the customer's address book looks like. Same rule the
+ *  collapsed card relied on, kept deliberately rather than inherited by
+ *  accident, and the reason CLAUDE.md's "no unbounded server list"
+ *  applies here at all.
+ *
+ *  Every testid is verbatim from the card it replaces
+ *  (`extra-work-customer-contacts-panel` / `-empty` / `-contact-row`),
+ *  because `sprint28_batch15_4_detail_rebuild.spec.ts` asserts on all
+ *  three and a moved panel is not a renamed one. */
+function CustomerContactsPanel({ contacts }: { contacts: Contact[] }) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  return (
+    <aside
+      className="ew-contacts-panel"
+      data-testid="extra-work-customer-contacts-panel"
+    >
+      <div className="ew-contacts-panel-head">
+        <span className="ew-contacts-panel-title">
+          {t("customer_contacts.panel_title", { ns: "common" })}
+        </span>
+        <span className="muted small">
+          {t("detail.card_count", { count: contacts.length })}
+        </span>
+      </div>
+      {contacts.length === 0 ? (
+        <div
+          className="muted small ew-contacts-panel-empty"
+          data-testid="extra-work-customer-contacts-empty"
+        >
+          {t("customer_contacts.panel_empty", { ns: "common" })}
+        </div>
+      ) : (
+        <ul className="ew-contacts-panel-list">
+          {contacts.map((contact) => (
+            <li
+              key={contact.id}
+              className="ew-contacts-panel-row"
+              data-testid="extra-work-customer-contact-row"
+            >
+              {/* Name, role and reach on their own lines. Putting name
+                  and role on ONE line was tried and MEASURED here, and
+                  it made rows taller, not shorter: at this column width
+                  (270px of content) a full name already fills the line,
+                  so the pair wrapped anyway and picked up the flex gap
+                  on top. Three spans it is. */}
+              <span className="ew-contacts-panel-name">
+                {contact.full_name}
+              </span>
+              {contact.role_label && (
+                <span className="muted small">{contact.role_label}</span>
+              )}
+              {(contact.email || contact.phone) && (
+                <span className="muted small ew-contacts-panel-reach">
+                  {contact.email && <span>{contact.email}</span>}
+                  {contact.phone && <span>{contact.phone}</span>}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </aside>
+  );
+}
 
 export function ExtraWorkDetailPage() {
   const { id } = useParams();
@@ -1329,7 +1526,7 @@ export function ExtraWorkDetailPage() {
   // driven exclusively by the canonical Proposal builder (its Send advances
   // the request to PRICING_PROPOSED), so a raw "propose price" status button
   // would be a second, conflicting pricing surface.
-  const providerWorkflowTargets = allowed.filter((s) => {
+  const providerWorkflowTargetsUnordered = allowed.filter((s) => {
     if (s === "CUSTOMER_APPROVED" || s === "CUSTOMER_REJECTED") return false;
     if (s === "PRICING_PROPOSED") return false;
     // With an open proposal, "Revise pricing" (PRICING_PROPOSED ->
@@ -1345,6 +1542,12 @@ export function ExtraWorkDetailPage() {
     }
     return true;
   });
+  // W2-B fix 4 — forward action first, cancel last. See
+  // `orderWorkflowTargets`.
+  const providerWorkflowTargets = orderWorkflowTargets(
+    ew.status,
+    providerWorkflowTargetsUnordered,
+  );
 
   // Sprint 31 — an AUTO_START request is pre-authorized by the customer,
   // so the workflow must NOT frame the pricing step as "propose to
@@ -2060,6 +2263,26 @@ export function ExtraWorkDetailPage() {
                         <div>{t("detail.labels_locked_howto")}</div>
                       </div>
                     )}
+                    {/* W2-B fix 1 — the editor opens HERE, in the same
+                        cell, directly under the values it edits. It used
+                        to open below the entire grid on the far left of
+                        the card: the operator pressed Edit on the right
+                        and the control appeared somewhere else entirely,
+                        with the fields it belonged to still showing
+                        their old values above it. Keyed by the values it
+                        seeds from, so a save-then-reopen shows what was
+                        saved. */}
+                    {labelsOpen && !ew.labels_locked && (
+                      <LabelsEditor
+                        key={`labels-${ew.id}-${ew.department ?? ""}-${
+                          ew.work_type ?? ""
+                        }`}
+                        ew={ew}
+                        onUpdated={(detail) => setEw(detail)}
+                        onRefresh={() => void refresh()}
+                        onClose={() => setLabelsOpen(false)}
+                      />
+                    )}
                   </div>
                 )}
               </div>
@@ -2073,175 +2296,179 @@ export function ExtraWorkDetailPage() {
                   onClose={() => setDatesOpen(false)}
                 />
               )}
-              {/* Sprint 189 §1 — and the labels editor opens in the same
-                  place, for the same reason: two selects and a save
-                  button do not fit in a half-width grid cell. Keyed by
-                  the values it seeds from, so a save-then-reopen shows
-                  what was saved. */}
-              {isProvider && labelsOpen && !ew.labels_locked && (
-                <LabelsEditor
-                  key={`labels-${ew.id}-${ew.department ?? ""}-${
-                    ew.work_type ?? ""
-                  }`}
-                  ew={ew}
-                  onUpdated={(detail) => setEw(detail)}
-                  onRefresh={() => void refresh()}
-                  onClose={() => setLabelsOpen(false)}
-                />
-              )}
-              <div className="field">
-                <div className="muted small">{t("detail.field_description")}</div>
-                <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
-              </div>
-              {ew.customer_visible_note && (
-                <div className="field">
-                  <div className="muted small">
-                    {t("detail.field_customer_visible_note")}
+              {/* W2-B fix 2 — the Details card becomes TWO columns from
+                  here down. The left column keeps the run of text the
+                  card has always ended with (description, the notes,
+                  the billing month and its override, routing). The
+                  right column is Customer contacts, which used to be a
+                  collapsed card in the far-right rail, three columns
+                  away from the request it describes.
+
+                  `.ew-detail-body-main:only-child` spans both columns,
+                  so a BUILDING_MANAGER or a customer user — neither of
+                  whom may see contacts at all — gets the full-width
+                  text block they had before rather than a half-width
+                  one with dead space beside it. */}
+              <div className="ew-detail-body-split">
+                <div className="ew-detail-body-main">
+                  <div className="field">
+                    <div className="muted small">{t("detail.field_description")}</div>
+                    <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
                   </div>
-                  <div style={{ whiteSpace: "pre-wrap" }}>
-                    {ew.customer_visible_note}
-                  </div>
-                </div>
-              )}
-              {ew.pricing_note && (
-                <div className="field">
-                  <div className="muted small">
-                    {t("detail.field_pricing_note")}
-                  </div>
-                  <div style={{ whiteSpace: "pre-wrap" }}>{ew.pricing_note}</div>
-                </div>
-              )}
-              {/* Provider-internal fields — never present on customer
-                  responses, so the conditional check is a no-op for
-                  customer users. */}
-              {isProvider && ew.manager_note && (
-                <div className="field">
-                  <div className="muted small">
-                    {t("detail.field_manager_note")}
-                  </div>
-                  <div style={{ whiteSpace: "pre-wrap" }}>{ew.manager_note}</div>
-                </div>
-              )}
-              {isProvider && ew.internal_cost_note && (
-                <div className="field">
-                  <div className="muted small">
-                    {t("detail.field_internal_cost_note")}
-                  </div>
-                  <div style={{ whiteSpace: "pre-wrap" }}>
-                    {ew.internal_cost_note}
-                  </div>
-                </div>
-              )}
-              {isProvider && ew.override_at && (
-                <div className="alert-warning" style={{ marginTop: 12 }}>
-                  <strong>{t("detail.override_applied")}</strong>
-                  {ew.override_reason && (
-                    <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>
-                      {ew.override_reason}
+                  {ew.customer_visible_note && (
+                    <div className="field">
+                      <div className="muted small">
+                        {t("detail.field_customer_visible_note")}
+                      </div>
+                      <div style={{ whiteSpace: "pre-wrap" }}>
+                        {ew.customer_visible_note}
+                      </div>
                     </div>
                   )}
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {formatDateTime(ew.override_at)}
-                  </div>
-                </div>
-              )}
-
-              {isProvider && (
-                <div
-                  className="field"
-                  data-testid="extra-work-billing-override"
-                >
-                  <div className="muted small">
-                    {t("detail.billing_section_title")}
-                  </div>
-                  <div>
-                    {ew.invoice_date
-                      ? t("detail.billing_overridden", {
-                          month: ew.invoice_date.slice(0, 7),
-                        })
-                      : t("detail.billing_default")}
-                  </div>
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {ew.is_invoiced
-                      ? t("detail.billing_invoiced_on", {
-                          date: ew.invoiced_at
-                            ? formatDateTime(ew.invoiced_at)
-                            : "—",
-                        })
-                      : t("detail.billing_not_invoiced")}
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      alignItems: "flex-end",
-                      gap: 8,
-                      marginTop: 8,
-                    }}
-                  >
-                    <label
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <span className="muted small">
-                        {t("detail.billing_month_input_label")}
-                      </span>
-                      <input
-                        type="month"
-                        className="field-input"
-                        value={
-                          billingDraft ??
-                          (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")
-                        }
-                        onChange={(e) => setBillingDraft(e.target.value)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={
-                        billingSaving ||
-                        !(
-                          billingDraft ??
-                          (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")
-                        )
-                      }
-                      onClick={saveBillingMonth}
-                    >
-                      {t("detail.billing_save")}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      disabled={billingSaving || !ew.invoice_date}
-                      onClick={clearBillingMonth}
-                    >
-                      {t("detail.billing_use_completion")}
-                    </button>
-                  </div>
-                  {billingError && (
-                    <div className="alert-error" style={{ marginTop: 8 }}>
-                      {billingError}
+                  {ew.pricing_note && (
+                    <div className="field">
+                      <div className="muted small">
+                        {t("detail.field_pricing_note")}
+                      </div>
+                      <div style={{ whiteSpace: "pre-wrap" }}>{ew.pricing_note}</div>
                     </div>
                   )}
-                </div>
-              )}
+                  {/* Provider-internal fields — never present on customer
+                      responses, so the conditional check is a no-op for
+                      customer users. */}
+                  {isProvider && ew.manager_note && (
+                    <div className="field">
+                      <div className="muted small">
+                        {t("detail.field_manager_note")}
+                      </div>
+                      <div style={{ whiteSpace: "pre-wrap" }}>{ew.manager_note}</div>
+                    </div>
+                  )}
+                  {isProvider && ew.internal_cost_note && (
+                    <div className="field">
+                      <div className="muted small">
+                        {t("detail.field_internal_cost_note")}
+                      </div>
+                      <div style={{ whiteSpace: "pre-wrap" }}>
+                        {ew.internal_cost_note}
+                      </div>
+                    </div>
+                  )}
+                  {isProvider && ew.override_at && (
+                    <div className="alert-warning" style={{ marginTop: 12 }}>
+                      <strong>{t("detail.override_applied")}</strong>
+                      {ew.override_reason && (
+                        <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>
+                          {ew.override_reason}
+                        </div>
+                      )}
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        {formatDateTime(ew.override_at)}
+                      </div>
+                    </div>
+                  )}
 
-              {/* Sprint 28 Batch 6 — routing decision text+testid (the
-                  badge itself is now in the page header). Kept as a
-                  named field so the locked testid keeps resolving. */}
-              <div className="field">
-                <div className="muted small">
-                  {t("detail.routing_decision_label")}
+                  {isProvider && (
+                    <div
+                      className="field"
+                      data-testid="extra-work-billing-override"
+                    >
+                      <div className="muted small">
+                        {t("detail.billing_section_title")}
+                      </div>
+                      <div>
+                        {ew.invoice_date
+                          ? t("detail.billing_overridden", {
+                              month: ew.invoice_date.slice(0, 7),
+                            })
+                          : t("detail.billing_default")}
+                      </div>
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        {ew.is_invoiced
+                          ? t("detail.billing_invoiced_on", {
+                              date: ew.invoiced_at
+                                ? formatDateTime(ew.invoiced_at)
+                                : "—",
+                            })
+                          : t("detail.billing_not_invoiced")}
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          alignItems: "flex-end",
+                          gap: 8,
+                          marginTop: 8,
+                        }}
+                      >
+                        <label
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          <span className="muted small">
+                            {t("detail.billing_month_input_label")}
+                          </span>
+                          <input
+                            type="month"
+                            className="field-input"
+                            value={
+                              billingDraft ??
+                              (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")
+                            }
+                            onChange={(e) => setBillingDraft(e.target.value)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={
+                            billingSaving ||
+                            !(
+                              billingDraft ??
+                              (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")
+                            )
+                          }
+                          onClick={saveBillingMonth}
+                        >
+                          {t("detail.billing_save")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={billingSaving || !ew.invoice_date}
+                          onClick={clearBillingMonth}
+                        >
+                          {t("detail.billing_use_completion")}
+                        </button>
+                      </div>
+                      {billingError && (
+                        <div className="alert-error" style={{ marginTop: 8 }}>
+                          {billingError}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Sprint 28 Batch 6 — routing decision text+testid (the
+                      badge itself is now in the page header). Kept as a
+                      named field so the locked testid keeps resolving. */}
+                  <div className="field">
+                    <div className="muted small">
+                      {t("detail.routing_decision_label")}
+                    </div>
+                    <div data-testid="extra-work-detail-routing-decision">
+                      {ew.routing_decision === "INSTANT"
+                        ? t("detail.routing_decision_instant")
+                        : t("detail.routing_decision_proposal")}
+                    </div>
+                  </div>
                 </div>
-                <div data-testid="extra-work-detail-routing-decision">
-                  {ew.routing_decision === "INSTANT"
-                    ? t("detail.routing_decision_instant")
-                    : t("detail.routing_decision_proposal")}
-                </div>
+                {canSeeCustomerContacts && (
+                  <CustomerContactsPanel contacts={customerContacts} />
+                )}
               </div>
             </div>
           </div>
@@ -2316,7 +2543,10 @@ export function ExtraWorkDetailPage() {
                 {canRejectAsCustomer && (
                   <button
                     type="button"
-                    className="btn btn-secondary btn-sm"
+                    /* W2-B fix 4 — one treatment for every action that
+                       says no, so none of them can be mistaken for the
+                       green one next to it. */
+                    className="btn btn-danger btn-sm"
                     disabled={transitionBusy !== null}
                     onClick={() => setRejectDialogOpen(true)}
                     data-testid="extra-work-customer-reject"
@@ -2331,7 +2561,12 @@ export function ExtraWorkDetailPage() {
                     <button
                       key={target}
                       type="button"
-                      className="btn btn-secondary btn-sm"
+                      /* W2-B fix 4 — filled green for the forward move,
+                         soft red for cancel, outlined for everything
+                         else. See `workflowButtonClass`. */
+                      className={workflowButtonClass(ew.status, target, {
+                        hasRepair: canRetrySpawn,
+                      })}
                       disabled={transitionBusy !== null}
                       onClick={() => {
                         // Sprint 29 Batch 29.8 — CANCELLED still
@@ -2374,10 +2609,15 @@ export function ExtraWorkDetailPage() {
                         >
                           <button
                             type="button"
+                            /* W2-B fix 4 — this pair is the sharpest
+                               case on the page: two buttons, one above
+                               the other, one of which approves on the
+                               customer's behalf. Filled green and soft
+                               red, never two outlines. */
                             className={
                               target === "CUSTOMER_APPROVED"
                                 ? "btn btn-primary btn-sm"
-                                : "btn btn-secondary btn-sm"
+                                : "btn btn-danger btn-sm"
                             }
                             onClick={() => {
                               setOverrideDecision(target);
@@ -2547,13 +2787,20 @@ export function ExtraWorkDetailPage() {
               B8 polishes the visuals. The backend chokepoint filters which
               messages this viewer receives; the composer offers only the
               tiers the backend will accept. */}
-          {/* Sprint 175 §1 — the SECOND two-column row. Messages on
-              the left at the Details card's width, and the right column
-              takes four COLLAPSED cards. A collapsed card is only its
-              header bar, so four of them sit under Workflow without the
-              right column growing taller than Messages — which is the
-              question the owner asked and the reason they fit. */}
-          <div className="ew-detail-second-row">
+          {/* W2-B fix 3 — Messages is FULL WIDTH.
+
+              It used to be the left column of a two-column row whose
+              right column held Customer contacts and, sometimes, the
+              collapsed Preview card. Contacts moved into the Details
+              card (fix 2), which left a 300px rail holding at most one
+              46px header bar — so the rail was mostly empty surface,
+              and the message thread, the one thing on this page people
+              actually read and write in, was squeezed into two thirds
+              of the width for it.
+
+              Preview moved down to join the other full-width collapsed
+              cards (People, Requested services), where it reads as one
+              of a stack rather than the sole occupant of a column. */}
           <section
             className="card ew-messages-card"
             data-testid="extra-work-messages-panel"
@@ -2713,87 +2960,6 @@ export function ExtraWorkDetailPage() {
             </div>
           </section>
 
-          <aside className="ew-detail-aside" data-testid="ew-detail-aside">
-          {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
-              Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the
-              backend gate; other roles never see this card). Pure
-              informational — full management lives on
-              /admin/customers/:id/contacts. */}
-          {canSeeCustomerContacts && (
-            <CollapsibleCard
-              key={`contacts-${ew.id}`}
-              title={t("customer_contacts.panel_title", { ns: "common" })}
-              /* Collapsed is not HIDDEN: the count rides in the header,
-                 so the operator knows whether there is anything inside
-                 without opening it. */
-              meta={t("detail.card_count", { count: customerContacts.length })}
-              defaultOpen={false}
-              testId="extra-work-customer-contacts-panel"
-            >
-              <div className="form-section">
-                {customerContacts.length === 0 ? (
-                  <div
-                    className="muted small"
-                    data-testid="extra-work-customer-contacts-empty"
-                  >
-                    {t("customer_contacts.panel_empty", { ns: "common" })}
-                  </div>
-                ) : (
-                  <ul
-                    style={{
-                      listStyle: "none",
-                      margin: 0,
-                      padding: 0,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                    }}
-                  >
-                    {customerContacts.map((contact) => (
-                      <li
-                        key={contact.id}
-                        data-testid="extra-work-customer-contact-row"
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 2,
-                        }}
-                      >
-                        <span style={{ fontWeight: 600 }}>
-                          {contact.full_name}
-                        </span>
-                        {contact.role_label && (
-                          <span className="muted small">
-                            {contact.role_label}
-                          </span>
-                        )}
-                        {(contact.email || contact.phone) && (
-                          <span
-                            className="muted small"
-                            style={{
-                              display: "flex",
-                              gap: 12,
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            {contact.email && <span>{contact.email}</span>}
-                            {contact.phone && <span>{contact.phone}</span>}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </CollapsibleCard>
-          )}
-
-          {/* Sprint 189 §1 — the labels card that stood here is gone: its
-              two fields now live in the Details card, in the cell that
-              sat empty under Preferred Date. Customer Contacts above
-              takes the height it leaves behind (see
-              `.ew-detail-aside .collapsible-card-body`). */}
-
           {/* Sprint 175 §1 — Preview. The proposal PDF was a button
               inside the Workflow card, where an operator looking for
               "the document" would not think to look. Collapsed by
@@ -2824,8 +2990,6 @@ export function ExtraWorkDetailPage() {
               </div>
             </CollapsibleCard>
           )}
-          </aside>
-          </div>{/* end .ew-detail-second-row */}
 
           {/* Sprint 176 §2 — People on this request: FULL WIDTH,
               collapsed, directly below Messages and above Requested

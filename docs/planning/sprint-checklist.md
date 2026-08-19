@@ -577,6 +577,62 @@ files (W1-A layout, W1-B this, W1-C financial totals) — see
   own read/unread lifecycle; adding it is a follow-up, not a detail.
 
 
+### Done — W2-B (Extra Work detail page, wave 2, chat B of 4)
+
+Frontend only. Four fixes on
+[frontend/src/pages/ExtraWorkDetailPage.tsx](../../frontend/src/pages/ExtraWorkDetailPage.tsx)
+plus the `.ew-*` block of `index.css`. Every layout claim below is a
+number read off the live DOM at 1440px, against the same page built from
+the branch point in a second worktree — not an impression.
+
+- **The label editor opens where the labels are.** Department and Work
+  Type display on the RIGHT of the details grid (Sprint 189 put them
+  there). Pressing "Edit labels" opened the two dropdowns on the far
+  LEFT, below the whole grid: measured at x=307 w=695 while the fields
+  they edit sit at x=662 w=341. The editor now opens inside that cell —
+  x=662 w=341 — stacked rather than in a row, which is the only thing
+  Sprint 189's "does not fit in a half-width cell" was actually about.
+- **Customer contacts moved into the Details card.** It was a COLLAPSED
+  card in the far-right rail, three columns from the request it
+  describes. The lower half of the card is now two columns: the
+  description / billing month / override / routing text on the left
+  (379px), contacts on the right (300px). `:only-child` spans the left
+  block across both columns for the roles that may not see contacts at
+  all (it is SUPER_ADMIN / COMPANY_ADMIN only, mirroring a backend 403),
+  so a building manager does not get a half-width card with dead space.
+  The list scrolls inside itself — measured with 12 contacts:
+  scrollHeight 992 inside a 300px box, panel capped at 350px, page
+  horizontal overflow 0.
+- **Messages went from 741px to 1128px.** It was the left column of a
+  2fr/1fr row whose right column held contacts. With contacts gone the
+  rail held at most one collapsed 46px header, so the row was deleted;
+  Preview joined the full-width collapsed stack (People, Requested
+  services) where it reads as one of a set.
+- **Colour on the workflow buttons, and an ORDER to go with it.** Every
+  status button was `.btn-secondary` — "Start review" and "Cancel
+  request" identical outlined boxes, one under the other. The forward
+  action is now filled green and every cancelling or rejecting action is
+  `.btn-danger`, both existing tokens. Measuring it also caught two
+  things nobody had asked about: the backend hands
+  `allowed_next_statuses` in enum order, so **Cancel rendered ABOVE
+  Start review**; and at CUSTOMER_APPROVED with no spawned tickets,
+  "Mark in progress" and "Retry scheduling work" both came out green.
+  Forward now sorts first and cancel last, and while a repair is
+  pending the repair keeps the emphasis.
+
+### Deliberately NOT done — W2-B
+
+- **No i18n keys added.** The moved contacts panel reuses the three keys
+  the card it replaces already used, so nl/en stay in lockstep with no
+  edit.
+- **The provider-override Approve/Reject pair and the customer-side
+  Reject were NOT measured live**, only read. No seed row reaches a
+  PRICING_PROPOSED-with-override-and-no-open-proposal state, and the
+  synthetic response built to force one threw in the page, so it would
+  have been a measurement of a broken render. Their classes are static
+  ternaries in source.
+
+
 ## Historical — Sprint 181
 
 **Branch:** `feat/sprint-181`, cut from the INTEGRATED Sprint 180 (see
