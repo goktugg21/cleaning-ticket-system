@@ -298,6 +298,75 @@ the list understood and the counts did not.
   the "do not invent status" trap.
 
 
+### Done — W1-B (Extra Work gap closing, wave 1, chat 2 of 3)
+
+**Branch:** `feat/ew-gap-closing`. Three chats in parallel on disjoint
+files (W1-A layout, W1-B this, W1-C financial totals) — see
+`docs/planning/ew-gap-closing-plan.md`, which is the contract.
+
+- **The billing cutoff (plan item 14).** `extra_work.billing.is_earned`
+  had exactly one arm — the spawned operational ticket is CLOSED — and
+  CLOSED is reachable only through APPROVED, which is reachable only
+  through WAITING_CUSTOMER_APPROVAL. So work the customer had not
+  answered yet was not merely dated wrong, it was **out of the billing
+  pool entirely**, and `invoice_date` could not rescue it because
+  `invoice_date` only relocates work that is already earned. The owner's
+  case: billing date 30 August, work done 29 August, approval 4
+  September — August found nothing, September billed August's work.
+  There is now a SECOND arm: earned when the ticket is at
+  WAITING_CUSTOMER_APPROVAL with `sent_for_approval_at` stamped.
+  **WAITING_MANAGER_REVIEW qualifies under neither arm** and must not be
+  added to one — that state is staff saying "done" with nobody having
+  checked, and billing it would bill unverified work.
+- **The cutoff comparison is not re-implemented.** The rule is "sent for
+  approval on or before the customer's cutoff", and the cutoff is
+  supplied by WHEN the invoice run fires: `run_daily_invoice_run` runs on
+  `schedule.is_billing_day` and asks for this period OR EARLIER. Work
+  sent for approval after that day does not exist yet when the run reads
+  the pool. No second copy of `invoicing/schedule.py` to drift from.
+- **One definition of earned, not two.** `reports.dimensions
+  ._classify_extra_work` re-tested `ticket.status == CLOSED` itself; it
+  now calls `is_earned`. A new `earned_at()` is the single anchor that
+  `billing_month`, `InvoiceLine.performed_on` and the report's
+  "Completed At" column all read, so the month, the invoice line and the
+  report cannot disagree about which date they mean.
+- **The customer is told, before they decide.** A `BillingCutoffNotice`
+  component on the customer's Meldingen and Facturen pages, and the same
+  three sentences in the approval-request e-mail — plain Dutch, nl
+  primary, en in lockstep. Not dismissible and not in Settings: a notice
+  the reader can un-see, or has to go looking for, is not a notice.
+- **The SLA engine now talks to somebody (plan §2.7).** It has run every
+  five minutes over every live ticket since Sprint 7 with real
+  business-hours arithmetic and notified NOBODY, and all nine
+  `NotificationEventType` members were event-driven — "nothing happened
+  and it should have" was an empty category. `sla/warnings.py` is that
+  category: three warnings (approval due before the cutoff; manager
+  review past target; planned work not started), each with ONE
+  escalation hop at a second threshold, on the existing five-minute
+  beat, through the existing `send_logged_email`, with the existing
+  tenant-scoped rosters. Repeat suppression is a query against the
+  `NotificationLog` rows the sweep itself wrote, not a "did we run?"
+  flag.
+- **Extra Work has a clock.** `reconcile_sla_states` iterates `Ticket`
+  only, so an approved-and-planned Extra Work with no spawned ticket had
+  no clock at all. The not-started sweep covers it, anchored on
+  `provider_planned_date` (what the provider committed to) and never on
+  the customer's `preferred_date` (what they asked for).
+
+### Deliberately NOT done — W1-B
+
+- **No credit-note or reversal mechanism.** One already exists and it
+  already answers "the customer rejects after we billed": a SENT invoice
+  is immutable, and reversal releases the work via
+  `invoice__reversed_by__isnull=True` in `invoicing/selectors.py`.
+- **No persisted SLA status column on Extra Work.** That needs a field
+  on `extra_work/models.py`, which wave 2 owns. The warning sweep
+  computes the Extra Work clock per tick instead.
+- **No in-app (bell) rows for the three warnings** — e-mail only this
+  round. The in-app feed is a second surface with its own enum and its
+  own read/unread lifecycle; adding it is a follow-up, not a detail.
+
+
 ## Historical — Sprint 181
 
 **Branch:** `feat/sprint-181`, cut from the INTEGRATED Sprint 180 (see

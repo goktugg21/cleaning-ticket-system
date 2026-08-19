@@ -47,6 +47,12 @@ __all__ = (
     "ew_message_audience",
     "emit_extra_work_message_notifications",
     "emit_extra_work_published_notifications",
+    # Sprint W1-B §2.7 — audience resolvers for the time-driven sweep.
+    "ticket_customer_recipients",
+    "ticket_assigned_staff_recipients",
+    "ticket_responsible_manager_recipients",
+    "company_admin_recipients",
+    "extra_work_provider_recipients",
 )
 
 logger = logging.getLogger(__name__)
@@ -770,6 +776,7 @@ def send_logged_email(
     body,
     event_type,
     ticket=None,
+    extra_work=None,
     recipient_user=None,
     actor=None,
     attachment=None,
@@ -801,6 +808,10 @@ def send_logged_email(
 
     log = NotificationLog.objects.create(
         ticket=ticket,
+        # Sprint W1-B §2.7 — set when the subject of the mail is an Extra
+        # Work rather than (or as well as) a ticket. It is what the
+        # warning sweep's cooldown query keys on.
+        extra_work=extra_work,
         recipient_user=recipient_user,
         triggered_by=actor,
         recipient_email=recipient_email,
@@ -847,6 +858,114 @@ def _send_to_user(ticket, recipient_user, event_type, subject, body, actor=None)
         body=body,
     )
 
+
+
+# ---------------------------------------------------------------------------
+# Sprint W1-B §2.7 — audience resolvers for the TIME-DRIVEN warning sweep.
+#
+# `sla.warnings` needs the same tenant-scoped rosters the event-driven
+# senders above already resolve. They are exposed HERE, wrapping the
+# existing private resolvers, rather than rebuilt inside `sla/`. A second
+# copy of "who is allowed to hear about this ticket" is exactly how a
+# cross-tenant leak gets written: the copy looks right, it is only ever
+# read by one caller, and nothing downstream contradicts it. Every list
+# below is keyed strictly on the subject's OWN company / building /
+# customer FKs, so a warning cannot reach a user in another company.
+#
+# One-hop escalation vocabulary, used by all three warnings:
+#   RESPONSIBLE — the person whose move it is.
+#   MANAGER     — the one hop above them. One. Never a chain.
+# ---------------------------------------------------------------------------
+
+
+def ticket_customer_recipients(ticket):
+    """Customer-side users who can actually OPEN this ticket.
+
+    `_ticket_customer_users` resolves every member of the ticket's
+    customer org; a member whose building access does not cover this
+    ticket's building would get a 404 opening the link. The scope gate is
+    the same one `emit_ticket_message_notifications` applies, for the
+    same reason — never notify somebody about a row they cannot read.
+    """
+    from tickets.permissions import user_has_scope_for_ticket
+
+    return [
+        u
+        for u in _ticket_customer_users(ticket)
+        if user_has_scope_for_ticket(u, ticket)
+    ]
+
+
+def ticket_assigned_staff_recipients(ticket):
+    """The field workers actually placed on this ticket."""
+    return _dedupe_users(list(_ticket_assigned_staff_users(ticket)))
+
+
+def ticket_responsible_manager_recipients(ticket):
+    """The provider people ANSWERABLE for this ticket, best available.
+
+    Three tiers, first non-empty wins, because the project has three
+    overlapping ideas of "the manager" and a warning that reached nobody
+    would be worse than one that reached a slightly wider ring:
+
+      1. `TicketManagerAssignment` — the EXPLICIT per-ticket responsible
+         managers (Sprint 10B). The real answer when it exists.
+      2. `Ticket.assigned_to` — the legacy single primary-manager
+         pointer, still what the existing assign endpoint writes.
+      3. every BUILDING_MANAGER assigned to the ticket's building — not
+         per-ticket responsibility, but it is the authority ring for the
+         building and it is never empty by accident.
+    """
+    users = list(
+        _active_users()
+        .filter(
+            role=UserRole.BUILDING_MANAGER,
+            ticket_manager_assignments__ticket_id=ticket.id,
+        )
+        .distinct()
+        .order_by("email")
+    )
+    if not users and ticket.assigned_to_id:
+        assigned = ticket.assigned_to
+        if assigned.is_active and assigned.deleted_at is None and assigned.email:
+            users = [assigned]
+    if not users:
+        users = list(
+            _active_users()
+            .filter(
+                role=UserRole.BUILDING_MANAGER,
+                building_assignments__building_id=ticket.building_id,
+            )
+            .distinct()
+            .order_by("email")
+        )
+    return _dedupe_users(users)
+
+
+def company_admin_recipients(company_id):
+    """Active COMPANY_ADMINs of one provider company — the single hop
+    above a building manager, and the top of the escalation. SUPER_ADMIN
+    is deliberately NOT here: they are not in anybody's reporting line
+    and auto-mailing every SA on every stalled ticket in every tenant is
+    the noise that gets a warning system switched off. An SA who wants a
+    company's stream subscribes to it (`SuperAdminCompanySubscription`)."""
+    return list(
+        _active_users()
+        .filter(
+            role=UserRole.COMPANY_ADMIN,
+            company_memberships__company_id=company_id,
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+
+def extra_work_provider_recipients(ew):
+    """Provider management for an Extra Work — its company's admins plus
+    the building managers of its building. The EW analogue of
+    `ticket_responsible_manager_recipients`, keyed on the EW's own FKs
+    (an Extra Work has no per-row responsible-manager table)."""
+    return _dedupe_users(list(_extra_work_provider_users(ew)))
 
 def _drop_muted(users, event_type):
     """Drop users who muted this event_type in their notification preferences.
@@ -928,6 +1047,39 @@ def send_ticket_created_email(ticket, actor=None):
     )
 
 
+# Sprint W1-B item 14 — the customer has to be TOLD the cutoff rule, in
+# the same message that asks them to approve.
+#
+# This is the moment of truth: the mail that lands when work reaches
+# WAITING_CUSTOMER_APPROVAL is the one the customer reads BEFORE
+# deciding. Putting the explanation only on a screen they may never open,
+# or in a settings page, would make the rule a surprise on an invoice —
+# which is precisely what item 14 was raised to prevent. The frontend
+# `BillingCutoffNotice` component says the same thing in the same words
+# on the pages where the decision is taken; this is the copy that reaches
+# people who never log in.
+#
+# Written for a non-specialist: what happens, when, and what to do if
+# they disagree. No jargon, no invoice-lifecycle vocabulary.
+_BILLING_CUTOFF_PARAGRAPH_NL = [
+    "",
+    "Let op — facturatie:",
+    "Werk dat vóór uw facturatiedatum is afgerond, komt op de "
+    "eerstvolgende factuur te staan, ook als uw goedkeuring op dat "
+    "moment nog niet binnen is. Zo staat het werk op de factuur van de "
+    "maand waarin het echt is uitgevoerd.",
+    "Keurt u het werk daarna alsnog af? Dan draaien wij de factuur terug "
+    "met een creditnota en verdwijnt het werk weer van uw rekening.",
+]
+
+
+def _billing_cutoff_paragraph(new_status):
+    """The cutoff explanation, but only on the one status that needs it."""
+    if str(new_status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL):
+        return list(_BILLING_CUTOFF_PARAGRAPH_NL)
+    return []
+
+
 def send_ticket_status_changed_email(
     ticket,
     old_status,
@@ -981,6 +1133,9 @@ def send_ticket_status_changed_email(
                 f"Nieuwe status: {_status_label(new_status)}",
                 "",
                 _ticket_summary(ticket),
+            ]
+            + _billing_cutoff_paragraph(new_status)
+            + [
                 "",
                 "Met vriendelijke groet,",
                 "het CleanOps-team",

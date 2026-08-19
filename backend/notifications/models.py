@@ -44,6 +44,41 @@ class NotificationEventType(models.TextChoices):
     # muted this would stop receiving invoices and nobody would know.
     INVOICE_SENT = ("INVOICE_SENT", "Invoice sent")
 
+    # ------------------------------------------------------------------
+    # Sprint W1-B §2.7 — the TIME-DRIVEN family.
+    #
+    # Every event type above this line is a reaction: something happened,
+    # somebody is told. "Nothing happened and it should have" was an
+    # empty category — the SLA engine ran every five minutes over every
+    # live ticket, wrote a status column, and notified nobody. These
+    # three are the first members of that category, emitted by
+    # `sla.warnings.sweep` rather than by a user action.
+    #
+    # All three are deliberately NOT in USER_MUTABLE_EVENT_TYPES. A
+    # warning exists precisely because nobody is looking; a mute switch
+    # on it would silence the one message whose whole purpose is to
+    # arrive unasked.
+    # ------------------------------------------------------------------
+    #: Work is finished and sitting with the customer while their billing
+    #: cutoff approaches. Under the cutoff rule it will be invoiced on
+    #: that date whether or not their approval has landed, so this is the
+    #: warning that makes the rule fair.
+    SLA_APPROVAL_CUTOFF_DUE = (
+        "SLA_APPROVAL_CUTOFF_DUE",
+        "Customer approval due before billing cutoff",
+    )
+    #: Staff reported the work done and it has been waiting on a
+    #: provider manager's check longer than the target.
+    SLA_MANAGER_REVIEW_OVERDUE = (
+        "SLA_MANAGER_REVIEW_OVERDUE",
+        "Manager review overdue",
+    )
+    #: The planned start has passed and the work has not started.
+    SLA_WORK_NOT_STARTED = (
+        "SLA_WORK_NOT_STARTED",
+        "Planned work has not started",
+    )
+
 
 class NotificationStatus(models.TextChoices):
     QUEUED = "QUEUED", "Queued"
@@ -73,6 +108,22 @@ class NotificationLog(models.Model):
         null=True,
         blank=True,
         related_name="triggered_notification_logs",
+    )
+
+    # Sprint W1-B §2.7 — the Extra Work this log row is about, when it is
+    # about one. Mirrors the in-app `Notification.extra_work` FK, and it
+    # exists for the same reason the `ticket` FK above does: the
+    # time-driven warning sweep has to answer "have I already told this
+    # person about THIS work today?" before it sends, and a repeating
+    # task with no per-subject key would either re-send every five
+    # minutes or have to match on subject text. An Extra Work that has
+    # not spawned an operational ticket yet has no `ticket` to key on.
+    extra_work = models.ForeignKey(
+        "extra_work.ExtraWorkRequest",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notification_logs",
     )
 
     recipient_email = models.EmailField()

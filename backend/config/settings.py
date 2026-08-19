@@ -341,6 +341,66 @@ SLA_AT_RISK_THRESHOLD = 0.8  # fraction of target consumed before AT_RISK
 # accrue an SLA. Stored as ISO date in TIME_ZONE; converted at use sites.
 SLA_ENGINE_START_DATE = "2026-05-06"
 
+# ---------------------------------------------------------------------------
+# Sprint W1-B §2.7 — the time-driven warning sweep (`sla.warnings.sweep`).
+#
+# The SLA engine above measures; these decide when silence becomes a
+# message. Every threshold is an env var so the owner can tune the noise
+# level on crmtest without a deploy, and every default is deliberately
+# generous — a warning system that cries early gets muted, and a muted
+# warning system is the state we started from.
+# ---------------------------------------------------------------------------
+
+#: Warn the customer this many calendar days before their billing cutoff
+#: that finished work still waiting on their approval will be invoiced on
+#: that date anyway (the `extra_work.billing.is_earned` cutoff arm).
+SLA_WARN_APPROVAL_CUTOFF_DAYS = int(
+    os.environ.get("SLA_WARN_APPROVAL_CUTOFF_DAYS", "5")
+)
+
+#: ...and escalate ONE hop to the provider side inside this many days of
+#: the cutoff. Must be <= the figure above or the hop never fires before
+#: the first notice does.
+SLA_WARN_APPROVAL_CUTOFF_ESCALATE_DAYS = int(
+    os.environ.get("SLA_WARN_APPROVAL_CUTOFF_ESCALATE_DAYS", "2")
+)
+
+#: Business seconds a ticket may sit at WAITING_MANAGER_REVIEW — staff
+#: have said "done" and nobody has checked it — before the responsible
+#: manager is warned. One business day by default.
+SLA_WARN_MANAGER_REVIEW_BUSINESS_SECONDS = int(
+    os.environ.get("SLA_WARN_MANAGER_REVIEW_BUSINESS_SECONDS", str(8 * 60 * 60))
+)
+
+#: ...and the second, larger threshold at which the one escalation hop
+#: reaches the company admins. Three business days by default.
+SLA_WARN_MANAGER_REVIEW_ESCALATE_BUSINESS_SECONDS = int(
+    os.environ.get(
+        "SLA_WARN_MANAGER_REVIEW_ESCALATE_BUSINESS_SECONDS", str(24 * 60 * 60)
+    )
+)
+
+#: Business seconds past a planned start before "this has not started" is
+#: worth saying. Half a business day by default, so a job that slips a
+#: morning is not an incident.
+SLA_WARN_NOT_STARTED_BUSINESS_SECONDS = int(
+    os.environ.get("SLA_WARN_NOT_STARTED_BUSINESS_SECONDS", str(4 * 60 * 60))
+)
+
+#: ...and the escalation hop to the responsible manager. Two business
+#: days by default.
+SLA_WARN_NOT_STARTED_ESCALATE_BUSINESS_SECONDS = int(
+    os.environ.get(
+        "SLA_WARN_NOT_STARTED_ESCALATE_BUSINESS_SECONDS", str(16 * 60 * 60)
+    )
+)
+
+#: How long one (event type, subject, recipient) stays quiet after a
+#: warning went out. The sweep runs on the same 5-minute beat as the SLA
+#: reconciler, so WITHOUT this every warning would be re-sent 288 times a
+#: day. 24h means at most one mail per person per problem per day.
+SLA_WARN_COOLDOWN_HOURS = int(os.environ.get("SLA_WARN_COOLDOWN_HOURS", "24"))
+
 CELERY_BEAT_SCHEDULE = {
     "reconcile-sla-states": {
         "task": "sla.tasks.reconcile_sla_states",
@@ -366,6 +426,18 @@ CELERY_BEAT_SCHEDULE = {
     "run-daily-invoice-run": {
         "task": "invoicing.tasks.run_daily_invoice_run",
         "schedule": 24 * 60 * 60,
+    },
+    # Sprint W1-B §2.7 — the time-driven warning sweep. Same 5-minute
+    # cadence as the SLA reconciler above, and for the same reason: it
+    # answers "has a threshold been crossed since I last looked?", which
+    # is only useful if it looks often. What stops it becoming 288 mails
+    # a day is the cooldown (SLA_WARN_COOLDOWN_HOURS), which is a query
+    # against the NotificationLog rows the sweep itself wrote — the same
+    # data-is-the-idempotency-key argument `invoicing/tasks.py` makes for
+    # the invoice claim, rather than a "did we run today?" flag.
+    "sweep-sla-warnings": {
+        "task": "sla.tasks.sweep_sla_warnings",
+        "schedule": 5 * 60,
     },
 }
 
