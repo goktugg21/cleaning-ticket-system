@@ -5040,7 +5040,10 @@ a.attn-row:hover {
   letter-spacing: 0.02em;
 }
 
-.work-type-pill-ticket {
+/* Same exposure as the Extra Work pill below: one class, and any
+   ancestor link rule repaints it. Doubled for the same reason. */
+.work-type-pill-ticket,
+.work-type-pill-ticket.work-type-pill-ticket {
   background: var(--green-faint, rgba(95,212,153,0.12));
   color: var(--green-2, var(--text));
   border: 1px solid rgba(95,212,153,0.25);
@@ -5052,7 +5055,27 @@ a.attn-row:hover {
    (the base .work-type-pill is font-weight 700) makes it unmistakable
    next to the pale-green "Ticket" pill — not a faint tint that blends
    into the surface. */
-.work-type-pill-extra-work {
+/* Sprint 190 §4 — the doubled class is load-bearing, not a typo.
+
+   This pill renders as an <a>, and a page that styles its own link
+   colour outranks a single class: `.td-subject a { color: inherit }`
+   (0,1,1) beats `.work-type-pill-extra-work` (0,1,0). On the customer's
+   /my/meldingen list that is exactly what happened — the label
+   inherited `--text-muted` (#5A6B61) and rendered grey-on-blue at a
+   measured 1.11:1, which is not "hard to read", it is invisible. The
+   pill looked correct on the dashboard and broke only where it sat
+   inside a styled link cell, which is why it survived three sprints.
+
+   Repeating the class raises this to (0,2,0) so the pill carries its
+   own colours into any container. The colours themselves are unchanged
+   and were never the problem: white on #3b6fb5 measures 5.09:1, over
+   the 4.5:1 AA floor for small text. A specificity fix, not a repaint.
+
+   Doubling the class beats `!important` here because a real override
+   further down (a future selected/disabled state) can still win by
+   ordinary cascade rules. */
+.work-type-pill-extra-work,
+.work-type-pill-extra-work.work-type-pill-extra-work {
   background: #3b6fb5;
   color: #ffffff;
   border: 1px solid #2f5d9e;
@@ -5066,9 +5089,13 @@ a.attn-row:hover {
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
 }
-.work-type-pill-extra-work.work-type-pill-link:hover {
+/* `.td-subject a:hover { color: var(--green) }` is (0,2,1); this needs
+   to state the colour AND outrank it, or the label turns green on blue
+   the moment the cursor lands on it. */
+.work-type-pill-extra-work.work-type-pill-extra-work.work-type-pill-link:hover {
   background: #2f5d9e;
   border-color: #264c82;
+  color: #ffffff;
 }
 
 .recent-ops-extra-work-row {
@@ -8300,8 +8327,13 @@ a.attn-row:hover {
    disclosure exists to create.
    ==================================================================== */
 .workflow-body .status-btn {
-  min-height: 52px;
-  padding: 14px 18px;
+  /* Sprint 190 §2b — 52px -> 46px (renders ~47px with the border).
+     Sprint 189 took these from 42px to 53px and the owner's verdict on
+     the test site was "a little bit fine", i.e. slightly too big rather
+     than wrong. So this comes DOWN a little and deliberately does not
+     return to the 42px it started at. */
+  min-height: 46px;
+  padding: 12px 16px;
   font-size: 15px;
   letter-spacing: -0.012em;
   border-width: 1.5px;
@@ -8315,7 +8347,95 @@ a.attn-row:hover {
   box-shadow: var(--shadow-sm);
 }
 .workflow-body .status-btn .status-btn-arrow {
-  font-size: 18px;
+  font-size: 17px;
+}
+
+/* --------------------------------------------------------------------
+   Sprint 190 §3 — colour on the workflow buttons.
+
+   The primary action was a plain outlined box: the single most
+   important control on the page, dressed as a form field. It now wears
+   the same solid brand green `.btn-primary` uses everywhere else in the
+   app. No new colour is introduced — `--green` / `--green-2` are the
+   existing primary-action tokens and `--red` / `--red-soft` /
+   `--red-border` the existing negative ones.
+
+   COLOUR CARRIES MEANING, so this keys off `data-tone`, which the page
+   computes from the `WORKFLOW_TONE` Record rather than from position or
+   label text. A rejection can never come out green:
+
+     - `[data-tone="advance"][data-emphasis="solid"]`  solid green
+     - `[data-tone="advance"][data-emphasis="outline"]` green outline
+     - `[data-tone="reject"]`                          red outline
+     - no `data-tone` at all (the correction list)     unchanged grey
+
+   The base `.status-btn:hover` turns a button green-tinted with green
+   text. That rule predates this one and, left alone, meant HOVERING
+   "Move to Rejected" painted it in the approve colour. Both tones
+   override their own hover below; that is the point of the block, not
+   a detail of it.
+   -------------------------------------------------------------------- */
+.workflow-body .status-btn[data-tone="advance"][data-emphasis="solid"] {
+  background: var(--green);
+  border-color: var(--green);
+  /* `--surface` is the existing white token; the app's `.btn-primary`
+     writes the same value as a literal. No new colour either way. */
+  color: var(--surface);
+  box-shadow: 0 4px 12px rgba(11, 107, 66, 0.22);
+}
+/* The hover DELIBERATELY keeps `--green` instead of lifting to
+   `--green-2` the way `.btn-primary:hover` does. Measured: white on
+   `--green` is 6.57:1, white on `--green-2` is 4.38:1 — under the 4.5:1
+   AA floor for 15px bold text. This is the most important control on
+   the page and it should not drop below AA for as long as the cursor is
+   on it, which is precisely when somebody is reading it. The hover
+   feedback is carried by the shadow and the border instead. */
+.workflow-body .status-btn[data-tone="advance"][data-emphasis="solid"]:hover {
+  background: var(--green);
+  border-color: var(--green-2);
+  color: var(--surface);
+  box-shadow: 0 6px 18px rgba(11, 107, 66, 0.34);
+}
+.workflow-body
+  .status-btn[data-tone="advance"][data-emphasis="solid"]
+  .status-btn-arrow {
+  color: inherit;
+}
+
+/* A second forward move on the same step (IN_PROGRESS offers manager
+   review AND closed) is still positive, but it is not THE next step. */
+.workflow-body .status-btn[data-tone="advance"][data-emphasis="outline"] {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--surface);
+}
+.workflow-body
+  .status-btn[data-tone="advance"][data-emphasis="outline"]:hover {
+  background: var(--green-faint);
+  border-color: var(--green);
+  color: var(--green);
+}
+.workflow-body
+  .status-btn[data-tone="advance"][data-emphasis="outline"]
+  .status-btn-arrow {
+  color: var(--green);
+}
+
+/* Rejection. Outlined rather than a solid red slab: it must be
+   unmistakably NOT the approve button, which red text on white already
+   achieves, without turning a routine review step into an alarm. */
+.workflow-body .status-btn[data-tone="reject"] {
+  color: var(--red);
+  border-color: var(--red-border);
+  background: var(--surface);
+}
+.workflow-body .status-btn[data-tone="reject"]:hover {
+  background: var(--red-soft);
+  border-color: var(--red);
+  color: var(--red);
+}
+.workflow-body .status-btn[data-tone="reject"] .status-btn-arrow {
+  color: var(--red);
 }
 /* The correction list keeps the old, quieter size. */
 .workflow-body .workflow-secondary-list .status-btn {
@@ -8390,10 +8510,16 @@ a.attn-row:hover {
   align-items: center;
   gap: 8px;
   font-family: var(--f-head);
-  font-size: 22px;
+  /* Sprint 190 §2a — 22px -> 18px. At 22px this was competing with the
+     36px page title instead of sitting under it; the owner's words were
+     "why are the 2 new things this big". 18px is a single step above
+     the 17px header description, which keeps it prominent (it is still
+     the largest thing on the rail, and still bold at 800) while making
+     the title unambiguously the biggest thing on the page. */
+  font-size: 18px;
   font-weight: 800;
-  line-height: 1.25;
-  letter-spacing: -0.02em;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
   color: var(--text);
   /* A single unbroken building name cannot widen the rail. */
   overflow-wrap: anywhere;
@@ -8410,8 +8536,10 @@ a.attn-row:hover {
   overflow-wrap: anywhere;
 }
 @media (max-width: 1100px) {
+  /* Sprint 190 §2a — was 19px, which after the base came down to 18px
+     would have made the narrow layout BIGGER than the wide one. */
   .ticket-place-value {
-    font-size: 19px;
+    font-size: 17px;
   }
 }
 

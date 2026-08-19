@@ -36,6 +36,52 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — Sprint 190 §§1–4 (wave 2, chat A of 4): what the owner saw on the test site
+
+Wave 1 shipped, the owner opened it on crmtest, and four things were wrong.
+Frontend only; no backend file touched and no backend test run.
+
+- **§1 — Location & Customer moved ABOVE Workflow.** Sprint 189 put Workflow
+  first. Measured in the live DOM, the rail now reads `ticket-place-card` →
+  `side-card-workflow` → `side-card-assignment` → `responsible-managers-section`
+  → `ticket-schedule-card` → `side-card-details`, verified in all eight ticket
+  statuses the page can reach. The two facts that tell you WHICH job this is now
+  sit directly under the Convert-to-Extra-Work button, above the control that
+  changes it. `docs/planning/ew-gap-closing-plan.md` §2.1 item 5 says the new
+  order — see the note in "What I did NOT do" about that file being untracked.
+- **§2 — both new things came down.** The card's values 22px → **18px** (page
+  title 36px, header description 17px, all measured on the same render), and the
+  narrow-viewport step 19px → 17px, which would otherwise have been bigger than
+  the base. The workflow button 53px → **48px**: the owner called 53px "a little
+  bit fine", so this is a small step down and deliberately not a return to the
+  42px it was before wave 1.
+- **§3 — colour on the workflow buttons, keyed to MEANING.** The primary forward
+  action is now solid `--green` with white text; a second forward move on the
+  same step is a green outline; a rejection is `--red` on white. No new colour:
+  every value is an existing token. The mapping is a `Record<TicketStatus,
+  WorkflowTone>` so a tenth status cannot compile until somebody classifies it —
+  a `Set(["REJECTED"])` would have painted it green in silence. Measured every
+  button in all eight statuses, base AND hover: the lowest contrast anywhere is
+  4.90:1 and no rejecting action is ever green. The base `.status-btn:hover`
+  turned any hovered button green-tinted, so before this, hovering "Move to
+  Rejected" painted it in the approve colour; both tones now own their hover.
+  The solid button's hover deliberately keeps `--green` rather than lifting to
+  `--green-2` the way `.btn-primary` does, because white on `--green-2` measures
+  4.38:1 — under the AA floor for 15px bold text.
+- **§4 — the chargeable pill was invisible for customers.** On
+  `/my/meldingen` the label measured **1.11:1**. Not a colour choice: the pill
+  is an `<a>`, and `.td-subject a { color: inherit }` (0,1,1) outranked
+  `.work-type-pill-extra-work` (0,1,0), so the white was never applied. Fixed by
+  doubling the class to (0,2,0) rather than `!important`. Now **5.09:1**, hover
+  6.60:1, both over the 4.5:1 AA floor. Measured in all four container contexts
+  the pill is dropped into: only `.td-subject` was ever broken (3.49:1 for a
+  clone, 1.11:1 on the real page), and the other three read 5.09:1 identically
+  before and after.
+
+**Gates.** `npm run typecheck` clean over 295 project files; `npm run lint`
+exactly 44 (42 errors, 2 warnings), baseline held, no new `eslint-disable`;
+`npm run build` OK. No i18n key added, so the nl/en pair is untouched.
+
 ### Done — Sprint 189 §§1–4 (chat 1 of 3): the four layout changes
 
 Frontend only. Plan §2.1, items 2–5. No backend file was touched and no

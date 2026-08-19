@@ -188,6 +188,35 @@ const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   CONVERTED_TO_EXTRA_WORK: [],
 };
 
+// Sprint 190 §3 — colour carries MEANING on the workflow rail, so the
+// mapping from "where this button sends the ticket" to "what colour it
+// wears" is a Record over the whole TicketStatus union, not a list of
+// the negative ones. A Record is exhaustive by construction: add a
+// tenth status to `TicketStatus` and this fails to compile until
+// somebody says whether it is a forward step or a rejection. A
+// `Set(["REJECTED"])` would instead silently paint the new status green
+// — which is exactly the class of bug CLAUDE.md's "iterate the shared
+// exported constant" note was written about.
+//
+// "advance" is every step that moves work along, INCLUDING CLOSED (the
+// normal end of a job) and INCLUDING IN_PROGRESS reached from REJECTED
+// (redoing the work is forward motion). Only an actual rejection is
+// "reject". CONVERTED_TO_EXTRA_WORK is filtered out of both render
+// arrays and never reaches a button; it is listed so the Record stays
+// total.
+type WorkflowTone = "advance" | "reject";
+const WORKFLOW_TONE: Record<TicketStatus, WorkflowTone> = {
+  OPEN: "advance",
+  IN_PROGRESS: "advance",
+  WAITING_MANAGER_REVIEW: "advance",
+  WAITING_CUSTOMER_APPROVAL: "advance",
+  APPROVED: "advance",
+  REJECTED: "reject",
+  CLOSED: "advance",
+  REOPENED_BY_ADMIN: "advance",
+  CONVERTED_TO_EXTRA_WORK: "advance",
+};
+
 function partitionTransitions(
   currentStatus: TicketStatus,
   allowed: TicketStatus[],
@@ -2037,13 +2066,56 @@ export function TicketDetailPage() {
             leak between tickets: each ticket lands on its per-mount
             defaults (Assignment/Details collapsed, Workflow open). */}
         <div className="detail-side" key={`detail-side-${ticket.id}`}>
-          {/* Sprint 189 §4 — the right column runs Workflow -> Location &
-              Customer -> Assignment -> Responsible manager -> Scheduling ->
-              Ticket details. The Workflow card sat at the BOTTOM of this
-              column, below five cards an operator had to scroll past to
-              reach the only control that moves the ticket. It is the
-              first thing on the rail now; the card itself is unchanged,
-              only its position in this list. */}
+          {/* Sprint 190 §1 — the right column runs Location & Customer ->
+              Workflow -> Assignment -> Responsible manager -> Scheduling ->
+              Ticket details.
+
+              Sprint 189 put Workflow first and Location & Customer second.
+              The owner looked at that on the test site and swapped them:
+              the two facts that tell you WHICH job you are looking at
+              belong above the control that changes it, directly under the
+              Convert-to-Extra-Work button. This supersedes the order in
+              `docs/planning/ew-gap-closing-plan.md` §2.1 item 5, which is
+              updated in the same commit. Neither card changed inside —
+              only their order in this list. */}
+          {/* Sprint 189 §3 — WHERE the work is and WHO it is for, big
+              enough to read without hunting. Both facts existed only
+              inside the Ticket details card, which is collapsed by
+              default, so opening a ticket told an operator its title and
+              nothing about the site it belongs to.
+
+              This is an ADDED display, not a move: the Ticket details
+              card further down still carries both rows, unchanged. And
+              it renders UNCONDITIONALLY — it is deliberately not tied to
+              `canConvertTicket` or to any other role gate, because the
+              building and the customer are exactly the two facts every
+              role that can open this page already sees below. */}
+          <div className="card ticket-place-card" data-testid="ticket-place-card">
+            <div className="ticket-place-item">
+              <span className="ticket-place-label">{t("details_location")}</span>
+              <span className="ticket-place-value">
+                <MapPin size={16} strokeWidth={2} aria-hidden="true" />
+                <span data-testid="ticket-place-location">
+                  {ticket.room_label || ticket.building_name}
+                </span>
+              </span>
+              {/* A room label alone loses the building it sits in; the
+                  building stays underneath it whenever both exist. */}
+              {ticket.room_label && ticket.building_name && (
+                <span className="ticket-place-sub">{ticket.building_name}</span>
+              )}
+            </div>
+            <div className="ticket-place-item">
+              <span className="ticket-place-label">{t("details_customer")}</span>
+              <span className="ticket-place-value">
+                <Users size={16} strokeWidth={2} aria-hidden="true" />
+                <span data-testid="ticket-place-customer">
+                  {ticket.customer_name}
+                </span>
+              </span>
+            </div>
+          </div>
+
           <CollapsibleCard
             title={
               canShowCompleteWorkButton
@@ -2084,6 +2156,11 @@ export function TicketDetailPage() {
                     <button
                       type="button"
                       className="status-btn"
+                      /* Sprint 190 §3 — completing the work IS the
+                         forward action for the assigned staffer, and it
+                         is the only button they get. */
+                      data-tone="advance"
+                      data-emphasis="solid"
                       onClick={openCompleteModal}
                       disabled={completeModalOpen}
                       data-testid="ticket-staff-complete-button"
@@ -2199,10 +2276,34 @@ export function TicketDetailPage() {
                       staffCompletionEvidenceRequired &&
                       !statusNote.trim() &&
                       !hasImageAttachment;
+                    // Sprint 190 §3 — `data-tone` / `data-emphasis` are
+                    // emitted ONLY for the primary variant. The
+                    // correction actions behind "show correction
+                    // actions" stay deliberately colourless: they are
+                    // the admin escape hatch, not the step to take, and
+                    // that list can contain REJECTED alongside six
+                    // forward moves. Leaving the attribute off is what
+                    // keeps the tone CSS from ever reaching them —
+                    // cleaner than out-specifying it afterwards.
+                    //
+                    // `emphasis` is the hierarchy: the first forward
+                    // action is the solid one. IN_PROGRESS offers two
+                    // forward moves (manager review, closed) and two
+                    // equally solid green buttons would say they are
+                    // equally the next step. PRIMARY_TRANSITIONS already
+                    // orders them; this renders that order.
+                    let advanceSeen = false;
                     const renderTransitionButton = (
                       status: TicketStatus,
                       variant: "primary" | "secondary",
-                    ) => (
+                    ) => {
+                      const tone = WORKFLOW_TONE[status];
+                      let emphasis: "solid" | "outline" = "outline";
+                      if (variant === "primary" && tone === "advance") {
+                        emphasis = advanceSeen ? "outline" : "solid";
+                        advanceSeen = true;
+                      }
+                      return (
                       <button
                         key={status}
                         type="button"
@@ -2210,6 +2311,10 @@ export function TicketDetailPage() {
                           variant === "primary"
                             ? "status-btn"
                             : "status-btn status-btn-secondary"
+                        }
+                        data-tone={variant === "primary" ? tone : undefined}
+                        data-emphasis={
+                          variant === "primary" ? emphasis : undefined
                         }
                         disabled={statusBusy !== null || evidenceMissing}
                         data-testid={
@@ -2235,7 +2340,8 @@ export function TicketDetailPage() {
                           </>
                         )}
                       </button>
-                    );
+                      );
+                    };
                     // Sprint 30 Batch 30.1.3 — drop the plain
                     // APPROVED/REJECTED button targets when the
                     // actor is a provider on WCA. They re-render in
@@ -2283,6 +2389,17 @@ export function TicketDetailPage() {
                           <button
                             type="button"
                             className="status-btn"
+                            /* Sprint 190 §3 — the override pair is
+                               Approve + Reject on the SAME step. This is
+                               the one place where getting the colour
+                               wrong would be worst, so it reads the same
+                               Record every other button reads. */
+                            data-tone={WORKFLOW_TONE[status]}
+                            data-emphasis={
+                              WORKFLOW_TONE[status] === "advance"
+                                ? "solid"
+                                : "outline"
+                            }
                             disabled={statusBusy !== null || overrideBusy}
                             onClick={() => changeStatus(status)}
                             data-testid={`workflow-move-${status}`}
@@ -2432,44 +2549,6 @@ export function TicketDetailPage() {
               )}
             </div>
           </CollapsibleCard>
-
-          {/* Sprint 189 §3 — WHERE the work is and WHO it is for, big
-              enough to read without hunting. Both facts existed only
-              inside the Ticket details card, which is collapsed by
-              default, so opening a ticket told an operator its title and
-              nothing about the site it belongs to.
-
-              This is an ADDED display, not a move: the Ticket details
-              card further down still carries both rows, unchanged. And
-              it renders UNCONDITIONALLY — it is deliberately not tied to
-              `canConvertTicket` or to any other role gate, because the
-              building and the customer are exactly the two facts every
-              role that can open this page already sees below. */}
-          <div className="card ticket-place-card" data-testid="ticket-place-card">
-            <div className="ticket-place-item">
-              <span className="ticket-place-label">{t("details_location")}</span>
-              <span className="ticket-place-value">
-                <MapPin size={18} strokeWidth={2} aria-hidden="true" />
-                <span data-testid="ticket-place-location">
-                  {ticket.room_label || ticket.building_name}
-                </span>
-              </span>
-              {/* A room label alone loses the building it sits in; the
-                  building stays underneath it whenever both exist. */}
-              {ticket.room_label && ticket.building_name && (
-                <span className="ticket-place-sub">{ticket.building_name}</span>
-              )}
-            </div>
-            <div className="ticket-place-item">
-              <span className="ticket-place-label">{t("details_customer")}</span>
-              <span className="ticket-place-value">
-                <Users size={18} strokeWidth={2} aria-hidden="true" />
-                <span data-testid="ticket-place-customer">
-                  {ticket.customer_name}
-                </span>
-              </span>
-            </div>
-          </div>
 
           {/* Sprint 30 Batch 30.1.1 — consolidated Assignment card.
               ONE outer card with TWO clearly-labeled subsections:
