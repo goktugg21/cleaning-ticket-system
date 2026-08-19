@@ -1,0 +1,255 @@
+/**
+ * W1-C (`docs/planning/ew-gap-closing-plan.md` §2.4) — the money strip.
+ *
+ * FOUR figures, each labelled so an operator knows what it means without
+ * asking anybody. They are deliberately not attached to a chip and they
+ * are deliberately not five:
+ *
+ *   1. Quoted, not yet started  price agreed, nobody has begun.
+ *   2. In progress             begun, not finished.
+ *   3. Done this period        finished inside the billing month.
+ *   4. Invoiced this period    of (3), the part already billed.
+ *
+ * (1) and (2) are where the open book stands right now. (3) and (4) are
+ * one billing month, and (4) is a SUBSET of (3) — its label says so out
+ * loud ("of that, invoiced") because a strip whose numbers look like
+ * four independent totals invites somebody to add them up.
+ *
+ * ## Where the numbers come from
+ *
+ * `GET /api/extra-work/financial-summary/` — ONE server aggregate over
+ * every Extra Work in scope, not a sum of whatever page a list is
+ * holding. Every amount there goes through the server-side mirror of
+ * `rowAmounts()` (`frontend/src/lib/billing.ts`), so this component
+ * NEVER does arithmetic: it formats decimal strings and nothing else.
+ * Adding a subtotal here, however small, would be the second money
+ * formula the plan forbids.
+ *
+ * ## Zero versus unpriced
+ *
+ * Zero is a legal price — free work and goodwill lines are ordinary
+ * business — so "€ 0,00" has to keep meaning "this costs nothing". A
+ * figure renders an EM DASH only when it would print zero AND every
+ * request behind it is unpriced: there, the zero is an absence rather
+ * than a price, and the footnote says how many rows it stands for.
+ *
+ * BOTH halves of that test are required, and the dev data is why. Four
+ * seeded requests carry a cached total (EUR 1028.50, EUR 1500.40, …)
+ * with no pricing lines at all, so `is_priced` is false while
+ * `rowAmounts()` has a real amount to show. Dashing on `is_priced`
+ * alone would have hidden EUR 5941.10 behind a dash on this very
+ * screen, next to a KPI card showing the same money — which is a worse
+ * lie than the one the dash exists to prevent. When there IS an amount,
+ * the amount is shown and the footnote carries the caveat.
+ *
+ * The SUM is unaffected either way: an unpriced row contributes zero,
+ * because zero is what it contributes (`sumRows` in `lib/billing.ts`
+ * says the same in as many words).
+ *
+ * ## Who sees it
+ *
+ * Provider management only. The endpoint answers 403 to anybody else, so
+ * the gate lives here rather than in each page — two callers cannot then
+ * disagree about it, and a customer never issues the request at all.
+ */
+import { useEffect, useState } from "react";
+import type { LucideIcon } from "lucide-react";
+import { Banknote, FileCheck2, Hammer, Hourglass } from "lucide-react";
+import { useTranslation } from "react-i18next";
+
+import { getExtraWorkFinancialSummary } from "../../api/extraWork";
+import type {
+  ExtraWorkFinancialFigure,
+  ExtraWorkFinancialFigureKey,
+  ExtraWorkFinancialSummary,
+} from "../../api/extraWork";
+import { getApiError } from "../../api/client";
+import { useAuth } from "../../auth/AuthContext";
+import { isProviderManagementRole } from "../../auth/permissions";
+import { formatMoney } from "../../lib/intl";
+
+/**
+ * The four figures and their icons, as ONE constant keyed by the union.
+ *
+ * A `Record` over `ExtraWorkFinancialFigureKey` rather than an array
+ * literal, because the compiler then refuses a fifth figure that has no
+ * entry here and refuses to drop one that does — the Sprint 126/130
+ * lesson in CLAUDE.md, where a second hand-maintained render array left
+ * a whole permission group invisible for three sprints. Render order is
+ * this object's declaration order, which is what `Object.keys` returns
+ * for string keys, so there is no second list to keep in step.
+ */
+const FIGURE_ICONS: Record<ExtraWorkFinancialFigureKey, LucideIcon> = {
+  quoted_not_started: Hourglass,
+  in_progress: Hammer,
+  done_this_period: FileCheck2,
+  invoiced_this_period: Banknote,
+};
+
+const FIGURE_ORDER = Object.keys(
+  FIGURE_ICONS,
+) as ExtraWorkFinancialFigureKey[];
+
+function FigureCard({
+  figureKey,
+  figure,
+  period,
+  testIdPrefix,
+}: {
+  figureKey: ExtraWorkFinancialFigureKey;
+  figure: ExtraWorkFinancialFigure | null;
+  period: string;
+  testIdPrefix: string;
+}) {
+  const { t } = useTranslation("extra_work");
+  const Icon = FIGURE_ICONS[figureKey];
+  // The figure would print zero AND nobody has priced any of the work
+  // behind it, so that zero is an ABSENCE, not a price.
+  // `formatMoney(null)` is the app's one em dash — not a second dash
+  // literal typed here.
+  //
+  // The zero test is a STRING compare against the server's fixed 2dp
+  // wire shape, deliberately: this component does no arithmetic on
+  // money, not even a parse, because the server has already applied the
+  // one billing rule and a number parsed here is a number that can
+  // drift from it.
+  const isAbsence =
+    figure !== null &&
+    figure.count > 0 &&
+    figure.unpriced_count === figure.count &&
+    figure.total === "0.00";
+
+  return (
+    <div className="ew-money-card" data-testid={`${testIdPrefix}-${figureKey}`}>
+      <div className="ew-money-card-icon" aria-hidden="true">
+        <Icon size={18} strokeWidth={1.9} />
+      </div>
+      <div className="ew-money-card-body">
+        <div className="ew-money-card-label">
+          {t(`financial_strip.${figureKey}_label`)}
+        </div>
+        <div className="ew-money-card-value">
+          {figure === null
+            ? formatMoney(null)
+            : formatMoney(isAbsence ? null : figure.total)}
+        </div>
+        <div className="ew-money-card-meta">
+          {t(`financial_strip.${figureKey}_meta`, { period })}
+        </div>
+        {figure !== null && (
+          <div className="ew-money-card-foot">
+            {t("financial_strip.request_count", { count: figure.count })}
+            {figure.unpriced_count > 0 && (
+              // One phrasing for every case, "5 of 5" included: it is
+              // the precise sentence whether it explains a dash or
+              // qualifies an amount, and two near-identical strings
+              // would be two chances to say it differently.
+              <span className="ew-money-card-unpriced">
+                {" "}
+                {/* Not `count`: i18next reserves that name for
+                    pluralisation and would go looking for `_one` /
+                    `_other` variants this key does not have. */}
+                {t("financial_strip.unpriced", {
+                  unpriced: figure.unpriced_count,
+                  total: figure.count,
+                })}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function FinancialStrip({
+  customerId,
+  buildingId,
+  testIdPrefix = "ew-money-strip",
+}: {
+  /** Narrow to one customer — the customer-scoped mounts of the two
+   *  pages. A convenience only: the server scopes first, so naming a
+   *  customer the actor cannot see returns nothing, not their money. */
+  customerId?: number;
+  buildingId?: number;
+  testIdPrefix?: string;
+}) {
+  const { t } = useTranslation("extra_work");
+  const { me } = useAuth();
+  const isProvider = isProviderManagementRole(me?.role);
+  const [summary, setSummary] = useState<ExtraWorkFinancialSummary | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  // No synchronous `setState` in the effect body (the house rule, and
+  // `react-hooks/set-state-in-effect`): `loading` starts true and is
+  // only ever turned off, in the async callback. A refetch after a prop
+  // change therefore keeps the previous figures on screen until the new
+  // ones land, which beats blanking four numbers to em dashes and back.
+  useEffect(() => {
+    if (!isProvider) return;
+    let cancelled = false;
+    getExtraWorkFinancialSummary({
+      customer: customerId,
+      building: buildingId,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setSummary(data);
+        setError("");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setSummary(null);
+        setError(getApiError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isProvider, customerId, buildingId]);
+
+  if (!isProvider) return null;
+
+  const period = summary?.period ?? "";
+
+  return (
+    <section
+      className="ew-money-strip"
+      data-testid={testIdPrefix}
+      aria-busy={loading}
+    >
+      <header className="ew-money-strip-head">
+        <h2 className="ew-money-strip-title">{t("financial_strip.title")}</h2>
+        <p className="ew-money-strip-sub">
+          {period
+            ? t("financial_strip.subtitle", { period })
+            : t("financial_strip.subtitle_unknown")}
+        </p>
+      </header>
+      {error ? (
+        <p
+          className="muted small"
+          role="status"
+          data-testid={`${testIdPrefix}-error`}
+        >
+          {error}
+        </p>
+      ) : (
+        <div className="ew-money-strip-row">
+          {FIGURE_ORDER.map((key) => (
+            <FigureCard
+              key={key}
+              figureKey={key}
+              figure={summary ? summary.figures[key] : null}
+              period={period}
+              testIdPrefix={testIdPrefix}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}

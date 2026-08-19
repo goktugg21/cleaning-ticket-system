@@ -93,6 +93,52 @@ seeded database, both pages: `document.scrollWidth` equals
 at 741px, the Extra Work workflow card at 371px, the ticket rail at
 361px, and no element in either page overflowing its own box, including
 a deliberately long department name and a 56-character room label.
+### Done — W1-C: four figures, and the track tabs stopped emptying the list
+
+Branch `feat/ew-gap-closing` (the Extra Work gap-closing plan,
+`docs/planning/ew-gap-closing-plan.md` §2.4 and its chip fix). Ran as one
+of THREE parallel Claude Code chats on that one branch, on a disjoint
+file set. The `## NOW` header above still names `feat/sprint-188`, and
+all three chats left it alone for the same reason: rewriting one shared
+paragraph from three chats at once conflicts three ways over prose. It
+is the closing chat's job, and it is the one thing in this file still
+owed.
+
+- **Picking a track no longer empties the list.** `switchTrack` reset the
+  status filter to the string `"ALL"`, and the All tile is `""`.
+  `StatusFilter` is a bare `string`, so nothing caught it: choosing
+  Quote & price or Chargeable work set a value no chip owns, every row
+  was filtered out and NO tile lit up. Picking a track now selects All,
+  which is what the owner asked for and what the line's own comment
+  always said it did.
+- **A money strip on the Extra Work list and on Chargeable work.** Four
+  figures, each with a sentence under it saying what it means: quoted and
+  not yet started, in progress, done in this billing month, and — of that
+  — the part already invoiced. The fourth is labelled as a share of the
+  third ("Daarvan al gefactureerd"), because four numbers that look
+  independent invite somebody to add them up.
+- **One aggregate, not a sum of the page.** New
+  `GET /api/extra-work/financial-summary/`
+  (`backend/extra_work/views_financials.py`). Two queries, constant in
+  the row count, pinned by `assertNumQueries` at two different sizes. It
+  computes NO money and NO classification of its own: amounts come from
+  `reports.dimensions._amounts_for_state` (the server mirror of
+  `rowAmounts()`), and which bucket a row lands in comes from
+  `extra_work.billing`'s `is_billable` / `billing_month`. W1-B's billing
+  cutoff widens `is_earned`; because this endpoint calls it rather than
+  restating it, that widening arrives here by itself.
+- **Provider management only.** STAFF and CUSTOMER_USER get 403, and the
+  strip renders nothing for them. A customer's own money already has a
+  customer-facing surface; a provider's commercial roll-up is not
+  something to hand them by accident.
+- **Zero still is not "unpriced".** Each figure carries how many of its
+  requests nobody has priced; a figure where that is ALL of them renders
+  an em dash instead of EUR 0,00. The sums are untouched — an unpriced
+  row contributes zero, because zero is what it contributes.
+- **`is_priced` has one definition again.** Sprint 188's three-EXISTS
+  expression moved out of `ExtraWorkRequestViewSet.get_queryset` into
+  `views_financials.is_priced_expression`, which the list now imports.
+  It also gained its first backend test, in the new module.
 
 ### Done — Sprint 188: zero is a price, and a customer is not an employer
 

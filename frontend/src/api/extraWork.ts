@@ -83,6 +83,57 @@ export async function listExtraWorkCategoryOptions(): Promise<ExtraWorkCategoryO
   return response.data;
 }
 
+// W1-C — the money strip (`docs/planning/ew-gap-closing-plan.md` §2.4).
+//
+// FOUR figures and only four, computed server-side because they are a
+// roll-up over every Extra Work in scope, not over the page the list
+// happens to be holding. Amounts are decimal STRINGS, as every money
+// field on this API is: they go straight into `formatMoney` and are
+// never turned into a float to be added up again here — the server has
+// already applied the one billing rule.
+export interface ExtraWorkFinancialFigure {
+  /** How many Extra Works are behind the figure. */
+  count: number;
+  /** How many of those `count` rows nobody has priced yet. Zero is a
+   *  LEGAL price, so this is the ONLY way to tell "this costs nothing"
+   *  from "nobody has said what this costs". */
+  unpriced_count: number;
+  subtotal: string;
+  vat: string;
+  total: string;
+}
+
+export type ExtraWorkFinancialFigureKey =
+  | "quoted_not_started"
+  | "in_progress"
+  | "done_this_period"
+  | "invoiced_this_period";
+
+export interface ExtraWorkFinancialSummary {
+  /** The billing month the two period figures cover, `YYYY-MM`. */
+  period: string;
+  figures: Record<ExtraWorkFinancialFigureKey, ExtraWorkFinancialFigure>;
+}
+
+export interface FinancialSummaryParams {
+  billing_period?: string;
+  customer?: number;
+  building?: number;
+}
+
+/** Provider management only — the backend answers 403 for a STAFF or
+ *  CUSTOMER_USER caller, so gate the call on `isProviderManagementRole`
+ *  rather than letting the console fill with refusals. */
+export async function getExtraWorkFinancialSummary(
+  params: FinancialSummaryParams = {},
+): Promise<ExtraWorkFinancialSummary> {
+  const response = await api.get<ExtraWorkFinancialSummary>(
+    "/extra-work/financial-summary/",
+    { params },
+  );
+  return response.data;
+}
+
 export async function listExtraWork(
   params: ListExtraWorkParams = {},
 ): Promise<PaginatedResponse<ExtraWorkRequestList>> {

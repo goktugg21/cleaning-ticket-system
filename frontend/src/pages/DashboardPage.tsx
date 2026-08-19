@@ -43,6 +43,7 @@ import {
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
 import { EditModeToggle } from "../components/EditModeToggle";
 import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
+import { FinancialStrip } from "../components/extra-work/FinancialStrip";
 import { SLABadge } from "../components/sla/SLABadge";
 import { StatusTiles } from "../components/StatusTiles";
 import { useToast } from "../components/ToastProvider";
@@ -1901,6 +1902,16 @@ export function DashboardPage({
         </section>
           </>
         )}
+
+        {/* W1-C §2.4 — the money strip, on the Chargeable work page.
+
+            Only there, and not on the ordinary Tickets page: the four
+            figures are Extra Work money, and a page about meldingen has
+            no money on it to explain. `isChargeableWork` rather than
+            `isTicketsPage` is the whole difference. Provider management
+            only — the component returns null for anybody else, and the
+            endpoint refuses them as well. */}
+        {isChargeableWork && <FinancialStrip customerId={customerId} />}
 
         {isTicketsPage && (
           <>

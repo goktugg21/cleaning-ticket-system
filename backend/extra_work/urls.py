@@ -35,6 +35,7 @@ from .views_assignments import (
     ExtraWorkBulkAssignView,
 )
 from .views_dates import ExtraWorkBulkDatesView
+from .views_financials import ExtraWorkFinancialSummaryView
 
 urlpatterns = [
     # Sprint 143 §6 — MUST precede the router: the DefaultRouter is
@@ -59,6 +60,14 @@ urlpatterns = [
         "bulk-dates/",
         ExtraWorkBulkDatesView.as_view(),
         name="extra-work-bulk-dates",
+    ),
+    # W1-C — the money strip's aggregate. MUST precede the router for the
+    # same reason the three above do: the router owns the empty prefix,
+    # so its detail route would read "financial-summary" as a pk.
+    path(
+        "financial-summary/",
+        ExtraWorkFinancialSummaryView.as_view(),
+        name="extra-work-financial-summary",
     ),
     path("", include(router.urls)),
     path(

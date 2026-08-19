@@ -46,6 +46,7 @@ import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
 import { ChoiceDialog } from "../components/ChoiceDialog";
 import { StatusTiles } from "../components/StatusTiles";
+import { FinancialStrip } from "../components/extra-work/FinancialStrip";
 import { TrackTabs } from "../components/extra-work/TrackTabs";
 import type { ExtraWorkTrack } from "../components/extra-work/TrackTabs";
 import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
@@ -689,7 +690,15 @@ export function ExtraWorkList({
     // carrying "REQUESTED" onto Work started would show an empty table
     // and read as "there is nothing here" rather than "you are still
     // filtered".
-    setStatusFilter("ALL");
+    //
+    // W1-C — this said `"ALL"`, and the All tile is `""`. `StatusFilter`
+    // is a bare `string`, so nothing caught it: picking either track set
+    // a filter value no chip owns, `chipMatches` matched nothing, the
+    // table emptied and NO tile lit up. Picking a track now selects All,
+    // which is the owner's "All has to stay lit" and also the only
+    // reading of this line that was ever intended — the comment above it
+    // already describes clearing the filter.
+    setStatusFilter("");
     if (value === "QUOTE") {
       // The two invoice filters have no control on this track, so they
       // must not stay applied behind its back.
@@ -1093,6 +1102,13 @@ export function ExtraWorkList({
       )}
 
       {/* KPI strip */}
+      {/* W1-C §2.4 — the money strip, above the request counters. Two
+          strips on one screen and they answer different questions: this
+          one is MONEY, the row below counts REQUESTS. Each carries its
+          own heading so nobody has to work that out. Provider management
+          only — the component returns null for anybody else. */}
+      <FinancialStrip customerId={customerId} />
+
       <div className="ew-list-kpi-row" data-testid="extra-work-list-kpi-row">
         <KpiCard
           icon={Inbox}

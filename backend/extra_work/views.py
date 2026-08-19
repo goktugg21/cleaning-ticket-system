@@ -22,16 +22,7 @@ from __future__ import annotations
 import logging
 
 from django.db import transaction
-from django.db.models import (
-    BooleanField,
-    Case,
-    Count,
-    Exists,
-    OuterRef,
-    Prefetch,
-    Q,
-    When,
-)
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, mixins, serializers, status, viewsets
@@ -59,11 +50,9 @@ from .models import (
     ExtraWorkRequest,
     ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
-    ExtraWorkRoutingDecision,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
     Proposal,
-    ProposalLine,
     ProposalStatus,
 )
 from .scoping import scope_extra_work_for
@@ -88,6 +77,7 @@ from .serializers import (
     derive_actor_kind,
 )
 from .state_machine import TransitionError, apply_transition
+from .views_financials import is_priced_expression
 
 
 logger = logging.getLogger(__name__)
@@ -177,37 +167,14 @@ class ExtraWorkRequestViewSet(
         # Sprint 188 — "has anyone put a price on this yet?", so a list can
         # print an em dash instead of EUR 0,00 for work nobody has priced.
         # Zero is a LEGAL price (free work, a goodwill line); the two must
-        # not render the same. This mirrors `active_priced_lines`'
-        # resolution order exactly — approved proposal wins, then the cart
-        # for an INSTANT route, then the legacy rows — because a display
-        # that disagreed with the money rule would be worse than no
-        # display at all. Three EXISTS subqueries for the whole page.
-        priced_proposal = ProposalLine.objects.filter(
-            proposal__extra_work_request_id=OuterRef("pk"),
-            proposal__status=ProposalStatus.CUSTOMER_APPROVED,
-            is_approved_for_spawn=True,
-        )
-        any_approved_proposal = Proposal.objects.filter(
-            extra_work_request_id=OuterRef("pk"),
-            status=ProposalStatus.CUSTOMER_APPROVED,
-        )
-        cart_rows = ExtraWorkRequestItem.objects.filter(
-            extra_work_request_id=OuterRef("pk")
-        )
-        # NB the FK on the legacy row is `extra_work`, not
-        # `extra_work_request` like the other two.
-        legacy_rows = ExtraWorkPricingLineItem.objects.filter(
-            extra_work_id=OuterRef("pk")
-        )
-        is_priced = Case(
-            When(Exists(any_approved_proposal), then=Exists(priced_proposal)),
-            When(
-                routing_decision=ExtraWorkRoutingDecision.INSTANT,
-                then=Exists(cart_rows),
-            ),
-            default=Exists(legacy_rows),
-            output_field=BooleanField(),
-        )
+        # not render the same.
+        #
+        # W1-C moved the expression itself to `views_financials.
+        # is_priced_expression` when the money strip needed the same
+        # answer over an aggregate. One definition, two callers: a second
+        # copy would be a second opinion, and only one of them would be
+        # the one the money rule agrees with.
+        is_priced = is_priced_expression()
         return (
             scope_extra_work_for(self.request.user)
             .select_related(
