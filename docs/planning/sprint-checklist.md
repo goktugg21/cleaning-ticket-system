@@ -199,6 +199,70 @@ backend at all. No hard cap on hours. No `planned_by` / `planned_at`
 columns: the plan writes one `ExtraWorkStatusHistory` annotation row,
 which is the trail this app already uses for non-status writes, and a
 second copy of the same fact is how two screens end up disagreeing.
+### Done — W2-C: fifteen things above the table became eleven
+
+The owner, on the Extra Work page: *"there are a lot of chips and cards.
+it looks confusing make them simpler. without giving up important
+information."* Frontend only — no backend file was touched and no
+backend test was run, because nothing on the server changed.
+
+MEASURED at 1440x1000 as SUPER_ADMIN against the seeded dev database,
+before and after, from the live DOM. `/extra-work` put **953px** between
+the top of the page and the first row of data; it now puts **728px**.
+`/tickets/chargeable` went 750px to 681px. Nothing scrolls sideways at
+1440 or at 1280 (`scrollWidth == clientWidth` on both).
+
+- **The four KPI counter cards are gone (89px, four boxes).** Three of
+  their four numbers were on screen twice. "Open requests 3" is the
+  "Awaiting pricing" chip, which shows the same 3 AND filters; "Awaiting
+  customer 1" is the "With the customer" chip, same. Those two are
+  covered with nothing lost. "Price approved 3" is a REAL removal: since
+  Sprint 180 split the list into two tracks, that number is split with
+  it — the red "3" badge on the Quote & price tab counts the half with no
+  operational ticket (the same 3, on this data) and the ticket chips on
+  Chargeable work show the other half. There is no one place left that
+  states it, and inventing one would have meant a chip whose count
+  duplicates the badge beside it.
+- **"Total value EUR 8,315.12" moved instead of dying.** It sits on the
+  list's own toolbar now, as a sentence, above the table it describes.
+  Its ARITHMETIC IS UNTOUCHED — measured identical before and after —
+  because relocating a number must not change it. Beside the money strip
+  it read as a fifth figure of the same kind and it is not one: the
+  strip's four are server aggregates over precise populations, this is
+  the sum of what the page loaded. That row was provider-only (the edit
+  toggle inside it is); it renders for everyone now, with the toggle
+  keeping its own gate, so a customer does not lose a number they had.
+  **Known and deliberately not fixed here:** it still sums the loaded
+  set, not the filtered view, so it can disagree with the rows on screen.
+  Re-scoping it is the right fix and is in NEXT — it changes a number,
+  which a layout sprint should not do quietly.
+- **The track control, its sentence and the status chips are ONE band.**
+  Three stacked blocks costing 58 + 19 + 55px plus gaps, two of them
+  rendered as identical rows of tiles. Now: one bordered band, the two
+  tracks as a joined segmented control with the sentence beside them, the
+  status chips on one baseline underneath. 146px to 96px. Both shared
+  components (`TrackTabs`, `StatusTiles`) are restyled BY CONTEXT from
+  `index.css` and neither file was edited — the tickets list renders
+  `StatusTiles` too.
+- **The money strip is 184px tall instead of 116px, with all four figures
+  intact.** The four icon tiles went (a generic clock / hammer / check /
+  banknote said nothing the label did not). The sentence under each
+  figure was REWRITTEN, not trimmed: each states the consequence the
+  label does not — "Money committed, not yet earned", "Lands when the
+  work finishes" — because a second line that only rephrases the heading
+  earns one line's worth. Labels, values, request counts and the unpriced
+  counts all still render.
+- **The wave-1 chip fix was re-verified, not assumed.** Clicking each
+  track still lists rows (13 on Quote & price, 5 on Chargeable work),
+  "All" stays lit on both, a chip still narrows (3 rows) and clears back
+  to 13.
+
+**Not done, on purpose:** the nine ticket status tiles on
+`/tickets/chargeable` are untouched. They are the Tickets page's control
+— `variant="tickets-page"` renders the same ones — so thinning them
+changes a page nobody complained about, and "Waiting for the manager"
+does not survive the one-line treatment in the measured 118px column.
+`/tickets/chargeable` gets the compact strip and nothing else.
 
 ### Done — Sprint 189 §§1–4 (chat 1 of 3): the four layout changes
 
@@ -1257,7 +1321,17 @@ still listed as open, and all of them had shipped.
 
 ### Open — verified still open
 
-1. **The INSTANT / cart route never writes the quote cache.**
+1. **The Extra Work list's "Total value" sums the loaded set, not the
+   filtered view.** It reads every request the page fetched, minus the
+   cancelled ones, while the row count beside it counts what survived
+   the search / chip / category / planned filters — so the two disagree
+   the moment anybody filters. W2-C moved it out of a KPI card and onto
+   the list toolbar and deliberately left the arithmetic alone, because
+   that sprint was about layout and quietly changing a money number in
+   one is how a screen loses its owner's trust. The fix is
+   `sumRows(visibleRows)` from `lib/billing.ts` — the one rule, already
+   imported by that page — plus a label that says which set it means.
+2. **The INSTANT / cart route never writes the quote cache.**
    `instant_tickets.py` sets `CUSTOMER_APPROVED` directly with no
    Proposal, and nothing on that path writes `subtotal_amount` /
    `vat_amount` / `total_amount`. Sprint 188's `is_priced` makes such a
@@ -1268,41 +1342,41 @@ still listed as open, and all of them had shipped.
    is genuinely unpriced), so this is a gap to close deliberately, not a
    fire.
 
-2. **`select_for_update` on the unbilled pool.** Two concurrent invoice
+3. **`select_for_update` on the unbilled pool.** Two concurrent invoice
    runs could both claim the same extra work. Deferred from the invoicing
    sprints; no report of it happening, and the nightly job is the only
    scheduled writer.
 
-3. **The invoice preview does not share the real renderer's layout.** It
+4. **The invoice preview does not share the real renderer's layout.** It
    answers "what would be billed" correctly; it just is not the PDF.
 
-4. **`/admin/customers/:id/quote-requests` — delete it or re-expose it.**
+5. **`/admin/customers/:id/quote-requests` — delete it or re-expose it.**
    Three references remain in the frontend and nothing routes to it. A
    decision, not a build.
 
-5. **The typography sweep**, owed since Sprint 175 and dropped or
+6. **The typography sweep**, owed since Sprint 175 and dropped or
    partially done several times since. Genuine outliers only; the
    building and customer detail pages are the house scale.
 
-6. **An undated extra work cannot be planned in one action** from the
+7. **An undated extra work cannot be planned in one action** from the
    Work Plan — it has to be given dates first, elsewhere.
 
-7. **Extra work with nobody assigned never reaches the Work Plan.** The
+8. **Extra work with nobody assigned never reaches the Work Plan.** The
    week view is built from assignments, so unassigned work is invisible
    exactly when someone needs to notice it.
 
-8. **The Work Plan demo seeder** does not add scheduled tickets and extra
+9. **The Work Plan demo seeder** does not add scheduled tickets and extra
    work, so a fresh dev database shows an empty week.
 
-9. **The forecast's "Current Monthly" needs an as-of-today label.**
+10. **The forecast's "Current Monthly" needs an as-of-today label.**
    Without it the number reads as a full-month figure.
 
-10. **The three remaining bare "Approved" strings** — the status word
+11. **The three remaining bare "Approved" strings** — the status word
     without saying approved BY WHOM, which is the distinction the owner
     has drawn twice: on a ticket it means the customer accepted the WORK;
     on an extra work it means they accepted the PRICE.
 
-11. **20 undefined CSS class names.** CLOSED as a defect by Sprint 187's
+12. **20 undefined CSS class names.** CLOSED as a defect by Sprint 187's
     verification — every one is paired with a defined companion class or
     is a no-op hook, and the count is byte-identical to the base commit.
     Listed here only so the next sweep does not re-open it.

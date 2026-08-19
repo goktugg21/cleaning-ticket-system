@@ -3,19 +3,9 @@
 // Sprint 28 Batch 15.3 — rebuilt with KPI strip, filter bar, StatusBadge,
 //   formatMoney/formatDate, ClickableRow, mobile card list, EmptyState.
 //   Functional contract is unchanged; only the presentation layer moves.
-import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import {
-  CheckCircle2,
-  Clock,
-  Inbox,
-  PlusCircle,
-  Search,
-  Sparkles,
-  Wallet,
-} from "lucide-react";
+import { PlusCircle, Search, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { listAllCustomers, listCustomerBuildings } from "../api/admin";
@@ -207,12 +197,26 @@ function isSpawnAnomaly(row: ExtraWorkRequestList): boolean {
 // were confusable and why this filter had to stop using it.
 type CategoryFilter = string;
 
-interface ExtraWorkKpis {
-  open: number; // REQUESTED + UNDER_REVIEW
-  awaiting: number; // PRICING_PROPOSED
-  approved: number; // CUSTOMER_APPROVED
-  totalValue: string; // decimal-string sum of earned amounts (excludes CANCELLED)
-}
+/**
+ * W2-C — the four KPI counter cards are gone, and `ExtraWorkKpis` with
+ * them. Three of the four numbers they carried were already on screen
+ * twice:
+ *
+ *   Open requests    == the "Awaiting pricing" chip, which also FILTERS
+ *   Awaiting customer== the "With the customer" chip, same
+ *   Price approved   == split across the two tracks BY DESIGN since
+ *                       Sprint 180: the "No ticket" badge on Quote &
+ *                       price counts the half with no operational
+ *                       ticket, and the ticket chips on Chargeable work
+ *                       show the other half. This one is a real
+ *                       removal, recorded in the sprint checklist.
+ *
+ * The fourth, the total value, is NOT removed — it moved to the list's
+ * own toolbar (`listTotalValue` below), where "the total of these
+ * requests" cannot be mistaken for one of the money strip's four
+ * carefully-scoped figures. Its ARITHMETIC is untouched, deliberately:
+ * relocating a number must not change it.
+ */
 
 /** Sprint 176 §3 — set the deadline and/or the planned end on a selection.
  *
@@ -354,33 +358,6 @@ function BulkDatesDialog({
             {busy ? t("detail.dates_saving") : t("common:save")}
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  meta,
-  testId,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: ReactNode;
-  meta: string;
-  testId: string;
-}) {
-  return (
-    <div className="ew-kpi-card" data-testid={testId}>
-      <div className="ew-kpi-card-icon" aria-hidden="true">
-        <Icon size={18} strokeWidth={1.9} />
-      </div>
-      <div className="ew-kpi-card-body">
-        <div className="ew-kpi-card-label">{label}</div>
-        <div className="ew-kpi-card-value">{value}</div>
-        <div className="ew-kpi-card-meta">{meta}</div>
       </div>
     </div>
   );
@@ -748,36 +725,29 @@ export function ExtraWorkList({
     return counts;
   }, [activeTrackRows, chips, chipMatches]);
 
-  // KPI strip — computed from the full loaded set (not the filtered
-  // view, and not the active track) so the operator always sees the same
-  // headline numbers regardless of which filter is active. `rows` is the
-  // COMPLETE matching set (Sprint 120 — listAllExtraWork exhausts every
-  // page), so these totals no longer silently undercount past 100 rows.
-  // A backend aggregation endpoint remains a future option if request
-  // volume on very large tenants becomes a real cost; not needed for
-  // correctness.
-  const kpis = useMemo<ExtraWorkKpis>(() => {
-    let open = 0;
-    let awaiting = 0;
-    let approved = 0;
+  // The list's own money total — computed from the full loaded set (not
+  // the filtered view, and not the active track), which is what the
+  // label under it says. `rows` is the COMPLETE matching set (Sprint 120
+  // — listAllExtraWork exhausts every page), so it does not silently
+  // undercount past 100 rows.
+  //
+  // W2-C moved this out of a KPI card and into the list toolbar and left
+  // the arithmetic ALONE. Re-scoping it to `visibleRows` would read
+  // better beside the row count and is arguably the bug fix this page
+  // wants, but it would also change a number the owner reads while a
+  // sprint about layout was in flight. Named as a follow-up in the
+  // sprint checklist instead.
+  const listTotalValue = useMemo(() => {
     let totalNum = 0;
     for (const r of rows) {
-      if (r.status === "REQUESTED" || r.status === "UNDER_REVIEW") open += 1;
-      else if (r.status === "PRICING_PROPOSED") awaiting += 1;
-      else if (r.status === "CUSTOMER_APPROVED") approved += 1;
       // Earned = final actual-hours amount when present, else the quoted
       // estimate (rowAmounts — the shared billing rule the /invoices widget
-      // uses), so this KPI agrees with the per-row Total column below.
+      // uses), so this agrees with the per-row Total column below.
       if (r.status !== "CANCELLED") {
         totalNum += rowAmounts(r).total;
       }
     }
-    return {
-      open,
-      awaiting,
-      approved,
-      totalValue: totalNum.toFixed(2),
-    };
+    return totalNum.toFixed(2);
   }, [rows]);
 
   const visibleRows = useMemo(() => {
@@ -1101,98 +1071,77 @@ export function ExtraWorkList({
         </div>
       )}
 
-      {/* KPI strip */}
-      {/* W1-C §2.4 — the money strip, above the request counters. Two
-          strips on one screen and they answer different questions: this
-          one is MONEY, the row below counts REQUESTS. Each carries its
-          own heading so nobody has to work that out. Provider management
-          only — the component returns null for anybody else. */}
+      {/* W1-C §2.4 — the money strip. Provider management only; the
+          component returns null for anybody else. */}
       <FinancialStrip customerId={customerId} />
 
-      <div className="ew-list-kpi-row" data-testid="extra-work-list-kpi-row">
-        <KpiCard
-          icon={Inbox}
-          label={t("kpi.open_label")}
-          value={kpis.open}
-          meta={t("kpi.open_meta")}
-          testId="extra-work-list-kpi-open"
-        />
-        <KpiCard
-          icon={Clock}
-          label={t("kpi.awaiting_label")}
-          value={kpis.awaiting}
-          meta={t("kpi.awaiting_meta")}
-          testId="extra-work-list-kpi-awaiting"
-        />
-        <KpiCard
-          icon={CheckCircle2}
-          label={t("kpi.approved_label")}
-          value={kpis.approved}
-          meta={t("kpi.approved_meta")}
-          testId="extra-work-list-kpi-approved"
-        />
-        <KpiCard
-          icon={Wallet}
-          label={t("kpi.value_label")}
-          value={formatMoney(kpis.totalValue)}
-          meta={t("kpi.value_meta")}
-          testId="extra-work-list-kpi-value"
-        />
-      </div>
+      {/* W2-C — ONE band, not three stacked rows.
+          The track control, the sentence explaining the track, and the
+          status chips were three separate blocks of chrome doing one
+          job: "which slice of the list am I looking at". Measured at
+          1440x1000 they cost 58 + 19 + 55px plus the gaps between them,
+          and read as two competing rows of identical tiles. Same three
+          controls, same counts, same filtering — one bordered band, the
+          coarse question (which track) as a segmented control on the
+          left with its sentence beside it, and the fine one (which
+          status) as chips underneath.
 
-      {/* Sprint 180 §1 — the two tracks. An extra work has a commercial
+          Sprint 180 §1 — the two tracks. An extra work has a commercial
           life and an operational one; this is which of the two you are
-          looking at, and it decides the columns below. Above the status
-          tiles because it is the coarser question: first WHICH life,
-          then which step within it. */}
-      <TrackTabs
-        tabs={[
-          {
-            value: "QUOTE",
-            label: t("list.track_quote"),
-            count: trackRows.QUOTE.length,
-            anomalyCount: spawnAnomalyCount,
-            anomalyTitle: t("list.track_anomaly_title"),
-          },
-          {
-            value: "STARTED",
-            label: t("list.track_started"),
-            count: trackRows.STARTED.length,
-          },
-        ]}
-        active={track}
-        onChange={switchTrack}
-        testIdPrefix="extra-work-track"
-      />
+          looking at, and it decides the columns below. Above the chips
+          because it is the coarser question: first WHICH life, then
+          which step within it.
 
-      <p className="ew-list-filters-hint muted small">
-        {track === "QUOTE"
-          ? t("list.track_quote_hint")
-          : t("list.track_started_hint")}
-      </p>
+          Sprint 159 §3 / 180 / 181 §2 — the chips: the chip IS the
+          filter, it carries its own count, the active one is visibly
+          selected; counts are per TRACK so a chip never promises rows
+          that live on the other one; and the set changes meaning with
+          the track (commercial states on Quote & price, TICKET states
+          on Chargeable work). */}
+      <div className="ew-list-scope" data-testid="extra-work-scope-band">
+        <div className="ew-list-scope-top">
+          <div className="ew-list-scope-tracks">
+            <TrackTabs
+              tabs={[
+                {
+                  value: "QUOTE",
+                  label: t("list.track_quote"),
+                  count: trackRows.QUOTE.length,
+                  anomalyCount: spawnAnomalyCount,
+                  anomalyTitle: t("list.track_anomaly_title"),
+                },
+                {
+                  value: "STARTED",
+                  label: t("list.track_started"),
+                  count: trackRows.STARTED.length,
+                },
+              ]}
+              active={track}
+              onChange={switchTrack}
+              testIdPrefix="extra-work-track"
+            />
+          </div>
+          <p className="ew-list-scope-hint muted small">
+            {track === "QUOTE"
+              ? t("list.track_quote_hint")
+              : t("list.track_started_hint")}
+          </p>
+        </div>
 
-      {/* Sprint 159 §3 — the statuses as TILES, the design the owner
-          picked for both work lists: the tile IS the filter, it carries
-          its own count, the active one is visibly selected.
-          Sprint 180 — counts are per TRACK, so a tile never promises
-          rows that live on the other one.
-          Sprint 181 §2 — FOUR tiles, not nine, and they change meaning
-          with the track: commercial states on Quote & price, TICKET
-          states on Work started. The old status dropdown that sat below
-          the search box is gone with them — it was a second control for
-          the same state, and nine options in a select was the least
-          readable of the two. */}
-      <StatusTiles
-        tiles={chips.map((chip) => ({
-          value: chip.value,
-          label: t(chip.labelKey),
-          count: statusCounts[chip.value] ?? 0,
-        }))}
-        active={statusFilter}
-        onChange={setStatusFilter}
-        totalCount={activeTrackRows.length}
-        testIdPrefix="extra-work-status"
-      />
+        <div className="ew-list-scope-chips">
+          <StatusTiles
+            tiles={chips.map((chip) => ({
+              value: chip.value,
+              label: t(chip.labelKey),
+              count: statusCounts[chip.value] ?? 0,
+            }))}
+            active={statusFilter}
+            onChange={setStatusFilter}
+            totalCount={activeTrackRows.length}
+            testIdPrefix="extra-work-status"
+          />
+        </div>
+      </div>
 
       {/* Filter bar */}
       <div
@@ -1535,9 +1484,32 @@ export function ExtraWorkList({
         />
       )}
 
-      {isProvider && visibleRows.length > 0 && (
+      {visibleRows.length > 0 && (
         <div className="ew-list-edit-bar">
-          {edit.editMode && (
+          {/* W2-C — where the "Totale waarde" KPI card went.
+              It is the same arithmetic it always was (every loaded
+              request except the cancelled ones, through `rowAmounts`),
+              moved off the card row and onto the list it describes, and
+              said in words rather than in a box: beside the money strip
+              it read as a fifth figure of the same kind, and it is not
+              one — the strip's four are server aggregates over precise
+              populations, this is the sum of what this page loaded.
+
+              The row it now shares was provider-only because the edit
+              toggle inside it is. The row is rendered for everyone now
+              and the toggle keeps its own gate, so a customer does not
+              lose a number they could read before. */}
+          <p
+            className="ew-list-total muted small"
+            data-testid="extra-work-list-total"
+          >
+            {t("list.total_value_label")}{" "}
+            <strong>{formatMoney(listTotalValue)}</strong>{" "}
+            <span className="ew-list-total-meta">
+              {t("list.total_value_meta")}
+            </span>
+          </p>
+          {isProvider && edit.editMode && (
             <MultiSelectToolbar
               selectedCount={edit.selection.length}
               onSelectAll={edit.selectAll}
@@ -1563,12 +1535,14 @@ export function ExtraWorkList({
               testIdPrefix="extra-work-bulk"
             />
           )}
-          <EditModeToggle
-            editMode={edit.editMode}
-            onToggle={edit.toggleMode}
-            disabled={assignBusy}
-            testId="extra-work-edit-mode-toggle"
-          />
+          {isProvider && (
+            <EditModeToggle
+              editMode={edit.editMode}
+              onToggle={edit.toggleMode}
+              disabled={assignBusy}
+              testId="extra-work-edit-mode-toggle"
+            />
+          )}
         </div>
       )}
 

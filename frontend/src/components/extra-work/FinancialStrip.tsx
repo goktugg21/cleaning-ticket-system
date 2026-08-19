@@ -15,6 +15,21 @@
  * loud ("of that, invoiced") because a strip whose numbers look like
  * four independent totals invites somebody to add them up.
  *
+ * ## W2-C — the same four figures, half the height
+ *
+ * The owner: "there are a lot of chips and cards. it looks confusing
+ * make them simpler. without giving up important information." Measured
+ * at 1440x1000, this strip was 184px of a 702px wall of controls
+ * standing between the page header and the first row of data.
+ *
+ * What went: the four icon tiles (a generic clock / hammer / check /
+ * banknote said nothing the label did not) and the padding around them.
+ * What stayed: every figure, every label, the sentence under each one,
+ * the request count and the unpriced count. The sentences were REWRITTEN
+ * rather than trimmed — each now states the CONSEQUENCE the label does
+ * not ("money committed, not yet earned"), because a second sentence
+ * that only rephrases the heading is two lines earning one line's worth.
+ *
  * ## Where the numbers come from
  *
  * `GET /api/extra-work/financial-summary/` — ONE server aggregate over
@@ -53,8 +68,6 @@
  * disagree about it, and a customer never issues the request at all.
  */
 import { useEffect, useState } from "react";
-import type { LucideIcon } from "lucide-react";
-import { Banknote, FileCheck2, Hammer, Hourglass } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getExtraWorkFinancialSummary } from "../../api/extraWork";
@@ -69,7 +82,7 @@ import { isProviderManagementRole } from "../../auth/permissions";
 import { formatMoney } from "../../lib/intl";
 
 /**
- * The four figures and their icons, as ONE constant keyed by the union.
+ * The four figures in reading order, as ONE constant keyed by the union.
  *
  * A `Record` over `ExtraWorkFinancialFigureKey` rather than an array
  * literal, because the compiler then refuses a fifth figure that has no
@@ -78,16 +91,20 @@ import { formatMoney } from "../../lib/intl";
  * a whole permission group invisible for three sprints. Render order is
  * this object's declaration order, which is what `Object.keys` returns
  * for string keys, so there is no second list to keep in step.
+ *
+ * W2-C — the value was a `LucideIcon` until the icons came out. It is
+ * `true` now: the Record is carried for the exhaustiveness check alone,
+ * which is the only reason it ever existed.
  */
-const FIGURE_ICONS: Record<ExtraWorkFinancialFigureKey, LucideIcon> = {
-  quoted_not_started: Hourglass,
-  in_progress: Hammer,
-  done_this_period: FileCheck2,
-  invoiced_this_period: Banknote,
+const FIGURE_KEYS: Record<ExtraWorkFinancialFigureKey, true> = {
+  quoted_not_started: true,
+  in_progress: true,
+  done_this_period: true,
+  invoiced_this_period: true,
 };
 
 const FIGURE_ORDER = Object.keys(
-  FIGURE_ICONS,
+  FIGURE_KEYS,
 ) as ExtraWorkFinancialFigureKey[];
 
 function FigureCard({
@@ -102,7 +119,6 @@ function FigureCard({
   testIdPrefix: string;
 }) {
   const { t } = useTranslation("extra_work");
-  const Icon = FIGURE_ICONS[figureKey];
   // The figure would print zero AND nobody has priced any of the work
   // behind it, so that zero is an ABSENCE, not a price.
   // `formatMoney(null)` is the app's one em dash — not a second dash
@@ -121,9 +137,6 @@ function FigureCard({
 
   return (
     <div className="ew-money-card" data-testid={`${testIdPrefix}-${figureKey}`}>
-      <div className="ew-money-card-icon" aria-hidden="true">
-        <Icon size={18} strokeWidth={1.9} />
-      </div>
       <div className="ew-money-card-body">
         <div className="ew-money-card-label">
           {t(`financial_strip.${figureKey}_label`)}

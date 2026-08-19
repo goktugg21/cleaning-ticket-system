@@ -7031,64 +7031,151 @@ a.attn-row:hover {
                           Users page group headers
    ==================================================================== */
 
-/* ----- EW list KPI strip ----- */
-.ew-list-kpi-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.ew-kpi-card {
-  display: flex;
-  gap: 12px;
-  padding: 14px 16px;
+/* ----- EW list scope band (W2-C) -----
+
+   Replaces the four-card KPI strip that stood here.
+
+   The owner: "there are a lot of chips and cards. it looks confusing
+   make them simpler. without giving up important information." Measured
+   at 1440x1000 the page put 702px of chrome between its header and the
+   first row of data, and 89px of that was four cards whose numbers were
+   already on screen as chips that also FILTER. The cards went; the
+   `.ew-kpi-card*` rules went with them, because their only consumer was
+   the component that was deleted in the same commit.
+
+   What is left is one band holding the two controls that answer "which
+   slice am I looking at": the track, as a joined segmented control, and
+   the statuses, as chips. Both are still `.status-tile` markup from the
+   two SHARED components (`TrackTabs`, `StatusTiles`) — the rules below
+   restyle them by CONTEXT rather than by editing a component the tickets
+   list also renders. */
+.ew-list-scope {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface);
+  padding: 10px 12px;
+  margin-bottom: 14px;
 }
-.ew-kpi-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--green-faint);
-  color: var(--green);
-  flex-shrink: 0;
-}
-.ew-kpi-card-body {
+.ew-list-scope-top {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 10px;
+}
+/* The track sentence sits BESIDE the control it explains rather than on
+   its own line under it. It is the first thing to give up room when the
+   window narrows, hence the min-width floor plus `flex: 1`. */
+.ew-list-scope-hint {
+  flex: 1 1 260px;
   min-width: 0;
+  margin: 0;
+  line-height: 1.35;
 }
-.ew-kpi-card-label {
-  font-family: var(--f-head);
-  font-size: 11.5px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+
+/* The two tracks as ONE joined segmented control: a single outer border,
+   a hairline between the halves, and the active half filled. Two
+   free-standing tiles read as "two more chips" beside the five below
+   them, which is exactly the confusion being removed here. */
+.ew-list-scope-tracks .status-tile-row {
+  display: inline-flex;
+  grid-template-columns: none;
+  gap: 0;
+  margin-bottom: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surface-2);
 }
-.ew-kpi-card-value {
-  font-family: var(--f-head);
-  font-size: 22px;
+.ew-list-scope-tracks .status-tile {
+  flex-direction: row;
+  align-items: baseline;
+  /* Wide on purpose. The "no ticket" anomaly badge lives INSIDE the
+     label span (TrackTabs renders it there), so on one baseline it ends
+     up next to the track's own count and "3 13" can be read as one
+     number. A 14px gap puts the badge visibly with the words it
+     qualifies and the count on its own. MEASURED: badge right edge to
+     count left edge is 14px, label-to-badge 6px. */
+  gap: 14px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+/* The anomaly badge reads as a badge at this size rather than as a
+   second bare number beside the count. */
+.ew-list-scope-tracks .status-tile-label .cell-tag {
+  font-size: 10px;
   font-weight: 800;
-  letter-spacing: -0.01em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--red-soft);
+  color: var(--red);
+}
+.ew-list-scope-tracks .status-tile + .status-tile {
+  border-left: 1px solid var(--border);
+}
+.ew-list-scope-tracks .status-tile-active {
+  background: var(--surface);
+  box-shadow: inset 0 -2px 0 var(--green);
+}
+.ew-list-scope-tracks .status-tile-label {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.ew-list-scope-tracks .status-tile-count {
+  font-size: 14px;
+}
+
+/* The status chips: same grid, one line each. The tiles stacked label
+   over count at 55px tall; label and count on one baseline is 31px and
+   loses nothing. */
+.ew-list-scope-chips .status-tile-row {
+  margin-bottom: 0;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+.ew-list-scope-chips .status-tile {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.ew-list-scope-chips .status-tile-label {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  /* An unusually long translated chip label may still need the room; it
+     shrinks with an ellipsis rather than pushing the count out of the
+     chip. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ew-list-scope-chips .status-tile-count {
+  font-size: 14px;
+  flex: none;
+}
+
+/* Where the "Totale waarde" card's number lives now: a sentence on the
+   list's own toolbar, pushed to the left of the edit toggle by its own
+   margin so the existing `.ew-list-edit-bar` rule is untouched. */
+.ew-list-total {
+  margin: 0 auto 0 0;
+}
+.ew-list-total strong {
+  font-family: var(--f-head);
+  font-weight: 800;
   color: var(--text);
-  line-height: 1.1;
 }
-.ew-kpi-card-meta {
-  font-size: 12px;
+.ew-list-total-meta {
   color: var(--text-faint);
 }
 
-@media (max-width: 960px) {
-  .ew-list-kpi-row { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 520px) {
-  .ew-list-kpi-row { grid-template-columns: 1fr; }
+@media (max-width: 640px) {
+  .ew-list-scope-tracks .status-tile-row { display: flex; width: 100%; }
+  .ew-list-scope-tracks .status-tile { flex: 1 1 0; justify-content: center; }
 }
 
 /* ----- EW list filter bar ----- */
@@ -10880,26 +10967,31 @@ a.wp-card-title:hover { text-decoration: underline; }
    FinancialStrip.tsx). Four labelled money figures, on the Extra Work
    list and on the Chargeable work page.
 
-   Deliberately its own vocabulary rather than a reuse of
-   `.ew-kpi-card`: the two strips sit on the SAME screen, and the KPI
-   strip counts REQUESTS while this one states MONEY. Making them
-   pixel-identical is what would invite an operator to read one row of
-   eight numbers that do not belong together. Same grid, same breakpoints
-   — a quieter card, and a heading that says which is which.
+   W2-C halved its height. The four icon tiles are gone (a generic
+   clock / hammer / check / banknote repeated the label and cost 36px of
+   box plus 12px of gap each), the padding is tighter, and the sentence
+   under each figure was rewritten to one line that states the
+   CONSEQUENCE rather than two that restate the heading. Every figure,
+   label, sentence, request count and unpriced count is still on screen.
+
+   Still its own vocabulary rather than a reuse of the list's chips:
+   these state MONEY and those filter ROWS, and making them look alike
+   is what invites an operator to read one row of numbers that do not
+   belong together.
    ==================================================================== */
 .ew-money-strip {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 .ew-money-strip-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
-  margin-bottom: 8px;
+  gap: 2px 10px;
+  margin-bottom: 6px;
 }
 .ew-money-strip-title {
   font-family: var(--f-head);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -10914,38 +11006,27 @@ a.wp-card-title:hover { text-decoration: underline; }
 .ew-money-strip-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  gap: 10px;
 }
 .ew-money-card {
   display: flex;
-  gap: 12px;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
 }
-.ew-money-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--surface-2);
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
 .ew-money-card-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
   min-width: 0;
 }
 .ew-money-card-label {
   font-family: var(--f-head);
-  font-size: 11.5px;
+  font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--text-muted);
 }
 .ew-money-card-value {
@@ -10954,18 +11035,19 @@ a.wp-card-title:hover { text-decoration: underline; }
   font-weight: 800;
   letter-spacing: -0.01em;
   color: var(--text);
-  line-height: 1.15;
+  line-height: 1.2;
 }
 /* The sentence that means an operator never has to ask what the figure
    is. It wraps rather than truncating — a clipped explanation is the
    same as no explanation. */
 .ew-money-card-meta {
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 11.5px;
+  line-height: 1.3;
   color: var(--text-faint);
 }
 .ew-money-card-foot {
-  font-size: 11.5px;
+  font-size: 11px;
+  line-height: 1.3;
   color: var(--text-faint);
 }
 .ew-money-card-unpriced {
