@@ -11,6 +11,7 @@ import { BadgeEuro } from "lucide-react";
 import { getApiError } from "../api/client";
 import { listMyInvoices } from "../api/invoices";
 import type { CustomerInvoice } from "../api/types";
+import { BillingCutoffNotice } from "../components/BillingCutoffNotice";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { formatMoney } from "../lib/intl";
@@ -58,6 +59,12 @@ export function MyInvoicesPage() {
           {error}
         </div>
       )}
+
+      {/* Sprint W1-B item 14 — the other half of the same explanation.
+          This page is where "why is work I never approved on my bill?"
+          gets asked, so this is where it gets answered, next to the
+          bills rather than in a mail the reader has to go and find. */}
+      <BillingCutoffNotice variant="invoice" />
 
       {loading ? (
         <div className="loading-bar">

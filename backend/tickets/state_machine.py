@@ -193,6 +193,16 @@ _SYSTEM_AUTO_TRANSITION_KEYS = {
 # -> APPROVED again) overwrite the value. For first/last/duration analytics use
 # TicketStatusHistory, which records every transition.
 TIMESTAMP_ON_ENTER = {
+    # Sprint W1-B (item 14, the billing cutoff) — `sent_for_approval_at`
+    # is now MONEY, not just analytics. `extra_work.billing.is_earned`
+    # bills work that sits at WAITING_CUSTOMER_APPROVAL with this stamp
+    # set, and `extra_work.billing.earned_at` reads it as the date the
+    # invoice line is anchored on. Removing this entry, or letting a
+    # route into WAITING_CUSTOMER_APPROVAL bypass `apply_transition`,
+    # would silently drop that work out of the billing pool again — the
+    # exact failure the sprint closed. Loop overwrites are correct and
+    # deliberate: a re-submitted ticket bills against the LATEST hand-off
+    # to the customer, not the first one.
     TicketStatus.WAITING_CUSTOMER_APPROVAL: "sent_for_approval_at",
     # Sprint 28 Batch 11 — stamped when a STAFF (or provider operator
     # acting on-behalf) completes work that routes through the manager

@@ -2432,5 +2432,12 @@
   "contacts.receives_invoices_yes": "Yes",
   "contacts.receives_invoices_no": "No",
   "customers.lifecycle_hint": "Descriptive. It does not decide who can log in — the active switch still does.",
-  "customer_labels.seeded_default": "General"
+  "customer_labels.seeded_default": "General",
+  "billing_cutoff_notice": {
+    "title": "Invoicing and your approval",
+    "lead_before": "Work that is finished is sometimes still waiting for your approval when your invoicing date comes round.",
+    "lead_invoice": "Is there work on this invoice you had not approved yet? This is why.",
+    "rule": "Work finished before your invoicing date goes on the next invoice, even if your approval has not come in by then. That way the work is billed in the month it was actually carried out.",
+    "reversal": "If you reject the work afterwards, we reverse the invoice with a credit note and the work comes off your account again."
+  }
 }

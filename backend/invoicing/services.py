@@ -27,7 +27,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
-from extra_work.billing import billing_month, build_ticket_map
+from extra_work.billing import billing_month, build_ticket_map, earned_at
 from extra_work.models import ExtraWorkRequest
 from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement)
 
@@ -223,9 +223,15 @@ def _create_draft(
         line_sub, line_vat, line_tot = amounts.get(ew.id) or _earned_amounts(ew)
         bm = billing_month(ew, ticket)  # (year, month) for included rows
         performed_on = None
-        if ticket is not None and ticket.closed_at is not None:
+        # Sprint W1-B — read the SAME anchor `billing_month` buckets on
+        # rather than `closed_at` directly. A row earned under the
+        # billing-cutoff arm (ticket at WAITING_CUSTOMER_APPROVAL) has no
+        # `closed_at` yet, and an invoice line for work that WAS
+        # performed must not print a blank performed-on date.
+        anchor = earned_at(ticket)
+        if anchor is not None:
             # Same Europe/Amsterdam localtime rule as billing_month.
-            performed_on = timezone.localtime(ticket.closed_at).date()
+            performed_on = timezone.localtime(anchor).date()
         InvoiceLine.objects.create(
             invoice=invoice,
             ordering=i,

@@ -2432,5 +2432,12 @@
   "contacts.receives_invoices_yes": "Ja",
   "contacts.receives_invoices_no": "Nee",
   "customers.lifecycle_hint": "Beschrijvend. Bepaalt niet wie kan inloggen — dat blijft de actief-schakelaar.",
-  "customer_labels.seeded_default": "Algemeen"
+  "customer_labels.seeded_default": "Algemeen",
+  "billing_cutoff_notice": {
+    "title": "Facturatie en uw goedkeuring",
+    "lead_before": "Werk dat is afgerond wacht soms nog op uw goedkeuring als uw facturatiedatum voorbijkomt.",
+    "lead_invoice": "Staat er werk op deze factuur dat u nog niet had goedgekeurd? Dan komt dat hierdoor.",
+    "rule": "Werk dat voor uw facturatiedatum is afgerond, komt op de eerstvolgende factuur te staan, ook als uw goedkeuring op dat moment nog niet binnen is. Zo staat het werk op de factuur van de maand waarin het echt is uitgevoerd.",
+    "reversal": "Keurt u het werk daarna alsnog af? Dan draaien wij de factuur terug met een creditnota en verdwijnt het werk weer van uw rekening."
+  }
 }

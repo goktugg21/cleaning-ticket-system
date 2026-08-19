@@ -35,7 +35,7 @@ from accounts.models import UserRole
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import Company, CompanyUserMembership
 from customers.models import Customer, CustomerUserMembership, Department, WorkType
-from extra_work.billing import billing_month, build_ticket_map, is_earned
+from extra_work.billing import billing_month, build_ticket_map, earned_at, is_earned
 from extra_work.models import ExtraWorkStatus
 from tickets.models import Ticket, TicketStatus, TicketType
 
@@ -445,7 +445,13 @@ def _wrap(filters: DimensionFilters, buckets: list) -> dict:
 # State classification (one spawned operational ticket per EW, linked via
 # Ticket.extra_work_request):
 #   t = first non-deleted spawned ticket (or None).
-#   EARNED          : t.status == CLOSED.
+#   EARNED          : `extra_work.billing.is_earned(t)` — t.status == CLOSED,
+#                     OR (Sprint W1-B, the billing cutoff) t.status ==
+#                     WAITING_CUSTOMER_APPROVAL with `sent_for_approval_at`
+#                     stamped. Called, never re-tested here: billing and
+#                     revenue reporting have to mean the same thing by
+#                     `earned`, and the only way to guarantee that is one
+#                     function. WAITING_MANAGER_REVIEW is in neither arm.
 #   LOST            : t.status in {REJECTED, CONVERTED_TO_EXTRA_WORK}, OR
 #                     (t is None AND ew.status in {CUSTOMER_REJECTED,
 #                      CANCELLED}).
@@ -489,7 +495,9 @@ _EW_NO_TICKET_PIPELINE = {
 def _classify_extra_work(ew, ticket) -> str:
     """Return the revenue state for one EW + its (optional) spawned ticket."""
     if ticket is not None:
-        if ticket.status == TicketStatus.CLOSED:
+        # ONE definition of earned, shared with the invoice run — see the
+        # block comment above and `extra_work/billing.py`.
+        if is_earned(ticket):
             return "earned"
         if ticket.status in (
             TicketStatus.REJECTED,
@@ -630,7 +638,17 @@ def _resolve_extra_work_revenue_rows(actor, query_params):
             Ticket.objects.filter(
                 extra_work_request_id__in=ew_ids, deleted_at__isnull=True
             )
-            .only("id", "status", "extra_work_request_id")
+            # `closed_at` / `sent_for_approval_at`: the two `earned_at`
+            # anchors, both read per row below (state classification and
+            # the Completed At column). Deferring either turns this into
+            # one extra query per Extra Work on a whole-month report.
+            .only(
+                "id",
+                "status",
+                "closed_at",
+                "sent_for_approval_at",
+                "extra_work_request_id",
+            )
             .order_by("id")
         ):
             # `.first()` semantics: keep the lowest-id ticket per EW.
@@ -955,8 +973,14 @@ def compute_extra_work_by_department(actor, query_params) -> dict:
 
         completed_at = None
         week_no = None
-        if state == "earned" and ticket is not None and ticket.closed_at is not None:
-            completed_date = timezone.localtime(ticket.closed_at).date()
+        # Same anchor `billing_month` buckets on: `closed_at` for a
+        # closed ticket, `sent_for_approval_at` for one earned under the
+        # cutoff arm. Reading `closed_at` directly would leave every
+        # cutoff-earned row with a blank Completed At on a report that
+        # counts its money.
+        _earned_on = earned_at(ticket) if state == "earned" else None
+        if _earned_on is not None:
+            completed_date = timezone.localtime(_earned_on).date()
             completed_at = completed_date.isoformat()
             week_no = completed_date.isocalendar()[1]
 
