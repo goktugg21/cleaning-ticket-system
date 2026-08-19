@@ -82,6 +82,124 @@ Frontend only; no backend file touched and no backend test run.
 exactly 44 (42 errors, 2 warnings), baseline held, no new `eslint-disable`;
 `npm run build` OK. No i18n key added, so the nl/en pair is untouched.
 
+### Done — W2-D: the planning layer (wave 2, chat 4)
+
+Branch `feat/ew-gap-closing`, plan `docs/planning/ew-gap-closing-plan.md`
+§2.2 and the two flags of §2.3. Backend and API only — every frontend
+file was out of scope by design, because three other chats are reworking
+the pages this will eventually mount on. The plan modal and the bulk-plan
+table are wave 3.
+
+- **A work now carries what we said it would take.** `budget_hours` is
+  the planned total, and it is distributed across the people on the job
+  in a new model, `ExtraWorkPlannedHours` — one row per person, in the
+  `extra_work` app (not in `tickets`, which is another chat's file this
+  wave; not in `timesheets`, which has a deliberate no-money rule and
+  holds ACTUAL hours, and "planned vs actual" cannot be one number
+  comparing itself).
+- **Requested dates and committed dates are now two separate stored
+  pairs.** `preferred_date` -> `planned_end_date` (plus `deadline`) is
+  what the customer asked for and what is owed;
+  `provider_planned_date` -> `provider_planned_end_date` (the second is
+  new) is what the provider committed to. The plan action writes the
+  second pair and never the first, so planning can no longer move the
+  date the provider is measured against, and "did we do what we
+  promised, or what they asked for?" is a question with an answer.
+- **Plan and start are one action.** `POST /api/extra-work/<id>/plan/`
+  writes the budget, the committed window, the per-person hours and the
+  two completion requirements, and then starts the work. A start that
+  cannot happen is REPORTED, never raised: once the work has an
+  operational ticket its status follows that ticket (Sprint 181 §1), so
+  the response comes back `started: false` with
+  `start_skipped: "operational_status_follows_ticket"` and the plan
+  still lands. Throwing away a correct plan because of a state the
+  operator can already see on their screen would be the wrong trade.
+- **Bulk plan, `POST /api/extra-work/bulk-plan/`** — the same payload for
+  many works, all-or-nothing, with one constant rejection body for every
+  reason (H-1). **It carries both completion flags**, which is the whole
+  reason it is written the way it is. Here there is ONE payload
+  serializer and ONE writer, and both read every field — booleans
+  included — by KEY PRESENCE: absent means untouched, so a bulk edit of
+  the dates cannot touch a flag and a bulk edit of a flag is something
+  somebody asked for. (On the reference side the evidence is stronger
+  than the brief's wording: neither flag survives ANY plan write there.
+  The modal sends them, the config-driven update persists neither, and 0
+  of 78 live records has either set —
+  `docs/reference/osius-reference-system/01-extra-work.md` §1.6, §3.6.
+  The brief calls it "bulk plan writes both to false"; the mechanism
+  differs, the consequence is the same.)
+- **Both plan endpoints are JSON-only, and that is a correctness fix.**
+  DRF reads a boolean that is ABSENT from HTML form input as `False` (an
+  unchecked checkbox sends nothing), so with the default parser set a
+  form-encoded plan that never mentioned a completion flag would have
+  written it to False on every work it touched — the same defect,
+  rebuilt by a framework default rather than by anybody deciding it. The
+  payload carries a nested list that form encoding cannot express
+  anyway. Pinned by a test on each endpoint.
+- **Overrun warns. It never blocks.** Distributing more hours than the
+  budget returns 200 with a `hours_overrun` warning naming the budget,
+  the distributed total and the difference; the save has already
+  happened. The warning is on the read surface too
+  (`planned_hours_overrun` on the detail), so the manager approving the
+  work sees it on the screen they approve from. The no-block rule is the
+  business's own: over there the hard cap exists as a complete function,
+  `validateTotalHours()`, is never called, and the model's boot carries
+  `// Hours validation removed per user request`.
+- **Hours belonging to somebody who has been un-assigned stay visible and
+  stay counted**, flagged `is_assigned: false`. Over there the grid is
+  built from the assignment list, so those hours vanish from the screen
+  while staying in every total and nothing explains the difference (live
+  work 474: 13.5 distributed hours against a budget of 1.00, no warning
+  anywhere).
+- **Budget hours never touches money.** Nothing in the planning module
+  reaches a price; `rowAmounts()` and its server-side mirror stay the one
+  billing-total rule. Pinned by a test that reads all six money fields
+  before and after a 40-hour plan and asserts they are unchanged.
+- **Planning is provider-only, and a customer never sees the budget or
+  the distribution** — on the detail or on the list. The two completion
+  flags stay visible to them: those are a promise about the evidence
+  they will get, not a number about our own people.
+
+**Click path (SUPER_ADMIN).** There is no button yet — this is the API
+half, and the UI is wave 3. To see it: Extra Work -> open any
+customer-approved job -> the detail response now carries `budget_hours`,
+`provider_planned_end_date`, `planned_hours`, `planned_hours_total`,
+`planned_hours_overrun`, `file_upload_required`,
+`completion_notes_required` and `actions.can_plan`. Assign people first
+(Extra Work -> the job -> Assignment) or the hours distribution refuses
+them.
+
+**Gates.** Ran 129 tests, OK. No frontend file was touched, so the
+frontend gate was not run. The migration's rendered SQL is four
+`ADD COLUMN` and one `CREATE TABLE` — no drop, no type change, no
+backfill.
+
+**Handoff to wave 3.** The Work Plan still places an extra work on
+`preferred_date` -> `planned_end_date`
+(`backend/tickets/views_work_plan.py` `_ew_week_q` / `_extra_work_job`),
+i.e. on what the CUSTOMER asked for, even though a committed window now
+exists beside it. Whether the plan should draw the committed window when
+one is set is an owner decision, and the file belongs to another chat
+this wave.
+
+**Tests.** `extra_work.tests.test_w2d_planning` and
+`extra_work.tests.test_w2d_bulk_plan` are new;
+`extra_work.tests.test_extra_work_mvp` and
+`extra_work.tests.test_m4_billing_fields` were run because model fields
+and both request serializers changed and those two modules are what
+prove the existing shape is untouched. `extra_work.tests.test_sprint176_dates`
+and `test_sprint184_dates_travel` were added to the list because
+`dates.py` — the ONE writer of an Extra Work's dates — gained the new
+committed-end field and its two validation rules.
+
+**Not done, deliberately.** No enforcement of the two completion flags
+(that is the completion transition, wave 3, and it belongs in one place).
+No coordinator concept — the word does not appear in the reference
+backend at all. No hard cap on hours. No `planned_by` / `planned_at`
+columns: the plan writes one `ExtraWorkStatusHistory` annotation row,
+which is the trail this app already uses for non-status writes, and a
+second copy of the same fact is how two screens end up disagreeing.
+
 ### Done — Sprint 189 §§1–4 (chat 1 of 3): the four layout changes
 
 Frontend only. Plan §2.1, items 2–5. No backend file was touched and no

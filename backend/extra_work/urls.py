@@ -36,6 +36,7 @@ from .views_assignments import (
 )
 from .views_dates import ExtraWorkBulkDatesView
 from .views_financials import ExtraWorkFinancialSummaryView
+from .views_planning import ExtraWorkBulkPlanView
 
 urlpatterns = [
     # Sprint 143 §6 — MUST precede the router: the DefaultRouter is
@@ -60,6 +61,14 @@ urlpatterns = [
         "bulk-dates/",
         ExtraWorkBulkDatesView.as_view(),
         name="extra-work-bulk-dates",
+    ),
+    # W2-D — plan many works at once. Same ordering rule as the three
+    # above: the router owns the empty prefix, so its detail route would
+    # read "bulk-plan" as a pk.
+    path(
+        "bulk-plan/",
+        ExtraWorkBulkPlanView.as_view(),
+        name="extra-work-bulk-plan",
     ),
     # W1-C — the money strip's aggregate. MUST precede the router for the
     # same reason the three above do: the router owns the empty prefix,

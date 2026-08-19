@@ -27,6 +27,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -61,11 +62,13 @@ from .label_validation import (
     validate_labels_for_customer,
 )
 from .dates import apply_extra_work_dates
+from .planning import PlanRejected, apply_plan
 from .serializers import (
     ERR_DEADLINE_PROVIDER_ONLY,
     ActualHoursEntrySerializer,
     ExtraWorkDatesSerializer,
     ExtraWorkLabelsSerializer,
+    ExtraWorkPlanSerializer,
     ExtraWorkPreviewSerializer,
     ExtraWorkPricingLineItemCustomerSerializer,
     ExtraWorkPricingLineItemSerializer,
@@ -104,6 +107,12 @@ PROVIDER_ROLES = {
     UserRole.COMPANY_ADMIN,
     UserRole.BUILDING_MANAGER,
 }
+
+# W2-D — one code for both refusals on the plan action (wrong role, and
+# right role without provider-side scope on this building). Same shape
+# as `ERR_DEADLINE_PROVIDER_ONLY`: the caller learns it may not plan
+# this work, and learns nothing about the work itself.
+ERR_PLAN_PROVIDER_ONLY = "plan_provider_only"
 
 
 # Sprint 28 Batch 9 — bucket definitions for the Extra Work stats
@@ -683,6 +692,109 @@ class ExtraWorkRequestViewSet(
             payload["tickets_moved"] = ticket_result["moved"]
             payload["tickets_kept_own_date"] = ticket_result["kept_own_date"]
         return Response(payload)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="plan",
+        # JSON ONLY, and this is a correctness fix rather than a
+        # preference. DRF's `BooleanField.get_value` treats a boolean
+        # that is ABSENT from HTML form input as `False` — because an
+        # unchecked checkbox sends nothing — so with the default parser
+        # set a form-encoded plan that never mentioned
+        # `file_upload_required` would silently write it to False on
+        # every work it touched. That is precisely the reference
+        # system's defect, rebuilt in our own code by a framework
+        # default. The payload carries a nested list (`planned_hours`)
+        # that form encoding cannot express anyway.
+        parser_classes=[JSONParser],
+    )
+    def plan(self, request, pk=None):
+        """W2-D — plan the work, and start it. One action, one call.
+
+        Body (every field optional; ABSENT MEANS LEAVE UNCHANGED):
+
+            {"budget_hours": "8.00",
+             "provider_planned_date": "2026-09-01",
+             "provider_planned_end_date": "2026-09-03",
+             "planned_hours": [{"user": 12, "hours": "4.00"}, ...],
+             "file_upload_required": true,
+             "completion_notes_required": false,
+             "start": true}
+
+        The rules and the evidence behind them are in
+        `extra_work.planning`; the three that decide how this endpoint
+        BEHAVES are worth repeating where somebody reads the HTTP layer:
+
+        * **Overrun warns, it never blocks.** Distributing more hours
+          than the budget returns 200 with a `hours_overrun` warning in
+          the `plan` block. The save has already happened.
+        * **A start that cannot happen is reported, not raised.** Once
+          the work has an operational ticket its status follows that
+          ticket (Sprint 181 §1), so `started` comes back false with
+          `start_skipped: "operational_status_follows_ticket"` and the
+          plan still lands. Throwing away a correct plan because of a
+          state the operator can see on their screen would be the wrong
+          trade.
+        * **The customer's dates are not touched.** `preferred_date`,
+          `planned_end_date` and `deadline` have their own endpoint
+          (`/dates/`); this one writes the provider's committed window
+          only, so planning can never move the date we are measured
+          against.
+
+        Role gate FIRST (before `get_object`), exactly as `dates` and
+        `actual_hours` do, so a customer-side or STAFF actor gets a
+        stable 403 instead of a scope-driven 404.
+        """
+        user = request.user
+
+        if user.role not in PROVIDER_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot plan Extra Work. "
+                    "Planning is a provider action.",
+                    "code": ERR_PLAN_PROVIDER_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        extra_work = self.get_object()  # 404 if out-of-scope (cross-tenant)
+
+        if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+            user,
+            "osius.ticket.view_building",
+            building_id=extra_work.building_id,
+        ):
+            return Response(
+                {
+                    "detail": "You do not have provider-side scope for this "
+                    "Extra Work request.",
+                    "code": ERR_PLAN_PROVIDER_ONLY,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        payload = ExtraWorkPlanSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        # `PlanRejected` propagates OUT of the atomic block on purpose:
+        # caught inside it, a refusal would commit whatever had already
+        # been written. `apply_plan` resolves everything before it
+        # writes anything, so this is belt and braces — but the belt is
+        # what makes it true regardless of how `apply_plan` changes.
+        try:
+            with transaction.atomic():
+                result = apply_plan(
+                    extra_work, payload.validated_data, actor=user
+                )
+        except PlanRejected as exc:
+            return Response(exc.body, status=status.HTTP_400_BAD_REQUEST)
+
+        data = ExtraWorkRequestDetailSerializer(
+            extra_work, context={"request": request}
+        ).data
+        data["plan"] = result
+        return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="actual-hours")
     def actual_hours(self, request, pk=None):

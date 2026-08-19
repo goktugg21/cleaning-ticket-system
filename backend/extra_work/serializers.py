@@ -670,6 +670,55 @@ def _serialize_spawned_tickets(obj):
     ]
 
 
+def _serialize_planned_hours(obj):
+    """W2-D — the budget, distributed. One row per person, DETAIL only.
+
+    TWO queries, whatever the crew size: the rows with their user, and
+    the set of user ids currently assigned to this work. `is_assigned`
+    is resolved from that set rather than per row, because the rows this
+    surface must NOT drop are exactly the ones a per-row join would.
+
+    A row whose person is no longer assigned STAYS in the list and stays
+    in the total, flagged `is_assigned: false`. That is the deliberate
+    opposite of the reference system, where the grid is built from the
+    assignment list and hours are matched onto it — so hours belonging
+    to a removed worker vanish from the screen while still counting in
+    every total, and the screen and the total disagree with nothing on
+    screen to explain it (`docs/reference/osius-reference-system/`
+    §4.4; live work 474 shows 13.5 distributed hours against a
+    `hours_planed` of 1.00 with no warning anywhere).
+
+    `user_phone` is deliberately absent: this list exists to plan hours,
+    not to publish a staff directory. `User.phone` is the ungated
+    account field the assignment list already exposes to provider
+    operators, and adding a second exposure here would be a second place
+    to keep the Sprint 154 §K privacy floor in step.
+    """
+    rows = list(obj.planned_hours.select_related("user").all())
+    if not rows:
+        return []
+    from .models import ExtraWorkAssignment
+
+    assigned = set(
+        ExtraWorkAssignment.objects.filter(
+            extra_work_request=obj,
+            user_id__in=[row.user_id for row in rows],
+        ).values_list("user_id", flat=True)
+    )
+    return [
+        {
+            "user_id": row.user_id,
+            "user_email": row.user.email,
+            "user_full_name": row.user.full_name,
+            "user_role": row.user.role,
+            "hours": f"{row.hours:.2f}",
+            "is_assigned": row.user_id in assigned,
+            "set_at": row.set_at,
+        }
+        for row in rows
+    ]
+
+
 def _has_operational_ticket(obj) -> bool:
     """Sprint 180 §1 — the ONE question the two list tracks split on.
 
@@ -794,6 +843,15 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             # the provider says the work will actually happen, and it is
             # what lets the Work Plan schedule an extra work at all.
             "provider_planned_date",
+            # W2-D — the other half of the provider's committed window,
+            # and the planning fields the bulk-plan table edits. Plain
+            # columns, so they cost the list nothing; the per-person
+            # distribution is DETAIL-ONLY on purpose (a nested list per
+            # row is the N+1 Sprint 120 exists to prevent).
+            "provider_planned_end_date",
+            "budget_hours",
+            "file_upload_required",
+            "completion_notes_required",
             "is_overdue",
             "started_before_plan",
             # Sprint 28 Batch 6 — cart routing taxonomy. Surfaced on
@@ -846,7 +904,18 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
 
     # Mirror ExtraWorkRequestDetailSerializer's redaction: a CUSTOMER_USER
     # never sees billing metadata on the list either.
-    _PROVIDER_ONLY_FIELDS = ("invoice_date", "is_invoiced", "invoiced_at")
+    #
+    # W2-D — `budget_hours` joins them. Planning is a provider action and
+    # a customer must never see how long we said the job would take, on
+    # any surface. The two completion flags stay visible: they are a
+    # promise about the evidence the customer will get, not a number
+    # about our own people.
+    _PROVIDER_ONLY_FIELDS = (
+        "invoice_date",
+        "is_invoiced",
+        "invoiced_at",
+        "budget_hours",
+    )
 
     def get_has_operational_ticket(self, obj) -> bool:
         return _has_operational_ticket(obj)
@@ -930,6 +999,12 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     # the ticket list to name the ticket.
     has_operational_ticket = serializers.SerializerMethodField()
     spawned_tickets = serializers.SerializerMethodField()
+    # W2-D — the budget, distributed. Provider-only (stripped in
+    # `to_representation`), DETAIL-only, and computed in ONE place so the
+    # list of people and the total can never disagree.
+    planned_hours = serializers.SerializerMethodField()
+    planned_hours_total = serializers.SerializerMethodField()
+    planned_hours_overrun = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkRequest
@@ -965,6 +1040,20 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             # the provider says the work will actually happen, and it is
             # what lets the Work Plan schedule an extra work at all.
             "provider_planned_date",
+            # W2-D — the committed window's end, the budget, the
+            # distribution and the two completion requirements. Read the
+            # six dates as TWO PAIRS (see the model): `preferred_date` ->
+            # `planned_end_date` is what the customer asked for,
+            # `provider_planned_date` -> `provider_planned_end_date` is
+            # what we committed to, and the plan action writes only the
+            # second.
+            "provider_planned_end_date",
+            "budget_hours",
+            "planned_hours",
+            "planned_hours_total",
+            "planned_hours_overrun",
+            "file_upload_required",
+            "completion_notes_required",
             "deadline",
             "is_overdue",
             "started_before_plan",
@@ -1059,6 +1148,14 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "invoice_date",
             "is_invoiced",
             "invoiced_at",
+            # W2-D — written by the plan action (`extra_work.planning`)
+            # and by nothing else. This ViewSet has no update action, so
+            # listing them as writable would be a promise no endpoint
+            # keeps.
+            "provider_planned_end_date",
+            "budget_hours",
+            "file_upload_required",
+            "completion_notes_required",
             "created_by",
             "created_by_email",
             "requested_at",
@@ -1078,6 +1175,14 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         "invoice_date",
         "is_invoiced",
         "invoiced_at",
+        # W2-D — planning is a provider action end to end. A customer
+        # must never see the budget, who is doing what for how long, or
+        # whether we are over our own estimate; those are numbers about
+        # our own people, and one of them names them.
+        "budget_hours",
+        "planned_hours",
+        "planned_hours_total",
+        "planned_hours_overrun",
     )
 
     def get_has_operational_ticket(self, obj) -> bool:
@@ -1088,6 +1193,26 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
 
     def get_is_priced(self, obj) -> bool:
         return _is_priced(obj)
+
+    def get_planned_hours(self, obj):
+        return _serialize_planned_hours(obj)
+
+    def get_planned_hours_total(self, obj) -> str:
+        from .planning import distributed_hours
+
+        return f"{distributed_hours(obj):.2f}"
+
+    def get_planned_hours_overrun(self, obj):
+        """The overrun warning body, or null. A WARNING — never a block.
+
+        On the READ surface as well as on the write response, so the
+        manager approving the work sees the overrun on the screen they
+        approve from and not only in the reply to a save somebody else
+        made.
+        """
+        from .planning import hours_overrun
+
+        return hours_overrun(obj)
 
     def get_pricing_line_items(self, obj):
         user = self.context.get("request").user if self.context.get("request") else None
@@ -1184,6 +1309,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
                 "can_post_ew_public_reply": False,
                 "can_post_ew_internal_note": False,
                 "can_post_ew_customer_internal": False,
+                "can_plan": False,
             }
 
         allowed = self._resolve_allowed_next_statuses(obj)
@@ -1309,6 +1435,14 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         can_post_ew_internal_note = provider_mgmt
         can_post_ew_customer_internal = is_customer
 
+        # W2-D — may this actor plan the work (budget hours, the
+        # committed window, hours per person, the two completion
+        # requirements)? Planning is a provider action end to end, so
+        # this is provider roles in scope and nobody else: the endpoint
+        # refuses a customer-side actor at the door, and this flag says
+        # so before the button is drawn rather than after it 403s.
+        can_plan = is_super or is_ca_in or is_bm_in
+
         return {
             "allowed_next_statuses": list(allowed),
             "can_prepare_extra_work_proposal": can_prepare_extra_work_proposal,
@@ -1321,6 +1455,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "can_post_ew_public_reply": can_post_ew_public_reply,
             "can_post_ew_internal_note": can_post_ew_internal_note,
             "can_post_ew_customer_internal": can_post_ew_customer_internal,
+            "can_plan": can_plan,
         }
 
     def to_representation(self, instance):
@@ -2230,6 +2365,84 @@ class ExtraWorkDatesSerializer(serializers.Serializer):
     deadline = serializers.DateField(required=False, allow_null=True)
     planned_end_date = serializers.DateField(required=False, allow_null=True)
     provider_planned_date = serializers.DateField(required=False, allow_null=True)
+
+
+# ---------------------------------------------------------------------------
+# W2-D — the plan payload
+# ---------------------------------------------------------------------------
+class ExtraWorkPlannedHoursRowSerializer(serializers.Serializer):
+    """One `{user, hours}` line of the distribution.
+
+    `hours` is `min_value=0` and has NO upper bound and no cap against
+    the parent's budget. Over-distributing is a WARNING the response
+    carries, never a refusal — see `extra_work.planning` for the
+    evidence behind that rule.
+
+    Zero is legal and means something: a person on the crew with no
+    hours budgeted for them yet. Dropping their line to say so would
+    lose the fact that they are on the job.
+    """
+
+    user = serializers.IntegerField(min_value=1)
+    hours = serializers.DecimalField(
+        max_digits=8, decimal_places=2, min_value=0
+    )
+
+
+class ExtraWorkPlanSerializer(serializers.Serializer):
+    """The plan, as it arrives — for ONE work and for a bulk selection.
+
+    THE POINT OF THIS CLASS IS THAT THERE IS ONLY ONE OF IT. The single
+    `POST /api/extra-work/<id>/plan/` and the bulk
+    `POST /api/extra-work/bulk-plan/` both validate against this
+    serializer, so a field the single form knows about cannot be a field
+    the bulk table silently drops.
+
+    That is the defect this shape exists to prevent, and the reference
+    system has it in its strongest form: over there the plan modal sends
+    `upload_is_required` and `notes_is_required` and the config-driven
+    update persists neither, so both are silently discarded on EVERY
+    write path and 0 of 78 live records has either flag set
+    (`docs/reference/osius-reference-system/01-extra-work.md` §1.6). A
+    payload field that no writer carries is a control that lies to the
+    person using it.
+
+    EVERY FIELD IS OPTIONAL, AND ABSENCE MEANS "LEAVE IT ALONE" —
+    including the two booleans. `required=False` on a BooleanField is
+    exactly what makes "the bulk dialog did not touch this" expressible;
+    a default of False here would rebuild the reference's bug in our own
+    code.
+
+    `start` is the exception, and deliberately so: plan and start are
+    ONE action, as they are in the reference system where the button is
+    labelled "Start Work". A caller that wants to plan without starting
+    sends `start: false`.
+    """
+
+    budget_hours = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        min_value=0,
+        required=False,
+        allow_null=True,
+    )
+    provider_planned_date = serializers.DateField(
+        required=False, allow_null=True
+    )
+    provider_planned_end_date = serializers.DateField(
+        required=False, allow_null=True
+    )
+    planned_hours = ExtraWorkPlannedHoursRowSerializer(
+        many=True, required=False
+    )
+    file_upload_required = serializers.BooleanField(required=False)
+    completion_notes_required = serializers.BooleanField(required=False)
+    # No `default=` on purpose: with one, `start` would be present in
+    # every validated payload and an EMPTY body would read as "start
+    # this work", which is not something anybody meant to ask for. The
+    # default lives in `planning.apply_plan` (absent -> start), so key
+    # presence keeps meaning what it means everywhere else here.
+    start = serializers.BooleanField(required=False)
 
 
 # ---------------------------------------------------------------------------

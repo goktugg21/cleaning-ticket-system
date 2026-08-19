@@ -27,9 +27,21 @@ from __future__ import annotations
 
 ERR_PLANNED_END_BEFORE_START = "planned_end_before_start"
 
+# W2-D — the same two rules for the PROVIDER's own pair
+# (`provider_planned_date` -> `provider_planned_end_date`). Separate
+# codes because they are a separate pair: a caller told "the end is
+# before the start" needs to know WHICH window it refused, and the plan
+# modal and the dates dialog edit different ones.
+ERR_PROVIDER_END_BEFORE_START = "provider_planned_end_before_start"
+ERR_PROVIDER_END_WITHOUT_START = "provider_planned_end_without_start"
+
 
 def apply_extra_work_dates(extra_work, data: dict) -> dict | None:
-    """Apply a validated `{deadline?, planned_end_date?}` to `extra_work`.
+    """Apply validated dates to `extra_work`.
+
+    Four keys, all optional:
+    `{deadline?, planned_end_date?, provider_planned_date?,
+      provider_planned_end_date?}`.
 
     Returns `None` on success (the row is saved), or an error body dict
     ready to hand to a 400 `Response` — so both callers report the same
@@ -59,6 +71,17 @@ def apply_extra_work_dates(extra_work, data: dict) -> dict | None:
     if "provider_planned_date" in data:
         extra_work.provider_planned_date = data["provider_planned_date"]
         update_fields.append("provider_planned_date")
+    # W2-D — the other half of the provider's pair. It lives here, with
+    # the customer's window, because this module is the ONE writer of an
+    # Extra Work's dates and a second writer is how two screens end up
+    # disagreeing about which rows are late. The plan action
+    # (`planning.apply_plan`) routes both provider dates through here
+    # rather than setting them itself.
+    if "provider_planned_end_date" in data:
+        extra_work.provider_planned_end_date = data[
+            "provider_planned_end_date"
+        ]
+        update_fields.append("provider_planned_end_date")
 
     if not update_fields:
         return None
@@ -82,6 +105,43 @@ def apply_extra_work_dates(extra_work, data: dict) -> dict | None:
             ),
             "code": ERR_PLANNED_END_BEFORE_START,
         }
+
+    # The COMMITTED window, judged the same way and separately. Same
+    # rule, different pair: what the provider committed to is not what
+    # the customer asked for, so an end from one is never measured
+    # against a start from the other.
+    provider_start = extra_work.provider_planned_date
+    provider_end = extra_work.provider_planned_end_date
+    if provider_end is not None:
+        if provider_start is None:
+            # Refused here and NOT for the customer's window above, on
+            # purpose: `planned_end_date` extends a wish that may never
+            # have been expressed, while a committed end with no
+            # committed start is a commitment to finish work nobody has
+            # said they will begin.
+            #
+            # The message names BOTH ways out, because this fires in two
+            # directions — setting an end with no start, and clearing a
+            # start out from under an end that is already stored. The
+            # second is why nothing here quietly clears the end to
+            # match: silently dropping a date the caller did not mention
+            # is the failure mode this whole module is written against.
+            return {
+                "detail": (
+                    "A planned end date cannot stand without a planned "
+                    "start date. Set a start date, or clear the end date "
+                    "as well."
+                ),
+                "code": ERR_PROVIDER_END_WITHOUT_START,
+            }
+        if provider_end < provider_start:
+            return {
+                "detail": (
+                    "The planned end date cannot be before the planned "
+                    "start date."
+                ),
+                "code": ERR_PROVIDER_END_BEFORE_START,
+            }
 
     # No deadline-vs-window check on purpose. A job planned for next week
     # and due at the end of the month is normal, and so is a deadline

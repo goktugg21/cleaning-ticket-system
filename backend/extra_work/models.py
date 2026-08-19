@@ -475,6 +475,18 @@ class ExtraWorkRequest(models.Model):
     #   deadline              by when it must be finished; the only one
     #                         that decides whether a row is late
     #
+    # W2-D added the sixth, `provider_planned_end_date`, which finishes
+    # the provider's own pair. Read the six as TWO PAIRS and one due
+    # date:
+    #
+    #   ASKED FOR / OWED   preferred_date -> planned_end_date, deadline
+    #   COMMITTED TO       provider_planned_date -> provider_planned_end_date
+    #
+    # The plan action writes the second pair ONLY. That is the whole
+    # point of holding two: months later "did we do what we promised, or
+    # what they asked for?" is a question with an answer, and a plan can
+    # never quietly move the date the provider is measured against.
+    #
     # Nullable and with no default: an extra work nobody has planned yet
     # must be distinguishable from one planned for today, which is the
     # whole distinction the Work Plan's undated lane rests on.
@@ -487,6 +499,81 @@ class ExtraWorkRequest(models.Model):
             "Distinct from `preferred_date` (the customer's wish) and "
             "from `deadline` (when it must be finished). NULL means "
             "nobody has planned it yet."
+        ),
+    )
+
+    # W2-D — the second half of the provider's pair. Set by the plan
+    # action (`extra_work.planning`), never by anything that touches
+    # the customer's dates.
+    #
+    # Nullable with no default for the same reason its start is: a job
+    # planned for one day and a job whose end nobody has committed to
+    # are different facts, and a default would erase the difference on
+    # every row that predates this column.
+    provider_planned_end_date = models.DateField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "W2-D — the day the PROVIDER expects to finish. With "
+            "`provider_planned_date` this is the COMMITTED window, held "
+            "separately from the customer's requested window "
+            "(`preferred_date` -> `planned_end_date`). NULL means the "
+            "provider has committed to a start but not to an end."
+        ),
+    )
+
+    # W2-D — BUDGET HOURS. The planned total for the job.
+    #
+    # THIS FIELD NEVER TOUCHES MONEY, and that is a rule, not an
+    # accident of the current wiring. `rowAmounts()` in
+    # `frontend/src/lib/billing.ts` and its server-side mirror
+    # (`extra_work.final_amounts`) are the one billing-total rule; a
+    # budget is a PLANNING and CONTROL number that answers "how long did
+    # we say this would take", and the moment an hours field reaches a
+    # price there are two money rules and they disagree by cents. Grep
+    # before wiring: nothing in `final_amounts.py`, `pricing.py`,
+    # `billing.py` or `invoicing/` reads this, and nothing should.
+    #
+    # NULL is "nobody has budgeted this", which is NOT the same fact as
+    # 0.00 ("we budgeted no hours"). Same distinction Sprint 188 drew
+    # for price: unpriced and free must never render the same.
+    budget_hours = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text=(
+            "W2-D — planned total hours for the job. A planning and "
+            "control number ONLY: it reaches no price anywhere. NULL "
+            "means unbudgeted, which is not the same as 0.00."
+        ),
+    )
+
+    # W2-D — the two completion requirements, set when the work is
+    # planned. BOTH DEFAULT FALSE.
+    #
+    # Stored and exposed here; ENFORCEMENT is deliberately not here. It
+    # belongs in the completion transition, in one place (wave 3), for
+    # the reason the reference system demonstrates: over there both
+    # flags are checked in the frontend only, so the same work completed
+    # through the API skips the check entirely.
+    file_upload_required = models.BooleanField(
+        default=False,
+        help_text=(
+            "W2-D — a file must be attached before this work may be "
+            "completed. Stored here; enforced in the completion "
+            "transition (wave 3)."
+        ),
+    )
+    completion_notes_required = models.BooleanField(
+        default=False,
+        help_text=(
+            "W2-D — a completion note must be written before this work "
+            "may be completed. Stored here; enforced in the completion "
+            "transition (wave 3)."
         ),
     )
 
@@ -2226,3 +2313,93 @@ class ExtraWorkAssignment(models.Model):
 
     def __str__(self):
         return f"{self.extra_work_request_id}: {self.user_id} ({self.role})"
+
+
+class ExtraWorkPlannedHours(models.Model):
+    """
+    W2-D — the budget, distributed. One row per person on the job.
+
+    `ExtraWorkRequest.budget_hours` is the planned total; this is how
+    that total is spread across the people who will do the work. The two
+    are held apart on purpose: a budget nobody has distributed yet is a
+    real and normal state, and a total derived from the rows could never
+    express "we have eight hours for this and have not decided who does
+    what".
+
+    WHY THIS IS ITS OWN MODEL IN THIS APP, and not somewhere else:
+
+      * not on `tickets` — an extra work is planned before, and
+        independently of, the tickets it spawns, and one plan can span
+        several tickets;
+      * not in `timesheets` — that module has a deliberate no-money rule
+        and a different lifecycle (entered, saved, approved). These are
+        PLANNED hours: what we said the job would take, written once,
+        before anyone works. Actual hours live there and must keep
+        living there, or "planned vs actual" becomes one number
+        comparing itself.
+
+    THE PERSON, NOT THE ASSIGNMENT ROW. The FK is to the user, and the
+    write path requires that user to be assigned to this request at the
+    time of writing. Un-assigning them afterwards does NOT delete this
+    row, and the read surface reports it with `is_assigned: false`
+    rather than dropping it.
+
+    That is a deliberate answer to a live defect in the reference
+    system, recorded in `docs/reference/osius-reference-system/`
+    §4.4: over there the hours grid is built from the worker assignment
+    list and hours are matched onto it, so hours belonging to a removed
+    worker VANISH FROM THE SCREEN BUT STAY IN EVERY TOTAL. The screen
+    and the total then disagree and nobody can see why. Here the row
+    stays visible, stays counted, and says that the person is no longer
+    on the job — which is a thing an operator can act on.
+
+    `hours` has no upper bound and no cap against the parent's budget.
+    Overrun is a WARNING, never a block: in the reference system a
+    complete hard-cap function (`validateTotalHours()`) exists and is
+    never called, with the comment `// Hours validation removed per user
+    request` in the model's boot. Somebody built the block and the
+    business had it removed. We warn (see `extra_work.planning`).
+
+    Zero is legal and is not the same as no row at all: a person on the
+    crew with no hours budgeted yet is a real plan, and deleting their
+    row to say so would lose the fact that they are on it.
+    """
+
+    extra_work_request = models.ForeignKey(
+        ExtraWorkRequest,
+        on_delete=models.CASCADE,
+        related_name="planned_hours",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="extra_work_planned_hours",
+    )
+    hours = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text=(
+            "Planned hours for this person on this job. A planning "
+            "number: it reaches no price anywhere."
+        ),
+    )
+    set_at = models.DateTimeField(auto_now=True)
+    set_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="extra_work_planned_hours_set",
+    )
+
+    class Meta:
+        unique_together = [("extra_work_request", "user")]
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["extra_work_request"]),
+        ]
+        verbose_name_plural = "extra work planned hours"
+
+    def __str__(self):
+        return f"{self.extra_work_request_id}: {self.user_id} = {self.hours}h"
