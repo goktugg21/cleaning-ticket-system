@@ -1506,6 +1506,23 @@ export function TicketDetailPage() {
             </button>
           )}
         </div>
+        {/* Sprint 191 §1 — the header is a BAND: title on the left,
+            Location and Customer on the right, directly under the
+            Convert-to-Extra-Work button and in the same horizontal row
+            as the title.
+
+            Sprint 189 built this as a card in the right column and
+            Sprint 190 moved that card up one slot. Both were wrong in
+            the same way — the owner asked for header text twice and got
+            a card twice. It is plain text here: no border, no surface,
+            no shadow, nothing that reads as a panel.
+
+            The block is NOT conditional on `canConvertTicket`. When
+            that button is absent the row above simply holds the back
+            link and everything settles upward; no space is reserved and
+            nothing disappears. */}
+        <div className="detail-header-band">
+          <div className="detail-header-band-main">
         <div className="detail-header-meta">
           <span className="detail-header-no">{ticket.ticket_no}</span>
           <span className={`badge badge-${ticket.priority.toLowerCase()}`}>
@@ -1539,6 +1556,47 @@ export function TicketDetailPage() {
             <RouteBadge value={ticket.extra_work_origin.origin} />
           </div>
         )}
+          </div>{/* end .detail-header-band-main */}
+
+          {/* WHERE the work is and WHO it is for. Still ALSO rendered
+              inside the Ticket details card below — this is an added
+              display, not a move, and that has been right since Sprint
+              189. */}
+          <div
+            className="detail-header-place"
+            data-testid="ticket-header-place"
+          >
+            <div className="detail-header-place-item">
+              <span className="detail-header-place-label">
+                {t("details_location")}
+              </span>
+              <span
+                className="detail-header-place-value"
+                data-testid="ticket-header-location"
+              >
+                {ticket.room_label || ticket.building_name}
+              </span>
+              {/* A room label alone loses the building it sits in; the
+                  building stays underneath it whenever both exist. */}
+              {ticket.room_label && ticket.building_name && (
+                <span className="detail-header-place-sub">
+                  {ticket.building_name}
+                </span>
+              )}
+            </div>
+            <div className="detail-header-place-item">
+              <span className="detail-header-place-label">
+                {t("details_customer")}
+              </span>
+              <span
+                className="detail-header-place-value"
+                data-testid="ticket-header-customer"
+              >
+                {ticket.customer_name}
+              </span>
+            </div>
+          </div>
+        </div>{/* end .detail-header-band */}
       </div>
 
       {error && (
@@ -2066,56 +2124,18 @@ export function TicketDetailPage() {
             leak between tickets: each ticket lands on its per-mount
             defaults (Assignment/Details collapsed, Workflow open). */}
         <div className="detail-side" key={`detail-side-${ticket.id}`}>
-          {/* Sprint 190 §1 — the right column runs Location & Customer ->
-              Workflow -> Assignment -> Responsible manager -> Scheduling ->
-              Ticket details.
+          {/* Sprint 191 §2 — the right column is five cards:
+              Workflow -> Assignment -> Responsible manager -> Scheduling
+              -> Ticket details.
 
-              Sprint 189 put Workflow first and Location & Customer second.
-              The owner looked at that on the test site and swapped them:
-              the two facts that tell you WHICH job you are looking at
-              belong above the control that changes it, directly under the
-              Convert-to-Extra-Work button. This supersedes the order in
-              `docs/planning/ew-gap-closing-plan.md` §2.1 item 5, which is
-              updated in the same commit. Neither card changed inside —
-              only their order in this list. */}
-          {/* Sprint 189 §3 — WHERE the work is and WHO it is for, big
-              enough to read without hunting. Both facts existed only
-              inside the Ticket details card, which is collapsed by
-              default, so opening a ticket told an operator its title and
-              nothing about the site it belongs to.
-
-              This is an ADDED display, not a move: the Ticket details
-              card further down still carries both rows, unchanged. And
-              it renders UNCONDITIONALLY — it is deliberately not tied to
-              `canConvertTicket` or to any other role gate, because the
-              building and the customer are exactly the two facts every
-              role that can open this page already sees below. */}
-          <div className="card ticket-place-card" data-testid="ticket-place-card">
-            <div className="ticket-place-item">
-              <span className="ticket-place-label">{t("details_location")}</span>
-              <span className="ticket-place-value">
-                <MapPin size={16} strokeWidth={2} aria-hidden="true" />
-                <span data-testid="ticket-place-location">
-                  {ticket.room_label || ticket.building_name}
-                </span>
-              </span>
-              {/* A room label alone loses the building it sits in; the
-                  building stays underneath it whenever both exist. */}
-              {ticket.room_label && ticket.building_name && (
-                <span className="ticket-place-sub">{ticket.building_name}</span>
-              )}
-            </div>
-            <div className="ticket-place-item">
-              <span className="ticket-place-label">{t("details_customer")}</span>
-              <span className="ticket-place-value">
-                <Users size={16} strokeWidth={2} aria-hidden="true" />
-                <span data-testid="ticket-place-customer">
-                  {ticket.customer_name}
-                </span>
-              </span>
-            </div>
-          </div>
-
+              The Location & Customer CARD that stood here is deleted.
+              It was built in Sprint 189 and reordered in Sprint 190; the
+              owner wanted that information in the page header both
+              times, and it is there now as plain text. Keeping a card
+              too would put the same two facts on screen three times.
+              This supersedes the orders in
+              `docs/planning/ew-gap-closing-plan.md` §2.1 items 4 and 5,
+              both updated in the same commit. */}
           <CollapsibleCard
             title={
               canShowCompleteWorkButton

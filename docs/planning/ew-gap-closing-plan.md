@@ -72,19 +72,30 @@ same.
   > and the contacts sit in one place rather than either side of the page.
 - **Item 3** — Workflow buttons larger and more prominent, on **both** the Extra Work
   detail page and the Ticket detail page.
-- **Item 4** — Location and Customer shown prominently at the top-right of the Ticket
-  detail page, in roughly title size. **They stay in the Ticket Details card as well** —
-  this is an added display, not a move. They appear there **whether or not** the ticket
-  has a Convert-to-Extra-Work button.
-- **Item 5** — Right column order on the Ticket detail page:
-  **Location & Customer → Workflow → Assignment → Responsible Manager → Scheduling →
-  Ticket Details.**
+- **Item 4** — Location and Customer shown prominently in the Ticket detail page
+  **HEADER**: on the right, directly under the Convert-to-Extra-Work button, in the same
+  horizontal row as the title. **Plain text — not a card**: no border, no background, no
+  shadow. A small muted label above each value, the value at 18px (the title is 36px).
+  **They stay in the Ticket Details card as well** — this is an added display, not a
+  move. They render **whether or not** the ticket has a Convert-to-Extra-Work button;
+  when it is absent the block settles upward and no space is reserved.
 
-  > Changed in wave 2 (Sprint 190 §1). This item originally read
-  > *Workflow → Location & Customer → ...* and shipped that way in Sprint 189. The owner
-  > reviewed it on the test site and swapped the first two: the two facts that tell you
-  > WHICH job you are looking at belong above the control that changes it, directly under
-  > the Convert-to-Extra-Work button. The line above is the current order.
+  > Corrected in wave 3 (Sprint 191 §1), on the owner's third telling. This item said
+  > "top-right of the Ticket detail page" and Sprint 189 read that as a CARD in the
+  > right-hand column; Sprint 190 moved the same card up one slot. Both missed the
+  > point. The owner's words: *"they should be in the same row as the title of the
+  > ticket. and they should be plain texts not as cards. just below the convert to
+  > extra work button."* The card is deleted — see item 5.
+- **Item 5** — Right column order on the Ticket detail page — **five cards**:
+  **Workflow → Assignment → Responsible Manager → Scheduling → Ticket Details.**
+
+  > Corrected in wave 3 (Sprint 191 §2), and this supersedes BOTH earlier orders. The
+  > line first read *Workflow → Location & Customer → ...* (shipped in Sprint 189), then
+  > *Location & Customer → Workflow → ...* (shipped in Sprint 190). There is no
+  > Location & Customer card in either position now, because there is no card at all:
+  > item 4 puts that information in the page header as plain text, and keeping a card
+  > as well would print the same two facts three times on one screen (header, card,
+  > Ticket Details). Six entries became five.
 
 ### 2.2 The planning layer (items 6, 10, 11, and item 7's flags)
 

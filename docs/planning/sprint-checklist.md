@@ -36,6 +36,48 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — Sprint 191 (wave 3, chat E of 2): Location & Customer, third time
+
+The owner asked for these two facts in the page HEADER three times. Sprint 189
+built a card in the right column; Sprint 190 moved the same card up one slot.
+Both readings were wrong, and both were mine. This is the header.
+
+- **§1 — plain text in the header band.** The header is now a two-column band:
+  ticket-number chip row + title + description on the left, Location and
+  Customer on the right, right-aligned, directly under the Convert-to-Extra-Work
+  button. Measured at 1440px: the block's right edge is **1412px** and the
+  Convert button's right edge is **1412px** — flush. The block spans y
+  **126–419**, the chip row starts at y **126** and the title at y **158–237**,
+  so it opens level with the top of the band and runs the full height of the
+  title. Values render at **18px/800** against the title's 36px. It is plain
+  text and measurably so: computed `background` is `rgba(0,0,0,0)`, `border` is
+  `0px none`, `box-shadow` is `none`.
+- **The block is not tied to the button.** On a CLOSED ticket, where
+  `canConvertTicket` is false and no button renders, the block is still there
+  and settles **2px upward** (y 126 → 124) as the row above it shrinks. No space
+  is reserved, nothing disappears, no hole.
+- **§2 — the card is deleted.** Element, CSS block and `data-testid` all gone;
+  `.ticket-place-card` no longer appears anywhere in `src/`. The right column is
+  five cards again, measured in the DOM on every ticket:
+  `side-card-workflow` → `side-card-assignment` → `responsible-managers-section`
+  → `ticket-schedule-card` → `side-card-details`. No e2e spec referenced the
+  testid, so no test needed updating.
+- **Location and Customer are STILL in the Ticket details card.** Verified by
+  expanding it: the first two rows read LOCATION and CUSTOMER on all three
+  tickets measured. That has been right since Sprint 189 and was not touched.
+- **Overflow, under stress.** With a 121-character room label and a
+  106-character customer name the block wraps inside its 300px ceiling and
+  `document.scrollWidth` still equals `clientWidth` (1440) — zero horizontal
+  overflow. At 390px the band stacks, the block goes left-aligned at 17px, and
+  overflow is still 0.
+- `docs/planning/ew-gap-closing-plan.md` §2.1 **items 4 and 5** are corrected in
+  the same commit, with both superseded orders quoted inline so the next chat
+  can see what changed rather than trusting a silently-edited line.
+
+**Gates.** `npm run typecheck` clean over 295 project files; `npm run lint`
+exactly 44 (42 errors, 2 warnings); `npm run build` OK. No i18n key added — the
+header reuses the existing `details_location` / `details_customer`.
+
 ### Done — Sprint 190 §§1–4 (wave 2, chat A of 4): what the owner saw on the test site
 
 Wave 1 shipped, the owner opened it on crmtest, and four things were wrong.

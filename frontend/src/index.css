@@ -2652,6 +2652,94 @@ table.data-table {
    element entirely rather than leaving a prominent void below the title. */
 .detail-header-desc:empty { display: none; }
 
+/* --------------------------------------------------------------------
+   Sprint 191 §1 — the header band: title on the left, Location and
+   Customer on the right, in the SAME horizontal row as the title and
+   directly under the Convert-to-Extra-Work button.
+
+   Sprint 189 rendered these two facts as a card in the right column and
+   Sprint 190 moved that card up one slot. The owner asked for header
+   text both times. This is plain text — no border, no background, no
+   shadow, nothing that reads as a panel — and the card is deleted.
+
+   `auto` on the second column, not a fixed width: the block takes only
+   what the two values need, so a ticket with a short building name
+   leaves the title the whole row. `align-items: start` keeps it level
+   with the ticket-number chip row rather than centring it against a
+   three-line title.
+   -------------------------------------------------------------------- */
+.detail-header-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 36px;
+  align-items: start;
+}
+.detail-header-band-main {
+  min-width: 0;
+}
+.detail-header-place {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  text-align: right;
+  /* The ceiling that stops a long customer name from eating the title's
+     column or pushing the page wider than the viewport. */
+  max-width: 300px;
+  min-width: 0;
+}
+.detail-header-place-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  max-width: 100%;
+}
+.detail-header-place-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.detail-header-place-value {
+  font-family: var(--f-head);
+  /* One step above the 17px description and half the 36px title: large
+     enough to read across the desk, never mistaken for the title. */
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  /* A single unbroken building name wraps instead of widening the page. */
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.detail-header-place-sub {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+/* Below the two-column detail grid's own breakpoint the header stacks:
+   the block goes under the title, left-aligned with everything else,
+   rather than clinging to a right edge that no longer means anything. */
+@media (max-width: 760px) {
+  .detail-header-band {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .detail-header-place {
+    align-items: flex-start;
+    text-align: left;
+    max-width: 100%;
+  }
+  .detail-header-place-value {
+    font-size: 17px;
+  }
+}
+
 /* RF-17 — the side column grows on wide screens (was a fixed 296px):
    clamp keeps 296px as the floor and lets it take ~32% up to 460px so
    the right-rail cards read as primary content. */
@@ -8642,75 +8730,6 @@ a.attn-row:hover {
   width: 100%;
   justify-content: center;
 }
-
-/* ====================================================================
-   Sprint 189 §3 — Ticket detail "where and for whom", second on the
-   right rail under Workflow.
-
-   Deliberately NOT a CollapsibleCard: the entire point is that it
-   cannot be closed and cannot be missed. The value size sits between
-   the header description (17px) and the h1 title (36px), which is the
-   "roughly title size, or slightly smaller" the owner asked for —
-   large and readable without competing with the title itself.
-   ==================================================================== */
-.ticket-place-card {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px;
-}
-.ticket-place-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.ticket-place-label {
-  font-family: var(--f-head);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.ticket-place-value {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--f-head);
-  /* Sprint 190 §2a — 22px -> 18px. At 22px this was competing with the
-     36px page title instead of sitting under it; the owner's words were
-     "why are the 2 new things this big". 18px is a single step above
-     the 17px header description, which keeps it prominent (it is still
-     the largest thing on the rail, and still bold at 800) while making
-     the title unambiguously the biggest thing on the page. */
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-  color: var(--text);
-  /* A single unbroken building name cannot widen the rail. */
-  overflow-wrap: anywhere;
-  min-width: 0;
-}
-.ticket-place-value svg {
-  flex: none;
-  color: var(--green);
-}
-.ticket-place-sub {
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-@media (max-width: 1100px) {
-  /* Sprint 190 §2a — was 19px, which after the base came down to 18px
-     would have made the narrow layout BIGGER than the wide one. */
-  .ticket-place-value {
-    font-size: 17px;
-  }
-}
-
 
 /* ----- Invoice-row foundation (P0-1) ----------------------------- */
 /* Shared <tr> rendered by `InvoiceLineRow`. Layered on top of the
