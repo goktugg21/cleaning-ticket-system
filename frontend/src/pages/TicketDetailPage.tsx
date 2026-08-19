@@ -2037,6 +2037,440 @@ export function TicketDetailPage() {
             leak between tickets: each ticket lands on its per-mount
             defaults (Assignment/Details collapsed, Workflow open). */}
         <div className="detail-side" key={`detail-side-${ticket.id}`}>
+          {/* Sprint 189 §4 — the right column runs Workflow -> Location &
+              Customer -> Assignment -> Responsible manager -> Scheduling ->
+              Ticket details. The Workflow card sat at the BOTTOM of this
+              column, below five cards an operator had to scroll past to
+              reach the only control that moves the ticket. It is the
+              first thing on the rail now; the card itself is unchanged,
+              only its position in this list. */}
+          <CollapsibleCard
+            title={
+              canShowCompleteWorkButton
+                ? t("card_workflow_title_staff_complete")
+                : t("card_workflow_title")
+            }
+            meta={t(`common:${ticketStatusLabelKey(ticket.status)}`)}
+            defaultOpen
+            testId="side-card-workflow"
+          >
+            <div className="workflow-body">
+              {/* Sprint 28 Batch 11 — STAFF "Complete work" entry
+                  point. Renders only for the assigned STAFF actor on
+                  an IN_PROGRESS ticket; opens a modal that resolves
+                  the destination (manager review vs customer
+                  approval) and submits the corresponding status
+                  transition.
+
+                  UX hotfix: when this CTA renders, the generic
+                  next-status UI (Status note + "Move to X" buttons)
+                  is suppressed entirely so STAFF only sees ONE
+                  clear action — "Complete work". The destination is
+                  resolved server-side via the BSV
+                  `staff_completion_routes_to_customer` flag; the
+                  backend `allowed_next_statuses` also narrows STAFF
+                  + IN_PROGRESS to the single resolved target so the
+                  API contract matches. */}
+              {canShowCompleteWorkButton ? (
+                <>
+                  <p
+                    className="muted small"
+                    data-testid="ticket-staff-complete-card-subtitle"
+                    style={{ marginTop: 0, marginBottom: 8 }}
+                  >
+                    {t("card_workflow_subtitle_staff_complete")}
+                  </p>
+                  <div className="status-actions" style={{ marginBottom: 0 }}>
+                    <button
+                      type="button"
+                      className="status-btn"
+                      onClick={openCompleteModal}
+                      disabled={completeModalOpen}
+                      data-testid="ticket-staff-complete-button"
+                    >
+                      {t("common:ticket_staff_complete.button_label")}
+                      <span className="status-btn-arrow">→</span>
+                    </button>
+                  </div>
+                </>
+              ) : visibleNextStatuses.length === 0 ? (
+                // Disabled-action clarity: when the backend gives the
+                // viewer zero transitions on a WCA ticket AND the
+                // override action is explicitly false, surface the
+                // *reason* rather than the generic terminal helper.
+                // Driven by the per-record action, not a role string —
+                // the only people who land here are providers without
+                // override authority (CUSTOMER_USER on their own WCA
+                // ticket gets APPROVED/REJECTED in allowed_next; STAFF
+                // sees Complete Work or a non-WCA status).
+                ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+                ticket.actions?.can_override_customer_decision === false ? (
+                  <p
+                    className="muted small"
+                    data-testid="workflow-wca-no-provider-decision"
+                  >
+                    {t("workflow_wca_no_provider_decision")}
+                  </p>
+                ) : (
+                  <p className="muted small">
+                    {t("workflow_no_transitions")}
+                  </p>
+                )
+              ) : (
+                <>
+                  <div className="field">
+                    <label className="field-label" htmlFor="status-note">
+                      {me?.role === "CUSTOMER_USER" &&
+                      ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+                      visibleNextStatuses.includes("REJECTED")
+                        ? t("workflow_rejection_reason_label")
+                        : staffCompletionEvidenceRequired
+                          ? t("workflow_status_note_label_staff_required")
+                          : t("workflow_status_note_label")}
+                    </label>
+                    <input
+                      id="status-note"
+                      className="field-input"
+                      data-testid="workflow-status-note-input"
+                      value={statusNote}
+                      onChange={(event) => setStatusNote(event.target.value)}
+                      placeholder={
+                        me?.role === "CUSTOMER_USER" &&
+                        ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+                        visibleNextStatuses.includes("REJECTED")
+                          ? t("workflow_rejection_reason_placeholder")
+                          : t("workflow_status_note_placeholder")
+                      }
+                    />
+                  </div>
+
+                  {/* Sprint 25C — OSIUS staff-completion evidence hint.
+                      Backend rejects the IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
+                      hop unless the ticket carries a note OR at least one
+                      visible attachment. The page already has a full
+                      attachments card lower down (upload + list); this hint
+                      nudges the operator toward proof-of-work without
+                      blocking the flow when a note alone is enough. */}
+                  {isStaff &&
+                    ticket.status === "IN_PROGRESS" &&
+                    visibleNextStatuses.includes("WAITING_CUSTOMER_APPROVAL") && (
+                      <p
+                        className="muted small"
+                        data-testid="workflow-completion-evidence-hint"
+                        style={{ marginTop: 4, marginBottom: 4 }}
+                      >
+                        {t("workflow_completion_evidence_hint")}
+                      </p>
+                    )}
+
+                  {me?.role === "CUSTOMER_USER" &&
+                    ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+                    visibleNextStatuses.includes("REJECTED") && (
+                      <div className="alert-warning">
+                        {t("workflow_customer_reject_warning")}
+                      </div>
+                    )}
+
+                  {/* Sprint 30 Batch 30.1.1.5 — progressive disclosure.
+                      Primary transitions render directly under
+                      `.status-actions` so existing selectors keep
+                      working. Secondary transitions live behind a
+                      "More actions" toggle (or render inline-open
+                      when the current status has zero primaries, e.g.
+                      CLOSED). The per-button JSX is identical for
+                      both groups — the `renderTransitionButton`
+                      helper parameterises only the className.
+
+                      Sprint 30 Batch 30.1.3 — on WCA, the override
+                      arming flow is folded INTO the primary buttons:
+                      a provider's click on Approve/Reject expands an
+                      inline reason + Confirm/Cancel pair directly
+                      under the buttons (no separate override card).
+                      For a CUSTOMER_USER on the same step the
+                      buttons stay direct (no `is_override` flag, no
+                      reason prompt). */}
+                  {(() => {
+                    // STAFF on a completion-evidence-required step
+                    // needs a note OR an image attachment before we
+                    // enable any transition button. Frontend mirror
+                    // of the backend `completion_evidence_required`
+                    // 400 check.
+                    const evidenceMissing =
+                      staffCompletionEvidenceRequired &&
+                      !statusNote.trim() &&
+                      !hasImageAttachment;
+                    const renderTransitionButton = (
+                      status: TicketStatus,
+                      variant: "primary" | "secondary",
+                    ) => (
+                      <button
+                        key={status}
+                        type="button"
+                        className={
+                          variant === "primary"
+                            ? "status-btn"
+                            : "status-btn status-btn-secondary"
+                        }
+                        disabled={statusBusy !== null || evidenceMissing}
+                        data-testid={
+                          variant === "primary"
+                            ? `workflow-move-${status}`
+                            : undefined
+                        }
+                        onClick={() => changeStatus(status)}
+                      >
+                        {statusBusy === status ? (
+                          t("updating")
+                        ) : (
+                          <>
+                            {/* Sprint 7B (frontend) — CONVERTED_TO_EXTRA_WORK
+                                is filtered out of the render arrays above,
+                                so this only ever labels real status moves.
+                                Conversion lives on the dedicated header
+                                "Convert to Extra Work" button. */}
+                            {t("workflow_move_to", {
+                              status: tStatus(status),
+                            })}
+                            <span className="status-btn-arrow">→</span>
+                          </>
+                        )}
+                      </button>
+                    );
+                    // Sprint 30 Batch 30.1.3 — drop the plain
+                    // APPROVED/REJECTED button targets when the
+                    // actor is a provider on WCA. They re-render in
+                    // the override-arming block below so the click
+                    // never POSTs without an `override_reason` (the
+                    // backend returns 400 `override_reason_required`
+                    // on the empty-reason path).
+                    // Sprint 7B (frontend) — NEVER render
+                    // CONVERTED_TO_EXTRA_WORK as a raw status-transition
+                    // button. That hop would flip the status WITHOUT
+                    // creating the ExtraWorkRequest; conversion now runs
+                    // through the dedicated convert endpoint + dialog
+                    // (the prominent header "Convert to Extra Work"
+                    // button). Drop it from both render groups so it can
+                    // never POST to /status/.
+                    const primaryForRender = (
+                      providerActsAsOverride
+                        ? primaryNextStatuses.filter(
+                            (s) => s !== "APPROVED" && s !== "REJECTED",
+                          )
+                        : primaryNextStatuses
+                    ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
+                    const secondaryForRender = (
+                      providerActsAsOverride
+                        ? secondaryNextStatuses.filter(
+                            (s) => s !== "APPROVED" && s !== "REJECTED",
+                          )
+                        : secondaryNextStatuses
+                    ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
+                    // Override-arming targets — only the WCA decision
+                    // targets the actor is actually allowed to drive.
+                    const overrideTargets: TicketStatus[] =
+                      providerActsAsOverride
+                        ? (PRIMARY_TRANSITIONS["WAITING_CUSTOMER_APPROVAL"]
+                            .filter((s) => visibleNextStatuses.includes(s))) as TicketStatus[]
+                        : [];
+                    const renderOverrideButton = (status: TicketStatus) => {
+                      const isArmed = overrideDecision === status;
+                      return (
+                        <div
+                          key={status}
+                          className="workflow-override-target"
+                          data-testid={`workflow-override-${status}`}
+                        >
+                          <button
+                            type="button"
+                            className="status-btn"
+                            disabled={statusBusy !== null || overrideBusy}
+                            onClick={() => changeStatus(status)}
+                            data-testid={`workflow-move-${status}`}
+                            aria-expanded={isArmed}
+                          >
+                            <>
+                              {t("workflow_move_to", { status: tStatus(status) })}
+                              <span className="status-btn-arrow">→</span>
+                            </>
+                          </button>
+                          {isArmed && (
+                            <div
+                              className="workflow-override-inline"
+                              data-testid="ticket-override-modal"
+                            >
+                              <form onSubmit={submitOverride}>
+                                <p
+                                  className="muted small"
+                                  style={{ margin: "0 0 6px" }}
+                                >
+                                  {t("override_inline_helper")}
+                                </p>
+                                <div className="field">
+                                  <label
+                                    className="field-label"
+                                    htmlFor="ticket-override-reason"
+                                  >
+                                    {t("override_modal_reason_label")}
+                                  </label>
+                                  <textarea
+                                    id="ticket-override-reason"
+                                    data-testid="ticket-override-reason"
+                                    className="field-textarea"
+                                    rows={3}
+                                    value={overrideReason}
+                                    onChange={(event) =>
+                                      setOverrideReason(event.target.value)
+                                    }
+                                    required
+                                  />
+                                </div>
+                                {overrideError && (
+                                  <div
+                                    className="alert-error"
+                                    role="alert"
+                                    data-testid="ticket-override-error"
+                                    style={{ marginTop: 6 }}
+                                  >
+                                    {overrideError}
+                                  </div>
+                                )}
+                                <div className="override-card-footer card-actions-cluster">
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={cancelOverride}
+                                    disabled={overrideBusy}
+                                    data-testid="ticket-override-cancel"
+                                  >
+                                    {t("override_modal_cancel")}
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    className="btn btn-primary btn-sm"
+                                    disabled={
+                                      overrideBusy ||
+                                      !overrideReason.trim()
+                                    }
+                                    data-testid="ticket-override-submit"
+                                  >
+                                    {overrideBusy
+                                      ? t("updating")
+                                      : overrideModalSubmitLabel(status)}
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+                    return (
+                      <>
+                        {(overrideTargets.length > 0 ||
+                          primaryForRender.length > 0) && (
+                          <div className="status-actions">
+                            {overrideTargets.map((status) =>
+                              renderOverrideButton(status),
+                            )}
+                            {primaryForRender.map((status) =>
+                              renderTransitionButton(status, "primary"),
+                            )}
+                          </div>
+                        )}
+                        {evidenceMissing && (
+                          <p
+                            className="muted small"
+                            data-testid="workflow-completion-evidence-required"
+                            style={{ marginTop: 4 }}
+                          >
+                            {t("workflow_completion_evidence_required")}
+                          </p>
+                        )}
+                        {secondaryForRender.length > 0 &&
+                          !shouldDefaultOpenSecondary && (
+                            <button
+                              type="button"
+                              className="workflow-more-actions-toggle"
+                              data-testid="workflow-more-actions-toggle"
+                              aria-expanded={isSecondaryOpen}
+                              onClick={() =>
+                                setSecondaryOpen((prev) => !prev)
+                              }
+                            >
+                              {isSecondaryOpen
+                                ? t("workflow_correction_actions_hide")
+                                : t("workflow_correction_actions_show")}
+                            </button>
+                          )}
+                        {secondaryForRender.length > 0 && isSecondaryOpen && (
+                          <div
+                            className="workflow-secondary-list"
+                            data-testid="workflow-secondary-list"
+                          >
+                            {/* Set-subtraction header: every status here
+                                is in allowed_next_statuses but NOT in
+                                PRIMARY_TRANSITIONS for the current
+                                state. They are admin corrections, not
+                                the normal next step. The frontend does
+                                not filter what the backend permits —
+                                the partition only changes layout. */}
+                            <p
+                              className="muted small"
+                              style={{ margin: "0 0 6px" }}
+                            >
+                              {t("workflow_correction_actions_help")}
+                            </p>
+                            {secondaryForRender.map((status) =>
+                              renderTransitionButton(status, "secondary"),
+                            )}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          </CollapsibleCard>
+
+          {/* Sprint 189 §3 — WHERE the work is and WHO it is for, big
+              enough to read without hunting. Both facts existed only
+              inside the Ticket details card, which is collapsed by
+              default, so opening a ticket told an operator its title and
+              nothing about the site it belongs to.
+
+              This is an ADDED display, not a move: the Ticket details
+              card further down still carries both rows, unchanged. And
+              it renders UNCONDITIONALLY — it is deliberately not tied to
+              `canConvertTicket` or to any other role gate, because the
+              building and the customer are exactly the two facts every
+              role that can open this page already sees below. */}
+          <div className="card ticket-place-card" data-testid="ticket-place-card">
+            <div className="ticket-place-item">
+              <span className="ticket-place-label">{t("details_location")}</span>
+              <span className="ticket-place-value">
+                <MapPin size={18} strokeWidth={2} aria-hidden="true" />
+                <span data-testid="ticket-place-location">
+                  {ticket.room_label || ticket.building_name}
+                </span>
+              </span>
+              {/* A room label alone loses the building it sits in; the
+                  building stays underneath it whenever both exist. */}
+              {ticket.room_label && ticket.building_name && (
+                <span className="ticket-place-sub">{ticket.building_name}</span>
+              )}
+            </div>
+            <div className="ticket-place-item">
+              <span className="ticket-place-label">{t("details_customer")}</span>
+              <span className="ticket-place-value">
+                <Users size={18} strokeWidth={2} aria-hidden="true" />
+                <span data-testid="ticket-place-customer">
+                  {ticket.customer_name}
+                </span>
+              </span>
+            </div>
+          </div>
+
           {/* Sprint 30 Batch 30.1.1 — consolidated Assignment card.
               ONE outer card with TWO clearly-labeled subsections:
                 - Building manager (ticket owner / BM dispatch — writes
@@ -2942,395 +3376,6 @@ export function TicketDetailPage() {
                 </button>
               </div>
             )}
-          </CollapsibleCard>
-
-          <CollapsibleCard
-            title={
-              canShowCompleteWorkButton
-                ? t("card_workflow_title_staff_complete")
-                : t("card_workflow_title")
-            }
-            meta={t(`common:${ticketStatusLabelKey(ticket.status)}`)}
-            defaultOpen
-            testId="side-card-workflow"
-          >
-            <div className="workflow-body">
-              {/* Sprint 28 Batch 11 — STAFF "Complete work" entry
-                  point. Renders only for the assigned STAFF actor on
-                  an IN_PROGRESS ticket; opens a modal that resolves
-                  the destination (manager review vs customer
-                  approval) and submits the corresponding status
-                  transition.
-
-                  UX hotfix: when this CTA renders, the generic
-                  next-status UI (Status note + "Move to X" buttons)
-                  is suppressed entirely so STAFF only sees ONE
-                  clear action — "Complete work". The destination is
-                  resolved server-side via the BSV
-                  `staff_completion_routes_to_customer` flag; the
-                  backend `allowed_next_statuses` also narrows STAFF
-                  + IN_PROGRESS to the single resolved target so the
-                  API contract matches. */}
-              {canShowCompleteWorkButton ? (
-                <>
-                  <p
-                    className="muted small"
-                    data-testid="ticket-staff-complete-card-subtitle"
-                    style={{ marginTop: 0, marginBottom: 8 }}
-                  >
-                    {t("card_workflow_subtitle_staff_complete")}
-                  </p>
-                  <div className="status-actions" style={{ marginBottom: 0 }}>
-                    <button
-                      type="button"
-                      className="status-btn"
-                      onClick={openCompleteModal}
-                      disabled={completeModalOpen}
-                      data-testid="ticket-staff-complete-button"
-                    >
-                      {t("common:ticket_staff_complete.button_label")}
-                      <span className="status-btn-arrow">→</span>
-                    </button>
-                  </div>
-                </>
-              ) : visibleNextStatuses.length === 0 ? (
-                // Disabled-action clarity: when the backend gives the
-                // viewer zero transitions on a WCA ticket AND the
-                // override action is explicitly false, surface the
-                // *reason* rather than the generic terminal helper.
-                // Driven by the per-record action, not a role string —
-                // the only people who land here are providers without
-                // override authority (CUSTOMER_USER on their own WCA
-                // ticket gets APPROVED/REJECTED in allowed_next; STAFF
-                // sees Complete Work or a non-WCA status).
-                ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                ticket.actions?.can_override_customer_decision === false ? (
-                  <p
-                    className="muted small"
-                    data-testid="workflow-wca-no-provider-decision"
-                  >
-                    {t("workflow_wca_no_provider_decision")}
-                  </p>
-                ) : (
-                  <p className="muted small">
-                    {t("workflow_no_transitions")}
-                  </p>
-                )
-              ) : (
-                <>
-                  <div className="field">
-                    <label className="field-label" htmlFor="status-note">
-                      {me?.role === "CUSTOMER_USER" &&
-                      ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                      visibleNextStatuses.includes("REJECTED")
-                        ? t("workflow_rejection_reason_label")
-                        : staffCompletionEvidenceRequired
-                          ? t("workflow_status_note_label_staff_required")
-                          : t("workflow_status_note_label")}
-                    </label>
-                    <input
-                      id="status-note"
-                      className="field-input"
-                      data-testid="workflow-status-note-input"
-                      value={statusNote}
-                      onChange={(event) => setStatusNote(event.target.value)}
-                      placeholder={
-                        me?.role === "CUSTOMER_USER" &&
-                        ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                        visibleNextStatuses.includes("REJECTED")
-                          ? t("workflow_rejection_reason_placeholder")
-                          : t("workflow_status_note_placeholder")
-                      }
-                    />
-                  </div>
-
-                  {/* Sprint 25C — OSIUS staff-completion evidence hint.
-                      Backend rejects the IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
-                      hop unless the ticket carries a note OR at least one
-                      visible attachment. The page already has a full
-                      attachments card lower down (upload + list); this hint
-                      nudges the operator toward proof-of-work without
-                      blocking the flow when a note alone is enough. */}
-                  {isStaff &&
-                    ticket.status === "IN_PROGRESS" &&
-                    visibleNextStatuses.includes("WAITING_CUSTOMER_APPROVAL") && (
-                      <p
-                        className="muted small"
-                        data-testid="workflow-completion-evidence-hint"
-                        style={{ marginTop: 4, marginBottom: 4 }}
-                      >
-                        {t("workflow_completion_evidence_hint")}
-                      </p>
-                    )}
-
-                  {me?.role === "CUSTOMER_USER" &&
-                    ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                    visibleNextStatuses.includes("REJECTED") && (
-                      <div className="alert-warning">
-                        {t("workflow_customer_reject_warning")}
-                      </div>
-                    )}
-
-                  {/* Sprint 30 Batch 30.1.1.5 — progressive disclosure.
-                      Primary transitions render directly under
-                      `.status-actions` so existing selectors keep
-                      working. Secondary transitions live behind a
-                      "More actions" toggle (or render inline-open
-                      when the current status has zero primaries, e.g.
-                      CLOSED). The per-button JSX is identical for
-                      both groups — the `renderTransitionButton`
-                      helper parameterises only the className.
-
-                      Sprint 30 Batch 30.1.3 — on WCA, the override
-                      arming flow is folded INTO the primary buttons:
-                      a provider's click on Approve/Reject expands an
-                      inline reason + Confirm/Cancel pair directly
-                      under the buttons (no separate override card).
-                      For a CUSTOMER_USER on the same step the
-                      buttons stay direct (no `is_override` flag, no
-                      reason prompt). */}
-                  {(() => {
-                    // STAFF on a completion-evidence-required step
-                    // needs a note OR an image attachment before we
-                    // enable any transition button. Frontend mirror
-                    // of the backend `completion_evidence_required`
-                    // 400 check.
-                    const evidenceMissing =
-                      staffCompletionEvidenceRequired &&
-                      !statusNote.trim() &&
-                      !hasImageAttachment;
-                    const renderTransitionButton = (
-                      status: TicketStatus,
-                      variant: "primary" | "secondary",
-                    ) => (
-                      <button
-                        key={status}
-                        type="button"
-                        className={
-                          variant === "primary"
-                            ? "status-btn"
-                            : "status-btn status-btn-secondary"
-                        }
-                        disabled={statusBusy !== null || evidenceMissing}
-                        data-testid={
-                          variant === "primary"
-                            ? `workflow-move-${status}`
-                            : undefined
-                        }
-                        onClick={() => changeStatus(status)}
-                      >
-                        {statusBusy === status ? (
-                          t("updating")
-                        ) : (
-                          <>
-                            {/* Sprint 7B (frontend) — CONVERTED_TO_EXTRA_WORK
-                                is filtered out of the render arrays above,
-                                so this only ever labels real status moves.
-                                Conversion lives on the dedicated header
-                                "Convert to Extra Work" button. */}
-                            {t("workflow_move_to", {
-                              status: tStatus(status),
-                            })}
-                            <span className="status-btn-arrow">→</span>
-                          </>
-                        )}
-                      </button>
-                    );
-                    // Sprint 30 Batch 30.1.3 — drop the plain
-                    // APPROVED/REJECTED button targets when the
-                    // actor is a provider on WCA. They re-render in
-                    // the override-arming block below so the click
-                    // never POSTs without an `override_reason` (the
-                    // backend returns 400 `override_reason_required`
-                    // on the empty-reason path).
-                    // Sprint 7B (frontend) — NEVER render
-                    // CONVERTED_TO_EXTRA_WORK as a raw status-transition
-                    // button. That hop would flip the status WITHOUT
-                    // creating the ExtraWorkRequest; conversion now runs
-                    // through the dedicated convert endpoint + dialog
-                    // (the prominent header "Convert to Extra Work"
-                    // button). Drop it from both render groups so it can
-                    // never POST to /status/.
-                    const primaryForRender = (
-                      providerActsAsOverride
-                        ? primaryNextStatuses.filter(
-                            (s) => s !== "APPROVED" && s !== "REJECTED",
-                          )
-                        : primaryNextStatuses
-                    ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
-                    const secondaryForRender = (
-                      providerActsAsOverride
-                        ? secondaryNextStatuses.filter(
-                            (s) => s !== "APPROVED" && s !== "REJECTED",
-                          )
-                        : secondaryNextStatuses
-                    ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
-                    // Override-arming targets — only the WCA decision
-                    // targets the actor is actually allowed to drive.
-                    const overrideTargets: TicketStatus[] =
-                      providerActsAsOverride
-                        ? (PRIMARY_TRANSITIONS["WAITING_CUSTOMER_APPROVAL"]
-                            .filter((s) => visibleNextStatuses.includes(s))) as TicketStatus[]
-                        : [];
-                    const renderOverrideButton = (status: TicketStatus) => {
-                      const isArmed = overrideDecision === status;
-                      return (
-                        <div
-                          key={status}
-                          className="workflow-override-target"
-                          data-testid={`workflow-override-${status}`}
-                        >
-                          <button
-                            type="button"
-                            className="status-btn"
-                            disabled={statusBusy !== null || overrideBusy}
-                            onClick={() => changeStatus(status)}
-                            data-testid={`workflow-move-${status}`}
-                            aria-expanded={isArmed}
-                          >
-                            <>
-                              {t("workflow_move_to", { status: tStatus(status) })}
-                              <span className="status-btn-arrow">→</span>
-                            </>
-                          </button>
-                          {isArmed && (
-                            <div
-                              className="workflow-override-inline"
-                              data-testid="ticket-override-modal"
-                            >
-                              <form onSubmit={submitOverride}>
-                                <p
-                                  className="muted small"
-                                  style={{ margin: "0 0 6px" }}
-                                >
-                                  {t("override_inline_helper")}
-                                </p>
-                                <div className="field">
-                                  <label
-                                    className="field-label"
-                                    htmlFor="ticket-override-reason"
-                                  >
-                                    {t("override_modal_reason_label")}
-                                  </label>
-                                  <textarea
-                                    id="ticket-override-reason"
-                                    data-testid="ticket-override-reason"
-                                    className="field-textarea"
-                                    rows={3}
-                                    value={overrideReason}
-                                    onChange={(event) =>
-                                      setOverrideReason(event.target.value)
-                                    }
-                                    required
-                                  />
-                                </div>
-                                {overrideError && (
-                                  <div
-                                    className="alert-error"
-                                    role="alert"
-                                    data-testid="ticket-override-error"
-                                    style={{ marginTop: 6 }}
-                                  >
-                                    {overrideError}
-                                  </div>
-                                )}
-                                <div className="override-card-footer card-actions-cluster">
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={cancelOverride}
-                                    disabled={overrideBusy}
-                                    data-testid="ticket-override-cancel"
-                                  >
-                                    {t("override_modal_cancel")}
-                                  </button>
-                                  <button
-                                    type="submit"
-                                    className="btn btn-primary btn-sm"
-                                    disabled={
-                                      overrideBusy ||
-                                      !overrideReason.trim()
-                                    }
-                                    data-testid="ticket-override-submit"
-                                  >
-                                    {overrideBusy
-                                      ? t("updating")
-                                      : overrideModalSubmitLabel(status)}
-                                  </button>
-                                </div>
-                              </form>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    };
-                    return (
-                      <>
-                        {(overrideTargets.length > 0 ||
-                          primaryForRender.length > 0) && (
-                          <div className="status-actions">
-                            {overrideTargets.map((status) =>
-                              renderOverrideButton(status),
-                            )}
-                            {primaryForRender.map((status) =>
-                              renderTransitionButton(status, "primary"),
-                            )}
-                          </div>
-                        )}
-                        {evidenceMissing && (
-                          <p
-                            className="muted small"
-                            data-testid="workflow-completion-evidence-required"
-                            style={{ marginTop: 4 }}
-                          >
-                            {t("workflow_completion_evidence_required")}
-                          </p>
-                        )}
-                        {secondaryForRender.length > 0 &&
-                          !shouldDefaultOpenSecondary && (
-                            <button
-                              type="button"
-                              className="workflow-more-actions-toggle"
-                              data-testid="workflow-more-actions-toggle"
-                              aria-expanded={isSecondaryOpen}
-                              onClick={() =>
-                                setSecondaryOpen((prev) => !prev)
-                              }
-                            >
-                              {isSecondaryOpen
-                                ? t("workflow_correction_actions_hide")
-                                : t("workflow_correction_actions_show")}
-                            </button>
-                          )}
-                        {secondaryForRender.length > 0 && isSecondaryOpen && (
-                          <div
-                            className="workflow-secondary-list"
-                            data-testid="workflow-secondary-list"
-                          >
-                            {/* Set-subtraction header: every status here
-                                is in allowed_next_statuses but NOT in
-                                PRIMARY_TRANSITIONS for the current
-                                state. They are admin corrections, not
-                                the normal next step. The frontend does
-                                not filter what the backend permits —
-                                the partition only changes layout. */}
-                            <p
-                              className="muted small"
-                              style={{ margin: "0 0 6px" }}
-                            >
-                              {t("workflow_correction_actions_help")}
-                            </p>
-                            {secondaryForRender.map((status) =>
-                              renderTransitionButton(status, "secondary"),
-                            )}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
-                </>
-              )}
-            </div>
           </CollapsibleCard>
 
           {/* Sprint 30 Batch 30.1.3 — the standalone provider override

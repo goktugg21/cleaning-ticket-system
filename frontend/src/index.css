@@ -7221,8 +7221,13 @@ a.attn-row:hover {
    stretch the column and the PAGE never gains a scrollbar. Collapsed
    cards render no body at all, so this costs them nothing — they stay
    exactly as tall as their header. */
+/* Sprint 189 §1 — 190px -> 248px. Department & Work Type left this
+   column for the Details card, so the collapsed card header they
+   occupied (46px) plus the 12px column gap is free. Customer Contacts
+   extends downward into exactly that: the panel is otherwise unchanged
+   — same card, same list, same scroll-inside-itself rule. */
 .ew-detail-aside .collapsible-card-body {
-  height: 190px;
+  height: 248px;
   overflow-y: auto;
 }
 @media (min-width: 1024px) {
@@ -7294,6 +7299,21 @@ a.attn-row:hover {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+}
+/* Sprint 189 §1 — Department + Work Type inside one Details-card grid
+   cell. Two label/value pairs and their Edit trigger on one line while
+   the cell is wide enough, wrapping rather than widening the cell when
+   it is not. `align-items: flex-end` puts the button on the values'
+   baseline, matching the deadline cell to its left. */
+.ew-labels-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px 18px;
+}
+.ew-labels-inline > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .ew-agreed-price-item-label {
   font-size: 12px;
@@ -8258,6 +8278,143 @@ a.attn-row:hover {
 .workflow-override-inline .field-textarea {
   width: 100%;
 }
+
+/* ====================================================================
+   Sprint 189 §2 — the workflow buttons are the PRIMARY action on both
+   detail pages, not a small technical control.
+
+   The Ticket page drew them at `.status-btn`'s 13px/11px-padding and
+   the Extra Work page drew them at `.btn-sm`'s 30px height, so the one
+   control that actually moves a job was the smallest thing on the
+   rail. Both pages get the same treatment here — a chargeable job is
+   still a ticket operationally, and it should not read as two
+   different weights of decision depending on which page you opened it
+   from.
+
+   SIZING AND WEIGHT ONLY. Every colour token, hover state, disabled
+   rule and focus behaviour is the one the button already carried, so a
+   Reject button does not become green by growing. The correction
+   actions behind "show correction actions" and the Confirm/Cancel pair
+   inside the override reason box stay small ON PURPOSE: they are the
+   secondary path, and enlarging them would flatten the hierarchy the
+   disclosure exists to create.
+   ==================================================================== */
+.workflow-body .status-btn {
+  min-height: 52px;
+  padding: 14px 18px;
+  font-size: 15px;
+  letter-spacing: -0.012em;
+  border-width: 1.5px;
+  box-shadow: var(--shadow-xs);
+  /* A long translated status label wraps inside the rail rather than
+     forcing the column wider. */
+  white-space: normal;
+  line-height: 1.3;
+}
+.workflow-body .status-btn:hover {
+  box-shadow: var(--shadow-sm);
+}
+.workflow-body .status-btn .status-btn-arrow {
+  font-size: 18px;
+}
+/* The correction list keeps the old, quieter size. */
+.workflow-body .workflow-secondary-list .status-btn {
+  min-height: 0;
+  padding: 11px 14px;
+  font-size: 13px;
+  border-width: 1px;
+  box-shadow: none;
+}
+.workflow-body .workflow-secondary-list .status-btn .status-btn-arrow {
+  font-size: inherit;
+}
+
+/* Extra Work workflow card. The three child selectors are deliberate
+   rather than one descendant selector: `.ew-workflow-actions .btn`
+   would also catch the Confirm/Cancel pair inside
+   `.workflow-override-inline`, which must stay at `.btn-sm` size. */
+.ew-workflow-actions > .btn,
+.ew-workflow-actions > .ew-auto-start > .btn,
+.ew-workflow-actions > .workflow-override-target > .btn {
+  height: auto;
+  min-height: 48px;
+  padding: 12px 18px;
+  font-size: 15px;
+  letter-spacing: -0.012em;
+  white-space: normal;
+  line-height: 1.3;
+}
+/* The auto-start button is the only one inside `.ew-auto-start`, whose
+   row layout would otherwise keep it at its intrinsic width. */
+.ew-workflow-actions > .ew-auto-start {
+  flex-direction: column;
+  align-items: stretch;
+}
+.ew-workflow-actions > .ew-auto-start > .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ====================================================================
+   Sprint 189 §3 — Ticket detail "where and for whom", second on the
+   right rail under Workflow.
+
+   Deliberately NOT a CollapsibleCard: the entire point is that it
+   cannot be closed and cannot be missed. The value size sits between
+   the header description (17px) and the h1 title (36px), which is the
+   "roughly title size, or slightly smaller" the owner asked for —
+   large and readable without competing with the title itself.
+   ==================================================================== */
+.ticket-place-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+}
+.ticket-place-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ticket-place-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.ticket-place-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--f-head);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  /* A single unbroken building name cannot widen the rail. */
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.ticket-place-value svg {
+  flex: none;
+  color: var(--green);
+}
+.ticket-place-sub {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1100px) {
+  .ticket-place-value {
+    font-size: 19px;
+  }
+}
+
 
 /* ----- Invoice-row foundation (P0-1) ----------------------------- */
 /* Shared <tr> rendered by `InvoiceLineRow`. Layered on top of the

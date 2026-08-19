@@ -583,21 +583,31 @@ function DatesEditor({
   );
 }
 
-function LabelsCard({
+/*  Sprint 189 §1 — Department and Work Type left the right-hand aside and
+ *  moved INTO the Details card, in the grid cell that sat empty under
+ *  Preferred Date. Two labels are not a card; they are two fields, and
+ *  the Details grid is where the other fields already are.
+ *
+ *  So what used to be `LabelsCard` is now the editor FORM only. The two
+ *  values are rendered by the parent, in the cell, with an Edit trigger
+ *  beside them — the same Sprint 177 §2 shape `DatesEditor` above uses
+ *  on this same card, so the two editors behave identically and open in
+ *  the same place.
+ *
+ *  Mounted only while open AND only while the labels are unlocked: a
+ *  work frozen by an issued invoice has nothing to edit, and the parent
+ *  cell states the lock and the way out instead. A fresh mount is the
+ *  reset, which is why the drafts below seed straight from the row. */
+function LabelsEditor({
   ew,
   onUpdated,
   onRefresh,
-  collapsible = false,
+  onClose,
 }: {
   ew: ExtraWorkRequestDetail;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
   onRefresh: () => void;
-  /** Sprint 176 §2 — render as a COLLAPSIBLE card rather than a plain
-   *  one, for the right column. A flag on the existing component, not a
-   *  wrapper: wrapping would nest a card inside a card, which is what
-   *  Sprint 175 avoided by leaving the card open and is the thing this
-   *  sprint was told to solve properly. */
-  collapsible?: boolean;
+  onClose: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
@@ -611,8 +621,6 @@ function LabelsCard({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    // No picker data needed while locked (read-only view).
-    if (ew.labels_locked) return;
     let cancelled = false;
     Promise.all([
       listLabels(ew.customer, "department", { is_active: true }),
@@ -630,7 +638,7 @@ function LabelsCard({
     return () => {
       cancelled = true;
     };
-  }, [ew.customer, ew.labels_locked]);
+  }, [ew.customer]);
 
   // Ensure the CURRENT selection is offered even if it has since been
   // archived (archived rows are absent from the is_active=true fetch).
@@ -666,6 +674,7 @@ function LabelsCard({
       // Sprint 129 §2b — the save was invisible before; confirm it the way
       // the actual-hours save does.
       pushToast({ variant: "success", title: t("detail.labels_saved") });
+      onClose();
     } catch (err) {
       const code = labelErrorCode(err);
       setError(
@@ -673,149 +682,85 @@ function LabelsCard({
           ? t(LABELS_ERROR_I18N_KEY[code])
           : getApiError(err),
       );
-      // Raced with an issuance in another tab — reload so the card flips to
-      // the read-only locked view (§4).
+      // Raced with an issuance in another tab — reload so the cell above
+      // flips to the read-only locked state (§4).
       if (code === "labels_locked_by_invoice") onRefresh();
     } finally {
       setSaving(false);
     }
   }
 
-  const body = (
-    <div className="form-section">
-      {!collapsible && (
-        <div className="form-section-title">
-          {t("detail.labels_section_title")}
+  return (
+    <div className="form-section" data-testid="extra-work-labels-editor">
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "flex-end",
+          gap: 8,
+          marginTop: 4,
+        }}
+      >
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="muted small">
+            {t("detail.labels_field_department")}
+          </span>
+          <select
+            className="field-select"
+            value={deptId}
+            onChange={(e) => setDeptId(e.target.value)}
+            data-testid="extra-work-labels-department"
+          >
+            <option value="">{t("detail.labels_none")}</option>
+            {deptOptions.map((d) => (
+              <option key={d.id} value={d.id}>
+                {customerLabelName(d.name, t)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span className="muted small">
+            {t("detail.labels_field_work_type")}
+          </span>
+          <select
+            className="field-select"
+            value={wtId}
+            onChange={(e) => setWtId(e.target.value)}
+            data-testid="extra-work-labels-work-type"
+          >
+            <option value="">{t("detail.labels_none")}</option>
+            {wtOptions.map((w) => (
+              <option key={w.id} value={w.id}>
+                {customerLabelName(w.name, t)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={saving}
+          onClick={() => void save()}
+          data-testid="extra-work-labels-save"
+        >
+          {saving ? t("detail.labels_saving") : t("detail.labels_save")}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={onClose}
+          disabled={saving}
+        >
+          {t("common:cancel")}
+        </button>
+      </div>
+      {error && (
+        <div className="alert-error" style={{ marginTop: 8 }}>
+          {error}
         </div>
       )}
-        {ew.labels_locked ? (
-          <div
-            className="alert-warning"
-            data-testid="extra-work-labels-locked"
-            style={{ marginTop: 4 }}
-          >
-            <div>
-              {t("detail.labels_field_department")}:{" "}
-              <strong>
-                {ew.department_name
-                  ? customerLabelName(ew.department_name, t)
-                  : t("detail.empty_dash")}
-              </strong>
-              {"  ·  "}
-              {t("detail.labels_field_work_type")}:{" "}
-              <strong>
-                {ew.work_type_name
-                  ? customerLabelName(ew.work_type_name, t)
-                  : t("detail.empty_dash")}
-              </strong>
-            </div>
-            <div style={{ marginTop: 6 }}>
-              {/* Sprint 129 §2b — the backend sends the NUMBER or null; the
-                  frontend owns the wording (no "CONCEPT" leak). Null = an
-                  issued-but-not-yet-sent invoice, which has no number. */}
-              {ew.labels_locked_invoice
-                ? t("detail.labels_locked_by", {
-                    number: ew.labels_locked_invoice,
-                  })
-                : t("detail.labels_locked_by_unsent")}
-            </div>
-            <div className="muted small" style={{ marginTop: 4 }}>
-              {t("detail.labels_locked_howto")}
-            </div>
-          </div>
-        ) : (
-          <>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "flex-end",
-                gap: 8,
-                marginTop: 4,
-              }}
-            >
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span className="muted small">
-                  {t("detail.labels_field_department")}
-                </span>
-                <select
-                  className="field-select"
-                  value={deptId}
-                  onChange={(e) => setDeptId(e.target.value)}
-                  data-testid="extra-work-labels-department"
-                >
-                  <option value="">{t("detail.labels_none")}</option>
-                  {deptOptions.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {customerLabelName(d.name, t)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span className="muted small">
-                  {t("detail.labels_field_work_type")}
-                </span>
-                <select
-                  className="field-select"
-                  value={wtId}
-                  onChange={(e) => setWtId(e.target.value)}
-                  data-testid="extra-work-labels-work-type"
-                >
-                  <option value="">{t("detail.labels_none")}</option>
-                  {wtOptions.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {customerLabelName(w.name, t)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={saving}
-                onClick={() => void save()}
-                data-testid="extra-work-labels-save"
-              >
-                {saving ? t("detail.labels_saving") : t("detail.labels_save")}
-              </button>
-            </div>
-            {error && (
-              <div className="alert-error" style={{ marginTop: 8 }}>
-                {error}
-              </div>
-            )}
-          </>
-        )}
     </div>
-  );
-
-  if (!collapsible) {
-    return (
-      <div
-        className="card"
-        style={{ marginBottom: 16 }}
-        data-testid="extra-work-labels"
-      >
-        {body}
-      </div>
-    );
-  }
-
-  return (
-    <CollapsibleCard
-      title={t("detail.labels_section_title")}
-      /* Collapsed is not hidden: the header carries how many of the two
-         labels are actually set, so the operator knows whether there is
-         anything inside without opening it. */
-      meta={t("detail.card_count", {
-        count: [ew.department, ew.work_type].filter(Boolean).length,
-      })}
-      defaultOpen={false}
-      testId="extra-work-labels"
-    >
-      {body}
-    </CollapsibleCard>
   );
 }
 
@@ -832,6 +777,9 @@ export function ExtraWorkDetailPage() {
   // beside the deadline, so the open state lives here rather than inside
   // the editor it opens.
   const [datesOpen, setDatesOpen] = useState(false);
+  // Sprint 189 §1 — same shape for the labels editor, which now opens in
+  // the same place from a trigger in the same grid.
+  const [labelsOpen, setLabelsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -2040,6 +1988,80 @@ export function ExtraWorkDetailPage() {
                     )}
                   </div>
                 </div>
+                {/* Sprint 189 §1 — Department and Work Type, in the cell
+                    that was empty. This grid is two columns and held
+                    three cells, so the fourth slot — directly under
+                    Preferred Date — rendered as blank surface. The two
+                    labels used to be a collapsed card in the right-hand
+                    aside, two clicks and a scroll away from the card
+                    that carries every other field of the same kind.
+
+                    Provider-only, exactly as the aside card was: a
+                    customer response carries no labels UI and this cell
+                    does not invent one. */}
+                {isProvider && (
+                  <div data-testid="extra-work-labels">
+                    <div className="ew-labels-inline">
+                      <div>
+                        <div className="muted small">
+                          {t("detail.labels_field_department")}
+                        </div>
+                        <div data-testid="extra-work-labels-department-value">
+                          {ew.department_name
+                            ? customerLabelName(ew.department_name, t)
+                            : t("detail.empty_dash")}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="muted small">
+                          {t("detail.labels_field_work_type")}
+                        </div>
+                        <div data-testid="extra-work-labels-work-type-value">
+                          {ew.work_type_name
+                            ? customerLabelName(ew.work_type_name, t)
+                            : t("detail.empty_dash")}
+                        </div>
+                      </div>
+                      {/* The trigger sits beside the values it edits, the
+                          same idiom as the deadline cell to the left. */}
+                      {!ew.labels_locked && !labelsOpen && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setLabelsOpen(true)}
+                          data-testid="extra-work-labels-edit"
+                        >
+                          <Pencil size={13} strokeWidth={2} />
+                          {t("detail.labels_edit")}
+                        </button>
+                      )}
+                    </div>
+                    {/* Frozen by an issued invoice — there is nothing to
+                        edit, so the reason and the way out take the
+                        trigger's place rather than hiding behind a dead
+                        button. Same two sentences the card showed. */}
+                    {ew.labels_locked && (
+                      <div
+                        className="muted small"
+                        data-testid="extra-work-labels-locked"
+                        style={{ marginTop: 4 }}
+                      >
+                        <div>
+                          {/* Sprint 129 §2b — the backend sends the NUMBER
+                              or null; the frontend owns the wording (no
+                              "CONCEPT" leak). Null = an issued-but-not-yet-
+                              sent invoice, which has no number. */}
+                          {ew.labels_locked_invoice
+                            ? t("detail.labels_locked_by", {
+                                number: ew.labels_locked_invoice,
+                              })
+                            : t("detail.labels_locked_by_unsent")}
+                        </div>
+                        <div>{t("detail.labels_locked_howto")}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               {/* The form itself opens BELOW the grid, where it has room for
                   two date inputs, the customer's preferred date and an
@@ -2049,6 +2071,22 @@ export function ExtraWorkDetailPage() {
                   ew={ew}
                   onUpdated={(detail) => setEw(detail)}
                   onClose={() => setDatesOpen(false)}
+                />
+              )}
+              {/* Sprint 189 §1 — and the labels editor opens in the same
+                  place, for the same reason: two selects and a save
+                  button do not fit in a half-width grid cell. Keyed by
+                  the values it seeds from, so a save-then-reopen shows
+                  what was saved. */}
+              {isProvider && labelsOpen && !ew.labels_locked && (
+                <LabelsEditor
+                  key={`labels-${ew.id}-${ew.department ?? ""}-${
+                    ew.work_type ?? ""
+                  }`}
+                  ew={ew}
+                  onUpdated={(detail) => setEw(detail)}
+                  onRefresh={() => void refresh()}
+                  onClose={() => setLabelsOpen(false)}
                 />
               )}
               <div className="field">
@@ -2750,22 +2788,11 @@ export function ExtraWorkDetailPage() {
             </CollapsibleCard>
           )}
 
-          {/* Sprint 176 §1b — the EDITABLE labels card (Sprint 128)
-              lives here now. Sprint 175 added a READ-ONLY copy above a
-              working one further down, which is two cards claiming the
-              same fact and only one of them able to change it. The
-              read-only copy is gone; this is the real one, moved. */}
-          {isProvider && (
-            <LabelsCard
-              key={`labels-${ew.id}-${ew.department ?? ""}-${
-                ew.work_type ?? ""
-              }-${String(ew.labels_locked)}`}
-              ew={ew}
-              onUpdated={(detail) => setEw(detail)}
-              onRefresh={() => void refresh()}
-              collapsible
-            />
-          )}
+          {/* Sprint 189 §1 — the labels card that stood here is gone: its
+              two fields now live in the Details card, in the cell that
+              sat empty under Preferred Date. Customer Contacts above
+              takes the height it leaves behind (see
+              `.ew-detail-aside .collapsible-card-body`). */}
 
           {/* Sprint 175 §1 — Preview. The proposal PDF was a button
               inside the Workflow card, where an operator looking for

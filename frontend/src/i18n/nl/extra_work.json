@@ -461,6 +461,7 @@
   "detail.labels_field_work_type": "Werktype",
   "detail.labels_none": "Geen",
   "detail.labels_save": "Opslaan",
+  "detail.labels_edit": "Labels bewerken",
   "detail.labels_saving": "Opslaan…",
   "detail.labels_locked_by": "Vergrendeld door factuur {{number}}.",
   "detail.labels_locked_howto": "Crediteer de factuur, pas het label aan en factureer opnieuw om dit te wijzigen.",

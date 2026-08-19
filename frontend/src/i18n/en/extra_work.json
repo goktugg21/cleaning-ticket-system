@@ -461,6 +461,7 @@
   "detail.labels_field_work_type": "Work type",
   "detail.labels_none": "None",
   "detail.labels_save": "Save",
+  "detail.labels_edit": "Edit labels",
   "detail.labels_saving": "Saving…",
   "detail.labels_locked_by": "Locked by invoice {{number}}.",
   "detail.labels_locked_howto": "To change this, credit the invoice, relabel, then re-invoice.",

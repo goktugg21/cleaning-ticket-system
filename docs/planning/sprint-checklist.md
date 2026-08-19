@@ -13,9 +13,14 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/sprint-188`. Sprints 153–188 land as ONE PR into
-`main` — 200 commits, a fast-forward, and the first time CI runs on any
-of it. The owner opens and merges it.
+**Branch:** `feat/ew-gap-closing`. Sprints 153–189 land as ONE PR into
+`main` — a fast-forward, and the first time CI runs on any of it. The
+owner opens and merges it.
+
+Sprint 189 runs as THREE parallel Claude Code chats on this one branch,
+on disjoint file sets: chat 1 the two detail pages, chat 2 the backend,
+chat 3 the list and dashboard pages. The plan they execute is
+[docs/planning/ew-gap-closing-plan.md](ew-gap-closing-plan.md).
 
 Sprint 187 shipped, then was VERIFIED rather than believed, and the
 verification found real defects in it. Those became 187C. 187B ran in a
@@ -30,6 +35,64 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — Sprint 189 §§1–4 (chat 1 of 3): the four layout changes
+
+Frontend only. Plan §2.1, items 2–5. No backend file was touched and no
+backend test was run, because nothing on the server changed.
+
+- **§1 — Department and Work Type sit under Preferred Date.** The Details
+  card's dates grid is two columns and held three cells, so the fourth
+  slot — directly under Preferred Date — rendered as blank surface while
+  the same two fields lived in a collapsed card in the right-hand aside,
+  two clicks and a scroll away from every other field of their kind. The
+  card is gone; the values are in the cell, with an Edit trigger beside
+  them and the form opening below the grid — the Sprint 177 §2 shape the
+  deadline cell one row to the left already uses. Provider-only, exactly
+  as the aside card was: measured on a CUSTOMER_USER, neither the cell
+  nor the department name appears anywhere in the page text. The locked-
+  by-invoice case keeps both of its sentences (which invoice, and the
+  reverse-relabel-rebill way out) inline in the cell instead of behind a
+  dead Edit button. Customer Contacts takes the freed height: its scroll
+  box goes 190px → 248px, the collapsed card header (46px) plus the 12px
+  column gap. Nothing else about that panel changed.
+- **§2 — the workflow buttons are the primary action, on BOTH pages.**
+  Measured before and after on the same DOM, at 1440px: the Ticket
+  page's `.status-btn` goes 42px/13px → 53px/15px, the Extra Work page's
+  `.btn-sm` workflow buttons go 30px/12px → 48px/15px. Sizing and weight
+  only — every colour token and hover rule is the one the button already
+  carried, so a Reject button does not turn green by growing. The
+  correction actions behind "show correction actions" and the
+  Confirm/Cancel pair inside the override reason box stay small on
+  purpose; enlarging them would flatten the hierarchy the disclosure
+  exists to create. A long translated label wraps (69px) instead of
+  overflowing.
+- **§3 — Location and Customer, prominent on the Ticket page.** A new
+  always-visible card, second on the right rail, values at 22px between
+  the header description's 17px and the h1's 36px. It is an ADDED
+  display: the Ticket details card still carries both rows, unchanged.
+  It renders UNCONDITIONALLY — deliberately not tied to `canConvertTicket`
+  or any other gate. A room label keeps its building underneath it.
+- **§4 — right column order.** Measured in the DOM as
+  `side-card-workflow` → `ticket-place-card` → `side-card-assignment` →
+  `responsible-managers-section` → `ticket-schedule-card` →
+  `side-card-details`. The Workflow card was at the BOTTOM, below five
+  cards an operator had to scroll past to reach the only control that
+  moves the ticket. The card itself is unchanged; only its position is.
+
+**Gates.** `tsc --noEmit -p tsconfig.app.json` clean over 293 project
+files (a bare `tsc --noEmit` scans NOTHING here — `tsconfig.json` is
+`"files": []` with two project references, so it prints a vacuous pass);
+`eslint .` exactly 44 (42 errors, 2 warnings), baseline held, no new
+`eslint-disable`; `vite build` OK. nl/en `extra_work.json` both 553 keys,
+zero asymmetry, one key added (`detail.labels_edit`).
+
+**Measured, not eyeballed.** 1440x1000, real data from a throwaway
+seeded database, both pages: `document.scrollWidth` equals
+`clientWidth` (1440) — zero horizontal overflow — with the Details card
+at 741px, the Extra Work workflow card at 371px, the ticket rail at
+361px, and no element in either page overflowing its own box, including
+a deliberately long department name and a 56-character room label.
 
 ### Done — Sprint 188: zero is a price, and a customer is not an employer
 
