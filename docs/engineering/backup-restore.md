@@ -12,16 +12,33 @@
 > the backups'" — §2 below). For the actual OFF-SITE, ENCRYPTED copy, see
 > [docs/operations/backups.md](../operations/backups.md) (Sprint 134).
 >
-> Wraps three pre-existing scripts (do NOT replace them):
+> **THE HELPER SCRIPTS THIS RUNBOOK USED TO WRAP ARE DEAD. Every
+> command below is now the real one, written out in full.**
 >
-> - [scripts/backup_postgres.sh](../../scripts/archive/backup_postgres.sh)
-> - [scripts/restore_postgres.sh](../../scripts/archive/restore_postgres.sh)
-> - [scripts/backup_media.sh](../../scripts/archive/backup_media.sh) /
->   [scripts/restore_media.sh](../../scripts/archive/restore_media.sh)
+> `backup_postgres.sh`, `restore_postgres.sh`, `backup_media.sh` and
+> `restore_media.sh` were moved to
+> [scripts/archive/](../../scripts/archive/) and each carries the header
+> *"ARCHIVED — pilot-era one-off (2026-05-03). Not maintained. Do not run
+> against any live environment without reading it first."* They are **not**
+> on the `scripts/` paths this runbook used to print, so
+> `./scripts/backup_postgres.sh` fails with "No such file or directory".
 >
-> The convenience wrappers under `scripts/ops/` (Sprint 6) call
-> these scripts with the right env defaults; this runbook is the
-> human-readable procedure.
+> That is not a cosmetic drift. Two consecutive deploys got a database
+> backup only because the operator noticed the failure and typed
+> `pg_dump` by hand. A backup procedure that does not run is worse than
+> no procedure at all, because people believe it. So this runbook no
+> longer delegates: the `docker compose exec` commands below are what you
+> run, and they are the same commands the archived scripts contained.
+>
+> Do not resurrect the archived scripts to make the old text true. If a
+> wrapper is wanted again it is a deliberate piece of work with an owner,
+> not a `git mv`.
+>
+> `scripts/ops/` holds one live script (`frontend_nginx_validate.sh`) and
+> no backup wrappers. For the OFF-SITE, ENCRYPTED copy — which is a
+> different thing from the local dumps here — see
+> [scripts/backup_restic.sh](../../scripts/backup_restic.sh) and
+> [docs/operations/backups.md](../operations/backups.md) (Sprint 134).
 
 ---
 
@@ -30,13 +47,51 @@
 ### Command
 
 ```bash
-./scripts/backup_postgres.sh
+mkdir -p backups/postgres
+docker compose -f docker-compose.prod.yml exec -T db sh -c \
+  'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > "backups/postgres/postgres-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
-The script reads `COMPOSE_FILE` (default `docker-compose.prod.yml`)
-and `BACKUP_DIR` (default `backups/postgres`). It runs
-`pg_dump -Fc` inside the `db` container and writes the dump to
-`backups/postgres/postgres-YYYYMMDD-HHMMSS.dump`.
+`-Fc` is the custom format, which is what `pg_restore` in §3 expects —
+a plain-SQL dump will not restore with those flags. `$POSTGRES_USER` and
+`$POSTGRES_DB` are read INSIDE the container from its own environment, so
+the command carries no credentials and stays correct if they change.
+
+**On a host where docker needs a group wrapper** (crmtest is one), wrap
+the whole thing rather than the inner part:
+
+```bash
+sg docker -c "docker compose -f docker-compose.prod.yml exec -T db sh -c 'pg_dump -Fc -U \"\$POSTGRES_USER\" \"\$POSTGRES_DB\"'" \
+  > "backups/postgres/postgres-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+**Check the redirect, not the pipeline.** The `>` is on the HOST side, so
+a failure inside the container still leaves a file behind — an empty or
+truncated one. Always confirm the size is plausible and verify it reads
+back (next section) before trusting it.
+
+### Verify the dump before you rely on it
+
+A dump nobody has opened is a folder of bytes. This takes seconds:
+
+```bash
+DUMP=backups/postgres/postgres-<timestamp>.dump
+ls -l "$DUMP"
+docker compose -f docker-compose.prod.yml exec -T db sh -c 'cat > /tmp/verify.dump' < "$DUMP"
+docker compose -f docker-compose.prod.yml exec -T db sh -c \
+  'pg_restore --list /tmp/verify.dump | head -20; rm -f /tmp/verify.dump'
+```
+
+A healthy dump prints its archive header (`Archive created at ...`,
+`dbname:`, `TOC Entries:`) and a table of contents.
+
+**Why the file is copied in first:** `pg_restore --list` on a custom-format
+archive needs a SEEKABLE file. Piping the dump to `pg_restore --list
+/dev/stdin` fails with `did not find magic string in file header` even
+when the dump is perfectly good — that error means "not seekable", not
+"corrupt". Copy it to a real path inside the container, or run
+`pg_restore` on the host if the client is installed there.
 
 ### Cron / systemd timer
 
@@ -47,7 +102,7 @@ host.
 
 ```cron
 # Daily Postgres dump at 02:30 local time.
-30 2 * * * cd /opt/cleaning-ticket-system && ./scripts/backup_postgres.sh >> backups/postgres.log 2>&1
+30 2 * * * cd /opt/cleaning-ticket-system && mkdir -p backups/postgres && docker compose -f docker-compose.prod.yml exec -T db sh -c 'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > "backups/postgres/postgres-$(date +\%Y\%m\%d-\%H\%M\%S).dump" 2>> backups/postgres.log
 ```
 
 #### systemd timer example
@@ -63,10 +118,33 @@ After=docker.service
 Type=oneshot
 User=cleaning-ops
 WorkingDirectory=/opt/cleaning-ticket-system
-ExecStart=/opt/cleaning-ticket-system/scripts/backup_postgres.sh
+ExecStart=/opt/cleaning-ticket-system/ops/backup-postgres.sh
 StandardOutput=append:/var/log/cleaning-ticket-pg-backup.log
 StandardError=append:/var/log/cleaning-ticket-pg-backup.log
 ```
+
+**Do NOT inline the dump command in `ExecStart`.** systemd performs its own
+`$VAR` expansion on that line, and `POSTGRES_USER` / `POSTGRES_DB` are not
+in systemd's environment — they live inside the `db` container. Inlined,
+they expand to empty strings and `pg_dump` runs with no user and no
+database. The unit therefore calls a one-line file that the operator owns:
+
+```bash
+# /opt/cleaning-ticket-system/ops/backup-postgres.sh   (chmod +x)
+#!/usr/bin/env bash
+set -euo pipefail
+cd /opt/cleaning-ticket-system
+mkdir -p backups/postgres
+docker compose -f docker-compose.prod.yml exec -T db sh -c \
+  'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > "backups/postgres/postgres-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+This is a file YOU create on the host, deliberately, not a repo script
+that can be archived out from under you — which is the exact failure this
+runbook is recovering from. Keep it next to the deployment, not in git.
+The same applies to the cron line above: `%` is special in crontab and
+must be escaped as `\%`, which the example does.
 
 `/etc/systemd/system/cleaning-ticket-pg-backup.timer`:
 
@@ -147,16 +225,22 @@ of bytes, not a backup.
 ### Restore command
 
 ```bash
-CONFIRM_RESTORE=YES \
-  ./scripts/restore_postgres.sh \
-  backups/postgres/postgres-YYYYMMDD-HHMMSS.dump
+docker compose -f docker-compose.prod.yml exec -T db sh -c \
+  'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < backups/postgres/postgres-YYYYMMDD-HHMMSS.dump
 ```
 
-The `CONFIRM_RESTORE=YES` envelope is mandatory — the script
-refuses to run otherwise. The restore uses
-`pg_restore --clean --if-exists --no-owner` and runs against
-whatever DB `docker-compose.prod.yml` is currently pointing at, so
-**make sure you target the right stack**.
+THIS COMMAND IS DESTRUCTIVE AND HAS NO CONFIRMATION PROMPT. The archived
+script wrapped it in a mandatory `CONFIRM_RESTORE=YES` envelope; running
+`pg_restore` directly, as you now do, has no such guard. `--clean
+--if-exists` DROPS the existing objects before recreating them, and it
+runs against whatever database the compose file in `-f` currently points
+at. **Read the `-f` flag out loud before you press return.** If you want
+the old safety net back, put it in your own shell:
+
+```bash
+[ "${CONFIRM_RESTORE:-}" = "YES" ] || { echo "set CONFIRM_RESTORE=YES" >&2; exit 1; }
+```
 
 ### Restore drill steps
 
@@ -174,11 +258,12 @@ whatever DB `docker-compose.prod.yml` is currently pointing at, so
 
 2. **Pipe the latest dump in**:
    ```bash
-   COMPOSE_FILE=docker-compose.staging.yml \
-   CONFIRM_RESTORE=YES \
-     ./scripts/restore_postgres.sh \
-     backups/postgres/postgres-<latest>.dump
+   docker compose -f docker-compose.staging.yml exec -T db sh -c \
+     'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+     < backups/postgres/postgres-<latest>.dump
    ```
+   (Note the `-f docker-compose.staging.yml`. That flag is the only thing
+   standing between a restore drill and a production wipe.)
 
 3. **Bring up the staging app and spot-check**:
    ```bash
@@ -211,11 +296,19 @@ whatever DB `docker-compose.prod.yml` is currently pointing at, so
 ### Backup
 
 ```bash
-./scripts/backup_media.sh
+mkdir -p backups/media
+OUT="backups/media/media-$(date +%Y%m%d-%H%M%S).tar.gz"
+docker compose -f docker-compose.prod.yml exec -T backend sh -c \
+  'mkdir -p /app/media && tar -czf - -C /app media' > "$OUT"
+tar -tzf "$OUT" >/dev/null && echo "media archive OK: $OUT"
 ```
 
-Archives the `cleaning-ticket-prod_backend_media_prod` docker
-volume into `backups/media/media-YYYYMMDD-HHMMSS.tar.gz`.
+Archives the backend's `/app/media` (the
+`cleaning-ticket-prod_backend_media_prod` docker volume) into
+`backups/media/media-YYYYMMDD-HHMMSS.tar.gz`. The `tar -tzf` line is the
+same integrity check the archived script ran and is not optional — as
+with the DB dump, the `>` redirect is on the host, so a failure inside
+the container still leaves a file.
 
 Same retention discipline as Postgres applies — the media volume
 holds every ticket attachment. **Schedule it on the same cron** as
@@ -224,27 +317,41 @@ the DB backup so the two are in lockstep.
 ```cron
 # Daily media archive at 02:35 (5 minutes after the DB dump so the
 # pg-backup log is closed).
-35 2 * * * cd /opt/cleaning-ticket-system && ./scripts/backup_media.sh >> backups/media.log 2>&1
+35 2 * * * cd /opt/cleaning-ticket-system && mkdir -p backups/media && docker compose -f docker-compose.prod.yml exec -T backend sh -c 'mkdir -p /app/media && tar -czf - -C /app media' > "backups/media/media-$(date +\%Y\%m\%d-\%H\%M\%S).tar.gz" 2>> backups/media.log
 ```
 
 ### Restore
 
 ```bash
-./scripts/restore_media.sh backups/media/media-YYYYMMDD-HHMMSS.tar.gz
+ARCHIVE=backups/media/media-YYYYMMDD-HHMMSS.tar.gz
+tar -tzf "$ARCHIVE" >/dev/null   # validate BEFORE deleting anything
+docker compose -f docker-compose.prod.yml exec -T backend sh -c '
+  set -e
+  mkdir -p /app/media
+  find /app/media -mindepth 1 -delete
+  tar -xzf - -C /app
+' < "$ARCHIVE"
 ```
 
-The script tar-extracts into the volume's mount path. Existing
-files are overwritten where the archive contains a newer copy;
-files that exist in the volume but not in the archive are left
-alone (it's NOT a `--delete`-style sync). For a true point-in-time
-restore, stop the worker first so no new uploads land while you
-restore:
+Note what this does: it **empties `/app/media` first**, so the result is
+the archive's contents exactly — anything uploaded since the archive was
+taken is gone. (The archived script did the same; the old wording here,
+"files that exist in the volume but not in the archive are left alone",
+was wrong about its own script.) Validate the tarball before the delete,
+as above, or a corrupt archive costs you the media volume.
+
+Stop the app first so no upload lands mid-restore:
 
 ```bash
 docker compose -f docker-compose.prod.yml stop backend worker beat
-./scripts/restore_media.sh backups/media/media-<timestamp>.tar.gz
+# ... run the restore above, but against a stopped backend you will need
+# a one-off container instead of `exec`; simplest is to restore, then:
 docker compose -f docker-compose.prod.yml start backend worker beat
 ```
+
+Because `exec` needs a RUNNING container, the practical order on a live
+box is: stop `worker` and `beat` (the writers), leave `backend` up for
+the `exec`, restore, then start the two back up.
 
 ---
 

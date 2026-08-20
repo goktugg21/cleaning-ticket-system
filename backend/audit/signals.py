@@ -99,6 +99,12 @@ from timesheets.models import WorkType as TimesheetWorkType
 # rate re-prices the period it covers, so who changed it and from what
 # has to be recoverable afterwards.
 from reports.models import EmployeeHourlyRate
+# W6 §2 — the per-company SLA warning thresholds. W4-Q built the model
+# and the screen that edits it and could not register it here, because
+# this file was held by another chat that sprint. Registering it now
+# closes an H-10 gap: a threshold change is a change to WHO gets warned
+# and WHEN, and until this line it was unattributable.
+from sla.models import SlaWarningThreshold
 from contracts.models import (
     Contract,
     ContractBuilding,
@@ -1662,6 +1668,27 @@ def _connect():
         # no `*StatusHistory` to double-write against (H-11): this model
         # has no state machine.
         EmployeeHourlyRate,
+        # W6 §2 — SlaWarningThreshold. The full CRUD trio, for the same
+        # reason EmployeeHourlyRate above has it: every arm changes
+        # behaviour that somebody will later ask about.
+        #
+        #   * CREATE is a company leaving the deployment defaults.
+        #   * UPDATE is the one that matters most — widening
+        #     `cooldown_hours` or pushing `manager_review_business_hours`
+        #     out makes warnings arrive later or not at all, and the
+        #     symptom ("we stopped being told") shows up weeks after the
+        #     edit, when the only way back to a cause is this diff.
+        #   * DELETE drops the company back to the deployment defaults,
+        #     which is a silent behaviour change unless it is recorded.
+        #
+        # Generic introspection covers every field: seven small integer
+        # thresholds plus `updated_by`, no FileField (the reason
+        # `Document` needs hand-written handlers), and no
+        # `*StatusHistory` to double-write against (H-11) — this model
+        # has no state machine. `updated_at` is auto_now and would fire
+        # on every save; it is already in `diff.NOISY_FIELDS`, so it
+        # never reaches a `changes` payload.
+        SlaWarningThreshold,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
