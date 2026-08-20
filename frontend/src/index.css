@@ -9282,10 +9282,12 @@ a.attn-row:hover {
    second one is the point: two mappings would drift and the rail would
    eventually contradict the dot three pixels away from it.
 
-   Tokens only, no literals. Chat B's semantic token set was not on
-   origin when this was written, so these are the existing `:root`
-   names; if that set lands with different names these declarations are
-   the only place on this page that has to follow. */
+   Tokens only, no literals. These deliberately still mirror the DOT's
+   mapping rather than the `--state-*` meaning scale: the rail and the
+   dot sit three pixels apart and must never disagree, and moving one
+   without the other is exactly how they would. Converging both onto
+   `--state-*` is a single edit here plus the dot block above it, and is
+   the obvious next step for whoever unifies the status palette. */
 .workflow-body[data-status] {
   padding-left: 12px;
   border-left: 3px solid var(--text-faint);
@@ -9333,29 +9335,34 @@ a.attn-row:hover {
   flex-direction: column;
   gap: 6px;
 }
+/* On the MEANING scale (W9, `--state-*`), not on the hue names. A
+   correction is the "needs a person to act" tone, which is what
+   `--state-waiting` is for; the values are identical to the `--amber`
+   family it aliases, so adopting the shared names changed no pixel and
+   put this card on the same scale as every other screen. */
 .workflow-correction-head {
   display: flex;
   align-items: center;
   gap: 6px;
   font-family: var(--f-head);
-  font-size: 10.5px;
+  font-size: var(--font-xs);
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--amber);
+  color: var(--state-waiting);
 }
 .workflow-body .status-btn[data-tone="correct"] {
-  color: var(--amber);
+  color: var(--state-waiting);
   border-color: var(--amber-border);
-  background: var(--amber-soft);
+  background: var(--state-waiting-bg);
 }
 .workflow-body .status-btn[data-tone="correct"]:hover {
-  border-color: var(--amber);
-  background: var(--amber-soft);
-  color: var(--amber);
+  border-color: var(--state-waiting);
+  background: var(--state-waiting-bg);
+  color: var(--state-waiting);
 }
 .workflow-body .status-btn[data-tone="correct"] .status-btn-arrow {
-  color: var(--amber);
+  color: var(--state-waiting);
 }
 .workflow-secondary-list {
   margin-top: 6px;
