@@ -401,6 +401,23 @@ SLA_WARN_NOT_STARTED_ESCALATE_BUSINESS_SECONDS = int(
 #: day. 24h means at most one mail per person per problem per day.
 SLA_WARN_COOLDOWN_HOURS = int(os.environ.get("SLA_WARN_COOLDOWN_HOURS", "24"))
 
+# ---------------------------------------------------------------------------
+# W3-H — the hourly rate labour cost is computed at (plan §2.8).
+#
+# UNSET BY DEFAULT, and the default is the design rather than a gap.
+# There is no wage anywhere in this system: not on `User`, not on
+# `StaffProfile`, not on `HourType` — `timesheets` is written never to
+# hold one, and says so at the field. Until a real per-person rate is
+# designed (its own sprint, with its own privacy story), this is the one
+# knob, and leaving it unset means the hours screen states plainly that
+# no rate is configured instead of printing a cost of EUR 0,00 — which
+# would claim the work cost nothing.
+#
+# Read ONLY by `reports.labour_cost.resolve_hourly_rate`. A second reader
+# would be a second rule; that function is the seam a per-person rate
+# replaces.
+LABOUR_COST_HOURLY_RATE_EUR = os.environ.get("LABOUR_COST_HOURLY_RATE_EUR", "")
+
 CELERY_BEAT_SCHEDULE = {
     "reconcile-sla-states": {
         "task": "sla.tasks.reconcile_sla_states",

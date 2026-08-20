@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .views_extra_work_hours import ExtraWorkHoursView
 from .views import (
     EmployeeHoursByBuildingView,
     EmployeeHoursByExtraWorkView,
@@ -257,6 +258,15 @@ urlpatterns = [
         "extra-work-revenue-by-building/export.pdf",
         ExtraWorkRevenueByBuildingPDFView.as_view(),
         name="reports-extra-work-revenue-by-building-pdf",
+    ),
+    # ---- W3-H: the hours booked to ONE extra work, with the roll-up of
+    # budget / entered / cost. Read by the panel on the Extra Work detail
+    # page; the cost half is computed in `reports/labour_cost.py`, which
+    # is the one place it may be. ----------------------------------------
+    path(
+        "extra-work/<int:extra_work_id>/hours/",
+        ExtraWorkHoursView.as_view(),
+        name="reports-extra-work-hours",
     ),
     # ---- Sprint 131: Extra Work revenue grouped Building -> Department ->
     # Work Type ----------------------------------------------------------

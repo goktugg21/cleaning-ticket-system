@@ -63,6 +63,7 @@ import {
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import { ExtraWorkAssignmentCard } from "../components/extra-work/ExtraWorkAssignmentCard";
+import { ExtraWorkHoursPanel } from "../components/extra-work/ExtraWorkHoursPanel";
 import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
 import type {
   Contact,
@@ -3102,6 +3103,21 @@ export function ExtraWorkDetailPage() {
             />
           )}
 
+          {/* W3-H (plan §2.8) — the TIMESHEET hours booked to this job,
+              with the roll-up of budget / entered / cost.
+
+              Directly under the actual-hours card on purpose, because
+              the two are easy to confuse and are not the same thing: the
+              card above enters hours onto a PRICING LINE, which is what
+              the customer is charged for; this panel reads the hours the
+              crew actually booked in the timesheets module, which is
+              what the job cost us. Two sides of one job, adjacent, each
+              saying which it is.
+
+              Unconditional apart from its own role gate: the panel
+              fetches nothing for a non-provider and renders nothing when
+              there is nothing to say. */}
+          <ExtraWorkHoursPanel extraWorkId={ew.id} />
 
           {/* Draft proposal lines — read-only display of the DRAFT
               proposal's nested `lines` array. Gated on the per-record

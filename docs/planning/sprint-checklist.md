@@ -78,6 +78,90 @@ Both readings were wrong, and both were mine. This is the header.
 exactly 44 (42 errors, 2 warnings); `npm run build` OK. No i18n key added — the
 header reuses the existing `details_location` / `details_customer`.
 
+### Done — W3-H: the hours screen (wave 3, chat H)
+
+Plan §2.8 and decision 12. The model was already there — `TimeEntry`
+has carried `source_type` / `source_id` since Sprint 173, so hours have
+been attributable to an extra work for several sprints — and nothing
+read them back against the job. This is that read, plus the roll-up.
+
+- **An hours panel on the Extra Work detail page.** Worker x day x hour
+  type, read-only, for the entries whose source is this extra work. The
+  hour type is part of the row identity, not a decoration: four normal
+  hours and two overtime hours on the same day for the same person are
+  two different facts and never merge onto one line.
+- **Planned and actual, side by side.** The roll-up shows W2-D's
+  `budget_hours`, the hours actually entered, and the difference between
+  them ("5,50 uur over de begroting"). This is the comparison the
+  reference system cannot make at all: over there `hours_planed` is
+  written by six code paths and read by nothing that decides anything,
+  and all three of its guards are dead code.
+- **Labour cost is computed in `backend/reports/labour_cost.py`** and
+  nowhere else. `timesheets/` still records hours and weighted hours and
+  never touches money — there is a test that walks every non-test file
+  in that app and fails on the word `hourly_rate`.
+- **The screen says where each number lives**, in one line under the
+  title: hours come from the timesheets module, cost is computed in
+  reporting, and there is deliberately no hourly-rate field on this
+  screen. Decision 12 asked for exactly that, so nobody hunts for a wage
+  field that does not exist.
+- **Budget hours never touches money.** It sits beside the cost and does
+  not feed it: cost is computed from the WEIGHTED ENTERED hours. Pinned
+  by a test that multiplies the budget by a hundred and asserts every
+  cost figure is byte-identical.
+
+**The honest part about cost.** There is no wage anywhere in this
+system — not on `User`, not on `StaffProfile`, not on `HourType`, and
+`timesheets` is written never to hold one. Inventing that field would be
+a payroll feature nobody asked for, in apps this sprint does not own. So
+the rate is one deployment setting, `LABOUR_COST_HOURLY_RATE_EUR`, unset
+by default, read by `resolve_hourly_rate` and by nothing else — the seam
+a real per-person rate replaces. **Unset, every cost figure is NULL and
+the panel says why.** It never prints EUR 0,00, because a cost of zero
+would claim the work was free. Travel costs (`TimeEntry.travel_costs`,
+real money somebody really claimed) are shown either way, and are never
+folded into a "total" while the rate is missing.
+
+**Who sees what.** SUPER_ADMIN and COMPANY_ADMIN see the company's rows
+and the cost. A BUILDING_MANAGER is admitted to the panel and sees only
+their OWN hours and no cost — the Sprint 182 §1 privacy floor, applied
+by calling BOTH halves of the pair (`filter_time_entries_for` for the
+tenant, `restrict_entries_to_self` for whose row it is), and the
+response says `visibility: "self"` so the panel states it on screen
+rather than letting a partial grid read as the job's total. STAFF and
+every customer-side role are refused at the door: the panel reports on a
+parent Extra Work, which the P0 staff-privacy decision (A4) closes to
+STAFF, and a worker reads their own hours in the timesheets module where
+the same pair applies.
+
+**Measured, not eyeballed.** 1440x1000, the built app served from this
+worktree against this branch's backend, real rows in the dev database.
+The panel is the fifth card in the main column at y=1440, 1128px wide
+and 269px tall. The five roll-up figures sit on ONE row (five children,
+one distinct top offset), 217px each. `document.scrollWidth` equals
+`clientWidth` (1440) — no horizontal page overflow — and no element
+inside the panel overflows its own box. The grid's scroll box needs
+neither axis at this size (1124/1124 wide, 102/102 tall). With
+`LABOUR_COST_HOURLY_RATE_EUR=32.50`: 17,75 gewogen uren -> "Loonkosten
+EUR 589,38 / Tarief EUR 32,50 per gewogen uur", travel EUR 12,50 beside
+it, and the grid reading 4,00 / 3,50 / blank / 7,50 for the first
+worker. A day nobody worked is BLANK, not 0,00.
+
+**Gates.** `tsc --noEmit -p tsconfig.app.json --listFiles`: 846 files
+listed, 297 of them under `src/`, 0 errors. `eslint .`: 44 problems (42
+errors, 2 warnings) — the baseline exactly, none of them in the new
+files. `vite build` OK in 8.73s. nl/en `extra_work.json` both 588 keys,
+symmetric, 27 added on each side. Backend:
+`reports.tests.test_w3h_extra_work_hours`, Ran 20 tests, OK.
+
+**Click path (SUPER_ADMIN).** Extra werk -> open any extra work -> scroll
+to "Uren op dit meerwerk", directly under the actual-hours card. The two
+are neighbours on purpose and each says which it is: the card above
+enters hours onto a PRICING LINE (what the customer is charged), this
+panel reads the hours the crew booked in the urenregistratie (what the
+job cost us). To see it populated: Urenregistratie -> week grid -> book
+hours with the job picker set to this extra work.
+
 ### Done — Sprint 190 §§1–4 (wave 2, chat A of 4): what the owner saw on the test site
 
 Wave 1 shipped, the owner opened it on crmtest, and four things were wrong.

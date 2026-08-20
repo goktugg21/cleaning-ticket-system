@@ -11156,3 +11156,66 @@ a.wp-card-title:hover { text-decoration: underline; }
 @media (max-width: 520px) {
   .ew-money-strip-row { grid-template-columns: 1fr; }
 }
+
+/* ====================================================================
+   W3-H — the hours panel's roll-up, on the Extra Work detail page.
+
+   Placed HERE, next to `.ew-money-*`, rather than at the end of the
+   file: this is the same idea one page over — a short row of labelled
+   figures with a sentence under each — and the two need to look like
+   the same system.
+
+   Deliberately its own class names rather than a reuse of
+   `.ew-money-card`: four of these five figures are HOURS, and hours and
+   money must not be dressed identically. That is the whole reason the
+   panel exists — `timesheets` records hours and never money, and a
+   figure strip that made "13,50" and "EUR 337,50" look like siblings
+   would undo the distinction on screen that the modules keep in code.
+   ==================================================================== */
+.ew-hours-rollup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+.ew-hours-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.ew-hours-figure-label {
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ew-hours-figure-value {
+  font-family: var(--f-head);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.2;
+}
+/* Wraps rather than truncating, for the reason the money card's meta
+   line gives: a clipped explanation is the same as no explanation, and
+   these sentences carry "no rate configured" and "your own hours only",
+   which are the two things a reader must not miss. */
+.ew-hours-figure-meta {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--text-faint);
+}
+/* The day columns. Narrow and right-aligned so a fortnight of them fits
+   before the horizontal scroll the `.table-wrap` wrapper provides. */
+.ew-hours-table .ew-hours-day-col {
+  text-align: right;
+  white-space: nowrap;
+}
