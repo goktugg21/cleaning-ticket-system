@@ -23,6 +23,17 @@
  * holds ninety is a number an operator would act on. Where the caller
  * has a SERVER-side breakdown it passes real numbers; where it has only
  * a page, it passes -1 rather than a lie.
+ *
+ * W8 BUG 2 — `showCounts={false}` drops the numbers from the WHOLE row.
+ *
+ * Per-tile `-1` was right for one tile that cannot be known beside
+ * others that can. It was wrong for the case the ticket list actually
+ * hits, where the count source cannot follow the filter at all: every
+ * tile fell back to an em dash except "All", which kept a number from a
+ * different source. One figure among eight dashes reads as eight empty
+ * buckets, and no arrangement of dashes says why. A row with no numbers
+ * is a filter, which is the other thing this row has always been, and it
+ * needs no explaining.
  */
 import { useTranslation } from "react-i18next";
 
@@ -39,6 +50,7 @@ export function StatusTiles({
   onChange,
   totalCount,
   testIdPrefix,
+  showCounts = true,
 }: {
   tiles: StatusTile[];
   /** "" is the all-statuses tile. */
@@ -47,6 +59,9 @@ export function StatusTiles({
   /** How many rows exist in total, for the "All" tile. -1 hides it. */
   totalCount: number;
   testIdPrefix: string;
+  /** False = this row is a filter and nothing else. No tile shows a
+   *  number, including "All". */
+  showCounts?: boolean;
 }) {
   const { t } = useTranslation("common");
 
@@ -62,9 +77,11 @@ export function StatusTiles({
         data-testid={`${testIdPrefix}-tile-all`}
       >
         <span className="status-tile-label">{t("status_chips.all")}</span>
-        <span className="status-tile-count">
-          {totalCount >= 0 ? totalCount : "—"}
-        </span>
+        {showCounts && (
+          <span className="status-tile-count">
+            {totalCount >= 0 ? totalCount : "—"}
+          </span>
+        )}
       </button>
       {tiles.map((tile) => {
         const isActive = tile.value === active;
@@ -89,9 +106,11 @@ export function StatusTiles({
                 </span>
               )}
             </span>
-            <span className="status-tile-count">
-              {tile.count >= 0 ? tile.count : "—"}
-            </span>
+            {showCounts && (
+              <span className="status-tile-count">
+                {tile.count >= 0 ? tile.count : "—"}
+              </span>
+            )}
           </button>
         );
       })}

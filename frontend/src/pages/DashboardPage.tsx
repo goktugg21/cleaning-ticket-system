@@ -108,6 +108,34 @@ type WorkTypeFilter = "all" | "tickets" | "chargeable";
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 
 /**
+ * W8 BUG 1 — what "My work" means, decided.
+ *
+ * It meant `created_by = me`. The owner, a SUPER_ADMIN: "What exactly
+ * makes these My Tickets? Shouldn't I normally be seeing all 78?" He is
+ * right that nobody would guess it, and right that it is not useful: the
+ * person who opened a ticket is not the person it is waiting on, and for
+ * an admin who opens tickets on other people's behalf the two sets barely
+ * overlap.
+ *
+ * Of the three candidates — created by me, assigned to me, awaiting my
+ * action — only the last earns a place on a dashboard, because a
+ * dashboard exists to answer "what do I have to do today". So:
+ *
+ *   MY WORK = the work I am RESPONSIBLE for that is NOT FINISHED.
+ *
+ * Responsible is `my_managed`: the primary-manager FK ∪ the
+ * responsible-manager M:N, the same union the ticket list's "Assigned
+ * to: Me" uses. Not finished is OPEN + IN_PROGRESS + WAITING_MANAGER
+ * _REVIEW — everything downstream of that is waiting on the customer or
+ * done, and neither is waiting on me.
+ *
+ * The same rule serves all three roles this block renders for: a
+ * BUILDING_MANAGER's assignments are their buildings' work, a
+ * COMPANY_ADMIN's are what they took on, and a SUPER_ADMIN's are what
+ * they took on too. One query, no per-role branch, and a SUPER_ADMIN
+ * who is on nothing sees 0 — which is the true answer and a far better
+ * one than a number nobody can account for.
+ *
  * W7 BUG 1 — the dashboard's "My work" number and the page it opens are
  * ONE query, spelled out in the link.
  *
@@ -133,7 +161,28 @@ const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
  * exactly `created_by` + the type narrowing and nothing else — which is
  * precisely the query `loadMyCounts` counts.
  */
-const MY_WORK_LINK_PARAMS = "status=ALL&work=all&finished_extra_work=1";
+const MY_WORK_LINK_PARAMS = "mine=1&work=all&finished_extra_work=1";
+
+/**
+ * The three statuses that are still waiting on the provider, one per
+ * chip.
+ *
+ * One status each rather than one chip over a three-status set, because
+ * a set is not a state the ticket list can be IN: its status control is
+ * a row of one-status tiles, so a chip counting three of them would open
+ * a page whose tiles all read unselected while the rows were narrowed —
+ * the same "the number and the page disagree" defect one layer down.
+ * Three chips, three exact queries, and on arrival the tile that matches
+ * is the one that is lit.
+ */
+const MY_WORK_STATUSES = [
+  { status: "OPEN" as const, testId: "dashboard-my-open" },
+  { status: "IN_PROGRESS" as const, testId: "dashboard-my-in-progress" },
+  {
+    status: "WAITING_MANAGER_REVIEW" as const,
+    testId: "dashboard-my-review",
+  },
+];
 
 /**
  * The parameters `/tickets/stats/` understands.
@@ -481,14 +530,38 @@ export function DashboardPage({
    * leaves the rest alone.
    */
   const mineOnly = searchParams.get("mine") === "1";
-  const setMineOnly = useCallback(
-    (value: boolean) => {
-      const nextSearch = new URLSearchParams(searchParams);
-      if (value) nextSearch.set("mine", "1");
-      else nextSearch.delete("mine");
-      setSearchParams(nextSearch, { replace: true });
+
+  /**
+   * W8 BUG 1 + BUG 3 — WHO IS ON THIS, as one control with three
+   * answers.
+   *
+   * There were two dropdowns here: "Created by: anyone / only me" and
+   * "Assigned to: anyone / nobody yet". The first is the whole of BUG 1
+   * — for a SUPER_ADMIN "the ones I happened to open" is not a slice of
+   * work anybody would ask for, and it was the predicate behind the
+   * dashboard's "My work: 7" beside a page reading 78. The second
+   * answered half of the real question.
+   *
+   * The real question is one question, so it is one control: who is on
+   * this ticket — anyone, me, or nobody yet. "Me" is `my_managed`, the
+   * union of the primary-manager FK and the responsible-manager M:N,
+   * i.e. the tickets this person is actually on the hook for. Nothing on
+   * this page filters by author any more.
+   */
+  const assignedFilter: "" | "me" | "nobody" = unassignedFilter
+    ? "nobody"
+    : mineOnly
+      ? "me"
+      : "";
+  const setAssignedFilter = useCallback(
+    (value: "" | "me" | "nobody") => {
       setPage(1);
       setSelectedIds(new Set<number>());
+      setUnassignedFilter(value === "nobody");
+      const nextSearch = new URLSearchParams(searchParams);
+      if (value === "me") nextSearch.set("mine", "1");
+      else nextSearch.delete("mine");
+      setSearchParams(nextSearch, { replace: true });
     },
     [searchParams, setSearchParams],
   );
@@ -572,7 +645,11 @@ export function DashboardPage({
       else if (workTypeFilter === "tickets") params.is_extra_work = "false";
     }
     if (isTicketsPage) {
-      if (mineOnly && me?.id) params.created_by = me.id;
+      // W8 BUG 1 — "mine" is the work this person is RESPONSIBLE for
+      // (`my_managed` = the primary-manager FK ∪ the responsible-manager
+      // M:N), not the work they happened to create. `created_by` is what
+      // produced the dashboard's 7-beside-78 and nothing asks for it now.
+      if (mineOnly) params.my_managed = "true";
       const typeParam = searchParams.get("type");
       if (typeParam) params.type = typeParam;
       const exclTypeParam = searchParams.get("exclude_type");
@@ -844,58 +921,38 @@ export function DashboardPage({
   // M6.3 — "my work" summary counts (provider-management only). Each
   // count is the PaginatedResponse.count for a created_by=me query;
   // page_size:1 keeps the payload minimal (count is the full total).
-  const [myCounts, setMyCounts] = useState<{
-    tickets: number | null;
-    meldingen: number | null;
-    extraWork: number | null;
-    quoteRequests: number | null;
-  }>({
-    tickets: null,
-    meldingen: null,
-    extraWork: null,
-    quoteRequests: null,
+  const [myCounts, setMyCounts] = useState<Record<string, number | null>>({
+    OPEN: null,
+    IN_PROGRESS: null,
+    WAITING_MANAGER_REVIEW: null,
   });
 
   const loadMyCounts = useCallback(async () => {
     const meId = me?.id;
     if (!meId || !isProviderManagementRole(userRole)) return;
     try {
-      // W7 BUG 1 — `status__in` is the one narrowing the Tickets page
-      // applies that no URL parameter can switch off: with no status
-      // chosen it always asks for the statuses the list works in, which
-      // drops CONVERTED_TO_EXTRA_WORK. So the chip counts it too, from
-      // the same constant, and "8" is the number of rows the click
-      // produces rather than a number nine tenths like it.
-      const [tk, ml, ew, qr] = await Promise.all([
-        api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: {
-            created_by: meId,
-            exclude_type: "REPORT",
-            status__in: ticketListStatusParam(),
-            page_size: 1,
-          },
-        }),
-        api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: {
-            created_by: meId,
-            type: "REPORT",
-            status__in: ticketListStatusParam(),
-            page_size: 1,
-          },
-        }),
-        listExtraWork({ created_by: meId, page_size: 1 }),
-        listExtraWork({
-          created_by: meId,
-          request_intent: "REQUEST_QUOTE",
-          page_size: 1,
-        }),
-      ]);
-      setMyCounts({
-        tickets: tk.data.count,
-        meldingen: ml.data.count,
-        extraWork: ew.count,
-        quoteRequests: qr.count,
-      });
+      // W8 BUG 1 — one query per chip, and it is the SAME query the
+      // chip's link puts in the URL: `my_managed` + that one status,
+      // with the list's two other defaults turned off explicitly
+      // (`work=all`, `finished_extra_work=1`) exactly as
+      // MY_WORK_LINK_PARAMS spells them. An absent parameter is a
+      // default and not an opinion, which is why the link states the
+      // whole predicate rather than the interesting part of it.
+      const responses = await Promise.all(
+        MY_WORK_STATUSES.map(({ status }) =>
+          api.get<PaginatedResponse<TicketList>>("/tickets/", {
+            params: { my_managed: true, status, page_size: 1 },
+          }),
+        ),
+      );
+      setMyCounts(
+        Object.fromEntries(
+          MY_WORK_STATUSES.map(({ status }, index) => [
+            status,
+            responses[index].data.count,
+          ]),
+        ),
+      );
     } catch {
       // Leave "—" placeholders on failure (mirrors loadStats).
     }
@@ -1186,32 +1243,9 @@ export function DashboardPage({
       unassignedFilter || stalledApprovalFilter || mineOnly,
   );
 
-  /**
-   * W7 DESIGN 3 — the active narrowings as SENTENCES, not as chips.
-   *
-   * "A chip filters. It never states a fact." Every one of these was a
-   * pill sitting in the section head stating a fact about the query, and
-   * five of them could stack. They are one plain line now, and the
-   * controls that change them are labelled selects in the filter bar
-   * below, where a person looks for a filter.
-   */
-  const activeNarrowings = useMemo(() => {
-    const out: string[] = [];
-    if (mineOnly) out.push(t("filter_summary.mine"));
-    if (unassignedFilter) out.push(t("filter_summary.unassigned"));
-    if (stalledApprovalFilter)
-      out.push(t("filter_summary.stalled", { days: STALLED_APPROVAL_DAYS }));
-    if (workTypeFilter === "tickets") out.push(t("filter_summary.tickets_only"));
-    if (hideFinishedExtraWork) out.push(t("filter_summary.finished_hidden"));
-    return out;
-  }, [
-    mineOnly,
-    unassignedFilter,
-    stalledApprovalFilter,
-    workTypeFilter,
-    hideFinishedExtraWork,
-    t,
-  ]);
+  // W8 BUG 3 — the narrowing SENTENCES are gone with the line that
+  // rendered them; every control that sets one now says what it does.
+
 
   /**
    * W7 DESIGN 7 — the manager-review queue explains itself on arrival.
@@ -1736,46 +1770,19 @@ export function DashboardPage({
                   <div className="section-head-title">{t("my_work.title")}</div>
                 </div>
                 <div className="mywork-chips">
-                  <Link
-                    to={`/tickets?mine=1&exclude_type=REPORT&${MY_WORK_LINK_PARAMS}`}
-                    className="mywork-chip"
-                    data-testid="dashboard-my-tickets"
-                  >
-                    <span>{t("my_work.chip_tickets")}</span>
-                    <span className="mywork-chip-count">
-                      {fmt(myCounts.tickets)}
-                    </span>
-                  </Link>
-                  <Link
-                    to={`/tickets?mine=1&type=REPORT&${MY_WORK_LINK_PARAMS}`}
-                    className="mywork-chip"
-                    data-testid="dashboard-my-meldingen"
-                  >
-                    <span>{t("my_work.chip_meldingen")}</span>
-                    <span className="mywork-chip-count">
-                      {fmt(myCounts.meldingen)}
-                    </span>
-                  </Link>
-                  <Link
-                    to="/extra-work?mine=1"
-                    className="mywork-chip"
-                    data-testid="dashboard-my-extra-work"
-                  >
-                    <span>{t("my_work.chip_extra_work")}</span>
-                    <span className="mywork-chip-count">
-                      {fmt(myCounts.extraWork)}
-                    </span>
-                  </Link>
-                  <Link
-                    to="/extra-work?mine=1&request_intent=REQUEST_QUOTE"
-                    className="mywork-chip"
-                    data-testid="dashboard-my-quote-requests"
-                  >
-                    <span>{t("my_work.chip_quotes")}</span>
-                    <span className="mywork-chip-count">
-                      {fmt(myCounts.quoteRequests)}
-                    </span>
-                  </Link>
+                  {MY_WORK_STATUSES.map(({ status, testId }) => (
+                    <Link
+                      key={status}
+                      to={`/tickets?status=${status}&${MY_WORK_LINK_PARAMS}`}
+                      className="mywork-chip"
+                      data-testid={testId}
+                    >
+                      <span>{tStatus(status)}</span>
+                      <span className="mywork-chip-count">
+                        {fmt(myCounts[status] ?? null)}
+                      </span>
+                    </Link>
+                  ))}
                 </div>
               </section>
             )}
@@ -2175,14 +2182,25 @@ export function DashboardPage({
             returned these rows. That fallback only holds with no status
             chosen, because with one chosen `count` describes that status
             rather than the whole list. */}
+        {/* W8 BUG 2 — the counts follow the filter, or the row does
+            not claim to count.
+
+            The old third option was the worst of the two: "All" kept a
+            number (from the list's own `count`, a different source) and
+            the eight status tiles beside it each showed an em dash, with
+            a paragraph in the side column apologising for it. Eight
+            dashes read as eight empty buckets, and no wording rescues
+            that — a reader who has to be told what a control means is
+            looking at a broken control.
+
+            So when `/tickets/stats/` cannot describe these rows, the
+            whole row drops its numbers and goes on being what it also
+            always was: the status filter. Nothing to explain. */}
         <StatusTiles
           tiles={TICKET_LIST_STATUSES.map((value) => ({
             value,
-            // The page's OWN status label helper, the same one
-            // the dropdown below uses — a second labelling path
-            // here rendered raw enum names.
             label: tStatus(value),
-            count: statsAreBlind ? -1 : stats ? (stats.by_status[value] ?? 0) : -1,
+            count: stats ? (stats.by_status[value] ?? 0) : -1,
           }))}
           active={statusFilter}
           onChange={(value: string) => {
@@ -2190,13 +2208,8 @@ export function DashboardPage({
             setPage(1);
             setSelectedIds(new Set<number>());
           }}
-          totalCount={
-            statsAreBlind
-              ? statusFilter === "" && !loading
-                ? count
-                : -1
-              : visibleTicketTotal(stats)
-          }
+          totalCount={visibleTicketTotal(stats)}
+          showCounts={!statsAreBlind}
           testIdPrefix="tickets-status"
         />
 
@@ -2286,28 +2299,12 @@ export function DashboardPage({
                       </select>
                     </div>
                   )}
-                  <div className="filter-field">
-                    <span className="filter-label">{t("common:status")}</span>
-                    <select
-                      className="filter-control"
-                      value={statusFilter}
-                      onChange={(event) => {
-                        setPage(1);
-                        // Sprint 7 — a status change leaves the
-                        // bulk-confirm queue; drop any selection so it
-                        // can't carry across filters.
-                        setSelectedIds(new Set<number>());
-                        setStatusFilter(event.target.value as TicketStatus | "");
-                      }}
-                    >
-                      <option value="">{t("common:all_statuses")}</option>
-                      {TICKET_LIST_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {tStatus(status)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {/* W8 BUG 3 — the Status dropdown is gone. The tile
+                      row above the list is the status control: it
+                      already selects, already clears, and already shows
+                      which status is on. Two controls for one question
+                      is how a person ends up unable to say what either
+                      of them does. */}
                   <div className="filter-field">
                     <span className="filter-label">{t("common:priority")}</span>
                     <select
@@ -2343,115 +2340,101 @@ export function DashboardPage({
                       ))}
                     </select>
                   </div>
-                  {/* W7 BUG 2 — the "only your items" filter, as a
-                      control that goes both ways.
+                  {/* W8 BUG 1 + BUG 3 — WHO IS ON THIS, once.
 
-                      This is the whole of that bug: the state existed,
-                      the URL carried it, the page honoured it, and the
-                      only thing on screen that could touch it was a link
-                      that turned it off and threw the rest of the query
-                      string away with it. A two-option select turns it
-                      on again, and it sits with the other filters rather
-                      than in the heading. */}
-                  {me?.id != null && (
-                    <div className="filter-field">
-                      <span className="filter-label">
-                        {t("filters.created_by")}
-                      </span>
-                      <select
-                        className="filter-control"
-                        value={mineOnly ? "me" : "anyone"}
-                        data-testid="tickets-filter-mine"
-                        onChange={(event) =>
-                          setMineOnly(event.target.value === "me")
-                        }
-                      >
-                        <option value="anyone">
-                          {t("filters.created_by_anyone")}
-                        </option>
-                        <option value="me">{t("filters.created_by_me")}</option>
-                      </select>
-                    </div>
-                  )}
-                  {/* The attention card's "Unassigned" deep link used to
-                      arrive as a chip with a Clear button and no way
-                      back. Same fix, same reason. */}
+                      Was two dropdowns: "Created by: anyone / only me"
+                      and "Assigned to: anyone / nobody yet". Author is
+                      not a slice of work anybody asks for — it is the
+                      predicate that made the dashboard say 7 over a page
+                      of 78 — and the other half of the real question was
+                      already here. One control, three answers. */}
                   <div className="filter-field">
                     <span className="filter-label">
                       {t("filters.assigned")}
                     </span>
                     <select
                       className="filter-control"
-                      value={unassignedFilter ? "nobody" : "anyone"}
+                      value={assignedFilter}
                       data-testid="tickets-filter-assigned"
-                      onChange={(event) => {
-                        setPage(1);
-                        setSelectedIds(new Set<number>());
-                        setUnassignedFilter(event.target.value === "nobody");
-                      }}
+                      onChange={(event) =>
+                        setAssignedFilter(
+                          event.target.value as "" | "me" | "nobody",
+                        )
+                      }
                     >
-                      <option value="anyone">
-                        {t("filters.assigned_anyone")}
-                      </option>
+                      <option value="">{t("filters.assigned_anyone")}</option>
+                      <option value="me">{t("filters.assigned_me")}</option>
                       <option value="nobody">
                         {t("filters.assigned_nobody")}
                       </option>
                     </select>
                   </div>
-                  {/* W7 DESIGN 3 — the work-type narrowing (was a lone
-                      pressed button in its own strip) and the
-                      finished-extra-work hide (was a pair of mutually
-                      exclusive fact-chips) as two ordinary dropdowns.
-                      The Chargeable work page pins the work type from
-                      its route, so it offers no control for it. */}
-                  {!isChargeableWork && (
-                    <div className="filter-field">
-                      <span className="filter-label">
-                        {t("work_type.label")}
-                      </span>
-                      <select
-                        className="filter-control"
-                        value={workTypeFilter === "tickets" ? "tickets" : "all"}
-                        data-testid="tickets-work-type"
-                        onChange={(event) => {
-                          const value =
-                            event.target.value === "tickets" ? "tickets" : "all";
-                          setPage(1);
-                          setSelectedIds(new Set<number>());
-                          setWorkTypeFilter(value);
-                          const next = new URLSearchParams(searchParams);
-                          if (value === "tickets") next.delete("work");
-                          else next.set("work", value);
-                          setSearchParams(next, { replace: true });
-                        }}
-                      >
-                        <option value="tickets">
-                          {t("work_type.tickets_only")}
-                        </option>
-                        <option value="all">{t("work_type.all")}</option>
-                      </select>
-                    </div>
-                  )}
+                  {/* W8 BUG 3 — WHAT IS ON THIS LIST, once.
+
+                      Was two dropdowns sitting side by side, both
+                      answering it and neither saying so: "Show: tickets
+                      only / tickets and chargeable work" and "Finished
+                      chargeable work: hidden / shown". Three of the four
+                      combinations are one sentence each, and the fourth
+                      (tickets only, finished chargeable shown) narrows
+                      chargeable work out and then un-hides it — a state
+                      with no meaning. One control, three answers, in the
+                      order that widens the list. The Chargeable work
+                      page pins its own work type, so it offers the
+                      finished/hidden choice alone. */}
                   <div className="filter-field">
                     <span className="filter-label">
-                      {t("finished_extra_work.label")}
+                      {t("work_scope.label")}
                     </span>
                     <select
                       className="filter-control"
-                      value={hideFinishedExtraWork ? "hidden" : "shown"}
-                      data-testid="tickets-filter-finished-extra-work"
+                      value={
+                        isChargeableWork
+                          ? hideFinishedExtraWork
+                            ? "tickets"
+                            : "everything"
+                          : workTypeFilter === "tickets"
+                            ? "tickets"
+                            : hideFinishedExtraWork
+                              ? "with_chargeable"
+                              : "everything"
+                      }
+                      data-testid="tickets-work-scope"
                       onChange={(event) => {
+                        const value = event.target.value;
                         setPage(1);
-                        setHideFinishedExtraWork(
-                          event.target.value === "hidden",
-                        );
+                        setSelectedIds(new Set<number>());
+                        setHideFinishedExtraWork(value !== "everything");
+                        if (!isChargeableWork) {
+                          const next = new URLSearchParams(searchParams);
+                          if (value === "tickets") {
+                            setWorkTypeFilter("tickets");
+                            next.delete("work");
+                          } else {
+                            setWorkTypeFilter("all");
+                            next.set("work", "all");
+                          }
+                          setSearchParams(next, { replace: true });
+                        }
                       }}
                     >
-                      <option value="hidden">
-                        {t("finished_extra_work.option_hidden")}
-                      </option>
-                      <option value="shown">
-                        {t("finished_extra_work.option_shown")}
+                      {!isChargeableWork && (
+                        <option value="tickets">
+                          {t("work_scope.tickets_only")}
+                        </option>
+                      )}
+                      {!isChargeableWork && (
+                        <option value="with_chargeable">
+                          {t("work_scope.with_chargeable")}
+                        </option>
+                      )}
+                      {isChargeableWork && (
+                        <option value="tickets">
+                          {t("work_scope.unfinished_only")}
+                        </option>
+                      )}
+                      <option value="everything">
+                        {t("work_scope.everything")}
                       </option>
                     </select>
                   </div>
@@ -2469,21 +2452,12 @@ export function DashboardPage({
                     <button type="submit" className="btn btn-secondary btn-sm">
                       {t("common:apply")}
                     </button>
-                    {isProviderManagementRole(userRole) &&
-                      statusFilter !== "WAITING_MANAGER_REVIEW" && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          data-testid="dashboard-manager-review-preset"
-                          onClick={() => {
-                            setPage(1);
-                            setSelectedIds(new Set<number>());
-                            setStatusFilter("WAITING_MANAGER_REVIEW");
-                          }}
-                        >
-                          {t("review_queue.preset")}
-                        </button>
-                      )}
+                    {/* W8 BUG 3 — "Reported done, needs a check" is
+                        gone. It set one status, which is what the tile
+                        of that name above the list does in one click,
+                        and a button that duplicates a filter is the
+                        third thing on this bar a person could not name.
+                        The tile keeps the wording. */}
                     {hasActiveFilters && (
                       <button
                         type="button"
@@ -2501,6 +2475,16 @@ export function DashboardPage({
                     back and why, then the single control that undoes all
                     of it. No pills: every one of these is a statement,
                     and the things that FILTER are the dropdowns above. */}
+                {/* W8 BUG 3 — the count, and nothing else.
+
+                    This line used to carry up to five sentences naming
+                    the narrowings that were on ("only the ones you
+                    created", "chargeable work left out", ...) plus a
+                    second reset button beside the Clear button six
+                    inches above it. Every one of those sentences existed
+                    because the control that set it did not say what it
+                    did; each of those controls now does, so there is
+                    nothing left for the sentence to explain. */}
                 <p
                   className="list-summary"
                   data-testid="tickets-list-summary"
@@ -2514,22 +2498,6 @@ export function DashboardPage({
                           count,
                         })}
                   </span>
-                  {activeNarrowings.length > 0 && (
-                    <span className="list-summary-detail">
-                      {" — "}
-                      {activeNarrowings.join(" · ")}
-                    </span>
-                  )}
-                  {(hasActiveFilters || activeNarrowings.length > 0) && (
-                    <button
-                      type="button"
-                      className="list-summary-reset"
-                      onClick={clearFilters}
-                      data-testid="tickets-show-everything"
-                    >
-                      {t("filter_summary.show_everything")}
-                    </button>
-                  )}
                 </p>
 
                 {assignOpen && (
@@ -3077,46 +3045,14 @@ export function DashboardPage({
                 </div>
               </div>
 
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("section_status_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("section_status_sub")}
-                    </div>
-                  </div>
-                </div>
-                {/* W7 BUG 1 — the fourth surface that counted tickets.
-                    This panel reads the same `/tickets/stats/` response
-                    the tiles do, so when that response cannot describe
-                    the current list it cannot describe it here either.
-                    Showing the company-wide breakdown beside a filtered
-                    list is the same defect one card to the right. */}
-                <div style={{ padding: "14px 18px 18px" }}>
-                  {statsAreBlind ? (
-                    <p className="muted small" data-testid="tickets-breakdown-blind">
-                      {t("section_status_filtered")}
-                    </p>
-                  ) : !stats ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : (
-                    <div className="bld-list">
-                      {TICKET_LIST_STATUSES.map((key) => {
-                        const value = stats.by_status[key] ?? 0;
-                        return (
-                          <div key={key} className="bld-row-head">
-                            <span className="bld-row-name">{tStatus(key)}</span>
-                            <span className="bld-row-count">{value}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
+              {/* W8 BUG 2 + BUG 3 — the "Status breakdown" card is
+                  gone. It listed the same eight numbers from the same
+                  `/tickets/stats/` response as the tile row directly
+                  above the list, so the page counted its statuses twice
+                  and had two places to be wrong; and it was the only
+                  home of the paragraph that apologised for the em
+                  dashes. The tiles are the status count and the status
+                  filter, and there is one of them. */}
               <div className="card">
                 <div className="section-head">
                   <div>
