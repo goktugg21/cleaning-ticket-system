@@ -2489,6 +2489,49 @@ class ExtraWorkPlannedHours(models.Model):
             "no price anywhere."
         ),
     )
+    #: W7 — WHICH KIND OF HOUR. The gap this closes is functional, not
+    #: cosmetic: `timesheets.TimeEntry` has carried `hour_type` since it
+    #: was written, so the hours panel renders "Noah Bakker | Normale
+    #: uren | Aug 10 | 3.00" for work already DONE — while the plan had
+    #: no way to say a night shift was coming. You could RECORD one and
+    #: not PLAN one, and planned-vs-actual compared a weighted actual
+    #: against a plan that could not be weighted.
+    #:
+    #: THE EXISTING CATALOG, NOT A SECOND ONE. `timesheets.HourType` is
+    #: the per-company list an operator already maintains (Normale 1.0,
+    #: Nacht 1.3, Weekend 1.5) and the one the actuals are keyed to. A
+    #: planning-only copy would drift from it within a sprint and turn
+    #: planned-vs-actual into a join between two vocabularies.
+    #:
+    #: NULL IS A REAL STATE AND IT MEANS ORDINARY HOURS. Every row
+    #: written before this column is NULL, and that reading is what
+    #: keeps them valid: a plan made when the only kind of hour the
+    #: model knew was an unqualified one was a plan for ordinary hours.
+    #: It is also the right answer for an operator who does not care to
+    #: split the day.
+    #:
+    #: PROTECT, matching `TimeEntry.hour_type`: an hour type a plan
+    #: depends on cannot be deleted out from under it. Archiving
+    #: (`is_active=False`) is the supported way to retire one and it
+    #: leaves existing plans intact — the same contract the actuals get.
+    #:
+    #: A MULTIPLIER IS A WEIGHT, NOT A RATE. Nothing here multiplies it
+    #: by money and the no-money rule is unchanged: these are planning
+    #: numbers and they reach no price anywhere.
+    hour_type = models.ForeignKey(
+        "timesheets.HourType",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        default=None,
+        related_name="extra_work_planned_hours",
+        help_text=(
+            "Which kind of hour is planned, or NULL for ordinary "
+            "hours. The same per-company catalog the timesheets "
+            "actuals use. A planning number: it reaches no price "
+            "anywhere."
+        ),
+    )
     hours = models.DecimalField(
         max_digits=8,
         decimal_places=2,
@@ -2508,28 +2551,40 @@ class ExtraWorkPlannedHours(models.Model):
     )
 
     class Meta:
-        # W6-H — the grain moved from (work, person) to
-        # (work, person, DAY), and NULL needs its own constraint.
+        # W7 — the grain is now (work, person, DAY, HOUR TYPE).
         #
-        # Postgres treats NULLs as distinct in a unique index, so
-        # `UniqueConstraint(work, user, date)` alone would happily allow
-        # five undated rows for the same person on the same job — which
-        # is exactly the state the old `unique_together` existed to
-        # prevent. The partial constraint below restores it for the
-        # undated case, so "one undated row per person per job" survives
-        # the change while dated rows are unique per day.
+        # W6-H moved it from (work, person) to (work, person, day) and
+        # needed TWO constraints to do it, because Postgres treats NULLs
+        # as distinct in a unique index: the plain constraint covered
+        # dated rows and a partial one restored "one undated row per
+        # person per job". Adding a second nullable column to the key
+        # would have turned that into four combinations and four
+        # constraints.
+        #
+        # `nulls_distinct=False` collapses all of it into ONE. Postgres
+        # 15 added `UNIQUE NULLS NOT DISTINCT` and Django 5.0 exposes
+        # it; this deployment is on Postgres 16. Two rows for the same
+        # person on the same job with the same day and the same hour
+        # type now collide whether or not either nullable column is
+        # NULL, which is the rule we actually want and could only
+        # approximate before.
+        #
+        # THE TWO OLD CONSTRAINTS ARE REPLACED, NOT DROPPED-AND-LOST.
+        # The new one is strictly stronger: everything the pair forbade
+        # it still forbids, and it additionally forbids the (person,
+        # NULL day, two rows) case the pair only caught via its partial
+        # arm. No existing row can violate it — a row set legal under
+        # the old pair is legal under this one, because before this
+        # sprint every row's `hour_type` is NULL and the key therefore
+        # reduces to exactly (work, person, date).
         constraints = [
             models.UniqueConstraint(
-                fields=["extra_work_request", "user", "date"],
-                name="uniq_ew_planned_hours_person_day",
-            ),
-            models.UniqueConstraint(
-                fields=["extra_work_request", "user"],
-                condition=models.Q(date__isnull=True),
-                name="uniq_ew_planned_hours_person_undated",
+                fields=["extra_work_request", "user", "date", "hour_type"],
+                name="uniq_ew_planned_hours_person_day_type",
+                nulls_distinct=False,
             ),
         ]
-        ordering = ["date", "id"]
+        ordering = ["date", "hour_type_id", "id"]
         indexes = [
             models.Index(fields=["extra_work_request"]),
             # The grid reads a whole job's plan ordered by day.

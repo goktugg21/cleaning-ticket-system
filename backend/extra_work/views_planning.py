@@ -389,8 +389,8 @@ def _planning_context(works: list) -> list[dict]:
     planned: dict[int, list[dict]] = {work_id: [] for work_id in ids}
     for row in (
         ExtraWorkPlannedHours.objects.filter(extra_work_request_id__in=ids)
-        .select_related("user")
-        .order_by("user__full_name", "user__email", "date")
+        .select_related("user", "hour_type")
+        .order_by("user__full_name", "user__email", "date", "hour_type_id")
     ):
         planned[row.extra_work_request_id].append(
             {
@@ -400,6 +400,13 @@ def _planning_context(works: list) -> list[dict]:
                 "user_role": row.user.role,
                 # W6-H — the day, or NULL for "day not decided".
                 "date": row.date,
+                # W7 — the kind of hour, or NULL for ordinary hours.
+                # Same shape the detail serializer emits, because the
+                # bulk table and the detail grid render the same row.
+                "hour_type": row.hour_type_id,
+                "hour_type_name": (
+                    row.hour_type.name if row.hour_type_id else None
+                ),
                 "hours": f"{row.hours:.2f}",
                 "is_assigned": row.user_id
                 in assigned[row.extra_work_request_id],

@@ -1995,6 +1995,14 @@ export interface ExtraWorkPlannedHoursRow {
    *  not set yet still plans hours. Render it as its own state, never
    *  as a blank cell that reads like a gap. */
   date: string | null;
+  /** W7 — WHICH KIND OF HOUR, from the `timesheets.HourType` catalog the
+   *  ACTUALS already use. NULL means ORDINARY hours: every row written
+   *  before W7 has it, and it is the right answer for an operator who
+   *  does not split the day. The name rides along so a grid can label
+   *  the row without a second request; it is null exactly when the id
+   *  is, and the CLIENT owns the wording for that case. */
+  hour_type: number | null;
+  hour_type_name: string | null;
   /** Decimal string, e.g. "4.00". Zero is legal and means "on the crew,
    *  no hours budgeted yet" — dropping the row to say so would lose the
    *  fact that they are on the job. */
@@ -2036,7 +2044,14 @@ export interface ExtraWorkPlanPayload {
   /** W6-H — one cell of the day grid. `date` omitted or null means
    *  "planned, day not decided", which is what every pre-W6-H client
    *  keeps sending and what the bulk table still sends. */
-  planned_hours?: { user: number; date?: string | null; hours: string }[];
+  planned_hours?: {
+    user: number;
+    date?: string | null;
+    /** W7 — omitted or null means ORDINARY hours, which is what every
+     *  pre-W7 client keeps sending. */
+    hour_type?: number | null;
+    hours: string;
+  }[];
   file_upload_required?: boolean;
   completion_notes_required?: boolean;
   /** Absent means START — plan and start are one action. Send `false`

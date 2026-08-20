@@ -50,20 +50,82 @@
  * A non-native overlay, conditionally mounted — the same split
  * `BulkAssignDialog` documents. CLAUDE.md's render-it-unconditionally
  * rule is about the native `<dialog>` element, which this is not.
+ *
+ * W7 — THE THREE THINGS THAT WERE WRONG WITH IT ON THE LIVE SITE
+ * --------------------------------------------------------------
+ * 5. **You could record a night shift and not plan one.**
+ *    `ExtraWorkPlannedHours` had no hour type while `TimeEntry` has had
+ *    one since it was written, so the hours panel could render
+ *    "Noah Bakker | Normale uren | Aug 10 | 3.00" for work already done
+ *    and the plan had no vocabulary for it. Each person now carries one
+ *    LINE PER KIND OF HOUR, from the same `timesheets.HourType` catalog
+ *    the actuals use — never a second catalog, or planned-vs-actual
+ *    becomes a join between two vocabularies.
+ *
+ * 6. **The grid scrolled sideways and took the useful part with it.**
+ *    Person and hour type slid out of view first, so an operator typing
+ *    into a cell three weeks along could not see whose row it was. Two
+ *    rules: the left columns are FROZEN (`position: sticky`, see
+ *    `.ew-plan-grid-scroll`), and the days are PAGED a week at a time
+ *    rather than laid end to end. Paging is display only — hours on a
+ *    day that is off screen stay in state, stay in every total and are
+ *    still submitted.
+ *
+ * 7. **The feature was invisible until you did something else first.**
+ *    With no window set there are no day columns, so the grid was one
+ *    blank column and a sentence UNDER a scrollbar explained why. The
+ *    owner could not find the feature at all. The window now comes
+ *    FIRST, before the budget and the grid, and the waiting state lives
+ *    INSIDE the grid where the eye already is — with the control that
+ *    fixes it. The sentence is gone.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { dayRange } from "../../lib/planGridDays";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
+  Users,
+  X,
+} from "lucide-react";
 
 import type {
   ExtraWorkAssignment,
   ExtraWorkPlanPayload,
   ExtraWorkRequestDetail,
 } from "../../api/types";
+import type { HourType } from "../../api/timesheets.types";
+import { listHourTypes } from "../../api/timesheets";
 import { Toggle } from "../Toggle";
 import { formatDate } from "../../lib/intl";
+
+/** W7 — how many day columns are on screen at once.
+ *
+ *  THE GRID USED TO SCROLL SIDEWAYS AND TAKE THE USEFUL PART WITH IT.
+ *  Person and hour type slid out of view first, so an operator typing
+ *  into a cell three weeks along could not see whose row it was. Two
+ *  rules fix that and this is the second: the left columns are frozen
+ *  (see `.ew-plan-grid-scroll` in index.css), and the day range is
+ *  PAGED rather than laid out end to end. Seven is a week, which is the
+ *  unit a work window is actually discussed in.
+ *
+ *  Paging is display only. Hours entered on a day that is not currently
+ *  on screen stay in state, stay in every total, and are still
+ *  submitted — the same rule that already applied to a day dropped out
+ *  of the window entirely. */
+const DAY_PAGE_SIZE = 7;
+
+/** One line of the grid: a person, and which kind of hour this line
+ *  budgets. `hourType` null is ORDINARY hours — the state every plan
+ *  written before W7 is in, and the right answer for an operator who
+ *  does not split the day. */
+interface CrewLine {
+  userId: number;
+  hourType: number | null;
+}
 
 /** Hours arithmetic, in one place, on strings that arrive as decimals.
  *  Returns a number for comparison only — every value that reaches the
@@ -118,17 +180,20 @@ export function PlanWorkDialog({
   const [notesTouched, setNotesTouched] = useState(false);
 
   // W6-H — THE GRID. Keyed `userId|YYYY-MM-DD`, with the empty string
-  // as the day for "planned, day not decided". One flat map rather than
+  // as the day for "planned, day not decided". W7 adds the hour type as
+  // a third segment, empty for ordinary hours. One flat map rather than
   // a nested one because every read here is a single cell and a flat
   // key makes an accidental whole-row overwrite unspellable.
-  const cellKey = (userId: number, day: string) => `${userId}|${day}`;
+  const cellKey = (userId: number, day: string, hourType: number | null) =>
+    `${userId}|${day}|${hourType ?? ""}`;
+  const lineKey = (line: CrewLine) => `${line.userId}|${line.hourType ?? ""}`;
 
   // Seeded from what is already planned, so reopening the dialog shows
   // the plan rather than a blank grid.
   const seeded = useMemo(() => {
     const map = new Map<string, string>();
     for (const row of ew.planned_hours ?? []) {
-      map.set(cellKey(row.user_id, row.date ?? ""), row.hours);
+      map.set(cellKey(row.user_id, row.date ?? "", row.hour_type), row.hours);
     }
     return map;
   }, [ew.planned_hours]);
@@ -139,11 +204,136 @@ export function PlanWorkDialog({
     return initial;
   });
 
+  // W7 — THE HOUR-TYPE CATALOG, read from the work's OWN company.
+  //
+  // Fetched here rather than passed in: this dialog is the only screen
+  // that plans hour types, and the page that mounts it is being rebuilt
+  // by another chat this sprint. `is_active` because an archived type is
+  // retired for NEW entries — the same contract the actuals have, and
+  // the same rule the server enforces on the write.
+  const [hourTypes, setHourTypes] = useState<HourType[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    listHourTypes({ company: ew.company, is_active: true })
+      .then((rows) => {
+        if (!cancelled) setHourTypes(rows);
+      })
+      .catch(() => {
+        // A catalog we could not read leaves the operator with ordinary
+        // hours, which is exactly what they had before W7. Never an
+        // error banner over a dialog whose main job still works.
+        if (!cancelled) setHourTypes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ew.company]);
+
+  const hourTypeName = (id: number | null) =>
+    id === null
+      ? t("plan.hour_type_ordinary")
+      : (hourTypes.find((h) => h.id === id)?.name ??
+        // Seeded from a row whose type has since been archived: name it
+        // from the plan rather than printing a bare id.
+        (ew.planned_hours ?? []).find((r) => r.hour_type === id)
+          ?.hour_type_name ??
+        t("plan.hour_type_unknown"));
+
+  // WHICH LINES EXIST. One per person by default (ordinary hours), plus
+  // any extra kind of hour already planned or added in this session.
+  // Derived once from the plan and then owned locally: adding a line is
+  // an edit, and re-deriving it from props would undo the operator's
+  // click on the next render.
+  const [extraLines, setExtraLines] = useState<CrewLine[]>(() => {
+    const seen = new Set<string>();
+    const out: CrewLine[] = [];
+    for (const row of ew.planned_hours ?? []) {
+      if (row.hour_type === null) continue;
+      const key = `${row.user_id}|${row.hour_type}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ userId: row.user_id, hourType: row.hour_type });
+    }
+    return out;
+  });
+
+  // EVERY LINE IN THE GRID, in render order: each assigned person, then
+  // their ordinary-hours line, then their extra kinds in the order the
+  // catalog lists them — so two people with the same kinds of hour read
+  // the same way down the grid.
+  //
+  // ONE memo, keyed by person, and it is the single source for the
+  // totals, the row spans and the submit. Deriving it three times would
+  // be three chances for the screen and the payload to disagree about
+  // which lines exist.
+  const linesByUser = useMemo(() => {
+    const map = new Map<number, CrewLine[]>();
+    for (const a of assignments) {
+      const extras = extraLines
+        .filter((line) => line.userId === a.user_id)
+        .sort((x, y) => {
+          const xi = hourTypes.findIndex((h) => h.id === x.hourType);
+          const yi = hourTypes.findIndex((h) => h.id === y.hourType);
+          return (xi < 0 ? 999 : xi) - (yi < 0 ? 999 : yi);
+        });
+      map.set(a.user_id, [{ userId: a.user_id, hourType: null }, ...extras]);
+    }
+    return map;
+  }, [assignments, extraLines, hourTypes]);
+
+  const linesFor = (userId: number): CrewLine[] =>
+    linesByUser.get(userId) ?? [{ userId, hourType: null }];
+
+  const addLine = (userId: number, hourType: number) =>
+    setExtraLines((prev) =>
+      prev.some((l) => l.userId === userId && l.hourType === hourType)
+        ? prev
+        : [...prev, { userId, hourType }],
+    );
+
+  // Removing a line clears its cells too. A line with no cells submits
+  // nothing, so leaving the values behind would resurrect them the next
+  // time the same kind of hour was added — a stale number nobody typed.
+  const removeLine = (userId: number, hourType: number) => {
+    setExtraLines((prev) =>
+      prev.filter((l) => !(l.userId === userId && l.hourType === hourType)),
+    );
+    setHours((prev) => {
+      const next = { ...prev };
+      const prefix = `${userId}|`;
+      const suffix = `|${hourType}`;
+      for (const key of Object.keys(next)) {
+        if (key.startsWith(prefix) && key.endsWith(suffix)) delete next[key];
+      }
+      return next;
+    });
+  };
+
   // THE COLUMNS ARE THE COMMITTED WINDOW the plan already stores. They
   // follow the two date fields above live, so moving the window
   // re-draws the grid without a save — which is the only way the two
   // controls can be understood as one decision.
   const days = useMemo(() => dayRange(start, end), [start, end]);
+
+  // W7 — THE VISIBLE WEEK. Display only; `days` above stays the whole
+  // window and is what every total and the submit read.
+  const [dayPage, setDayPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(days.length / DAY_PAGE_SIZE));
+  // Clamped rather than reset: shrinking the window while looking at
+  // the last page should land on the new last page, not throw the
+  // operator back to the first.
+  const safePage = Math.min(dayPage, pageCount - 1);
+  const visibleDays = days.slice(
+    safePage * DAY_PAGE_SIZE,
+    safePage * DAY_PAGE_SIZE + DAY_PAGE_SIZE,
+  );
+
+  // W7 fix 3 — the control the waiting state points at.
+  const startRef = useRef<HTMLInputElement | null>(null);
+  const focusWindow = () => {
+    startRef.current?.focus();
+    startRef.current?.scrollIntoView({ block: "center" });
+  };
 
   // Every cell in the grid, plus every UNDATED cell, plus any cell on a
   // day that is no longer in the window. That last group matters: hours
@@ -153,13 +343,17 @@ export function PlanWorkDialog({
   // system's §4.4 defect, one level down.
   const liveKeys = useMemo(() => {
     const keys = new Set<string>();
-    for (const a of assignments) {
-      keys.add(cellKey(a.user_id, ""));
-      for (const day of days) keys.add(cellKey(a.user_id, day));
+    for (const [userId, lines] of linesByUser) {
+      for (const line of lines) {
+        keys.add(`${userId}||${line.hourType ?? ""}`);
+        for (const day of days) {
+          keys.add(`${userId}|${day}|${line.hourType ?? ""}`);
+        }
+      }
     }
     for (const key of Object.keys(hours)) keys.add(key);
     return keys;
-  }, [assignments, days, hours]);
+  }, [linesByUser, days, hours]);
 
   const distributed = Array.from(liveKeys).reduce(
     (sum, key) => sum + toHours(hours[key] ?? ""),
@@ -174,11 +368,17 @@ export function PlanWorkDialog({
     return sum;
   };
 
-  const dayTotal = (day: string) =>
-    assignments.reduce(
-      (sum, a) => sum + toHours(hours[cellKey(a.user_id, day)] ?? ""),
-      0,
-    );
+  // Across every LINE on that day, not one cell per person: a day with
+  // eight normal and four night hours totals twelve.
+  const dayTotal = (day: string) => {
+    let sum = 0;
+    for (const [userId, lines] of linesByUser) {
+      for (const line of lines) {
+        sum += toHours(hours[cellKey(userId, day, line.hourType)] ?? "");
+      }
+    }
+    return sum;
+  };
   const budgetHours = toHours(budget);
   // A budget of zero is a real budget; only a BLANK one means "no budget
   // set", which is nothing to overrun. Same reading as the server's
@@ -206,22 +406,49 @@ export function PlanWorkDialog({
       // "on the job, no hours budgeted yet" is a state the plan has
       // always been able to express and losing it would drop them off
       // the screen entirely.
-      const cells: { user: number; date?: string | null; hours: string }[] = [];
-      for (const a of assignments) {
+      const cells: {
+        user: number;
+        date?: string | null;
+        hour_type?: number | null;
+        hours: string;
+      }[] = [];
+      for (const [userId, lines] of linesByUser) {
         let any = false;
-        for (const key of liveKeys) {
-          if (!key.startsWith(`${a.user_id}|`)) continue;
-          const raw = (hours[key] ?? "").trim();
-          if (raw === "") continue;
-          const day = key.slice(key.indexOf("|") + 1);
-          cells.push({
-            user: a.user_id,
-            date: day === "" ? null : day,
-            hours: raw.replace(",", "."),
-          });
-          any = true;
+        for (const line of lines) {
+          // Every day of the window PLUS the undated cell PLUS any day
+          // this person already has hours on that has since dropped out
+          // of the window — the last group is why this walks `liveKeys`
+          // rather than `days`. Hours on a dropped day still exist
+          // server-side and still count; omitting them here would
+          // silently delete them.
+          for (const key of liveKeys) {
+            const [rawUser, rawDay, rawType] = key.split("|");
+            if (Number(rawUser) !== userId) continue;
+            if ((rawType === "" ? null : Number(rawType)) !== line.hourType) {
+              continue;
+            }
+            const raw = (hours[key] ?? "").trim();
+            if (raw === "") continue;
+            cells.push({
+              user: userId,
+              date: rawDay === "" ? null : rawDay,
+              // Omitted-or-null both mean ORDINARY hours server-side, so
+              // the ordinary line sends null and reads identically to
+              // every pre-W7 payload.
+              hour_type: line.hourType,
+              hours: raw.replace(",", "."),
+            });
+            any = true;
+          }
         }
-        if (!any) cells.push({ user: a.user_id, date: null, hours: "0" });
+        // The person-level exception is deliberate and unchanged:
+        // somebody on the crew with nothing anywhere still gets one
+        // undated ordinary zero row, because "on the job, no hours
+        // budgeted yet" is a state the plan has always expressed and
+        // losing it would drop them off the screen entirely.
+        if (!any) {
+          cells.push({ user: userId, date: null, hour_type: null, hours: "0" });
+        }
       }
       payload.planned_hours = cells;
     }
@@ -256,28 +483,21 @@ export function PlanWorkDialog({
           </div>
         )}
 
-        <div className="ew-plan-section">
-          <label className="field ew-plan-budget">
-            <span className="muted small">{t("plan.budget_hours_label")}</span>
-            <input
-              type="number"
-              min="0"
-              step="0.25"
-              inputMode="decimal"
-              className="field-input"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-              data-testid="extra-work-plan-budget"
-            />
-            <span className="muted small">{t("plan.budget_hours_hint")}</span>
-          </label>
-        </div>
+        {/* W7 fix 3 — THE WINDOW COMES FIRST.
+            It used to sit under the budget, and the grid below it drew
+            no day columns until it was set — so the dialog opened on a
+            budget box and one blank column, with a sentence beneath a
+            scrollbar explaining why. The owner never found the feature.
+            The decision that unlocks the rest of the screen is now the
+            first thing on it, numbered, and the grid says the same
+            thing again in its own body rather than in a footnote.
 
-        {/* OUR dates, with the customer's shown beside them read-only.
+            OUR dates, with the customer's shown beside them read-only.
             Two pairs of dates on one screen is exactly the confusion the
             labels have to prevent. */}
         <div className="ew-plan-section">
           <div className="ew-plan-section-title">
+            <span className="ew-plan-step">1</span>
             {t("plan.our_window_title")}
           </div>
           <p className="muted small ew-plan-section-hint">
@@ -287,6 +507,7 @@ export function PlanWorkDialog({
             <label className="field">
               <span className="muted small">{t("plan.our_start_label")}</span>
               <input
+                ref={startRef}
                 type="date"
                 className="field-input"
                 value={start}
@@ -330,7 +551,27 @@ export function PlanWorkDialog({
         </div>
 
         <div className="ew-plan-section">
-          <div className="ew-plan-section-title">{t("plan.hours_title")}</div>
+          <label className="field ew-plan-budget">
+            <span className="muted small">{t("plan.budget_hours_label")}</span>
+            <input
+              type="number"
+              min="0"
+              step="0.25"
+              inputMode="decimal"
+              className="field-input"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              data-testid="extra-work-plan-budget"
+            />
+            <span className="muted small">{t("plan.budget_hours_hint")}</span>
+          </label>
+        </div>
+
+        <div className="ew-plan-section">
+          <div className="ew-plan-section-title">
+            <span className="ew-plan-step">2</span>
+            {t("plan.hours_title")}
+          </div>
           {assignmentsLoading ? (
             <div className="loading-bar">
               <div className="loading-bar-fill" />
@@ -363,17 +604,59 @@ export function PlanWorkDialog({
                   hours" before anyone has decided which day, and that
                   was the ONLY thing this dialog could say before W6-H.
                   Dropping it would break every existing plan. */}
-              <div className="table-wrap">
+              {/* The pager. Only when there is more than one week to
+                  page through — a three-day job gets no controls it
+                  does not need. */}
+              {pageCount > 1 && (
+                <div className="ew-plan-day-pager">
+                  <span
+                    className="ew-plan-day-pager-label"
+                    data-testid="extra-work-plan-day-page-label"
+                  >
+                    {t("plan.day_page_label", {
+                      from: safePage * DAY_PAGE_SIZE + 1,
+                      to: safePage * DAY_PAGE_SIZE + visibleDays.length,
+                      total: days.length,
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setDayPage(Math.max(0, safePage - 1))}
+                    disabled={safePage === 0}
+                    aria-label={t("plan.day_page_prev")}
+                    data-testid="extra-work-plan-day-prev"
+                  >
+                    <ChevronLeft size={14} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() =>
+                      setDayPage(Math.min(pageCount - 1, safePage + 1))
+                    }
+                    disabled={safePage >= pageCount - 1}
+                    aria-label={t("plan.day_page_next")}
+                    data-testid="extra-work-plan-day-next"
+                  >
+                    <ChevronRight size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+              <div className="ew-plan-grid-scroll">
                 <table className="data-table ew-plan-grid">
                   <thead>
                     <tr>
                       <th className="ew-plan-grid-name">
                         {t("plan.grid_person")}
                       </th>
+                      <th className="ew-plan-grid-type">
+                        {t("plan.grid_hour_type")}
+                      </th>
                       <th className="ew-plan-grid-cell">
                         {t("plan.grid_no_day")}
                       </th>
-                      {days.map((day) => (
+                      {visibleDays.map((day) => (
                         <th key={day} className="ew-plan-grid-cell">
                           {formatDayHeader(day)}
                         </th>
@@ -384,53 +667,180 @@ export function PlanWorkDialog({
                     </tr>
                   </thead>
                   <tbody>
-                    {assignments.map((a) => (
-                      <tr
-                        key={a.user_id}
-                        data-testid="extra-work-plan-crew-row"
-                        data-user-id={a.user_id}
-                      >
-                        <td className="ew-plan-grid-name">
-                          {a.user_full_name || a.user_email}
-                        </td>
-                        {["", ...days].map((day) => (
-                          <td key={day || "none"} className="ew-plan-grid-cell">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.25"
-                              inputMode="decimal"
-                              className="field-input ew-plan-crew-hours"
-                              value={hours[cellKey(a.user_id, day)] ?? ""}
-                              onChange={(e) =>
-                                setHours((prev) => ({
-                                  ...prev,
-                                  [cellKey(a.user_id, day)]: e.target.value,
-                                }))
-                              }
-                              aria-label={`${t("plan.hours_for", {
-                                name: a.user_full_name || a.user_email,
-                              })} ${day || t("plan.grid_no_day")}`}
-                              data-testid="extra-work-plan-crew-hours"
-                              data-day={day}
-                            />
+                    {assignments.map((a) => {
+                      const lines = linesFor(a.user_id);
+                      const used = new Set(
+                        lines
+                          .map((l) => l.hourType)
+                          .filter((id): id is number => id !== null),
+                      );
+                      const addable = hourTypes.filter(
+                        (h) => !used.has(h.id),
+                      );
+                      return lines.map((line, index) => (
+                        <tr
+                          key={lineKey(line)}
+                          data-testid="extra-work-plan-crew-row"
+                          data-user-id={a.user_id}
+                          data-hour-type={line.hourType ?? ""}
+                        >
+                          {/* The name is written ONCE and spans the
+                              person's lines — the reference system's
+                              shape, and the only way a crew of three
+                              with a night shift each reads as three
+                              blocks rather than six unrelated rows. */}
+                          {index === 0 && (
+                            <td
+                              className="ew-plan-grid-name"
+                              rowSpan={lines.length}
+                            >
+                              <div className="ew-plan-grid-person">
+                                <span>
+                                  {a.user_full_name || a.user_email}
+                                </span>
+                                {addable.length > 0 && (
+                                  <select
+                                    className="ew-plan-add-type"
+                                    value=""
+                                    onChange={(e) => {
+                                      if (e.target.value === "") return;
+                                      addLine(
+                                        a.user_id,
+                                        Number(e.target.value),
+                                      );
+                                    }}
+                                    aria-label={t("plan.add_hour_type", {
+                                      name:
+                                        a.user_full_name || a.user_email,
+                                    })}
+                                    data-testid="extra-work-plan-add-hour-type"
+                                  >
+                                    <option value="">
+                                      {t("plan.add_hour_type_placeholder")}
+                                    </option>
+                                    {addable.map((h) => (
+                                      <option key={h.id} value={h.id}>
+                                        {h.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                          <td className="ew-plan-grid-type">
+                            <div className="ew-plan-type-line">
+                              <span>{hourTypeName(line.hourType)}</span>
+                              {/* Ordinary hours cannot be removed: it is
+                                  the line every plan has and the one a
+                                  person with no split falls back to. */}
+                              {line.hourType !== null && (
+                                <button
+                                  type="button"
+                                  className="ew-plan-type-remove"
+                                  onClick={() =>
+                                    removeLine(a.user_id, line.hourType!)
+                                  }
+                                  aria-label={t("plan.remove_hour_type", {
+                                    type: hourTypeName(line.hourType),
+                                  })}
+                                  data-testid="extra-work-plan-remove-hour-type"
+                                >
+                                  <X size={13} aria-hidden="true" />
+                                </button>
+                              )}
+                            </div>
                           </td>
-                        ))}
-                        <td className="ew-plan-grid-cell">
-                          <strong data-testid="extra-work-plan-row-total">
-                            {personTotal(a.user_id).toFixed(2)}
-                          </strong>
+                          {["", ...visibleDays].map((day) => (
+                            <td
+                              key={day || "none"}
+                              className="ew-plan-grid-cell"
+                            >
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.25"
+                                inputMode="decimal"
+                                className="field-input ew-plan-crew-hours"
+                                value={
+                                  hours[
+                                    cellKey(a.user_id, day, line.hourType)
+                                  ] ?? ""
+                                }
+                                onChange={(e) =>
+                                  setHours((prev) => ({
+                                    ...prev,
+                                    [cellKey(
+                                      a.user_id,
+                                      day,
+                                      line.hourType,
+                                    )]: e.target.value,
+                                  }))
+                                }
+                                aria-label={`${t("plan.hours_for", {
+                                  name: a.user_full_name || a.user_email,
+                                })} ${hourTypeName(line.hourType)} ${
+                                  day || t("plan.grid_no_day")
+                                }`}
+                                data-testid="extra-work-plan-crew-hours"
+                                data-day={day}
+                                data-hour-type={line.hourType ?? ""}
+                              />
+                            </td>
+                          ))}
+                          {index === 0 && (
+                            <td
+                              className="ew-plan-grid-cell"
+                              rowSpan={lines.length}
+                            >
+                              <strong data-testid="extra-work-plan-row-total">
+                                {personTotal(a.user_id).toFixed(2)}
+                              </strong>
+                            </td>
+                          )}
+                        </tr>
+                      ));
+                    })}
+                    {/* W7 fix 3 — THE WAITING STATE, IN THE GRID.
+                        With no window there are no day columns, and the
+                        old dialog explained that in a sentence below a
+                        scrollbar. It says it here instead, in the space
+                        the day columns will occupy, with the control
+                        that fills them. */}
+                    {days.length === 0 && (
+                      <tr data-testid="extra-work-plan-no-window">
+                        <td
+                          className="ew-plan-grid-waiting"
+                          colSpan={4}
+                        >
+                          <div className="ew-plan-grid-waiting-title">
+                            {t("plan.grid_waiting_title")}
+                          </div>
+                          <div className="muted small">
+                            {t("plan.grid_waiting_hint")}
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ marginTop: 8 }}
+                            onClick={focusWindow}
+                            data-testid="extra-work-plan-goto-window"
+                          >
+                            <CalendarPlus size={14} aria-hidden="true" />
+                            {t("plan.grid_waiting_action")}
+                          </button>
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                   <tfoot>
                     <tr>
                       <td className="ew-plan-grid-name">
                         {t("plan.grid_day_total")}
                       </td>
+                      <td className="ew-plan-grid-type" />
                       <td className="ew-plan-grid-cell" />
-                      {days.map((day) => (
+                      {visibleDays.map((day) => (
                         <td key={day} className="ew-plan-grid-cell">
                           {dayTotal(day).toFixed(2)}
                         </td>
@@ -444,14 +854,6 @@ export function PlanWorkDialog({
                   </tfoot>
                 </table>
               </div>
-              {days.length === 0 && (
-                <p
-                  className="muted small"
-                  data-testid="extra-work-plan-no-window"
-                >
-                  {t("plan.grid_no_window")}
-                </p>
-              )}
               <div className="ew-plan-total" data-testid="extra-work-plan-total-line">
                 <span>{t("plan.distributed_label")}</span>
                 <strong>

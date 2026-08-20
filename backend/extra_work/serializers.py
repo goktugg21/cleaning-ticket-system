@@ -709,7 +709,7 @@ def _serialize_planned_hours(obj, viewer=None):
     operators, and adding a second exposure here would be a second place
     to keep the Sprint 154 §K privacy floor in step.
     """
-    rows = list(obj.planned_hours.select_related("user").all())
+    rows = list(obj.planned_hours.select_related("user", "hour_type").all())
     if not rows:
         return []
     from .models import ExtraWorkAssignment
@@ -747,6 +747,15 @@ def _serialize_planned_hours(obj, viewer=None):
             # its own state on screen, never as a blank that reads like
             # a missing value.
             "date": row.date,
+            # W7 — NULL means ORDINARY hours, and the NAME comes with the
+            # id so the grid can label a row without a second request
+            # and without inventing a word for the null case (the client
+            # owns that wording, the way it owns "CONCEPT" for an unsent
+            # invoice number).
+            "hour_type": row.hour_type_id,
+            "hour_type_name": (
+                row.hour_type.name if row.hour_type_id else None
+            ),
             "hours": f"{row.hours:.2f}",
             "is_assigned": row.user_id in assigned,
             "set_at": row.set_at,
@@ -2477,6 +2486,22 @@ class ExtraWorkPlannedHoursRowSerializer(serializers.Serializer):
     #: existed, which is what keeps the bulk table and every older
     #: client running unchanged.
     date = serializers.DateField(required=False, allow_null=True)
+    #: W7 — WHICH KIND OF HOUR. Optional and nullable, and both absences
+    #: mean the same thing: ORDINARY hours. A payload that never mentions
+    #: an hour type behaves exactly as it did before the column existed,
+    #: which is what keeps the bulk table and every older client running
+    #: unchanged.
+    #:
+    #: A bare id, validated in `planning.resolve_planned_hours` against
+    #: the catalog of the work's OWN company rather than by a
+    #: `PrimaryKeyRelatedField` over every HourType there is. A global
+    #: queryset here would 400-with-a-different-message for another
+    #: tenant's id than for a nonexistent one, which is an existence
+    #: oracle across companies — the same reason the crew check refuses
+    #: an unassigned person and an unknown person with one body.
+    hour_type = serializers.IntegerField(
+        min_value=1, required=False, allow_null=True
+    )
     hours = serializers.DecimalField(
         max_digits=8, decimal_places=2, min_value=0
     )

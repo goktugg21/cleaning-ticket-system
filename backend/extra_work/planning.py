@@ -129,6 +129,15 @@ _PLAN_DATE_FIELDS = ("provider_planned_date", "provider_planned_end_date")
 ERR_NOTHING_TO_PLAN = "nothing_to_plan"
 ERR_PLANNED_HOURS_INVALID = "planned_hours_invalid"
 ERR_PLANNED_HOURS_DUPLICATE = "planned_hours_duplicate_user"
+#: W7 — a named hour type that is not this company's, or is archived, or
+#: does not exist. ONE code and ONE message for all three, for the reason
+#: `PLANNED_HOURS_INVALID_MESSAGE` gives about people: a distinguishable
+#: answer would let a caller enumerate another tenant's catalog by id.
+ERR_PLANNED_HOURS_HOUR_TYPE = "planned_hours_hour_type_invalid"
+PLANNED_HOURS_HOUR_TYPE_MESSAGE = (
+    "One or more of the named hour types could not be resolved, or are "
+    "not available on this work's company."
+)
 
 #: ONE message for every way a named person can fail to resolve — not
 #: assigned to this work, not visible to this caller, or not a real
@@ -304,16 +313,22 @@ def resolve_planned_hours(
     oracle and why the single-work path leaves it off.
     """
     context = extra_work if name_the_work else None
-    resolved: list[tuple[int, object, Decimal]] = []
-    seen: set[tuple[int, object]] = set()
+    resolved: list[tuple[int, object, object, Decimal]] = []
+    seen: set[tuple[int, object, object]] = set()
     seen_users: set[int] = set()
+    seen_hour_types: set[int] = set()
     for row in rows:
         user_id = row["user"]
-        # W6-H — the grain is (person, DAY). The same person may appear
-        # once per day; twice on the SAME day is still the payload
-        # mistake the duplicate check was written for.
-        key = (user_id, row.get("date"))
+        # W6-H — the grain is (person, DAY). W7 adds the HOUR TYPE, so
+        # the same person may appear once per day PER KIND OF HOUR:
+        # eight normal hours and four night hours on one Tuesday is two
+        # legitimate rows. Twice with the same triple is still the
+        # payload mistake the duplicate check was written for.
+        hour_type_id = row.get("hour_type")
+        key = (user_id, row.get("date"), hour_type_id)
         seen_users.add(user_id)
+        if hour_type_id is not None:
+            seen_hour_types.add(hour_type_id)
         if key in seen:
             # About the PAYLOAD, not about any id — so it says what is
             # wrong without becoming an existence oracle.
@@ -337,7 +352,9 @@ def resolve_planned_hours(
                 body["user"] = user_id
             raise PlanRejected(body)
         seen.add(key)
-        resolved.append((user_id, row.get("date"), _q2(row["hours"])))
+        resolved.append(
+            (user_id, row.get("date"), hour_type_id, _q2(row["hours"]))
+        )
 
     if not resolved:
         return resolved
@@ -355,9 +372,40 @@ def resolve_planned_hours(
         # set — two identical requests must produce two identical
         # bodies, or the equality property above is not a property.
         first_bad = next(
-            (uid for uid, _, _ in resolved if uid not in assigned), None
+            (uid for uid, _, _, _ in resolved if uid not in assigned), None
         )
         _reject_hours(context, first_bad)
+
+    # W7 — THE HOUR TYPES MUST BE THIS COMPANY'S, AND LIVE.
+    #
+    # Scoped to `extra_work.company_id` rather than to the caller: the
+    # row being written belongs to the WORK, so the catalog that governs
+    # it is the work's. A SUPER_ADMIN who can see every company's hour
+    # types still cannot plan another company's type onto this job.
+    #
+    # `is_active=True` because an archived type is retired for NEW
+    # entries and a plan is a new entry — exactly the contract
+    # `HourType`'s docstring states for the actuals. Rows already
+    # carrying an archived type keep it; this only refuses fresh ones.
+    if seen_hour_types:
+        from timesheets.models import HourType
+
+        live = set(
+            HourType.objects.filter(
+                id__in=seen_hour_types,
+                company_id=extra_work.company_id,
+                is_active=True,
+            ).values_list("id", flat=True)
+        )
+        if live != seen_hour_types:
+            body = {
+                "detail": PLANNED_HOURS_HOUR_TYPE_MESSAGE,
+                "code": ERR_PLANNED_HOURS_HOUR_TYPE,
+            }
+            if context is not None:
+                body["extra_work"] = context.id
+                body["extra_work_title"] = context.title
+            raise PlanRejected(body)
     return resolved
 
 
@@ -371,34 +419,42 @@ def _write_planned_hours(extra_work, resolved, *, actor) -> str:
     operator who clears a cell in the day grid gets the removal they
     asked for rather than a stale row nobody can see how to delete.
 
-    W6-H — THE KEY IS (person, DAY). A person with 8 hours on Monday and
-    6 on Tuesday is two rows, and a person with an undated total is one
-    row keyed `(person, None)`. That means submitting a dated grid for
-    somebody who previously had one undated total REPLACES the total
-    with the days, which is the intended reading: the operator has just
-    decided the days.
+    W6-H — THE KEY IS (person, DAY). W7 — AND HOUR TYPE. A person with 8
+    normal hours on Monday and 4 night hours on the same Monday is two
+    rows; a person with an undated total is one row keyed
+    `(person, None, None)`. Submitting a dated grid for somebody who
+    previously had one undated total REPLACES the total with the days,
+    which is the intended reading: the operator has just decided the
+    days. The same applies to hour types — splitting a day into normal
+    and night replaces the unqualified row, because that is what the
+    operator just said the day is made of.
 
     Instance `.delete()` and `objects.update_or_create()` per row, never
     a queryset `.update()`: the bulk paths in the reference system fire
     no model events at all, which is why a work can move there leaving
     no trace of who moved it.
     """
-    wanted = {(user_id, on_date): hours for user_id, on_date, hours in resolved}
+    wanted = {
+        (user_id, on_date, hour_type_id): hours
+        for user_id, on_date, hour_type_id, hours in resolved
+    }
     existing = {
-        (row.user_id, row.date): row for row in extra_work.planned_hours.all()
+        (row.user_id, row.date, row.hour_type_id): row
+        for row in extra_work.planned_hours.all()
     }
 
     for key, row in existing.items():
         if key not in wanted:
             row.delete()
 
-    for (user_id, on_date), hours in wanted.items():
-        row = existing.get((user_id, on_date))
+    for (user_id, on_date, hour_type_id), hours in wanted.items():
+        row = existing.get((user_id, on_date, hour_type_id))
         if row is None:
             ExtraWorkPlannedHours.objects.create(
                 extra_work_request=extra_work,
                 user_id=user_id,
                 date=on_date,
+                hour_type_id=hour_type_id,
                 hours=hours,
                 set_by=actor,
             )
@@ -409,9 +465,9 @@ def _write_planned_hours(extra_work, resolved, *, actor) -> str:
 
     if not resolved:
         return "hours distribution cleared"
-    total = sum((hours for _, _, hours in resolved), Decimal("0.00"))
-    people = len({user_id for user_id, _, _ in resolved})
-    days = {on_date for _, on_date, _ in resolved if on_date is not None}
+    total = sum((hours for _, _, _, hours in resolved), Decimal("0.00"))
+    people = len({user_id for user_id, _, _, _ in resolved})
+    days = {on_date for _, on_date, _, _ in resolved if on_date is not None}
     fragment = (
         f"hours for {people} "
         f"{'person' if people == 1 else 'people'} ({total:.2f}h)"
