@@ -47,6 +47,7 @@ import type {
   SlaCompanyThresholds,
   SlaThresholdRow,
 } from "../../api/types";
+import { useAuth } from "../../auth/AuthContext";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
 import { formatDate } from "../../lib/intl";
@@ -94,6 +95,35 @@ const GROUPS: { key: string; kind: "warning" | "timing"; fields: string[] }[] = 
   { key: "cooldown", kind: "timing", fields: ["cooldown_hours"] },
 ];
 
+/**
+ * W8 §1 — WHO EACH NUMBER SENDS A MESSAGE TO.
+ *
+ * The owner read this page and asked: "What exactly does 'Nobody has
+ * started' refer to? Which work? Which ticket? Which SLA? Which
+ * company?" All four answers existed on the page and none of them was
+ * attached to the number that causes them — the subject was in a
+ * paragraph under the heading, and the recipient was in a third line
+ * under both inputs, phrased as a pair ("the assigned staff, then the
+ * responsible manager") that the reader had to zip together with the
+ * two fields themselves.
+ *
+ * So the recipient moves ONTO the field. Each threshold now renders as
+ * one readable line — warn after N, and this is who hears about it —
+ * and the paragraph and the shared "Goes to" line are deleted rather
+ * than shortened. A person reading one line knows what happens and to
+ * whom; that is the whole test.
+ */
+const FIELD_RECIPIENT: Record<string, string> = {
+  not_started_business_hours: "not_started_business_hours",
+  not_started_escalate_business_hours:
+    "not_started_escalate_business_hours",
+  manager_review_business_hours: "manager_review_business_hours",
+  manager_review_escalate_business_hours:
+    "manager_review_escalate_business_hours",
+  approval_cutoff_days: "approval_cutoff_days",
+  approval_cutoff_escalate_days: "approval_cutoff_escalate_days",
+};
+
 /** How many warnings there are, for the "1 of 3" marker. Counted from
  *  GROUPS, never typed as a literal three. */
 const WARNING_COUNT = GROUPS.filter((g) => g.kind === "warning").length;
@@ -118,7 +148,16 @@ function draftFrom(company: SlaCompanyThresholds | null): Record<string, string>
 
 export function SlaWarningsAdminPage() {
   const { t } = useTranslation("common");
+  const { me } = useAuth();
   const { push: pushToast } = useToast();
+  // A STABLE PRIMITIVE, not a ref and not the array itself. The load
+  // below needs the viewer's companies to choose which one to open on,
+  // and it must not re-run on every render: an array literal changes
+  // identity each time, and reading a ref during render is its own
+  // violation. Joining the ids gives the effect a dependency that
+  // changes only when the ids genuinely do — which is effectively never
+  // inside one session, so the load still happens once.
+  const ownCompanyKey = (me?.company_ids ?? []).join(",");
   const [companies, setCompanies] = useState<SlaCompanyThresholds[]>([]);
   const [window_, setWindow] = useState<SlaBusinessWindow | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -139,7 +178,23 @@ export function SlaWarningsAdminPage() {
         if (cancelled) return;
         setCompanies(data.results);
         setWindow(data.business_window);
-        const first = data.results[0] ?? null;
+        // W8 §2 — OPEN ON YOUR OWN COMPANY, not on whichever row the
+        // server happened to return first.
+        //
+        // The owner reported three times that "the defaults differ per
+        // company". They do not: every field of every company on this
+        // deployment resolves to the same platform number, checked
+        // field by field. What differs is WHICH COMPANY the page opens
+        // on — `results[0]` is the server's ordering, so a SUPER_ADMIN
+        // landed on an unrelated tenant, and flipping the picker while
+        // comparing remembered numbers reads exactly like per-company
+        // defaults. Landing on your own company removes the illusion at
+        // its source instead of explaining it away.
+        const ownIds = ownCompanyKey === "" ? [] : ownCompanyKey.split(",");
+        const own = data.results.find((row) =>
+          ownIds.includes(String(row.company)),
+        );
+        const first = own ?? data.results[0] ?? null;
         setSelectedId(first ? first.company : null);
         setDraft(draftFrom(first));
       })
@@ -152,7 +207,7 @@ export function SlaWarningsAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ownCompanyKey]);
 
   const selected = useMemo(
     () => companies.find((c) => c.company === selectedId) ?? null,
@@ -214,11 +269,30 @@ export function SlaWarningsAdminPage() {
     setError("");
     try {
       const patch: Record<string, number | null> = {};
+      let anySet = false;
       for (const row of selected.thresholds) {
         const raw = (draft[row.field] ?? "").trim();
         patch[row.field] = raw === "" ? null : Number(raw);
+        if (raw !== "") anySet = true;
       }
-      applyResult(await saveSlaWarningThresholds(selected.company, patch));
+      // W8 §2 — SAVING AN ALL-BLANK FORM IS "BACK TO DEFAULTS", AND IT
+      // MUST NOT LEAVE A ROW BEHIND.
+      //
+      // Pressing Save on an untouched page used to PUT seven nulls,
+      // which creates a `SlaWarningThreshold` row storing nothing. One
+      // exists on crmtest today for exactly that reason. It changes no
+      // number — `is_customized` correctly ignores an all-null row — but
+      // it is a record of a decision nobody made, it cannot be reached
+      // by "Back to defaults" (that button is disabled precisely because
+      // the row is not a customisation), and it is the sort of ghost
+      // that makes an operator distrust the screen. An empty form is a
+      // request to use the defaults, so it goes to the endpoint that
+      // means that.
+      applyResult(
+        anySet
+          ? await saveSlaWarningThresholds(selected.company, patch)
+          : await resetSlaWarningThresholds(selected.company),
+      );
       pushToast({
         variant: "success",
         title: t("sla_warnings.saved"),
@@ -248,7 +322,17 @@ export function SlaWarningsAdminPage() {
     <div data-testid="sla-warnings-page">
       <PageHeader
         eyebrow={t("sla_warnings.eyebrow")}
-        title={t("sla_warnings.title")}
+        /* W8 §2 — WHICH COMPANY, in the title. The owner asked "which
+           company?" of a page whose answer was a dropdown halfway down
+           it. A SUPER_ADMIN has no home company, so the picker still
+           decides; the heading now says out loud which one it picked. */
+        title={
+          selected
+            ? t("sla_warnings.title_for_company", {
+                company: selected.company_name,
+              })
+            : t("sla_warnings.title")
+        }
         subtitle={t("sla_warnings.subtitle")}
         actions={
           selected ? (
@@ -352,6 +436,12 @@ export function SlaWarningsAdminPage() {
                   </span>
                 )}
                 <div>
+                  {/* W8 §1 — the title NAMES THE SUBJECT. "Nobody has
+                      started" named nothing an operator could point at,
+                      which is exactly what the owner asked about. The
+                      explanatory paragraph that used to sit under it is
+                      deleted, not shortened: the subject belongs in the
+                      heading and the recipient belongs on the field. */}
                   <h3 className="sla-warning-title">
                     {t(`sla_warnings.group.${group.key}.title`)}
                     {group.kind === "warning" && (
@@ -363,9 +453,6 @@ export function SlaWarningsAdminPage() {
                       </span>
                     )}
                   </h3>
-                  <p className="muted small sla-warning-what">
-                    {t(`sla_warnings.group.${group.key}.what`)}
-                  </p>
                 </div>
               </div>
               <div className="sla-warning-fields">
@@ -420,21 +507,25 @@ export function SlaWarningsAdminPage() {
                           ? explain(row, shown)
                           : t("sla_warnings.unit_invalid")}
                       </span>
+                      {/* WHO HEARS ABOUT IT, on the field that causes
+                          it. One line per threshold, so the first and
+                          the escalation each say their own recipient
+                          instead of sharing a sentence the reader had
+                          to split in two. */}
+                      {FIELD_RECIPIENT[field] && (
+                        <span
+                          className="sla-field-to"
+                          data-testid={`sla-warnings-to-${field}`}
+                        >
+                          {t("sla_warnings.goes_to_inline", {
+                            who: t(`sla_warnings.to.${field}`),
+                          })}
+                        </span>
+                      )}
                     </label>
                   );
                 })}
               </div>
-              {group.kind === "warning" && (
-                /* Who receives it, as a labelled fact rather than the
-                   last clause of a paragraph. It is the question an
-                   operator actually has about a warning. */
-                <p className="sla-warning-who">
-                  <span className="sla-who-label">
-                    {t("sla_warnings.who_label")}
-                  </span>
-                  {t(`sla_warnings.group.${group.key}.who`)}
-                </p>
-              )}
             </div>
           ))}
         </>

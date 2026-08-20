@@ -12616,7 +12616,6 @@ a.wp-card-title:hover { text-decoration: underline; }
   text-transform: uppercase;
   color: var(--text-muted);
 }
-.sla-warning-what { margin: 0; }
 .sla-warning-fields {
   display: flex;
   flex-wrap: wrap;
@@ -12649,21 +12648,44 @@ a.wp-card-title:hover { text-decoration: underline; }
   border-color: rgba(11, 107, 66, 0.25);
   color: var(--green);
 }
-.sla-warning-who {
-  margin: 14px 0 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-soft);
-  font-size: 12px;
-  color: var(--text);
+/* W8 §3 — the Hourly rates tab's headline state. A COUNT, not a
+   paragraph: how many people have a cost per hour and how many do not.
+   Sits where the explanatory note used to, and unlike the note it moves
+   when somebody does the thing the tab is for. */
+.labour-rates-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--green);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
 }
-.sla-who-label {
-  font-family: var(--f-head);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-right: 8px;
+/* The worked example under the new-rate form. Recessed, because it is a
+   consequence of what you just typed rather than a field you fill. */
+.labour-rates-preview {
+  margin: 4px 0 12px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--green-faint);
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* W8 §1 — WHO HEARS ABOUT IT, on the field that causes it.
+   Replaces `.sla-warning-who`, a shared line under BOTH inputs that
+   named two recipients in one sentence and left the reader to work out
+   which belonged to which number. Attached to the field, it is a fact
+   about that threshold and needs no reading order. */
+.sla-field-to {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
 }
 
 /* ===================================================================

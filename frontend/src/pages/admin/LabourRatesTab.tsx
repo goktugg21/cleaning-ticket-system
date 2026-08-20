@@ -16,6 +16,7 @@ import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
+import { formatMoney } from "../../lib/intl";
 
 interface LabourRatesTabProps {
   /** True when a SUPER_ADMIN must disambiguate (2+ provider companies). */
@@ -39,6 +40,11 @@ const EMPTY_FORM: RateFormState = {
   valid_from: "",
   note: "",
 };
+
+/** The round number of hours the form's worked example multiplies by.
+ *  Ten, because it is the figure a reader can divide back out in their
+ *  head to check the rate — which is the whole point of showing it. */
+const PREVIEW_HOURS = 10;
 
 /** Today as an ISO date, for the "what is the rate right now" column. */
 function todayIso(): string {
@@ -189,6 +195,23 @@ export function LabourRatesTab({
   const rowsFor = (employeeId: number) =>
     rates.filter((row) => row.employee === employeeId);
 
+  /** How many of this company's people have a cost per hour TODAY.
+   *  The one number this tab exists to move. */
+  const withRateCount = employees.filter(
+    (person) => rateInForce(rowsFor(person.id), today) !== undefined,
+  ).length;
+
+  /** The worked example under the form: what PREVIEW_HOURS hours of this
+   *  person's time will report as. `null` until there is a usable rate
+   *  to multiply, so an untouched form shows nothing. */
+  const previewRate = Number.parseFloat(
+    (form.hourly_rate ?? "").replace(",", "."),
+  );
+  const previewCost =
+    Number.isFinite(previewRate) && previewRate > 0
+      ? (previewRate * PREVIEW_HOURS).toFixed(2)
+      : null;
+
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
     setFormError("");
@@ -256,12 +279,34 @@ export function LabourRatesTab({
 
   return (
     <div data-testid="labour-rates-tab">
-      {/* The plan's decision 12, said on the screen rather than left to
-          be discovered: hours are recorded in one module and priced in
-          another, and there is no wage field on a timesheet. */}
-      <p className="muted" data-testid="labour-rates-seam-note">
-        {t("labour_rates.seam_note")}
-      </p>
+      {/* W8 §3 — THE CONSEQUENCE, AS LIVE DATA, INSTEAD OF A
+          DEFINITION.
+          This tab used to open with a paragraph explaining the seam
+          between the hours module and reporting. The owner read it and
+          said "I literally don't understand their purpose", which is
+          the paragraph's own verdict on itself. What replaces it is a
+          count of what is actually true right now: how many people have
+          a cost per hour and how many do not. It answers "what is this
+          for" by showing what changes when you use it, it moves the
+          moment somebody adds a rate, and it cannot be read as
+          decoration because it is a number about this company. */}
+      {!blocked && !loading && employees.length > 0 && (
+        <div className="labour-rates-state" data-testid="labour-rates-state">
+          <strong data-testid="labour-rates-state-count">
+            {t("labour_rates.state_count", {
+              withRate: withRateCount,
+              total: employees.length,
+            })}
+          </strong>
+          <span className="muted small">
+            {withRateCount === 0
+              ? t("labour_rates.state_none")
+              : t("labour_rates.state_some", {
+                  missing: employees.length - withRateCount,
+                })}
+          </span>
+        </div>
+      )}
 
       {loadError && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
@@ -280,7 +325,6 @@ export function LabourRatesTab({
         <>
           <section className="card card-detail-pad" style={{ marginBottom: 16 }}>
             <h3>{t("labour_rates.current_heading")}</h3>
-            <p className="muted">{t("labour_rates.current_hint")}</p>
             <BoundedList
               /* W5 fix 5 — `lg`, not `md`. Six rows of this table are
                  taller than the 320px `md` window (each row carries a
@@ -356,7 +400,6 @@ export function LabourRatesTab({
           {historyFor !== "" && (
             <section className="card card-detail-pad" style={{ marginBottom: 16 }}>
               <h3>{t("labour_rates.history_heading")}</h3>
-              <p className="muted">{t("labour_rates.history_hint")}</p>
               <BoundedList
                 size="md"
                 count={historyRows.length}
@@ -413,10 +456,6 @@ export function LabourRatesTab({
 
           <section className="card card-detail-pad">
             <h3>{t("labour_rates.new_heading")}</h3>
-            {/* The sentence that makes the model make sense: a raise is
-                a NEW row from a NEW date, and that is what keeps old
-                work costing what it cost. */}
-            <p className="muted">{t("labour_rates.new_hint")}</p>
             <form onSubmit={handleCreate}>
               <div className="field">
                 <label className="field-label" htmlFor="labour-rate-employee">
@@ -490,6 +529,33 @@ export function LabourRatesTab({
                   }
                 />
               </div>
+              {/* W8 §3 — THE CONSEQUENCE, WORKED OUT, WHERE THE
+                  DECISION IS MADE.
+                  "A raise is a NEW row with a new start date" was a
+                  paragraph asking the reader to hold a model in their
+                  head. This shows the model happening instead: type a
+                  number and see what ten hours of that person's time
+                  will report as, and from when. It appears only once
+                  there is something to compute, so an empty form stays
+                  an empty form.
+
+                  NOT A SECOND MONEY RULE. This multiplies a rate by a
+                  round ten to illustrate the unit; no cost figure
+                  anywhere is taken from it, and `rowAmounts()` is not
+                  involved because a labour cost is not a customer
+                  price. */}
+              {previewCost !== null && (
+                <p
+                  className="labour-rates-preview"
+                  data-testid="labour-rate-preview"
+                >
+                  {t("labour_rates.preview", {
+                    hours: PREVIEW_HOURS,
+                    amount: formatMoney(previewCost),
+                    from: form.valid_from || t("labour_rates.preview_no_date"),
+                  })}
+                </p>
+              )}
               {formError && (
                 <div className="alert-error" role="alert">
                   {formError}
