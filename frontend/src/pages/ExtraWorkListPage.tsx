@@ -28,7 +28,6 @@ import type {
   ExtraWorkBilledTo,
   ExtraWorkCategory,
   ExtraWorkBulkPlanItem,
-  ExtraWorkGroupSummary,
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
@@ -59,6 +58,7 @@ import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { SeriesHeaderRow } from "../components/extra-work/SeriesHeaderRow";
 import { SeriesEditorDialog } from "../components/extra-work/SeriesEditorDialog";
+import { foldSeries } from "../lib/extraWorkSeries";
 import { isPriced, rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
@@ -393,48 +393,6 @@ function BulkDatesDialog({
  * the SERVER still decides what the actor may see — a customer id the
  * actor has no access to returns their own rows, not that customer's.
  */
-/** W5-B — fold day-by-day series into one entry each.
- *
- *  Order is preserved and a series takes the position of its FIRST
- *  member, so turning series on does not reshuffle a list somebody was
- *  reading. An ungrouped work passes through untouched — that is the
- *  overwhelming majority of rows and the case that must not regress.
- *
- *  Note what this does NOT do: it never asks the server for a header
- *  record and it never treats a member as special. The reference system
- *  elects `group_sequence == 1` the header and branches its status
- *  filter on that election, which is the direct cause of its list
- *  totals disagreeing with its own statistics endpoint. Here the header
- *  is a rendering artefact that exists only in the browser; the counts
- *  on it come from the server and describe the whole series. */
-type ListEntry =
-  | { kind: "row"; row: ExtraWorkRequestList }
-  | {
-      kind: "series";
-      group: ExtraWorkGroupSummary;
-      rows: ExtraWorkRequestList[];
-    };
-
-export function foldSeries(rows: ExtraWorkRequestList[]): ListEntry[] {
-  const out: ListEntry[] = [];
-  const seenAt = new Map<number, number>();
-  for (const row of rows) {
-    if (!row.group) {
-      out.push({ kind: "row", row });
-      continue;
-    }
-    const at = seenAt.get(row.group.id);
-    if (at === undefined) {
-      seenAt.set(row.group.id, out.length);
-      out.push({ kind: "series", group: row.group, rows: [row] });
-    } else {
-      const entry = out[at];
-      if (entry.kind === "series") entry.rows.push(row);
-    }
-  }
-  return out;
-}
-
 export function ExtraWorkList({
   customerId,
   hideHeader = false,
