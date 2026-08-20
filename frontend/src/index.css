@@ -13121,7 +13121,17 @@ a.wp-card-title:hover { text-decoration: underline; }
    the person it is about, so the name it belongs to is the line above
    it and never has to be repeated in a heading.
    -------------------------------------------------------------------- */
-.pva-table .pva-action { width: 1%; white-space: nowrap; text-align: right; }
+/* The action column must not push the table wider than the card. At
+   1440px it did: the table grew past the panel's 745px and the sticky
+   detail-side column sat on top of the Record button, so the control
+   this whole panel exists for could not be clicked. Measured, not
+   guessed -- elementFromPoint over the button returned
+   .collapsible-card-body.
+   `overflow-x: auto` on the body is the rule this app already states
+   for wide content (CLAUDE.md): a table scrolls inside its own
+   container rather than escaping it. Dropping `nowrap` lets the cell
+   shrink first, so in practice there is nothing to scroll. */
+.pva-table .pva-action { width: 1%; text-align: right; }
 .pva-record {
   display: flex;
   flex-wrap: wrap;
@@ -13145,6 +13155,10 @@ a.wp-card-title:hover { text-decoration: underline; }
 
 .pva-body {
   padding: 4px 0 2px;
+  /* See the .pva-action note above: the table must scroll inside this
+     card rather than grow past it and slide under the sticky side
+     column. */
+  overflow-x: auto;
 }
 .pva-body > .muted {
   padding: 10px 20px 16px;
