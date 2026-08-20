@@ -7800,30 +7800,36 @@ a.attn-row:hover {
 
    No border, no fill, no shadow, no box. The label and the lines under
    it are the whole treatment. */
+/* W7-D — no column pin: contacts is no longer a grid cell. It sits
+   below the fact grid as its own block, because a list of people is not
+   a single fact and a tall cell holds its whole row open. */
 .ew-contacts-field {
-  grid-column: 2;
   min-width: 0;
-}
-@media (max-width: 900px) {
-  .ew-contacts-field {
-    grid-column: auto;
-  }
+  margin-top: 14px;
 }
 
-/* W5 fix 2 — Description sits in the LEFT column of the fact grid, in
-   the row under Deadline. Contacts is pinned to column two, so without
-   this the grid ended with an empty column-one cell and Description
-   started below the whole grid, a contacts-list's height further down.
-   Released below the breakpoint where the grid is a single column, or
-   it would conjure a second one. */
-.ew-description-field {
-  grid-column: 1;
-  min-width: 0;
+/* W7-D — Description sits in the LEFT column, in the row under Deadline.
+   THE HOLE, AND WHY PINNING ALONE DID NOT CLOSE IT.
+   Contacts is pinned to column two. CSS grid auto-placement is SPARSE by
+   default: once the cursor has passed the contacts row it never goes
+   back, so an item pinned to column one is placed on the NEXT row and
+   the column-one cell beside contacts stays empty. Two previous attempts
+   pinned Description to column one and reported the gap fixed; pinning
+   is what creates the hole, so it could not close it.
+   `grid-auto-flow: dense` is the missing half: it sends a
+   later-but-narrower item back to fill an earlier gap, so Description
+   lands beside contacts instead of under it and no padded cell remains.
+   Applied to THIS grid only, on the parent — a global change to
+   `.form-2col` would reorder every two-column fact grid in the app. */
+.ew-detail-fact-grid {
+  grid-auto-flow: row dense;
 }
-@media (max-width: 900px) {
-  .ew-description-field {
-    grid-column: auto;
-  }
+/* W7-D — no pin. Pinning is what created the hole: sparse placement
+   never returns to an earlier row, so a pinned item lands on the next
+   one and leaves a cell empty. With no tall cell left in this grid,
+   natural flow fills every position in order. */
+.ew-description-field {
+  min-width: 0;
 }
 .ew-contacts-field-count {
   font-weight: 700;
@@ -12432,4 +12438,35 @@ a.wp-card-title:hover { text-decoration: underline; }
 }
 .ticket-my-planned-day {
   white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------
+   W7-D — the Extra Work detail page as a header plus tabs.
+
+   The page was nine cards on one 4,500px scroll. The header holds the
+   five facts a person needs on arrival and stays put; everything else
+   is behind a tab.
+   -------------------------------------------------------------------- */
+.ew-detail-tabs {
+  margin-bottom: 16px;
+  position: sticky;
+  /* Under the app header, so the tab bar is reachable from anywhere in
+     a long tab without scrolling back up. */
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  padding-top: 4px;
+}
+/* W7-D — the billing month: one line, one control. */
+.ew-billing-line {
+  min-width: 0;
+}
+.ew-billing-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ew-billing-input {
+  width: 160px;
 }

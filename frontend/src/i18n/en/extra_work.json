@@ -720,5 +720,12 @@
   },
   "hours_panel.planned_label": "Planned",
   "hours_panel.planned_undated": "(+{{hours}} with no day)",
-  "hours_panel.planned_total": "Planned total"
+  "hours_panel.planned_total": "Planned total",
+  "detail.tab_overview": "Overview",
+  "detail.tab_money": "Money",
+  "detail.tab_hours": "Hours",
+  "detail.tab_people": "People",
+  "detail.tab_messages": "Messages",
+  "detail.tabs_aria": "Sections of this request",
+  "detail.billing_follows_completion": "Follows the completion month"
 }

@@ -522,7 +522,7 @@
   "detail.dates_edit": "Datums bewerken",
   "detail.dates_saving": "Opslaan...",
   "detail.dates_saved": "Datums opgeslagen.",
-  "detail.field_planned_end_date": "Geplande einddatum",
+  "detail.field_planned_end_date": "Einddatum planning",
   "detail.dates_preferred_hint": "Gewenste datum van de klant: {{date}}",
   "list.bulk_dates_button": "Datums instellen",
   "list.bulk_dates_title": "Deadline en geplande einddatum instellen",
@@ -720,5 +720,12 @@
   },
   "hours_panel.planned_label": "Gepland",
   "hours_panel.planned_undated": "(+{{hours}} zonder dag)",
-  "hours_panel.planned_total": "Gepland totaal"
+  "hours_panel.planned_total": "Gepland totaal",
+  "detail.tab_overview": "Overzicht",
+  "detail.tab_money": "Geld",
+  "detail.tab_hours": "Uren",
+  "detail.tab_people": "Mensen",
+  "detail.tab_messages": "Berichten",
+  "detail.tabs_aria": "Onderdelen van deze aanvraag",
+  "detail.billing_follows_completion": "Volgt de maand van afronden"
 }
