@@ -373,7 +373,7 @@ export function HourTypesTab({
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <div className="card" data-testid="hour-types-list">
+        <div className="card card-detail-pad" data-testid="hour-types-list">
           <BoundedList
             size="md"
             count={hourTypes.length}
@@ -516,7 +516,7 @@ export function HourTypesTab({
         >
           <form
             onSubmit={handleSubmit}
-            className="card"
+            className="card card-detail-pad"
             style={{
               maxWidth: 560,
               width: "100%",

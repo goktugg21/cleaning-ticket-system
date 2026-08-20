@@ -300,7 +300,7 @@
   "detail.workflow_rejecting": "Afwijzen…",
   "detail.workflow_move_to": "Naar {{label}}",
   "detail.workflow_working": "Bezig…",
-  "detail.workflow_no_transitions": "Er zijn geen verdere overgangen beschikbaar voor u in deze status.",
+  "detail.workflow_current_status_label": "Huidige status",
   "detail.workflow_decision_on_proposal": "De beslissing van de klant staat nu bij de offerte hieronder — goedkeuren, afwijzen en de override van de aanbieder staan allemaal op het voorstel zelf. Wilt u de prijs wijzigen? Wijs de offerte af en stel een herziene offerte op.",
   "detail.auto_start_button": "Werk starten",
   "detail.auto_start_busy": "Starten…",

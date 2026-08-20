@@ -300,7 +300,7 @@
   "detail.workflow_rejecting": "Rejecting…",
   "detail.workflow_move_to": "Move to {{label}}",
   "detail.workflow_working": "Working…",
-  "detail.workflow_no_transitions": "No further transitions are available to you in this status.",
+  "detail.workflow_current_status_label": "Current status",
   "detail.workflow_decision_on_proposal": "The customer's decision now lives on the quote below — approve, reject and the provider override are all on the proposal itself. To change the price, reject the quote and prepare a revised one.",
   "detail.auto_start_button": "Start work",
   "detail.auto_start_busy": "Starting…",

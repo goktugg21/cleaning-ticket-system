@@ -733,6 +733,16 @@ p { line-height: 1.6; }
 
 .page-canvas { flex: 1; padding: 28px; }
 
+/* W5 fix 5 — the Hours admin title rendered clipped along its top edge.
+   `.page-title` is 28px/800 in the head font on `line-height: 1`, so the
+   line box is exactly the em box and this typeface's ascenders sit
+   proud of it. Given a page-scoped override rather than a change to
+   `.page-title` itself: that rule is shared by every page in the app and
+   another chat is in this file. */
+.hours-admin-page .page-title {
+  line-height: 1.15;
+}
+
 /* ====================================================================
    PAGE: LOGIN
    ==================================================================== */
@@ -2699,13 +2709,12 @@ table.data-table {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  /* W4-M §1 — 12px read as one blob once the type came down. The two
-     pairs are two separate facts and now say so.
-     W5 fix 2 — 14px still read as one grey lump: two labels and two
-     values at near-equal weights, stacked evenly, with nothing saying
-     where one fact ends and the next begins. 24px is the real space
-     the owner asked for. */
-  gap: 24px;
+  /* W4-M §1 — 12px read as one blob once the type came down; the two
+     pairs are two separate facts and now say so. W5 took it to 24px,
+     which overshot: the block then read as two unrelated islands rather
+     than one place-and-customer group. 15px is the owner's call and
+     sits between the two. */
+  gap: 15px;
   text-align: right;
   /* The ceiling that stops a long customer name from eating the title's
      column or pushing the page wider than the viewport. Unchanged at
@@ -7800,6 +7809,22 @@ a.attn-row:hover {
     grid-column: auto;
   }
 }
+
+/* W5 fix 2 — Description sits in the LEFT column of the fact grid, in
+   the row under Deadline. Contacts is pinned to column two, so without
+   this the grid ended with an empty column-one cell and Description
+   started below the whole grid, a contacts-list's height further down.
+   Released below the breakpoint where the grid is a single column, or
+   it would conjure a second one. */
+.ew-description-field {
+  grid-column: 1;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .ew-description-field {
+    grid-column: auto;
+  }
+}
 .ew-contacts-field-count {
   font-weight: 700;
 }
@@ -7874,6 +7899,34 @@ a.attn-row:hover {
 .ew-workflow-card {
   display: flex;
   flex-direction: column;
+}
+
+/* W5 fix 4 — the current-status readout that replaced the
+   no-transitions apology. Same shape as the ticket page's: a micro-cap
+   label over the status, plain text, no chrome. */
+.ew-workflow-current-status {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+  min-width: 0;
+}
+.ew-workflow-current-status-label {
+  font-family: var(--f-head);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ew-workflow-current-status-value {
+  font-family: var(--f-head);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 .ew-auto-start {
   display: flex;

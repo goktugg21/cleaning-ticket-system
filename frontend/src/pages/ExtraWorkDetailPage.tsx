@@ -2418,6 +2418,24 @@ export function ExtraWorkDetailPage() {
                 {canSeeCustomerContacts && (
                   <CustomerContactsPanel contacts={customerContacts} />
                 )}
+                {/* W5 fix 2 — Description is the NEXT field in the LEFT
+                    column, not the start of the text run below the grid.
+
+                    Customer contacts is pinned to `grid-column: 2`, so
+                    column one ran out of fields at Deadline while column
+                    two kept going, and the grid's last row left a void
+                    under Deadline exactly as tall as the contacts list.
+                    Pinning Description to column one drops it into the
+                    next free row of that column — directly under
+                    Deadline, at the grid's own 14px gap. The left column
+                    is not padded to match the right; the field that was
+                    always meant to come next simply comes next. */}
+                <div className="field ew-description-field">
+                  <div className="muted small">
+                    {t("detail.field_description")}
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
+                </div>
               </div>
               {/* The form itself opens BELOW the grid, where it has room for
                   two date inputs, the customer's preferred date and an
@@ -2434,10 +2452,6 @@ export function ExtraWorkDetailPage() {
                   Full width again: Customer contacts is a field in the
                   grid above, so nothing shares this row. */}
               <div className="ew-detail-body-main">
-                  <div className="field">
-                    <div className="muted small">{t("detail.field_description")}</div>
-                    <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
-                  </div>
                   {ew.customer_visible_note && (
                     <div className="field">
                       <div className="muted small">
@@ -2922,6 +2936,38 @@ export function ExtraWorkDetailPage() {
                   {t("detail.workflow_decision_on_proposal")}
                 </p>
               )}
+              {/* W5 fix 4 — where the job IS, in place of the apology.
+
+                  This card used to carry "No further transitions are
+                  available to you in this status" for a customer with
+                  nothing to decide. The ticket page deleted its version
+                  of that sentence in W4-M and put the current status
+                  there instead, and this is the same change: a customer
+                  is not a failed provider, and a note about what their
+                  role cannot do answers a question they did not ask.
+
+                  Only for the viewer who genuinely has no action here. A
+                  provider always has at least the Plan button, so this
+                  never displaces a provider's controls; the
+                  open-proposal case above already says where the
+                  decision went and keeps its own sentence. */}
+              {!isProvider &&
+                !canApproveAsCustomer &&
+                !canRejectAsCustomer &&
+                !(ew.status === "PRICING_PROPOSED" && hasOpenProposal) && (
+                  <div
+                    className="ew-workflow-current-status"
+                    data-testid="extra-work-workflow-current-status"
+                    data-status={ew.status}
+                  >
+                    <span className="ew-workflow-current-status-label">
+                      {t("detail.workflow_current_status_label")}
+                    </span>
+                    <span className="ew-workflow-current-status-value">
+                      {tStatusLabel(t, ew.status)}
+                    </span>
+                  </div>
+                )}
             </div>
           </div>
           </div>{/* end .ew-detail-top-row */}

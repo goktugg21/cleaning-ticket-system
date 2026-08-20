@@ -61,6 +61,7 @@ import {
   isStaff as isStaffRoleFn,
 } from "../auth/permissions";
 import { AttachmentThumb } from "../components/AttachmentThumb";
+import { BillingCutoffNotice } from "../components/BillingCutoffNotice";
 import { BoundedList } from "../components/BoundedList";
 import { CollapsibleCard } from "../components/CollapsibleCard";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -2614,6 +2615,28 @@ export function TicketDetailPage() {
                       >
                         {t("workflow_completion_evidence_hint")}
                       </p>
+                    )}
+
+                  {/* W5 fix 3 — the billing-cutoff notice, above the
+                      customer's approve / reject buttons.
+
+                      Wave 1 built it and mounted it on the invoice list
+                      and the melding list, and handed off that it also
+                      belongs at the decision itself. This is that
+                      placement: the "before" variant answers exactly the
+                      question a customer has with these two buttons in
+                      front of them — what happens to this work if I do
+                      not answer before my billing date. Same rule as the
+                      approval e-mail carries, at the moment it applies.
+
+                      Customer-side only, and only on the step where the
+                      decision is theirs: a provider driving the same
+                      transition under override is not the audience. */}
+                  {isCustomerUser(me?.role) &&
+                    ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+                    (visibleNextStatuses.includes("APPROVED") ||
+                      visibleNextStatuses.includes("REJECTED")) && (
+                      <BillingCutoffNotice />
                     )}
 
                   {me?.role === "CUSTOMER_USER" &&

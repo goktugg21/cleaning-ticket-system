@@ -278,11 +278,19 @@ export function LabourRatesTab({
         <p className="muted">{t("loading")}</p>
       ) : (
         <>
-          <section className="card" style={{ marginBottom: 16 }}>
+          <section className="card card-detail-pad" style={{ marginBottom: 16 }}>
             <h3>{t("labour_rates.current_heading")}</h3>
             <p className="muted">{t("labour_rates.current_hint")}</p>
             <BoundedList
-              size="md"
+              /* W5 fix 5 — `lg`, not `md`. Six rows of this table are
+                 taller than the 320px `md` window (each row carries a
+                 button), so a table nobody would call long scrolled
+                 inside a page that already scrolls. It keeps a bound:
+                 employees is a SERVER collection and CLAUDE.md's rule
+                 is that those are never rendered unbounded — a real
+                 tenant has hundreds. `lg` is the existing 420px step,
+                 not a new value. */
+              size="lg"
               count={employees.length}
               ariaLabel={t("labour_rates.current_heading")}
               testIdPrefix="labour-rates-current"
@@ -346,7 +354,7 @@ export function LabourRatesTab({
           </section>
 
           {historyFor !== "" && (
-            <section className="card" style={{ marginBottom: 16 }}>
+            <section className="card card-detail-pad" style={{ marginBottom: 16 }}>
               <h3>{t("labour_rates.history_heading")}</h3>
               <p className="muted">{t("labour_rates.history_hint")}</p>
               <BoundedList
@@ -403,7 +411,7 @@ export function LabourRatesTab({
             </section>
           )}
 
-          <section className="card">
+          <section className="card card-detail-pad">
             <h3>{t("labour_rates.new_heading")}</h3>
             {/* The sentence that makes the model make sense: a raise is
                 a NEW row from a NEW date, and that is what keeps old
@@ -503,7 +511,7 @@ export function LabourRatesTab({
               and ref-driven and is rendered UNCONDITIONALLY — the two
               are deliberately different things (CLAUDE.md §3). */}
           {editing && (
-            <section className="card" style={{ marginTop: 16 }}>
+            <section className="card card-detail-pad" style={{ marginTop: 16 }}>
               <h3>{t("labour_rates.correct_heading")}</h3>
               <p className="muted">{t("labour_rates.correct_warning")}</p>
               <form onSubmit={handleEditSave}>

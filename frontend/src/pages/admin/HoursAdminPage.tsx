@@ -609,7 +609,9 @@ export function HoursAdminPage() {
   // comment, not a JSX one: a JSX comment cannot sit between `return (`
   // and the element, which is a mistake I have now made twice.
   return (
-    <div>
+    /* W5 fix 5 — a named root so this page's title spacing can be fixed
+       without touching the global `.page-title` every page shares. */
+    <div className="hours-admin-page">
       <PageHeader
         title={t("hours_admin.title")}
         subtitle={t("hours_admin.subtitle")}

@@ -356,7 +356,7 @@ export function HoursOverviewTab({
   return (
     <>
       {/* ---- Period selector ------------------------------------- */}
-      <div className="card" style={{ padding: "16px 18px", marginBottom: 16 }}>
+      <div className="card card-detail-pad" style={{ padding: "16px 18px", marginBottom: 16 }}>
         <div
           className="composer-toggle"
           role="tablist"
@@ -510,7 +510,7 @@ export function HoursOverviewTab({
 
       {/* ---- Filters --------------------------------------------- */}
       <div
-        className="card"
+        className="card card-detail-pad"
         style={{ padding: "16px 18px", marginBottom: 16 }}
         data-testid="overview-filters"
       >
@@ -566,7 +566,7 @@ export function HoursOverviewTab({
           {/* ---- Totals ------------------------------------------ */}
           {summary && (
             <section
-              className="card"
+              className="card card-detail-pad"
               style={{ padding: "18px 22px", marginBottom: 16 }}
               data-testid="overview-totals"
             >
@@ -630,7 +630,7 @@ export function HoursOverviewTab({
           {/* ---- Breakdown tables -------------------------------- */}
           {summary && hasData && (
             <section
-              className="card"
+              className="card card-detail-pad"
               style={{ padding: "18px 22px", marginBottom: 16 }}
               data-testid="overview-breakdowns"
             >
@@ -798,7 +798,7 @@ export function HoursOverviewTab({
 
           {/* ---- Read-only entries ------------------------------- */}
           <section
-            className="card"
+            className="card card-detail-pad"
             style={{ marginBottom: 16 }}
             data-testid="overview-entries"
           >
@@ -927,7 +927,7 @@ export function HoursOverviewTab({
         </p>
       </div>
 
-      <div className="card" style={{ padding: "18px 22px", marginBottom: 16 }}>
+      <div className="card card-detail-pad" style={{ padding: "18px 22px", marginBottom: 16 }}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>
           {t("weeks.picker_title")}
         </div>
@@ -1008,7 +1008,7 @@ export function HoursOverviewTab({
         )}
       </div>
 
-      <div className="card" data-testid="weeks-lock-list">
+      <div className="card card-detail-pad" data-testid="weeks-lock-list">
         <BoundedList
           size="md"
           count={locks.length}
