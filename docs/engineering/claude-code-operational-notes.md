@@ -102,10 +102,14 @@ sg docker -c "docker run --rm -v \"$(pwd)/frontend:/app\" -w /app node:22-alpine
 ```
 
 - `tsc --noEmit -p tsconfig.app.json` (Tier 1) must pass clean.
-- `npx eslint .` must report **exactly 44 problems (42 errors, 2
-  warnings)** — the frozen baseline, and the number CLAUDE.md carries.
-  (This line said 48/46 until Sprint 179A; the baseline had moved and
-  the note had not. CLAUDE.md is authoritative when the two disagree.)
+- `npx eslint .` must report **exactly 45 problems (42 errors, 3
+  warnings)** as of `231dc11` — the frozen baseline, and the number
+  CLAUDE.md carries. (This line said 48/46 until Sprint 179A and 44
+  until W9; the baseline had moved and the note had not, twice.
+  CLAUDE.md is authoritative when the two disagree.) The three warnings
+  are named in CLAUDE.md. Measure with ONE run and read the WHOLE
+  output: tailing it is how W9's four chats each blamed a different
+  file for the same drift.
   Capture it before AND after every
   commit and diff the per-file violation counts (`grep -oE
   '^/app/src/[^:]+' | sort | uniq -c`); the set must be identical modulo
