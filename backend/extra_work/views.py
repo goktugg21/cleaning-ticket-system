@@ -192,6 +192,11 @@ class ExtraWorkRequestViewSet(
                 # lookup.
                 "company", "building", "customer", "created_by",
                 "department", "work_type",
+                # W5-B — the day-by-day series, so the list serializer's
+                # `group` block does not fetch the group per row. The
+                # per-page memo in `get_group` covers the member COUNTS;
+                # this covers the group row itself.
+                "group",
             )
             .annotate(
                 annotated_has_operational_ticket=Exists(spawned),

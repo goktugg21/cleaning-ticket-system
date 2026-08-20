@@ -12,6 +12,10 @@ import type {
   ExtraWorkAssignmentRole,
   ExtraWorkBulkAssignResult,
   ExtraWorkBulkPlanContext,
+  ExtraWorkGroupDetail,
+  ExtraWorkGroupMemberEdit,
+  ExtraWorkGroupSummary,
+  ExtraWorkSlot,
   ExtraWorkBulkPlanPayload,
   ExtraWorkBulkPlanResult,
   EwMessageRecipient,
@@ -299,6 +303,68 @@ export async function bulkSetExtraWorkDates(payload: {
     "/extra-work/bulk-dates/",
     payload,
   );
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// W5-B — day-by-day (multi-date) Extra Work.
+//
+// Both writes are pinned to DRF's `JSONParser` server-side and answer
+// 415 to form data, for the same reason the plan endpoints are: DRF
+// reads a boolean ABSENT from form input as `false`, so a form-encoded
+// write could silently clear a completion flag across a whole series.
+// These functions therefore hand axios a plain object, never a
+// FormData. Do not "fix" a 415 here by switching.
+//
+// NOTE WHAT IS NOT HERE. There is no group-status call and no
+// group-delete call, because those endpoints do not exist: a status
+// change is a workflow transition and goes through the state machine
+// one work at a time, and cancelling a work is a per-work action.
+// Planning a series goes through `bulkPlanExtraWork`, which since W4-O
+// already takes per-work values. See `views_groups.py` for what the
+// reference system's equivalents cost it.
+// ---------------------------------------------------------------------------
+
+/** Create one Extra Work per picked slot, sharing everything else.
+ *
+ *  `shared` is an ordinary create payload — the same shape the single
+ *  form posts — and every member is built from it by the same
+ *  serializer. All-or-nothing: if any member is invalid nothing is
+ *  written, not even a group row. */
+export async function batchCreateExtraWork(
+  shared: Record<string, unknown>,
+  slots: ExtraWorkSlot[],
+): Promise<{
+  group: ExtraWorkGroupSummary & { customer: number; building: number };
+  created: number;
+  members: number[];
+}> {
+  const response = await api.post("/extra-work/batch/", { ...shared, slots });
+  return response.data;
+}
+
+/** The series and its members, for the group editor. */
+export async function getExtraWorkGroup(
+  id: number,
+): Promise<ExtraWorkGroupDetail> {
+  const response = await api.get<ExtraWorkGroupDetail>(
+    `/extra-work/groups/${id}/`,
+  );
+  return response.data;
+}
+
+/** Title / time / condition, per member, all or nothing.
+ *
+ *  Deliberately narrow. Date, budget hours and assigned people are NOT
+ *  editable through here — they go through the planning and assignment
+ *  endpoints that already exist and already take per-work values. */
+export async function updateExtraWorkGroupMembers(
+  id: number,
+  members: ExtraWorkGroupMemberEdit[],
+): Promise<{ group: ExtraWorkGroupSummary; updated: number }> {
+  const response = await api.patch(`/extra-work/groups/${id}/members/`, {
+    members,
+  });
   return response.data;
 }
 

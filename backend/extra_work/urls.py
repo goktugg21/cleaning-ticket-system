@@ -36,6 +36,11 @@ from .views_assignments import (
 )
 from .views_dates import ExtraWorkBulkDatesView
 from .views_financials import ExtraWorkFinancialSummaryView
+from .views_groups import (
+    ExtraWorkBatchCreateView,
+    ExtraWorkGroupDetailView,
+    ExtraWorkGroupMembersView,
+)
 from .views_planning import ExtraWorkBulkPlanView
 
 urlpatterns = [
@@ -69,6 +74,24 @@ urlpatterns = [
         "bulk-plan/",
         ExtraWorkBulkPlanView.as_view(),
         name="extra-work-bulk-plan",
+    ),
+    # W5-B — day-by-day creation and the group read/edit. Same ordering
+    # rule as every sibling above: the router owns the empty prefix, so
+    # its detail route would read "batch" and "groups" as a pk.
+    path(
+        "batch/",
+        ExtraWorkBatchCreateView.as_view(),
+        name="extra-work-batch",
+    ),
+    path(
+        "groups/<int:pk>/",
+        ExtraWorkGroupDetailView.as_view(),
+        name="extra-work-group-detail",
+    ),
+    path(
+        "groups/<int:pk>/members/",
+        ExtraWorkGroupMembersView.as_view(),
+        name="extra-work-group-members",
     ),
     # W1-C — the money strip's aggregate. MUST precede the router for the
     # same reason the three above do: the router owns the empty prefix,

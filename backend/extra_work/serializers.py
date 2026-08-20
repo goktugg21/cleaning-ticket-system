@@ -774,6 +774,21 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     has_operational_ticket = serializers.SerializerMethodField()
     spawned_tickets = serializers.SerializerMethodField()
 
+    # W5-B — the day-by-day series this row belongs to, or null.
+    #
+    # WHOLE-GROUP TRUTH, not page truth. The counts describe every
+    # member of the series, even the ones on another page of results, so
+    # a badge reading "12" never depends on how the list happened to be
+    # paginated. That is what lets the frontend fold a series into one
+    # row without inventing a header record.
+    #
+    # The reference system instead marks the member with
+    # `group_sequence == 1` as a header row and branches its status
+    # filter on it, "which is the group-header inflation that makes list
+    # totals and statistics totals disagree" (A7 §2.1). Nothing here
+    # branches on sequence.
+    group = serializers.SerializerMethodField()
+
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -864,6 +879,7 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             # operational ticket(s) it produced. Visible to every
             # audience: the customer is entitled to know that their
             # extra work turned into scheduled work.
+            "group",
             "has_operational_ticket",
             "spawned_tickets",
             # Sprint 180 §3 — who the finished work is charged to. Not
@@ -919,6 +935,38 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
 
     def get_has_operational_ticket(self, obj) -> bool:
         return _has_operational_ticket(obj)
+
+    def get_group(self, obj):
+        """The series summary, or null for an ordinary standalone work.
+
+        `None` is the common case by a wide margin and it is what makes
+        the normal row render exactly as it did before this field
+        existed — the frontend reads a null group as "not a series" and
+        changes nothing.
+        """
+        group_id = obj.group_id
+        if group_id is None:
+            return None
+        # MEMOISED PER PAGE. The counts are a property of the SERIES,
+        # not of the row, so twelve siblings on one page must not run
+        # twelve identical count queries. `many=True` builds one
+        # serializer instance for the whole page, so this cache lives
+        # exactly as long as it should.
+        cache = getattr(self, "_w5b_group_cache", None)
+        if cache is None:
+            cache = {}
+            self._w5b_group_cache = cache
+        if group_id not in cache:
+            from .groups import group_status_counts
+
+            group = obj.group
+            cache[group_id] = {
+                "id": group.id,
+                "standard_title": group.standard_title,
+                "member_count": group.members.count(),
+                "status_counts": group_status_counts(group),
+            }
+        return cache[group_id]
 
     def get_is_priced(self, obj) -> bool:
         return _is_priced(obj)

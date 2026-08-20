@@ -12031,3 +12031,123 @@ a.wp-card-title:hover { text-decoration: underline; }
   cursor: pointer;
   line-height: 0;
 }
+
+/* --------------------------------------------------------------------
+   W5-B — a day-by-day series folded into one list row.
+
+   The header row is a real <tr> spanning the table, so the series sits
+   in the list rather than beside it and keeps its place in the sort.
+   Members render through the list's own row renderer and are marked
+   only by an indent, because a member is an ordinary Extra Work and a
+   row that looked different would suggest otherwise.
+   -------------------------------------------------------------------- */
+.ew-series-header > td {
+  background: var(--surface-2);
+  padding: 8px 12px;
+}
+.ew-series-header-inner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+.ew-series-toggle {
+  font-weight: 700;
+}
+.ew-series-count {
+  white-space: nowrap;
+}
+.ew-series-statuses {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-left: auto;
+}
+.ew-series-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ew-series-status-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+/* The indent is the ONLY difference between a member row and a
+   standalone one. */
+.ew-series-member > td:first-child {
+  padding-left: 28px;
+}
+
+/* W5-B — the entry-mode radio pair and the slot picker on the create
+   form. The picker is a form, not a table: it must stay usable at the
+   narrow widths where the rest of the create form already wraps. */
+.ew-entry-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.ew-entry-mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.ew-slot-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.ew-slot-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.ew-slot-controls .field {
+  min-width: 140px;
+}
+.ew-slot-repeat {
+  max-width: 140px;
+}
+.ew-slot-add {
+  margin-bottom: 2px;
+}
+.ew-slot-hint {
+  flex: 1 1 220px;
+  margin: 0 0 4px;
+}
+.ew-slot-count {
+  margin: 0;
+}
+.ew-slot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ew-slot-item {
+  display: grid;
+  grid-template-columns: 110px 90px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: var(--r);
+  background: var(--surface);
+}
+/* The series editor's own table. */
+.ew-series-table {
+  min-width: 720px;
+}
+.ew-series-when {
+  white-space: nowrap;
+}
+.ew-series-time {
+  width: 120px;
+}

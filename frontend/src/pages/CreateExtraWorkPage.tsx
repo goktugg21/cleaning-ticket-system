@@ -30,7 +30,12 @@ import {
 } from "../api/admin";
 import { getApiError } from "../api/client";
 import { listLabels } from "../api/customerLabels";
-import { createExtraWork, getExtraWorkPreview } from "../api/extraWork";
+import {
+  batchCreateExtraWork,
+  createExtraWork,
+  getExtraWorkPreview,
+} from "../api/extraWork";
+import { SlotPicker } from "../components/extra-work/SlotPicker";
 import type {
   Building,
   Customer,
@@ -48,6 +53,7 @@ import type {
   ExtraWorkUrgency,
   Service,
   ServiceUnitType,
+  ExtraWorkSlot,
 } from "../api/types";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
@@ -324,6 +330,20 @@ export function CreateExtraWorkPage({
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
+  // W5-B — SINGLE or MULTIPLE, the reference system's "entry mode".
+  //
+  // In MULTIPLE the title becomes a STANDARD title and every picked day
+  // creates its own real Extra Work, sharing customer, building,
+  // description, labels and cart. The whole form below is unchanged in
+  // either mode — that is the point: a member is created by the same
+  // payload and the same serializer as a single work, so the two paths
+  // cannot drift apart the way the reference system's did.
+  const [entryMode, setEntryMode] = useState<"SINGLE" | "MULTIPLE">("SINGLE");
+  const [slots, setSlots] = useState<ExtraWorkSlot[]>([]);
+  const [batchResult, setBatchResult] = useState<{
+    group: { id: number; standard_title: string };
+    created: number;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   // Sprint 29 Batch 29.8.5 — soft warning channel used when the service
@@ -1248,6 +1268,10 @@ export function CreateExtraWorkPage({
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    if (entryMode === "MULTIPLE" && slots.length === 0) {
+      setError(t("series.slot_none"));
+      return;
+    }
     if (!form.title.trim()) {
       setError(t("create.error_title_required"));
       return;
@@ -1396,7 +1420,14 @@ export function CreateExtraWorkPage({
 
     setSubmitting(true);
     try {
-      const created = await createExtraWork({
+      // ONE payload, both modes. A series member is created from
+      // exactly this object — same fields, same serializer, same
+      // validation — with only the title and the slot's date differing
+      // per member, which the server composes. That is what stops the
+      // batch path from drifting away from the single path the way the
+      // reference system's did (its batch writer sets `requested_at` to
+      // the scheduled slot and never sets `requested_by` at all).
+      const payload = {
         building: Number(effectiveBuilding),
         customer: Number(form.customer),
         title: form.title.trim(),
@@ -1462,8 +1493,14 @@ export function CreateExtraWorkPage({
                 customer_note: line.customerNote.trim() || undefined,
               };
         }),
-      });
-      setResult(created);
+      };
+
+      if (entryMode === "MULTIPLE") {
+        const batch = await batchCreateExtraWork(payload, slots);
+        setBatchResult({ group: batch.group, created: batch.created });
+      } else {
+        setResult(await createExtraWork(payload));
+      }
     } catch (err) {
       // Intent rejections (the backend code is not on the wire) get a
       // friendly localized message; everything else surfaces the DRF
@@ -1480,6 +1517,37 @@ export function CreateExtraWorkPage({
 
   const noOptions =
     !loadingOptions && (buildings.length === 0 || customers.length === 0);
+
+  // ----- W5-B: the series confirmation -----
+  //
+  // A batch has no single record to show, so it gets its own panel
+  // rather than pretending one member is "the" result. It states how
+  // many REAL works were created, because that is the fact somebody
+  // needs to check against what they expected to pick.
+  if (batchResult) {
+    return (
+      <div className="page-wrap" data-testid="extra-work-batch-result">
+        <div className="card">
+          <h2 className="section-title">{t("series.created_title")}</h2>
+          <p>{batchResult.group.standard_title}</p>
+          <p>
+            <strong data-testid="extra-work-batch-created-count">
+              {t("series.created_body", { count: batchResult.created })}
+            </strong>
+          </p>
+          <div className="form-actions">
+            <Link
+              to="/extra-work"
+              className="btn btn-primary"
+              data-testid="extra-work-batch-to-list"
+            >
+              {t("series.created_open_list")}
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ----- Result panel (read-only confirmation) -----
   if (result) {
@@ -1933,9 +2001,43 @@ export function CreateExtraWorkPage({
               </div>
             </div>
 
+            {/* W5-B — the entry mode. Above the title deliberately:
+                it changes what the title MEANS, and a control that
+                changes the meaning of the field below it belongs above
+                that field. */}
+            <div className="field">
+              <span className="field-label">{t("series.mode_label")}</span>
+              <div className="ew-entry-mode" role="radiogroup"
+                   aria-label={t("series.mode_label")}>
+                <label className="ew-entry-mode-option">
+                  <input
+                    type="radio"
+                    name="ew-entry-mode"
+                    checked={entryMode === "SINGLE"}
+                    onChange={() => setEntryMode("SINGLE")}
+                    data-testid="extra-work-entry-mode-single"
+                  />
+                  <span>{t("series.mode_single")}</span>
+                </label>
+                <label className="ew-entry-mode-option">
+                  <input
+                    type="radio"
+                    name="ew-entry-mode"
+                    checked={entryMode === "MULTIPLE"}
+                    onChange={() => setEntryMode("MULTIPLE")}
+                    data-testid="extra-work-entry-mode-multiple"
+                  />
+                  <span>{t("series.mode_multiple")}</span>
+                </label>
+              </div>
+              <p className="muted small">{t("series.mode_hint")}</p>
+            </div>
+
             <div className="field">
               <label className="field-label" htmlFor="ew-title">
-                {t("create.field_title")}
+                {entryMode === "MULTIPLE"
+                  ? t("series.standard_title_label")
+                  : t("create.field_title")}
               </label>
               <input
                 id="ew-title"
@@ -1949,6 +2051,13 @@ export function CreateExtraWorkPage({
                 required
               />
             </div>
+
+            {entryMode === "MULTIPLE" && (
+              <div className="field">
+                <span className="field-label">{t("series.slot_list")}</span>
+                <SlotPicker slots={slots} onChange={setSlots} />
+              </div>
+            )}
 
             <div className="field">
               <label className="field-label" htmlFor="ew-description">

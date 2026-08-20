@@ -1729,6 +1729,12 @@ export interface ExtraWorkRequestList {
   // extra work turned into scheduled work.
   has_operational_ticket: boolean;
   spawned_tickets: ExtraWorkSpawnedTicket[];
+  // W5-B — the day-by-day series this row belongs to, or NULL for an
+  // ordinary standalone work. Null is by far the common case and is
+  // what keeps a normal row rendering exactly as it did before series
+  // existed: the list reads a null group as "not a series" and changes
+  // nothing about the row.
+  group: ExtraWorkGroupSummary | null;
   // Sprint 180 §3 — who the finished work is charged to. Not
   // provider-only: the customer picks it on their own create form.
   billed_to: ExtraWorkBilledTo;
@@ -2026,6 +2032,90 @@ export interface ExtraWorkPlanResult {
   start_skipped: string | null;
   tickets_moved: number[];
   tickets_kept_own_date: number[];
+}
+
+/** W5-B — when a work happens relative to the handover ("oplevering").
+ *
+ *  NULL is a real value and means NOBODY WAS ASKED — which is the state
+ *  of every ordinary ad-hoc work, and a different fact from "at
+ *  handover". The reference system cannot express the difference: its
+ *  server does `match($entry['condition'] ?? 'at')`, so an unanswered
+ *  slot and an explicit one are the same five characters afterwards.
+ *
+ *  A REAL COLUMN here. Over there the value is never persisted at all —
+ *  it is baked into the title string and every reader recovers it with
+ *  a regex, which is why two incompatible suffix formats now coexist in
+ *  their data and the parser understands only one of them. Never derive
+ *  this from a title. */
+export type ExtraWorkCondition =
+  | "AT_HANDOVER"
+  | "BEFORE_HANDOVER"
+  | "AFTER_HANDOVER";
+
+/** W5-B — one picked day/time/condition on the multi-date create form.
+ *  `time` and `condition` are both optional and both meaningful when
+ *  absent: no time is not midnight, no condition is not "at handover". */
+export interface ExtraWorkSlot {
+  /** ISO date, `YYYY-MM-DD`. */
+  date: string;
+  /** `HH:MM`, or omitted. */
+  time?: string | null;
+  condition?: ExtraWorkCondition | null;
+}
+
+/** W5-B — the series summary carried on every list row.
+ *
+ *  WHOLE-SERIES TRUTH, not page truth: `member_count` and
+ *  `status_counts` describe every member, including ones on another
+ *  page of results. That is what lets the list fold a series into one
+ *  row without the server inventing a header record — the reference
+ *  system marks `group_sequence == 1` as a header and branches its
+ *  status filter on it, which is why its list totals and its own
+ *  statistics endpoint disagree. */
+export interface ExtraWorkGroupSummary {
+  id: number;
+  standard_title: string;
+  member_count: number;
+  status_counts: { status: ExtraWorkStatus; count: number }[];
+}
+
+/** W5-B — one member, as the group editor reads it. */
+export interface ExtraWorkGroupMember {
+  extra_work: number;
+  title: string;
+  status: ExtraWorkStatus;
+  building_name: string;
+  preferred_date: string | null;
+  /** `HH:MM:SS` or null. Null is "no time given", not midnight. */
+  scheduled_time: string | null;
+  condition: ExtraWorkCondition | null;
+  group_sequence: number | null;
+  provider_planned_date: string | null;
+  /** Decimal string, or null for "nobody has budgeted this". */
+  budget_hours: string | null;
+}
+
+export interface ExtraWorkGroupDetail {
+  group: ExtraWorkGroupSummary & { customer: number; building: number };
+  members: ExtraWorkGroupMember[];
+}
+
+/** W5-B — one row of a group-editor save.
+ *
+ *  KEY PRESENCE, like the plan payload: absent leaves the value alone,
+ *  present-and-null clears it. Only the three things that are neither a
+ *  workflow transition nor a planning value live here — date, budget
+ *  hours and assigned people go through `bulk-plan` and `bulk-assign`,
+ *  which already take per-work values. There is no third planning
+ *  path. */
+export interface ExtraWorkGroupMemberEdit {
+  extra_work: number;
+  title?: string;
+  scheduled_time?: string | null;
+  condition?: ExtraWorkCondition | null;
+  /** Recompose the title from this member's COLUMNS after the edits
+   *  above land. One direction only; the old title is never read. */
+  regenerate_title?: boolean;
 }
 
 /** W4-O — ONE work's own plan inside a bulk call.

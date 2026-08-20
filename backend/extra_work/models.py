@@ -245,6 +245,31 @@ def compute_line_amounts(quantity, unit_price, vat_pct):
     return line_subtotal, line_vat, line_total
 
 
+class ExtraWorkCondition(models.TextChoices):
+    """When, relative to the handover ("oplevering"), the work happens.
+
+    NULLABLE ON PURPOSE, and that is a deliberate departure from the
+    reference system rather than an oversight.
+
+    Over there the value is `match($entry['condition'] ?? 'at')`, so a
+    slot nobody answered and a slot explicitly marked "at handover" are
+    the same five characters afterwards, and A7 §2.2 records the
+    consequence in one line: "The operator cannot tell 'explicitly at'
+    from 'not specified'." Here NULL means nobody was asked. That is the
+    honest state for the overwhelming majority of extra work, which is
+    ad-hoc and has no handover to be before or after; inventing
+    AT_HANDOVER for every existing row would be manufacturing data to
+    fill a column.
+
+    The multi-date form pre-selects AT_HANDOVER, so a batch that goes
+    through the picker carries a real answer.
+    """
+
+    AT_HANDOVER = "AT_HANDOVER", "At handover"
+    BEFORE_HANDOVER = "BEFORE_HANDOVER", "Before handover"
+    AFTER_HANDOVER = "AFTER_HANDOVER", "After handover"
+
+
 class ExtraWorkRequest(models.Model):
     """
     The single entity a customer-side user creates and a provider-
@@ -520,6 +545,68 @@ class ExtraWorkRequest(models.Model):
             "separately from the customer's requested window "
             "(`preferred_date` -> `planned_end_date`). NULL means the "
             "provider has committed to a start but not to an end."
+        ),
+    )
+
+    # W5-B — day-by-day scheduling. See `ExtraWorkGroup` for what a
+    # group is and, more importantly, what it is not.
+    #
+    # `SET_NULL`, never CASCADE. Losing the batch receipt must never
+    # take real work with it. The reference system's group delete
+    # soft-deletes every member with no status check at all, so a group
+    # containing invoiced work can be removed in one click (A1); ours
+    # cannot express that, because there is no group-delete endpoint and
+    # because this FK could not carry it out if there were.
+    group = models.ForeignKey(
+        "extra_work.ExtraWorkGroup",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+        related_name="members",
+        help_text=(
+            "The multi-date batch this work was created in, or NULL for "
+            "an ordinary single work. A group is a creation and editing "
+            "convenience only: this work's status, price, hours and "
+            "invoice are entirely its own."
+        ),
+    )
+    #: Display order inside the group, 1..N at creation.
+    #:
+    #: DELIBERATELY NOT A HEADER FLAG. The reference system treats
+    #: `group_sequence == 1` as "this row is the group header", which
+    #: changes which rows a status filter returns and is the direct
+    #: cause of its list totals disagreeing with its own statistics
+    #: endpoint (A7 §2.1, A1 §1). Here it orders members and nothing
+    #: else; no query branches on it.
+    group_sequence = models.PositiveIntegerField(null=True, blank=True, default=None)
+    #: The time of day this occurrence is for. NULL means no time was
+    #: given (every pre-W5-B work, and any single work created without
+    #: one) — which is a different fact from midnight.
+    scheduled_time = models.TimeField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Time of day for this occurrence. Held as a real column "
+            "rather than inside the title string."
+        ),
+    )
+    #: At / before / after handover. NULL means nobody was asked — see
+    #: `ExtraWorkCondition` for why that state has to exist.
+    condition = models.CharField(
+        max_length=32,
+        choices=ExtraWorkCondition.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "When this work happens relative to the handover. A REAL "
+            "COLUMN. The reference system keeps this value only as five "
+            "characters inside the title and every reader recovers it "
+            "with a regex, which is why two title formats now coexist "
+            "there and the parser only understands one of them "
+            "(A7 §1.3). Never parse this out of a title."
         ),
     )
 
@@ -2403,3 +2490,87 @@ class ExtraWorkPlannedHours(models.Model):
 
     def __str__(self):
         return f"{self.extra_work_request_id}: {self.user_id} = {self.hours}h"
+
+
+# ---------------------------------------------------------------------------
+# W5-B — day-by-day (multi-date) Extra Work
+# ---------------------------------------------------------------------------
+class ExtraWorkGroup(models.Model):
+    """A batch of Extra Works created from one multi-date pick.
+
+    WHAT A GROUP IS, AND WHAT IT IS EMPHATICALLY NOT
+    ------------------------------------------------
+    A group is a convenience for CREATING and EDITING several works at
+    once. It is not a second entity that owns anything. Every member is
+    a real `ExtraWorkRequest` with its own status, its own price, its
+    own hours and its own invoice line; deleting or cancelling one
+    member must leave the others untouched, and no total anywhere is
+    computed from a group. Money continues to flow per work through
+    `rowAmounts()` and its server-side mirror.
+
+    That is the line the reference system does not hold. Over there the
+    group is also a bulk-write surface with its own endpoints, and each
+    one loses something: `bulkUpdateGroupStatus` is a query-builder mass
+    update that "bypasses Eloquent events entirely: no `*_by` stamp, no
+    `*_at` stamp, no system comment, no broadcast, no FCM, no activity
+    row, no draft publication" (A7 §2.1), and `bulkDeleteGroup`
+    soft-deletes every member "with no status check at all -- a group
+    containing invoiced works can be deleted this way" (A1 §
+    `bulkDelete`). We have no group-status endpoint and no group-delete
+    endpoint for exactly those reasons: a status change is a workflow
+    transition and goes through the state machine, one work at a time.
+
+    THE COMPANY / CUSTOMER / BUILDING ANCHORS ARE THE TENANT FLOOR.
+    They are stored here, not merely implied by the members, so "a group
+    never spans customers or companies" is a database fact rather than a
+    convention the create path is trusted to have honoured. The batch
+    endpoint sets them from the one payload every member shares, and the
+    member's own scoping is unchanged.
+
+    NO `member_count` COLUMN. The reference freezes `group_total` at
+    creation and never decrements it, then computes two OTHER counts by
+    two different routes -- one of which bypasses the soft-delete scope
+    -- so "three different member counts, computed three different ways"
+    disagree on the same screen (A7 §2.1). The count here is always
+    `self.members.count()`, derived, once.
+    """
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.CASCADE,
+        related_name="extra_work_groups",
+    )
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="extra_work_groups",
+    )
+    building = models.ForeignKey(
+        "buildings.Building",
+        on_delete=models.CASCADE,
+        related_name="extra_work_groups",
+    )
+    #: The title every member starts from. Members compose their own
+    #: title from this plus their slot; editing a member's title later
+    #: does NOT change this, and this is never parsed back out of a
+    #: member title.
+    standard_title = models.CharField(max_length=255)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_extra_work_groups",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["company", "customer"]),
+            models.Index(fields=["building"]),
+        ]
+
+    def __str__(self):
+        return f"Group {self.pk}: {self.standard_title}"

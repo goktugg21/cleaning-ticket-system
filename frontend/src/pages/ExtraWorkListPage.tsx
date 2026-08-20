@@ -3,7 +3,7 @@
 // Sprint 28 Batch 15.3 — rebuilt with KPI strip, filter bar, StatusBadge,
 //   formatMoney/formatDate, ClickableRow, mobile card list, EmptyState.
 //   Functional contract is unchanged; only the presentation layer moves.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PlusCircle, Search, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +28,7 @@ import type {
   ExtraWorkBilledTo,
   ExtraWorkCategory,
   ExtraWorkBulkPlanItem,
+  ExtraWorkGroupSummary,
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
@@ -56,6 +57,8 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { SeriesHeaderRow } from "../components/extra-work/SeriesHeaderRow";
+import { SeriesEditorDialog } from "../components/extra-work/SeriesEditorDialog";
 import { isPriced, rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
@@ -390,6 +393,48 @@ function BulkDatesDialog({
  * the SERVER still decides what the actor may see — a customer id the
  * actor has no access to returns their own rows, not that customer's.
  */
+/** W5-B — fold day-by-day series into one entry each.
+ *
+ *  Order is preserved and a series takes the position of its FIRST
+ *  member, so turning series on does not reshuffle a list somebody was
+ *  reading. An ungrouped work passes through untouched — that is the
+ *  overwhelming majority of rows and the case that must not regress.
+ *
+ *  Note what this does NOT do: it never asks the server for a header
+ *  record and it never treats a member as special. The reference system
+ *  elects `group_sequence == 1` the header and branches its status
+ *  filter on that election, which is the direct cause of its list
+ *  totals disagreeing with its own statistics endpoint. Here the header
+ *  is a rendering artefact that exists only in the browser; the counts
+ *  on it come from the server and describe the whole series. */
+type ListEntry =
+  | { kind: "row"; row: ExtraWorkRequestList }
+  | {
+      kind: "series";
+      group: ExtraWorkGroupSummary;
+      rows: ExtraWorkRequestList[];
+    };
+
+export function foldSeries(rows: ExtraWorkRequestList[]): ListEntry[] {
+  const out: ListEntry[] = [];
+  const seenAt = new Map<number, number>();
+  for (const row of rows) {
+    if (!row.group) {
+      out.push({ kind: "row", row });
+      continue;
+    }
+    const at = seenAt.get(row.group.id);
+    if (at === undefined) {
+      seenAt.set(row.group.id, out.length);
+      out.push({ kind: "series", group: row.group, rows: [row] });
+    } else {
+      const entry = out[at];
+      if (entry.kind === "series") entry.rows.push(row);
+    }
+  }
+  return out;
+}
+
 export function ExtraWorkList({
   customerId,
   hideHeader = false,
@@ -1011,6 +1056,193 @@ export function ExtraWorkList({
       : [];
   const customerChosen = customerFilter !== "";
 
+  // W5-B — which series are expanded. Collapsed by default: a series is
+  // one agreed job and showing it as twelve identical-looking rows is
+  // what this replaces. State lives here rather than in the header row
+  // so expansion survives a re-render of the table.
+  const [expandedSeries, setExpandedSeries] = useState<number[]>([]);
+  // Which series is open in the editor, or null. Provider-only: the
+  // dialog's endpoint refuses a customer at the door, and offering a
+  // button that always 403s is worse than not offering it.
+  const [editingSeries, setEditingSeries] = useState<number | null>(null);
+  // NOTE: the series header spans the table with a deliberately
+  // over-large colSpan rather than a counted one. Four of this table's
+  // columns are conditional (the select box, the ticket column, the
+  // billing column, the billed-to column), so a hand-counted span would
+  // be a second list that has to be kept in step with the first — the
+  // exact shape of the bug CLAUDE.md records about render-order arrays.
+  // HTML clamps an over-large colSpan to the real row width, so 99 is
+  // always right and cannot drift.
+
+  /** ONE row — series member or standalone, the SAME markup either way.
+   *
+   *  Extracted rather than duplicated on purpose: a member of a series
+   *  must not quietly render a poorer row than the one an operator is
+   *  used to, and two copies of a 150-line row is how that happens. The
+   *  only difference is an indent class. */
+  function renderRow(row: ExtraWorkRequestList, inSeries = false) {
+    return (
+                  <ClickableRow
+                    key={row.id}
+                    className={inSeries ? "ew-series-member" : undefined}
+                    to={`/extra-work/${row.id}`}
+                    testId="extra-work-row"
+                  >
+                    {edit.editMode && (
+                      <td
+                        className="td-select"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={edit.isSelected(row.id)}
+                          onChange={() => edit.toggle(row.id)}
+                          disabled={assignBusy}
+                          aria-label={row.title}
+                          data-testid={`extra-work-select-${row.id}`}
+                        />
+                      </td>
+                    )}
+                    <td className="td-subject">
+                      <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
+                    </td>
+                    <td>
+                      {/* Sprint 181 §1 — ONE status per row, and on the
+                          Work started track it is the TICKET's.
+                          The owner clicked an Extra Work reading
+                          "Completed", scrolled down, and its ticket read
+                          "Open". Both were "true"; they were two copies
+                          of one fact. Once a ticket exists it is the
+                          only authority for how the work is going, so
+                          the pricing-stage status does not appear here
+                          at all — not as a column, not as a smaller
+                          second line. That is also what fixes the row
+                          that read "Customer approved" in a track full
+                          of started work: it now reads the ticket's
+                          "Open", i.e. approved, not started. */}
+                      {isWorkStarted ? (
+                        <StatusBadge
+                          status={{
+                            kind: "ticket",
+                            value: operationalStatus(row) ?? "OPEN",
+                          }}
+                          testId={`ew-operational-status-${row.id}`}
+                        />
+                      ) : (
+                        <StatusBadge
+                          status={{ kind: "extra-work", value: row.status }}
+                        />
+                      )}
+                      {/* Sprint 180 §1(b) — approved, but the spawn that
+                          is supposed to be synchronous with approval
+                          produced no ticket. The row belongs on this
+                          track, but saying nothing about it is how the
+                          work gets lost. The detail page has the retry
+                          button. */}
+                      {isSpawnAnomaly(row) && (
+                        <span
+                          className="cell-tag cell-tag-rejected"
+                          style={{ marginLeft: 6 }}
+                          title={t("list.track_anomaly_title")}
+                          data-testid="ew-no-ticket-marker"
+                        >
+                          {t("list.track_anomaly_marker")}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <RouteBadge value={row.routing_decision} />
+                    </td>
+                    <td>
+                      {/* Sprint 144 §1 — new shape first, enum fallback. */}
+                      {extraWorkCategoryName(row) ??
+                        t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
+                    </td>
+                    <td>{row.building_name}</td>
+                    <td>{row.customer_name}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {isPriced(row) ? (
+                        formatMoney(rowAmounts(row).total)
+                      ) : (
+                        <span
+                          className="muted-empty"
+                          title={t("list.total_not_priced_hint")}
+                        >
+                          &mdash;
+                        </span>
+                      )}
+                    </td>
+                    {isWorkStarted && (
+                      <td data-testid={`ew-ticket-cell-${row.id}`}>
+                        {/* Sprint 181 §1b — one renderer for the ticket
+                            numbers, with a real separator. Sprint 180
+                            leaned on a margin here and joined with ", "
+                            in the mobile card below; two tickets rendered
+                            as `TCK-...207TCK-...208`. */}
+                        <SpawnedTicketLinks tickets={row.spawned_tickets} />
+                      </td>
+                    )}
+                    {isWorkStarted && isProvider && (
+                      <td>
+                        {row.is_invoiced ? (
+                          <span className="badge badge-approved">
+                            {t("list.billing_invoiced")}
+                          </span>
+                        ) : (
+                          <span className="badge badge-normal">
+                            {t("list.billing_to_invoice")}
+                          </span>
+                        )}
+                        {row.invoice_date && (
+                          <div
+                            style={{
+                              fontSize: "0.8em",
+                              marginTop: 2,
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {formatDate(row.invoice_date)}
+                          </div>
+                        )}
+                      </td>
+                    )}
+                    {isWorkStarted && (
+                      <td data-testid={`ew-billed-to-cell-${row.id}`}>
+                        {t(BILLED_TO_I18N_KEY[row.billed_to])}
+                      </td>
+                    )}
+                    <td>{formatDate(row.requested_at)}</td>
+                    <td className="td-date">
+                      {row.deadline ? formatDate(row.deadline) : (
+                        <span className="muted-empty">—</span>
+                      )}
+                      {/* The markers, in the status colours this app
+                          already has — a new pair would mean two
+                          vocabularies for "something is wrong". */}
+                      {row.is_overdue && (
+                        <span
+                          className="cell-tag cell-tag-rejected"
+                          style={{ marginLeft: 6 }}
+                          data-testid="ew-overdue-marker"
+                        >
+                          {t("list.overdue")}
+                        </span>
+                      )}
+                      {row.started_before_plan && (
+                        <span
+                          className="cell-tag cell-tag-open"
+                          style={{ marginLeft: 6 }}
+                          title={t("list.startedEarlyWhy")}
+                          data-testid="ew-started-early-marker"
+                        >
+                          {t("list.startedEarly")}
+                        </span>
+                      )}
+                    </td>
+                  </ClickableRow>
+    );
+  }
+
   return (
     <div data-testid="extra-work-list-page">
       {!hideHeader && (
@@ -1070,6 +1302,19 @@ export function ExtraWorkList({
 
       {/* W3-F — bulk plan. Conditionally mounted like its two
           neighbours; a plain overlay, not a native `<dialog>`. */}
+      {/* W5-B — the series editor. Conditionally mounted like its
+          neighbours; a plain overlay, not a native <dialog>. */}
+      {editingSeries !== null && (
+        <SeriesEditorDialog
+          groupId={editingSeries}
+          onClose={() => setEditingSeries(null)}
+          onSaved={() => {
+            setEditingSeries(null);
+            setReloadKey((key) => key + 1);
+          }}
+        />
+      )}
+
       {planOpen && (
         <BulkPlanDialog
           rows={rows.filter((row) => edit.selection.includes(row.id))}
@@ -1682,165 +1927,33 @@ export function ExtraWorkList({
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map((row) => (
-                  <ClickableRow
-                    key={row.id}
-                    to={`/extra-work/${row.id}`}
-                    testId="extra-work-row"
-                  >
-                    {edit.editMode && (
-                      <td
-                        className="td-select"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={edit.isSelected(row.id)}
-                          onChange={() => edit.toggle(row.id)}
-                          disabled={assignBusy}
-                          aria-label={row.title}
-                          data-testid={`extra-work-select-${row.id}`}
-                        />
-                      </td>
-                    )}
-                    <td className="td-subject">
-                      <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
-                    </td>
-                    <td>
-                      {/* Sprint 181 §1 — ONE status per row, and on the
-                          Work started track it is the TICKET's.
-                          The owner clicked an Extra Work reading
-                          "Completed", scrolled down, and its ticket read
-                          "Open". Both were "true"; they were two copies
-                          of one fact. Once a ticket exists it is the
-                          only authority for how the work is going, so
-                          the pricing-stage status does not appear here
-                          at all — not as a column, not as a smaller
-                          second line. That is also what fixes the row
-                          that read "Customer approved" in a track full
-                          of started work: it now reads the ticket's
-                          "Open", i.e. approved, not started. */}
-                      {isWorkStarted ? (
-                        <StatusBadge
-                          status={{
-                            kind: "ticket",
-                            value: operationalStatus(row) ?? "OPEN",
-                          }}
-                          testId={`ew-operational-status-${row.id}`}
-                        />
-                      ) : (
-                        <StatusBadge
-                          status={{ kind: "extra-work", value: row.status }}
-                        />
-                      )}
-                      {/* Sprint 180 §1(b) — approved, but the spawn that
-                          is supposed to be synchronous with approval
-                          produced no ticket. The row belongs on this
-                          track, but saying nothing about it is how the
-                          work gets lost. The detail page has the retry
-                          button. */}
-                      {isSpawnAnomaly(row) && (
-                        <span
-                          className="cell-tag cell-tag-rejected"
-                          style={{ marginLeft: 6 }}
-                          title={t("list.track_anomaly_title")}
-                          data-testid="ew-no-ticket-marker"
-                        >
-                          {t("list.track_anomaly_marker")}
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <RouteBadge value={row.routing_decision} />
-                    </td>
-                    <td>
-                      {/* Sprint 144 §1 — new shape first, enum fallback. */}
-                      {extraWorkCategoryName(row) ??
-                        t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
-                    </td>
-                    <td>{row.building_name}</td>
-                    <td>{row.customer_name}</td>
-                    <td style={{ textAlign: "right" }}>
-                      {isPriced(row) ? (
-                        formatMoney(rowAmounts(row).total)
-                      ) : (
-                        <span
-                          className="muted-empty"
-                          title={t("list.total_not_priced_hint")}
-                        >
-                          &mdash;
-                        </span>
-                      )}
-                    </td>
-                    {isWorkStarted && (
-                      <td data-testid={`ew-ticket-cell-${row.id}`}>
-                        {/* Sprint 181 §1b — one renderer for the ticket
-                            numbers, with a real separator. Sprint 180
-                            leaned on a margin here and joined with ", "
-                            in the mobile card below; two tickets rendered
-                            as `TCK-...207TCK-...208`. */}
-                        <SpawnedTicketLinks tickets={row.spawned_tickets} />
-                      </td>
-                    )}
-                    {isWorkStarted && isProvider && (
-                      <td>
-                        {row.is_invoiced ? (
-                          <span className="badge badge-approved">
-                            {t("list.billing_invoiced")}
-                          </span>
-                        ) : (
-                          <span className="badge badge-normal">
-                            {t("list.billing_to_invoice")}
-                          </span>
-                        )}
-                        {row.invoice_date && (
-                          <div
-                            style={{
-                              fontSize: "0.8em",
-                              marginTop: 2,
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            {formatDate(row.invoice_date)}
-                          </div>
-                        )}
-                      </td>
-                    )}
-                    {isWorkStarted && (
-                      <td data-testid={`ew-billed-to-cell-${row.id}`}>
-                        {t(BILLED_TO_I18N_KEY[row.billed_to])}
-                      </td>
-                    )}
-                    <td>{formatDate(row.requested_at)}</td>
-                    <td className="td-date">
-                      {row.deadline ? formatDate(row.deadline) : (
-                        <span className="muted-empty">—</span>
-                      )}
-                      {/* The markers, in the status colours this app
-                          already has — a new pair would mean two
-                          vocabularies for "something is wrong". */}
-                      {row.is_overdue && (
-                        <span
-                          className="cell-tag cell-tag-rejected"
-                          style={{ marginLeft: 6 }}
-                          data-testid="ew-overdue-marker"
-                        >
-                          {t("list.overdue")}
-                        </span>
-                      )}
-                      {row.started_before_plan && (
-                        <span
-                          className="cell-tag cell-tag-open"
-                          style={{ marginLeft: 6 }}
-                          title={t("list.startedEarlyWhy")}
-                          data-testid="ew-started-early-marker"
-                        >
-                          {t("list.startedEarly")}
-                        </span>
-                      )}
-                    </td>
-                  </ClickableRow>
-                ))}
+                {foldSeries(visibleRows).map((entry) => {
+                  if (entry.kind === "row") return renderRow(entry.row);
+                  const open = expandedSeries.includes(entry.group.id);
+                  return (
+                    <Fragment key={`series-${entry.group.id}`}>
+                      <SeriesHeaderRow
+                        group={entry.group}
+                        onThisPage={entry.rows.length}
+                        columns={99}
+                        open={open}
+                        onToggle={() =>
+                          setExpandedSeries((prev) =>
+                            prev.includes(entry.group.id)
+                              ? prev.filter((id) => id !== entry.group.id)
+                              : [...prev, entry.group.id],
+                          )
+                        }
+                        onEdit={
+                          isProvider
+                            ? () => setEditingSeries(entry.group.id)
+                            : undefined
+                        }
+                      />
+                      {open && entry.rows.map((row) => renderRow(row, true))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
