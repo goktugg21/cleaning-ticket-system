@@ -923,85 +923,82 @@ function LabelsEditor({
 }
 
 
-/*  W2-B fix 2 — Customer contacts, as a panel INSIDE the Details card.
+/*  W5 fix 1 — Customer contacts is a FIELD, not a panel.
  *
- *  It was a collapsed card in the far-right rail: three columns away
- *  from the request it belongs to, closed by default, and the first
- *  thing an operator on the phone to a customer had to go hunting for.
- *  It now sits in the Details card itself, in the right-hand column
- *  beside the description / billing / routing text, open, with the
- *  count in its own header.
+ *  Four attempts to place this. It was a collapsed card in the far-right
+ *  rail (W2-B), then a half-width column beside the description (W2-B
+ *  fix 2 / W3-F), then a full-height third column top-aligned with the
+ *  card (W4-N). The owner spelled the answer out: it is the NEXT FIELD
+ *  in the right-hand column of the Details grid, directly under
+ *  Department / Work type, with the same label styling as "Customer",
+ *  "Ticket" and "Preferred date", the count beside the label, and one
+ *  readable line per contact.
  *
- *  THE BOUND IS THE POINT. A customer can have dozens of contacts, and
- *  this panel is now inside the card that governs the top of the page —
- *  so an unbounded list would drag the whole page layout with it. The
- *  list scrolls inside its own box (`.ew-contacts-panel-list`,
- *  max-height in CSS) and the panel's height is therefore capped
- *  whatever the customer's address book looks like. Same rule the
- *  collapsed card relied on, kept deliberately rather than inherited by
- *  accident, and the reason CLAUDE.md's "no unbounded server list"
- *  applies here at all.
+ *  So there is no border, no fill, no shadow and no wrapper that reads
+ *  as a panel — the `muted small` label and the plain lines under it
+ *  are the entire treatment, which is exactly what every other field in
+ *  that column wears. It is placed by normal grid flow (`grid-column: 2`
+ *  puts it in the next free row of the column it belongs to), never by
+ *  positioning.
  *
- *  Every testid is verbatim from the card it replaces
+ *  THE BOUND IS THE ONE THING KEPT. A customer can have dozens of
+ *  contacts and this sits in the card that governs the top of the page,
+ *  so the list scrolls inside itself (`.ew-contacts-field-list`,
+ *  max-height in CSS) rather than making the card enormous — CLAUDE.md's
+ *  "no unbounded server list" rule.
+ *
+ *  Every testid is verbatim from the card it replaced
  *  (`extra-work-customer-contacts-panel` / `-empty` / `-contact-row`),
  *  because `sprint28_batch15_4_detail_rebuild.spec.ts` asserts on all
- *  three and a moved panel is not a renamed one. */
+ *  three and a restyled field is not a renamed one. */
 function CustomerContactsPanel({ contacts }: { contacts: Contact[] }) {
   const { t } = useTranslation(["extra_work", "common"]);
   return (
-    <aside
-      className="ew-contacts-panel"
+    <div
+      className="ew-contacts-field"
       data-testid="extra-work-customer-contacts-panel"
     >
-      <div className="ew-contacts-panel-head">
-        {/* `muted small` is the class every other label in this half of
-            the card carries. Wearing it is what makes the heading line
-            up with "Description" rather than merely sit near it. */}
-        <span className="muted small ew-contacts-panel-title">
-          {t("customer_contacts.panel_title", { ns: "common" })}
-        </span>
-        <span className="muted small">
-          {t("detail.card_count", { count: contacts.length })}
-        </span>
+      {/* `muted small` — the same class "Customer", "Ticket", "Preferred
+          date" and "Department" wear, so this label shares their size,
+          weight, colour and left edge. The count rides with it. */}
+      <div className="muted small">
+        {t("customer_contacts.panel_title", { ns: "common" })}{" "}
+        <span className="ew-contacts-field-count">{contacts.length}</span>
       </div>
       {contacts.length === 0 ? (
         <div
-          className="muted small ew-contacts-panel-empty"
+          className="muted small"
           data-testid="extra-work-customer-contacts-empty"
         >
           {t("customer_contacts.panel_empty", { ns: "common" })}
         </div>
       ) : (
-        <ul className="ew-contacts-panel-list">
+        <ul className="ew-contacts-field-list">
           {contacts.map((contact) => (
             <li
               key={contact.id}
-              className="ew-contacts-panel-row"
+              className="ew-contacts-field-row"
               data-testid="extra-work-customer-contact-row"
             >
-              {/* Name, role and reach on their own lines. Putting name
-                  and role on ONE line was tried and MEASURED here, and
-                  it made rows taller, not shorter: at this column width
-                  (270px of content) a full name already fills the line,
-                  so the pair wrapped anyway and picked up the flex gap
-                  on top. Three spans it is. */}
-              <span className="ew-contacts-panel-name">
+              {/* One line per person: name, role, e-mail, phone. It
+                  wraps inside the column rather than widening it. */}
+              <span className="ew-contacts-field-name">
                 {contact.full_name}
               </span>
               {contact.role_label && (
                 <span className="muted small">{contact.role_label}</span>
               )}
-              {(contact.email || contact.phone) && (
-                <span className="muted small ew-contacts-panel-reach">
-                  {contact.email && <span>{contact.email}</span>}
-                  {contact.phone && <span>{contact.phone}</span>}
-                </span>
+              {contact.email && (
+                <span className="muted small">{contact.email}</span>
+              )}
+              {contact.phone && (
+                <span className="muted small">{contact.phone}</span>
               )}
             </li>
           ))}
         </ul>
       )}
-    </aside>
+    </div>
   );
 }
 
@@ -2171,27 +2168,6 @@ export function ExtraWorkDetailPage() {
                 <div className="form-section-title">
                   {t("detail.details_section_title")}
                 </div>
-              {/* W4-N fix 1 - the Details card is THREE columns, and the
-                  third one starts at the TOP.
-
-                  W2-B put Customer contacts beside the DESCRIPTION and
-                  W3-F kept it there, which meant the contacts heading
-                  began level with "Description" - most of a card below
-                  "Building". The owner asked for it beside the whole
-                  card. So the split moved up: the two fact grids, the
-                  dates editor and the run of prose are now one left
-                  column, and contacts is a sibling column of the same
-                  wrapper. The acceptance number is that the top of the
-                  contacts block and the top of the "Building" label are
-                  the same Y, which they are because both are the first
-                  child of row one of an `align-items: start` grid.
-
-                  `.ew-detail-cols-main` carries `.form-section`'s own
-                  `flex-direction: column; gap: 16px`, so every vertical
-                  distance inside the left column is the one it had when
-                  these blocks were direct children of the section. */}
-              <div className="ew-detail-cols">
-                <div className="ew-detail-cols-main">
               <div className="form-2col">
                 <div>
                   <div className="muted small">{t("detail.field_building")}</div>
@@ -2431,6 +2407,17 @@ export function ExtraWorkDetailPage() {
                     )}
                   </div>
                 )}
+                {/* The next field in this column, directly under
+                    Department / Work type. `grid-column: 2` in the CSS
+                    is placement inside the grid's own flow, not
+                    positioning: it puts the field in the next free row
+                    of the column it belongs to. Contacts are
+                    SUPER_ADMIN / COMPANY_ADMIN only, mirroring a backend
+                    403, and both of those roles are providers, so the
+                    Department cell above it is always present. */}
+                {canSeeCustomerContacts && (
+                  <CustomerContactsPanel contacts={customerContacts} />
+                )}
               </div>
               {/* The form itself opens BELOW the grid, where it has room for
                   two date inputs, the customer's preferred date and an
@@ -2442,13 +2429,11 @@ export function ExtraWorkDetailPage() {
                   onClose={() => setDatesOpen(false)}
                 />
               )}
-              {/* The run of text the card has always ended with
-                  (description, the notes, the billing month and its
-                  override, routing). It stays a flex column of its own
-                  so its fields keep their 16px rhythm; what changed in
-                  W4-N is only that it is no longer the thing Customer
-                  contacts is aligned to. */}
-                <div className="ew-detail-body-main">
+              {/* The run of text the card ends with (description, the
+                  notes, the billing month and its override, routing).
+                  Full width again: Customer contacts is a field in the
+                  grid above, so nothing shares this row. */}
+              <div className="ew-detail-body-main">
                   <div className="field">
                     <div className="muted small">{t("detail.field_description")}</div>
                     <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
@@ -2609,17 +2594,6 @@ export function ExtraWorkDetailPage() {
                       the same reason the button is. */}
                   {isProvider && <PlanSummary ew={ew} />}
                 </div>
-                </div>
-                {/* Customer contacts is SUPER_ADMIN / COMPANY_ADMIN only
-                    (it mirrors a backend 403). When it is absent
-                    `.ew-detail-cols-main:only-child` spans both columns,
-                    so a building manager or a customer user gets the
-                    full-width card they had rather than a narrowed one
-                    with dead space beside it. */}
-                {canSeeCustomerContacts && (
-                  <CustomerContactsPanel contacts={customerContacts} />
-                )}
-              </div>
             </div>
           </div>
 

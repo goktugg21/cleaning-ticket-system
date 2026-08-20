@@ -310,8 +310,14 @@ p { line-height: 1.6; }
    existing pages are left on their inline style: they render correctly
    today, and converting four working pages for tidiness is risk with
    no visible benefit in a sprint that has four items to land. */
+/* W5 fix 3 — text was crowding the card borders on both detail pages.
+   The inset steps up one notch on the scale this file already uses
+   (20/22 -> 24/28), and the same 28px horizontal inset goes on
+   `.form-section` and on the collapsible cards' head and body, so a
+   field, a section and a collapsed card all start on the same line
+   whichever of the two detail pages you are on. */
 .card-detail-pad {
-  padding: 20px 22px;
+  padding: 24px 28px;
 }
 
 /* Section head */
@@ -1783,7 +1789,8 @@ table.data-table {
   .create-layout { grid-template-columns: 1fr; }
 }
 
-.form-section { padding: 22px; border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 16px; }
+/* W5 fix 3 — 22px -> 24px 28px. See the note on `.card-detail-pad`. */
+.form-section { padding: 24px 28px; border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 16px; }
 .form-section:last-of-type { border-bottom: none; }
 .form-section-title {
   font-family: var(--f-head);
@@ -2693,8 +2700,12 @@ table.data-table {
   flex-direction: column;
   align-items: flex-end;
   /* W4-M §1 — 12px read as one blob once the type came down. The two
-     pairs are two separate facts and now say so. */
-  gap: 14px;
+     pairs are two separate facts and now say so.
+     W5 fix 2 — 14px still read as one grey lump: two labels and two
+     values at near-equal weights, stacked evenly, with nothing saying
+     where one fact ends and the next begins. 24px is the real space
+     the owner asked for. */
+  gap: 24px;
   text-align: right;
   /* The ceiling that stops a long customer name from eating the title's
      column or pushing the page wider than the viewport. Unchanged at
@@ -2706,7 +2717,9 @@ table.data-table {
 .detail-header-place-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  /* W5 fix 2 — the label sits ON its value, tight, so the pair reads as
+     one unit against the 24px between the pairs. */
+  gap: 1px;
   min-width: 0;
   max-width: 100%;
 }
@@ -2723,9 +2736,15 @@ table.data-table {
   justify-content: flex-end;
   gap: 4px;
   font-family: var(--f-head);
+  /* W5 fix 2 — the label was shouting as loud as the value: 800 weight
+     at 0.14em is a headline treatment, and two of those stacked beside
+     two values of nearly the same colour is the grey lump the owner is
+     looking at. Weight down to 600, tracking with it. The colour stays
+     --text-muted (5.31:1 on the page ground) because --text-faint is
+     2.75:1 and unreadable at this size. */
   font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   /* Was --text-faint (#8A9B91): 2.75:1 against the page ground
      (#F7F8F6). At 9.5px that is unreadable as well as below AA;
@@ -2743,10 +2762,14 @@ table.data-table {
   font-family: var(--f-head);
   /* W4-M §1 — was 18px/800. Down two steps to 15px/700: still the head
      font, still bold, still the heaviest thing on this side of the
-     band, but no longer arguing with the 36px title. */
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.3;
+     band, but no longer arguing with the 36px title.
+     W5 fix 2 — the smaller footprint stays, the weight goes back up:
+     the hierarchy inside this block has to be unmistakable, 16px/800
+     against a 9.5px/600 label. It is the label that had to give way,
+     not the value. */
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.25;
   letter-spacing: -0.01em;
   color: var(--text);
   /* A single unbroken building name wraps instead of widening the page. */
@@ -3375,7 +3398,8 @@ table.data-table {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 22px;
+  /* W5 fix 3 — the same 28px inset the card's sections use. */
+  padding: 18px 28px;
 }
 .collapsible-card-toggle {
   display: flex;
@@ -3411,7 +3435,7 @@ table.data-table {
   color: var(--text-muted);
   white-space: nowrap;
 }
-.collapsible-card-body { padding: 0 22px 22px; }
+.collapsible-card-body { padding: 0 28px 24px; }
 
 /* RF-14 — long pricing tables: cap the height at roughly 8 rows and
    scroll internally with a pinned header (mirrors the sticky thead of
@@ -7751,136 +7775,69 @@ a.attn-row:hover {
 .ew-detail-main {
   min-width: 0;
 }
-/* W4-N fix 1 — the WHOLE Details card in two columns, contacts on the
-   right, starting at the top.
+/* W5 fix 1 — Customer contacts is a FIELD in the Details grid.
 
-   W2-B split only the lower half of the card (description and below),
-   which put the Customer contacts heading level with "Description" —
-   several rows beneath "Building". Two waves shipped that and the owner
-   asked twice for contacts beside the whole card. The wrapper therefore
-   starts directly under the section title and holds BOTH fact grids,
-   the dates editor and the prose in its left child. Because it is a
-   grid with `align-items: start`, the top of `.ew-contacts-panel` and
-   the top of `.form-2col` (whose first cell is the "Building" label)
-   are the same Y by construction, not by a margin that has to be kept
-   in sync.
+   W4-N made the whole card a two-column grid with contacts as a
+   top-aligned third column. Wrong, and the fourth wrong answer in a
+   row. Contacts is the NEXT ITEM in the right-hand column of the fact
+   grid, directly under Department / Work type, wearing the same label
+   treatment as every other field in that column.
 
-   The right column is a fixed 300px at the wide end rather than a
-   fraction, because its content is names, e-mail addresses and phone
-   numbers — a fraction would keep growing it on a wide screen and steal
-   width from the prose beside it, which is the one thing on this card
-   that benefits from length.
+   `grid-column: 2` is placement inside `.form-2col`'s own flow, not
+   positioning: auto-placement drops the field into the next free row of
+   column two, which is the row under Department / Work type. Below the
+   900px breakpoint `.form-2col` collapses to one column, so the
+   explicit column is released or it would conjure a second one.
 
-   `:only-child` is load-bearing, not tidiness. Customer contacts is
-   SUPER_ADMIN / COMPANY_ADMIN only (it mirrors a backend 403), so for a
-   building manager or a customer user the left block is the sole child
-   and must span both columns — otherwise those roles get a narrowed
-   card with an empty strip beside it. */
-.ew-detail-cols {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
-  gap: 16px;
-  align-items: start;
-}
-/* The same `column / 16px` `.form-section` gives its own children, so
-   moving these blocks one level down changed no vertical distance. */
-.ew-detail-cols-main {
+   No border, no fill, no shadow, no box. The label and the lines under
+   it are the whole treatment. */
+.ew-contacts-field {
+  grid-column: 2;
   min-width: 0;
+}
+@media (max-width: 900px) {
+  .ew-contacts-field {
+    grid-column: auto;
+  }
+}
+.ew-contacts-field-count {
+  font-weight: 700;
+}
+/* THE BOUND. A customer can have dozens of contacts and this field sits
+   in the card that governs the top of the page, so the list scrolls in
+   place instead of making the card enormous — about four lines' worth
+   of window on it, the same rule the panel it replaces relied on. */
+.ew-contacts-field-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 5px;
+  max-height: 132px;
+  overflow-y: auto;
 }
-.ew-detail-cols-main:only-child {
-  grid-column: 1 / -1;
+/* One readable line per person: name, role, e-mail, phone. It wraps
+   inside the column rather than pushing the column - and therefore the
+   page - wider. */
+.ew-contacts-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ew-contacts-field-name {
+  font-weight: 600;
 }
 .ew-detail-body-main {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-@media (max-width: 900px) {
-  .ew-detail-cols {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Customer contacts, in the card instead of in the rail.
-
-   THE MAX-HEIGHT IS THE WHOLE SAFETY RULE. A customer can have dozens
-   of contacts and this panel now sits inside the card that governs the
-   top of the page, so an unbounded list would drag the page layout with
-   it. The list scrolls inside itself and the panel is capped whatever
-   the address book looks like. Measured at 1440px with twelve contacts
-   carrying a name, a role and both an e-mail and a phone number: 992px
-   of content inside a 300px box, panel 350px, page overflow 0. A row is
-   three lines at this column width, so 300px shows between three and
-   four of them — a window on the list, not the list. The alternative
-   was a taller box that pushed the card down for every customer,
-   including the ones with two contacts (panel 218px, no scrollbar). */
-.ew-contacts-panel {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  /* Matches `.field`'s own label-to-value gap, so the heading sits the
-     same distance above its content as "Description" does above the
-     description text. */
-  gap: 6px;
-  /* W3-F — NO padding, NO background, NO border box.
-     W2-B drew this as a filled, bordered, padded card sitting inside
-     the details card: a nested box, and 12px of its own padding meant
-     its heading started 12px lower than the "Description" heading it
-     was supposed to line up with. It is a COLUMN of the card, not a
-     thing on top of it. The only remaining separator is the rule down
-     its left edge, which says "different column" without saying
-     "different card". */
-  padding: 0 0 0 16px;
-  border-left: 1px solid var(--border-soft);
-}
-.ew-contacts-panel-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-/* Deliberately `.muted small`'s size and colour rather than a heading
-   style of its own: every other label in this half of the card
-   ("Description", "Billing month", "Routing") is a muted small line,
-   and the first thing "align with the other sections" means is that
-   this one is too. Same font, same size, same colour, same baseline. */
-.ew-contacts-panel-title {
-  font-weight: 600;
-}
-.ew-contacts-panel-empty {
-  margin: 0;
-}
-.ew-contacts-panel-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-.ew-contacts-panel-row {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-.ew-contacts-panel-name {
-  font-weight: 600;
-  /* A long address or name wraps inside the column rather than pushing
-     the column — and therefore the page — wider. */
-  overflow-wrap: anywhere;
-}
-.ew-contacts-panel-reach {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  overflow-wrap: anywhere;
 }
 .ew-detail-actions-section-title {
   font-family: var(--f-head);

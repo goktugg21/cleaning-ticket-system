@@ -133,6 +133,119 @@ function formatPeriod(year: number | null, month: number | null): string {
   return `${String(month).padStart(2, "0")}-${year}`;
 }
 
+/* ====================================================================
+   W5 fix 4 — WHICH PERIOD the unbilled work belongs to.
+
+   THE BUG THE OWNER HIT. The due panel and the Generate button answer
+   two different questions and neither says which one it is answering.
+   `unbilled_extra_work_through` (backend/invoicing/selectors.py:227)
+   matches work billable in the current period OR ANY EARLIER one;
+   `unbilled_extra_work` (:207) matches ONE EXACT period and is what
+   `generate` runs. So work whose billing month is June shows as "1
+   unbilled" in the August panel and generates nothing in August, and
+   the screen explains none of that. Both selectors are correct and
+   neither is touched here — what was missing is the period, said out
+   loud, in three places: on the row, on the button, and in the answer
+   when a run produces nothing.
+
+   HOW THE PERIODS ARE FOUND, WITHOUT A NEW ENDPOINT. `/invoices/preview/`
+   already takes a year and a month and already runs the THROUGH query,
+   so `linesThrough(M) - linesThrough(M-1)` is the count that sits in
+   exactly M. Walking back from the current period until the through
+   count reaches zero yields every period that holds unbilled work,
+   oldest last. Two facts make this cheap: the walk stops at the oldest
+   period with work (typically one or two steps), and it is capped at
+   `MAX_PERIOD_LOOKBACK` steps so a pathological customer cannot spend
+   the panel's afternoon on it.
+
+   The differencing is a count of ROWS, never money. Every amount on
+   this page still comes from the server through `formatMoney`. */
+const MAX_PERIOD_LOOKBACK = 13;
+
+interface UnbilledPeriod {
+  year: number;
+  month: number;
+  count: number;
+}
+
+interface UnbilledPeriods {
+  /** Oldest first. Empty when the probe found nothing to attribute. */
+  periods: UnbilledPeriod[];
+  /** The walk hit its cap with work still older than the last period. */
+  truncated: boolean;
+}
+
+function monthBefore(
+  year: number,
+  month: number,
+): { year: number; month: number } {
+  return month === 1
+    ? { year: year - 1, month: 12 }
+    : { year, month: month - 1 };
+}
+
+function previewLineCount(preview: InvoicePreview): number {
+  return preview.invoices.reduce((total, inv) => total + inv.line_count, 0);
+}
+
+async function resolveUnbilledPeriods(
+  customer: number,
+  year: number,
+  month: number,
+): Promise<UnbilledPeriods> {
+  const periods: UnbilledPeriod[] = [];
+  let cursor = { year, month };
+  let through = previewLineCount(
+    await getInvoicePreview({ customer, year, month }),
+  );
+  let steps = 0;
+  while (through > 0 && steps < MAX_PERIOD_LOOKBACK) {
+    const earlier = monthBefore(cursor.year, cursor.month);
+    const earlierThrough = previewLineCount(
+      await getInvoicePreview({
+        customer,
+        year: earlier.year,
+        month: earlier.month,
+      }),
+    );
+    if (through > earlierThrough) {
+      periods.push({ ...cursor, count: through - earlierThrough });
+    }
+    cursor = earlier;
+    through = earlierThrough;
+    steps += 1;
+  }
+  periods.reverse();
+  return { periods, truncated: through > 0 };
+}
+
+/** The row sentence. One period is named; several are given as a span. */
+function periodsSentence(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  resolved: UnbilledPeriods | undefined,
+): string | null {
+  if (!resolved || resolved.periods.length === 0) return null;
+  const first = resolved.periods[0];
+  if (resolved.periods.length === 1) {
+    return t("facturen.due_period_one", {
+      period: formatPeriod(first.year, first.month),
+    });
+  }
+  const last = resolved.periods[resolved.periods.length - 1];
+  return t("facturen.due_period_many", {
+    count: resolved.periods.length,
+    first: formatPeriod(first.year, first.month),
+    last: formatPeriod(last.year, last.month),
+  });
+}
+
+function periodListLabel(resolved: UnbilledPeriods | undefined): string | null {
+  if (!resolved || resolved.periods.length === 0) return null;
+  return resolved.periods
+    .map((period) => formatPeriod(period.year, period.month))
+    .join(", ");
+}
+
 export function FacturenPage({
   customerId,
   embedded = false,
@@ -147,6 +260,12 @@ export function FacturenPage({
 
   const [dueRows, setDueRows] = useState<InvoiceDueRow[]>([]);
   const [dueLoading, setDueLoading] = useState(true);
+  // W5 fix 4 — resolved lazily per customer, keyed by customer id. An
+  // absent entry means "not resolved yet or the probe failed", and a row
+  // in that state simply says nothing rather than guessing a period.
+  const [duePeriods, setDuePeriods] = useState<
+    Record<number, UnbilledPeriods>
+  >({});
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -218,6 +337,36 @@ export function FacturenPage({
     };
   }, [customerId, refreshKey]);
 
+  // W5 fix 4 — resolve WHICH periods each due row's unbilled work sits
+  // in. Runs after the rows land, one row at a time rather than a burst,
+  // and every state write happens in an async callback (never in the
+  // effect body). A row whose probe throws keeps its silence: a missing
+  // sentence is recoverable, a wrong period is not.
+  useEffect(() => {
+    let cancelled = false;
+    const rows = dueRows.filter((row) => row.unbilled_count > 0);
+    if (rows.length === 0) return;
+    async function resolveAll() {
+      for (const row of rows) {
+        try {
+          const resolved = await resolveUnbilledPeriods(
+            row.customer,
+            row.period_year,
+            row.period_month,
+          );
+          if (cancelled) return;
+          setDuePeriods((prev) => ({ ...prev, [row.customer]: resolved }));
+        } catch {
+          if (cancelled) return;
+        }
+      }
+    }
+    resolveAll();
+    return () => {
+      cancelled = true;
+    };
+  }, [dueRows]);
+
   // Invoice list. Sprint 120 — listAllInvoices pages exhaustively (the
   // plain listInvoices requests page_size=100 and never follows `next`,
   // so this list, its status/period filtering, and its totals used to
@@ -280,10 +429,20 @@ export function FacturenPage({
 
   function openGenerate(row: InvoiceDueRow) {
     setGenRow(row);
+    // W5 fix 4 — open on the OLDEST period that actually holds unbilled
+    // work, not on the current calendar month. `generate` targets one
+    // exact period, so seeding it with "now" is what produced "0 drafts
+    // generated" against a panel that had just said there was work. The
+    // row's own period is the fallback for a customer whose probe has
+    // not landed yet, which is the behaviour this replaces.
+    const resolved = duePeriods[row.customer];
+    const target = resolved?.periods[0];
     setGenMonth(
-      row.period_year && row.period_month
-        ? `${row.period_year}-${String(row.period_month).padStart(2, "0")}`
-        : currentMonthValue(),
+      target
+        ? `${target.year}-${String(target.month).padStart(2, "0")}`
+        : row.period_year && row.period_month
+          ? `${row.period_year}-${String(row.period_month).padStart(2, "0")}`
+          : currentMonthValue(),
     );
     // Seed from the customer's SAVED pair. The /due/ row carries both
     // (Sprint 182), with the legacy granularity as the fallback for a
@@ -358,10 +517,24 @@ export function FacturenPage({
         // customer serializer already translates a legacy write.
         granularity: granularityFor(genTarget, genSplit),
       });
-      pushToast({
-        variant: created.length > 0 ? "success" : "info",
-        title: t("facturen.gen_toast", { count: created.length }),
-      });
+      if (created.length > 0) {
+        pushToast({
+          variant: "success",
+          title: t("facturen.gen_toast", { count: created.length }),
+        });
+      } else {
+        // W5 fix 4 — "0 drafts generated" is a count, not an answer. Say
+        // which period the run targeted and, when the probe knows,
+        // where this customer's unbilled work actually is.
+        const attempted = formatPeriod(parsed.year, parsed.month);
+        const elsewhere = periodListLabel(duePeriods[genRow.customer]);
+        pushToast({
+          variant: "info",
+          title: elsewhere
+            ? t("facturen.gen_zero_elsewhere", { attempted, actual: elsewhere })
+            : t("facturen.gen_zero", { attempted }),
+        });
+      }
       setGenRow(null);
       setRefreshKey((k) => k + 1);
     } catch (err) {
@@ -473,6 +646,20 @@ export function FacturenPage({
                           data-testid="facturen-due-nothing"
                         >
                           {nothingSentence(t, row.nothing_reason)}
+                        </span>
+                      )}
+                      {/* W5 fix 4 — WHICH period this count is about.
+                          The count comes from the THROUGH query, so a
+                          "1" here can be June's work read in August;
+                          without this line the panel and the Generate
+                          button silently disagree. */}
+                      {periodsSentence(t, duePeriods[row.customer]) && (
+                        <span
+                          className="muted small"
+                          style={{ display: "block", textAlign: "left" }}
+                          data-testid="facturen-due-periods"
+                        >
+                          {periodsSentence(t, duePeriods[row.customer])}
                         </span>
                       )}
                     </td>
@@ -642,6 +829,18 @@ export function FacturenPage({
             <div className="section-head-title" style={{ marginBottom: 8 }}>
               {t("facturen.gen_title", { name: genRow.customer_name })}
             </div>
+            {/* W5 fix 4 — the same sentence the row carries, repeated
+                where the month is chosen, because this is the field the
+                operator is about to get wrong. */}
+            {periodsSentence(t, duePeriods[genRow.customer]) && (
+              <p
+                className="muted small"
+                style={{ marginTop: 0 }}
+                data-testid="facturen-generate-periods"
+              >
+                {periodsSentence(t, duePeriods[genRow.customer])}
+              </p>
+            )}
             <div
               className="invoices-toolbar"
               style={{ display: "flex", gap: 16, flexWrap: "wrap" }}
@@ -689,7 +888,17 @@ export function FacturenPage({
                 disabled={genBusy || !parseMonth(genMonth)}
                 data-testid="facturen-generate-confirm"
               >
-                {t("facturen.generate")}
+                {/* W5 fix 4 — the button names the ONE period it is
+                    about to generate. `generate` has always targeted an
+                    exact period; only the button was silent about it. */}
+                {(() => {
+                  const parsed = parseMonth(genMonth);
+                  return parsed
+                    ? t("facturen.gen_confirm_for", {
+                        period: formatPeriod(parsed.year, parsed.month),
+                      })
+                    : t("facturen.generate");
+                })()}
               </button>
             </div>
           </div>
