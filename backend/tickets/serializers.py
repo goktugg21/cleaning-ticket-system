@@ -21,6 +21,7 @@ from customers.models import (
 from sla import business_hours
 
 from .models import (
+    AttachmentVisibility,
     SubTask,
     Ticket,
     TicketAttachment,
@@ -523,6 +524,25 @@ class TicketAutoCompleteFlagSerializer(serializers.Serializer):
     auto_complete_on_subtasks = serializers.BooleanField()
 
 
+class TicketAttachmentPolicySerializer(serializers.Serializer):
+    """Sprint 191 §2.5 — input for the PA/SA attachment-visibility-policy
+    action: the per-work "staff uploads are customer-visible immediately"
+    setting. Same shape as `TicketAutoCompleteFlagSerializer`, which is
+    the endpoint this one mirrors."""
+
+    staff_uploads_customer_visible = serializers.BooleanField()
+
+
+class TicketAttachmentVisibilitySerializer(serializers.Serializer):
+    """Sprint 191 §2.5 — input for the promote/demote action on ONE
+    attachment. `visibility` is the whole body: INTERNAL keeps the row on
+    the provider side, CUSTOMER releases it across the customer wall.
+    Phase is deliberately NOT settable here — a label change is not a
+    visibility change and must not ride along on the same action."""
+
+    visibility = serializers.ChoiceField(choices=AttachmentVisibility.choices)
+
+
 class TicketDetailSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
     # Sprint 185 E §1 — see `TicketListSerializer`: the kind of WORK,
@@ -646,6 +666,12 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             # Sprint 4 — sub-tasks + auto-complete opt-in (additive).
             "sub_tasks",
             "auto_complete_on_subtasks",
+            # Sprint 191 §2.5 — the per-work photo-visibility setting.
+            # Read-only here like every other flag on this serializer;
+            # mutated through the dedicated PA/SA endpoint. Safe for
+            # every role that already sees ticket detail: it states the
+            # rule, it is not itself a photo.
+            "staff_uploads_customer_visible",
         ]
         read_only_fields = fields
 
@@ -1658,6 +1684,12 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "mime_type",
             "file_size",
             "is_hidden",
+            # Sprint 191 §2.5 — the customer wall and the phase label.
+            # Both writable at upload; `visibility` only for provider
+            # management (see `validate_visibility`), `phase` for anyone
+            # who may upload at all, because a label grants nothing.
+            "visibility",
+            "phase",
             "created_at",
         ]
         read_only_fields = [
@@ -1727,6 +1759,29 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Only provider management roles may upload "
                 "hidden/internal attachments."
+            )
+
+        return value
+
+    def validate_visibility(self, value):
+        """Sprint 191 §2.5 — only provider management may CHOOSE a
+        visibility at upload time.
+
+        Mirrors `validate_is_hidden`, and for the same reason: the level
+        an upload lands at is a provider decision, not the uploader's.
+        STAFF gets the computed default (INTERNAL, unless the work
+        carries `staff_uploads_customer_visible`) and a customer-side
+        uploader gets CUSTOMER — both resolved in
+        `TicketAttachmentListCreateView.perform_create`, which is the one
+        place that default lives."""
+        request = self.context.get("request")
+        user = request.user if request else None
+
+        if not is_provider_management_role(user):
+            raise serializers.ValidationError(
+                "Only provider management roles may choose an "
+                "attachment's visibility.",
+                code="visibility_forbidden",
             )
 
         return value

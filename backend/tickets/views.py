@@ -37,6 +37,7 @@ from .filters import (
     parse_is_extra_work,
 )
 from .models import (
+    AttachmentVisibility,
     Ticket,
     TicketAttachment,
     TicketMessage,
@@ -59,7 +60,9 @@ from .state_machine import TransitionError, apply_transition
 from .serializers import (
     TicketAssignableManagerSerializer,
     TicketAssignSerializer,
+    TicketAttachmentPolicySerializer,
     TicketAttachmentSerializer,
+    TicketAttachmentVisibilitySerializer,
     TicketAutoCompleteFlagSerializer,
     TicketCategorySerializer,
     TicketConvertToExtraWorkSerializer,
@@ -953,11 +956,107 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path="attachment-visibility-policy",
+    )
+    def attachment_visibility_policy(self, request, pk=None):
+        """
+        Sprint 191 §2.5 — set the per-work photo-visibility setting
+        (`Ticket.staff_uploads_customer_visible`).
+
+        OFF (the default) is the decision: a staff upload on this work
+        lands INTERNAL and waits for a provider to promote it. ON is the
+        opt-in for a customer who has asked to see the work as it
+        happens — staff uploads on THIS work are customer-visible the
+        moment they arrive.
+
+        Flipping it changes only what happens NEXT. It does not
+        retro-promote the photos already stored (those still need the
+        per-attachment promote action) and it does not retro-hide the
+        ones already released, because turning a default off cannot
+        un-say what a manager already decided.
+
+        PA / SA only, blocked on a terminal ticket, one explicit AuditLog
+        row on a real change — deliberately the same shape as
+        `auto_complete_flag` above, which is the closest existing
+        per-work switch.
+        """
+        if request.user.role not in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+        ):
+            return Response(
+                {
+                    "detail": "Only a provider admin can change the "
+                    "attachment visibility setting.",
+                    "code": "attachment_visibility_policy_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ticket = self.get_object()
+
+        if ticket.status in _SCHEDULE_TERMINAL_STATUSES:
+            return Response(
+                {
+                    "detail": "This ticket is in a terminal status; the "
+                    "attachment visibility setting cannot be changed.",
+                    "code": "attachment_visibility_policy_not_allowed_terminal",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ser = TicketAttachmentPolicySerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_value = ser.validated_data["staff_uploads_customer_visible"]
+        old_value = ticket.staff_uploads_customer_visible
+
+        if new_value != old_value:
+            ticket.staff_uploads_customer_visible = new_value
+            # Explicit update_fields EXCLUDES `status` so the SLA
+            # post_save signal sees no status change (mirrors the
+            # auto-complete-flag / schedule endpoints).
+            ticket.save(
+                update_fields=[
+                    "staff_uploads_customer_visible",
+                    "updated_at",
+                ]
+            )
+            self._audit_ticket_flag(
+                request,
+                ticket,
+                "staff_uploads_customer_visible",
+                old_value,
+                new_value,
+            )
+
+        return Response(
+            TicketDetailSerializer(ticket, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
     def _audit_auto_complete_flag(self, request, ticket, old_value, new_value):
         """Sprint 4 — explicit AuditLog UPDATE row for the flag flip. Ticket
         is NOT signal-audited (audit/signals.py registers only its
         sub-models), so the flip is recorded here, mirroring the
         perform_create / destroy explicit-audit blocks. Best-effort: a
+        failure is logged but never blocks the flip."""
+        self._audit_ticket_flag(
+            request,
+            ticket,
+            "auto_complete_on_subtasks",
+            old_value,
+            new_value,
+        )
+
+    def _audit_ticket_flag(self, request, ticket, field, old_value, new_value):
+        """Sprint 191 §2.5 — the body of `_audit_auto_complete_flag`, with
+        the field name as a parameter so the second per-work switch
+        (`staff_uploads_customer_visible`) writes an identically shaped
+        row instead of a copy of this block. Ticket is NOT signal-audited,
+        so every flag flip on it has to say so here. Best-effort: a
         failure is logged but never blocks the flip."""
         try:
             _scope = audit_context.get_current_actor_scope() or {}
@@ -971,7 +1070,7 @@ class TicketViewSet(
                 target_model="tickets.Ticket",
                 target_id=ticket.id,
                 changes={
-                    "auto_complete_on_subtasks": {
+                    field: {
                         "before": old_value,
                         "after": new_value,
                     }
@@ -983,7 +1082,8 @@ class TicketViewSet(
             )
         except Exception:  # pragma: no cover — audit must not block the flip
             _audit_logger.exception(
-                "audit: failed to record ticket auto_complete flag flip #%s",
+                "audit: failed to record ticket %s flag flip #%s",
+                field,
                 ticket.id,
             )
 
@@ -1751,6 +1851,14 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
                 qs = qs.exclude(
                     message__message_type=TicketMessageType.STAFF_OPERATIONAL
                 )
+                # Sprint 191 §2.5 — the customer wall. A customer-side
+                # caller sees ONLY what has been released to them: their
+                # own uploads (created CUSTOMER) plus whatever a provider
+                # manager has promoted. `is_staff_role` is the whole
+                # provider side (SA / CA / BM / STAFF), so this branch is
+                # customer-side only and the worker who took the photo
+                # keeps seeing it while it is INTERNAL.
+                qs = qs.filter(visibility=AttachmentVisibility.CUSTOMER)
 
         return qs.order_by("-created_at")
 
@@ -1804,12 +1912,42 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
             )
         return slot
 
+    def _default_visibility(self, ticket, user):
+        """Sprint 191 §2.5 — the level an upload lands at when the
+        uploader did not choose one. THE one place that default lives.
+
+        Three cases, in order:
+
+          1. A customer-side uploader gets CUSTOMER. Their own file must
+             not be hidden from them, and it was never internal in the
+             first place.
+          2. A provider-side upload on a work whose
+             `staff_uploads_customer_visible` is set gets CUSTOMER — the
+             per-work opt-in for the customers who asked to see the job
+             as it happens.
+          3. Everything else gets INTERNAL. That is the decision: nothing
+             a worker uploads crosses the wall until a provider promotes
+             it.
+
+        Provider management can still override at upload time by sending
+        `visibility` (see `TicketAttachmentSerializer.validate_
+        visibility`); STAFF and customer-side cannot, and get this.
+        """
+        if not is_staff_role(user):
+            return AttachmentVisibility.CUSTOMER
+        if ticket.staff_uploads_customer_visible:
+            return AttachmentVisibility.CUSTOMER
+        return AttachmentVisibility.INTERNAL
+
     def perform_create(self, serializer):
         ticket = self._get_ticket()
         user = self.request.user
         uploaded_file = serializer.validated_data["file"]
 
         is_hidden = serializer.validated_data.get("is_hidden", False)
+        visibility = serializer.validated_data.get(
+            "visibility"
+        ) or self._default_visibility(ticket, user)
 
         # Sprint 12 — optional per-slot evidence link (pop the write-only
         # input so it is not double-applied via validated_data).
@@ -1828,6 +1966,114 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
             mime_type=getattr(uploaded_file, "content_type", "") or "application/octet-stream",
             file_size=getattr(uploaded_file, "size", 0),
             is_hidden=is_hidden,
+            visibility=visibility,
+        )
+
+
+class TicketAttachmentVisibilityView(generics.GenericAPIView):
+    """
+    Sprint 191 §2.5 — promote ONE attachment across the customer wall,
+    or pull it back.
+
+    `PATCH /api/tickets/<ticket_id>/attachments/<attachment_id>/visibility/`
+    with `{"visibility": "CUSTOMER"}` (or `"INTERNAL"`).
+
+    Provider management only (SUPER_ADMIN / COMPANY_ADMIN /
+    BUILDING_MANAGER). The worker who took the photo cannot publish it,
+    which is the whole decision: a provider decides what the customer
+    sees.
+
+    Tenant scoping is the P0 surface here. The role gate answers 403
+    FIRST (a wrong role learns nothing about which tickets exist), and
+    the ticket is then resolved through `scope_tickets_for(user)`, so a
+    manager of another tenant gets a 404 and cannot promote a photo
+    across a tenant boundary. The attachment is looked up with
+    `ticket=ticket`, so an id from another ticket 404s too.
+
+    The audit row is automatic: `TicketAttachment` is registered in the
+    generic CRUD trio in `audit/signals.py`, whose UPDATE handler diffs
+    only the fields that actually changed — so a promote lands as one
+    AuditLog row reading visibility INTERNAL -> CUSTOMER, with the actor
+    on it (Addendum A §A.3.3: visibility changes are audited).
+
+    It does NOT touch `is_hidden` and it does NOT touch `phase`: this
+    endpoint moves the customer wall and nothing else. Completion
+    evidence is unaffected — the gates count `is_hidden=False` rows.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def patch(self, request, ticket_id, attachment_id):
+        # Role gate FIRST, before any object lookup, so a wrong role gets
+        # a stable 403 rather than a scope-driven 404 (the shape the
+        # auto-complete-flag / schedule actions already use).
+        if not is_provider_management_role(request.user):
+            return Response(
+                {
+                    "detail": "Only provider management can change an "
+                    "attachment's visibility.",
+                    "code": "attachment_visibility_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ticket = get_object_or_404(Ticket, pk=ticket_id)
+        if not scope_tickets_for(request.user).filter(pk=ticket.pk).exists():
+            raise Http404("Ticket not found.")
+
+        attachment = get_object_or_404(
+            TicketAttachment,
+            pk=attachment_id,
+            ticket=ticket,
+        )
+
+        ser = TicketAttachmentVisibilitySerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_visibility = ser.validated_data["visibility"]
+
+        # Releasing a row the OTHER filters would still hide would
+        # produce a lie in the UI: the pill would read "customer
+        # visible" while `is_hidden` / the parent note's tier keeps the
+        # customer from ever seeing it. Refuse instead, and say which
+        # flag is in the way. The two axes stay independent — this is a
+        # consistency check, not one axis deciding the other.
+        if new_visibility == AttachmentVisibility.CUSTOMER:
+            blocked_by_hidden = attachment.is_hidden
+            blocked_by_message = bool(
+                attachment.message_id
+                and (
+                    attachment.message.is_hidden
+                    or attachment.message.message_type
+                    in (
+                        TicketMessageType.INTERNAL_NOTE,
+                        TicketMessageType.STAFF_OPERATIONAL,
+                    )
+                )
+            )
+            if blocked_by_hidden or blocked_by_message:
+                return Response(
+                    {
+                        "detail": (
+                            "This attachment is hidden (moderation flag) "
+                            "and cannot be made customer-visible."
+                            if blocked_by_hidden
+                            else "This attachment belongs to an internal "
+                            "note and cannot be made customer-visible."
+                        ),
+                        "code": "attachment_visibility_conflict",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if attachment.visibility != new_visibility:
+            attachment.visibility = new_visibility
+            attachment.save(update_fields=["visibility"])
+
+        return Response(
+            TicketAttachmentSerializer(
+                attachment, context={"request": request, "ticket": ticket}
+            ).data,
+            status=status.HTTP_200_OK,
         )
 
 
@@ -1877,6 +2123,17 @@ class TicketAttachmentDownloadView(generics.GenericAPIView):
                 request, message="Attachment not found in your scope."
             )
         if message_staff_operational and not is_staff_role(request.user):
+            self.permission_denied(
+                request, message="Attachment not found in your scope."
+            )
+        # Sprint 191 §2.5 — the customer wall, mirroring the list
+        # queryset. An INTERNAL row is provider-side only; the download
+        # URL is the second way to reach a file and must refuse the same
+        # rows the list hides, or the wall is decorative.
+        if (
+            attachment.visibility != AttachmentVisibility.CUSTOMER
+            and not is_staff_role(request.user)
+        ):
             self.permission_denied(
                 request, message="Attachment not found in your scope."
             )

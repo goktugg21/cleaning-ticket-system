@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     TicketAttachmentDownloadView,
     TicketAttachmentListCreateView,
+    TicketAttachmentVisibilityView,
     TicketMessageListCreateView,
     TicketMessageRecipientsView,
     TicketViewSet,
@@ -94,6 +95,14 @@ urlpatterns = [
         "<int:ticket_id>/attachments/<int:attachment_id>/download/",
         TicketAttachmentDownloadView.as_view(),
         name="ticket-attachment-download",
+    ),
+    # Sprint 191 §2.5 — promote one attachment across the customer wall
+    # (provider management only). Before the list route for the same
+    # reason the download route is: a longer, more specific path.
+    path(
+        "<int:ticket_id>/attachments/<int:attachment_id>/visibility/",
+        TicketAttachmentVisibilityView.as_view(),
+        name="ticket-attachment-visibility",
     ),
     path(
         "<int:ticket_id>/attachments/",

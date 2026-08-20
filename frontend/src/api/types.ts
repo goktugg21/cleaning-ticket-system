@@ -479,6 +479,13 @@ export interface TicketDetail extends TicketList {
   // the flag via PATCH /tickets/<id>/auto-complete-flag/. Additive.
   sub_tasks: SubTask[];
   auto_complete_on_subtasks: boolean;
+  // Sprint 191 - the per-work photo-visibility setting. False (the
+  // default) means a staff upload on this work lands INTERNAL and waits
+  // for a provider manager to promote it; true means staff uploads here
+  // are customer-visible the moment they arrive. Read-only on the detail
+  // payload; mutated via PATCH
+  // /tickets/<id>/attachment-visibility-policy/ (PA/SA only).
+  staff_uploads_customer_visible: boolean;
   // Per-current-user, per-ticket capability block — backend
   // `TicketDetailSerializer.get_actions`. Optional so older list
   // serializers / pre-cherry-pick caches don't break typing; treat
@@ -599,6 +606,17 @@ export interface NotificationListResponse {
 }
 
 
+// Sprint 191 - the two new attachment axes, deliberately independent of
+// each other and of `is_hidden`. `visibility` is the customer wall
+// (INTERNAL = provider side only, CUSTOMER = released to the customer);
+// `phase` is a label and decides nothing. Mirrors
+// tickets.models.AttachmentVisibility / AttachmentPhase.
+export const ATTACHMENT_VISIBILITIES = ["INTERNAL", "CUSTOMER"] as const;
+export type AttachmentVisibility = (typeof ATTACHMENT_VISIBILITIES)[number];
+
+export const ATTACHMENT_PHASES = ["UNSPECIFIED", "BEFORE", "AFTER"] as const;
+export type AttachmentPhase = (typeof ATTACHMENT_PHASES)[number];
+
 export interface TicketAttachment {
   id: number;
   ticket: number;
@@ -610,6 +628,8 @@ export interface TicketAttachment {
   mime_type: string;
   file_size: number;
   is_hidden: boolean;
+  visibility: AttachmentVisibility;
+  phase: AttachmentPhase;
   created_at: string;
 }
 

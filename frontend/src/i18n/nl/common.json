@@ -2439,5 +2439,17 @@
     "lead_invoice": "Staat er werk op deze factuur dat u nog niet had goedgekeurd? Dan komt dat hierdoor.",
     "rule": "Werk dat voor uw facturatiedatum is afgerond, komt op de eerstvolgende factuur te staan, ook als uw goedkeuring op dat moment nog niet binnen is. Zo staat het werk op de factuur van de maand waarin het echt is uitgevoerd.",
     "reversal": "Keurt u het werk daarna alsnog af? Dan draaien wij de factuur terug met een creditnota en verdwijnt het werk weer van uw rekening."
+  },
+  "attachment_visibility": {
+    "internal": "Alleen intern",
+    "customer": "Zichtbaar voor klant",
+    "promote": "Vrijgeven aan klant",
+    "demote": "Intern maken",
+    "promote_aria": "Geef {{name}} vrij aan de klant",
+    "demote_aria": "Maak {{name}} weer intern",
+    "busy": "Bezig...",
+    "failed": "Mislukt, probeer opnieuw",
+    "phase_before": "Voor",
+    "phase_after": "Na"
   }
 }

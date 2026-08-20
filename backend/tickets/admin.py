@@ -39,8 +39,11 @@ class TicketMessageAdmin(admin.ModelAdmin):
 
 @admin.register(TicketAttachment)
 class TicketAttachmentAdmin(admin.ModelAdmin):
-    list_display = ("ticket", "original_filename", "mime_type", "file_size", "uploaded_by", "created_at")
-    list_filter = ("mime_type", "created_at")
+    # Sprint 191 §2.5 — visibility and phase are the two new axes and
+    # both belong in the list: "which photos on this job are still
+    # internal" is the question this screen gets asked.
+    list_display = ("ticket", "original_filename", "mime_type", "file_size", "uploaded_by", "visibility", "phase", "created_at")
+    list_filter = ("visibility", "phase", "mime_type", "created_at")
     search_fields = ("ticket__ticket_no", "original_filename")
 
 

@@ -739,6 +739,67 @@ the branch point in a second worktree — not an impression.
   ternaries in source.
 
 
+### Done — Sprint 191 §2.5 (wave 3, chat I of 5): the photo pool
+
+Staff uploads land internal. Nothing a worker uploads reaches the customer
+until a provider manager releases it, and phase (before / after) is a label
+that decides nothing.
+
+- **`TicketAttachment.visibility`** — INTERNAL / CUSTOMER, its own column
+  beside `is_hidden`, not a reuse of it. `is_hidden` is moderation (hides a
+  row from everyone below provider management, STAFF included);
+  `visibility` is the customer wall (INTERNAL still shows the worker their
+  own photo). Migration `0027` backfills every existing row to the level it
+  was already being served at — `is_hidden` rows to INTERNAL, everything
+  else to CUSTOMER — so no file changed audience when the column arrived.
+- **The wall is enforced on BOTH read paths.** The list queryset and the
+  download endpoint refuse the same rows for a customer-side caller; a wall
+  on one of them only would have been decorative, because the download URL
+  is the second way to reach a file.
+- **The default is resolved in one place** (`_default_visibility`): a
+  customer's own upload is CUSTOMER (hiding it from the uploader is a bug,
+  not a privacy win), a provider-side upload is CUSTOMER only when the work
+  carries `staff_uploads_customer_visible`, and everything else is
+  INTERNAL. Only provider management may name a `visibility` at upload;
+  STAFF sending one gets a 400 `visibility_forbidden`, mirroring the
+  existing `is_hidden` rule.
+- **Promote is one PATCH**, `…/attachments/<id>/visibility/`, provider
+  management only. The role gate answers 403 before any object lookup, then
+  the ticket is resolved through `scope_tickets_for` — so a manager of
+  another tenant gets a 404 and cannot promote across a tenant boundary,
+  and an attachment id belonging to another ticket 404s on this ticket's
+  URL. Releasing a row that `is_hidden` or an internal note would still
+  hide is refused (400 `attachment_visibility_conflict`) rather than
+  producing a pill that lies.
+- **The per-work setting** `Ticket.staff_uploads_customer_visible` (PA/SA
+  only, terminal-ticket guard, one AuditLog row) changes only what happens
+  next: it never retro-promotes what is already stored.
+- **Completion evidence is untouched, and that was verified rather than
+  assumed.** Both gates —
+  `state_machine._ticket_has_visible_attachment` and the per-slot gate in
+  `views_staff_assignments.py` — count `is_hidden=False` rows and neither
+  reads `visibility`. Pinned three ways in
+  `tickets/tests/test_sprint191_attachment_visibility.py`: an INTERNAL
+  photo still satisfies the ticket-level helper, a hidden one still does
+  not, and a slot completes through the real API on an INTERNAL photo with
+  a blank note.
+- **Frontend:** `AttachmentThumb` carries the state and the action. A
+  provider-side viewer sees an "Alleen intern" / "Zichtbaar voor klant"
+  pill; provider management additionally gets the release/withdraw control.
+  A customer sees neither — every file they are served is customer-visible
+  by construction, so a pill saying so is noise.
+
+### Deliberately NOT done — Sprint 191 §2.5
+
+- **No toggle in the ticket page for the per-work setting.** The API, the
+  detail payload and the Django admin field are in;
+  `frontend/src/pages/TicketDetailPage.tsx` belongs to another chat this
+  wave, so the switch has no mount point yet. Chat E owns the placement.
+- **Extra Work has no photo pool of its own.** Photos live on the spawned
+  operational ticket, which is what this sprint hardened;
+  `backend/extra_work/**` was not touched.
+
+
 ## Historical — Sprint 181
 
 **Branch:** `feat/sprint-181`, cut from the INTEGRATED Sprint 180 (see

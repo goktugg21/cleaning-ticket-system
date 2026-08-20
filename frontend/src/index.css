@@ -3898,6 +3898,83 @@ a.attn-row:hover {
   background: var(--amber);
   color: #fff;
 }
+/* Sprint 191 - the customer wall on the attachment tile. The pill sits
+   top-LEFT so it never collides with .att-thumb-internal-pill (the
+   is_hidden moderation flag, top-right): the two are different axes and
+   a tile can carry both. */
+.att-vis-pill {
+  position: absolute;
+  top: 8px; left: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--f-head);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+}
+.att-vis-pill.is-internal {
+  background: var(--amber-soft);
+  color: var(--amber);
+  border: 1px solid var(--amber-border);
+}
+.att-vis-pill.is-customer {
+  background: var(--green-soft);
+  color: var(--green);
+  border: 1px solid rgba(11,107,66,0.2);
+}
+/* The phase label. Bottom-left, deliberately quiet and colourless: it is
+   a label, not a permission, and must not read like the wall above it. */
+.att-phase-pill {
+  position: absolute;
+  bottom: 8px; left: 8px;
+  font-family: var(--f-head);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+/* The promote/demote control. A role="button" span, not a <button>: the
+   tile it lives in IS a button (TicketDetailPage) and nesting one inside
+   another is invalid HTML. */
+.att-vis-action {
+  position: absolute;
+  bottom: 6px; right: 6px;
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.att-vis-action:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.att-vis-action:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.att-vis-action[aria-busy="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
 .att-thumb-upload {
   border: 2px dashed var(--border);
   background: transparent;

@@ -502,6 +502,23 @@ class Ticket(models.Model):
     # PA / SA via the dedicated auto-complete-flag endpoint.
     auto_complete_on_subtasks = models.BooleanField(default=False)
 
+    # Sprint 191 §2.5 — the per-work photo-visibility setting.
+    #
+    # Default False: a staff upload on this ticket lands INTERNAL
+    # (`AttachmentVisibility.INTERNAL`) and stays provider-side until a
+    # provider manager promotes it. Set True for the customers who have
+    # asked to see the work as it happens — then a staff upload on THIS
+    # ticket is customer-visible the moment it is uploaded, with no
+    # promote step.
+    #
+    # It changes only the DEFAULT applied at upload. It does not
+    # retro-promote what is already stored, it grants nobody a new
+    # permission, and it has no effect on the completion-evidence gate
+    # (which reads `is_hidden`, never `visibility`). Settable only by
+    # PA / SA through the dedicated attachment-visibility-policy
+    # endpoint, mirroring `auto_complete_on_subtasks`.
+    staff_uploads_customer_visible = models.BooleanField(default=False)
+
     class Meta:
         ordering = ["-created_at"]
 
@@ -643,6 +660,57 @@ class TicketMessage(models.Model):
         return f"{self.ticket} - {self.author}"
 
 
+class AttachmentVisibility(models.TextChoices):
+    """
+    Sprint 191 §2.5 — WHO may see an attachment, as its own axis.
+
+    Addendum A §A.3.3: every artefact carries a visibility level and it
+    defaults to the most restrictive one. For a ticket attachment that
+    is INTERNAL — provider-side only.
+
+    This is deliberately NOT the same thing as any of the three flags it
+    sits beside, and the difference is the whole point of the field:
+
+      * `is_hidden` is MODERATION (B7). It hides a row from everybody
+        below provider management, STAFF included. A worker cannot set
+        it and a worker cannot see what carries it.
+      * `visibility` is the CUSTOMER wall. INTERNAL keeps a row on the
+        provider side (management AND the staff who did the work);
+        CUSTOMER releases it across the wall. Nothing a worker uploads
+        crosses it until a provider manager promotes it, or the work
+        carries `Ticket.staff_uploads_customer_visible`.
+      * `phase` is a LABEL (before / after). It never decides who sees
+        anything. The reference system's bug is exactly this conflation:
+        its "draft" phase bucket renders to the customer under a "Draft
+        Images" heading, so labelling a photo publishes it. Here the two
+        axes are independent in both directions — a BEFORE photo can be
+        customer-visible and an AFTER photo can be internal.
+
+    THE COMPLETION-EVIDENCE GATE DOES NOT READ THIS FIELD, and must not
+    start. `state_machine._ticket_has_visible_attachment` and the
+    per-slot gate in `views_staff_assignments.py` both count
+    `is_hidden=False` rows: a photo a worker uploaded as proof still
+    satisfies the gate while it is INTERNAL. The customer not seeing it
+    yet does not mean the work did not happen.
+    """
+
+    INTERNAL = "INTERNAL", "Internal (provider side only)"
+    CUSTOMER = "CUSTOMER", "Customer visible"
+
+
+class AttachmentPhase(models.TextChoices):
+    """
+    Sprint 191 §2.5 — WHEN in the job the file was taken. A label, and
+    only a label: no queryset filters on it, no permission reads it, and
+    changing it moves nothing across the customer wall. See
+    `AttachmentVisibility` for why that separation is load-bearing.
+    """
+
+    UNSPECIFIED = "UNSPECIFIED", "Unspecified"
+    BEFORE = "BEFORE", "Before"
+    AFTER = "AFTER", "After"
+
+
 class TicketAttachment(models.Model):
     ticket = models.ForeignKey(
         Ticket,
@@ -680,6 +748,28 @@ class TicketAttachment(models.Model):
     mime_type = models.CharField(max_length=120)
     file_size = models.PositiveIntegerField()
     is_hidden = models.BooleanField(default=False)
+
+    # Sprint 191 §2.5 — the customer wall (see `AttachmentVisibility`).
+    # Model default is the most restrictive value per Addendum A §A.3.3;
+    # `TicketAttachmentListCreateView.perform_create` is what decides the
+    # value an actual upload gets (a customer's own upload is CUSTOMER —
+    # it must not be hidden from the person who uploaded it).
+    #
+    # Migration 0027 backfills every pre-existing row to the level it was
+    # ALREADY being served at, so the field changes nothing about what
+    # anybody could see before it existed: is_hidden rows -> INTERNAL,
+    # everything else -> CUSTOMER.
+    visibility = models.CharField(
+        max_length=16,
+        choices=AttachmentVisibility.choices,
+        default=AttachmentVisibility.INTERNAL,
+    )
+    # Sprint 191 §2.5 — before / after. A label with no behaviour.
+    phase = models.CharField(
+        max_length=16,
+        choices=AttachmentPhase.choices,
+        default=AttachmentPhase.UNSPECIFIED,
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
