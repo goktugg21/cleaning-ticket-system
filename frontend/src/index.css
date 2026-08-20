@@ -8383,14 +8383,6 @@ a.attn-row:hover {
   width: 100%;
   justify-content: center;
 }
-.ew-detail-header-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-
 /* PageHeader: optional meta strip rendered under the title row. */
 .page-header-meta {
   margin-top: 4px;
@@ -12538,6 +12530,110 @@ a.wp-card-title:hover { text-decoration: underline; }
    five facts a person needs on arrival and stays put; everything else
    is behind a tab.
    -------------------------------------------------------------------- */
+/* --------------------------------------------------------------------
+   W8 §1 — the four blocks of persistent context.
+
+   What this replaces: `.ew-detail-header-meta`, one wrapping row of
+   `cell-tag` chips carrying nine facts at one weight in one colour. It
+   read as a breadcrumb, so the eye skipped it, and the facts on it were
+   the ones a person needs while doing anything else on the page.
+
+   Four blocks, four questions, on a rule-separated row. Equal columns
+   because no one of the four is subordinate to the others; the WHAT
+   NEXT block is last because reading order runs identity -> state ->
+   money -> action.
+   -------------------------------------------------------------------- */
+.ew-ctx {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.ew-ctx-block {
+  padding: 14px 16px;
+  border-left: 1px solid var(--border-soft);
+  min-width: 0;
+}
+.ew-ctx-block:first-child { border-left: none; }
+/* The block label is a QUIET signpost, not a heading competing with the
+   fact under it — the mistake the chip row made was giving label and
+   value the same weight. */
+.ew-ctx-label {
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.ew-ctx-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ew-ctx-strong {
+  font-family: var(--f-head);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.ew-ctx-sub { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.ew-ctx-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* W8 §2 — the one sentence and the one button. The sentence is body
+   text, not muted: it is an instruction, and a greyed instruction reads
+   as a disclaimer. */
+.ew-next { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.ew-next-sentence { margin: 0; font-size: 13px; color: var(--text); }
+.ew-next-button { align-self: stretch; justify-content: center; }
+
+@media (max-width: 1100px) {
+  .ew-ctx { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ew-ctx-block:nth-child(3) { border-left: none; }
+  .ew-ctx-block:nth-child(n + 3) { border-top: 1px solid var(--border-soft); }
+}
+@media (max-width: 620px) {
+  .ew-ctx { grid-template-columns: minmax(0, 1fr); }
+  .ew-ctx-block { border-left: none; }
+  .ew-ctx-block + .ew-ctx-block { border-top: 1px solid var(--border-soft); }
+}
+
+/* --------------------------------------------------------------------
+   W8 §3 — the Details card, as groups instead of one flat grid.
+
+   Fourteen facts in one two-column grid in no order is what the owner
+   called "mixed together and placed in random-looking locations". The
+   grouping is the fix; the rule above each group title is what makes a
+   group visible as a group without a box around it.
+   -------------------------------------------------------------------- */
+.ew-facts { display: flex; flex-direction: column; }
+.ew-facts-group { padding: 16px 0; border-top: 1px solid var(--border-soft); }
+.ew-facts-group:first-child { padding-top: 0; border-top: none; }
+.ew-facts-group:last-child { padding-bottom: 0; }
+.ew-facts-group-title {
+  margin: 0 0 10px;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ew-facts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px 24px;
+}
+/* The label carries WHOSE fact this is, so it must be readable rather
+   than faint; the value is what the eye lands on. */
+.ew-fact-label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+.ew-fact-value { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.ew-fact-with-action { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ew-fact-prose { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ew-fact-note { margin-top: 12px; }
+
 .ew-detail-tabs {
   margin-bottom: 16px;
   position: sticky;

@@ -74,6 +74,8 @@ import { useAuth } from "../auth/AuthContext";
 import { ExtraWorkAssignmentCard } from "../components/extra-work/ExtraWorkAssignmentCard";
 import { ExtraWorkHoursPanel } from "../components/extra-work/ExtraWorkHoursPanel";
 import { PlanSummary } from "../components/extra-work/PlanSummary";
+import { ExtraWorkContextHeader } from "../components/extra-work/ExtraWorkContextHeader";
+import { resolveNextStep } from "../components/extra-work/nextStep";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
 import type {
@@ -94,7 +96,6 @@ import type {
   TicketList,
   TicketStatus,
 } from "../api/types";
-import { CollapsibleCard } from "../components/CollapsibleCard";
 import { ConfirmDialog, type ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { Toggle } from "../components/Toggle";
@@ -104,13 +105,10 @@ import { PageHeader } from "../components/PageHeader";
 import { ProposalBuilder } from "../components/ProposalBuilder";
 import { customerLabelName } from "../lib/customerLabelName";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
-import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
-import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
 import { useToast } from "../components/ToastProvider";
-import { rowAmounts } from "../lib/billing";
 import { extraWorkStatusLabelKey, ticketStatusLabelKey } from "../lib/enumLabels";
-import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
+import { formatDate, formatDateTime, formatRelative, useLocaleCode } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 import { Avatar } from "../components/Avatar";
 
@@ -2060,121 +2058,71 @@ export function ExtraWorkDetailPage() {
       });
       setEw(updated);
       setBillingDraft(null);
+      /* W8 §6 — say that it saved. The only feedback was the Save
+         button re-disabling itself, which is indistinguishable from a
+         button that did nothing, and the owner was not sure the save
+         reached the server at all. The month it confirms is the one the
+         SERVER echoed back, not the one that was typed, so a server
+         that stored something else cannot be reported as success. */
+      pushToast({
+        variant: "success",
+        title: t("detail.billing_saved", {
+          month: updated.invoice_date
+            ? updated.invoice_date.slice(0, 7)
+            : month,
+        }),
+      });
     } catch (err) {
-      setBillingError(getApiError(err));
+      const message = getApiError(err);
+      setBillingError(message);
+      /* A failure has to be as loud as a success, or the quiet case
+         reads as the good case. */
+      pushToast({ variant: "error", title: t("detail.billing_save_failed") });
     } finally {
       setBillingSaving(false);
     }
   }
+  /* W8 §2 — the one move this record is waiting for, and the one
+     handler that performs it. Derived from the status by a pure
+     resolver so the sentence and the button can never describe
+     different moves. */
+  const nextStep = resolveNextStep({
+    status: ew.status,
+    isProvider,
+    hasSpawnedTickets: ew.spawned_tickets.length > 0,
+    isInvoiced: ew.is_invoiced,
+  });
+  const nextStepBusy =
+    proposalBusy ||
+    retrySpawnBusy ||
+    (nextStep.action.kind === "transition" &&
+      transitionBusy === nextStep.action.to);
+
+  function runNextStep() {
+    const action = nextStep.action;
+    switch (action.kind) {
+      case "transition":
+        void handleTransition(action.to);
+        return;
+      case "tab":
+        setTab(action.tab);
+        return;
+      case "plan":
+        void openPlan();
+        return;
+      case "retrySpawn":
+        void handleRetrySpawn();
+        return;
+      case "none":
+        return;
+    }
+  }
+
   return (
     <div data-testid="extra-work-detail-page">
       <PageHeader
         backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
         title={ew.title}
-        meta={
-          <div className="ew-detail-header-meta">
-            {/* W7-D — WHO and WHERE, in the header, because they are two
-                of the five facts a person needs on arrival and they were
-                previously only inside the Details card, one tab away. */}
-            <span className="cell-tag cell-tag-muted" data-testid="extra-work-header-customer">
-              {ew.customer_name}
-            </span>
-            <span className="cell-tag cell-tag-muted" data-testid="extra-work-header-building">
-              {ew.building_name}
-            </span>
-            {/* Sprint 183 §3 — an extra work that WENT OPERATIONAL shows
-                its TICKET's status here, exactly as its row already does
-                in the list (Sprint 181 §1). Same component, same
-                resolver, same string, same colour.
-
-                The owner, twice: "an extra work that went operational
-                has a ticket page and an extra work page. The statuses
-                must be identical — not similar, identical — and come
-                from the same place."
-
-                They did not. The list learned to read the ticket in
-                Sprint 181; this page was left reading `ew.status`, so
-                one screen said "Price approved" while the other said
-                "Open" about the same job. The extra work's own status is
-                the COMMERCIAL state and remains the truth for anything
-                not yet started; once a ticket exists, the ticket is what
-                is happening.
-
-                Nothing about the extra work's status is CHANGED — this
-                is a display change to this one block, which is all this
-                branch may touch in this file. */}
-            <StatusBadge
-              status={
-                ew.spawned_tickets.length > 0
-                  ? { kind: "ticket", value: ew.spawned_tickets[0].status }
-                  : { kind: "extra-work", value: ew.status }
-              }
-              testId="extra-work-header-status"
-            />
-            {/* Sprint 182 §3 — the money, beside the status.
-                The owner: "when I open an extra work from Chargeable
-                work, show me its money too — the way the row does."
-                It WAS on this page, in the meta line of a collapsed
-                card near the bottom, and only once a final amount
-                existed — so a priced-but-not-yet-finished request
-                showed an amount in the list and nothing at all here.
-
-                `rowAmounts` is the one billing-total rule (CLAUDE.md:
-                final-with-quoted-fallback), and `formatMoney` is the
-                list's own formatter, so this figure is the row's figure
-                — same number, same rounding, same currency. */}
-            <span
-              className="cell-tag cell-tag-muted"
-              data-testid="extra-work-header-total"
-              title={t("detail.header_total_hint")}
-            >
-              {t("list.column_total")}:{" "}
-              {ew.is_priced === false
-                ? "\u2014"
-                : formatMoney(rowAmounts(ew).total)}
-            </span>
-            {/* Sprint 174 §3 — the deadline and started-early markers
-                live in the HEADER, beside the status. A warning you
-                have to open a collapsed card to find is not a warning.
-                Both use the status colours this app already has: a
-                second colour vocabulary for "something is wrong" is how
-                two screens end up disagreeing about severity. */}
-            {ew.deadline && (
-              <span
-                className={`cell-tag ${
-                  ew.is_overdue ? "cell-tag-rejected" : "cell-tag-muted"
-                }`}
-                data-testid="ew-header-deadline"
-              >
-                {t("detail.deadline")}: {formatDate(ew.deadline)}
-                {ew.is_overdue ? ` — ${t("list.overdue")}` : ""}
-              </span>
-            )}
-            {ew.started_before_plan && (
-              <span
-                className="cell-tag cell-tag-open"
-                title={t("list.startedEarlyWhy")}
-                data-testid="ew-header-started-early"
-              >
-                {t("list.startedEarly")}
-              </span>
-            )}
-            <RouteBadge value={ew.routing_decision} />
-            <span className="muted small">
-              {/* Sprint 144 §1 — the real classifier when the request
-                  has one, the enum label for a pre-144 row. */}
-              {extraWorkCategoryName(ew) ??
-                `${t(CATEGORY_I18N_KEY[ew.category] ?? ew.category)}${
-                  ew.category === "OTHER" && ew.category_other_text
-                    ? ` — ${ew.category_other_text}`
-                    : ""
-                }`}
-            </span>
-            <span className="muted small">
-              · {t(URGENCY_I18N_KEY[ew.urgency] ?? ew.urgency)}
-            </span>
-          </div>
-        }
       />
 
       {error && (
@@ -2182,6 +2130,38 @@ export function ExtraWorkDetailPage() {
           {error}
         </div>
       )}
+
+      {/* W8 §1 — the four blocks, above the tabs and outside them, so
+          they are on screen whatever tab is open. Tabs swap only the
+          area beneath. */}
+      <ExtraWorkContextHeader
+        ew={ew}
+        urgencyLabel={t(URGENCY_I18N_KEY[ew.urgency] ?? ew.urgency)}
+        departmentLabel={
+          ew.department_name ? customerLabelName(ew.department_name, t) : null
+        }
+        workTypeLabel={
+          ew.work_type_name ? customerLabelName(ew.work_type_name, t) : null
+        }
+        nextStep={
+          <div className="ew-next">
+            <p className="ew-next-sentence" data-testid="extra-work-next-sentence">
+              {t(nextStep.sentenceKey)}
+            </p>
+            {nextStep.buttonKey && (
+              <button
+                type="button"
+                className="btn btn-primary ew-next-button"
+                onClick={runNextStep}
+                disabled={nextStepBusy}
+                data-testid="extra-work-next-button"
+              >
+                {t(nextStep.buttonKey)}
+              </button>
+            )}
+          </div>
+        }
+      />
 
       {/* Main content. The top row places Details (left, larger
           share) and the WORKFLOW card (right, smaller share) side
@@ -2223,388 +2203,218 @@ export function ExtraWorkDetailPage() {
                 <div className="form-section-title">
                   {t("detail.details_section_title")}
                 </div>
-              <div className="form-2col">
-                <div>
-                  <div className="muted small">{t("detail.field_building")}</div>
-                  <div>{ew.building_name}</div>
-                </div>
-                <div>
-                  <div className="muted small">{t("detail.field_customer")}</div>
-                  <div>{ew.customer_name}</div>
-                </div>
-                {/* Sprint 180 §3 — who pays, next to the two names it
-                    chooses between. Read-only here: the value is set on
-                    the create form and the Extra Work ViewSet has no
-                    update action, so an editable control would be a
-                    promise no endpoint keeps. */}
-                <div>
-                  <div className="muted small">
-                    {t("detail.field_billed_to")}
-                  </div>
-                  <div data-testid="extra-work-billed-to">
-                    {ew.billed_to === "CUSTOMER"
-                      ? t("billed_to.customer")
-                      : t("billed_to.building")}
-                  </div>
-                </div>
-                {/* Sprint 180 §2 — the ticket this Extra Work became.
-                    The ticket page has shown its Extra Work origin for
-                    sprints; the reverse had no field at all. The panel
-                    lower down lists every spawned ticket with its
-                    status; this cell answers "did this become work, and
-                    which one" without scrolling for it. */}
-                <div>
-                  <div className="muted small">{t("detail.field_ticket")}</div>
-                  <div data-testid="extra-work-ticket-link">
-                    {/* Sprint 181 §1b — one renderer, with a real
-                        separator. `max` is higher here than in the list
-                        because this is the page somebody opens to see
-                        all of them. */}
-                    <SpawnedTicketLinks
-                      tickets={ew.spawned_tickets}
-                      max={4}
-                      emptyLabel={t("detail.ticket_none")}
-                    />
-                  </div>
-                </div>
-                {/* Sprint 181 §1 — the operational state, and where it
-                    comes from. When a ticket exists this IS the ticket's
-                    status, with the number beside it so nobody wonders
-                    where the value came from, or why the workflow
-                    buttons below no longer offer to move it. The Extra
-                    Work's own status stays on this page (the Workflow
-                    card) for an operator debugging a stuck row — the
-                    LIST is where one status had to win. */}
-                {ew.spawned_tickets.length > 0 && (
-                  <div>
-                    <div className="muted small">
-                      {t("detail.operational_state")}
-                    </div>
-                    <div data-testid="extra-work-operational-state">
-                      <StatusBadge
-                        status={{
-                          kind: "ticket",
-                          value: ew.spawned_tickets[0].status,
-                        }}
-                      />
-                    </div>
-                    <div className="muted small" style={{ marginTop: 4 }}>
-                      {t("detail.operational_state_hint", {
-                        ticket:
-                          ew.spawned_tickets[0].ticket_no ??
-                          `#${ew.spawned_tickets[0].id}`,
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="form-2col ew-detail-fact-grid">
-                <div>
-                  <div className="muted small">
-                    {t("detail.field_requested_at")}
-                  </div>
-                  <div>{formatDateTime(ew.requested_at)}</div>
-                </div>
-                <div>
-                  <div className="muted small">
-                    {t("detail.field_preferred_date")}
-                  </div>
-                  {/* W7-D — THE LABEL NOW MATCHES THE FIELD.
-                      This cell was labelled "Preferred date" and rendered
-                      `formatPlannedWindow(preferred_date, planned_end_date)`.
-                      When `preferred_date` is null — the common case — the
-                      window helper falls to its endOnly branch and prints
-                      "Until 20 Aug 2026", which is the PLANNED END DATE
-                      under a label naming a different column. The screen
-                      said the customer asked for a date the customer never
-                      gave.
-                      One field, one label: the preferred date is the
-                      preferred date. The end of the window is its own
-                      labelled fact below, where it can be read for what it
-                      is. `formatPlannedWindow` is untouched and still used
-                      by the surfaces that genuinely show a window. */}
-                  <div data-testid="extra-work-preferred-date">
-                    {ew.preferred_date
-                      ? formatDate(ew.preferred_date)
-                      : t("detail.empty_dash")}
-                  </div>
-                </div>
-                <div>
-                  <div className="muted small">
-                    {t("detail.field_planned_end_date")}
-                  </div>
-                  <div data-testid="extra-work-planned-window">
-                    {ew.planned_end_date
-                      ? formatDate(ew.planned_end_date)
-                      : t("detail.empty_dash")}
-                  </div>
-                </div>
-                <div>
-                  <div className="muted small">{t("detail.deadline")}</div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <span>
-                      {ew.deadline
-                        ? formatDate(ew.deadline)
-                        : t("detail.empty_dash")}
-                    </span>
-                    {/* Sprint 177 §2 — the trigger sits BESIDE the date it
-                        edits, in the same cell, rather than floating in its
-                        own row under the whole grid where the owner could
-                        not find it. Sprint 176 §3's rule is unchanged:
-                        provider-only, and `preferred_date` (the customer's
-                        wish, one cell to the left) is not editable here. */}
-                    {isProvider && !datesOpen && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setDatesOpen(true)}
-                        data-testid="extra-work-dates-edit"
-                      >
-                        <Pencil size={13} strokeWidth={2} />
-                        {t("detail.dates_edit")}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {/* Sprint 189 §1 — Department and Work Type, in the cell
-                    that was empty. This grid is two columns and held
-                    three cells, so the fourth slot — directly under
-                    Preferred Date — rendered as blank surface. The two
-                    labels used to be a collapsed card in the right-hand
-                    aside, two clicks and a scroll away from the card
-                    that carries every other field of the same kind.
+              {/* W8 §3 — the Details card, grouped by the QUESTION each
+                  fact answers, in the order a person reads.
 
-                    Provider-only, exactly as the aside card was: a
-                    customer response carries no labels UI and this cell
-                    does not invent one. */}
-                {isProvider && (
-                  <div data-testid="extra-work-labels">
-                    {/* W3-F — ONE of two rows, never a row plus a form.
-                        Both branches render the same `.ew-labels-inline`
-                        shape: two label/value stacks and one action
-                        slot. The editor swaps the values for selects of
-                        the same pinned height and the Edit button for
-                        Save / Cancel of the same `.btn-sm` height, so
-                        the cell measures identically in both states and
-                        nothing below it can move. */}
-                    {labelsOpen && !ew.labels_locked ? (
-                      <LabelsEditor
-                        key={`labels-${ew.id}-${ew.department ?? ""}-${
-                          ew.work_type ?? ""
-                        }`}
-                        ew={ew}
-                        onUpdated={(detail) => setEw(detail)}
-                        onRefresh={() => void refresh()}
-                        onClose={() => setLabelsOpen(false)}
-                      />
-                    ) : (
-                    <div className="ew-labels-inline">
-                      <div>
-                        <div className="muted small">
-                          {t("detail.labels_field_department")}
-                        </div>
-                        <div
-                          className="ew-label-value"
-                          data-testid="extra-work-labels-department-value"
-                        >
-                          {ew.department_name
-                            ? customerLabelName(ew.department_name, t)
-                            : t("detail.empty_dash")}
-                        </div>
+                  It was one flat two-column grid holding Building,
+                  Customer, Billed to, Ticket, Requested at, Planned end,
+                  Preferred date, Deadline, Department, Work type,
+                  Contacts, Routing, Description and the plan block, in
+                  none of those orders. The owner: "everything is mixed
+                  together and placed in random-looking locations."
+
+                  Customer, building, status and the ticket number are
+                  GONE from here. They are in the persistent header now,
+                  and printing them twice was part of the clutter. */}
+              <div className="ew-facts">
+
+                {/* DATES — chronological, and each label says whose date
+                    it is. Four dates in a row all labelled like column
+                    headings is why nobody could tell the customer's wish
+                    from our own commitment. */}
+                <section className="ew-facts-group" data-testid="ew-facts-dates">
+                  <h4 className="ew-facts-group-title">{t("detail.group_dates")}</h4>
+                  <div className="ew-facts-grid">
+                    <div>
+                      <div className="ew-fact-label">{t("detail.date_requested")}</div>
+                      <div className="ew-fact-value">{formatDateTime(ew.requested_at)}</div>
+                    </div>
+                    <div>
+                      <div className="ew-fact-label">{t("detail.date_preferred")}</div>
+                      <div className="ew-fact-value" data-testid="extra-work-preferred-date">
+                        {ew.preferred_date ? formatDate(ew.preferred_date) : t("detail.empty_dash")}
                       </div>
-                      <div>
-                        <div className="muted small">
-                          {t("detail.labels_field_work_type")}
-                        </div>
-                        <div
-                          className="ew-label-value"
-                          data-testid="extra-work-labels-work-type-value"
-                        >
-                          {ew.work_type_name
-                            ? customerLabelName(ew.work_type_name, t)
-                            : t("detail.empty_dash")}
-                        </div>
+                    </div>
+                    <div>
+                      <div className="ew-fact-label">{t("detail.date_planned_end")}</div>
+                      <div className="ew-fact-value" data-testid="extra-work-planned-window">
+                        {ew.planned_end_date ? formatDate(ew.planned_end_date) : t("detail.empty_dash")}
                       </div>
-                      {/* The trigger sits beside the values it edits, the
-                          same idiom as the deadline cell to the left. */}
-                      {!ew.labels_locked && (
-                        <div className="ew-labels-inline-actions">
+                    </div>
+                    <div>
+                      <div className="ew-fact-label">{t("detail.date_deadline")}</div>
+                      <div className="ew-fact-value ew-fact-with-action">
+                        <span>
+                          {ew.deadline ? formatDate(ew.deadline) : t("detail.empty_dash")}
+                        </span>
+                        {ew.deadline && ew.is_overdue && (
+                          <span className="cell-tag cell-tag-rejected" data-testid="ew-header-deadline">
+                            {t("list.overdue")}
+                          </span>
+                        )}
+                        {isProvider && !datesOpen && (
                           <button
                             type="button"
-                            className="btn btn-secondary btn-sm ew-labels-icon-btn"
-                            onClick={() => setLabelsOpen(true)}
-                            title={t("detail.labels_edit")}
-                            aria-label={t("detail.labels_edit")}
-                            data-testid="extra-work-labels-edit"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setDatesOpen(true)}
+                            data-testid="extra-work-dates-edit"
                           >
                             <Pencil size={13} strokeWidth={2} />
+                            {t("detail.dates_edit")}
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
-                    )}
-                    {/* Frozen by an issued invoice — there is nothing to
-                        edit, so the reason and the way out take the
-                        trigger's place rather than hiding behind a dead
-                        button. Same two sentences the card showed. */}
-                    {ew.labels_locked && (
-                      <div
-                        className="muted small"
-                        data-testid="extra-work-labels-locked"
-                        style={{ marginTop: 4 }}
-                      >
-                        <div>
-                          {/* Sprint 129 §2b — the backend sends the NUMBER
-                              or null; the frontend owns the wording (no
-                              "CONCEPT" leak). Null = an issued-but-not-yet-
-                              sent invoice, which has no number. */}
-                          {ew.labels_locked_invoice
-                            ? t("detail.labels_locked_by", {
-                                number: ew.labels_locked_invoice,
-                              })
-                            : t("detail.labels_locked_by_unsent")}
+                  </div>
+                  {isProvider && datesOpen && (
+                    <DatesEditor
+                      ew={ew}
+                      onUpdated={(detail) => setEw(detail)}
+                      onClose={() => setDatesOpen(false)}
+                    />
+                  )}
+                  {/* The plan reads back with the dates it commits to,
+                      not at the bottom of an unrelated run of text. */}
+                  {isProvider && <PlanSummary ew={ew} />}
+                  {ew.started_before_plan && (
+                    <p className="muted small" data-testid="ew-header-started-early" style={{ margin: "8px 0 0" }}>
+                      {t("list.startedEarlyWhy")}
+                    </p>
+                  )}
+                </section>
+
+                {/* CLASSIFICATION — how this request is filed. */}
+                <section className="ew-facts-group" data-testid="ew-facts-classification">
+                  <h4 className="ew-facts-group-title">{t("detail.group_classification")}</h4>
+                  {isProvider && labelsOpen && !ew.labels_locked ? (
+                    <LabelsEditor
+                      key={`labels-${ew.id}-${ew.department ?? ""}-${ew.work_type ?? ""}`}
+                      ew={ew}
+                      onUpdated={(detail) => setEw(detail)}
+                      onRefresh={() => void refresh()}
+                      onClose={() => setLabelsOpen(false)}
+                    />
+                  ) : (
+                    <div className="ew-facts-grid" data-testid="extra-work-labels">
+                      <div>
+                        <div className="ew-fact-label">{t("detail.labels_field_department")}</div>
+                        <div className="ew-fact-value" data-testid="extra-work-labels-department-value">
+                          {ew.department_name ? customerLabelName(ew.department_name, t) : t("detail.empty_dash")}
                         </div>
-                        <div>{t("detail.labels_locked_howto")}</div>
                       </div>
-                    )}
-                  </div>
+                      <div>
+                        <div className="ew-fact-label">{t("detail.labels_field_work_type")}</div>
+                        <div className="ew-fact-value ew-fact-with-action">
+                          <span data-testid="extra-work-labels-work-type-value">
+                            {ew.work_type_name ? customerLabelName(ew.work_type_name, t) : t("detail.empty_dash")}
+                          </span>
+                          {isProvider && !ew.labels_locked && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm ew-labels-icon-btn"
+                              onClick={() => setLabelsOpen(true)}
+                              title={t("detail.labels_edit")}
+                              aria-label={t("detail.labels_edit")}
+                              data-testid="extra-work-labels-edit"
+                            >
+                              <Pencil size={13} strokeWidth={2} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {/* W8 §3 — the CATEGORY. It was a grey chip in the
+                          old context row and had no home in the Details
+                          card at all; with the chip row gone it would
+                          have vanished from the page. It is a
+                          classification, so it lives with the other
+                          two. */}
+                      <div>
+                        <div className="ew-fact-label">{t("detail.field_category")}</div>
+                        <div className="ew-fact-value" data-testid="extra-work-category">
+                          {extraWorkCategoryName(ew) ??
+                            `${t(CATEGORY_I18N_KEY[ew.category] ?? ew.category)}${
+                              ew.category === "OTHER" && ew.category_other_text
+                                ? ` \u2014 ${ew.category_other_text}`
+                                : ""
+                            }`}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="ew-fact-label">{t("detail.routing_decision_label")}</div>
+                        <div className="ew-fact-value" data-testid="extra-work-detail-routing-decision">
+                          {ew.routing_decision === "INSTANT"
+                            ? t("detail.routing_decision_instant")
+                            : t("detail.routing_decision_proposal")}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="ew-fact-label">{t("detail.field_billed_to")}</div>
+                        <div className="ew-fact-value" data-testid="extra-work-billed-to">
+                          {ew.billed_to === "CUSTOMER" ? t("billed_to.customer") : t("billed_to.building")}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {isProvider && ew.labels_locked && (
+                    <p className="muted small" data-testid="extra-work-labels-locked" style={{ margin: "8px 0 0" }}>
+                      {ew.labels_locked_invoice
+                        ? t("detail.labels_locked_by", { number: ew.labels_locked_invoice })
+                        : t("detail.labels_locked_by_unsent")}{" "}
+                      {t("detail.labels_locked_howto")}
+                    </p>
+                  )}
+                </section>
+
+                {/* CONTACTS */}
+                {canSeeCustomerContacts && (
+                  <section className="ew-facts-group" data-testid="ew-facts-contacts">
+                    <h4 className="ew-facts-group-title">{t("detail.group_contacts")}</h4>
+                    <CustomerContactsPanel contacts={customerContacts} />
+                  </section>
                 )}
-                {/* The next field in this column, directly under
-                    Department / Work type. `grid-column: 2` in the CSS
-                    is placement inside the grid's own flow, not
-                    positioning: it puts the field in the next free row
-                    of the column it belongs to. Contacts are
-                    SUPER_ADMIN / COMPANY_ADMIN only, mirroring a backend
-                    403, and both of those roles are providers, so the
-                    Department cell above it is always present. */}
 
-                {/* W5 fix 2 — Description is the NEXT field in the LEFT
-                    column, not the start of the text run below the grid.
-
-                    Customer contacts is pinned to `grid-column: 2`, so
-                    column one ran out of fields at Deadline while column
-                    two kept going, and the grid's last row left a void
-                    under Deadline exactly as tall as the contacts list.
-                    Pinning Description to column one drops it into the
-                    next free row of that column — directly under
-                    Deadline, at the grid's own 14px gap. The left column
-                    is not padded to match the right; the field that was
-                    always meant to come next simply comes next. */}
-                <div className="field ew-description-field">
-                  <div className="muted small">
-                    {t("detail.field_description")}
-                  </div>
-                  <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
-                </div>
-              </div>
-              {/* W7-D — CONTACTS SITS BELOW THE FACT GRID, not inside it.
-                  This is the actual cause of the gap two previous
-                  attempts chased with column pins. A grid row is as tall
-                  as its tallest cell, so a contacts LIST in column two
-                  stretched its row and left column one padded beneath
-                  Department — and no amount of pinning Description to a
-                  column can shrink a row that a sibling is holding open.
-                  A list of people is not a single fact and does not
-                  belong in a grid of single facts. Out of the grid, the
-                  facts are all one line tall, every row is its own
-                  height, and there is nothing left to pad. */}
-              {canSeeCustomerContacts && (
-                <CustomerContactsPanel contacts={customerContacts} />
-              )}
-              {/* The form itself opens BELOW the grid, where it has room for
-                  two date inputs, the customer's preferred date and an
-                  error, without reflowing the three cells above it. */}
-              {isProvider && datesOpen && (
-                <DatesEditor
-                  ew={ew}
-                  onUpdated={(detail) => setEw(detail)}
-                  onClose={() => setDatesOpen(false)}
-                />
-              )}
-              {/* The run of text the card ends with (description, the
-                  notes, the billing month and its override, routing).
-                  Full width again: Customer contacts is a field in the
-                  grid above, so nothing shares this row. */}
-              <div className="ew-detail-body-main">
+                {/* DESCRIPTION, and the notes that are more of the same
+                    kind of thing: prose about this request. */}
+                <section className="ew-facts-group" data-testid="ew-facts-description">
+                  <h4 className="ew-facts-group-title">{t("detail.group_description")}</h4>
+                  <div className="ew-fact-prose">{ew.description}</div>
                   {ew.customer_visible_note && (
-                    <div className="field">
-                      <div className="muted small">
-                        {t("detail.field_customer_visible_note")}
-                      </div>
-                      <div style={{ whiteSpace: "pre-wrap" }}>
-                        {ew.customer_visible_note}
-                      </div>
+                    <div className="ew-fact-note">
+                      <div className="ew-fact-label">{t("detail.field_customer_visible_note")}</div>
+                      <div className="ew-fact-prose">{ew.customer_visible_note}</div>
                     </div>
                   )}
                   {ew.pricing_note && (
-                    <div className="field">
-                      <div className="muted small">
-                        {t("detail.field_pricing_note")}
-                      </div>
-                      <div style={{ whiteSpace: "pre-wrap" }}>{ew.pricing_note}</div>
+                    <div className="ew-fact-note">
+                      <div className="ew-fact-label">{t("detail.field_pricing_note")}</div>
+                      <div className="ew-fact-prose">{ew.pricing_note}</div>
                     </div>
                   )}
-                  {/* Provider-internal fields — never present on customer
-                      responses, so the conditional check is a no-op for
-                      customer users. */}
                   {isProvider && ew.manager_note && (
-                    <div className="field">
-                      <div className="muted small">
-                        {t("detail.field_manager_note")}
-                      </div>
-                      <div style={{ whiteSpace: "pre-wrap" }}>{ew.manager_note}</div>
+                    <div className="ew-fact-note">
+                      <div className="ew-fact-label">{t("detail.field_manager_note")}</div>
+                      <div className="ew-fact-prose">{ew.manager_note}</div>
                     </div>
                   )}
                   {isProvider && ew.internal_cost_note && (
-                    <div className="field">
-                      <div className="muted small">
-                        {t("detail.field_internal_cost_note")}
-                      </div>
-                      <div style={{ whiteSpace: "pre-wrap" }}>
-                        {ew.internal_cost_note}
-                      </div>
+                    <div className="ew-fact-note">
+                      <div className="ew-fact-label">{t("detail.field_internal_cost_note")}</div>
+                      <div className="ew-fact-prose">{ew.internal_cost_note}</div>
                     </div>
                   )}
                   {isProvider && ew.override_at && (
                     <div className="alert-warning" style={{ marginTop: 12 }}>
                       <strong>{t("detail.override_applied")}</strong>
                       {ew.override_reason && (
-                        <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>
-                          {ew.override_reason}
-                        </div>
+                        <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{ew.override_reason}</div>
                       )}
                       <div className="muted small" style={{ marginTop: 4 }}>
                         {formatDateTime(ew.override_at)}
                       </div>
                     </div>
                   )}
+                </section>
 
-
-                  {/* Sprint 28 Batch 6 — routing decision text+testid (the
-                      badge itself is now in the page header). Kept as a
-                      named field so the locked testid keeps resolving. */}
-                  <div className="field">
-                    <div className="muted small">
-                      {t("detail.routing_decision_label")}
-                    </div>
-                    <div data-testid="extra-work-detail-routing-decision">
-                      {ew.routing_decision === "INSTANT"
-                        ? t("detail.routing_decision_instant")
-                        : t("detail.routing_decision_proposal")}
-                    </div>
-                  </div>
-                  {/* W3-F — the plan, read back. Renders nothing at all
-                      until there IS a plan, so an unplanned job is not
-                      given an empty block to explain. Provider-only for
-                      the same reason the button is. */}
-                  {isProvider && <PlanSummary ew={ew} />}
                 </div>
             </div>
           </div>
@@ -3006,30 +2816,16 @@ export function ExtraWorkDetailPage() {
               it moved on — the header keeps count + final total visible.
               Keyed by EW id so navigating between EWs re-derives the
               default state instead of carrying the previous card's.) ----- */}
-          <CollapsibleCard
-            key={`cart-${ew.id}`}
-            title={t("detail.line_items_section_title")}
-            meta={
-              <>
-                {t("detail.card_lines_count", {
-                  count: ew.line_items.length,
-                })}
-                {ew.final_total_amount != null && (
-                  <>
-                    {" · "}
-                    {t("detail.pricing_column_total")}:{" "}
-                    {formatMoney(ew.final_total_amount)}
-                  </>
-                )}
-              </>
-            }
-            defaultOpen={
-              ew.status === "REQUESTED" ||
-              ew.status === "UNDER_REVIEW" ||
-              ew.status === "PRICING_PROPOSED"
-            }
-            testId="extra-work-detail-line-items"
-          >
+          {/* W8 §4 — open. It collapsed itself once the request moved
+              past PRICING_PROPOSED, so on a job in progress the Money
+              tab opened with its priced lines hidden. The count and
+              total that justified the collapsed header are the table's
+              own first and last figures. */}
+          <div className="card" data-testid="extra-work-detail-line-items">
+            <div className="form-section">
+              <div className="form-section-title">
+                {t("detail.line_items_section_title")}
+              </div>
             {ew.line_items.length === 0 ? (
               <div
                 className="muted small"
@@ -3073,15 +2869,14 @@ export function ExtraWorkDetailPage() {
                 </table>
               </div>
             )}
-          </CollapsibleCard>
+            </div>
+          </div>
           {hasActiveProposal && canViewProposalPdf && (
-            <CollapsibleCard
-              key={`preview-${ew.id}`}
-              title={t("detail.preview_card_title")}
-              defaultOpen={false}
-              testId="extra-work-preview-panel"
-            >
+            <div className="card" data-testid="extra-work-preview-panel">
               <div className="form-section">
+                <div className="form-section-title">
+                  {t("detail.preview_card_title")}
+                </div>
                 <p className="muted small" style={{ marginTop: 0 }}>
                   {t("detail.preview_card_hint")}
                 </p>
@@ -3097,7 +2892,7 @@ export function ExtraWorkDetailPage() {
                     : t("detail.proposal_pdf")}
                 </button>
               </div>
-            </CollapsibleCard>
+            </div>
           )}
           {/* Draft proposal lines — read-only display of the DRAFT
               proposal's nested `lines` array. Gated on the per-record
@@ -3268,15 +3063,22 @@ export function ExtraWorkDetailPage() {
           )}
           {tab === "people" && (
             <>
+          {/* W8 §4 — NOT collapsed. The whole tab was one closed card,
+              which renders as an empty page with a button on it. The
+              collapse existed to fight a nine-card scroll that the tabs
+              already removed.
+
+              W8 §5 — and NOT `bare`. Bare stripped the card's title and
+              its one-line purpose, which is what made this read as
+              copy-pasted: a table of names with no statement of what it
+              is for. The card states who is on this job, and its Assign
+              control sits at the top where the action belongs. */}
           {isProvider && ew !== null && (
-            <CollapsibleCard
-              key={`people-${ew.id}`}
-              title={t("assign.card_title")}
-              defaultOpen={false}
-              testId="extra-work-assignments-card"
-            >
-              <ExtraWorkAssignmentCard extraWorkId={ew.id} bare />
-            </CollapsibleCard>
+            <div className="card" data-testid="extra-work-assignments-card">
+              <div className="form-section">
+                <ExtraWorkAssignmentCard extraWorkId={ew.id} />
+              </div>
+            </div>
           )}
             </>
           )}

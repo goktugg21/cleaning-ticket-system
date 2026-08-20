@@ -3,18 +3,13 @@
  * W4-N fix 2 — a COLLAPSIBLE card, closed by default, whose collapsed
  * header carries the over/under-budget figure.
  *
- * ## Why it is a `CollapsibleCard` and not a card of its own shape
+ * ## W8 §4 — it is a plain OPEN card
  *
- * The owner's words: "make this as a openable card just like the
- * requested services card. and the default state should be closed as
- * well." `CollapsibleCard` IS the requested-services card, so this
- * mounts that component rather than growing a second chevron idiom
- * three pixels away from the first one. The header meta follows the
- * same grammar Requested services uses ("2 lines - Total: EUR 38.09"):
- * the volume, then the one figure worth reading without opening
- * anything. Here that figure is the variance, chosen by the owner.
- *
- * ## The variance has THREE readings and none of them is a bare zero
+ * It used to be a `CollapsibleCard`, closed by default, on the argument
+ * that it matched the requested-services card. Once the page became
+ * tabs this card WAS the whole Hours tab, so the tab rendered as an
+ * empty page with one button on it. Nothing here is optional detail a
+ * reader should have to ask for.
  *
  * `variance_hours` is `entered - budget`, computed once, on the server
  * (`backend/reports/extra_work_hours.py`). Positive is over. It is
@@ -92,7 +87,6 @@ import { useAuth } from "../../auth/AuthContext";
 import { isProviderManagementRole } from "../../auth/permissions";
 import { formatDate, formatMoney, formatNumber } from "../../lib/intl";
 import { BoundedList } from "../BoundedList";
-import { CollapsibleCard } from "../CollapsibleCard";
 
 /** Hours on the wire are 2dp strings; this only localises the separator. */
 function hours(value: string | null): string {
@@ -186,19 +180,14 @@ export function ExtraWorkHoursPanel({ extraWorkId }: { extraWorkId: number }) {
 
   if (state.kind === "error") {
     return (
-      <CollapsibleCard
-        key={`ew-hours-${extraWorkId}`}
-        title={t("hours_panel.title")}
-        meta={
-          <span className="ew-hours-meta">{t("hours_panel.load_error")}</span>
-        }
-        defaultOpen={false}
-        testId="ew-hours-panel"
-      >
-        <p className="form-error" data-testid="ew-hours-error">
-          {t("hours_panel.load_error")} {state.message}
-        </p>
-      </CollapsibleCard>
+      <div className="card" data-testid="ew-hours-panel">
+        <div className="form-section">
+          <div className="form-section-title">{t("hours_panel.title")}</div>
+          <p className="form-error" data-testid="ew-hours-error">
+            {t("hours_panel.load_error")} {state.message}
+          </p>
+        </div>
+      </div>
     );
   }
 
@@ -216,28 +205,17 @@ export function ExtraWorkHoursPanel({ extraWorkId }: { extraWorkId: number }) {
       : t(variance.key, { hours: variance.hours });
 
   return (
-    <CollapsibleCard
-      key={`ew-hours-${extraWorkId}`}
-      title={t("hours_panel.title")}
-      meta={
-        <span className="ew-hours-meta" data-testid="ew-hours-meta">
-          {t("hours_panel.meta_entered", {
-            hours: hours(report.rollup.entered_hours),
-          })}
-          {" · "}
-          <span
-            className={`ew-hours-meta-variance ew-hours-tone-${
-              variance?.tone ?? "none"
-            }`}
-            data-testid="ew-hours-meta-variance"
-          >
-            {varianceText}
-          </span>
-        </span>
-      }
-      defaultOpen={false}
-      testId="ew-hours-panel"
-    >
+    /* W8 §4 — an OPEN card, not a collapsed one. The Hours tab's only
+       content was this card, shut, so the tab was an empty page with a
+       button on it. Collapsing was there to fight the nine-card scroll
+       the tabs already removed.
+       The old collapsed header carried the entered total and the
+       variance so you could read them without opening it. Both are in
+       the comparison below, larger, so repeating them here would be the
+       same number twice on one screen. */
+    <div className="card" data-testid="ew-hours-panel">
+      <div className="form-section">
+        <div className="form-section-title">{t("hours_panel.title")}</div>
       {/* Decision 12: where each number lives, in plain words, above
           the figures it explains and where a person looking for a wage
           field would look. */}
@@ -474,6 +452,7 @@ export function ExtraWorkHoursPanel({ extraWorkId }: { extraWorkId: number }) {
           </table>
         )}
       </BoundedList>
-    </CollapsibleCard>
+      </div>
+    </div>
   );
 }
