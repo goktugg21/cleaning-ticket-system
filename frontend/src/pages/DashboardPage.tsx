@@ -108,79 +108,112 @@ type WorkTypeFilter = "all" | "tickets" | "chargeable";
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 
 /**
- * W8 BUG 1 — what "My work" means, decided.
+ * W9 BUG 1 + BUG 4 — the dashboard had TWO answers to "what needs
+ * doing", and the one with a person's name on it was always zero.
  *
- * It meant `created_by = me`. The owner, a SUPER_ADMIN: "What exactly
- * makes these My Tickets? Shouldn't I normally be seeing all 78?" He is
- * right that nobody would guess it, and right that it is not useful: the
- * person who opened a ticket is not the person it is waiting on, and for
- * an admin who opens tickets on other people's behalf the two sets barely
- * overlap.
+ * "Waiting for you" counted `my_managed` — the tickets this person is
+ * the named manager of. W8 chose it over `created_by` and it is the
+ * better predicate, but for the two roles that mostly look at this
+ * screen it is empty by construction: a SUPER_ADMIN and a COMPANY_ADMIN
+ * hand work out, they are not the named manager on it. So all three
+ * chips read 0 for ever, under a heading claiming they were the owner's
+ * work, while the sidebar said B1 Amsterdam had 50 active. "Why are
+ * these 0? What exactly determines these numbers? When do they change?"
+ * — the honest answers were "you are on nothing", "an assignment nobody
+ * makes to you" and "never".
  *
- * Of the three candidates — created by me, assigned to me, awaiting my
- * action — only the last earns a place on a dashboard, because a
- * dashboard exists to answer "what do I have to do today". So:
+ * The block is gone rather than re-predicated, because the dashboard was
+ * already carrying the right answer six inches above it. "Needs
+ * attention" lists the work that will not move until somebody on the
+ * provider side acts, and it is role-correct without a single per-role
+ * branch: every count behind it runs through `scope_tickets_for`, so a
+ * SUPER_ADMIN sees the company's, a COMPANY_ADMIN sees their company's
+ * and a BUILDING_MANAGER sees their buildings'. That IS "waiting for
+ * you", per role, and unlike the chips it is never structurally zero.
  *
- *   MY WORK = the work I am RESPONSIBLE for that is NOT FINISHED.
+ * What "waiting for you" means, then, by role and by row:
  *
- * Responsible is `my_managed`: the primary-manager FK ∪ the
- * responsible-manager M:N, the same union the ticket list's "Assigned
- * to: Me" uses. Not finished is OPEN + IN_PROGRESS + WAITING_MANAGER
- * _REVIEW — everything downstream of that is waiting on the customer or
- * done, and neither is waiting on me.
+ *   Reported done, needs your check   the cleaner has finished; until
+ *                                     you check it the customer never
+ *                                     sees it and it cannot be invoiced
+ *   Unassigned                        nobody is on it, so nothing at
+ *                                     all happens until you put someone
+ *   Approval overdue                  the customer has gone quiet on
+ *                                     finished work, and chasing them
+ *                                     is the provider's move
  *
- * The same rule serves all three roles this block renders for: a
- * BUILDING_MANAGER's assignments are their buildings' work, a
- * COMPANY_ADMIN's are what they took on, and a SUPER_ADMIN's are what
- * they took on too. One query, no per-role branch, and a SUPER_ADMIN
- * who is on nothing sees 0 — which is the true answer and a far better
- * one than a number nobody can account for.
- *
- * W7 BUG 1 — the dashboard's "My work" number and the page it opens are
- * ONE query, spelled out in the link.
- *
- * The owner's worst bug: "My work -> Tickets: 8", click it, and the page
- * lists two rows under a tile reading 21. Three surfaces, three different
- * predicates, all three called tickets.
- *
- *   * the CHIP counted `created_by=me & exclude_type=REPORT` — every
- *     status, chargeable work included, finished extra work included;
- *   * the PAGE it opened silently added its own three defaults on top
- *     (status=OPEN, ordinary tickets only, finished extra work hidden),
- *     because `?mine=1` says nothing about any of them and an absent
- *     parameter falls through to the default rather than to "no opinion";
- *   * the TILES above the rows counted `/tickets/stats/`, which has never
- *     been told about `created_by` at all, so it answered for the whole
- *     company.
- *
- * A deep link must therefore state the WHOLE predicate, not the one part
- * that is interesting. `status=ALL` is the existing "everything" escape
- * hatch the status parser already understands, `work=all` turns off the
- * ordinary-tickets narrowing, and `finished_extra_work=1` is the existing
- * URL opt-out of the hide. With all three present the page applies
- * exactly `created_by` + the type narrowing and nothing else — which is
- * precisely the query `loadMyCounts` counts.
+ * Two blocks became one. Nothing was added.
  */
-const MY_WORK_LINK_PARAMS = "mine=1&work=all&finished_extra_work=1";
 
 /**
- * The three statuses that are still waiting on the provider, one per
- * chip.
+ * W9 BUG 2 — the dashboard row and the page it opens, from ONE table.
  *
- * One status each rather than one chip over a three-status set, because
- * a set is not a state the ticket list can be IN: its status control is
- * a row of one-status tiles, so a chip counting three of them would open
- * a page whose tiles all read unselected while the rows were narrowed —
- * the same "the number and the page disagree" defect one layer down.
- * Three chips, three exact queries, and on arrival the tile that matches
- * is the one that is lit.
+ * The owner's requirement for a dashboard number, verbatim: clicking it
+ * should make clear why he clicked, what he is looking at, which filter
+ * is on, why these tickets belong there and what to do next. A selected
+ * chip over an empty table answers none of those, and the answer cannot
+ * live on the dashboard because by then he has left it.
+ *
+ * So each queue owns its link AND its destination heading, side by side
+ * in one entry: the row he clicked and the page he lands on say the same
+ * words because they read the same key. `matches` is the same predicate
+ * spelled as a question, so a link and its heading cannot drift — the
+ * defect this file has now produced three times, once per surface that
+ * counted tickets its own way.
+ *
+ * This generalises the review queue, which has had exactly this
+ * treatment since Sprint 158 and was the only queue to get it.
  */
-const MY_WORK_STATUSES = [
-  { status: "OPEN" as const, testId: "dashboard-my-open" },
-  { status: "IN_PROGRESS" as const, testId: "dashboard-my-in-progress" },
+/**
+ * The two narrowings the ticket list turns on by ITSELF, switched off.
+ *
+ * Every count behind these queues is over all work in scope: the
+ * unassigned query asks for `status=OPEN&assigned_to__isnull`, and
+ * nothing in it says "ordinary tickets only, and hide finished
+ * chargeable work". The list says both, by default, from an absent
+ * parameter — so a link carrying only the status would land on strictly
+ * fewer rows than the number that was clicked. An absent parameter is a
+ * default, never an opinion, so a queue link states the whole predicate.
+ * This is the same lesson W7 learned on the "My work" links; those links
+ * are gone and the rule outlived them.
+ */
+const QUEUE_WIDE = "work=all&finished_extra_work=1";
+
+/** The one place a queue's URL is written. Both the dashboard row and
+ *  the page's own heading resolve through this key. */
+function queueSearch(key: string): string {
+  return TICKET_QUEUES.find((queue) => queue.key === key)?.search ?? "";
+}
+
+interface TicketQueueState {
+  status: string;
+  unassigned: boolean;
+  stalled: boolean;
+}
+
+const TICKET_QUEUES: {
+  key: string;
+  search: string;
+  matches: (state: TicketQueueState) => boolean;
+  /** The queue whose next step is putting somebody on the work. */
+  assigns?: boolean;
+}[] = [
   {
-    status: "WAITING_MANAGER_REVIEW" as const,
-    testId: "dashboard-my-review",
+    key: "review",
+    search: `status=WAITING_MANAGER_REVIEW&${QUEUE_WIDE}`,
+    matches: (s) =>
+      s.status === "WAITING_MANAGER_REVIEW" && !s.unassigned && !s.stalled,
+  },
+  {
+    key: "unassigned",
+    search: `status=OPEN&unassigned=1&${QUEUE_WIDE}`,
+    matches: (s) => s.status === "OPEN" && s.unassigned,
+    assigns: true,
+  },
+  {
+    key: "approval_overdue",
+    search: `status=WAITING_CUSTOMER_APPROVAL&stalled=1&${QUEUE_WIDE}`,
+    matches: (s) => s.status === "WAITING_CUSTOMER_APPROVAL" && s.stalled,
   },
 ];
 
@@ -921,43 +954,6 @@ export function DashboardPage({
   // M6.3 — "my work" summary counts (provider-management only). Each
   // count is the PaginatedResponse.count for a created_by=me query;
   // page_size:1 keeps the payload minimal (count is the full total).
-  const [myCounts, setMyCounts] = useState<Record<string, number | null>>({
-    OPEN: null,
-    IN_PROGRESS: null,
-    WAITING_MANAGER_REVIEW: null,
-  });
-
-  const loadMyCounts = useCallback(async () => {
-    const meId = me?.id;
-    if (!meId || !isProviderManagementRole(userRole)) return;
-    try {
-      // W8 BUG 1 — one query per chip, and it is the SAME query the
-      // chip's link puts in the URL: `my_managed` + that one status,
-      // with the list's two other defaults turned off explicitly
-      // (`work=all`, `finished_extra_work=1`) exactly as
-      // MY_WORK_LINK_PARAMS spells them. An absent parameter is a
-      // default and not an opinion, which is why the link states the
-      // whole predicate rather than the interesting part of it.
-      const responses = await Promise.all(
-        MY_WORK_STATUSES.map(({ status }) =>
-          api.get<PaginatedResponse<TicketList>>("/tickets/", {
-            params: { my_managed: true, status, page_size: 1 },
-          }),
-        ),
-      );
-      setMyCounts(
-        Object.fromEntries(
-          MY_WORK_STATUSES.map(({ status }, index) => [
-            status,
-            responses[index].data.count,
-          ]),
-        ),
-      );
-    } catch {
-      // Leave "—" placeholders on failure (mirrors loadStats).
-    }
-  }, [me?.id, userRole]);
-
   const loadStatsByBuilding = useCallback(async () => {
     // The by-building side panel renders on the Tickets page only.
     if (!isTicketsPage) return;
@@ -1120,14 +1116,12 @@ export function DashboardPage({
     loadStats();
     loadStatsByBuilding();
     loadExtraWorkStats();
-    loadMyCounts();
     loadAttention();
     loadWidgets();
   }, [
     loadStats,
     loadStatsByBuilding,
     loadExtraWorkStats,
-    loadMyCounts,
     loadAttention,
     loadWidgets,
   ]);
@@ -1256,7 +1250,26 @@ export function DashboardPage({
    * finished. Why it matters: until somebody checks it the customer
    * never sees it and it cannot be invoiced.
    */
-  const isReviewQueue = statusFilter === "WAITING_MANAGER_REVIEW";
+  /**
+   * W9 BUG 2 — which named queue this page is currently showing, if any.
+   *
+   * Read from the page's own filter state rather than from the URL, so a
+   * queue reached by working the filters by hand explains itself exactly
+   * as one reached from the dashboard. The heading, the reason and the
+   * empty message all key off this, which is why a link and its
+   * destination cannot say different things.
+   */
+  const activeQueue = useMemo(
+    () =>
+      TICKET_QUEUES.find((queue) =>
+        queue.matches({
+          status: statusFilter,
+          unassigned: unassignedFilter,
+          stalled: stalledApprovalFilter,
+        }),
+      ) ?? null,
+    [statusFilter, unassignedFilter, stalledApprovalFilter],
+  );
 
   // Sprint 28 Batch 13 (rework) — operations-level KPI summary. Derived
   // from existing TicketStats + ExtraWorkStats; no client-side
@@ -1535,12 +1548,12 @@ export function DashboardPage({
                 <ul className="attn-list">
                   <li className="attn-item">
                     <Link
-                      to="/tickets?status=WAITING_MANAGER_REVIEW"
+                      to={`/tickets?${queueSearch("review")}`}
                       className="attn-row"
                       data-testid="attention-review"
                     >
                       <span className="attn-row-label">
-                        {t("attention.review_title")}
+                        {t("queue.review.title")}
                       </span>
                       <span
                         className={attnBadge(
@@ -1554,12 +1567,12 @@ export function DashboardPage({
                   </li>
                   <li className="attn-item">
                     <Link
-                      to="/tickets?status=OPEN&unassigned=1"
+                      to={`/tickets?${queueSearch("unassigned")}`}
                       className="attn-row"
                       data-testid="attention-unassigned"
                     >
                       <span className="attn-row-label">
-                        {t("attention.unassigned_title")}
+                        {t("queue.unassigned.title")}
                       </span>
                       <span
                         className={attnBadge(
@@ -1601,12 +1614,12 @@ export function DashboardPage({
                       it closes. So it gets the warning tint. */}
                   <li className="attn-item">
                     <Link
-                      to={`/tickets?status=WAITING_CUSTOMER_APPROVAL&stalled=1`}
+                      to={`/tickets?${queueSearch("approval_overdue")}`}
                       className="attn-row"
                       data-testid="attention-approval-overdue"
                     >
                       <span className="attn-row-label">
-                        {t("attention.approval_overdue_title", {
+                        {t("queue.approval_overdue.title", {
                           days: STALLED_APPROVAL_DAYS,
                         })}
                       </span>
@@ -1760,32 +1773,6 @@ export function DashboardPage({
                 </Link>
               </div>
             </section>
-
-            {me?.id && (
-              <section
-                className="mywork-section"
-                data-testid="dashboard-my-work"
-              >
-                <div className="section-head" style={{ marginBottom: 10 }}>
-                  <div className="section-head-title">{t("my_work.title")}</div>
-                </div>
-                <div className="mywork-chips">
-                  {MY_WORK_STATUSES.map(({ status, testId }) => (
-                    <Link
-                      key={status}
-                      to={`/tickets?status=${status}&${MY_WORK_LINK_PARAMS}`}
-                      className="mywork-chip"
-                      data-testid={testId}
-                    >
-                      <span>{tStatus(status)}</span>
-                      <span className="mywork-chip-count">
-                        {fmt(myCounts[status] ?? null)}
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              </section>
-            )}
 
             {/* #109 Part G — bottom density band (management view only):
                 a Facturatie mini per-building panel + a compact
@@ -2008,7 +1995,7 @@ export function DashboardPage({
           <div className="card attention-card" data-testid="attention-review">
             <div className="attention-card-head">
               <span className="attention-card-title">
-                {t("attention.review_title")}
+                {t("queue.review.title")}
               </span>
               <span className="attention-card-count">
                 {fmt(stats?.by_status?.WAITING_MANAGER_REVIEW ?? null)}
@@ -2044,7 +2031,7 @@ export function DashboardPage({
           >
             <div className="attention-card-head">
               <span className="attention-card-title">
-                {t("attention.unassigned_title")}
+                {t("queue.unassigned.title")}
               </span>
               <span className="attention-card-count">
                 {attnUnassigned === null ? "—" : attnUnassigned.count}
@@ -2066,7 +2053,7 @@ export function DashboardPage({
               )}
             </ul>
             <Link
-              to="/tickets?status=OPEN&unassigned=1"
+              to={`/tickets?${queueSearch("unassigned")}`}
               className="attention-card-link"
               data-testid="attention-unassigned-link"
             >
@@ -2226,27 +2213,50 @@ export function DashboardPage({
                     finished extra work shown) are one sentence below the
                     filters, and each of them now has a labelled control
                     among the filters instead of a pill with an × on it. */}
+                {/* W9 BUG 2 — what you are looking at, why these
+                    tickets are here, and the next step, in the words of
+                    the dashboard row you clicked to get here. */}
                 <div className="section-head">
                   <div>
-                    <div className="section-head-title">
-                      {isReviewQueue
-                        ? t("review_queue.title")
+                    <div
+                      className="section-head-title"
+                      data-testid="tickets-queue-title"
+                    >
+                      {activeQueue
+                        ? t(`queue.${activeQueue.key}.title`)
                         : t("section_recent_title")}
                     </div>
                     <div className="section-head-sub">
-                      {isReviewQueue
-                        ? t("review_queue.sub")
+                      {activeQueue
+                        ? t(`queue.${activeQueue.key}.why`)
                         : t("section_recent_sub")}
                     </div>
                   </div>
-                  {isProviderManagementRole(userRole) && (
-                    <EditModeToggle
-                      editMode={edit.editMode}
-                      onToggle={edit.toggleMode}
-                      disabled={bulkSubmitting || assignBusy}
-                      testId="dashboard-tickets-edit-toggle"
-                    />
-                  )}
+                  {isProviderManagementRole(userRole) &&
+                    (activeQueue?.assigns && !edit.editMode ? (
+                      /* W9 — BRING THE ACTION TO WHERE THE USER IS. The
+                         next step in the unassigned queue is putting
+                         somebody on the work, and it was behind a button
+                         called "Edit". Same control, named for the job
+                         it does here. The house rule still holds: the
+                         screen edits nothing until this is pressed. */
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={edit.start}
+                        disabled={bulkSubmitting || assignBusy}
+                        data-testid="tickets-queue-action"
+                      >
+                        {t("queue.unassigned.action")}
+                      </button>
+                    ) : (
+                      <EditModeToggle
+                        editMode={edit.editMode}
+                        onToggle={edit.toggleMode}
+                        disabled={bulkSubmitting || assignBusy}
+                        testId="dashboard-tickets-edit-toggle"
+                      />
+                    ))}
                 </div>
 
                 <form className="filter-bar" onSubmit={handleSearchSubmit}>
@@ -2876,15 +2886,23 @@ export function DashboardPage({
                 {!loading && tickets.length === 0 && (
                   <div className="empty-state">
                     <div className="empty-icon">＋</div>
+                    {/* W9 BUG 2 — an empty queue is GOOD NEWS and says
+                        so in its own words. "No tickets match these
+                        filters" is what a filter accident looks like,
+                        and it read identically to one. */}
                     <div className="empty-title">
-                      {hasActiveFilters
-                        ? t("empty_no_match_title")
-                        : t("empty_no_tickets_title")}
+                      {activeQueue
+                        ? t(`queue.${activeQueue.key}.empty`)
+                        : hasActiveFilters
+                          ? t("empty_no_match_title")
+                          : t("empty_no_tickets_title")}
                     </div>
                     <p className="empty-sub">
-                      {hasActiveFilters
-                        ? t("empty_no_match_sub")
-                        : t("empty_no_tickets_sub")}
+                      {activeQueue
+                        ? t("queue.empty_sub")
+                        : hasActiveFilters
+                          ? t("empty_no_match_sub")
+                          : t("empty_no_tickets_sub")}
                     </p>
                     {hasActiveFilters ? (
                       <button
