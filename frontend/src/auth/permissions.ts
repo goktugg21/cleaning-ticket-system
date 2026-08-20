@@ -233,6 +233,23 @@ export function canManageTimesheets(role: Role | null | undefined): boolean {
   return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
 }
 
+// Sprint W4-Q §2 — `/admin/sla-warnings`, the per-company thresholds for
+// the three time-driven warnings. Backend:
+// `sla.views_thresholds` + `IsSuperAdminOrCompanyAdmin`.
+//
+// BUILDING_MANAGER is deliberately NOT admitted even though it is a
+// provider-management role elsewhere: these numbers govern every ticket
+// in a whole company and a BM's authority is one building. STAFF and
+// CUSTOMER_USER never — a customer must not even learn that their
+// provider warns itself after eight hours.
+//
+// `isProviderAdmin` is not reused, for the reason `canManageTimesheets`
+// gives above: a future widening of that predicate must not silently
+// hand somebody else the company's whole warning rhythm.
+export function canManageSlaWarnings(role: Role | null | undefined): boolean {
+  return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
+}
+
 // Sprint 160 — the contracts module. Two predicates, mirroring the
 // backend's two permission classes (`contracts.permissions`).
 //

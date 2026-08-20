@@ -6513,6 +6513,39 @@ a.attn-row:hover {
 .notif-page-row-unread .notif-page-row-summary { font-weight: 600; }
 .notif-page-row-meta { font-size: 12px; color: var(--text-muted); }
 
+/* Sprint W4-Q §1 — the TIME-DRIVEN warnings in the feed.
+   Every other row in this feed is activity: somebody did something.
+   These three are the opposite — nothing happened and it should have —
+   so they read as a warning rather than as news. Amber, not red: the
+   work is late, it is not broken, and a feed that shouts at the same
+   pitch about a job running four hours behind and a real failure is a
+   feed people stop reading. */
+.notif-warning-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--f-head);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  color: var(--amber);
+}
+.notif-item-warning,
+.notif-page-row-warning {
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+/* The unread accent is the same inset shadow, so an UNREAD warning
+   would otherwise lose its amber edge to the green one. Warning wins:
+   which kind of row it is matters more than whether it has been read,
+   and the unread state still has its dot and its heavier summary. */
+.notif-page-row-unread.notif-page-row-warning {
+  box-shadow: inset 3px 0 0 var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
+.notif-item-unread.notif-item-warning {
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
+
 @media (max-width: 720px) {
   .notif-panel { right: -8px; }
 }

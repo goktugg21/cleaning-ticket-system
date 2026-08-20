@@ -18,6 +18,7 @@ import { CustomerRoute } from "./components/CustomerRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
 import { TimesheetsRoute } from "./components/TimesheetsRoute";
+import { SlaWarningsRoute } from "./components/SlaWarningsRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
 import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
@@ -82,6 +83,9 @@ import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPag
 import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
 import { HoursAdminPage } from "./pages/admin/HoursAdminPage";
+// Sprint W4-Q §2 — per-company thresholds for the three time-driven
+// SLA warnings. SA / CA only, on its own guard (see SlaWarningsRoute).
+import { SlaWarningsAdminPage } from "./pages/admin/SlaWarningsAdminPage";
 // Sprint 160 — contracts. Eagerly imported like the other admin
 // pages; the module is small and the route is behind its own guard.
 import { ContractsAdminPage } from "./pages/admin/contracts/ContractsAdminPage";
@@ -805,6 +809,15 @@ export default function App() {
               <TimesheetsRoute manager>
                 <HoursAdminPage />
               </TimesheetsRoute>
+            }
+          />
+          {/* Sprint W4-Q §2 — the SLA warning thresholds. */}
+          <Route
+            path="/admin/sla-warnings"
+            element={
+              <SlaWarningsRoute>
+                <SlaWarningsAdminPage />
+              </SlaWarningsRoute>
             }
           />
           {/* Sprint 160 — contracts. Its own guard rather than

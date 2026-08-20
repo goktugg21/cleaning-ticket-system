@@ -62,20 +62,50 @@ There is no third. Nothing here re-escalates, re-times, or walks a
 reporting tree — the settings are two numbers per warning and the code
 is one `if`.
 
-WHY IT DOES NOT SEND 288 MAILS A DAY
-------------------------------------
+WHY IT DOES NOT SEND 288 MESSAGES A DAY
+---------------------------------------
 The sweep is on the same 5-minute beat as the reconciler, so every
 qualifying row qualifies again five minutes later. The cooldown is a
-query against the `NotificationLog` rows the sweep itself wrote:
-"have I already told this person about this subject inside
-SLA_WARN_COOLDOWN_HOURS?". That is the same argument `invoicing/tasks.py`
-makes for the invoice claim — the idempotency key is the data, not a
-"did we run today?" flag, because a flag can be lost, reset, or lie after
-a partial failure while the log row cannot.
+query against the rows the sweep itself wrote: "have I already told this
+person about this subject inside the cooldown window?". That is the same
+argument `invoicing/tasks.py` makes for the invoice claim — the
+idempotency key is the data, not a "did we run today?" flag, because a
+flag can be lost, reset, or lie after a partial failure while the log
+row cannot.
 
 Keying the cooldown is why `NotificationLog` gained a nullable
-`extra_work` FK this sprint: an Extra Work that has not spawned a ticket
-has no `ticket` to key on.
+`extra_work` FK in W1-B: an Extra Work that has not spawned a ticket has
+no `ticket` to key on.
+
+SPRINT W4-Q §1 — THE BELL, AND ONE COOLDOWN FOR BOTH CHANNELS
+-------------------------------------------------------------
+W1-B sent email and said plainly that it did not do the bell. It does
+now: `_emit` writes an in-app `Notification` row and queues the mail
+from the SAME recipient list, in the same loop, so the two channels
+cannot drift into telling different people. The roster and its tenant
+scoping are unchanged — still resolved in `notifications.services`,
+still passed through `user_has_scope_for_ticket` on the customer side.
+
+The two channels share ONE cooldown, and a hit on either suppresses
+both. The full argument is at `_already_warned_user_ids`; the short
+version is that "have I already told this person about this problem
+today?" must not have two answers depending on which pipe carried it.
+
+SPRINT W4-Q §2 — THE THRESHOLDS ARE PER COMPANY
+-----------------------------------------------
+Every number this module compares against used to be one platform-wide
+env var. They are now resolved per subject from the SUBJECT'S OWN
+company (`sla.thresholds`), falling back to `settings.SLA_WARN_*` where
+that company has configured nothing. The env var is the fallback, not
+the source of truth, and no deployment had to change for that to be
+true: a company with no override row resolves to exactly the numbers it
+resolved to before.
+
+The resolver is built once per sweep and asked per row. It is asked with
+the subject's own `company_id` every time, never with a value hoisted
+out of the loop — a hoisted threshold is one tenant's clock applied to
+another tenant's work, which is the tenant-scoping surface of this
+sprint and is tested directly.
 
 TENANT SCOPING
 --------------
@@ -103,6 +133,7 @@ from django.utils import timezone
 from tickets.models import Ticket, TicketStatus
 
 from . import business_hours
+from .thresholds import ThresholdResolver
 
 logger = logging.getLogger(__name__)
 
@@ -120,15 +151,38 @@ NOT_STARTED_TICKET_STATUSES = frozenset(
 )
 
 
-def _cooldown_cutoff(now):
-    hours = int(getattr(settings, "SLA_WARN_COOLDOWN_HOURS", 24))
-    return now - datetime.timedelta(hours=hours)
-
-
-def _already_warned_user_ids(*, event_type, ticket_id, extra_work_id, user_ids, now):
+def _already_warned_user_ids(
+    *, event_type, ticket_id, extra_work_id, user_ids, now, cooldown_hours
+):
     """Which of `user_ids` already had THIS warning about THIS subject
-    inside the cooldown window. One query per emit, not per recipient."""
-    from notifications.models import NotificationLog
+    inside the cooldown window. Two queries per emit, not per recipient.
+
+    Sprint W4-Q §1 — ONE COOLDOWN, SHARED BY BOTH CHANNELS.
+    ------------------------------------------------------
+    The window is asked of the email log AND the in-app feed, and a hit
+    on either suppresses both. This is a decision, not an accident, and
+    the argument is short: the cooldown answers "have I already told
+    this person about this problem today?", and the answer must not
+    depend on which pipe carried it. Two independent clocks would let a
+    person be told twice about one problem in one day — once in the
+    inbox, once in the bell — which is precisely the flood the cooldown
+    exists to prevent, arriving through the door we just opened.
+
+    It also makes the throttle self-healing across a partial failure. If
+    the mail row is written and the bell row is not (or the reverse),
+    the surviving row still holds the window shut, so the next tick five
+    minutes later does not re-send the half that worked.
+
+    And it is what would keep a recipient WITHOUT an email address
+    safe: they would get the bell only, and the bell row is what
+    throttles them. No such recipient reaches `_emit` today — the
+    rosters in `notifications.services` still drop address-less users
+    upstream (`_active_users` excludes `email=""`) — so this is the
+    belt to that braces, not a live path. It costs one query and it
+    means the throttle does not depend on a filter three modules away
+    staying exactly as it is.
+    """
+    from notifications.models import Notification, NotificationLog
 
     if not user_ids:
         return set()
@@ -142,30 +196,71 @@ def _already_warned_user_ids(*, event_type, ticket_id, extra_work_id, user_ids, 
         # unthrottled. An un-keyed warning is a warning that repeats
         # every five minutes forever.
         return set(user_ids)
-    return set(
+    ids = list(user_ids)
+    cutoff = now - datetime.timedelta(hours=int(cooldown_hours))
+    warned = set(
         NotificationLog.objects.filter(
             subject_q,
             event_type=event_type,
-            recipient_user_id__in=list(user_ids),
-            created_at__gte=_cooldown_cutoff(now),
+            recipient_user_id__in=ids,
+            created_at__gte=cutoff,
         ).values_list("recipient_user_id", flat=True)
     )
+    # The in-app enum's three warning values are spelled identically to
+    # the email enum's on purpose (see notifications/models.py), so the
+    # same `event_type` string keys both halves of this query.
+    warned |= set(
+        Notification.objects.filter(
+            subject_q,
+            event_type=event_type,
+            recipient_id__in=ids,
+            created_at__gte=cutoff,
+        ).values_list("recipient_id", flat=True)
+    )
+    return warned
 
 
-def _emit(*, event_type, subject, body, users, now, ticket=None, extra_work=None):
-    """Send one warning to everyone in `users` who is not in cooldown.
+def _emit(
+    *,
+    event_type,
+    subject,
+    body,
+    inapp_summary,
+    users,
+    now,
+    cooldown_hours,
+    ticket=None,
+    extra_work=None,
+):
+    """Warn everyone in `users` who is not in cooldown, on BOTH channels.
 
-    Returns the number of mails actually queued. Recipients are deduped
+    Returns the number of PEOPLE warned — not the number of messages,
+    because one person now receives two of them. Recipients are deduped
     by id here as well as by the resolvers, because the responsible ring
     and the escalation ring legitimately overlap (a building manager can
     be both) and nobody should get the same warning twice in one tick.
+
+    The bell row and the mail are written from the SAME list, in the
+    same loop, so the two channels cannot drift into telling different
+    people. Neither is assembled here: the roster arrived already
+    tenant-scoped from `notifications.services`, and the bell row is
+    written by `notifications.services.emit_sla_warning_inapp`.
+
+    The email address is required for the MAIL only, not for the bell.
+    That is a change from W1-B, which dropped an address-less user
+    before the send and so gave them nothing at all. It is currently a
+    difference without a case: the rosters upstream in
+    `notifications.services` already exclude `email=""`, so nobody
+    reaches here without one. It is written this way so the bell does
+    not silently inherit an email-era assumption from a filter three
+    modules away.
     """
-    from notifications.services import send_logged_email
+    from notifications.services import emit_sla_warning_inapp, send_logged_email
 
     seen = set()
     candidates = []
     for user in users:
-        if not user or not user.id or not getattr(user, "email", ""):
+        if not user or not user.id:
             continue
         if user.id in seen:
             continue
@@ -180,10 +275,21 @@ def _emit(*, event_type, subject, body, users, now, ticket=None, extra_work=None
         extra_work_id=getattr(extra_work, "id", None),
         user_ids=[u.id for u in candidates],
         now=now,
+        cooldown_hours=cooldown_hours,
     )
-    sent = 0
-    for user in candidates:
-        if user.id in suppressed:
+    warned = [u for u in candidates if u.id not in suppressed]
+    if not warned:
+        return 0
+
+    emit_sla_warning_inapp(
+        event_type=event_type,
+        recipients=warned,
+        summary=inapp_summary,
+        ticket=ticket,
+        extra_work=extra_work,
+    )
+    for user in warned:
+        if not getattr(user, "email", ""):
             continue
         send_logged_email(
             recipient_email=user.email,
@@ -194,8 +300,7 @@ def _emit(*, event_type, subject, body, users, now, ticket=None, extra_work=None
             ticket=ticket,
             extra_work=extra_work,
         )
-        sent += 1
-    return sent
+    return len(warned)
 
 
 def _sign_off():
@@ -241,7 +346,7 @@ def _billing_cutoff_date(customer, on_or_after):
     return None
 
 
-def sweep_approval_cutoff(now):
+def sweep_approval_cutoff(now, thresholds):
     """Finished Extra Work sitting with the customer as their cutoff nears.
 
     Restricted to tickets spawned from an Extra Work, and to Extra Work
@@ -256,10 +361,6 @@ def sweep_approval_cutoff(now):
         ticket_responsible_manager_recipients,
     )
 
-    warn_days = int(getattr(settings, "SLA_WARN_APPROVAL_CUTOFF_DAYS", 5))
-    escalate_days = int(
-        getattr(settings, "SLA_WARN_APPROVAL_CUTOFF_ESCALATE_DAYS", 2)
-    )
     today = timezone.localtime(now).date()
 
     qs = (
@@ -282,6 +383,14 @@ def sweep_approval_cutoff(now):
             customer = ticket.customer
             if customer is None:
                 continue
+            # Sprint W4-Q §2 — the numbers are the TICKET'S OWN
+            # company's. Resolved per subject rather than once per
+            # sweep, because the sweep crosses every tenant and a
+            # hoisted variable would be one company's clock applied to
+            # everybody's work.
+            th = thresholds.for_company(ticket.company_id)
+            warn_days = th.approval_cutoff_days
+            escalate_days = th.approval_cutoff_escalate_days
             cutoff = _billing_cutoff_date(customer, today)
             if cutoff is None:
                 continue
@@ -327,8 +436,19 @@ def sweep_approval_cutoff(now):
                 event_type=NotificationEventType.SLA_APPROVAL_CUTOFF_DUE,
                 subject=subject,
                 body=body,
+                # The bell line carries the FACTS only — which work, how
+                # long is left. The sentence that names the warning is
+                # rendered by the feed UI through `t()`, because a
+                # server-side Dutch string in a translated interface is
+                # a string nobody can translate.
+                inapp_summary=(
+                    f"{ew.title} - {ticket.ticket_no} - "
+                    f"facturatiedatum {cutoff_label} "
+                    f"({days_left} dag(en))"
+                ),
                 users=recipients,
                 now=now,
+                cooldown_hours=th.cooldown_hours,
                 ticket=ticket,
                 extra_work=ew,
             )
@@ -345,23 +465,12 @@ def sweep_approval_cutoff(now):
 # 2. Manager review past its target
 # ---------------------------------------------------------------------------
 
-def sweep_manager_review(now):
+def sweep_manager_review(now, thresholds):
     """Staff said done; nobody has checked it."""
     from notifications.models import NotificationEventType
     from notifications.services import (
         company_admin_recipients,
         ticket_responsible_manager_recipients,
-    )
-
-    target = int(
-        getattr(settings, "SLA_WARN_MANAGER_REVIEW_BUSINESS_SECONDS", 8 * 3600)
-    )
-    escalate_target = int(
-        getattr(
-            settings,
-            "SLA_WARN_MANAGER_REVIEW_ESCALATE_BUSINESS_SECONDS",
-            24 * 3600,
-        )
     )
 
     qs = (
@@ -376,6 +485,9 @@ def sweep_manager_review(now):
     sent = failed = 0
     for ticket in qs.iterator():
         try:
+            th = thresholds.for_company(ticket.company_id)
+            target = th.manager_review_business_seconds
+            escalate_target = th.manager_review_escalate_business_seconds
             waited = business_hours.business_seconds_between(
                 ticket.manager_review_at, now
             )
@@ -409,8 +521,13 @@ def sweep_manager_review(now):
                 event_type=NotificationEventType.SLA_MANAGER_REVIEW_OVERDUE,
                 subject=subject,
                 body=body,
+                inapp_summary=(
+                    f"{ticket.ticket_no} - {ticket.title} - "
+                    f"{hours} werkuren"
+                ),
                 users=recipients,
                 now=now,
+                cooldown_hours=th.cooldown_hours,
                 ticket=ticket,
             )
         except Exception:  # noqa: BLE001 — one ticket must not stop the sweep.
@@ -426,20 +543,11 @@ def sweep_manager_review(now):
 # 3. Should have started and has not — tickets AND Extra Work
 # ---------------------------------------------------------------------------
 
-def sweep_not_started_tickets(now):
+def sweep_not_started_tickets(now, thresholds):
     from notifications.models import NotificationEventType
     from notifications.services import (
         ticket_assigned_staff_recipients,
         ticket_responsible_manager_recipients,
-    )
-
-    target = int(
-        getattr(settings, "SLA_WARN_NOT_STARTED_BUSINESS_SECONDS", 4 * 3600)
-    )
-    escalate_target = int(
-        getattr(
-            settings, "SLA_WARN_NOT_STARTED_ESCALATE_BUSINESS_SECONDS", 16 * 3600
-        )
     )
 
     qs = (
@@ -455,6 +563,9 @@ def sweep_not_started_tickets(now):
     sent = failed = 0
     for ticket in qs.iterator():
         try:
+            th = thresholds.for_company(ticket.company_id)
+            target = th.not_started_business_seconds
+            escalate_target = th.not_started_escalate_business_seconds
             late = business_hours.business_seconds_between(
                 ticket.scheduled_start_at, now
             )
@@ -488,8 +599,14 @@ def sweep_not_started_tickets(now):
                 event_type=NotificationEventType.SLA_WORK_NOT_STARTED,
                 subject=subject,
                 body=body,
+                inapp_summary=(
+                    f"{ticket.ticket_no} - {ticket.title} - gepland "
+                    f"{planned.strftime('%d-%m-%Y %H:%M')}, "
+                    f"{hours} werkuren verstreken"
+                ),
                 users=recipients,
                 now=now,
+                cooldown_hours=th.cooldown_hours,
                 ticket=ticket,
             )
         except Exception:  # noqa: BLE001 — one ticket must not stop the sweep.
@@ -501,7 +618,7 @@ def sweep_not_started_tickets(now):
     return sent, failed
 
 
-def sweep_not_started_extra_work(now):
+def sweep_not_started_extra_work(now, thresholds):
     """The Extra Work clock.
 
     `reconcile_sla_states` iterates `Ticket` only, so an Extra Work that
@@ -528,9 +645,6 @@ def sweep_not_started_extra_work(now):
     from notifications.models import NotificationEventType
     from notifications.services import extra_work_provider_recipients
 
-    target = int(
-        getattr(settings, "SLA_WARN_NOT_STARTED_BUSINESS_SECONDS", 4 * 3600)
-    )
     today = timezone.localtime(now).date()
     tz = business_hours.project_tz()
     window_start = datetime.time(*settings.SLA_BUSINESS_HOURS_START)
@@ -553,8 +667,9 @@ def sweep_not_started_extra_work(now):
             )
             if planned_at >= now:
                 continue
+            th = thresholds.for_company(ew.company_id)
             late = business_hours.business_seconds_between(planned_at, now)
-            if late < target:
+            if late < th.not_started_business_seconds:
                 continue
             hours = late // 3600
             planned_label = ew.provider_planned_date.strftime("%d-%m-%Y")
@@ -582,8 +697,13 @@ def sweep_not_started_extra_work(now):
                 event_type=NotificationEventType.SLA_WORK_NOT_STARTED,
                 subject=subject,
                 body=body,
+                inapp_summary=(
+                    f"{ew.title} - gepland {planned_label}, "
+                    f"{hours} werkuren verstreken"
+                ),
                 users=list(extra_work_provider_recipients(ew)),
                 now=now,
+                cooldown_hours=th.cooldown_hours,
                 extra_work=ew,
             )
         except Exception:  # noqa: BLE001 — one EW must not stop the sweep.
@@ -604,10 +724,18 @@ def sweep(now=None) -> dict:
     if now is None:
         now = timezone.now()
 
-    cutoff_sent, cutoff_failed = sweep_approval_cutoff(now)
-    review_sent, review_failed = sweep_manager_review(now)
-    ticket_sent, ticket_failed = sweep_not_started_tickets(now)
-    ew_sent, ew_failed = sweep_not_started_extra_work(now)
+    # Sprint W4-Q §2 — every threshold below is now the SUBJECT'S OWN
+    # company's, falling back to `settings.SLA_WARN_*` where that
+    # company has configured nothing. The resolver is built once per
+    # sweep (one query for every override row) and asked per subject;
+    # building it here rather than inside the four sweeps means one
+    # query per tick instead of four.
+    thresholds = ThresholdResolver()
+
+    cutoff_sent, cutoff_failed = sweep_approval_cutoff(now, thresholds)
+    review_sent, review_failed = sweep_manager_review(now, thresholds)
+    ticket_sent, ticket_failed = sweep_not_started_tickets(now, thresholds)
+    ew_sent, ew_failed = sweep_not_started_extra_work(now, thresholds)
 
     return {
         "approval_cutoff": cutoff_sent,

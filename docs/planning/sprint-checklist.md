@@ -984,6 +984,146 @@ the list understood and the counts did not.
   the "do not invent status" trap.
 
 
+### Done — W4-Q: the bell, and thresholds you can change without a deploy (wave 4, chat Q of 6)
+
+Plan §2.7's two loose ends, both of which W1-B reported honestly at the
+time rather than hiding: the three time-driven warnings were **e-mail
+only**, and every threshold was an **environment variable**. Neither is a
+detail. A warning nobody sees is the silence this whole sprint family
+exists to end, and a number you can only change by redeploying is a
+number nobody changes.
+
+**No engine was rebuilt.** `sla/business_hours.py` has done real
+business-hours arithmetic since Sprint 7 and is untouched. This sprint
+adds a CHANNEL and a CONFIGURATION SURFACE around it.
+
+- **The three warnings now ring the bell.** `SLA_APPROVAL_CUTOFF_DUE`,
+  `SLA_MANAGER_REVIEW_OVERDUE` and `SLA_WORK_NOT_STARTED` join
+  `NotificationType`, and `sla.warnings._emit` writes the in-app row and
+  queues the mail **from one recipient list, in one loop**, so the two
+  channels cannot drift into telling different people. The roster is not
+  re-derived: it is still the tenant-scoped resolvers in
+  `notifications.services`, and the customer ring still passes through
+  `user_has_scope_for_ticket`. A test asserts the two channels reach
+  exactly the same set.
+- **ONE cooldown, shared, and that is a decision.** The window is asked
+  of the mail log **and** the feed, and a hit on either suppresses both.
+  "Have I already told this person about this problem today?" must not
+  have two answers depending on which pipe carried it — two independent
+  clocks would tell one person about one problem twice a day, which is
+  the flood the cooldown exists to stop, arriving through the door this
+  sprint opened. It is also self-healing: if one channel's row is lost,
+  the surviving row still holds the window shut. Three tests pin it,
+  including the deploy case — W1-B's existing mail rows must not all
+  re-fire as bells on the first sweep after this lands.
+- **The three enum values are spelled identically in both enums.** One
+  event, two channels, one name. Safe only while none of them is
+  user-mutable, because `NotificationPreference.event_type` stores both
+  enums' values in one column;
+  `notifications/tests/test_w4q_sla_feed.py` asserts that invariant so
+  the day somebody makes one mutable it fails loudly instead of muting
+  the wrong channel.
+- **The feed says what kind of row it is.** Warnings render with an
+  amber left accent and a translated headline; the server `summary`
+  carries the facts only (which job, how many business hours) because a
+  Dutch sentence stored on the row is a sentence nobody can translate.
+  Amber and not red on purpose: a feed that shouts at the same pitch
+  about a job four hours behind and a real failure is a feed people stop
+  reading.
+- **Thresholds are per company, with a default.** New
+  `sla.models.SlaWarningThreshold` — one nullable column per knob, one
+  row per provider company — and `sla.thresholds` resolves the company's
+  own value where it has one and `settings.SLA_WARN_*` where it does
+  not, **per field**. A company that tuned only its manager-review clock
+  keeps the platform default for the rest.
+- **Nothing had to change in any existing deployment.** No company has a
+  row until somebody saves one, so every warning resolves to exactly the
+  number it resolved to before. The env vars are not deleted and must
+  not be: they are what a company with no row falls back on. The env
+  var stopped being the source of truth and became the fallback, which
+  is a change of role, not of value.
+- **A company's threshold cannot move another company's warnings.** The
+  resolver is asked with the SUBJECT's own `company_id` on every row —
+  never a value hoisted out of the loop, which would be one tenant's
+  clock applied to another tenant's work. This is the tenant-scoping
+  surface of the sprint and it is tested directly rather than assumed:
+  two companies, the same stalled work in each, one of them tuned to a
+  hair trigger, and the assertion is about what the other one does NOT
+  get. Both directions (tuning down, tuning up) and the cooldown knob
+  too.
+- **The screen states what a number MEANS.** `/admin/sla-warnings`,
+  SUPER_ADMIN / COMPANY_ADMIN only. "24" is not a threshold anybody can
+  reason about; the field prints "24 business hours (Mon-Fri
+  09:00-17:00), which is about 3 working days" — and the window comes
+  from the server, which reads the same settings the engine measures
+  with, so the sentence cannot go stale. The two billing-cutoff figures
+  are labelled CALENDAR days, because a billing date is a date on a
+  calendar; that asymmetry is real and is stated rather than smoothed
+  over.
+- **Zero is a legal threshold.** An empty field means "not configured,
+  using the default"; a typed `0` means "warn me the moment it lands in
+  review". They never render or behave the same — the input state is a
+  string, not `number | null`, precisely so `""` and `0` stay distinct.
+  Same distinction the money rule makes between unpriced and free.
+  `override` / `effective` / `default` are three separate fields on the
+  wire for the same reason: an override that happens to equal the
+  default is still an override, and the screen says so.
+- **A customer never sees this.** 403, not an empty list — a filtered-
+  to-nothing response would still leak the endpoint's shape. A
+  BUILDING_MANAGER is refused too: these numbers govern every ticket in
+  a whole company and a BM's authority is one building. A COMPANY_ADMIN
+  probing another company's id gets **404, not 403**, so the status code
+  cannot be used to enumerate company ids.
+- **One predicate governs the link and the route.**
+  `canManageSlaWarnings` + `SlaWarningsRoute`. Two independently-
+  maintained consumers of one rule is the shape that hid the
+  `documents` permission group for three sprints.
+- **Migrations are additive.** `sla/0001_initial` is the first migration
+  the app has ever had (it had no models); `notifications/0018` is
+  choices-only on an existing CharField. No column changes, no backfill,
+  and `makemigrations --dry-run --check` reports **No changes detected**.
+
+**Measured, not eyeballed** (built `dist/` behind `vite preview`, the
+branch backend on the dev database, Playwright reading the live DOM at
+1440x1000):
+
+- `/admin/sla-warnings` renders all **seven** knobs, laid out two-up per
+  warning (x=301 and x=860, w=535 each) with the cooldown full-width
+  (w=1094). Every one prints its meaning: *"24 business hours (Mon-Fri
+  09:00-17:00), which is about 3 working day(s)"*, *"5 calendar day(s)"*,
+  *"24 clock hour(s), so outside working hours as well."*
+- **Empty and 0 measurably differ.** Same field, three states read out of
+  the DOM: empty -> "Not set - the default of 8 is used." / "8 business
+  hours ... about 1 working day(s)"; typed `0` -> "This company's own
+  value." / "0 business hours ... about 0 working day(s)"; cleared again
+  -> back to "Not set - the default of 8 is used."
+- **No horizontal overflow.** `scrollWidth == clientWidth` at 1440 (1440)
+  and at 390 (390), on both the thresholds screen and the feed.
+- **The feed marks a warning and stays legible.** Three warning rows,
+  `data-warning="true"`, each carrying `inset 3px 0 0 rgb(154,90,0)` and
+  a composited background of **rgb(247,242,235)** against a plain row's
+  **rgb(255,255,255)**. The translated headline is 12px/700 in
+  rgb(154,90,0) at **4.91:1** contrast — over the 4.5:1 AA floor for
+  normal-size text; the summary line is 15.9:1. The bell panel shows the
+  same treatment (row 338x87) and the badge reads 3.
+
+### Deliberately NOT done — W4-Q
+
+- **No per-user mute for the warnings.** W1-B kept all three out of
+  `USER_MUTABLE_EVENT_TYPES` and that stands on both channels: a warning
+  exists precisely because nobody is looking, and a mute switch on it
+  silences the one message whose whole purpose is to arrive unasked.
+- **No AuditLog row for a threshold change.** The row carries
+  `updated_by` / `updated_at` and the screen shows both. Registering the
+  model in `audit/signals.py` would mean editing a file another chat may
+  be in this wave; it is a one-line follow-up (**handoff**).
+- **No per-building or per-customer thresholds.** The owner decided per
+  COMPANY. A second axis would need its own resolution order and its own
+  answer to "which one wins", and nobody has asked for one.
+- **No second SLA clock.** `sla/business_hours.py` is untouched. The
+  Extra Work clock is still W1-B's per-tick computation, not a persisted
+  column.
+
 ### Done — W1-B (Extra Work gap closing, wave 1, chat 2 of 3)
 
 **Branch:** `feat/ew-gap-closing`. Three chats in parallel on disjoint

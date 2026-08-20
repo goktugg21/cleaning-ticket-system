@@ -54,6 +54,10 @@ urlpatterns = [
     path("api/notifications/", include("notifications.urls")),
     # RF-1 — aggregated message inbox (tickets + Extra Work).
     path("api/inbox/", include("notifications.urls_inbox")),
+    # Sprint W4-Q §2 — the per-company SLA warning thresholds. The SLA
+    # engine itself is signal/Celery driven and has no API; this is its
+    # configuration surface, SUPER_ADMIN / COMPANY_ADMIN only.
+    path("api/sla/", include("sla.urls")),
     # Sprint 28 Batch 5 — provider service catalog (ServiceCategory +
     # Service CRUD). Per-customer pricing rows are under
     # /api/customers/<id>/pricing/ — see customers/urls.py.

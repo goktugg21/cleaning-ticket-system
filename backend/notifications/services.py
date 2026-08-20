@@ -53,6 +53,8 @@ __all__ = (
     "ticket_responsible_manager_recipients",
     "company_admin_recipients",
     "extra_work_provider_recipients",
+    # Sprint W4-Q §1 — the bell half of the same three warnings.
+    "emit_sla_warning_inapp",
 )
 
 logger = logging.getLogger(__name__)
@@ -958,6 +960,51 @@ def company_admin_recipients(company_id):
         .distinct()
         .order_by("email")
     )
+
+
+def emit_sla_warning_inapp(
+    *, event_type, recipients, summary, ticket=None, extra_work=None
+):
+    """Sprint W4-Q §1 — write the BELL half of one time-driven warning.
+
+    The email half is `send_logged_email`; this is its twin, and the two
+    are called from the same place in `sla.warnings._emit` with the SAME
+    recipient list, so the two channels cannot drift into telling
+    different people.
+
+    Everything scoping-related has already happened by the time we get
+    here: the roster came from the tenant-scoped resolvers above and the
+    customer ring went through `user_has_scope_for_ticket`. This
+    function deliberately adds no roster logic of its own — a second
+    place that decides who may hear about a ticket is how a cross-tenant
+    leak gets written, and that argument is why `sla.warnings` calls
+    into this module rather than assembling its own audience.
+
+    `actor` is None and `is_directed` is False by construction: nobody
+    did this. That is the entire point of the category — these are the
+    notifications that exist because NOTHING happened.
+
+    Returns the rows created (an empty list when there is nobody to
+    tell), so the caller can count what it actually wrote.
+    """
+    summary = (summary or "").strip()[:500]
+    rows = [
+        Notification(
+            recipient=user,
+            actor=None,
+            event_type=event_type,
+            ticket=ticket,
+            extra_work=extra_work,
+            is_directed=False,
+            summary=summary,
+            read_at=None,
+        )
+        for user in recipients
+        if user is not None and user.id
+    ]
+    if rows:
+        Notification.objects.bulk_create(rows)
+    return rows
 
 
 def extra_work_provider_recipients(ew):

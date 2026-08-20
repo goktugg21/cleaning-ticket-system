@@ -174,18 +174,32 @@ class ApprovalCutoffWarningTests(WarningTestBase):
         self.assertEqual(second["approval_cutoff"], 0)
 
     def test_it_speaks_again_once_the_cooldown_expires(self):
+        from notifications.models import Notification, NotificationType
+
         self._stage(billing_day=21)
         sla_warnings.sweep(now=NOW)
-        # `NotificationLog.created_at` is auto_now_add, i.e. the REAL
-        # clock, while `now` here is a fixed simulated instant. In
-        # production those are the same clock; in a test they are not, so
-        # the row is aged against the SIMULATED clock rather than the
-        # sweep being run 25 hours "later" — otherwise the assertion
-        # would be about the difference between the two clocks and not
-        # about the cooldown at all.
+        # `created_at` is auto_now_add, i.e. the REAL clock, while `now`
+        # here is a fixed simulated instant. In production those are the
+        # same clock; in a test they are not, so the rows are aged
+        # against the SIMULATED clock rather than the sweep being run 25
+        # hours "later" — otherwise the assertion would be about the
+        # difference between the two clocks and not about the cooldown at
+        # all.
+        #
+        # Sprint W4-Q §1: BOTH tables. The cooldown is now shared between
+        # the mail and the bell, and a hit on either holds the window
+        # shut — so ageing only the mail log leaves the fresh bell row
+        # suppressing the next tick, and this test would be asserting
+        # that the shared cooldown is broken. That it failed on exactly
+        # this line when the bell was added is the shared cooldown
+        # working.
+        aged = NOW - datetime.timedelta(hours=25)
         NotificationLog.objects.filter(
             event_type=NotificationEventType.SLA_APPROVAL_CUTOFF_DUE
-        ).update(created_at=NOW - datetime.timedelta(hours=25))
+        ).update(created_at=aged)
+        Notification.objects.filter(
+            event_type=NotificationType.SLA_APPROVAL_CUTOFF_DUE
+        ).update(created_at=aged)
         again = sla_warnings.sweep(now=NOW)
         self.assertGreaterEqual(again["approval_cutoff"], 1)
 
@@ -431,4 +445,83 @@ class CooldownDisabledTests(WarningTestBase):
                 recipient_email=self.manager.email,
             ).count(),
             1,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Sprint W4-Q §1 — the same warnings now leave through TWO doors.
+#
+# Wave 1's cooldown tests above all read `NotificationLog`. They still
+# pass, and they are still the right assertions for the e-mail half. What
+# they can no longer prove on their own is that the cooldown was not
+# quietly duplicated when the bell was added — a second, independent
+# clock would keep every one of them green while telling each person
+# about each problem twice a day. That is what this class is for.
+#
+# The channel-specific behaviour lives in
+# `sla/tests/test_w4q_inapp_warnings.py`; these three stay here because
+# they are about the cooldown wave 1 built.
+# ---------------------------------------------------------------------------
+
+class BothChannelsShareOneCooldownTests(WarningTestBase):
+    def _stage(self):
+        Ticket.objects.filter(pk=self.ticket.pk).update(
+            status=TicketStatus.OPEN,
+            scheduled_start_at=NOW - datetime.timedelta(days=2),
+        )
+
+    def test_one_warning_produces_one_mail_and_one_bell_row(self):
+        from notifications.models import Notification, NotificationType
+
+        self._stage()
+        sla_warnings.sweep(now=NOW)
+        self.assertEqual(
+            NotificationLog.objects.filter(
+                event_type=NotificationEventType.SLA_WORK_NOT_STARTED,
+                recipient_email=self.manager.email,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            Notification.objects.filter(
+                event_type=NotificationType.SLA_WORK_NOT_STARTED,
+                recipient=self.manager,
+            ).count(),
+            1,
+        )
+
+    def test_the_cooldown_counts_people_not_messages(self):
+        """288 sweeps a day, one person, one problem: still one of each.
+        The count the sweep returns is PEOPLE warned, which is why it did
+        not double when the second channel arrived."""
+        self._stage()
+        first = sla_warnings.sweep(now=NOW)
+        second = sla_warnings.sweep(now=NOW + datetime.timedelta(minutes=5))
+        third = sla_warnings.sweep(now=NOW + datetime.timedelta(minutes=10))
+        self.assertGreaterEqual(first["not_started_tickets"], 1)
+        self.assertEqual(second["not_started_tickets"], 0)
+        self.assertEqual(third["not_started_tickets"], 0)
+
+    def test_a_surviving_bell_row_still_throttles_a_lost_mail_row(self):
+        """Self-healing across a partial failure, and the reason the
+        window is asked of BOTH tables rather than of the mail log
+        alone."""
+        from notifications.models import Notification, NotificationType
+
+        self._stage()
+        sla_warnings.sweep(now=NOW)
+        NotificationLog.objects.filter(
+            event_type=NotificationEventType.SLA_WORK_NOT_STARTED
+        ).delete()
+        sla_warnings.sweep(now=NOW + datetime.timedelta(minutes=5))
+        self.assertEqual(
+            NotificationLog.objects.filter(
+                event_type=NotificationEventType.SLA_WORK_NOT_STARTED
+            ).count(),
+            0,
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                event_type=NotificationType.SLA_WORK_NOT_STARTED
+            ).exists()
         )

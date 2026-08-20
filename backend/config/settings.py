@@ -345,10 +345,33 @@ SLA_ENGINE_START_DATE = "2026-05-06"
 # Sprint W1-B §2.7 — the time-driven warning sweep (`sla.warnings.sweep`).
 #
 # The SLA engine above measures; these decide when silence becomes a
-# message. Every threshold is an env var so the owner can tune the noise
-# level on crmtest without a deploy, and every default is deliberately
-# generous — a warning system that cries early gets muted, and a muted
-# warning system is the state we started from.
+# message. Every default is deliberately generous — a warning system that
+# cries early gets muted, and a muted warning system is the state we
+# started from.
+#
+# SPRINT W4-Q §2 — THESE ARE NOW THE FALLBACK, NOT THE SOURCE OF TRUTH.
+#
+# W1-B made them env vars so the owner could tune them without a code
+# change, which is still a deploy, and — worse — one number for every
+# tenant on the platform. A provider running a same-day emergency service
+# and a provider running a monthly contract round do not agree on when
+# silence becomes a problem, and a shared number is wrong for both.
+#
+# Each provider company can now store its own value
+# (`sla.models.SlaWarningThreshold`, edited at /admin/sla-warnings), and
+# `sla.thresholds.resolve` reads the company's number where there is one
+# and the value below where there is not — PER FIELD, so a company that
+# tuned only its manager-review clock keeps these defaults for the rest.
+#
+# Nothing had to change in any existing deployment for that to be true:
+# until somebody saves a number, no company has a row, and every warning
+# resolves to exactly the value below. Do NOT delete these — a company
+# that has configured nothing has nothing else to fall back on.
+#
+# One unit note: the two *_BUSINESS_SECONDS pairs are seconds here
+# because they were written for the engine, and business HOURS on the
+# model and the screen because that is what a person tuning them thinks
+# in. `sla.thresholds` does that conversion in one place.
 # ---------------------------------------------------------------------------
 
 #: Warn the customer this many calendar days before their billing cutoff
@@ -398,7 +421,8 @@ SLA_WARN_NOT_STARTED_ESCALATE_BUSINESS_SECONDS = int(
 #: How long one (event type, subject, recipient) stays quiet after a
 #: warning went out. The sweep runs on the same 5-minute beat as the SLA
 #: reconciler, so WITHOUT this every warning would be re-sent 288 times a
-#: day. 24h means at most one mail per person per problem per day.
+#: day. 24h means at most one warning per person per problem per day —
+#: across BOTH channels since W4-Q, not one mail plus one bell.
 SLA_WARN_COOLDOWN_HOURS = int(os.environ.get("SLA_WARN_COOLDOWN_HOURS", "24"))
 
 # ---------------------------------------------------------------------------
@@ -453,8 +477,9 @@ CELERY_BEAT_SCHEDULE = {
     # cadence as the SLA reconciler above, and for the same reason: it
     # answers "has a threshold been crossed since I last looked?", which
     # is only useful if it looks often. What stops it becoming 288 mails
-    # a day is the cooldown (SLA_WARN_COOLDOWN_HOURS), which is a query
-    # against the NotificationLog rows the sweep itself wrote — the same
+    # a day is the cooldown (per company since W4-Q, falling back to
+    # SLA_WARN_COOLDOWN_HOURS), which is a query against the rows the
+    # sweep itself wrote on both channels — the same
     # data-is-the-idempotency-key argument `invoicing/tasks.py` makes for
     # the invoice claim, rather than a "did we run today?" flag.
     "sweep-sla-warnings": {

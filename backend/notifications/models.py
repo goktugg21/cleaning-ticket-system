@@ -199,6 +199,58 @@ class NotificationType(models.TextChoices):
     EXTRA_WORK_MESSAGE = "EXTRA_WORK_MESSAGE", "Extra work message"
     EXTRA_WORK_PUBLISHED = "EXTRA_WORK_PUBLISHED", "Extra work published"
 
+    # ------------------------------------------------------------------
+    # Sprint W4-Q §1 — the TIME-DRIVEN family reaches the bell.
+    #
+    # Sprint W1-B built these three as EMAIL ONLY and said so plainly:
+    # the in-app feed is a different model with its own enum and its own
+    # read/unread lifecycle, and bolting it on in the same sprint would
+    # have meant guessing at the cooldown. This is that half.
+    #
+    # THE VALUES ARE DELIBERATELY IDENTICAL to their `NotificationEvent
+    # Type` siblings, and they are the first three that are. One warning
+    # crossing two channels is ONE event, and giving the bell copy a
+    # different spelling would mean every reader — the cooldown query,
+    # the feed UI, an operator reading the two tables side by side — had
+    # to carry a translation table between two names for one thing.
+    #
+    # The one place that could bite is `NotificationPreference.
+    # event_type`, which stores values from BOTH enums in a single
+    # column and until now relied on them never colliding. None of these
+    # three is user-mutable in EITHER direction (see
+    # USER_MUTABLE_EVENT_TYPES / USER_MUTABLE_INAPP_EVENT_TYPES below),
+    # so no preference row can ever exist for them and the ambiguity
+    # cannot arise. `notifications/tests/test_sla_inapp.py` asserts that
+    # invariant so it fails loudly the day somebody makes one mutable
+    # rather than silently muting the wrong channel.
+    # ------------------------------------------------------------------
+    SLA_APPROVAL_CUTOFF_DUE = (
+        "SLA_APPROVAL_CUTOFF_DUE",
+        "Customer approval due before billing cutoff",
+    )
+    SLA_MANAGER_REVIEW_OVERDUE = (
+        "SLA_MANAGER_REVIEW_OVERDUE",
+        "Manager review overdue",
+    )
+    SLA_WORK_NOT_STARTED = (
+        "SLA_WORK_NOT_STARTED",
+        "Planned work has not started",
+    )
+
+
+#: The three time-driven in-app types, for readers that need to ask "is
+#: this row a warning?" without repeating the list. A MODULE constant
+#: rather than a class attribute: anything hung off a `TextChoices` body
+#: risks being read as a fourth choice by the metaclass, and one enum
+#: with a phantom member is a migration that never stops churning.
+SLA_WARNING_INAPP_TYPES = frozenset(
+    {
+        NotificationType.SLA_APPROVAL_CUTOFF_DUE,
+        NotificationType.SLA_MANAGER_REVIEW_OVERDUE,
+        NotificationType.SLA_WORK_NOT_STARTED,
+    }
+)
+
 
 class Notification(models.Model):
     """In-app notification (M1 — message center, phase B1).

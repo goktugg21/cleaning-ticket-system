@@ -29,6 +29,7 @@ import {
   Receipt,
   Settings,
   ShieldCheck,
+  Siren,
   Sparkles,
   Tag,
   Tags,
@@ -51,6 +52,7 @@ import {
   canAccessReports,
   canAccessStaffRequestReview,
   canAccessTimesheets,
+  canManageSlaWarnings,
   canManageTimesheets,
   isBuildingManager,
   isCustomerUser,
@@ -879,6 +881,27 @@ export function AppShell({ children }: AppShellProps) {
                         <ClipboardList size={16} strokeWidth={2} />
                       </span>
                       {t("nav.audit_logs")}
+                    </NavLink>
+                  )}
+                  {/* Sprint W4-Q §2 — when the three time-driven
+                      warnings fire, per company. Gated on
+                      `canManageSlaWarnings` rather than on the admin
+                      group: the group and the predicate admit the same
+                      pair today, and the predicate is the one that
+                      mirrors the backend's permission class, so it is
+                      the one that must govern the link. The route uses
+                      the SAME predicate (SlaWarningsRoute) so the nav
+                      can never offer a screen the route refuses. */}
+                  {canManageSlaWarnings(me?.role) && (
+                    <NavLink
+                      to="/admin/sla-warnings"
+                      className={navClass}
+                      data-testid="sidebar-sla-warnings"
+                    >
+                      <span className="nav-icon">
+                        <Siren size={16} strokeWidth={2} />
+                      </span>
+                      {t("nav.sla_warnings")}
                     </NavLink>
                   )}
                 </>

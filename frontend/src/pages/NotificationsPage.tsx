@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BellOff, CheckCheck } from "lucide-react";
+import { AlertTriangle, BellOff, CheckCheck } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import { listAllCompanies } from "../api/admin";
@@ -25,6 +25,7 @@ import {
   setCompanySubscription,
 } from "../api/notifications";
 import type { CompanyAdmin, Notification } from "../api/types";
+import { isSlaWarningEvent } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { Toggle } from "../components/Toggle";
@@ -342,14 +343,35 @@ export function NotificationsPage() {
                   !viewAsMode && !notification.is_read
                     ? " notif-page-row-unread"
                     : ""
+                }${
+                  isSlaWarningEvent(notification.event_type)
+                    ? " notif-page-row-warning"
+                    : ""
                 }`}
                 onClick={() => handleSelect(notification)}
                 data-testid="notification-row"
+                /* Sprint W4-Q §1 — the KIND of row is an attribute, not
+                   a second testid. `notification-row` stays the one
+                   selector for "a row in this feed" so nothing that
+                   counts rows has to learn a second name. */
+                data-warning={
+                  isSlaWarningEvent(notification.event_type) ? "true" : undefined
+                }
               >
                 {!viewAsMode && !notification.is_read && (
                   <span className="notif-item-dot" aria-hidden="true" />
                 )}
                 <span className="notif-page-row-main">
+                  {/* Sprint W4-Q §1 — see NotificationBell: the warning
+                      names itself here, through t(), because the server
+                      summary deliberately carries facts and no
+                      untranslatable sentence. */}
+                  {isSlaWarningEvent(notification.event_type) && (
+                    <span className="notif-warning-title">
+                      <AlertTriangle size={13} strokeWidth={2.2} />
+                      {t(`notifications.sla.${notification.event_type}`)}
+                    </span>
+                  )}
                   <span className="notif-page-row-summary">
                     {notification.summary}
                   </span>

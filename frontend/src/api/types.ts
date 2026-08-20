@@ -605,6 +605,78 @@ export interface NotificationListResponse {
   unread_count: number;
 }
 
+// Sprint W4-Q §1 — the three TIME-DRIVEN feed types. Every other
+// notification in the feed is a reaction to somebody doing something;
+// these three exist because nothing happened and it should have, and
+// the feed renders them as warnings rather than as activity.
+//
+// The strings match `notifications.models.NotificationType` (and, by
+// design, its email twin `NotificationEventType` — one event, two
+// channels, one spelling). An ORDERED exported constant that every
+// consumer iterates, never a second local copy: a hardcoded array
+// literal somewhere else is exactly what hid the `documents` permission
+// group for three sprints.
+export const SLA_WARNING_EVENT_TYPES = [
+  "SLA_APPROVAL_CUTOFF_DUE",
+  "SLA_MANAGER_REVIEW_OVERDUE",
+  "SLA_WORK_NOT_STARTED",
+] as const;
+export type SlaWarningEventType = (typeof SLA_WARNING_EVENT_TYPES)[number];
+
+export function isSlaWarningEvent(
+  eventType: string,
+): eventType is SlaWarningEventType {
+  return (SLA_WARNING_EVENT_TYPES as readonly string[]).includes(eventType);
+}
+
+// Sprint W4-Q §2 — the per-company warning thresholds
+// (backend/sla/serializers_thresholds.py).
+//
+// `effective`, `override` and `default` are three separate numbers on
+// purpose. `override === null` means this company stored nothing and is
+// running on the platform default; a stored 0 is a real, legal
+// threshold ("warn me the moment it lands") and must never render the
+// same as "not configured".
+export const SLA_THRESHOLD_UNITS = [
+  "days",
+  "business_hours",
+  "hours",
+] as const;
+export type SlaThresholdUnit = (typeof SLA_THRESHOLD_UNITS)[number];
+
+export interface SlaThresholdRow {
+  field: string;
+  unit: SlaThresholdUnit;
+  effective: number;
+  override: number | null;
+  default: number;
+}
+
+export interface SlaCompanyThresholds {
+  company: number;
+  company_name: string;
+  updated_at: string | null;
+  updated_by_name: string | null;
+  is_customized: boolean;
+  thresholds: SlaThresholdRow[];
+}
+
+export interface SlaBusinessWindow {
+  start: string;
+  end: string;
+  /** Python weekday numbers, Mon=0. Labelled by the frontend so the
+   *  sentence translates. */
+  days: number[];
+  hours_per_day: number;
+}
+
+export interface SlaThresholdListResponse {
+  results: SlaCompanyThresholds[];
+  defaults: Record<string, number>;
+  fields: { field: string; unit: SlaThresholdUnit }[];
+  business_window: SlaBusinessWindow;
+}
+
 
 // Sprint 191 - the two new attachment axes, deliberately independent of
 // each other and of `is_hidden`. `visibility` is the customer wall

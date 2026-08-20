@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Bell } from "lucide-react";
+import { AlertTriangle, Bell } from "lucide-react";
 import { formatRelative } from "../lib/intl";
 import {
   diffNewNotifications,
@@ -27,6 +27,7 @@ import {
   notificationHref,
 } from "../api/notifications";
 import type { Notification } from "../api/types";
+import { isSlaWarningEvent } from "../api/types";
 import { useToast } from "./ToastProvider";
 import type { ToastInput } from "./ToastProvider";
 
@@ -98,6 +99,21 @@ export function NotificationBell() {
           ? t("notifications.toast_ticket_ref", { no: n.ticket_no })
           : "") ||
         t("notifications.toast_new");
+      // Sprint W4-Q §1 — a time-driven warning toasts as a WARNING and
+      // leads with what is wrong, not with the name of the job. The
+      // headline of an activity toast answers "about what?"; the
+      // headline of a warning has to answer "what has gone quiet?", and
+      // the job name is still on the description line underneath.
+      if (isSlaWarningEvent(n.event_type)) {
+        return {
+          variant: "warning",
+          title: t(`notifications.sla.${n.event_type}`),
+          description: n.summary || name,
+          onClick: () => {
+            openNotification(n);
+          },
+        };
+      }
       return {
         variant: "success",
         title: name,
@@ -290,10 +306,27 @@ export function NotificationBell() {
                   role="menuitem"
                   className={`notif-item${
                     notification.is_read ? "" : " notif-item-unread"
+                  }${
+                    isSlaWarningEvent(notification.event_type)
+                      ? " notif-item-warning"
+                      : ""
                   }`}
                   onClick={() => openNotification(notification)}
                 >
                   <span className="notif-item-main">
+                    {/* Sprint W4-Q §1 — the warning NAMES itself. The
+                        server summary carries only the facts (which job,
+                        how late); the sentence that says what kind of
+                        problem this is is rendered here through t(), so
+                        it translates. A Dutch string baked into a
+                        notification row on the server is a string
+                        nobody can translate. */}
+                    {isSlaWarningEvent(notification.event_type) && (
+                      <span className="notif-warning-title">
+                        <AlertTriangle size={13} strokeWidth={2.2} />
+                        {t(`notifications.sla.${notification.event_type}`)}
+                      </span>
+                    )}
                     <span className="notif-item-summary">
                       {notification.summary}
                     </span>
