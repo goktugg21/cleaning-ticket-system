@@ -7,6 +7,12 @@ from accounts.models import UserRole
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
 
+from .completion_requirements import (
+    ERR_COMPLETION_EVIDENCE,
+    message_for,
+    missing_evidence,
+    requirements_for_ticket,
+)
 from .models import Ticket, TicketStatus, TicketStatusHistory
 
 
@@ -502,17 +508,40 @@ def apply_transition(
     # completion transition (BM closing out a job on behalf of an
     # absent staff member, SUPER_ADMIN unblocking a stuck ticket)
     # bypass the rule.
+    #
+    # W3-G — WHICH evidence is no longer hardcoded. The rule comes from
+    # `completion_requirements`, which reads W2-D's `file_upload_required`
+    # / `completion_notes_required` off this ticket's extra work and falls
+    # back to Sprint 25C's note-OR-attachment for a ticket that came from
+    # no extra work. This is the transition the plan (§2.3) means by "the
+    # completion transition": the per-slot gate is operational evidence
+    # and does not move the ticket, whereas THIS is what makes the work
+    # billable, so a rule that bound only the slot could be walked around
+    # by moving the ticket instead.
+    #
+    # WHO it applies to is unchanged, deliberately: STAFF only. B1 is a
+    # canonical business decision, not an accident, and widening the gate
+    # to managers would be a different sprint's argument. The consequence
+    # is worth stating: a manager can still complete a job that requires a
+    # photo without one, exactly as they could before.
     if (
         getattr(user, "role", None) == UserRole.STAFF
         and (str(ticket.status), str(to_status))
         in {(str(a), str(b)) for (a, b) in COMPLETION_EVIDENCE_TRANSITIONS}
     ):
-        if not (note and note.strip()) and not _ticket_has_visible_attachment(ticket):
+        requirements = requirements_for_ticket(ticket)
+        missing = missing_evidence(
+            requirements,
+            has_note=bool(note and note.strip()),
+            # The evidence pool is the TICKET's customer-visible
+            # attachments, not one slot's — `_ticket_has_visible_attachment`
+            # is unchanged, including its message-tier exclusions.
+            has_file=_ticket_has_visible_attachment(ticket),
+        )
+        if missing:
             raise TransitionError(
-                "Please leave a completion note or attach a photo of the "
-                "completed work before sending this ticket for customer "
-                "approval.",
-                code="completion_evidence_required",
+                message_for(missing),
+                code=ERR_COMPLETION_EVIDENCE,
             )
 
     # Sprint 8B — hourly Extra Work completion gate. An EW-origin

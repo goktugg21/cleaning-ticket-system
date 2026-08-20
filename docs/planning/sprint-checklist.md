@@ -77,6 +77,69 @@ Both readings were wrong, and both were mine. This is the header.
 **Gates.** `npm run typecheck` clean over 295 project files; `npm run lint`
 exactly 44 (42 errors, 2 warnings); `npm run build` OK. No i18n key added — the
 header reuses the existing `details_location` / `details_customer`.
+### Done — W3-G: the completion gate stopped asking every job the same question
+
+Plan §2.3, item 7's server side. W2-D stored `file_upload_required` and
+`completion_notes_required` on the extra work and deliberately left
+enforcement to wave 3; this is that enforcement. **No migration** — the
+two columns already exist and nothing was added to any model.
+
+- **The rule is configurable and the two flags are independent.** File
+  only, note only, both, or neither — the four combinations, on the
+  work, set when it is planned.
+- **It is enforced on BOTH completion surfaces, from ONE rule.** New
+  `backend/tickets/completion_requirements.py` answers "what does this
+  job need"; the per-slot gate
+  (`views_staff_assignments._SlotWriteSerializer`) and the ticket-level
+  STAFF completion transition (`state_machine.apply_transition`) both
+  call it. Only the slot gate was named in the brief, and only the slot
+  gate would have been a hole: it does not move the ticket, so a rule
+  binding it alone is walked around by moving the ticket instead — and
+  the ticket transition is the one that makes work billable.
+- **A ticket that came from no extra work keeps exactly the rule it had:
+  a note or a photo.** There are no flags to read, and inventing a
+  default would either drop a requirement live work has always been held
+  to or invent one nobody asked for. The resolver reports `source`
+  (`extra_work` / `default`) so a caller can tell "this needs nothing"
+  from "we could not find out", and four tests pin the old behaviour so
+  a later sprint cannot drift it by accident.
+- **The two gates keep their own evidence pools, unchanged.** The slot
+  reads what is linked to THAT slot — a sibling worker's photo is not
+  proof this visit happened — and the ticket reads its own
+  customer-visible attachments, message-tier exclusions and all.
+- **The error message names what is missing.** "Completing a slot
+  requires a note or a photo" was true of every job until this sprint
+  and is now true of some of them, which makes it the worst kind of
+  message: right often enough to be believed.
+- **The worker is told before they fill the form in.** New read-only
+  `GET /api/tickets/<id>/staff-assignments/<slot>/completion-requirements/`,
+  gated to the slot's owner or a manager exactly like the PATCH. The
+  dialog states the requirement, marks the required fields, and keeps its
+  own button honest — and the server still refuses on its own, from the
+  same resolver. In the system we are closing the gap against, both flags
+  are checked in the browser only, in two screens that check different
+  things, and no endpoint can persist them at all.
+
+**Three things the owner should decide, none of them silently taken:**
+
+1. **Both flags default False, so every EXISTING extra-work ticket now
+   requires nothing where it used to require a note or a photo.** That is
+   what "both False -> nothing required" means applied to live data, and
+   it is the specified behaviour, but it is a real loosening on work
+   already in flight. If the intent was "off means keep the old rule",
+   the change is one line in `completion_requirements.requirements_for_ticket`.
+2. **`file_upload_required` is satisfied by ANY non-hidden attachment,
+   PDF included**, because that is what the field is named and what W2-D
+   documented. The legacy note-or-photo arm keeps its stricter reading
+   (a genuine image; a PDF mislabelled `image/jpeg` never counted and
+   still does not). If it should mean a PHOTO, it is the `has_file`
+   argument at the two call sites.
+3. **Managers still bypass the gate.** B1
+   (`system-business-logic-and-workflows.md` §4.4) scopes the
+   ticket-level rule to STAFF actors, and this sprint changed WHAT the
+   rule asks, not WHO it asks. So a manager can complete a job that
+   requires a photo without one. Asserted in a test rather than left to
+   be discovered.
 
 ### Done — W3-H: the hours screen (wave 3, chat H)
 

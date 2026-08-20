@@ -14,6 +14,7 @@ from .views_manager_assignments import (
     TicketManagerAssignmentListCreateView,
 )
 from .views_staff_assignments import (
+    SlotCompletionRequirementsView,
     StaffAssignmentSlotAgendaView,
     TicketStaffAssignmentDetailView,
     TicketStaffAssignmentListCreateView,
@@ -137,6 +138,15 @@ urlpatterns = [
         "<int:ticket_id>/staff-assignments/<int:assignment_id>/",
         TicketStaffAssignmentDetailView.as_view(),
         name="ticket-staff-assignment-detail",
+    ),
+    # W3-G — what this slot must carry before it can be reported done,
+    # so the completion dialog can say so before the worker fills it in.
+    # Read-only; the serializer on the PATCH above is still the gate.
+    path(
+        "<int:ticket_id>/staff-assignments/<int:assignment_id>/"
+        "completion-requirements/",
+        SlotCompletionRequirementsView.as_view(),
+        name="ticket-slot-completion-requirements",
     ),
     # Sprint 10B — explicit per-ticket responsible-manager M:N. Same
     # hand-mounted shape as the staff-assignment endpoints above (the

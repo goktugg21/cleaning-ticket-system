@@ -64,6 +64,12 @@ from accounts.scoping import scope_tickets_for
 from buildings.models import BuildingStaffVisibility
 from notifications.services import send_slot_unable_to_complete_email
 
+from .completion_requirements import (
+    ERR_COMPLETION_EVIDENCE,
+    message_for,
+    missing_evidence,
+    requirements_for_ticket,
+)
 from .models import (
     StaffAssignmentSlotStatus,
     SubTask,
@@ -208,39 +214,55 @@ class _SlotWriteSerializer(serializers.ModelSerializer):
                     code="slot_unable_reason_required",
                 )
         if new_status == StaffAssignmentSlotStatus.COMPLETED:
-            # Sprint 12 — completing a slot requires evidence: a non-empty
-            # completion_note OR at least one non-hidden linked PHOTO (image
-            # only — a PDF does not count). The photo is linked via the
-            # two-step flow: upload an attachment with staff_assignment_id,
-            # then PATCH slot_status=COMPLETED. Mirrors the ticket-level
-            # STAFF completion-evidence rule (state_machine.py) but on the
-            # per-staff dated-slot surface, which does NOT drive the ticket
-            # state machine.
+            # Sprint 12 — completing a slot requires evidence. W3-G made
+            # WHICH evidence configurable per job: the rule now comes from
+            # `completion_requirements`, which reads W2-D's two flags off
+            # the ticket's extra work and falls back to Sprint 12's
+            # note-OR-photo for a ticket that came from no extra work.
+            #
+            # The rule moved; the EVIDENCE POOL did not. It is still what is
+            # linked to THIS SLOT, not what is anywhere on the ticket,
+            # because a slot is one worker's one visit and another worker's
+            # photo is not proof that this visit happened. And this gate
+            # still does NOT drive the ticket state machine — the
+            # ticket-level rule in `state_machine.py` reads the same
+            # requirements against the ticket's own attachments.
             note = attrs.get(
                 "completion_note",
                 getattr(self.instance, "completion_note", "") or "",
             )
             has_note = bool((note or "").strip())
-            # A linked photo must be a GENUINE image: both an image MIME type
-            # AND an image extension (is_photo_attachment). A MIME-only check
-            # would let historical bad data (proof.pdf stored as image/jpeg)
-            # satisfy the gate, so verify each non-hidden linked attachment in
-            # Python rather than with a mime_type__in queryset filter.
-            has_photo = bool(
-                self.instance is not None
-                and any(
-                    is_photo_attachment(att)
-                    for att in self.instance.attachments.filter(is_hidden=False)
-                )
+            linked = (
+                list(self.instance.attachments.filter(is_hidden=False))
+                if self.instance is not None
+                else []
             )
-            if not (has_note or has_photo):
+            # `file_upload_required` is satisfied by ANY non-hidden linked
+            # attachment — the field says file and W2-D documented file.
+            has_file = bool(linked)
+            # The legacy branch keeps its stricter reading: a GENUINE image,
+            # both an image MIME type AND an image extension
+            # (is_photo_attachment). A MIME-only check would let historical
+            # bad data (proof.pdf stored as image/jpeg) satisfy a gate
+            # nobody consciously configured, which is why each attachment is
+            # verified in Python rather than with a mime_type__in filter.
+            has_photo = any(is_photo_attachment(att) for att in linked)
+            ticket = self.context.get("ticket") or getattr(
+                self.instance, "ticket", None
+            )
+            requirements = requirements_for_ticket(ticket)
+            missing = missing_evidence(
+                requirements,
+                has_note=has_note,
+                # The legacy arm asks "note or PHOTO"; the configured arm
+                # asks "is there a file". One call, two readings, decided
+                # here rather than inside the shared rule.
+                has_file=has_photo if requirements.either_required else has_file,
+            )
+            if missing:
                 raise serializers.ValidationError(
-                    {
-                        "completion_note": (
-                            "Completing a slot requires a note or a photo."
-                        )
-                    },
-                    code="completion_evidence_required",
+                    {"completion_note": message_for(missing)},
+                    code=ERR_COMPLETION_EVIDENCE,
                 )
         start = attrs.get(
             "scheduled_start_at",
@@ -586,6 +608,61 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
                 {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SlotCompletionRequirementsView(generics.GenericAPIView):
+    """
+    GET /api/tickets/<id>/staff-assignments/<assignment_id>/completion-requirements/
+
+    W3-G — what this slot must carry before it may be reported done, so
+    the worker is told BEFORE they fill the form in rather than after
+    they press the button. Shape:
+
+        {"note_required": bool, "file_required": bool,
+         "either_required": bool, "source": "extra_work" | "default"}
+
+    Why an endpoint rather than two more fields on the slot row: the
+    completion dialog takes `Pick<MySlot, "id" | "ticket_id">` on
+    purpose (Sprint 179A), so the Work Plan — whose entries are a merged
+    shape, not `MySlot` rows — can reuse it without either side
+    inventing a conversion. Widening that prop to carry the flags would
+    put the requirement back in two shapes; the two ids the dialog
+    already holds are enough to ask.
+
+    THE BROWSER IS NOT THE GATE. This endpoint exists so the dialog can
+    say what is needed and keep its own button honest. The serializer
+    above still refuses, from the same
+    `completion_requirements.requirements_for_ticket` call, so a client
+    that skips this read, caches it, or is simply wrong changes nothing
+    about what gets written.
+
+    Permission is the PATCH gate, unchanged and in the same order: the
+    STAFF member who owns the slot, or an actor who passes
+    `_gate_actor`. A STAFF user asking about somebody else's slot falls
+    through to the manager gate and gets 403, exactly as they do when
+    they try to write it.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def get(self, request, ticket_id, assignment_id):
+        ticket = _resolve_ticket(request, ticket_id)
+        assignment = TicketStaffAssignment.objects.filter(
+            ticket=ticket, pk=assignment_id
+        ).first()
+        if assignment is None:
+            return Response(
+                {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        is_self_staff = (
+            request.user.role == UserRole.STAFF
+            and request.user.id == assignment.user_id
+        )
+        if not is_self_staff:
+            gate = _gate_actor(request, ticket)
+            if gate is not None:
+                return gate
+        return Response(requirements_for_ticket(ticket).as_dict())
 
 
 class StaffAssignmentSlotAgendaView(generics.ListAPIView):

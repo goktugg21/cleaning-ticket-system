@@ -1575,6 +1575,32 @@ export async function updateStaffSlot(
   return response.data;
 }
 
+// W3-G — what this slot must carry before it may be reported done.
+//
+// Server-resolved, because the rule lives on the extra work the ticket
+// came from and a plain ticket has no extra work at all. The dialog
+// reads this to SAY what is needed and to keep its own submit button
+// honest; the PATCH above still refuses on its own, from the same
+// resolver, so this is never the gate.
+export interface SlotCompletionRequirements {
+  note_required: boolean;
+  file_required: boolean;
+  /** The pre-W3-G rule, for a ticket with no extra work: a note OR a
+   *  photo. Mutually exclusive with the two flags above. */
+  either_required: boolean;
+  source: "extra_work" | "default";
+}
+
+export async function getSlotCompletionRequirements(
+  ticketId: number,
+  slotId: number,
+): Promise<SlotCompletionRequirements> {
+  const response = await api.get<SlotCompletionRequirements>(
+    `/tickets/${ticketId}/staff-assignments/${slotId}/completion-requirements/`,
+  );
+  return response.data;
+}
+
 export async function removeTicketStaffAssignment(
   ticketId: number,
   slotId: number,

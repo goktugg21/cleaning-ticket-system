@@ -364,6 +364,17 @@ p { line-height: 1.6; }
   color: var(--text-muted);
   letter-spacing: 0.01em;
 }
+/* W3-G — the asterisk on a field this particular job requires. Which
+   fields those are is configured per work (`file_upload_required` /
+   `completion_notes_required`), so the mark appears and disappears
+   between two jobs on the same screen and has to be unmistakable when
+   it is there. `aria-hidden` in the markup: the requirement is stated
+   in words above the fields, and a screen reader reading "star" adds
+   nothing to that. */
+.field-label .required-mark {
+  color: var(--red);
+  font-weight: 800;
+}
 /* Sprint 180 §1 — the line UNDER a field that explains it. Used in three
    places and defined nowhere, so it inherited the body's 14px and read as
    ordinary copy rather than as help. Two of the three callers already
