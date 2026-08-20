@@ -103,9 +103,6 @@
   "workflow_customer_rejection_required": "Please write the rejection reason in the status note field first.",
   "workflow_move_to": "Move to {{status}}",
   "workflow_convert_to_extra_work": "Convert to Extra Work",
-  "workflow_correction_actions_show": "Show correction actions",
-  "workflow_correction_actions_hide": "Hide correction actions",
-  "workflow_correction_actions_help": "These are correction transitions outside the normal flow. The backend has permitted each one for you on this ticket; use them only when the standard next step doesn't apply.",
   "workflow_wca_no_provider_decision": "Waiting for the customer to approve or reject this work. Overriding the customer decision needs the override permission, which you don't have on this ticket.",
   "composer_public_who_sees": "Visible to the customer and the provider team. Use for normal conversation about this ticket.",
   "composer_internal_who_sees": "Visible only to provider admins and building managers. Not visible to the customer or to assigned field staff.",
@@ -270,5 +267,7 @@
   "directed.bubble_prefix": "Directed to:",
   "detail.my_planned_days_label": "Your planned days:",
   "detail.my_planned_no_day": "No day yet",
-  "detail.my_planned_hours_value": "{{hours}} h"
+  "detail.my_planned_hours_value": "{{hours}} h",
+  "workflow_correction_heading": "Correct a mistake",
+  "workflow_move_back_to": "Move back to {{status}}"
 }

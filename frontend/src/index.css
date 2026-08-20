@@ -9274,17 +9274,89 @@ a.attn-row:hover {
    between the primary action group and the secondary list. The
    secondary list itself is visually softer (smaller font, faint
    top divider) so the eye lands on the primary actions first. */
-.workflow-more-actions-toggle {
-  align-self: flex-start;
-  margin-top: 8px;
-  padding: 4px 0;
-  background: transparent;
-  border: 0;
-  font-size: 12px;
-  color: var(--text-muted);
-  cursor: pointer;
+/* W9 §1 — WHERE THE JOB IS, AS COLOUR ON THE WORKFLOW CARD.
+
+   Same status-to-token mapping as `.workflow-current-status-dot` above,
+   applied as a left rail on the card body so the state is legible
+   before any text is read. Reusing that mapping rather than writing a
+   second one is the point: two mappings would drift and the rail would
+   eventually contradict the dot three pixels away from it.
+
+   Tokens only, no literals. Chat B's semantic token set was not on
+   origin when this was written, so these are the existing `:root`
+   names; if that set lands with different names these declarations are
+   the only place on this page that has to follow. */
+.workflow-body[data-status] {
+  padding-left: 12px;
+  border-left: 3px solid var(--text-faint);
 }
-.workflow-more-actions-toggle:hover { color: var(--text); }
+.workflow-body[data-status="OPEN"],
+.workflow-body[data-status="REOPENED_BY_ADMIN"],
+.workflow-body[data-status="IN_PROGRESS"] {
+  border-left-color: var(--green);
+}
+.workflow-body[data-status="WAITING_CUSTOMER_APPROVAL"],
+.workflow-body[data-status="WAITING_MANAGER_REVIEW"] {
+  border-left-color: var(--teal);
+}
+.workflow-body[data-status="APPROVED"] {
+  border-left-color: var(--green-2);
+}
+.workflow-body[data-status="REJECTED"] {
+  border-left-color: var(--red);
+}
+.workflow-body[data-status="CLOSED"],
+.workflow-body[data-status="CONVERTED_TO_EXTRA_WORK"] {
+  border-left-color: var(--closed);
+}
+
+/* ===================================================================
+   W9 §2 — CORRECTING A STEP, IN PLAIN SIGHT.
+
+   `.workflow-more-actions-toggle` is deleted with the disclosure it
+   opened. Undoing a step you just took by mistake is not a rare admin
+   escape hatch, and hiding it behind a text link is why the owner could
+   not find it.
+
+   The group is separated from the forward buttons by a rule and a
+   heading, and its buttons wear AMBER — a tone no forward action on this
+   card uses, so the split is visible before a single word is read and
+   muscle memory aimed at the green button cannot land here. Amber, not
+   red: a correction is a normal thing to do and destructive-red would
+   overstate it. Every colour is an existing `:root` token.
+   =================================================================== */
+.workflow-correction-group {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workflow-correction-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.workflow-body .status-btn[data-tone="correct"] {
+  color: var(--amber);
+  border-color: var(--amber-border);
+  background: var(--amber-soft);
+}
+.workflow-body .status-btn[data-tone="correct"]:hover {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+.workflow-body .status-btn[data-tone="correct"] .status-btn-arrow {
+  color: var(--amber);
+}
 .workflow-secondary-list {
   margin-top: 6px;
   padding-top: 8px;

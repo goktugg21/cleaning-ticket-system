@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Paperclip,
   TriangleAlert,
+  Undo2,
   UploadCloud,
   UserPlus,
   Users,
@@ -187,16 +188,130 @@ function isAdminCustomerDecisionOverride(
 // runs first; this only changes how the legal set is laid out.
 const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   OPEN: ["IN_PROGRESS"],
-  IN_PROGRESS: ["WAITING_MANAGER_REVIEW", "CLOSED"],
-  WAITING_MANAGER_REVIEW: ["APPROVED", "REJECTED"],
+  // W9 §2 — CLOSED was listed here and IS NOT REACHABLE from
+  // IN_PROGRESS. `ALLOWED_TRANSITIONS` offers exactly two targets
+  // (manager review, customer approval), so naming a third did nothing
+  // except push the real second option — send it straight to the
+  // customer — into the hidden list.
+  IN_PROGRESS: ["WAITING_MANAGER_REVIEW", "WAITING_CUSTOMER_APPROVAL"],
+  // W9 §2 — THIS LINE IS WHY THE OWNER COULD NOT FIND ANYTHING.
+  // APPROVED and REJECTED are not reachable from WAITING_MANAGER_REVIEW
+  // — the backend allows only WAITING_CUSTOMER_APPROVAL (accept and
+  // forward) and IN_PROGRESS (send back to the worker). Because neither
+  // named status was legal, `partitionTransitions` produced an EMPTY
+  // primary list and dropped BOTH real actions behind "Show correction
+  // actions". On the one screen where a manager has a decision to make,
+  // the card looked like it offered nothing.
+  WAITING_MANAGER_REVIEW: ["WAITING_CUSTOMER_APPROVAL"],
   WAITING_CUSTOMER_APPROVAL: ["APPROVED", "REJECTED"],
   APPROVED: ["CLOSED"],
   REJECTED: ["IN_PROGRESS"],
+  // Reopening is the only move a closed ticket has, and it is a
+  // correction — it is rendered by the correction group below, not
+  // here, so it never wears a forward button's colour.
   CLOSED: [],
   REOPENED_BY_ADMIN: ["IN_PROGRESS"],
   // Terminal — no further status moves once converted to Extra Work.
   CONVERTED_TO_EXTRA_WORK: [],
 };
+
+/**
+ * W9 §2 — WHICH MOVES UNDO PROGRESS, by rank rather than by list.
+ *
+ * The owner: "if something moves from In Progress to a customer-related
+ * status or another stage, there should be a clear way to move it back
+ * ... I couldn't clearly find where this exists in Tickets." He could
+ * not find it because it lived behind a text link called "Show
+ * correction actions", and on the status where it matters most it was
+ * not reachable at all (see WAITING_MANAGER_REVIEW above).
+ *
+ * WHY A RANK AND NOT A HARDCODED PAIR LIST. `ALLOWED_TRANSITIONS` has
+ * only two backward pairs, so a pair list looked right — and it was
+ * wrong for the one role that matters here. `allowed_next_statuses`
+ * (state_machine.py, the SUPER_ADMIN_ALLOWED_NEXT_ALL_STATUSES branch,
+ * Sprint 184 §2) deliberately hands a SUPER_ADMIN EVERY status except
+ * the current one and CONVERTED_TO_EXTRA_WORK. So for the owner's own
+ * role a backward move exists from every status, including the
+ * WAITING_CUSTOMER_APPROVAL -> IN_PROGRESS he asked about, and a
+ * two-entry list would have surfaced almost none of them.
+ *
+ * The rank is the normal progression. A move is a correction when it
+ * goes to a lower rank than where the ticket stands. That is true for
+ * whoever is looking: a manager sending work back, a SUPER_ADMIN
+ * pulling a job out of the customer's hands. Nothing here widens what
+ * anybody may do — every button still comes from the backend's
+ * `allowed_next_statuses` and the endpoint re-checks it.
+ */
+const STATUS_RANK: Record<TicketStatus, number> = {
+  OPEN: 0,
+  IN_PROGRESS: 1,
+  // Back in the crew's hands, so it ranks with IN_PROGRESS rather than
+  // after CLOSED, where its name would otherwise put it.
+  REOPENED_BY_ADMIN: 1,
+  WAITING_MANAGER_REVIEW: 2,
+  WAITING_CUSTOMER_APPROVAL: 3,
+  APPROVED: 4,
+  REJECTED: 4,
+  CLOSED: 5,
+  CONVERTED_TO_EXTRA_WORK: 5,
+};
+
+/**
+ * States whose backward-looking move is the ONLY thing to do next, and
+ * is therefore resumption rather than correction. A rejected job going
+ * back to IN_PROGRESS is the crew getting on with it — the existing
+ * `WORKFLOW_TONE` note makes the same call and calls it forward motion.
+ * Painting it amber under "Correct a mistake" would tell an operator
+ * that the normal path through a rejection is an error.
+ */
+const RESUME_TARGETS: Partial<Record<TicketStatus, TicketStatus[]>> = {
+  REJECTED: ["IN_PROGRESS"],
+  REOPENED_BY_ADMIN: ["IN_PROGRESS"],
+};
+
+/**
+ * W9 §2 — THE ONE WAY BACK, not every way back.
+ *
+ * A SUPER_ADMIN may move a ticket to any earlier status, so "show every
+ * correction" put seven amber buttons under a closed job and nothing
+ * else. That is not a control an owner reads in ten seconds; it is a
+ * list to be afraid of. The group therefore offers the single obvious
+ * step — put the job back where work happens — and every other backward
+ * move stays in the quiet list below it, exactly where it already was.
+ * Nothing a role may do is taken away; one thing is made obvious.
+ *
+ * From a finished job (approved, rejected, closed) that step is
+ * REOPENED_BY_ADMIN, the status the system has for precisely this and
+ * the one that leaves a visible mark that an admin reopened it. From
+ * anywhere else it is IN_PROGRESS. Failing both, the nearest earlier
+ * status, so a role with an unusual permission set still gets one.
+ */
+function pickCorrectionTarget(
+  currentStatus: TicketStatus,
+  candidates: TicketStatus[],
+): TicketStatus | null {
+  if (candidates.length === 0) return null;
+  const prefer: TicketStatus[] =
+    STATUS_RANK[currentStatus] >= 4
+      ? ["REOPENED_BY_ADMIN", "IN_PROGRESS"]
+      : ["IN_PROGRESS", "REOPENED_BY_ADMIN"];
+  for (const wanted of prefer) {
+    if (candidates.includes(wanted)) return wanted;
+  }
+  // Nearest earlier status: the highest rank still below the current one.
+  return [...candidates].sort(
+    (x, y) => STATUS_RANK[y] - STATUS_RANK[x],
+  )[0];
+}
+
+/** Is this move a correction rather than a step forward? */
+function isCorrection(
+  currentStatus: TicketStatus,
+  nextStatus: TicketStatus,
+): boolean {
+  if ((RESUME_TARGETS[currentStatus] ?? []).includes(nextStatus)) return false;
+  return STATUS_RANK[nextStatus] < STATUS_RANK[currentStatus];
+}
 
 // Sprint 190 §3 — colour carries MEANING on the workflow rail, so the
 // mapping from "where this button sends the ticket" to "what colour it
@@ -239,7 +354,13 @@ function partitionTransitions(
   // overrides that.)
   const primaryOrder = PRIMARY_TRANSITIONS[currentStatus] ?? [];
   const allowedSet = new Set(allowed);
-  const primary = primaryOrder.filter((s) => allowedSet.has(s));
+  // W9 §2 — a correction never counts as a forward step, even when
+  // PRIMARY_TRANSITIONS names it. `WAITING_MANAGER_REVIEW` legitimately
+  // lists IN_PROGRESS as one of its two real targets; it belongs in the
+  // correction group, which is where the split below puts it.
+  const primary = primaryOrder.filter(
+    (s) => allowedSet.has(s) && !isCorrection(currentStatus, s),
+  );
   const primarySet = new Set(primary);
   const secondary = allowed.filter((s) => !primarySet.has(s));
   return { primary, secondary };
@@ -562,22 +683,15 @@ export function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [statusNote, setStatusNote] = useState("");
   const [statusBusy, setStatusBusy] = useState<TicketStatus | null>(null);
-  // Sprint 30 Batch 30.1.1.5 — progressive workflow disclosure. The
-  // secondary transition list starts collapsed; the "More actions"
-  // toggle expands it. When the current status has no primary
-  // transitions (CLOSED), the secondary list renders inline-open
-  // and the toggle is hidden — see `shouldDefaultOpen` below.
-  const [secondaryOpen, setSecondaryOpen] = useState(false);
-  // #109 Part I — the Workflow "correction actions" disclosure is
-  // per-ticket. TicketDetailPage does NOT remount when only the :id
-  // route param changes, so this state would otherwise carry an open
-  // correction list across tickets. Reset it during render when the
-  // ticket id changes — the React-sanctioned "adjust state when a prop
-  // changes" pattern (a guarded setState during render, NOT in an
-  // effect), so no effect / eslint set-state-in-effect involvement.
-  const [correctionForTicketId, setCorrectionForTicketId] = useState<
-    number | null
-  >(null);
+  // W9 §2 — THE DISCLOSURE IS GONE, AND SO IS ITS STATE.
+  //
+  // Three pieces of machinery existed only to collapse and re-expand
+  // the correction list: an open/closed flag, a per-ticket id used to
+  // re-collapse it during render when the route param changed, and a
+  // "default it open when there are no primaries" special case for
+  // CLOSED. Corrections now render whenever the backend offers one, so
+  // there is nothing to open, nothing to reset between tickets, and no
+  // special case for a status whose only move is a correction.
   // Sprint 27F-F1 — ticket-override modal state. Mirrors the
   // ExtraWorkDetailPage shape:
   //   overrideDecision  the target status the operator picked
@@ -1133,13 +1247,6 @@ export function TicketDetailPage() {
           : { primary: [] as TicketStatus[], secondary: [] as TicketStatus[] },
       [ticket, visibleNextStatuses],
     );
-  // CLOSED has no primaries; render the disclosure inline-open by
-  // default so the only available action (REOPENED_BY_ADMIN) is one
-  // click away, without an extra toggle.
-  const shouldDefaultOpenSecondary =
-    primaryNextStatuses.length === 0 && secondaryNextStatuses.length > 0;
-  const isSecondaryOpen = secondaryOpen || shouldDefaultOpenSecondary;
-
   // Sprint 28 Batch 11 — the "Complete work" button only renders for
   // a STAFF user who is actually on the ticket's assignment set and
   // is looking at an IN_PROGRESS ticket. Backend enforces the same
@@ -1696,15 +1803,6 @@ export function TicketDetailPage() {
         <div className="alert-error">{error || t("ticket_not_found")}</div>
       </div>
     );
-  }
-
-  // #109 Part I — guarded render-time reset: when the resolved ticket
-  // id differs from the one the correction disclosure was last set for,
-  // collapse it. React re-renders immediately with the updated guard,
-  // so this settles in one extra render and never loops.
-  if (correctionForTicketId !== ticket.id) {
-    setCorrectionForTicketId(ticket.id);
-    if (secondaryOpen) setSecondaryOpen(false);
   }
 
   return (
@@ -2534,7 +2632,15 @@ export function TicketDetailPage() {
             defaultOpen
             testId="side-card-workflow"
           >
-            <div className="workflow-body">
+            {/* W9 §1 — the card carries the colour of WHERE THE JOB IS.
+                The owner asked for "more visually informative rather
+                than everything being white and green", and the most
+                informative colour on this page is the one fact the card
+                exists for. The accent reuses the exact status-to-token
+                mapping the status dot already uses, so the rail and the
+                dot can never disagree, and every value is an existing
+                `:root` token. */}
+            <div className="workflow-body" data-status={ticket.status}>
               {/* Sprint 28 Batch 11 — STAFF "Complete work" entry
                   point. Renders only for the assigned STAFF actor on
                   an IN_PROGRESS ticket; opens a modal that resolves
@@ -2759,9 +2865,15 @@ export function TicketDetailPage() {
                     let advanceSeen = false;
                     const renderTransitionButton = (
                       status: TicketStatus,
-                      variant: "primary" | "secondary",
+                      variant: "primary" | "secondary" | "correction",
                     ) => {
-                      const tone = WORKFLOW_TONE[status];
+                      // W9 §2 — a correction carries its OWN tone, so
+                      // the amber is a property of what the button does
+                      // rather than of which list it sits in.
+                      const tone =
+                        variant === "correction"
+                          ? "correct"
+                          : WORKFLOW_TONE[status];
                       let emphasis: "solid" | "outline" = "outline";
                       if (variant === "primary" && tone === "advance") {
                         emphasis = advanceSeen ? "outline" : "solid";
@@ -2772,19 +2884,21 @@ export function TicketDetailPage() {
                         key={status}
                         type="button"
                         className={
-                          variant === "primary"
-                            ? "status-btn"
-                            : "status-btn status-btn-secondary"
+                          variant === "secondary"
+                            ? "status-btn status-btn-secondary"
+                            : "status-btn"
                         }
-                        data-tone={variant === "primary" ? tone : undefined}
+                        data-tone={
+                          variant === "secondary" ? undefined : tone
+                        }
                         data-emphasis={
                           variant === "primary" ? emphasis : undefined
                         }
                         disabled={statusBusy !== null || evidenceMissing}
                         data-testid={
-                          variant === "primary"
-                            ? `workflow-move-${status}`
-                            : undefined
+                          variant === "secondary"
+                            ? undefined
+                            : `workflow-move-${status}`
                         }
                         onClick={() => changeStatus(status)}
                       >
@@ -2797,10 +2911,27 @@ export function TicketDetailPage() {
                                 so this only ever labels real status moves.
                                 Conversion lives on the dedicated header
                                 "Convert to Extra Work" button. */}
-                            {t("workflow_move_to", {
-                              status: tStatus(status),
-                            })}
-                            <span className="status-btn-arrow">→</span>
+                            {/* W9 §2 — the WORDING follows the move, not
+                                the list. A backward move that did not
+                                win the correction slot still sits in
+                                the quiet list, and labelling it "Move
+                                to Open ->" on a closed ticket pointed
+                                the wrong way. It reads "Move back to"
+                                with a left arrow wherever it lands; the
+                                amber is what the correction slot adds
+                                on top. */}
+                            {isCorrection(ticket.status, status)
+                              ? t("workflow_move_back_to", {
+                                  status: tStatus(status),
+                                })
+                              : t("workflow_move_to", {
+                                  status: tStatus(status),
+                                })}
+                            <span className="status-btn-arrow">
+                              {isCorrection(ticket.status, status)
+                                ? "\u2190"
+                                : "\u2192"}
+                            </span>
                           </>
                         )}
                       </button>
@@ -2835,6 +2966,23 @@ export function TicketDetailPage() {
                           )
                         : secondaryNextStatuses
                     ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
+                    // W9 §2 — split the leftovers into the two things
+                    // they actually are. A correction gets its own
+                    // visible group; anything else the backend permits
+                    // that is neither a named forward step nor a
+                    // correction keeps the old quiet list, so nothing a
+                    // role is allowed to do disappears from the screen.
+                    const correctionTarget = pickCorrectionTarget(
+                      ticket.status,
+                      secondaryForRender.filter((st) =>
+                        isCorrection(ticket.status, st),
+                      ),
+                    );
+                    const correctionForRender =
+                      correctionTarget === null ? [] : [correctionTarget];
+                    const otherSecondaryForRender = secondaryForRender.filter(
+                      (st) => st !== correctionTarget,
+                    );
                     // Override-arming targets — only the WCA decision
                     // targets the actor is actually allowed to drive.
                     const overrideTargets: TicketStatus[] =
@@ -2967,41 +3115,49 @@ export function TicketDetailPage() {
                             {t("workflow_completion_evidence_required")}
                           </p>
                         )}
-                        {secondaryForRender.length > 0 &&
-                          !shouldDefaultOpenSecondary && (
-                            <button
-                              type="button"
-                              className="workflow-more-actions-toggle"
-                              data-testid="workflow-more-actions-toggle"
-                              aria-expanded={isSecondaryOpen}
-                              onClick={() =>
-                                setSecondaryOpen((prev) => !prev)
-                              }
-                            >
-                              {isSecondaryOpen
-                                ? t("workflow_correction_actions_hide")
-                                : t("workflow_correction_actions_show")}
-                            </button>
-                          )}
-                        {secondaryForRender.length > 0 && isSecondaryOpen && (
+                        {/* W9 §2 — CORRECTIONS ARE VISIBLE, AND THEY ARE
+                            SEPARATE.
+
+                            This was a text link ("Show correction
+                            actions") over a collapsed list, which is why
+                            the owner could not find how to move a ticket
+                            back. A disclosure is the right pattern for
+                            things most people never need; undoing a step
+                            you just took by mistake is not one of those.
+
+                            So the group always renders when the backend
+                            offers a backward move, under its own rule
+                            and its own heading, and its buttons carry
+                            `data-tone="correct"` — an amber outline that
+                            belongs to no forward action on the card. It
+                            is one glance from the green buttons above it
+                            and cannot be hit by muscle memory.
+
+                            The explanatory sentence under the heading is
+                            deleted: the heading names the group and each
+                            button names its destination, so a sentence
+                            saying "these are corrections, not the normal
+                            next step" was restating both. */}
+                        {correctionForRender.length > 0 && (
+                          <div
+                            className="workflow-correction-group"
+                            data-testid="workflow-correction-group"
+                          >
+                            <div className="workflow-correction-head">
+                              <Undo2 size={13} strokeWidth={2.4} aria-hidden="true" />
+                              {t("workflow_correction_heading")}
+                            </div>
+                            {correctionForRender.map((status) =>
+                              renderTransitionButton(status, "correction"),
+                            )}
+                          </div>
+                        )}
+                        {otherSecondaryForRender.length > 0 && (
                           <div
                             className="workflow-secondary-list"
                             data-testid="workflow-secondary-list"
                           >
-                            {/* Set-subtraction header: every status here
-                                is in allowed_next_statuses but NOT in
-                                PRIMARY_TRANSITIONS for the current
-                                state. They are admin corrections, not
-                                the normal next step. The frontend does
-                                not filter what the backend permits —
-                                the partition only changes layout. */}
-                            <p
-                              className="muted small"
-                              style={{ margin: "0 0 6px" }}
-                            >
-                              {t("workflow_correction_actions_help")}
-                            </p>
-                            {secondaryForRender.map((status) =>
+                            {otherSecondaryForRender.map((status) =>
                               renderTransitionButton(status, "secondary"),
                             )}
                           </div>
