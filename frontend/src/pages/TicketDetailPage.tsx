@@ -61,6 +61,7 @@ import {
   isStaff as isStaffRoleFn,
 } from "../auth/permissions";
 import { AttachmentThumb } from "../components/AttachmentThumb";
+import { BoundedList } from "../components/BoundedList";
 import { CollapsibleCard } from "../components/CollapsibleCard";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Toggle } from "../components/Toggle";
@@ -245,6 +246,109 @@ const CONVERTIBLE_TICKET_STATUSES: ReadonlySet<TicketStatus> = new Set<
   TicketStatus
 >(["OPEN", "IN_PROGRESS", "REOPENED_BY_ADMIN"]);
 
+// W4-M §4a — frontend mirror of the backend `_SCHEDULE_TERMINAL_STATUSES`
+// set that also guards PATCH /tickets/<id>/attachment-visibility-policy/
+// (400 `attachment_visibility_policy_not_allowed_terminal`). Declared
+// here rather than imported from TicketScheduleCard: that file is a card
+// component, not a constants module, and the two uses are independent.
+const PHOTO_POLICY_TERMINAL_STATUSES: ReadonlySet<TicketStatus> = new Set<
+  TicketStatus
+>(["APPROVED", "REJECTED", "CLOSED", "CONVERTED_TO_EXTRA_WORK"]);
+
+// W4-M §4b — the PER-TICKET half of the staff photo pre-permission.
+//
+// The field, the resolver and both endpoints are chat P's
+// (`backend/tickets/models.py::UploadVisibilityGrant`,
+// `backend/tickets/attachment_visibility.py`,
+// `backend/tickets/views_upload_visibility.py`). This page renders the
+// per-ticket scope only:
+//
+//   GET   /api/tickets/<id>/upload-visibility/
+//   PATCH /api/tickets/<id>/upload-visibility/<user_id>/
+//         { uploads_customer_visible: true | false | null }
+//
+// `null` is not `false`. null CLEARS the decision at this scope and lets
+// the standing permission answer again; false is an explicit refusal
+// that outranks the standing permission for this ticket. The control
+// below is therefore three-state, not a toggle — a toggle would have to
+// silently pick one of grant/clear and would make one of them
+// unreachable.
+//
+// The types are declared here rather than in `api/types.ts` because the
+// same wave is writing that file for the STANDING scope; one contract,
+// two consumers, and this is the one that has to stay out of the other
+// chat's way.
+type UploadVisibilitySource =
+  | ""
+  | "UPLOADER_CHOICE"
+  | "CUSTOMER_UPLOAD"
+  | "TICKET_GRANT"
+  | "STANDING_GRANT"
+  | "WORK_SETTING"
+  | "DEFAULT_INTERNAL"
+  | "MANUAL";
+
+interface TicketUploadVisibilityPerson {
+  user_id: number;
+  ticket_id: number;
+  user_email: string;
+  user_full_name: string;
+  // The decision AT THIS SCOPE. null = no per-ticket decision.
+  uploads_customer_visible: boolean | null;
+  // The decision at the STANDING scope, for the "what is deciding today"
+  // line. null = no standing decision either.
+  standing_uploads_customer_visible: boolean | null;
+  reason: string;
+  granted_by_id: number | null;
+  updated_at: string | null;
+  // Where this person's NEXT upload on THIS ticket would land, and which
+  // rung of the ladder said so.
+  effective_visibility: "INTERNAL" | "CUSTOMER";
+  effective_source: UploadVisibilitySource;
+}
+
+interface TicketUploadVisibilityResponse {
+  ticket_id: number;
+  staff_uploads_customer_visible: boolean;
+  people: TicketUploadVisibilityPerson[];
+}
+
+// The three states the <select> offers. A union type, not a `const`
+// array: nothing iterates the list (the three <option>s are written out
+// so each can carry its own scope-bearing label), so an array would be a
+// runtime value that exists only to be read as a type.
+type UploadGrantChoice = "INHERIT" | "GRANT" | "REFUSE";
+
+function grantChoiceOf(value: boolean | null): UploadGrantChoice {
+  if (value === null) return "INHERIT";
+  return value ? "GRANT" : "REFUSE";
+}
+
+function grantChoiceValue(choice: UploadGrantChoice): boolean | null {
+  if (choice === "INHERIT") return null;
+  return choice === "GRANT";
+}
+
+// Which rung is deciding, in words. Keyed off the source the resolver
+// reports rather than re-deriving the ladder here — a second copy of the
+// precedence rule in the frontend is exactly how the two drift.
+//
+// `null` for the four sources the ladder cannot produce for an assigned
+// worker's next upload (an uploader's own stated value, a customer's own
+// file, a hand edit afterwards, and the blank pre-W4-P marker). They are
+// in the union because the wire type carries them; rendering nothing is
+// better than inventing an explanation for a case that cannot occur.
+const UPLOAD_SOURCE_LABEL_KEY: Record<UploadVisibilitySource, string | null> = {
+  "": null,
+  UPLOADER_CHOICE: null,
+  CUSTOMER_UPLOAD: null,
+  TICKET_GRANT: "upload_grant_source_ticket",
+  STANDING_GRANT: "upload_grant_source_standing",
+  WORK_SETTING: "upload_grant_source_work",
+  DEFAULT_INTERNAL: "upload_grant_source_default",
+  MANUAL: null,
+};
+
 const ACCEPTED_ATTACHMENT_TYPES =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
 const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
@@ -392,6 +496,20 @@ export function TicketDetailPage() {
    *  the melding. */
   const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
   const [categoryBusy, setCategoryBusy] = useState(false);
+  // W4-M §4a — the per-work photo-visibility switch (PA/SA only). One
+  // busy flag; the value itself is read straight off the ticket so the
+  // control can never drift from what the server stored.
+  const [photoPolicyBusy, setPhotoPolicyBusy] = useState(false);
+  // W4-M §4b — the per-ticket upload permission per assigned person.
+  // `null` while the read has not answered (or is not available to this
+  // viewer); the section renders nothing at all in that case rather than
+  // showing an empty control that cannot be used.
+  const [uploadGrants, setUploadGrants] =
+    useState<TicketUploadVisibilityResponse | null>(null);
+  const [uploadGrantBusyUserId, setUploadGrantBusyUserId] = useState<
+    number | null
+  >(null);
+  const [uploadGrantsNonce, setUploadGrantsNonce] = useState(0);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   // Sprint 32 — unified audit timeline for provider-audit roles (SA / CA /
@@ -861,6 +979,76 @@ export function TicketDetailPage() {
     };
   }, [canSeeCustomerContacts, ticketCustomerId]);
 
+  // W4-M §4b — read the per-ticket upload permissions.
+  //
+  // Provider management only, mirroring the endpoint's own gate; the
+  // request does not even fire for anyone else. A failure is swallowed
+  // and the section stays unrendered: this permission is an optional
+  // refinement of a ticket page that has to keep working without it,
+  // and — while the two halves of this wave land in parallel — a 404
+  // from a backend that does not carry the endpoint yet must read as
+  // "not available here", never as a page-level error.
+  const canGrantUploadVisibility = isProviderManagementRole(me?.role);
+  const uploadGrantsTicketId = ticket?.id ?? null;
+  useEffect(() => {
+    const cancelled = { current: false };
+    if (!canGrantUploadVisibility || uploadGrantsTicketId === null) {
+      queueMicrotask(() => {
+        if (!cancelled.current) setUploadGrants(null);
+      });
+    } else {
+      api
+        .get<TicketUploadVisibilityResponse>(
+          `/tickets/${uploadGrantsTicketId}/upload-visibility/`,
+        )
+        .then((response) => {
+          if (!cancelled.current) setUploadGrants(response.data);
+        })
+        .catch(() => {
+          if (!cancelled.current) setUploadGrants(null);
+        });
+    }
+    return () => {
+      cancelled.current = true;
+    };
+  }, [canGrantUploadVisibility, uploadGrantsTicketId, uploadGrantsNonce]);
+
+  // W4-M §4b — grant / refuse / clear one person's uploads on THIS
+  // ticket. The PATCH answers with that one person's new row, so the
+  // list is patched in place instead of refetched; the ticket itself is
+  // untouched by the call.
+  async function setUploadGrant(userId: number, choice: UploadGrantChoice) {
+    if (!id) return;
+    setError("");
+    setUploadGrantBusyUserId(userId);
+    try {
+      const response = await api.patch<TicketUploadVisibilityPerson>(
+        `/tickets/${id}/upload-visibility/${userId}/`,
+        { uploads_customer_visible: grantChoiceValue(choice) },
+      );
+      setUploadGrants((previous) =>
+        previous === null
+          ? previous
+          : {
+              ...previous,
+              people: previous.people.map((person) =>
+                person.user_id === userId ? response.data : person,
+              ),
+            },
+      );
+      // The grant writes an AuditLog row and no status history, so the
+      // timeline needs the same nudge the category change gives it.
+      setAuditReloadNonce((n) => n + 1);
+    } catch (err) {
+      setError(getApiError(err));
+      // A refused write must not leave the control showing the value the
+      // operator picked, so re-read the authoritative list.
+      setUploadGrantsNonce((n) => n + 1);
+    } finally {
+      setUploadGrantBusyUserId(null);
+    }
+  }
+
   useEffect(() => {
     if (!isStaff || !id) return;
     let cancelled = false;
@@ -918,6 +1106,24 @@ export function TicketDetailPage() {
     () => (ticket ? getVisibleWorkflowStatuses(ticket) : []),
     [ticket],
   );
+
+  // W4-M §2 — when did this job arrive at the status it is in? Read off
+  // `status_history` rather than any single timestamp column, because
+  // no one column covers every status (there is an `approved_at` and a
+  // `closed_at`, but nothing for OPEN or IN_PROGRESS). Ordering of the
+  // serialized rows is not contracted, so this takes the LATEST
+  // created_at among the rows that landed on the current status rather
+  // than trusting first/last. A ticket that never transitioned (still
+  // OPEN, no history) yields null and the line simply does not render.
+  const currentStatusSince = useMemo(() => {
+    if (!ticket) return null;
+    let latest: string | null = null;
+    for (const row of ticket.status_history ?? []) {
+      if (row.new_status !== ticket.status) continue;
+      if (latest === null || row.created_at > latest) latest = row.created_at;
+    }
+    return latest;
+  }, [ticket]);
 
   // Sprint 30 Batch 30.1.1.5 — partition the already-legal transition
   // set into "obvious next step" primaries vs "edge-case" secondaries.
@@ -988,6 +1194,41 @@ export function TicketDetailPage() {
       setError(getApiError(err));
     } finally {
       setCategoryBusy(false);
+    }
+  }
+
+  // W4-M §4a — flip Ticket.staff_uploads_customer_visible.
+  //
+  // What this changes is what happens to the NEXT staff upload on this
+  // work. It does not reach back: photos already stored keep the
+  // audience they were given, which is why the caption under the switch
+  // says so in words rather than leaving a manager to assume otherwise.
+  // The endpoint answers with the full ticket, so the response is the
+  // new state — no optimistic local value to get out of step.
+  async function setPhotoVisibilityPolicy(nextValue: boolean) {
+    if (!id) return;
+    setError("");
+    setPhotoPolicyBusy(true);
+    try {
+      const response = await api.patch<TicketDetail>(
+        `/tickets/${id}/attachment-visibility-policy/`,
+        { staff_uploads_customer_visible: nextValue },
+      );
+      setTicket(response.data);
+      // The flip writes an AuditLog row and no status history, so the
+      // timeline needs the same nudge the category change gives it.
+      setAuditReloadNonce((n) => n + 1);
+      toast.push({
+        variant: "success",
+        title: nextValue
+          ? t("photo_policy_toast_on")
+          : t("photo_policy_toast_off"),
+        description: t("photo_policy_toast_scope"),
+      });
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setPhotoPolicyBusy(false);
     }
   }
 
@@ -1566,8 +1807,15 @@ export function TicketDetailPage() {
             className="detail-header-place"
             data-testid="ticket-header-place"
           >
+            {/* W4-M §1 — same two facts, one type step down and with a
+                micro-icon on each label. The owner asked for "smaller
+                and nicer" after Sprint 191 landed the placement. It is
+                still PLAIN TEXT: no wrapper, no surface, no border, no
+                shadow — the craft is in the type scale and the icons,
+                not in a panel. */}
             <div className="detail-header-place-item">
               <span className="detail-header-place-label">
+                <MapPin size={10} strokeWidth={2.6} aria-hidden="true" />
                 {t("details_location")}
               </span>
               <span
@@ -1586,6 +1834,7 @@ export function TicketDetailPage() {
             </div>
             <div className="detail-header-place-item">
               <span className="detail-header-place-label">
+                <Users size={10} strokeWidth={2.6} aria-hidden="true" />
                 {t("details_customer")}
               </span>
               <span
@@ -1797,6 +2046,79 @@ export function TicketDetailPage() {
                 )}
               </span>
             </div>
+
+            {/* W4-M §4a — THE PER-WORK PHOTO SETTING.
+
+                The field and its endpoint shipped in Sprint 191 §2.5 with
+                no UI anywhere; this is the mount point. It belongs on the
+                attachments card because that is where the photos are —
+                a manager deciding what the customer sees is looking at
+                this list when the question comes up.
+
+                Two things the copy has to carry and does:
+                  - the SCOPE is this job, not this worker and not every
+                    job. It is in the label, not in a tooltip;
+                  - it changes what happens NEXT. A manager who believes
+                    the switch releases yesterday's photos is wrong in a
+                    way the customer finds out about, so the caption says
+                    so under both states.
+
+                PA / SA only, matching the endpoint's own gate. On a
+                terminal ticket the endpoint 400s, so the switch is
+                disabled and says why rather than offering a click that
+                cannot land. */}
+            {isProviderAdmin(me?.role) && (
+              <div
+                className="photo-policy"
+                data-testid="ticket-photo-policy"
+                data-enabled={
+                  ticket.staff_uploads_customer_visible ? "true" : "false"
+                }
+              >
+                <div className="photo-policy-row">
+                  <Toggle
+                    id="ticket-photo-policy-toggle"
+                    checked={ticket.staff_uploads_customer_visible}
+                    onChange={(event) =>
+                      void setPhotoVisibilityPolicy(event.target.checked)
+                    }
+                    disabled={
+                      photoPolicyBusy ||
+                      PHOTO_POLICY_TERMINAL_STATUSES.has(ticket.status)
+                    }
+                    data-testid="ticket-photo-policy-toggle"
+                  />
+                  <label
+                    className="photo-policy-label"
+                    htmlFor="ticket-photo-policy-toggle"
+                  >
+                    {t("photo_policy_label")}
+                  </label>
+                </div>
+                <p
+                  className="photo-policy-help"
+                  data-testid="ticket-photo-policy-help"
+                >
+                  {ticket.staff_uploads_customer_visible
+                    ? t("photo_policy_help_on")
+                    : t("photo_policy_help_off")}
+                </p>
+                <p
+                  className="photo-policy-warning"
+                  data-testid="ticket-photo-policy-warning"
+                >
+                  {t("photo_policy_help_forward_only")}
+                </p>
+                {PHOTO_POLICY_TERMINAL_STATUSES.has(ticket.status) && (
+                  <p
+                    className="photo-policy-help"
+                    data-testid="ticket-photo-policy-terminal"
+                  >
+                    {t("photo_policy_help_terminal")}
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="att-thumb-grid">
               {attachments.map((item) => (
@@ -2191,28 +2513,62 @@ export function TicketDetailPage() {
                   </div>
                 </>
               ) : visibleNextStatuses.length === 0 ? (
-                // Disabled-action clarity: when the backend gives the
-                // viewer zero transitions on a WCA ticket AND the
-                // override action is explicitly false, surface the
-                // *reason* rather than the generic terminal helper.
-                // Driven by the per-record action, not a role string —
-                // the only people who land here are providers without
-                // override authority (CUSTOMER_USER on their own WCA
-                // ticket gets APPROVED/REJECTED in allowed_next; STAFF
-                // sees Complete Work or a non-WCA status).
-                ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                ticket.actions?.can_override_customer_decision === false ? (
-                  <p
-                    className="muted small"
-                    data-testid="workflow-wca-no-provider-decision"
-                  >
-                    {t("workflow_wca_no_provider_decision")}
-                  </p>
-                ) : (
-                  <p className="muted small">
-                    {t("workflow_no_transitions")}
-                  </p>
-                )
+                /* W4-M §2 — the read-only Workflow card.
+
+                   This branch used to print "No status transitions
+                   available for your role." A customer opening their own
+                   ticket is not a failed provider, and a sentence about
+                   what their role cannot do tells them nothing they
+                   wanted to know. The sentence is gone. What stands in
+                   its place is the one fact the card is for: where this
+                   job is right now, and since when.
+
+                   Everyone with no button lands here — a customer on an
+                   OPEN job, a manager on a CLOSED one — and everyone
+                   gets the status readout. The provider-only reason line
+                   underneath is the single exception: it explains why a
+                   provider who would normally decide has no button on a
+                   WCA ticket, which is information a provider acts on
+                   and a customer never sees. */
+                <div
+                  className="workflow-current-status"
+                  data-testid="workflow-current-status"
+                  data-status={ticket.status}
+                >
+                  <span className="workflow-current-status-label">
+                    {t("workflow_current_status_label")}
+                  </span>
+                  <span className="workflow-current-status-value">
+                    <span
+                      className="workflow-current-status-dot"
+                      aria-hidden="true"
+                    />
+                    <span data-testid="workflow-current-status-text">
+                      {tStatus(ticket.status)}
+                    </span>
+                  </span>
+                  {currentStatusSince && (
+                    <span
+                      className="workflow-current-status-since"
+                      data-testid="workflow-current-status-since"
+                    >
+                      {t("workflow_current_status_since", {
+                        when: formatDateTime(currentStatusSince),
+                      })}
+                    </span>
+                  )}
+                  {!isCustomerUser(me?.role) &&
+                    ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+                    ticket.actions?.can_override_customer_decision ===
+                      false && (
+                      <p
+                        className="muted small workflow-current-status-note"
+                        data-testid="workflow-wca-no-provider-decision"
+                      >
+                        {t("workflow_wca_no_provider_decision")}
+                      </p>
+                    )}
+                </div>
               ) : (
                 <>
                   <div className="field">
@@ -2938,6 +3294,128 @@ export function TicketDetailPage() {
                     );
                   })}
                 </ul>
+              )}
+
+              {/* W4-M §4b — PER-TICKET PHOTO PERMISSION, per assigned
+                  person.
+
+                  There are TWO controls in this product that decide
+                  whether a named person's photos reach the customer, and
+                  the owner asked in as many words that a manager never
+                  has to guess which one they just flipped:
+
+                    * chat P's screen, on the person's own admin page —
+                      THIS PERSON, ON EVERY TICKET;
+                    * this one — THIS PERSON, ON THIS TICKET ONLY.
+
+                  So the scope is in the heading, in the helper line, in
+                  every option label of every row, and in the sentence
+                  that points at the other control. It is not in a
+                  tooltip, because a tooltip is not read by the person
+                  who already thinks they know what the switch does.
+
+                  Three states, not two: "not set" lets the standing
+                  permission answer, and it is a different thing from an
+                  explicit "no" that overrules the standing permission
+                  here. A toggle cannot say that. */}
+              {uploadGrants !== null && uploadGrants.people.length > 0 && (
+                <div
+                  className="upload-grants"
+                  data-testid="ticket-upload-grants"
+                >
+                  <div
+                    className="upload-grants-heading"
+                    data-testid="ticket-upload-grants-heading"
+                  >
+                    {t("upload_grant_section_heading")}
+                  </div>
+                  <p
+                    className="upload-grants-help"
+                    data-testid="ticket-upload-grants-help"
+                  >
+                    {t("upload_grant_section_help")}
+                  </p>
+                  <BoundedList
+                    size="sm"
+                    count={uploadGrants.people.length}
+                    ariaLabel={t("upload_grant_section_heading")}
+                    testIdPrefix="ticket-upload-grants"
+                  >
+                    <ul className="upload-grants-list">
+                      {uploadGrants.people.map((person) => {
+                        const displayName =
+                          person.user_full_name?.trim() ||
+                          person.user_email.split("@")[0];
+                        const visible =
+                          person.effective_visibility === "CUSTOMER";
+                        const sourceKey =
+                          UPLOAD_SOURCE_LABEL_KEY[person.effective_source] ??
+                          null;
+                        return (
+                          <li
+                            key={person.user_id}
+                            className="upload-grants-row"
+                            data-testid="ticket-upload-grant-row"
+                            data-user-id={person.user_id}
+                            data-effective={person.effective_visibility}
+                          >
+                            <span className="upload-grants-name">
+                              {displayName}
+                            </span>
+                            <select
+                              className="field-input upload-grants-select"
+                              aria-label={t("upload_grant_select_aria", {
+                                name: displayName,
+                              })}
+                              value={grantChoiceOf(
+                                person.uploads_customer_visible,
+                              )}
+                              disabled={
+                                uploadGrantBusyUserId === person.user_id
+                              }
+                              onChange={(event) =>
+                                void setUploadGrant(
+                                  person.user_id,
+                                  event.target.value as UploadGrantChoice,
+                                )
+                              }
+                              data-testid="ticket-upload-grant-select"
+                            >
+                              <option value="INHERIT">
+                                {t("upload_grant_choice_inherit")}
+                              </option>
+                              <option value="GRANT">
+                                {t("upload_grant_choice_grant")}
+                              </option>
+                              <option value="REFUSE">
+                                {t("upload_grant_choice_refuse")}
+                              </option>
+                            </select>
+                            <span
+                              className="upload-grants-effect"
+                              data-testid="ticket-upload-grant-effect"
+                            >
+                              {visible
+                                ? t("upload_grant_effect_customer")
+                                : t("upload_grant_effect_internal")}{" "}
+                              {sourceKey !== null && (
+                                <span className="upload-grants-effect-why">
+                                  {t(sourceKey)}
+                                </span>
+                              )}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </BoundedList>
+                  <p
+                    className="upload-grants-warning"
+                    data-testid="ticket-upload-grants-warning"
+                  >
+                    {t("upload_grant_section_forward_only")}
+                  </p>
+                </div>
               )}
 
               {isStaff && (

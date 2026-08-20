@@ -128,6 +128,70 @@ errors, 2 warnings)** — the baseline exactly, no new violation and no new
 `eslint-disable`; `vite build` OK. No test runner was added and no
 backend test was run: the sprint touches no backend file.
 
+### Done — W4-M (wave 4, chat M of 6): the ticket header, the customer's Workflow card, and two photo scopes
+
+Frontend only. `TicketDetailPage.tsx`, the ticket-header and
+ticket-workflow blocks of `index.css`, and the `nl`/`en`
+`ticket_detail` bundles. Every number below is read off the live DOM
+against the same page built from the branch point in a second
+worktree.
+
+- **§1 — the header block is smaller, and it has some craft now.** It
+  stays PLAIN TEXT, which is the point Sprint 191 took three attempts
+  to reach: measured computed `background` `rgba(0, 0, 0, 0)`, `border`
+  `0px none`, `box-shadow` `none`. What changed is the type scale and
+  the labels. Values **18px/800 -> 15px/700**, labels **11px -> 9.5px**
+  with a 10px lucide glyph in front of each (a pin for Location, people
+  for Customer), the building sub-line **13px -> 11.5px**. Measured
+  block height on the real seed row at 1440px: **91px -> 81px**; at
+  1280px **87px -> 81px**. On a stress row (a 48-character room label
+  and a 52-character customer name) **153px -> 138px** at both widths.
+  The block still ends flush with the Convert-to-Extra-Work button
+  (right edge **1412px** at 1440, **1252px** at 1280) and page overflow
+  is **0** in all eight runs. The label colour moved from
+  `--text-faint` to `--text-muted` in the same pass: at 9.5px the old
+  tone was **2.75:1** on the page ground and unreadable; the new one is
+  **5.31:1**.
+
+- **§2 — "No status transitions available for your role." is deleted.**
+  A customer opening their own job was told what their role cannot do,
+  which is worse than being told nothing. In its place the card now
+  states where the job IS: a "Current status" micro-cap, the status name
+  at **20px/800** with a status-coloured 9px dot, and the time it
+  arrived there, read off `status_history` rather than any one timestamp
+  column. Measured from an ACTUAL customer session (Bright Facilities
+  customer, ticket 11): the sentence is gone from the page text, the
+  readout renders at **275x62px**, the dot is `rgb(11, 107, 66)` for
+  IN_PROGRESS, and the since-line reads "Sinds 20 jul 2026, 01:11".
+  The path where a customer CAN act is untouched and was verified
+  separately on a WAITING_CUSTOMER_APPROVAL ticket.
+
+- **§3 — the provider company name on the customer's view is real
+  data, verified rather than assumed.** Logged in as a customer of
+  Bright Facilities (a DIFFERENT provider company from the demo's Osius
+  Demo) the assigned-staff heading reads "Toegewezen **Bright
+  Facilities**-medewerkers". It interpolates `ticket.company_name`; no
+  change was needed.
+
+- **§4a — the per-work photo switch finally has a mount point.**
+  `Ticket.staff_uploads_customer_visible` and its endpoint shipped in
+  Sprint 191 §2.5 with no UI anywhere. It is now a switch at the top of
+  the Attachments card, PA/SA only, disabled on a terminal ticket with
+  the reason stated. The caption says in words that flipping it decides
+  the NEXT upload and releases nothing already stored — in amber, not
+  muted grey, because a manager who misreads that line believes they
+  released yesterday's photos and did not.
+
+- **§4b — the per-ticket half of the staff pre-permission, against
+  chat P's contract.** On the Assignment card, one row per assigned
+  person, three states (not two): grant, refuse, or leave it to the
+  company-wide setting. The scope is in the heading ("Photo permission
+  — THIS JOB ONLY"), in the helper, and in every option label, because
+  there are two controls in this product that look alike and mean
+  different things and the owner asked that nobody have to guess which
+  one they flipped. Each row also states what the next photo would
+  actually do and which rung of chat P's ladder decided it.
+
 ### Done — Sprint 191 (wave 3, chat E of 2): Location & Customer, third time
 
 The owner asked for these two facts in the page HEADER three times. Sprint 189
