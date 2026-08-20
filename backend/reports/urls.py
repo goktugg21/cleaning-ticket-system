@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views_extra_work_hours import ExtraWorkHoursView
+from .views_planned_vs_actual import ExtraWorkPlannedVsActualView
 from .views_labour_rates import (
     EmployeeHourlyRateDetailView,
     EmployeeHourlyRateListCreateView,
@@ -286,6 +287,16 @@ urlpatterns = [
         "extra-work/<int:extra_work_id>/hours/",
         ExtraWorkHoursView.as_view(),
         name="reports-extra-work-hours",
+    ),
+    # ---- W7: planned hours beside worked hours, per person, for one
+    # job. Read by the panel on the operational ticket. No money in the
+    # response, which is what lets STAFF read their own line here while
+    # the hours endpoint above refuses them. Distinct literal segment,
+    # so neither route can swallow the other. --------------------------
+    path(
+        "extra-work/<int:extra_work_id>/planned-vs-actual/",
+        ExtraWorkPlannedVsActualView.as_view(),
+        name="reports-extra-work-planned-vs-actual",
     ),
     # ---- Sprint 131: Extra Work revenue grouped Building -> Department ->
     # Work Type ----------------------------------------------------------

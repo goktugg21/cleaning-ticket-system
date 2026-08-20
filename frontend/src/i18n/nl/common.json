@@ -2566,5 +2566,18 @@
   "sla_warnings.to.manager_review_escalate_business_hours": "de beheerders van dit bedrijf",
   "sla_warnings.to.approval_cutoff_days": "de klant die de opdracht heeft gegeven",
   "sla_warnings.to.approval_cutoff_escalate_days": "de verantwoordelijke manager van die opdracht",
-  "sla_warnings.title_for_company": "SLA-waarschuwingen voor {{company}}"
+  "sla_warnings.title_for_company": "SLA-waarschuwingen voor {{company}}",
+  "planned_vs_actual.title": "Geplande en gewerkte uren",
+  "planned_vs_actual.title_self": "Mijn geplande en gewerkte uren",
+  "planned_vs_actual.col_person": "Persoon",
+  "planned_vs_actual.col_planned": "Gepland",
+  "planned_vs_actual.col_worked": "Gewerkt",
+  "planned_vs_actual.col_difference": "Verschil",
+  "planned_vs_actual.whole_job": "Hele klus",
+  "planned_vs_actual.more": "{{hours}} meer",
+  "planned_vs_actual.less": "{{hours}} minder",
+  "planned_vs_actual.same": "Gelijk",
+  "planned_vs_actual.not_planned": "Niet ingepland",
+  "planned_vs_actual.empty": "Er is nog niemand ingepland op deze klus.",
+  "planned_vs_actual.empty_self": "U bent niet ingepland op deze klus."
 }

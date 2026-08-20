@@ -81,6 +81,7 @@ import { useToast } from "../components/ToastProvider";
 import { RouteBadge } from "../components/RouteBadge";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
+import { PlannedVsActualHours } from "../components/PlannedVsActualHours";
 import { ticketStatusLabelKey } from "../lib/enumLabels";
 
 // B7 four-tier note taxonomy — per-tier UI vocabulary. The bubble class
@@ -1888,6 +1889,39 @@ export function TicketDetailPage() {
 
       <div className="detail-grid">
         <div className="detail-main">
+          {/* W7 — the plan against the reality, on the screen where the
+              work actually happens.
+
+              The owner: "If I enter who is supposed to work how many
+              hours, I need to be able to see that information in the
+              operational ticket as well." Until now the plan lived only
+              on the Extra Work and the actual hours only in the hours
+              module, so answering "did Noah work the eight hours we
+              planned him" meant opening two other screens and holding
+              two numbers in your head.
+
+              FIRST in the column, above the messages: it is the state of
+              the job, and it is the reason somebody opened the ticket.
+
+              Only on a ticket that CAME FROM an extra work. An ordinary
+              melding has no plan to compare against, and rendering an
+              empty panel on every ticket in the system would teach
+              everybody to scroll past it.
+
+              This is the same component the chargeable-work view of the
+              job reaches (that view IS this page — a chargeable-work row
+              opens here) and the same one the Extra Work page should
+              mount; see the hand-off in the report. */}
+          {ticket.extra_work_origin && (
+            <PlannedVsActualHours
+              // Keyed by the job: the panel holds prop-derived loading
+              // state, and CLAUDE.md's rule for that is to key the
+              // component by id rather than to reset it in an effect.
+              key={ticket.extra_work_origin.extra_work_request_id}
+              extraWorkId={ticket.extra_work_origin.extra_work_request_id}
+              testId="ticket-planned-vs-actual"
+            />
+          )}
           <div className="card">
             <div className="card-head-icon">
               <span className="card-head-icon-glyph">

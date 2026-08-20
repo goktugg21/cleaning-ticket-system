@@ -12917,3 +12917,46 @@ a.wp-card-title:hover { text-decoration: underline; }
     margin-left: 0;
   }
 }
+
+/* ===================================================================
+   W7 — planned hours beside worked hours, per person.
+   `components/PlannedVsActualHours.tsx`, mounted on the operational
+   ticket. APPEND-ONLY: nothing above this line is touched.
+   =================================================================== */
+.pva-body {
+  padding: 4px 0 2px;
+}
+.pva-body > .muted {
+  padding: 10px 20px 16px;
+}
+/* Hours are read down the column and compared across the row, so they
+   are lined up and tabular: proportional digits make 8,00 and 11,50
+   different widths and the eye stops being able to scan them. */
+.pva-table .pva-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pva-table tfoot td {
+  border-top: 2px solid var(--border);
+  font-weight: 800;
+}
+.pva-diff {
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* ONE colour with ONE meaning: this job ran over its plan. Nothing else
+   on the panel is tinted, so no key is needed to read the tint. */
+.pva-diff-over {
+  color: var(--red);
+}
+/* Under plan is deliberately NOT green. Unfinished work reads as under
+   plan too, and a green number would congratulate somebody for a job
+   that is not done. */
+.pva-diff-under,
+.pva-diff-same {
+  color: var(--text-muted);
+}
+.pva-diff-none {
+  color: var(--text-faint);
+}
