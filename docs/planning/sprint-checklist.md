@@ -36,6 +36,98 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — W4-N (wave 4, chat N of 6): contacts beside the whole card, and the hours card
+
+Two owner corrections on the Extra Work detail page. Frontend only — no
+backend file was opened, no migration, no test-runner change.
+
+**Fix 1 — Customer contacts starts at the TOP of the Details card.** The
+third attempt at this. W2-B split only the LOWER half of the card, so the
+contacts heading began level with "Description"; W3-F kept that split and
+merely removed the panel's padding. Both left contacts most of a card
+below "Building", which is not what was asked for. The split now starts
+directly under the section title and holds both fact grids, the dates
+editor and the prose in its left child, so the card reads as three
+columns from its first row.
+
+The acceptance number, measured in the live DOM at 1440px with twelve
+contacts: the "Building" label's top is **y = 269** and the Customer
+contacts block's top is **y = 269** — **delta 0.00px**. Same two numbers
+at 1280px: **269 / 269, delta 0.00**. The contacts heading itself is also
+at **269**. Alignment is structural, not a tuned margin: both are the
+first child of row one of an `align-items: start` grid.
+
+- **The list still scrolls inside its own box and the card does not
+  stretch.** Twelve contacts: list `clientHeight` **300**, `scrollHeight`
+  **1240** — it scrolls. The Details card measures **927px** with twelve
+  contacts and **927px** with two. Identical.
+- **"Edit labels" still moves nothing below it, and now at 1280px too.**
+  Description y **567 → 567** and routing y **855 → 855** at 1440px;
+  **585 → 585** and **873 → 873** at 1280px. That second pair needed a
+  fix: narrowing the fact grid made the read state's ONE icon button fit
+  beside the values where the edit state's TWO did not, so the cell
+  wrapped differently per state and pushed everything below it down
+  **36px** — one `.btn-sm` row plus the flex row-gap. W3-F's parity rule
+  rested on the two states being the same HEIGHT; they now also have the
+  same WIDTHS (equal flex bases on both label/value stacks, and an action
+  slot that reserves two icon buttons in both states), so wrapping is a
+  property of the cell and not of the state. Labels cell measured at
+  **1440 / 1366 / 1280 / 1152px**: identical height (118px) in both
+  states at every one.
+- **Horizontal page overflow is 0** at 1440 and 1280, closed and open.
+- **A role that may not see contacts still gets the full-width card.**
+  `.ew-detail-cols-main:only-child` spans both columns — measured by
+  removing the panel from the live DOM: main **272.7 → 588.7px**, the
+  wrapper's full **588.7px**.
+
+**Fix 2 — the hours panel is a collapsible card, moved and regrouped.**
+
+- **Same card as Requested services, not a second idiom.** It mounts
+  `CollapsibleCard`, the component Requested services uses. Measured
+  side by side: chevron **16x16**, `rotate(-90deg)` closed, colour
+  `rgb(138,155,145)`, header padding `16px 22px`, header height **48px**
+  — identical on both cards.
+- **Closed by default**: `data-open="false"` on first render, and zero
+  `.collapsible-card-body` nodes exist while closed.
+- **Moved** to below People on this request and above Requested services.
+  Card tops at 1440px: People **1513**, Hours **1579**, Requested
+  services **1645**.
+- **The collapsed header carries the over/under-budget figure**, in
+  Requested services' own grammar (volume, then the one figure). All four
+  readings, measured from the rendered header (nl, the primary bundle):
+  over `"8,50 uur geboekt · 2,50 uur over de begroting"`; under
+  `"8,50 uur geboekt · 3,50 uur onder de begroting"`; exactly on budget
+  `"8,50 uur geboekt · Precies op de begroting"`; **no budget set**
+  `"8,50 uur geboekt · Geen begroting om tegen af te zetten"` — never
+  "0 over", which would claim the job landed on a budget nobody set. A
+  zero variance and an absent budget are deliberately different
+  sentences. Header height **48px** and page overflow **0** in all four.
+- **The open state groups the figures by what they are.** Five equal
+  bordered boxes became two groups: Budget → Entered as ONE comparison
+  with the arrow between them and the variance sentence under it,
+  Weighted as a subordinate line beneath (it is Entered times a factor,
+  not a sixth headline), and Labour cost + Travel in their own tinted
+  group — measured `rgb(242,244,242)` against the hours group's
+  `rgb(255,255,255)` — because money is not an hour. "Not budgeted"
+  renders as muted text, not as a figure.
+- **The provenance line survives**, as required: it is the first thing in
+  the opened body, above every figure it explains — "Uren komen uit de
+  urenregistratie; loonkosten worden berekend in rapportage. Op dit
+  scherm staat geen uurloonveld, en dat is met opzet."
+- **No arithmetic was added.** Every figure is still a fixed 2dp string
+  the server produced; the only numeric operation in the component is the
+  existing `Math.abs` that strips a sign the sentence already states.
+
+**i18n.** Three keys added to both bundles (`hours_panel.group_hours_title`,
+`hours_panel.group_money_title`, `hours_panel.meta_entered`); nl and en
+both **592 keys**, symmetric difference empty.
+
+**Gates.** `tsc --noEmit -p tsconfig.app.json --listFiles` exit 0 over
+**849 files, 300 of them under `src/`**; `eslint .` **44 problems (42
+errors, 2 warnings)** — the baseline exactly, no new violation and no new
+`eslint-disable`; `vite build` OK. No test runner was added and no
+backend test was run: the sprint touches no backend file.
+
 ### Done — Sprint 191 (wave 3, chat E of 2): Location & Customer, third time
 
 The owner asked for these two facts in the page HEADER three times. Sprint 189

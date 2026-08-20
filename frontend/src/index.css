@@ -7481,26 +7481,47 @@ a.attn-row:hover {
 .ew-detail-main {
   min-width: 0;
 }
-/* W2-B fix 2 — the lower half of the Details card, in two columns.
+/* W4-N fix 1 — the WHOLE Details card in two columns, contacts on the
+   right, starting at the top.
 
-   Everything from the description down (the notes, the billing month
-   and its override, routing) stays on the left; Customer contacts takes
-   the right. The right column is a fixed 300px at the wide end rather
-   than a fraction, because its content is names, e-mail addresses and
-   phone numbers — a fraction would keep growing it on a wide screen and
-   steal width from the prose beside it, which is the one thing on this
-   card that benefits from length.
+   W2-B split only the lower half of the card (description and below),
+   which put the Customer contacts heading level with "Description" —
+   several rows beneath "Building". Two waves shipped that and the owner
+   asked twice for contacts beside the whole card. The wrapper therefore
+   starts directly under the section title and holds BOTH fact grids,
+   the dates editor and the prose in its left child. Because it is a
+   grid with `align-items: start`, the top of `.ew-contacts-panel` and
+   the top of `.form-2col` (whose first cell is the "Building" label)
+   are the same Y by construction, not by a margin that has to be kept
+   in sync.
+
+   The right column is a fixed 300px at the wide end rather than a
+   fraction, because its content is names, e-mail addresses and phone
+   numbers — a fraction would keep growing it on a wide screen and steal
+   width from the prose beside it, which is the one thing on this card
+   that benefits from length.
 
    `:only-child` is load-bearing, not tidiness. Customer contacts is
    SUPER_ADMIN / COMPANY_ADMIN only (it mirrors a backend 403), so for a
    building manager or a customer user the left block is the sole child
-   and must span both columns — otherwise those roles get a half-width
-   description with an empty half beside it. */
-.ew-detail-body-split {
+   and must span both columns — otherwise those roles get a narrowed
+   card with an empty strip beside it. */
+.ew-detail-cols {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
   gap: 16px;
   align-items: start;
+}
+/* The same `column / 16px` `.form-section` gives its own children, so
+   moving these blocks one level down changed no vertical distance. */
+.ew-detail-cols-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ew-detail-cols-main:only-child {
+  grid-column: 1 / -1;
 }
 .ew-detail-body-main {
   min-width: 0;
@@ -7508,11 +7529,8 @@ a.attn-row:hover {
   flex-direction: column;
   gap: 16px;
 }
-.ew-detail-body-main:only-child {
-  grid-column: 1 / -1;
-}
 @media (max-width: 900px) {
-  .ew-detail-body-split {
+  .ew-detail-cols {
     grid-template-columns: 1fr;
   }
 }
@@ -7655,7 +7673,32 @@ a.attn-row:hover {
   align-items: flex-end;
   gap: 6px 18px;
 }
+/* W4-N — the read state and the edit state must WRAP identically.
+
+   W3-F pinned the two states to the same line height and the same
+   button height, which held the cell steady while the cell was wide.
+   Fix 1 narrowed it (Customer contacts now takes a column from the top
+   of the card, so the fact grid is no longer the card's full width),
+   and at 1280px the two states stopped wrapping the same way: the read
+   state's ONE icon button fitted beside the values and the edit
+   state's TWO did not, so pressing Edit pushed everything below it down
+   36px — one wrapped row of `.btn-sm` plus the flex row-gap. Measured.
+
+   Height parity therefore cannot rest on the items being the same
+   height; the items must also be the same WIDTH. Two rules do that:
+
+   1. Both label/value stacks get the SAME definite flex basis, so
+      neither state sizes to its own content (read state: the value
+      text; edit state: the widest option in the select).
+   2. The action slot reserves the width of TWO icon buttons in both
+      states, so the single Edit button occupies exactly the room Save
+      and Cancel will need.
+
+   With both widths fixed, whether the actions wrap is a property of
+   the cell, not of which state it is in — the two states wrap the same
+   way at every width, which is the invariant W3-F was after. */
 .ew-labels-inline > div {
+  flex: 1 1 90px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -7940,7 +7983,11 @@ a.attn-row:hover {
 .ew-labels-inline-actions {
   display: flex;
   gap: 6px;
+  /* Two `.ew-labels-icon-btn` (30px) and the 6px between them. The read
+     state holds one button in that slot ON PURPOSE — see the note on
+     `.ew-labels-inline > div`. */
   flex: none;
+  min-width: 66px;
 }
 /* Square, so two of them take about the width the one labelled button
    took and the row cannot wrap where it did not wrap before. */
@@ -11440,27 +11487,175 @@ a.wp-card-title:hover { text-decoration: underline; }
    the same system.
 
    Deliberately its own class names rather than a reuse of
-   `.ew-money-card`: four of these five figures are HOURS, and hours and
+   `.ew-money-card`: most of these figures are HOURS, and hours and
    money must not be dressed identically. That is the whole reason the
    panel exists — `timesheets` records hours and never money, and a
    figure strip that made "13,50" and "EUR 337,50" look like siblings
    would undo the distinction on screen that the modules keep in code.
+
+   W4-N fix 2 — TWO GROUPS, NOT FIVE BOXES.
+
+   W3-H drew Budget, Entered, Weighted, Labour cost and Travel as five
+   identical bordered boxes in one auto-fit row. Five equal boxes is a
+   claim that there are five facts of one kind, and there are not:
+   Budget and Entered are the two halves of one comparison, Weighted is
+   Entered times a factor, and the last two are money. The old row said
+   none of that, which is what "reads as five equal facts when they are
+   not" meant. So:
+
+     .ew-hours-groups   two columns — hours on the left, money on the
+                        right — collapsing to one at narrow widths
+     .ew-hours-compare  Budget -> Entered inside ONE box, arrow between
+     .ew-hours-variance the gap, as a sentence, under the comparison it
+                        belongs to; the tone class is a SECOND signal on
+                        a sentence that already names the direction
+     .ew-hours-derived  Weighted, subordinate: one line, small, under
+     .ew-hours-money-*  the tinted group, label and figure on one row
    ==================================================================== */
-.ew-hours-rollup {
+.ew-hours-groups {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 12px;
   margin: 10px 0 12px;
+  align-items: start;
 }
-.ew-hours-figure {
+@media (max-width: 900px) {
+  .ew-hours-groups {
+    grid-template-columns: 1fr;
+  }
+}
+.ew-hours-group {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+/* Money reads as a different KIND of number, so it gets a different
+   ground rather than a different font size. Same trick the status
+   tints use: the tint carries the category, the type stays the type. */
+.ew-hours-group-money {
+  background: var(--surface-2);
+}
+.ew-hours-group-title {
+  margin: 0;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* Budget and Entered, one box, arrow between. `align-items: end` puts
+   the two figures on one baseline even when one side is the shorter
+   "Not budgeted" text rather than a 20px numeral. */
+.ew-hours-compare {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.ew-hours-compare-side {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+}
+/* "Not budgeted" is a sentence, not a figure, and must not be typeset
+   as one — a job nobody budgeted would otherwise look like a job
+   budgeted at nothing. */
+.ew-hours-compare-empty {
+  font-size: 13px;
+  color: var(--text-faint);
+  line-height: 1.6;
+}
+.ew-hours-compare-arrow {
+  font-size: 15px;
+  color: var(--text-faint);
+  line-height: 1.6;
+  flex: none;
+}
+.ew-hours-variance {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+/* The direction is in the words; these only reinforce it. Over budget
+   is amber, not red: an overrun is a warning, and the plan is explicit
+   that we warn and never block. */
+.ew-hours-tone-over {
+  color: var(--amber);
+}
+.ew-hours-tone-under,
+.ew-hours-tone-on {
+  color: var(--green-2);
+}
+.ew-hours-tone-none {
+  color: var(--text-faint);
+}
+/* Weighted: subordinate to the comparison above it, so one line at
+   label size with the figure inline, separated by a hairline rather
+   than by a box of its own. */
+.ew-hours-derived {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.ew-hours-derived-label {
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ew-hours-derived-value {
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+}
+.ew-hours-derived-hint {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.ew-hours-money-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ew-hours-money-value {
+  font-family: var(--f-head);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+/* The provenance sentence keeps its own top margin at zero: it is the
+   first thing in the opened body and `.collapsible-card-body` already
+   supplies the padding. */
+.ew-hours-provenance {
+  margin-top: 0;
+}
+/* `.collapsible-card-meta` is `white-space: nowrap`, which is right for
+   "2 lines - Total: EUR 38.09" and wrong for a variance sentence in
+   Dutch. Overridden on this card's own span so a long reading wraps
+   inside the header instead of widening the page. */
+.ew-hours-meta {
+  white-space: normal;
+}
+.ew-hours-meta-variance {
+  font-weight: 700;
 }
 .ew-hours-figure-label {
   font-family: var(--f-head);

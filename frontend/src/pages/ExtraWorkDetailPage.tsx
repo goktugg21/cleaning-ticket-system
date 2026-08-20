@@ -2171,6 +2171,27 @@ export function ExtraWorkDetailPage() {
                 <div className="form-section-title">
                   {t("detail.details_section_title")}
                 </div>
+              {/* W4-N fix 1 - the Details card is THREE columns, and the
+                  third one starts at the TOP.
+
+                  W2-B put Customer contacts beside the DESCRIPTION and
+                  W3-F kept it there, which meant the contacts heading
+                  began level with "Description" - most of a card below
+                  "Building". The owner asked for it beside the whole
+                  card. So the split moved up: the two fact grids, the
+                  dates editor and the run of prose are now one left
+                  column, and contacts is a sibling column of the same
+                  wrapper. The acceptance number is that the top of the
+                  contacts block and the top of the "Building" label are
+                  the same Y, which they are because both are the first
+                  child of row one of an `align-items: start` grid.
+
+                  `.ew-detail-cols-main` carries `.form-section`'s own
+                  `flex-direction: column; gap: 16px`, so every vertical
+                  distance inside the left column is the one it had when
+                  these blocks were direct children of the section. */}
+              <div className="ew-detail-cols">
+                <div className="ew-detail-cols-main">
               <div className="form-2col">
                 <div>
                   <div className="muted small">{t("detail.field_building")}</div>
@@ -2421,20 +2442,12 @@ export function ExtraWorkDetailPage() {
                   onClose={() => setDatesOpen(false)}
                 />
               )}
-              {/* W2-B fix 2 — the Details card becomes TWO columns from
-                  here down. The left column keeps the run of text the
-                  card has always ended with (description, the notes,
-                  the billing month and its override, routing). The
-                  right column is Customer contacts, which used to be a
-                  collapsed card in the far-right rail, three columns
-                  away from the request it describes.
-
-                  `.ew-detail-body-main:only-child` spans both columns,
-                  so a BUILDING_MANAGER or a customer user — neither of
-                  whom may see contacts at all — gets the full-width
-                  text block they had before rather than a half-width
-                  one with dead space beside it. */}
-              <div className="ew-detail-body-split">
+              {/* The run of text the card has always ended with
+                  (description, the notes, the billing month and its
+                  override, routing). It stays a flex column of its own
+                  so its fields keep their 16px rhythm; what changed in
+                  W4-N is only that it is no longer the thing Customer
+                  contacts is aligned to. */}
                 <div className="ew-detail-body-main">
                   <div className="field">
                     <div className="muted small">{t("detail.field_description")}</div>
@@ -2596,6 +2609,13 @@ export function ExtraWorkDetailPage() {
                       the same reason the button is. */}
                   {isProvider && <PlanSummary ew={ew} />}
                 </div>
+                </div>
+                {/* Customer contacts is SUPER_ADMIN / COMPANY_ADMIN only
+                    (it mirrors a backend 403). When it is absent
+                    `.ew-detail-cols-main:only-child` spans both columns,
+                    so a building manager or a customer user gets the
+                    full-width card they had rather than a narrowed one
+                    with dead space beside it. */}
                 {canSeeCustomerContacts && (
                   <CustomerContactsPanel contacts={customerContacts} />
                 )}
@@ -3155,6 +3175,28 @@ export function ExtraWorkDetailPage() {
             </CollapsibleCard>
           )}
 
+          {/* W3-H (plan §2.8) — the TIMESHEET hours booked to this job,
+              with the roll-up of budget / entered / cost.
+
+              W4-N fix 2 moved it HERE: below People on this request,
+              above Requested services, where the owner asked for it. It
+              used to sit near the bottom of the page under the
+              actual-hours card, on the argument that the two are easy
+              to confuse — but the two things a manager compares are the
+              crew's booked hours and the budget that was planned for
+              them, and the planning half of this page is up here. The
+              distinction the old position was protecting is now carried
+              by the card's own words: the actual-hours card enters
+              hours onto a PRICING LINE (what the customer pays), this
+              one reads the hours the crew booked in the timesheets
+              module (what the job cost us), and its first line of body
+              text says exactly that.
+
+              Unconditional apart from its own role gate: the panel
+              fetches nothing for a non-provider and renders nothing when
+              there is nothing to say. Collapsed by default. */}
+          <ExtraWorkHoursPanel extraWorkId={ew.id} />
+
           {/* ----- Cart line items (Sprint 28 Batch 6; RF-14 collapsible:
               open while the request is still pre-decision, collapsed once
               it moved on — the header keeps count + final total visible.
@@ -3250,22 +3292,6 @@ export function ExtraWorkDetailPage() {
               }}
             />
           )}
-
-          {/* W3-H (plan §2.8) — the TIMESHEET hours booked to this job,
-              with the roll-up of budget / entered / cost.
-
-              Directly under the actual-hours card on purpose, because
-              the two are easy to confuse and are not the same thing: the
-              card above enters hours onto a PRICING LINE, which is what
-              the customer is charged for; this panel reads the hours the
-              crew actually booked in the timesheets module, which is
-              what the job cost us. Two sides of one job, adjacent, each
-              saying which it is.
-
-              Unconditional apart from its own role gate: the panel
-              fetches nothing for a non-provider and renders nothing when
-              there is nothing to say. */}
-          <ExtraWorkHoursPanel extraWorkId={ew.id} />
 
           {/* Draft proposal lines — read-only display of the DRAFT
               proposal's nested `lines` array. Gated on the per-record
