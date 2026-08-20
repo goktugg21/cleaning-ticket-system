@@ -50,7 +50,16 @@ import type {
   TicketStatusChangePayload,
   WorkCategory,
   TicketTimelineRow,
+  // W6 §3 — the SHARED upload-visibility wire types. This page carried
+  // its own copies of all three until now; see the note above
+  // `UPLOAD_SOURCE_LABEL_KEY`.
+  TicketUploadVisibility,
+  UploadVisibilitySource,
 } from "../api/types";
+import {
+  getTicketUploadVisibility,
+  setTicketUploadVisibility,
+} from "../api/uploadVisibility";
 import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -275,44 +284,34 @@ const PHOTO_POLICY_TERMINAL_STATUSES: ReadonlySet<TicketStatus> = new Set<
 // silently pick one of grant/clear and would make one of them
 // unreachable.
 //
-// The types are declared here rather than in `api/types.ts` because the
-// same wave is writing that file for the STANDING scope; one contract,
-// two consumers, and this is the one that has to stay out of the other
-// chat's way.
-type UploadVisibilitySource =
-  | ""
-  | "UPLOADER_CHOICE"
-  | "CUSTOMER_UPLOAD"
-  | "TICKET_GRANT"
-  | "STANDING_GRANT"
-  | "WORK_SETTING"
-  | "DEFAULT_INTERNAL"
-  | "MANUAL";
-
-interface TicketUploadVisibilityPerson {
-  user_id: number;
-  ticket_id: number;
-  user_email: string;
-  user_full_name: string;
-  // The decision AT THIS SCOPE. null = no per-ticket decision.
-  uploads_customer_visible: boolean | null;
-  // The decision at the STANDING scope, for the "what is deciding today"
-  // line. null = no standing decision either.
-  standing_uploads_customer_visible: boolean | null;
-  reason: string;
-  granted_by_id: number | null;
-  updated_at: string | null;
-  // Where this person's NEXT upload on THIS ticket would land, and which
-  // rung of the ladder said so.
-  effective_visibility: "INTERNAL" | "CUSTOMER";
-  effective_source: UploadVisibilitySource;
-}
-
-interface TicketUploadVisibilityResponse {
-  ticket_id: number;
-  staff_uploads_customer_visible: boolean;
-  people: TicketUploadVisibilityPerson[];
-}
+// W6 §3 — THE TYPES USED TO BE DECLARED HERE, AND ARE NOT ANY MORE.
+//
+// W4-P wrote local copies of `UploadVisibilitySource`,
+// `TicketUploadVisibilityPerson` and the response shape in this file,
+// with the note "declared here rather than in `api/types.ts` because the
+// same wave is writing that file for the STANDING scope". That was the
+// right call for one sprint and the wrong thing to leave behind: the
+// shared versions landed in `api/types.ts` in that same wave, together
+// with a typed client in `api/uploadVisibility.ts`, and two
+// independently maintained descriptions of one wire contract is the
+// Sprint 126/130 failure mode — the copy nobody edits goes quietly stale
+// and the compiler cannot tell you, because each copy is internally
+// consistent.
+//
+// Two deliberate differences absorbed by collapsing onto the shared
+// types, neither of which changes behaviour here:
+//
+//   * `ticket_id` is `number | null` on the shared type, because
+//     `UploadVisibilityGrantState` also describes the STANDING scope,
+//     which has no ticket. This page never reads the field.
+//   * `effective_visibility` is `AttachmentVisibility`, which IS
+//     `"INTERNAL" | "CUSTOMER"` — the same two strings the local copy
+//     spelled out, now derived from the same `as const` array the
+//     attachment types use.
+//
+// `UploadVisibilitySource` is now derived from the exported
+// `UPLOAD_VISIBILITY_SOURCES` constant, so the exhaustive Record below
+// is checked against the one list a new source would be added to.
 
 // The three states the <select> offers. A union type, not a `const`
 // array: nothing iterates the list (the three <option>s are written out
@@ -506,7 +505,7 @@ export function TicketDetailPage() {
   // viewer); the section renders nothing at all in that case rather than
   // showing an empty control that cannot be used.
   const [uploadGrants, setUploadGrants] =
-    useState<TicketUploadVisibilityResponse | null>(null);
+    useState<TicketUploadVisibility | null>(null);
   const [uploadGrantBusyUserId, setUploadGrantBusyUserId] = useState<
     number | null
   >(null);
@@ -998,12 +997,9 @@ export function TicketDetailPage() {
         if (!cancelled.current) setUploadGrants(null);
       });
     } else {
-      api
-        .get<TicketUploadVisibilityResponse>(
-          `/tickets/${uploadGrantsTicketId}/upload-visibility/`,
-        )
-        .then((response) => {
-          if (!cancelled.current) setUploadGrants(response.data);
+      getTicketUploadVisibility(uploadGrantsTicketId)
+        .then((data) => {
+          if (!cancelled.current) setUploadGrants(data);
         })
         .catch(() => {
           if (!cancelled.current) setUploadGrants(null);
@@ -1023,9 +1019,10 @@ export function TicketDetailPage() {
     setError("");
     setUploadGrantBusyUserId(userId);
     try {
-      const response = await api.patch<TicketUploadVisibilityPerson>(
-        `/tickets/${id}/upload-visibility/${userId}/`,
-        { uploads_customer_visible: grantChoiceValue(choice) },
+      const updated = await setTicketUploadVisibility(
+        id,
+        userId,
+        grantChoiceValue(choice),
       );
       setUploadGrants((previous) =>
         previous === null
@@ -1033,7 +1030,7 @@ export function TicketDetailPage() {
           : {
               ...previous,
               people: previous.people.map((person) =>
-                person.user_id === userId ? response.data : person,
+                person.user_id === userId ? updated : person,
               ),
             },
       );
