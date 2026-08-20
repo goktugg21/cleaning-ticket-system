@@ -12204,3 +12204,69 @@ a.wp-card-title:hover { text-decoration: underline; }
 .ew-series-time {
   width: 120px;
 }
+
+/* --------------------------------------------------------------------
+   W6-H — the plan dialog's day grid: people down the side, the
+   committed window across the top.
+
+   Scrolls horizontally inside its own wrapper rather than widening the
+   dialog: a two-week window is fourteen columns and the dialog must
+   stay readable at 1280px. The name column is pinned so a scrolled row
+   is still attributable to a person.
+   -------------------------------------------------------------------- */
+.ew-plan-grid {
+  min-width: 520px;
+}
+.ew-plan-grid th,
+.ew-plan-grid td {
+  padding: 6px 8px;
+  text-align: center;
+}
+.ew-plan-grid .ew-plan-grid-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  text-align: left;
+  white-space: nowrap;
+  min-width: 150px;
+}
+.ew-plan-grid thead .ew-plan-grid-name,
+.ew-plan-grid tfoot .ew-plan-grid-name {
+  background: var(--surface-2);
+  z-index: 3;
+}
+.ew-plan-grid-cell {
+  min-width: 72px;
+}
+.ew-plan-grid .ew-plan-crew-hours {
+  width: 66px;
+  text-align: right;
+  padding: 4px 6px;
+}
+.ew-plan-grid tfoot td {
+  background: var(--surface-2);
+  font-weight: 700;
+}
+/* W6-H — the planned row inside the actual-hours grid. Recessed so the
+   eye reads the booked rows first and the plan as the line to compare
+   them against. */
+.ew-hours-planned-row > td {
+  background: var(--surface-2);
+}
+.ew-hours-undated {
+  white-space: nowrap;
+}
+
+/* W6-H — the worker's own planned days on a ticket. Their surface: a
+   worker cannot open the parent Extra Work at all. */
+.ticket-my-planned-hours {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-top: 6px;
+}
+.ticket-my-planned-day {
+  white-space: nowrap;
+}

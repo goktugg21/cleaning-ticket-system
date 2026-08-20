@@ -66,6 +66,32 @@ export interface ExtraWorkHoursReport {
   days_omitted: number;
   rows: ExtraWorkHoursRow[];
   totals: { hours: string; weighted_hours: string };
+  /** W6-H — the PLAN on the same day axis as `rows`.
+   *
+   *  Its own block rather than folded into `rows` because the actual
+   *  grid's grain is (person, HOUR TYPE, day) and a plan has no hour
+   *  type: merging would have to invent one, or silently attach the
+   *  plan to whichever type happened to sort first.
+   *
+   *  Scoped by the same `visibility` answer the rows are, so the two
+   *  halves of one grid cannot disagree about who is looking. */
+  planned: {
+    /** Days that carry a PLAN. May include days nobody has booked yet —
+     *  those become columns too, because "we planned Thursday and
+     *  nobody booked anything" is the cell a manager is looking for. */
+    days: string[];
+    by_employee: {
+      employee_id: number;
+      employee_name: string;
+      /** ISO day -> planned hours. */
+      days: Record<string, string>;
+      hours: string;
+      /** Planned but not yet placed on a day. A real state. */
+      undated_hours: string;
+    }[];
+    total_hours: string;
+    undated_total_hours: string;
+  };
   rollup: {
     /** W2-D's planning number. Read here, never multiplied by anything. */
     budget_hours: string | null;
@@ -73,6 +99,11 @@ export interface ExtraWorkHoursReport {
     weighted_hours: string;
     /** entered - budget. Positive is over. Hours, never money. */
     variance_hours: string | null;
+    /** W6-H — what was DISTRIBUTED across the crew, as distinct from
+     *  the budget, which is the ceiling somebody agreed. Different
+     *  numbers; the screen must not conflate them. */
+    planned_hours: string;
+    planned_undated_hours: string;
   };
   cost: ExtraWorkLabourCost | null;
 }

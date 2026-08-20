@@ -147,6 +147,81 @@ def entries_for_extra_work(user, extra_work_id: int):
     )
 
 
+def planned_hours_for_extra_work(user, extra_work) -> dict:
+    """W6-H — the PLAN, per person per day, beside the same grid.
+
+    THE ASYMMETRY THIS CLOSES. `TimeEntry` has always carried a `date`,
+    so the actual side of this panel has always been per-day. The plan
+    was one total per person, so a manager could see that somebody
+    worked 6 hours on Monday and that they were planned 43 hours in
+    total, and nothing on the screen could say what Monday was supposed
+    to be. Now both sides have days and the comparison is per cell.
+
+    SCOPED THE SAME WAY THE ACTUALS ARE. `entries_for_extra_work`
+    narrows the actual rows to self for a non-manager; this narrows the
+    planned rows by the same test, off the same `visibility` answer, so
+    the two halves of one grid cannot disagree about who the caller is.
+    Writing a second scoping rule here is exactly how they would.
+
+    Undated rows are reported separately rather than dropped or dumped
+    into an arbitrary column: "planned, day not decided" is a real state
+    and a manager needs to see that 12 of the 43 planned hours have not
+    been placed on a day yet.
+    """
+    from extra_work.models import ExtraWorkPlannedHours
+
+    rows = (
+        ExtraWorkPlannedHours.objects.filter(extra_work_request=extra_work)
+        .select_related("user")
+        .order_by("user__full_name", "user__email", "date")
+    )
+    if not is_timesheet_manager(user):
+        rows = rows.filter(user_id=user.id)
+
+    by_employee: dict[int, dict] = {}
+    planned_days: set = set()
+    total = Decimal("0")
+    undated_total = Decimal("0")
+
+    for row in rows:
+        entry = by_employee.get(row.user_id)
+        if entry is None:
+            entry = by_employee[row.user_id] = {
+                "employee_id": row.user_id,
+                "employee_name": row.user.full_name or row.user.email,
+                "days": {},
+                "_hours": Decimal("0"),
+                "_undated": Decimal("0"),
+            }
+        entry["_hours"] += row.hours
+        total += row.hours
+        if row.date is None:
+            entry["_undated"] += row.hours
+            undated_total += row.hours
+        else:
+            day = row.date.isoformat()
+            planned_days.add(day)
+            # (person, day) is unique by constraint, so this is an
+            # assignment and not a sum.
+            entry["days"][day] = _hours(row.hours)
+
+    return {
+        "days": sorted(planned_days),
+        "by_employee": [
+            {
+                "employee_id": entry["employee_id"],
+                "employee_name": entry["employee_name"],
+                "days": entry["days"],
+                "hours": _hours(entry["_hours"]),
+                "undated_hours": _hours(entry["_undated"]),
+            }
+            for entry in by_employee.values()
+        ],
+        "total_hours": _hours(total),
+        "undated_total_hours": _hours(undated_total),
+    }
+
+
 def extra_work_hours_report(user, extra_work) -> dict:
     """The grid, the roll-up and the cost block for one extra work."""
     entries = entries_for_extra_work(user, extra_work.id)
@@ -229,6 +304,12 @@ def extra_work_hours_report(user, extra_work) -> dict:
             )
         )
 
+    # W6-H — a day that is PLANNED but not yet worked is a column too.
+    # Leaving it out would hide precisely the cell a manager is looking
+    # for ("we planned Thursday and nobody booked anything").
+    planned_block = planned_hours_for_extra_work(user, extra_work)
+    all_days |= set(planned_block["days"])
+
     ordered_days = sorted(all_days)
     days_omitted = max(0, len(ordered_days) - MAX_DAY_COLUMNS)
     shown_days = ordered_days[days_omitted:]
@@ -296,6 +377,13 @@ def extra_work_hours_report(user, extra_work) -> dict:
         "days": shown_days,
         "days_omitted": days_omitted,
         "rows": grid_rows,
+        # W6-H — the plan, per person per day, on the SAME day axis as
+        # the rows above. Kept as its own block rather than merged into
+        # `rows` because the actual grid's grain is (person, HOUR TYPE,
+        # day) and a plan has no hour type: folding it in would have to
+        # invent one, or silently attach the plan to whichever type
+        # happened to be first.
+        "planned": planned_block,
         "totals": {
             "hours": _hours(total_hours),
             "weighted_hours": _hours(total_weighted),
@@ -308,6 +396,12 @@ def extra_work_hours_report(user, extra_work) -> dict:
             "entered_hours": _hours(total_hours),
             "weighted_hours": _hours(total_weighted),
             "variance_hours": variance,
+            # W6-H — what was PLANNED, as distinct from the budget. The
+            # budget is the ceiling somebody agreed; this is what was
+            # actually distributed across the crew. They are different
+            # numbers and the screen must not conflate them.
+            "planned_hours": planned_block["total_hours"],
+            "planned_undated_hours": planned_block["undated_total_hours"],
         },
         # None for a non-manager: absent, not zero. The screen renders
         # the absence with its reason rather than a figure.

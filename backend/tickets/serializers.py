@@ -156,6 +156,35 @@ def _iso_date(value):
     return value.isoformat() if value is not None else None
 
 
+def _my_planned_hours(ew_request, request) -> list[dict]:
+    """W6-H — the caller's OWN planned days on this Extra Work.
+
+    `[{date, hours}, ...]`, ascending, with `date: null` for hours
+    planned before anybody decided the day. Empty when the caller has no
+    plan on this job, which is the ordinary case for most viewers.
+
+    Hours only. No rate, no cost, no other person's name.
+    """
+    if ew_request is None or request is None:
+        return []
+    user = getattr(request, "user", None)
+    if user is None or not getattr(user, "is_authenticated", False):
+        return []
+
+    from extra_work.models import ExtraWorkPlannedHours
+
+    rows = ExtraWorkPlannedHours.objects.filter(
+        extra_work_request=ew_request, user=user
+    ).order_by("date", "id")
+    return [
+        {
+            "date": row.date,
+            "hours": f"{row.hours:.2f}",
+        }
+        for row in rows
+    ]
+
+
 def resolve_extra_work_origin_core(ticket) -> dict | None:
     """Shared Extra Work origin resolution for the ticket list + detail
     serializers.
@@ -932,6 +961,27 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         # serializer omits it.
         payload["actual_hours_required"] = ew_has_unfinalized_hourly_lines(
             ew_request
+        )
+
+        # W6-H — WHICH DAYS THE CALLER IS PLANNED ON, and only theirs.
+        #
+        # THIS IS THE WORKER'S SURFACE, and it is here rather than on the
+        # Extra Work detail page for a reason that is already settled
+        # policy: `extra_work.scoping.scope_extra_work_for` returns
+        # `none()` for STAFF — the post-2026-05-20 P0 staff-privacy fix —
+        # with the note "Operational visibility for STAFF lives on the
+        # spawned Ticket". A worker cannot open the parent Extra Work at
+        # all, so telling them which days they are on had to happen on
+        # the ticket they can already open.
+        #
+        # ALWAYS THE CALLER'S OWN ROWS, whatever the role. This is not a
+        # crew roster: a manager who wants the whole grid has the hours
+        # panel and the plan dialog, both of which are already gated for
+        # them. Filtering by `user=request.user` here means the payload
+        # is identical for every role and carries nobody else's hours,
+        # so there is no role branch to get wrong later.
+        payload["my_planned_hours"] = _my_planned_hours(
+            ew_request, self.context.get("request")
         )
         # Sprint 8B — `final_total_amount` is a COMMERCIAL amount. The
         # staff-privacy floor forbids STAFF from seeing price/amount

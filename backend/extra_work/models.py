@@ -2462,6 +2462,33 @@ class ExtraWorkPlannedHours(models.Model):
         on_delete=models.PROTECT,
         related_name="extra_work_planned_hours",
     )
+    #: W6-H — WHICH DAY these hours are planned for.
+    #:
+    #: NULL IS A REAL AND SUPPORTED STATE, not a migration artefact. It
+    #: means "planned, day not decided yet" — the only thing this model
+    #: could say before W6-H, and still the right answer for a job whose
+    #: window has not been set. Every row that existed before this
+    #: column is NULL and stays NULL: guessing a date onto historic rows
+    #: would manufacture a plan nobody made, and every comparison
+    #: against actuals would then be against a fiction.
+    #:
+    #: THE ASYMMETRY THIS CLOSES. `timesheets.TimeEntry` has carried a
+    #: `date` since it was written, so ACTUAL hours have always been
+    #: per-day while the PLAN was a single per-person total. You could
+    #: see that Gokhan worked 6 hours on Monday and that he was planned
+    #: 43 hours in total, and nothing could tell you what Monday was
+    #: supposed to be.
+    date = models.DateField(
+        null=True,
+        blank=True,
+        default=None,
+        db_index=True,
+        help_text=(
+            "The day these hours are planned for, or NULL for "
+            "'planned, day not decided'. A planning number: it reaches "
+            "no price anywhere."
+        ),
+    )
     hours = models.DecimalField(
         max_digits=8,
         decimal_places=2,
@@ -2481,10 +2508,32 @@ class ExtraWorkPlannedHours(models.Model):
     )
 
     class Meta:
-        unique_together = [("extra_work_request", "user")]
-        ordering = ["id"]
+        # W6-H — the grain moved from (work, person) to
+        # (work, person, DAY), and NULL needs its own constraint.
+        #
+        # Postgres treats NULLs as distinct in a unique index, so
+        # `UniqueConstraint(work, user, date)` alone would happily allow
+        # five undated rows for the same person on the same job — which
+        # is exactly the state the old `unique_together` existed to
+        # prevent. The partial constraint below restores it for the
+        # undated case, so "one undated row per person per job" survives
+        # the change while dated rows are unique per day.
+        constraints = [
+            models.UniqueConstraint(
+                fields=["extra_work_request", "user", "date"],
+                name="uniq_ew_planned_hours_person_day",
+            ),
+            models.UniqueConstraint(
+                fields=["extra_work_request", "user"],
+                condition=models.Q(date__isnull=True),
+                name="uniq_ew_planned_hours_person_undated",
+            ),
+        ]
+        ordering = ["date", "id"]
         indexes = [
             models.Index(fields=["extra_work_request"]),
+            # The grid reads a whole job's plan ordered by day.
+            models.Index(fields=["extra_work_request", "date"]),
         ]
         verbose_name_plural = "extra work planned hours"
 

@@ -647,7 +647,13 @@
     "bulk_start_all_hint": "Inplannen en starten is een handeling. Zet dit uit als u alleen de planning wilt vastleggen.",
     "bulk_unchanged_hint": "Alleen gewijzigde velden worden verstuurd. Een schakelaar die u niet aanraakt, blijft per aanvraag staan zoals hij stond.",
     "bulk_loading": "Bezig met laden van de huidige planning...",
-    "bulk_load_failed": "De huidige planning kon niet worden geladen."
+    "bulk_load_failed": "De huidige planning kon niet worden geladen.",
+    "grid_person": "Medewerker",
+    "grid_no_day": "Geen dag",
+    "grid_row_total": "Totaal",
+    "grid_day_total": "Per dag",
+    "grid_no_window": "Er zijn nog geen uitvoerdatums ingevuld, dus er zijn nog geen dagkolommen. U kunt uren alvast onder Geen dag zetten.",
+    "bulk_hours_no_days": "Hier stelt u een totaal per persoon in, zonder dag. Wilt u uren per dag verdelen, open dan het werk zelf en gebruik Werk inplannen."
   },
   "series": {
     "member_count": "{{count}} werk",
@@ -700,5 +706,8 @@
     "created_body_other": "{{count}} werken aangemaakt in deze reeks.",
     "created_open_list": "Naar de lijst",
     "slot_none": "Kies minstens een dag voor deze reeks."
-  }
+  },
+  "hours_panel.planned_label": "Gepland",
+  "hours_panel.planned_undated": "(+{{hours}} zonder dag)",
+  "hours_panel.planned_total": "Gepland totaal"
 }

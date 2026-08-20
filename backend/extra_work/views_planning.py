@@ -390,7 +390,7 @@ def _planning_context(works: list) -> list[dict]:
     for row in (
         ExtraWorkPlannedHours.objects.filter(extra_work_request_id__in=ids)
         .select_related("user")
-        .order_by("user__full_name", "user__email")
+        .order_by("user__full_name", "user__email", "date")
     ):
         planned[row.extra_work_request_id].append(
             {
@@ -398,6 +398,8 @@ def _planning_context(works: list) -> list[dict]:
                 "user_email": row.user.email,
                 "user_full_name": row.user.full_name,
                 "user_role": row.user.role,
+                # W6-H — the day, or NULL for "day not decided".
+                "date": row.date,
                 "hours": f"{row.hours:.2f}",
                 "is_assigned": row.user_id
                 in assigned[row.extra_work_request_id],

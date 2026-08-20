@@ -4,7 +4,6 @@
   "priority_long_normal": "Normal Priority",
   "priority_long_high": "High Priority",
   "priority_long_urgent": "Critical Priority",
-
   "card_activity_title": "Activity Timeline",
   "activity_show": "Show",
   "activity_hide": "Hide",
@@ -15,7 +14,6 @@
   "timeline_status_to": " to ",
   "timeline_created_as": " created the ticket as ",
   "status_default_created": "Created",
-
   "card_messages_title": "Messages & internal notes",
   "composer_internal_placeholder": "Internal note — not visible to customers.",
   "composer_public_placeholder": "Write a reply…",
@@ -35,7 +33,6 @@
   "tag_staff_operational": "Operational",
   "tag_staff_completion": "Completion",
   "tag_customer_internal": "Internal (my team)",
-
   "card_attachments_title": "Attachments",
   "photo_policy_label": "Staff photos on THIS job go straight to the customer",
   "photo_policy_help_off": "Off: a photo a worker uploads to this job stays internal until a provider manager releases it.",
@@ -63,7 +60,6 @@
   "upload_button": "Upload",
   "attachment_too_large": "Attachment file size cannot exceed 10 MB.",
   "internal_pill": "Internal",
-
   "card_assignment_title": "Assignment",
   "side_summary_assignment_one": "{{count}} staff member",
   "side_summary_assignment_other": "{{count}} staff members",
@@ -77,7 +73,6 @@
   "assignment_current": " (current)",
   "update_assignment": "Update assignment",
   "updating": "Updating…",
-
   "card_details_title": "Ticket details",
   "details_location": "Location",
   "details_customer": "Customer",
@@ -90,13 +85,11 @@
   "details_closed": "Closed",
   "details_subsection_contacts": "Customer contacts",
   "details_subsection_sla": "SLA",
-
   "card_sla_title": "SLA",
   "sla_due_label": "Due",
   "sla_paused_since_label": "Paused since",
   "sla_first_breached_label": "First breached",
   "sla_completed_label": "Completed",
-
   "card_workflow_title": "Workflow",
   "card_workflow_title_staff_complete": "Complete your assigned work",
   "card_workflow_subtitle_staff_complete": "This will be routed according to your building settings.",
@@ -126,13 +119,10 @@
   "assignment_section_bm_helper": "The building manager who owns this ticket from the provider side. They route the work and oversee its completion.",
   "workflow_completion_evidence_hint": "Please upload a photo of the completed work if possible. This helps the manager and customer verify the result. If a photo isn't available, write a short completion note instead.",
   "workflow_completion_evidence_required": "Add a completion note or attach a photo of the completed work before sending this ticket for customer approval.",
-
   "card_history_title": "Status history",
   "history_empty": "No status changes yet.",
-
   "card_critical_title": "Critical priority",
   "card_critical_body": "This ticket is flagged urgent. Prioritise dispatch and update the customer once an operator is on site.",
-
   "delete_ticket_button": "Delete accidental ticket",
   "delete_ticket_footer_link": "Delete this ticket (accidental entry)",
   "delete_ticket_dialog_title": "Delete ticket {{ticket_no}}",
@@ -141,7 +131,6 @@
   "delete_ticket_confirm_button": "Delete ticket",
   "delete_ticket_confirm_busy": "Deleting…",
   "delete_ticket_failed": "Could not delete the ticket. {{detail}}",
-
   "assigned_staff_title": "Assigned field staff",
   "assigned_staff_empty": "No staff assigned yet.",
   "upload_grant_section_heading": "Photo permission — THIS JOB ONLY",
@@ -170,7 +159,6 @@
   "request_assignment_cancelled_success": "Request cancelled. You can submit a new request if you change your mind.",
   "request_assignment_cancel_dialog_title": "Cancel this assignment request?",
   "request_assignment_cancel_dialog_body": "The request will move to Cancelled. You can submit a new request for this ticket later.",
-
   "assigned_staff_admin_title": "Assign field staff",
   "assigned_staff_admin_desc": "Add a staff member to this ticket directly. They do not need to submit an assignment request first.",
   "assigned_staff_admin_select_placeholder": "Select an eligible staff member…",
@@ -183,7 +171,6 @@
   "assigned_staff_admin_remove_dialog_body": "{{name}} will no longer appear as assigned to this ticket. You can add them again later.",
   "assigned_staff_admin_banner_added": "{{name}} added as assigned staff.",
   "assigned_staff_admin_banner_removed": "{{name}} removed from assigned staff.",
-
   "override_modal_title": "Override customer decision",
   "override_modal_prompt": "Why are you overriding the customer's decision? This will be recorded in the audit log.",
   "override_inline_helper": "This overrides the customer's decision and is recorded in the status history.",
@@ -200,7 +187,6 @@
   "timeline_ew_relation_converted_source": "converted source",
   "timeline_ew_status_change": "Extra Work #{{id}}:",
   "timeline_occurrence_reference": "Originated from planned occurrence #{{id}} · {{date}}",
-
   "resp_mgr.title": "Responsible managers",
   "resp_mgr.count_one": "{{count}} manager",
   "resp_mgr.count_other": "{{count}} managers",
@@ -214,7 +200,6 @@
   "resp_mgr.no_candidates": "No eligible managers for this building.",
   "resp_mgr.error_terminal": "This ticket is closed or decided; responsible managers can't be changed.",
   "resp_mgr.error_not_eligible": "That manager isn't eligible for this building.",
-
   "convert.dialog_title": "Convert to Extra Work",
   "convert.dialog_desc": "Create a new Extra Work request from this ticket. This ticket will be marked as converted and a new request is created with the line items below.",
   "convert.intent_section_title": "How should this request be handled?",
@@ -247,9 +232,7 @@
   "convert.cancel_button": "Cancel",
   "convert.submit_button": "Convert to Extra Work",
   "convert.submitting": "Converting…",
-
   "detail.spawned_from_label": "Spawned from extra work",
-
   "schedule.card_title": "Scheduling",
   "schedule.current_date_label": "Scheduled date",
   "schedule.not_scheduled": "Not scheduled yet",
@@ -288,6 +271,8 @@
   "directed.private_off_hint": "Everyone who can see this ticket will see this message; the selected people also get a notification.",
   "directed.private_disabled_hint": "Select at least one person to make this message private.",
   "directed.private_badge": "Private",
-  "directed.bubble_prefix": "Directed to:"
+  "directed.bubble_prefix": "Directed to:",
+  "detail.my_planned_days_label": "Your planned days:",
+  "detail.my_planned_no_day": "No day yet",
+  "detail.my_planned_hours_value": "{{hours}} h"
 }
-

@@ -647,7 +647,13 @@
     "bulk_start_all_hint": "Planning and starting is one action. Turn this off to record the plan without starting.",
     "bulk_unchanged_hint": "Only fields you changed are sent. A switch you do not touch keeps whatever each request already had.",
     "bulk_loading": "Loading what these works plan now...",
-    "bulk_load_failed": "The current plan could not be loaded."
+    "bulk_load_failed": "The current plan could not be loaded.",
+    "grid_person": "Person",
+    "grid_no_day": "No day",
+    "grid_row_total": "Total",
+    "grid_day_total": "Per day",
+    "grid_no_window": "No delivery dates are set yet, so there are no day columns. You can already put hours under No day.",
+    "bulk_hours_no_days": "Here you set a total per person, with no day. To spread hours across days, open the work itself and use Plan work."
   },
   "series": {
     "member_count": "{{count}} work",
@@ -700,5 +706,8 @@
     "created_body_other": "{{count}} works created in this series.",
     "created_open_list": "Go to the list",
     "slot_none": "Pick at least one day for this series."
-  }
+  },
+  "hours_panel.planned_label": "Planned",
+  "hours_panel.planned_undated": "(+{{hours}} with no day)",
+  "hours_panel.planned_total": "Planned total"
 }

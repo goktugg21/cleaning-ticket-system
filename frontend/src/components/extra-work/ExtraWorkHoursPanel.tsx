@@ -204,6 +204,9 @@ export function ExtraWorkHoursPanel({ extraWorkId }: { extraWorkId: number }) {
 
   const report = state.report;
   const variance = varianceKey(report.rollup.variance_hours);
+  // W6-H — the plan rows, in the same order the actual rows use so the
+  // two halves of the grid read as one table.
+  const plannedByEmployee = report.planned?.by_employee ?? [];
   const cost = report.cost;
   // One string, built once, used in the collapsed header. The volume
   // then the figure — Requested services' own grammar.
@@ -412,6 +415,45 @@ export function ExtraWorkHoursPanel({ extraWorkId }: { extraWorkId: number }) {
                   ))}
                   <td className="ew-hours-day-col">
                     <strong>{hours(row.hours)}</strong>
+                  </td>
+                </tr>
+              ))}
+              {/* W6-H — the PLAN, on the same day axis, one row per
+                  person. Underneath the actuals rather than interleaved
+                  with them: the actual rows are split by hour type and
+                  a plan has none, so a planned row sitting between two
+                  hour-type rows would read as a third type. */}
+              {plannedByEmployee.map((planned) => (
+                <tr
+                  key={`planned:${planned.employee_id}`}
+                  className="ew-hours-planned-row"
+                  data-testid="ew-hours-planned-row"
+                  data-employee-id={planned.employee_id}
+                >
+                  <td>{planned.employee_name}</td>
+                  <td>{t("hours_panel.planned_label")}</td>
+                  {report.days.map((day) => (
+                    <td key={day} className="ew-hours-day-col">
+                      {planned.days[day] ? hours(planned.days[day]) : ""}
+                    </td>
+                  ))}
+                  <td className="ew-hours-day-col">
+                    <strong>{hours(planned.hours)}</strong>
+                    {/* Planned but not yet placed on a day. Shown on
+                        the row it belongs to, because a total that
+                        exceeds the visible cells with no explanation is
+                        the reference system's §4.4 defect. */}
+                    {Number(planned.undated_hours) > 0 && (
+                      <span
+                        className="muted small ew-hours-undated"
+                        data-testid="ew-hours-planned-undated"
+                      >
+                        {" "}
+                        {t("hours_panel.planned_undated", {
+                          hours: hours(planned.undated_hours),
+                        })}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

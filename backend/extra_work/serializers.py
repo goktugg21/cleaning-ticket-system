@@ -670,7 +670,22 @@ def _serialize_spawned_tickets(obj):
     ]
 
 
-def _serialize_planned_hours(obj):
+def _is_provider_manager(user) -> bool:
+    """SA / CA / BM. The roles whose job includes the whole crew.
+
+    Deliberately the same three roles the plan endpoints admit, so "who
+    may set the plan" and "who may read all of it" cannot drift apart.
+    """
+    from accounts.models import UserRole
+
+    return getattr(user, "role", None) in {
+        UserRole.SUPER_ADMIN,
+        UserRole.COMPANY_ADMIN,
+        UserRole.BUILDING_MANAGER,
+    }
+
+
+def _serialize_planned_hours(obj, viewer=None):
     """W2-D — the budget, distributed. One row per person, DETAIL only.
 
     TWO queries, whatever the crew size: the rows with their user, and
@@ -699,6 +714,23 @@ def _serialize_planned_hours(obj):
         return []
     from .models import ExtraWorkAssignment
 
+    # W6-H — A WORKER SEES THEIR OWN ROWS AND NOBODY ELSE'S.
+    #
+    # This list is how a worker finds out which days they are on, so it
+    # has to be readable by STAFF — but "readable by STAFF" cannot mean
+    # "the whole crew's hours". Before W6-H the list carried one total
+    # per person and was emitted in full to every non-customer; giving
+    # it days without narrowing it would turn a coarse leak into a
+    # detailed one.
+    #
+    # Narrowed by ROLE, not by assignment: a provider manager sees the
+    # crew because managing the crew is their job, and everyone else
+    # sees the row with their own name on it.
+    if viewer is not None and not _is_provider_manager(viewer):
+        rows = [row for row in rows if row.user_id == viewer.id]
+        if not rows:
+            return []
+
     assigned = set(
         ExtraWorkAssignment.objects.filter(
             extra_work_request=obj,
@@ -711,6 +743,10 @@ def _serialize_planned_hours(obj):
             "user_email": row.user.email,
             "user_full_name": row.user.full_name,
             "user_role": row.user.role,
+            # W6-H — NULL means "planned, day not decided". Rendered as
+            # its own state on screen, never as a blank that reads like
+            # a missing value.
+            "date": row.date,
             "hours": f"{row.hours:.2f}",
             "is_assigned": row.user_id in assigned,
             "set_at": row.set_at,
@@ -1243,7 +1279,10 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         return _is_priced(obj)
 
     def get_planned_hours(self, obj):
-        return _serialize_planned_hours(obj)
+        request = self.context.get("request")
+        return _serialize_planned_hours(
+            obj, viewer=request.user if request else None
+        )
 
     def get_planned_hours_total(self, obj) -> str:
         from .planning import distributed_hours
@@ -2432,6 +2471,12 @@ class ExtraWorkPlannedHoursRowSerializer(serializers.Serializer):
     """
 
     user = serializers.IntegerField(min_value=1)
+    #: W6-H — WHICH DAY. Optional and nullable, and both absences mean
+    #: the same thing: "planned, day not decided". A payload that never
+    #: mentions a date still works exactly as it did before the column
+    #: existed, which is what keeps the bulk table and every older
+    #: client running unchanged.
+    date = serializers.DateField(required=False, allow_null=True)
     hours = serializers.DecimalField(
         max_digits=8, decimal_places=2, min_value=0
     )

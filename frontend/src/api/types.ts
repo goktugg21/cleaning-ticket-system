@@ -405,6 +405,19 @@ export interface TicketExtraWorkOrigin {
   extra_work_request_item_id: number;
   service_name: string | null;
   origin: "INSTANT" | "PROPOSAL";
+  /** W6-H — the CALLER'S OWN planned days on the parent Extra Work, and
+   *  nobody else's. Optional because the list serializer omits it.
+   *
+   *  This is the WORKER'S surface. A worker cannot open the parent
+   *  Extra Work at all — `scope_extra_work_for` returns none() for
+   *  STAFF, the P0 staff-privacy fix, with operational visibility
+   *  living on the spawned ticket instead — so "which days am I on"
+   *  had to be answered on the ticket they can already open.
+   *
+   *  `date: null` means "planned, day not decided". Hours only: no
+   *  rate, no cost, no other person's name. */
+  my_planned_hours?: { date: string | null; hours: string }[];
+  actual_hours_required?: boolean;
 }
 
 // Sprint 9B (backend) — operational schedule lifecycle on a ticket.
@@ -1976,6 +1989,12 @@ export interface ExtraWorkPlannedHoursRow {
   user_email: string;
   user_full_name: string;
   user_role: string;
+  /** W6-H — the day these hours are planned for, or NULL for "planned,
+   *  day not decided". NULL is a supported state, not a missing value:
+   *  every row written before W6-H has it, and a job whose window is
+   *  not set yet still plans hours. Render it as its own state, never
+   *  as a blank cell that reads like a gap. */
+  date: string | null;
   /** Decimal string, e.g. "4.00". Zero is legal and means "on the crew,
    *  no hours budgeted yet" — dropping the row to say so would lose the
    *  fact that they are on the job. */
@@ -2014,7 +2033,10 @@ export interface ExtraWorkPlanPayload {
   budget_hours?: string | null;
   provider_planned_date?: string | null;
   provider_planned_end_date?: string | null;
-  planned_hours?: { user: number; hours: string }[];
+  /** W6-H — one cell of the day grid. `date` omitted or null means
+   *  "planned, day not decided", which is what every pre-W6-H client
+   *  keeps sending and what the bulk table still sends. */
+  planned_hours?: { user: number; date?: string | null; hours: string }[];
   file_upload_required?: boolean;
   completion_notes_required?: boolean;
   /** Absent means START — plan and start are one action. Send `false`

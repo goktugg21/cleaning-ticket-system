@@ -304,11 +304,17 @@ def resolve_planned_hours(
     oracle and why the single-work path leaves it off.
     """
     context = extra_work if name_the_work else None
-    resolved: list[tuple[int, Decimal]] = []
-    seen: set[int] = set()
+    resolved: list[tuple[int, object, Decimal]] = []
+    seen: set[tuple[int, object]] = set()
+    seen_users: set[int] = set()
     for row in rows:
         user_id = row["user"]
-        if user_id in seen:
+        # W6-H — the grain is (person, DAY). The same person may appear
+        # once per day; twice on the SAME day is still the payload
+        # mistake the duplicate check was written for.
+        key = (user_id, row.get("date"))
+        seen_users.add(user_id)
+        if key in seen:
             # About the PAYLOAD, not about any id — so it says what is
             # wrong without becoming an existence oracle.
             body = {
@@ -330,24 +336,26 @@ def resolve_planned_hours(
                 body["extra_work_title"] = context.title
                 body["user"] = user_id
             raise PlanRejected(body)
-        seen.add(user_id)
-        resolved.append((user_id, _q2(row["hours"])))
+        seen.add(key)
+        resolved.append((user_id, row.get("date"), _q2(row["hours"])))
 
     if not resolved:
         return resolved
 
+    # ASSIGNED FIRST, THEN BUDGETED — unchanged by W6-H. Adding a day to
+    # a row does not create a second way to attach a person to a job.
     assigned = set(
         ExtraWorkAssignment.objects.filter(
-            extra_work_request=extra_work, user_id__in=seen
+            extra_work_request=extra_work, user_id__in=seen_users
         ).values_list("user_id", flat=True)
     )
-    if assigned != seen:
+    if assigned != seen_users:
         # The FIRST unresolved person in PAYLOAD order, so the id named
         # is a function of the request and not of iteration order over a
         # set — two identical requests must produce two identical
         # bodies, or the equality property above is not a property.
         first_bad = next(
-            (uid for uid, _ in resolved if uid not in assigned), None
+            (uid for uid, _, _ in resolved if uid not in assigned), None
         )
         _reject_hours(context, first_bad)
     return resolved
@@ -357,30 +365,40 @@ def _write_planned_hours(extra_work, resolved, *, actor) -> str:
     """Replace this work's distribution with `resolved`. Returns a note fragment.
 
     REPLACE, not merge: the list submitted IS the distribution, so an
-    omitted person's row is deleted and `planned_hours: []` clears the
-    lot. The three states stay legible — absent leaves the distribution
-    alone, `[]` empties it, a list sets it — and an operator who removes
-    a line from the plan modal gets the removal they asked for rather
-    than a stale row nobody can see how to delete.
+    omitted (person, day) row is deleted and `planned_hours: []` clears
+    the lot. The three states stay legible — absent leaves the
+    distribution alone, `[]` empties it, a list sets it — and an
+    operator who clears a cell in the day grid gets the removal they
+    asked for rather than a stale row nobody can see how to delete.
+
+    W6-H — THE KEY IS (person, DAY). A person with 8 hours on Monday and
+    6 on Tuesday is two rows, and a person with an undated total is one
+    row keyed `(person, None)`. That means submitting a dated grid for
+    somebody who previously had one undated total REPLACES the total
+    with the days, which is the intended reading: the operator has just
+    decided the days.
 
     Instance `.delete()` and `objects.update_or_create()` per row, never
     a queryset `.update()`: the bulk paths in the reference system fire
     no model events at all, which is why a work can move there leaving
     no trace of who moved it.
     """
-    wanted = dict(resolved)
-    existing = {row.user_id: row for row in extra_work.planned_hours.all()}
+    wanted = {(user_id, on_date): hours for user_id, on_date, hours in resolved}
+    existing = {
+        (row.user_id, row.date): row for row in extra_work.planned_hours.all()
+    }
 
-    for user_id, row in existing.items():
-        if user_id not in wanted:
+    for key, row in existing.items():
+        if key not in wanted:
             row.delete()
 
-    for user_id, hours in resolved:
-        row = existing.get(user_id)
+    for (user_id, on_date), hours in wanted.items():
+        row = existing.get((user_id, on_date))
         if row is None:
             ExtraWorkPlannedHours.objects.create(
                 extra_work_request=extra_work,
                 user_id=user_id,
+                date=on_date,
                 hours=hours,
                 set_by=actor,
             )
@@ -391,12 +409,18 @@ def _write_planned_hours(extra_work, resolved, *, actor) -> str:
 
     if not resolved:
         return "hours distribution cleared"
-    total = sum((hours for _, hours in resolved), Decimal("0.00"))
-    people = len(resolved)
-    return (
+    total = sum((hours for _, _, hours in resolved), Decimal("0.00"))
+    people = len({user_id for user_id, _, _ in resolved})
+    days = {on_date for _, on_date, _ in resolved if on_date is not None}
+    fragment = (
         f"hours for {people} "
         f"{'person' if people == 1 else 'people'} ({total:.2f}h)"
     )
+    if days:
+        fragment += (
+            f" across {len(days)} {'day' if len(days) == 1 else 'days'}"
+        )
+    return fragment
 
 
 def _start(extra_work, *, actor) -> tuple[bool, str | None, object]:

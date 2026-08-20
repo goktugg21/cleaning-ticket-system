@@ -706,6 +706,20 @@ export function BulkPlanDialog({
                               hours for anyone not assigned), so it is
                               shown and explained rather than dropped
                               from the screen while still counting. */}
+                          {/* W6-H — SAID PLAINLY, not dropped in
+                              silence. The per-work plan dialog sets
+                              hours per DAY; this table sets a per-person
+                              total with no day, because a day grid per
+                              work inside a table of twelve works is not
+                              a usable control. An operator who plans
+                              here and then opens one work must not be
+                              surprised to find the day column empty. */}
+                          <p
+                            className="muted small"
+                            data-testid="extra-work-bulk-plan-no-days"
+                          >
+                            {t("plan.bulk_hours_no_days")}
+                          </p>
                           {stale.length > 0 && (
                             <p
                               className="ew-bulk-plan-stale"

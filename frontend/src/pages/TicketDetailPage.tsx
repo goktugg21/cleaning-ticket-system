@@ -1795,6 +1795,44 @@ export function TicketDetailPage() {
             <RouteBadge value={ticket.extra_work_origin.origin} />
           </div>
         )}
+
+        {/* W6-H — MY PLANNED DAYS.
+            The worker's answer to "which days am I on this job, and for
+            how many hours". It lives here because a worker cannot open
+            the parent Extra Work at all (scope_extra_work_for returns
+            none() for STAFF, the P0 staff-privacy fix), so the ticket is
+            the surface they already use.
+
+            The caller's OWN rows and nobody else's — the server filters
+            by the requesting user, so this is not a crew roster and
+            carries no other person's name and no money. Rendered only
+            when there is something to say. */}
+        {(ticket.extra_work_origin?.my_planned_hours?.length ?? 0) > 0 && (
+          <div
+            className="ticket-my-planned-hours"
+            data-testid="ticket-my-planned-hours"
+          >
+            <span className="muted small">
+              {t("detail.my_planned_days_label")}
+            </span>{" "}
+            {ticket.extra_work_origin?.my_planned_hours?.map((row) => (
+              <span
+                key={row.date ?? "none"}
+                className="ticket-my-planned-day"
+                data-testid="ticket-my-planned-day"
+                data-date={row.date ?? ""}
+              >
+                {/* No day yet is a REAL state, not a blank. It is what
+                    every plan said before days existed. */}
+                {row.date ?? t("detail.my_planned_no_day")}
+                {": "}
+                <strong>
+                  {t("detail.my_planned_hours_value", { hours: row.hours })}
+                </strong>
+              </span>
+            ))}
+          </div>
+        )}
           </div>{/* end .detail-header-band-main */}
 
           {/* WHERE the work is and WHO it is for. Still ALSO rendered

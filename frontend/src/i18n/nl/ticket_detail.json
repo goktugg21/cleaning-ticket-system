@@ -4,7 +4,6 @@
   "priority_long_normal": "Normale prioriteit",
   "priority_long_high": "Hoge prioriteit",
   "priority_long_urgent": "Kritieke prioriteit",
-
   "card_activity_title": "Activiteitstijdlijn",
   "activity_show": "Tonen",
   "activity_hide": "Verbergen",
@@ -15,7 +14,6 @@
   "timeline_status_to": " naar ",
   "timeline_created_as": " heeft het ticket aangemaakt als ",
   "status_default_created": "Aangemaakt",
-
   "card_messages_title": "Berichten en interne notities",
   "composer_internal_placeholder": "Interne notitie — niet zichtbaar voor klanten.",
   "composer_public_placeholder": "Schrijf een reactie…",
@@ -35,7 +33,6 @@
   "tag_staff_operational": "Operationeel",
   "tag_staff_completion": "Afronding",
   "tag_customer_internal": "Intern (mijn team)",
-
   "card_attachments_title": "Bijlagen",
   "photo_policy_label": "Foto's van medewerkers bij DEZE opdracht gaan direct naar de klant",
   "photo_policy_help_off": "Uit: een foto die een medewerker bij deze opdracht uploadt blijft intern totdat een manager van de dienstverlener die vrijgeeft.",
@@ -63,7 +60,6 @@
   "upload_button": "Uploaden",
   "attachment_too_large": "Bijlage mag niet groter zijn dan 10 MB.",
   "internal_pill": "Intern",
-
   "card_assignment_title": "Toewijzing",
   "side_summary_assignment_one": "{{count}} medewerker",
   "side_summary_assignment_other": "{{count}} medewerkers",
@@ -77,7 +73,6 @@
   "assignment_current": " (huidig)",
   "update_assignment": "Toewijzing bijwerken",
   "updating": "Bijwerken…",
-
   "card_details_title": "Ticketgegevens",
   "details_location": "Locatie",
   "details_customer": "Klant",
@@ -90,13 +85,11 @@
   "details_closed": "Gesloten",
   "details_subsection_contacts": "Contactpersonen klant",
   "details_subsection_sla": "SLA",
-
   "card_sla_title": "SLA",
   "sla_due_label": "Verloopt",
   "sla_paused_since_label": "Gepauzeerd sinds",
   "sla_first_breached_label": "Eerst overschreden",
   "sla_completed_label": "Voltooid op",
-
   "card_workflow_title": "Werkstroom",
   "card_workflow_title_staff_complete": "Voltooi je toegewezen werk",
   "card_workflow_subtitle_staff_complete": "Dit wordt gerouteerd op basis van je gebouwinstellingen.",
@@ -126,13 +119,10 @@
   "assignment_section_bm_helper": "De gebouwbeheerder die dit ticket vanuit de providerzijde beheert. Hij/zij stuurt het werk aan en bewaakt de afronding.",
   "workflow_completion_evidence_hint": "Upload indien mogelijk een foto van het uitgevoerde werk. Zo kunnen de manager en de klant het resultaat controleren. Als er geen foto beschikbaar is, schrijf dan in plaats daarvan een korte afrondingsnotitie.",
   "workflow_completion_evidence_required": "Voeg een afrondingsnotitie toe of plaats een foto van het uitgevoerde werk voordat u dit ticket ter goedkeuring aan de klant stuurt.",
-
   "card_history_title": "Statusgeschiedenis",
   "history_empty": "Nog geen statuswijzigingen.",
-
   "card_critical_title": "Kritieke prioriteit",
   "card_critical_body": "Dit ticket is als urgent gemarkeerd. Geef voorrang aan de uitvoering en informeer de klant zodra een uitvoerder ter plaatse is.",
-
   "delete_ticket_button": "Per ongeluk geopend ticket verwijderen",
   "delete_ticket_footer_link": "Dit ticket verwijderen (per ongeluk aangemaakt)",
   "delete_ticket_dialog_title": "Ticket {{ticket_no}} verwijderen",
@@ -141,7 +131,6 @@
   "delete_ticket_confirm_button": "Ticket verwijderen",
   "delete_ticket_confirm_busy": "Verwijderen…",
   "delete_ticket_failed": "Kon het ticket niet verwijderen. {{detail}}",
-
   "assigned_staff_title": "Toegewezen veldmedewerkers",
   "assigned_staff_empty": "Nog geen medewerker toegewezen.",
   "upload_grant_section_heading": "Fotorechten — ALLEEN DEZE OPDRACHT",
@@ -170,7 +159,6 @@
   "request_assignment_cancelled_success": "Aanvraag geannuleerd. Je kunt later een nieuwe aanvraag indienen.",
   "request_assignment_cancel_dialog_title": "Deze toewijzingsaanvraag annuleren?",
   "request_assignment_cancel_dialog_body": "De aanvraag wordt verplaatst naar Geannuleerd. Je kunt later een nieuwe aanvraag voor dit ticket indienen.",
-
   "assigned_staff_admin_title": "Medewerker toewijzen",
   "assigned_staff_admin_desc": "Voeg een medewerker rechtstreeks aan dit ticket toe. Een aanvraag van de medewerker is niet nodig.",
   "assigned_staff_admin_select_placeholder": "Kies een geschikte medewerker…",
@@ -183,7 +171,6 @@
   "assigned_staff_admin_remove_dialog_body": "{{name}} wordt niet langer als toegewezen aan dit ticket getoond. Je kunt deze medewerker later opnieuw toevoegen.",
   "assigned_staff_admin_banner_added": "{{name}} toegevoegd als toegewezen medewerker.",
   "assigned_staff_admin_banner_removed": "{{name}} verwijderd uit toegewezen medewerkers.",
-
   "override_modal_title": "Klantbeslissing overschrijven",
   "override_modal_prompt": "Waarom overschrijf je de beslissing van de klant? Dit wordt vastgelegd in het auditlog.",
   "override_inline_helper": "Dit overschrijft de beslissing van de klant en wordt vastgelegd in de statusgeschiedenis.",
@@ -200,7 +187,6 @@
   "timeline_ew_relation_converted_source": "omgezette bron",
   "timeline_ew_status_change": "Meerwerk #{{id}}:",
   "timeline_occurrence_reference": "Voortgekomen uit geplande uitvoering #{{id}} · {{date}}",
-
   "resp_mgr.title": "Verantwoordelijke beheerders",
   "resp_mgr.count_one": "{{count}} beheerder",
   "resp_mgr.count_other": "{{count}} beheerders",
@@ -214,7 +200,6 @@
   "resp_mgr.no_candidates": "Geen geschikte beheerders voor dit gebouw.",
   "resp_mgr.error_terminal": "Dit ticket is gesloten of afgehandeld; verantwoordelijke beheerders kunnen niet meer worden gewijzigd.",
   "resp_mgr.error_not_eligible": "Die beheerder is niet geschikt voor dit gebouw.",
-
   "convert.dialog_title": "Converteer naar Extra Werk",
   "convert.dialog_desc": "Maak een nieuw Extra Werk-verzoek aan op basis van dit ticket. Dit ticket wordt gemarkeerd als geconverteerd en er wordt een nieuw verzoek aangemaakt met de regels hieronder.",
   "convert.intent_section_title": "Hoe moet dit verzoek worden afgehandeld?",
@@ -247,9 +232,7 @@
   "convert.cancel_button": "Annuleren",
   "convert.submit_button": "Converteer naar Extra Werk",
   "convert.submitting": "Converteren…",
-
   "detail.spawned_from_label": "Voortgekomen uit extra werk",
-
   "schedule.card_title": "Planning",
   "schedule.current_date_label": "Geplande datum",
   "schedule.not_scheduled": "Nog niet ingepland",
@@ -288,6 +271,8 @@
   "directed.private_off_hint": "Iedereen die dit ticket kan zien, ziet dit bericht; de geselecteerde personen krijgen ook een notificatie.",
   "directed.private_disabled_hint": "Selecteer minstens één persoon om dit bericht privé te maken.",
   "directed.private_badge": "Privé",
-  "directed.bubble_prefix": "Gericht aan:"
+  "directed.bubble_prefix": "Gericht aan:",
+  "detail.my_planned_days_label": "Jouw geplande dagen:",
+  "detail.my_planned_no_day": "Nog geen dag",
+  "detail.my_planned_hours_value": "{{hours}} uur"
 }
-

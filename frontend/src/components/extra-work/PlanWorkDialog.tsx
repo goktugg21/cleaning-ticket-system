@@ -52,6 +52,8 @@
  * rule is about the native `<dialog>` element, which this is not.
  */
 import { useMemo, useState } from "react";
+
+import { dayRange } from "../../lib/planGridDays";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Users } from "lucide-react";
 
@@ -69,6 +71,13 @@ import { formatDate } from "../../lib/intl";
 function toHours(value: string): number {
   const parsed = Number.parseFloat((value ?? "").replace(",", "."));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** `19-11` — short enough for a column head, unambiguous in a window
+ *  that never spans a year. */
+function formatDayHeader(day: string): string {
+  const [, month, dayOfMonth] = day.split("-");
+  return `${dayOfMonth}-${month}`;
 }
 
 export function PlanWorkDialog({
@@ -108,24 +117,68 @@ export function PlanWorkDialog({
   const [photoTouched, setPhotoTouched] = useState(false);
   const [notesTouched, setNotesTouched] = useState(false);
 
-  // Seeded from what is already planned, keyed by user id, so reopening
-  // the dialog shows the plan rather than a blank grid.
+  // W6-H — THE GRID. Keyed `userId|YYYY-MM-DD`, with the empty string
+  // as the day for "planned, day not decided". One flat map rather than
+  // a nested one because every read here is a single cell and a flat
+  // key makes an accidental whole-row overwrite unspellable.
+  const cellKey = (userId: number, day: string) => `${userId}|${day}`;
+
+  // Seeded from what is already planned, so reopening the dialog shows
+  // the plan rather than a blank grid.
   const seeded = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const row of ew.planned_hours ?? []) map.set(row.user_id, row.hours);
+    const map = new Map<string, string>();
+    for (const row of ew.planned_hours ?? []) {
+      map.set(cellKey(row.user_id, row.date ?? ""), row.hours);
+    }
     return map;
   }, [ew.planned_hours]);
 
-  const [hours, setHours] = useState<Record<number, string>>(() => {
-    const initial: Record<number, string> = {};
-    for (const a of assignments) initial[a.user_id] = seeded.get(a.user_id) ?? "";
+  const [hours, setHours] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const [key, value] of seeded) initial[key] = value;
     return initial;
   });
 
-  const distributed = assignments.reduce(
-    (sum, a) => sum + toHours(hours[a.user_id] ?? ""),
+  // THE COLUMNS ARE THE COMMITTED WINDOW the plan already stores. They
+  // follow the two date fields above live, so moving the window
+  // re-draws the grid without a save — which is the only way the two
+  // controls can be understood as one decision.
+  const days = useMemo(() => dayRange(start, end), [start, end]);
+
+  // Every cell in the grid, plus every UNDATED cell, plus any cell on a
+  // day that is no longer in the window. That last group matters: hours
+  // planned for a Thursday that has since been dropped from the window
+  // still exist server-side and still count, so hiding them from the
+  // total would put the screen and the server at odds — the reference
+  // system's §4.4 defect, one level down.
+  const liveKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const a of assignments) {
+      keys.add(cellKey(a.user_id, ""));
+      for (const day of days) keys.add(cellKey(a.user_id, day));
+    }
+    for (const key of Object.keys(hours)) keys.add(key);
+    return keys;
+  }, [assignments, days, hours]);
+
+  const distributed = Array.from(liveKeys).reduce(
+    (sum, key) => sum + toHours(hours[key] ?? ""),
     0,
   );
+
+  const personTotal = (userId: number) => {
+    let sum = 0;
+    for (const key of liveKeys) {
+      if (key.startsWith(`${userId}|`)) sum += toHours(hours[key] ?? "");
+    }
+    return sum;
+  };
+
+  const dayTotal = (day: string) =>
+    assignments.reduce(
+      (sum, a) => sum + toHours(hours[cellKey(a.user_id, day)] ?? ""),
+      0,
+    );
   const budgetHours = toHours(budget);
   // A budget of zero is a real budget; only a BLANK one means "no budget
   // set", which is nothing to overrun. Same reading as the server's
@@ -143,13 +196,34 @@ export function PlanWorkDialog({
     if (start !== "") payload.provider_planned_date = start;
     if (end !== "") payload.provider_planned_end_date = end;
     if (assignments.length > 0) {
-      payload.planned_hours = assignments.map((a) => ({
-        user: a.user_id,
-        // Zero is legal and means "on the crew, no hours budgeted yet".
-        hours: (hours[a.user_id] ?? "").trim() === ""
-          ? "0"
-          : (hours[a.user_id] ?? "").trim().replace(",", "."),
-      }));
+      // W6-H — one entry per NON-EMPTY cell. A blank cell is not "zero
+      // hours on that day", it is "no plan for that day", and sending a
+      // zero for every day of a two-week window would fill the grid
+      // with rows nobody entered.
+      //
+      // The person-level exception is deliberate: somebody on the crew
+      // with nothing anywhere still gets one undated zero row, because
+      // "on the job, no hours budgeted yet" is a state the plan has
+      // always been able to express and losing it would drop them off
+      // the screen entirely.
+      const cells: { user: number; date?: string | null; hours: string }[] = [];
+      for (const a of assignments) {
+        let any = false;
+        for (const key of liveKeys) {
+          if (!key.startsWith(`${a.user_id}|`)) continue;
+          const raw = (hours[key] ?? "").trim();
+          if (raw === "") continue;
+          const day = key.slice(key.indexOf("|") + 1);
+          cells.push({
+            user: a.user_id,
+            date: day === "" ? null : day,
+            hours: raw.replace(",", "."),
+          });
+          any = true;
+        }
+        if (!any) cells.push({ user: a.user_id, date: null, hours: "0" });
+      }
+      payload.planned_hours = cells;
     }
     if (photoTouched) payload.file_upload_required = photoRequired;
     if (notesTouched) payload.completion_notes_required = notesRequired;
@@ -279,38 +353,106 @@ export function PlanWorkDialog({
             </div>
           ) : (
             <>
-              <ul className="ew-plan-crew">
-                {assignments.map((a) => (
-                  <li
-                    key={a.user_id}
-                    className="ew-plan-crew-row"
-                    data-testid="extra-work-plan-crew-row"
-                  >
-                    <span className="ew-plan-crew-name">
-                      {a.user_full_name || a.user_email}
-                    </span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.25"
-                      inputMode="decimal"
-                      className="field-input ew-plan-crew-hours"
-                      value={hours[a.user_id] ?? ""}
-                      onChange={(e) =>
-                        setHours((prev) => ({
-                          ...prev,
-                          [a.user_id]: e.target.value,
-                        }))
-                      }
-                      aria-label={t("plan.hours_for", {
-                        name: a.user_full_name || a.user_email,
-                      })}
-                      data-testid="extra-work-plan-crew-hours"
-                    />
-                  </li>
-                ))}
-              </ul>
-              <div className="ew-plan-total" data-testid="extra-work-plan-total">
+              {/* W6-H — PEOPLE DOWN THE SIDE, PLANNED DAYS ACROSS THE
+                  TOP. The columns are the committed window the plan
+                  already stores, so setting the window and filling the
+                  grid are one decision rather than two screens.
+
+                  The "no day yet" column is always present and is not a
+                  fallback: a plan can legitimately say "Gokhan: 8
+                  hours" before anyone has decided which day, and that
+                  was the ONLY thing this dialog could say before W6-H.
+                  Dropping it would break every existing plan. */}
+              <div className="table-wrap">
+                <table className="data-table ew-plan-grid">
+                  <thead>
+                    <tr>
+                      <th className="ew-plan-grid-name">
+                        {t("plan.grid_person")}
+                      </th>
+                      <th className="ew-plan-grid-cell">
+                        {t("plan.grid_no_day")}
+                      </th>
+                      {days.map((day) => (
+                        <th key={day} className="ew-plan-grid-cell">
+                          {formatDayHeader(day)}
+                        </th>
+                      ))}
+                      <th className="ew-plan-grid-cell">
+                        {t("plan.grid_row_total")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {assignments.map((a) => (
+                      <tr
+                        key={a.user_id}
+                        data-testid="extra-work-plan-crew-row"
+                        data-user-id={a.user_id}
+                      >
+                        <td className="ew-plan-grid-name">
+                          {a.user_full_name || a.user_email}
+                        </td>
+                        {["", ...days].map((day) => (
+                          <td key={day || "none"} className="ew-plan-grid-cell">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.25"
+                              inputMode="decimal"
+                              className="field-input ew-plan-crew-hours"
+                              value={hours[cellKey(a.user_id, day)] ?? ""}
+                              onChange={(e) =>
+                                setHours((prev) => ({
+                                  ...prev,
+                                  [cellKey(a.user_id, day)]: e.target.value,
+                                }))
+                              }
+                              aria-label={`${t("plan.hours_for", {
+                                name: a.user_full_name || a.user_email,
+                              })} ${day || t("plan.grid_no_day")}`}
+                              data-testid="extra-work-plan-crew-hours"
+                              data-day={day}
+                            />
+                          </td>
+                        ))}
+                        <td className="ew-plan-grid-cell">
+                          <strong data-testid="extra-work-plan-row-total">
+                            {personTotal(a.user_id).toFixed(2)}
+                          </strong>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td className="ew-plan-grid-name">
+                        {t("plan.grid_day_total")}
+                      </td>
+                      <td className="ew-plan-grid-cell" />
+                      {days.map((day) => (
+                        <td key={day} className="ew-plan-grid-cell">
+                          {dayTotal(day).toFixed(2)}
+                        </td>
+                      ))}
+                      <td className="ew-plan-grid-cell">
+                        <strong data-testid="extra-work-plan-total">
+                          {distributed.toFixed(2)}
+                        </strong>
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              {days.length === 0 && (
+                <p
+                  className="muted small"
+                  data-testid="extra-work-plan-no-window"
+                >
+                  {t("plan.grid_no_window")}
+                </p>
+              )}
+              <div className="ew-plan-total" data-testid="extra-work-plan-total-line">
                 <span>{t("plan.distributed_label")}</span>
                 <strong>
                   {t("plan.hours_value", { hours: distributed.toFixed(2) })}
