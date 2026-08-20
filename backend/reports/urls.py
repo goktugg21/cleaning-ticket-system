@@ -1,6 +1,10 @@
 from django.urls import path
 
 from .views_extra_work_hours import ExtraWorkHoursView
+from .views_labour_rates import (
+    EmployeeHourlyRateDetailView,
+    EmployeeHourlyRateListCreateView,
+)
 from .views import (
     EmployeeHoursByBuildingView,
     EmployeeHoursByExtraWorkView,
@@ -258,6 +262,21 @@ urlpatterns = [
         "extra-work-revenue-by-building/export.pdf",
         ExtraWorkRevenueByBuildingPDFView.as_view(),
         name="reports-extra-work-revenue-by-building-pdf",
+    ),
+    # ---- W4-R: the per-person hourly rate. SA / CA only, at the door
+    # and again in the queryset — a wage is personal data and a
+    # BUILDING_MANAGER is refused here even though they are admitted to
+    # every other reports surface. Literal segment BEFORE the detail
+    # route, the ordering this repo keeps. ------------------------------
+    path(
+        "employee-hourly-rates/",
+        EmployeeHourlyRateListCreateView.as_view(),
+        name="reports-employee-hourly-rates",
+    ),
+    path(
+        "employee-hourly-rates/<int:pk>/",
+        EmployeeHourlyRateDetailView.as_view(),
+        name="reports-employee-hourly-rate-detail",
     ),
     # ---- W3-H: the hours booked to ONE extra work, with the roll-up of
     # budget / entered / cost. Read by the panel on the Extra Work detail

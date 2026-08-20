@@ -1,6 +1,17 @@
 """
 W3-H — the hours booked to one extra work, and what they cost.
 
+W4-R note: the rate stopped being one global number and became
+`reports.models.EmployeeHourlyRate` — per person, dated, resolved as of
+the day of the hour. Nothing in this module changed its MEANING. The
+deployment setting these tests configure is still the fallback for
+anyone with no personal rate, so every assertion below still says what
+it said; what the per-person rate adds is covered in
+`test_w4r_employee_hourly_rate.py` and `test_w4r_labour_rate_api.py`.
+Two things here were tightened rather than replaced: the purity test now
+also refuses the new model's NAME inside `timesheets/`, and the
+budget-does-not-feed-cost test gained a per-person twin.
+
 Six things are pinned, and each is a rule somebody could undo without
 any other test noticing:
 
@@ -287,6 +298,34 @@ class LabourCostTests(ExtraWorkHoursBase):
         self.assertEqual(before, after)
         self.assertEqual(after["hours_cost"], "100.00")
 
+    def test_BUDGET_HOURS_NEVER_TOUCHES_MONEY_with_a_PERSONAL_rate_either(self):
+        """W4-R's twin of the rule above. The per-person rate made the
+        cost path go through a second lookup; the budget must be no
+        nearer it than it was. Multiply the budget by a hundred and
+        every cost figure stays byte-identical."""
+        from decimal import Decimal as D
+
+        from reports.models import EmployeeHourlyRate
+
+        EmployeeHourlyRate.objects.create(
+            company=self.company_a,
+            employee=self.staff_a,
+            hourly_rate=D("22.00"),
+            valid_from=date(2026, 1, 1),
+            created_by=self.ca_a,
+        )
+        self.hours_on(self.staff_a, self.ew_a, MONDAY, "4.00")
+        self.ew_a.budget_hours = D("4.00")
+        self.ew_a.save(update_fields=["budget_hours"])
+        before = self.api(self.ca_a).get(url(self.ew_a.id)).data["cost"]
+
+        self.ew_a.budget_hours = D("400.00")
+        self.ew_a.save(update_fields=["budget_hours"])
+        after = self.api(self.ca_a).get(url(self.ew_a.id)).data["cost"]
+
+        self.assertEqual(before, after)
+        self.assertEqual(after["hours_cost"], "88.00")
+
     def test_the_timesheets_module_computes_no_money(self):
         """The rule this sprint exists to keep, asserted against the
         source rather than trusted: no rate, wage or cost multiplication
@@ -301,7 +340,20 @@ class LabourCostTests(ExtraWorkHoursBase):
             if "tests" in path.parts or "migrations" in path.parts:
                 continue
             text = path.read_text(encoding="utf-8").lower()
-            for needle in ("hourly_rate", "labour_cost", "labor_cost"):
+            for needle in (
+                "hourly_rate",
+                "labour_cost",
+                "labor_cost",
+                # W4-R — the model name, in every spelling an import
+                # would produce. `EmployeeHourlyRate` lowercases to
+                # `employeehourlyrate`, which the `hourly_rate` needle
+                # above does NOT catch: a snapshot column or a rate
+                # lookup could have been added here and passed the old
+                # test. It cannot now.
+                "employeehourlyrate",
+                "hourlyrate",
+                "employee_hourly_rate",
+            ):
                 if needle in text:
                     offenders.append(f"{path.name}: {needle}")
         self.assertEqual(offenders, [])

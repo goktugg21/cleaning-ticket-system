@@ -44,11 +44,32 @@ So:
     nothing outside a customer's own tenant. A worker reads their own
     hours in the timesheets module, where that same pair applies.
 
+**W4-R, and this is why the BM answer is NO COST rather than a total.**
+A one-person job's labour cost divided by its hours IS that person's
+hourly rate. Handing a BUILDING_MANAGER a job total and an hours total
+would hand them a wage by division on every single-worker job, which is
+most of them — and a wage is exactly what the owner decided a BM does
+not see. There is no partial answer that closes that: rounding it,
+bucketing it or showing only the total still divides. So the cost block
+is ABSENT for a BM (`cost: null`), on every job, whatever the crew size,
+and the same rule keeps a BM out of the rate endpoints entirely
+(`reports.labour_rate_scope`). A BM who worked on the job sees their own
+hours, as they do everywhere else, and no money beside them.
+
 ## COST IS NOT COMPUTED HERE
 
 It is computed in `reports.labour_cost`, which is the one place, and it
 is handed the weighted hours this module summed. Nothing in
 `timesheets/` is asked for money and nothing here multiplies by a rate.
+
+**W4-R: it is handed them PER PERSON PER DAY, not as one total.** The
+rate is now `reports.models.EmployeeHourlyRate` — one row per person
+from a date — so pricing an hour needs to know whose hour it was and
+which day it fell on. The aggregate below already groups at exactly
+that grain for the grid, so the `HourSegment` list is a second reading
+of the rows it was fetching anyway, not a second query. Handing over a
+single summed figure would force the cost module to guess a rate, and
+guessing is how a March raise re-prices January.
 
 ## WHY THIS IS NOT THE REPORT NEXT DOOR
 
@@ -83,7 +104,7 @@ from timesheets.scope import (
     restrict_entries_to_self,
 )
 
-from .labour_cost import labour_cost
+from .labour_cost import HourSegment, labour_cost
 
 
 #: How many day columns the grid returns, most recent first-kept.
@@ -161,6 +182,7 @@ def extra_work_hours_report(user, extra_work) -> dict:
     )
 
     rows: dict[tuple[int, int], dict] = {}
+    segments: list[HourSegment] = []
     all_days: set = set()
     total_hours = Decimal("0")
     total_weighted = Decimal("0")
@@ -193,6 +215,19 @@ def extra_work_hours_report(user, extra_work) -> dict:
         row["_weighted"] += record["weighted"] or Decimal("0")
         total_hours += record["summed_hours"] or Decimal("0")
         total_weighted += record["weighted"] or Decimal("0")
+        # W4-R — the costing grain: whose hours, on which day, weighted.
+        # Collected from the SAME aggregate rows the grid is built from,
+        # so the rate lookup costs one extra query for the whole crew
+        # rather than one per cell. Every entry contributes, including
+        # the days the grid window later drops: the window truncates
+        # what is DRAWN, never what is counted.
+        segments.append(
+            HourSegment(
+                employee_id=record["employee_id"],
+                on_date=record["date"],
+                weighted_hours=record["weighted"] or Decimal("0"),
+            )
+        )
 
     ordered_days = sorted(all_days)
     days_omitted = max(0, len(ordered_days) - MAX_DAY_COLUMNS)
@@ -244,7 +279,7 @@ def extra_work_hours_report(user, extra_work) -> dict:
     manager = is_timesheet_manager(user)
     cost = (
         labour_cost(
-            weighted_hours=total_weighted,
+            segments=segments,
             travel_costs=travel_total,
             company_id=extra_work.company_id,
         )

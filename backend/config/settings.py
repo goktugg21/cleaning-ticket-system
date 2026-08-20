@@ -405,17 +405,22 @@ SLA_WARN_COOLDOWN_HOURS = int(os.environ.get("SLA_WARN_COOLDOWN_HOURS", "24"))
 # W3-H — the hourly rate labour cost is computed at (plan §2.8).
 #
 # UNSET BY DEFAULT, and the default is the design rather than a gap.
-# There is no wage anywhere in this system: not on `User`, not on
-# `StaffProfile`, not on `HourType` — `timesheets` is written never to
-# hold one, and says so at the field. Until a real per-person rate is
-# designed (its own sprint, with its own privacy story), this is the one
-# knob, and leaving it unset means the hours screen states plainly that
-# no rate is configured instead of printing a cost of EUR 0,00 — which
-# would claim the work cost nothing.
+# The FALLBACK hourly rate, for anyone with no personal one.
 #
-# Read ONLY by `reports.labour_cost.resolve_hourly_rate`. A second reader
-# would be a second rule; that function is the seam a per-person rate
-# replaces.
+# W4-R designed the per-person rate this comment used to await:
+# `reports.models.EmployeeHourlyRate`, one dated row per person per
+# company, resolved as of the DAY of the hour being costed so a raise
+# never re-prices past work. It lives in `reports` because `timesheets`
+# is written never to hold a wage and says so at the field.
+#
+# This setting is what costs the hours of somebody who has no row. Leave
+# it unset and those hours are simply not costed — the hours screen says
+# so rather than printing EUR 0,00, which would claim the work cost
+# nothing. A crew where SOME people are unpriced yields no job total at
+# all, not a partial one.
+#
+# Read ONLY by `reports.labour_cost.resolve_deployment_hourly_rate`. A
+# second reader would be a second rule.
 LABOUR_COST_HOURLY_RATE_EUR = os.environ.get("LABOUR_COST_HOURLY_RATE_EUR", "")
 
 CELERY_BEAT_SCHEDULE = {

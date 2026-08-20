@@ -1179,6 +1179,81 @@ same page built from the branch point in a second worktree.
   complete function that is never called, under the comment "// Hours
   validation removed per user request".
 
+### Done — W4-R: a wage per person, dated, and nobody's business but two roles'
+
+W3-H shipped ONE deployment-wide hourly rate and said so out loud: the only
+knob until a real per-person rate was designed. This is that design, plus the
+privacy rule that has to come with it.
+
+- **The rate is per person AND dated.** New model
+  `reports.models.EmployeeHourlyRate` — one row per (employee, company,
+  `valid_from`), open-ended and superseded rather than edited. The rate that
+  costs an hour is the row in force **on the day of that hour**: latest
+  `valid_from` at or before it, ties by `-id`, the identical resolution shape
+  `extra_work.pricing.resolve_price` and `timesheets.ContractHours` already
+  use. Additive migration `reports/0001_initial.py` — the first model in an app
+  that until now was views over other apps' tables.
+- **A RAISE NEVER RE-PRICES THE PAST, and that is the decision the sprint
+  turned on.** Two ways to get it: snapshot the rate onto the hour entry, or
+  version the rate and resolve it by date. **Time-ranged, because the snapshot
+  is not available to us** — it needs a money column on `TimeEntry`, which is a
+  `timesheets` model, and that module holds no wage by rule and by a test that
+  walks its every file. The seam W3-H named
+  (`reports.labour_cost.resolve_hourly_rate`) exists so the answer never has to
+  reach into that app, and it did not. `valid_from` alone with no `valid_to`: a
+  closed range can leave a GAP, and a gap silently falls through to the
+  deployment rate — a different number arrived at by nobody's decision.
+- **Cost is now computed per person per day, not over one summed total.**
+  `labour_cost()` takes `HourSegment(employee_id, on_date, weighted_hours)`
+  and prices each at its own rate; `RateBook` loads a whole crew's history in
+  ONE query. A job that ran across a raise costs January's days at January's
+  rate and May's at May's — 8h at EUR 20.00 plus 8h at EUR 31.75 is EUR 414.00,
+  not 16h at either.
+- **The global rate is still the FALLBACK** for anyone with no personal rate,
+  and when neither exists every cost figure is still NULL. **A zero is never
+  printed** — "we do not know" and "it was free" stay different claims.
+- **Partial knowledge is not a total.** A crew where one person has no rate and
+  there is no fallback produces NO `hours_cost` and NO `total_cost` — plus
+  `unrated_weighted_hours`, so the absence carries its reason instead of being
+  a blank. A figure covering two thirds of a job is the number an operator
+  reads as the job's cost and acts on.
+- **A wage is personal data, and the line is enforced at the API.** New
+  `IsLabourRateManager` + `reports/labour_rate_scope.py`: SUPER_ADMIN and
+  COMPANY_ADMIN (own company only). **BUILDING_MANAGER is refused** — every
+  verb, every URL — even though they are admitted to every OTHER reports
+  surface by `IsRevenueReportConsumer`; STAFF are refused including for their
+  own rate; every customer-side role always. Tested by calling the real URLs
+  as each of the five roles, not by checking a screen.
+- **The back door is closed and here is the choice.** A one-person job's
+  labour cost divided by its hours IS that person's rate. There is no partial
+  answer that survives that division, so a BUILDING_MANAGER gets **no cost
+  block at all** on the hours panel — `cost: null`, on every job, whatever the
+  crew size, whether the rate is personal or global, and including a job they
+  worked themselves. They see their own hours, as they do everywhere else, and
+  no money beside them.
+- **BUDGET HOURS STILL NEVER FEEDS COST.** W3-H's test (multiply the budget by
+  a hundred, assert every cost figure byte-identical) still passes, and gained
+  a twin that does the same with a personal rate in play — the per-person path
+  added a second lookup and the budget had to stay no nearer it than before.
+- **The timesheets purity test still passes, and was TIGHTENED.** It scanned
+  for `hourly_rate` / `labour_cost` / `labor_cost`; `EmployeeHourlyRate`
+  lowercases to `employeehourlyrate`, which none of those catch, so a rate
+  lookup could have been added to `timesheets/` and passed the old test. It
+  cannot now.
+- **Editing history is allowed and is a different thing from a raise.** PATCH
+  and DELETE re-price the period the edited row covers, deliberately: somebody
+  who typed 24.50 for 25.40 has to be able to fix it. What the model prevents
+  is a rate change moving the past as a SIDE EFFECT of an ordinary raise. Every
+  write lands on the `AuditLog` with a before/after diff (the model joins the
+  full CRUD trio in `audit/signals.py`).
+- **The UI says where each number lives** (plan decision 12). New "Uurtarieven"
+  tab on the Uren admin page — that route already admits SA / CA only, which is
+  exactly the endpoint's admit set — leading with a sentence stating that hours
+  are recorded in the hours module, which holds no amounts, and that the rate
+  lives in reporting. Current rate per person, the full dated history, and a
+  form whose hint says a raise is a NEW row from a NEW date. "No rate set"
+  renders as words, never as EUR 0,00.
+
 
 ## Historical — Sprint 181
 

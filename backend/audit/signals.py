@@ -93,6 +93,12 @@ from timesheets.models import (
 # the timesheets one twice and the customers one not at all. Two
 # different nouns that happen to share a word.
 from timesheets.models import WorkType as TimesheetWorkType
+# W4-R — the per-person hourly rate. It lives in `reports` because a
+# wage may not live in `timesheets` (that module computes no money), and
+# it is audited for the reason every wage-bearing row is: a corrected
+# rate re-prices the period it covers, so who changed it and from what
+# has to be recoverable afterwards.
+from reports.models import EmployeeHourlyRate
 from contracts.models import (
     Contract,
     ContractBuilding,
@@ -1646,6 +1652,16 @@ def _connect():
         Contract,
         ContractRevision,
         ContractLine,
+        # W4-R — EmployeeHourlyRate. The full CRUD trio, and every arm
+        # of it earns its place: a CREATE is a raise, an UPDATE is a
+        # correction that re-prices the period the row covers, and a
+        # DELETE drops that period back to whatever the previous row or
+        # the deployment fallback says. All three change what past work
+        # is recorded as having cost, so all three are attributable.
+        # Generic introspection covers every field — no FileField, and
+        # no `*StatusHistory` to double-write against (H-11): this model
+        # has no state machine.
+        EmployeeHourlyRate,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")

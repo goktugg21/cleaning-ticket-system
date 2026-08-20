@@ -42,6 +42,13 @@ import { ContractHoursApprovalTab } from "./ContractHoursApprovalTab";
 import { ContractHoursTab } from "./ContractHoursTab";
 import { WorkTypesTab } from "./WorkTypesTab";
 import { HoursOverviewTab } from "./HoursOverviewTab";
+// W4-R — the per-person hourly rate. The rate is stored and applied
+// in `reports`, never in `timesheets` (that module computes no
+// money), and the tab leads with a sentence saying so. It sits here
+// because the person who sets a rate is the person who manages
+// hours; the route already admits SA / CA only, which is exactly the
+// endpoint's admit set.
+import { LabourRatesTab } from "./LabourRatesTab";
 
 // Sprint 152.2 — "weeks" became the OVERVIEW tab: the read-only
 // analytical surface (period selector, graphs, breakdowns), which
@@ -54,7 +61,8 @@ type Tab =
   | "weeks"
   | "contract_hours"
   | "contract_approval"
-  | "work_types";
+  | "work_types"
+  | "labour_rates";
 
 // Sprint 152 — the SUPER_ADMIN's provider company, remembered across
 // visits. Its OWN key, not shared with the catalog's
@@ -693,6 +701,16 @@ export function HoursAdminPage() {
           onClick={() => setTab("work_types")}
         >
           {t("work_types.tab")}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "labour_rates"}
+          className={`composer-toggle-btn ${tab === "labour_rates" ? "active" : ""}`}
+          data-testid="hours-tab-labour-rates"
+          onClick={() => setTab("labour_rates")}
+        >
+          {t("labour_rates.tab")}
         </button>
       </div>
 
@@ -1355,6 +1373,13 @@ export function HoursAdminPage() {
 
       {tab === "hour_types" && (
         <HourTypesTab
+          companyRequired={showCompanySelector}
+          selectedCompany={company}
+        />
+      )}
+
+      {tab === "labour_rates" && (
+        <LabourRatesTab
           companyRequired={showCompanySelector}
           selectedCompany={company}
         />

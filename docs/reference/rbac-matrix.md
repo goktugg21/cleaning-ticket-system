@@ -216,6 +216,8 @@ the G-B7 row in §7.
 | `CUSTOMER_COMPANY_ADMIN`-granting guard (Sprint 27A) | [serializers_memberships.py validate_access_role](../../backend/customers/serializers_memberships.py) |
 | StaffProfile PATCH | [accounts/views_staff.py:104-116](../../backend/accounts/views_staff.py#L104-L116) |
 | BuildingStaffVisibility CREATE/PATCH/DELETE | [accounts/views_staff.py:153-230](../../backend/accounts/views_staff.py#L153-L230) |
+| Hourly-rate (wage) admit set — SA + CA only, BM/STAFF/customer refused (W4-R) | [reports/permissions.py IsLabourRateManager](../../backend/reports/permissions.py) + [reports/labour_rate_scope.py](../../backend/reports/labour_rate_scope.py) |
+| Labour-cost visibility on the Extra Work hours panel — `cost` is absent for a BM, so a one-person job's cost cannot divide out a wage (W4-R) | [reports/extra_work_hours.py](../../backend/reports/extra_work_hours.py) |
 | Audit signals (which models / which fields) | [audit/signals.py](../../backend/audit/signals.py) |
 | Effective-permission composer (Sprint 27B) | [accounts/permissions_effective.py](../../backend/accounts/permissions_effective.py) |
 | Audit log shape | [audit/models.py:11-64](../../backend/audit/models.py#L11-L64) |

@@ -63,3 +63,35 @@ class IsRevenueReportConsumer(BasePermission):
             UserRole.COMPANY_ADMIN,
             UserRole.BUILDING_MANAGER,
         }
+
+
+class IsLabourRateManager(BasePermission):
+    """W4-R — who may reach an `EmployeeHourlyRate` at all.
+
+    SUPER_ADMIN and COMPANY_ADMIN. Nobody else, and the exclusions are
+    the point rather than a side effect:
+
+      * **BUILDING_MANAGER is refused.** They are admitted to every
+        other reports surface by `IsRevenueReportConsumer`, and this
+        class exists so that habit cannot spread here. A BM routes work
+        and oversees completion; what a colleague earns is not part of
+        that job, and the owner decided this explicitly.
+      * **STAFF is refused**, including for their own rate. A worker
+        reading their own wage from a reporting endpoint is a payroll
+        surface nobody designed, and the same refusal is what stops
+        anyone inferring a colleague's.
+      * **Every customer-side role is refused**, always. A provider's
+        wage bill is not a customer's business in any form.
+
+    NOT a subclass of, and not derived from, `IsRevenueReportConsumer`:
+    the two admit sets differ by exactly one role, and expressing this
+    one as "that one minus BM" would make a future widening of that
+    class silently widen this one. The admit tuple lives in
+    `reports.labour_rate_scope.LABOUR_RATE_MANAGER_ROLES`, shared with
+    the queryset floor so the door and the rows cannot drift apart.
+    """
+
+    def has_permission(self, request, view):
+        from .labour_rate_scope import is_labour_rate_manager
+
+        return is_labour_rate_manager(request.user)
