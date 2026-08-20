@@ -431,7 +431,17 @@ export function HourTypesTab({
                         </span>
                       )}
                     </td>
-                    <td>x{hourType.multiplier}</td>
+                    {/* W7 §3 — a real multiplication sign, not the
+                        letter x. This column is the ONE thing that
+                        separates an hour type from a contract work
+                        type: an hour of this kind counts as this many
+                        hours, and those weighted hours are what an
+                        hourly rate is later applied to. The column
+                        header now says "Counts as", so the cell reads
+                        as a sentence: Overtime — counts as x1.50. */}
+                    <td data-testid="hour-type-multiplier-cell">
+                      <strong>{"× "}{hourType.multiplier}</strong>
+                    </td>
                     <td className="muted small">{hourType.sort_order}</td>
                     <td className="muted small">{hourType.entry_count}</td>
                     <td className="muted small">{hourType.company_name}</td>

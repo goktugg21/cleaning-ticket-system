@@ -34,7 +34,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlarmClock, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 
 import { getApiError } from "../../api/client";
 import {
@@ -49,34 +49,61 @@ import type {
 } from "../../api/types";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
+import { formatDate } from "../../lib/intl";
 
-/** The three warnings, and which fields belong to each. Rendering by
- *  WARNING rather than as a flat list of seven inputs is the whole
- *  usability argument: a threshold means nothing without the warning it
- *  governs, and the pair (first notice, escalation) only makes sense
- *  side by side. Iterated from here by the renderer; the server's field
- *  list is what validates, this is only the grouping. */
-const GROUPS: { key: string; fields: string[] }[] = [
+/**
+ * W7 §7 — THREE warnings, then one timing setting. In that order.
+ *
+ * The page used to render four peer cards, each headed by an alarm-clock
+ * icon and a paragraph, with two explanation lines under every input.
+ * Nothing on it said how many things it configured, and the owner read
+ * it as an alarm console rather than as a settings page. It is a
+ * settings page for three warnings, so it now looks like one: the three
+ * warnings are NUMBERED and ordered the way a job runs (nothing started
+ * -> nobody reviewed it -> the customer has not approved it before their
+ * billing date), and the repeat interval is not a fourth warning and no
+ * longer sits as one.
+ *
+ * `kind` is what the renderer branches on; the numbering is derived from
+ * it, so a fourth warning added here is numbered without touching the
+ * renderer, and a second timing setting cannot accidentally become
+ * "warning 4".
+ */
+const GROUPS: { key: string; kind: "warning" | "timing"; fields: string[] }[] = [
   {
-    key: "approval_cutoff",
-    fields: ["approval_cutoff_days", "approval_cutoff_escalate_days"],
+    key: "not_started",
+    kind: "warning",
+    fields: [
+      "not_started_business_hours",
+      "not_started_escalate_business_hours",
+    ],
   },
   {
     key: "manager_review",
+    kind: "warning",
     fields: [
       "manager_review_business_hours",
       "manager_review_escalate_business_hours",
     ],
   },
   {
-    key: "not_started",
-    fields: [
-      "not_started_business_hours",
-      "not_started_escalate_business_hours",
-    ],
+    key: "approval_cutoff",
+    kind: "warning",
+    fields: ["approval_cutoff_days", "approval_cutoff_escalate_days"],
   },
-  { key: "cooldown", fields: ["cooldown_hours"] },
+  { key: "cooldown", kind: "timing", fields: ["cooldown_hours"] },
 ];
+
+/** How many warnings there are, for the "1 of 3" marker. Counted from
+ *  GROUPS, never typed as a literal three. */
+const WARNING_COUNT = GROUPS.filter((g) => g.kind === "warning").length;
+
+/** Each warning's ordinal, keyed by group. Derived from the order of the
+ *  WARNINGS in GROUPS rather than from the array index, so a timing
+ *  setting placed anywhere in the list cannot shift the numbering. */
+const WARNING_ORDINAL: Record<string, number> = Object.fromEntries(
+  GROUPS.filter((g) => g.kind === "warning").map((g, i) => [g.key, i + 1]),
+);
 
 function draftFrom(company: SlaCompanyThresholds | null): Record<string, string> {
   const draft: Record<string, string> = {};
@@ -288,59 +315,87 @@ export function SlaWarningsAdminPage() {
                 ))}
               </select>
             </label>
+            {/* ONE line, not three. The tenancy note said in a sentence
+                what the picker above it already says by existing, and
+                the defaults are PLATFORM-wide (`sla.thresholds.defaults`
+                reads Django settings, not the company row), so the only
+                thing worth stating here is whether this company has
+                stepped off them and who did it. */}
             <p className="muted small" style={{ marginTop: 8, marginBottom: 0 }}>
               {selected?.is_customized
                 ? t("sla_warnings.state_custom", {
-                    when: selected.updated_at
-                      ? new Date(selected.updated_at).toLocaleDateString()
-                      : "",
+                    when: formatDate(selected.updated_at),
                     who: selected.updated_by_name ?? "",
                   })
                 : t("sla_warnings.state_default")}
-            </p>
-            <p className="muted small" style={{ marginTop: 4, marginBottom: 0 }}>
-              {t("sla_warnings.tenancy_note")}
             </p>
           </div>
 
           {GROUPS.map((group) => (
             <div
-              className="card"
-              style={{ padding: 16, marginBottom: 16 }}
+              className={
+                group.kind === "warning"
+                  ? "card sla-warning-card"
+                  : "card sla-timing-card"
+              }
               key={group.key}
               data-testid={`sla-warnings-group-${group.key}`}
             >
-              <h3 style={{ marginTop: 0, marginBottom: 4, fontSize: 16 }}>
-                <AlarmClock
-                  size={15}
-                  strokeWidth={2}
-                  style={{ verticalAlign: "-2px", marginRight: 6 }}
-                />
-                {t(`sla_warnings.group.${group.key}.title`)}
-              </h3>
-              <p className="muted small" style={{ marginTop: 0 }}>
-                {t(`sla_warnings.group.${group.key}.what`)}
-              </p>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 24,
-                }}
-              >
+              {/* The number is the structure. Three numbered cards say
+                  "this page configures three things" without a sentence
+                  claiming it, and the repeat interval is visibly not one
+                  of them. */}
+              <div className="sla-warning-head">
+                {group.kind === "warning" && (
+                  <span className="sla-warning-num" aria-hidden="true">
+                    {WARNING_ORDINAL[group.key]}
+                  </span>
+                )}
+                <div>
+                  <h3 className="sla-warning-title">
+                    {t(`sla_warnings.group.${group.key}.title`)}
+                    {group.kind === "warning" && (
+                      <span className="sla-warning-of">
+                        {t("sla_warnings.n_of_total", {
+                          n: WARNING_ORDINAL[group.key],
+                          total: WARNING_COUNT,
+                        })}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="muted small sla-warning-what">
+                    {t(`sla_warnings.group.${group.key}.what`)}
+                  </p>
+                </div>
+              </div>
+              <div className="sla-warning-fields">
                 {group.fields.map((field) => {
                   const row = byField.get(field);
                   if (!row) return null;
                   const raw = (draft[field] ?? "").trim();
                   const shown = raw === "" ? row.default : Number(raw);
                   return (
-                    <label
-                      className="field"
-                      key={field}
-                      style={{ minWidth: 260, flex: "1 1 260px" }}
-                    >
-                      <span className="field-label">
-                        {t(`sla_warnings.field.${field}`)}
+                    <label className="field sla-warning-field" key={field}>
+                      <span className="sla-field-head">
+                        <span className="field-label">
+                          {t(`sla_warnings.field.${field}`)}
+                        </span>
+                        {/* Where the number comes from, as a chip beside
+                            the label rather than a second sentence under
+                            the input. Two muted lines per input was most
+                            of this page's text. */}
+                        <span
+                          className={
+                            raw === ""
+                              ? "sla-source-chip is-default"
+                              : "sla-source-chip is-own"
+                          }
+                          data-testid={`sla-warnings-source-${field}`}
+                        >
+                          {raw === ""
+                            ? t("sla_warnings.chip_default")
+                            : t("sla_warnings.chip_own")}
+                        </span>
                       </span>
                       <input
                         className="field-input"
@@ -365,20 +420,21 @@ export function SlaWarningsAdminPage() {
                           ? explain(row, shown)
                           : t("sla_warnings.unit_invalid")}
                       </span>
-                      <span
-                        className="muted small"
-                        data-testid={`sla-warnings-source-${field}`}
-                      >
-                        {raw === ""
-                          ? t("sla_warnings.source_default", {
-                              value: row.default,
-                            })
-                          : t("sla_warnings.source_company")}
-                      </span>
                     </label>
                   );
                 })}
               </div>
+              {group.kind === "warning" && (
+                /* Who receives it, as a labelled fact rather than the
+                   last clause of a paragraph. It is the question an
+                   operator actually has about a warning. */
+                <p className="sla-warning-who">
+                  <span className="sla-who-label">
+                    {t("sla_warnings.who_label")}
+                  </span>
+                  {t(`sla_warnings.group.${group.key}.who`)}
+                </p>
+              )}
             </div>
           ))}
         </>

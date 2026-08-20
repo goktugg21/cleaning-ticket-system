@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ClipboardList, Euro, FileSignature } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import { getApiError } from "../../api/client";
@@ -63,6 +65,105 @@ type Tab =
   | "contract_approval"
   | "work_types"
   | "labour_rates";
+
+/**
+ * W7 §1 — the seven tabs, in THREE named groups.
+ *
+ * Seven equal pills in one row said nothing about what any of them was
+ * for, and the owner could not name a single one. The tabs did not
+ * change; what they belong to is now on the screen. Each group answers
+ * one question, and every tab under it answers it a different way:
+ *
+ *   worked   what was ACTUALLY worked        Entries, Overview
+ *   agreed   what was AGREED in a contract   Contract hours, Approval,
+ *                                            Contract work types
+ *   cost     what an hour COSTS              Hour types, Hourly rates
+ *
+ * The grouping is also the answer to "hour types vs work types", which
+ * no label on a flat row could give: an hour TYPE carries a multiplier,
+ * that multiplier weights the hours, and the weighted hours are what an
+ * hourly rate is applied to (`reports/labour_cost.py`) — so it sits in
+ * the money group, next to the rates. A contract work type carries no
+ * weight and is only ever read off a ContractHours row
+ * (`timesheets.WorkType` is that FK's ONLY consumer), so it sits with
+ * contract hours. Two catalogs that look alike, in the two places they
+ * actually belong.
+ *
+ * ONE constant, iterated by the renderer. CLAUDE.md records what a
+ * second hand-maintained render list costs (Sprint 126's headerless
+ * permission column, invisible for three sprints); a new tab added to
+ * `Tab` and not to a group here is a compile-time hole, not a silent
+ * one, because `key` is typed `Tab`.
+ *
+ * NOT exported, and that is the `react-refresh/only-export-components`
+ * rule rather than a preference: a non-component export from a file
+ * that exports a component is a lint error, and the baseline is frozen
+ * at exactly 44. `CatalogsAdminPage`'s own `TABS` is module-local for
+ * the same reason.
+ */
+const HOURS_TAB_GROUPS: {
+  key: "worked" | "agreed" | "cost";
+  labelKey: string;
+  Icon: LucideIcon;
+  tabs: { key: Tab; labelKey: string; testId: string }[];
+}[] = [
+  {
+    key: "worked",
+    labelKey: "hours_admin.group_worked",
+    Icon: ClipboardList,
+    tabs: [
+      {
+        key: "entries",
+        labelKey: "hours_admin.tab_entries",
+        testId: "hours-tab-entries",
+      },
+      {
+        key: "weeks",
+        labelKey: "hours_admin.tab_overview",
+        testId: "hours-tab-weeks",
+      },
+    ],
+  },
+  {
+    key: "agreed",
+    labelKey: "hours_admin.group_agreed",
+    Icon: FileSignature,
+    tabs: [
+      {
+        key: "contract_hours",
+        labelKey: "contract_hours.tab",
+        testId: "hours-tab-contract-hours",
+      },
+      {
+        key: "contract_approval",
+        labelKey: "contract_hours.tab_approval",
+        testId: "hours-tab-contract-approval",
+      },
+      {
+        key: "work_types",
+        labelKey: "work_types.tab",
+        testId: "hours-tab-work-types",
+      },
+    ],
+  },
+  {
+    key: "cost",
+    labelKey: "hours_admin.group_cost",
+    Icon: Euro,
+    tabs: [
+      {
+        key: "hour_types",
+        labelKey: "hours_admin.tab_hour_types",
+        testId: "hours-tab-hour-types",
+      },
+      {
+        key: "labour_rates",
+        labelKey: "labour_rates.tab",
+        testId: "hours-tab-labour-rates",
+      },
+    ],
+  },
+];
 
 // Sprint 152 — the SUPER_ADMIN's provider company, remembered across
 // visits. Its OWN key, not shared with the catalog's
@@ -636,84 +737,43 @@ export function HoursAdminPage() {
         </div>
       )}
 
-      {/* Same tablist markup as ServicesAdminPage — `composer-toggle` /
-          `composer-toggle-btn`, not a new tab component. */}
+      {/* W7 §1 — the tab bar is GROUPED. `role="tablist"` stays on the
+          outer element and every button stays `role="tab"`, so the
+          accessibility tree is the flat list it always was; the three
+          `hours-tab-group` boxes are presentational and are marked so.
+          Iterated from `HOURS_TAB_GROUPS`, never a second local array. */}
       <div
-        className="composer-toggle"
+        className="hours-tab-bar"
         role="tablist"
         aria-label={t("hours_admin.tabs_aria")}
-        style={{ marginBottom: 16 }}
       >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "entries"}
-          className={`composer-toggle-btn ${tab === "entries" ? "active" : ""}`}
-          data-testid="hours-tab-entries"
-          onClick={() => setTab("entries")}
-        >
-          {t("hours_admin.tab_entries")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "contract_hours"}
-          className={`composer-toggle-btn ${tab === "contract_hours" ? "active" : ""}`}
-          data-testid="hours-tab-contract-hours"
-          onClick={() => setTab("contract_hours")}
-        >
-          {t("contract_hours.tab")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "weeks"}
-          className={`composer-toggle-btn ${tab === "weeks" ? "active" : ""}`}
-          data-testid="hours-tab-weeks"
-          onClick={() => setTab("weeks")}
-        >
-          {t("hours_admin.tab_overview")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "contract_approval"}
-          className={`composer-toggle-btn ${tab === "contract_approval" ? "active" : ""}`}
-          data-testid="hours-tab-contract-approval"
-          onClick={() => setTab("contract_approval")}
-        >
-          {t("contract_hours.tab_approval")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "hour_types"}
-          className={`composer-toggle-btn ${tab === "hour_types" ? "active" : ""}`}
-          data-testid="hours-tab-hour-types"
-          onClick={() => setTab("hour_types")}
-        >
-          {t("hours_admin.tab_hour_types")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "work_types"}
-          className={`composer-toggle-btn ${tab === "work_types" ? "active" : ""}`}
-          data-testid="hours-tab-work-types"
-          onClick={() => setTab("work_types")}
-        >
-          {t("work_types.tab")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "labour_rates"}
-          className={`composer-toggle-btn ${tab === "labour_rates" ? "active" : ""}`}
-          data-testid="hours-tab-labour-rates"
-          onClick={() => setTab("labour_rates")}
-        >
-          {t("labour_rates.tab")}
-        </button>
+        {HOURS_TAB_GROUPS.map((group) => (
+          <div
+            className="hours-tab-group"
+            key={group.key}
+            data-testid={`hours-tab-group-${group.key}`}
+          >
+            <span className="hours-tab-group-label" aria-hidden="true">
+              <group.Icon size={13} strokeWidth={2.2} />
+              {t(group.labelKey)}
+            </span>
+            <div className="composer-toggle" role="presentation">
+              {group.tabs.map((entry) => (
+                <button
+                  key={entry.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === entry.key}
+                  className={`composer-toggle-btn ${tab === entry.key ? "active" : ""}`}
+                  data-testid={entry.testId}
+                  onClick={() => setTab(entry.key)}
+                >
+                  {t(entry.labelKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       {tab === "work_types" && <WorkTypesTab />}

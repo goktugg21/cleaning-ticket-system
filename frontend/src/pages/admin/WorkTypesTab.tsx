@@ -15,9 +15,19 @@ import type { CatalogRow } from "../../components/CatalogTab";
  * could put a row in it. The same defect as contract types, one screen
  * over, and it should have been caught by the same reasoning.
  *
- * It sits on /admin/hours beside Hour types, because a work type is an
- * hours concept and that is where an operator managing hour types is
- * already standing.
+ * W7 §2 — it is now called "Contract work types" on screen, and on
+ * /admin/hours it sits under "Agreed in a contract" rather than beside
+ * Hour types.
+ *
+ * Two reasons, and the second is the one that matters. `ContractHours`
+ * is the ONLY consumer of `timesheets.WorkType` — grep the FK — so
+ * "contract work type" is what the row has always been. And "Work type"
+ * was already taken: `customers.WorkType` is a per-CUSTOMER label on an
+ * Extra Work request (Eindschoonmaak, Bouw schoonmaak), a different
+ * table with a different owner and a different consumer, and it is the
+ * one an operator meets daily on the Extra Work screens. Two unrelated
+ * things could not both keep the name, so the rarer one gave it up.
+ * `customers.WorkType` is untouched.
  */
 export function WorkTypesTab() {
   const { t } = useTranslation("common");

@@ -17,6 +17,7 @@ import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import { api } from "../../api/client";
 import type { ReportFilters } from "../../api/reports";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
+import { formatDate } from "../../lib/intl";
 import { useAuth } from "../../auth/AuthContext";
 import { useReportsFilters } from "../../hooks/useReportsFilters";
 import { AgeBucketsChart } from "./charts/AgeBucketsChart";
@@ -750,9 +751,13 @@ export function ReportsPage() {
               </div>
               {summaries && (
                 <p className="muted small" style={{ marginBottom: 4 }}>
+                  {/* W7 §4 — through `formatDate`, not raw ISO. The
+                      period a card's four numbers cover is the thing the
+                      owner could not read off them, so it must not be
+                      the one line on the card printed in wire format. */}
                   {t("card_period", {
-                    from: summaries.from,
-                    to: summaries.to,
+                    from: formatDate(summaries.from),
+                    to: formatDate(summaries.to),
                   })}
                 </p>
               )}
