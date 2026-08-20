@@ -469,7 +469,7 @@
   "detail.labels_field_work_type": "Werktype",
   "detail.labels_none": "Geen",
   "detail.labels_save": "Opslaan",
-  "detail.labels_edit": "Labels bewerken",
+  "detail.labels_edit_both": "Indeling bewerken",
   "detail.labels_saving": "Opslaan…",
   "detail.labels_locked_by": "Vergrendeld door factuur {{number}}.",
   "detail.labels_locked_howto": "Crediteer de factuur, pas het label aan en factureer opnieuw om dit te wijzigen.",
@@ -592,6 +592,7 @@
   "hours_panel.where_numbers_live": "Uren komen uit de urenregistratie; loonkosten worden berekend in rapportage. Op dit scherm staat geen uurloonveld, en dat is met opzet.",
   "plan": {
     "open_button": "Werk inplannen",
+    "edit_button": "Planning bewerken",
     "dialog_title": "Werk inplannen en starten",
     "dialog_subtitle": "Leg vast hoeveel uur dit werk mag kosten, wanneer wij het uitvoeren en wie eraan werkt.",
     "budget_hours_label": "Beschikbare uren",

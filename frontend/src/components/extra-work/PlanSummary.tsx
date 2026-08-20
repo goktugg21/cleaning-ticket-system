@@ -28,12 +28,23 @@
  * NOT MONEY. Every figure here is hours.
  */
 import { useTranslation } from "react-i18next";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Pencil } from "lucide-react";
 
 import type { ExtraWorkRequestDetail } from "../../api/types";
 import { formatDate } from "../../lib/intl";
 
-export function PlanSummary({ ew }: { ew: ExtraWorkRequestDetail }) {
+export function PlanSummary({
+  ew,
+  onEdit,
+}: {
+  ew: ExtraWorkRequestDetail;
+  /** W9 §3 — opens the SAME Plan work dialog the workflow card opens.
+   *  The plan was readable here and editable only from a button further
+   *  down the page, so the section that shows the plan could not change
+   *  it. The control that closes a gap belongs on the screen that
+   *  shows the gap. */
+  onEdit?: () => void;
+}) {
   const { t } = useTranslation(["extra_work", "common"]);
 
   const rows = ew.planned_hours ?? [];
@@ -52,9 +63,22 @@ export function PlanSummary({ ew }: { ew: ExtraWorkRequestDetail }) {
 
   return (
     <div className="ew-plan-summary" data-testid="extra-work-plan-summary">
-      <span className="muted small ew-plan-summary-title">
-        {t("plan.summary_title")}
-      </span>
+      <div className="ew-plan-summary-head">
+        <span className="ew-plan-summary-title">
+          {t("plan.summary_title")}
+        </span>
+        {onEdit && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onEdit}
+            data-testid="extra-work-plan-summary-edit"
+          >
+            <Pencil size={13} strokeWidth={2} aria-hidden="true" />
+            {t("plan.edit_button")}
+          </button>
+        )}
+      </div>
 
       <div className="ew-plan-summary-figures">
         <div>
@@ -67,7 +91,18 @@ export function PlanSummary({ ew }: { ew: ExtraWorkRequestDetail }) {
         </div>
         <div>
           <div className="muted small">{t("plan.distributed_label")}</div>
-          <div data-testid="extra-work-plan-summary-total">
+          {/* W9 §1 — over the budget shows on the figure that is
+              over, in the same warning ink the alert below uses. The
+              alert still says by how much; this is so nobody has to
+              reach it to know that they are over. */}
+          <div
+            className={
+              overrun
+                ? "ew-plan-summary-figure ew-plan-summary-figure-over"
+                : "ew-plan-summary-figure"
+            }
+            data-testid="extra-work-plan-summary-total"
+          >
             {t("plan.hours_value", { hours: ew.planned_hours_total ?? "0.00" })}
           </div>
         </div>
@@ -99,6 +134,9 @@ export function PlanSummary({ ew }: { ew: ExtraWorkRequestDetail }) {
               className="ew-plan-summary-crew-row"
               data-testid="extra-work-plan-summary-crew-row"
             >
+              <span className="ew-plan-summary-crew-hours">
+                {t("plan.hours_value", { hours: row.hours })}
+              </span>
               <span className="ew-plan-summary-crew-name">
                 {row.user_full_name || row.user_email}
                 {!row.is_assigned && (
@@ -112,7 +150,6 @@ export function PlanSummary({ ew }: { ew: ExtraWorkRequestDetail }) {
                   </span>
                 )}
               </span>
-              <span>{t("plan.hours_value", { hours: row.hours })}</span>
             </li>
           ))}
         </ul>

@@ -2198,6 +2198,64 @@ export function ExtraWorkDetailPage() {
 
           {tab === "overview" && (
             <>
+          {/* W9 §5 — DESCRIPTION FIRST.
+
+              The owner: "move Description to the very top, above
+              Details. Description is important and should be one of the
+              first things the user sees."
+
+              It was the LAST group inside the Details card, under dates,
+              classification and contacts — so the sentence saying what
+              the job actually is arrived after everything filed about
+              it. Its own card, above Details, and the notes that are the
+              same kind of thing (customer-visible, pricing, manager,
+              internal cost) come with it rather than being split from
+              the text they annotate. */}
+          <div className="card" data-testid="extra-work-description-card">
+            <div className="form-section">
+              <div className="form-section-title">
+                {t("detail.group_description")}
+              </div>
+              <div data-testid="ew-facts-description">
+                <div className="ew-fact-prose">{ew.description}</div>
+                {ew.customer_visible_note && (
+                  <div className="ew-fact-note">
+                    <div className="ew-fact-label">{t("detail.field_customer_visible_note")}</div>
+                    <div className="ew-fact-prose">{ew.customer_visible_note}</div>
+                  </div>
+                )}
+                {ew.pricing_note && (
+                  <div className="ew-fact-note">
+                    <div className="ew-fact-label">{t("detail.field_pricing_note")}</div>
+                    <div className="ew-fact-prose">{ew.pricing_note}</div>
+                  </div>
+                )}
+                {isProvider && ew.manager_note && (
+                  <div className="ew-fact-note">
+                    <div className="ew-fact-label">{t("detail.field_manager_note")}</div>
+                    <div className="ew-fact-prose">{ew.manager_note}</div>
+                  </div>
+                )}
+                {isProvider && ew.internal_cost_note && (
+                  <div className="ew-fact-note">
+                    <div className="ew-fact-label">{t("detail.field_internal_cost_note")}</div>
+                    <div className="ew-fact-prose">{ew.internal_cost_note}</div>
+                  </div>
+                )}
+                {isProvider && ew.override_at && (
+                  <div className="alert-warning" style={{ marginTop: 12 }}>
+                    <strong>{t("detail.override_applied")}</strong>
+                    {ew.override_reason && (
+                      <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{ew.override_reason}</div>
+                    )}
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {formatDateTime(ew.override_at)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
             <div className="card">
               <div className="form-section">
                 <div className="form-section-title">
@@ -2223,7 +2281,24 @@ export function ExtraWorkDetailPage() {
                     headings is why nobody could tell the customer's wish
                     from our own commitment. */}
                 <section className="ew-facts-group" data-testid="ew-facts-dates">
-                  <h4 className="ew-facts-group-title">{t("detail.group_dates")}</h4>
+                  {/* Same move as Classification below, and for the same
+                      reason: `DatesEditor` edits every date in this
+                      group, and the button sat inside the Deadline value
+                      as though Deadline were the only editable one. */}
+                  <div className="ew-facts-group-head">
+                    <h4 className="ew-facts-group-title">{t("detail.group_dates")}</h4>
+                    {isProvider && !datesOpen && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setDatesOpen(true)}
+                        data-testid="extra-work-dates-edit"
+                      >
+                        <Pencil size={13} strokeWidth={2} aria-hidden="true" />
+                        {t("detail.dates_edit")}
+                      </button>
+                    )}
+                  </div>
                   <div className="ew-facts-grid">
                     <div>
                       <div className="ew-fact-label">{t("detail.date_requested")}</div>
@@ -2252,17 +2327,6 @@ export function ExtraWorkDetailPage() {
                             {t("list.overdue")}
                           </span>
                         )}
-                        {isProvider && !datesOpen && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => setDatesOpen(true)}
-                            data-testid="extra-work-dates-edit"
-                          >
-                            <Pencil size={13} strokeWidth={2} />
-                            {t("detail.dates_edit")}
-                          </button>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -2275,7 +2339,9 @@ export function ExtraWorkDetailPage() {
                   )}
                   {/* The plan reads back with the dates it commits to,
                       not at the bottom of an unrelated run of text. */}
-                  {isProvider && <PlanSummary ew={ew} />}
+                  {isProvider && (
+                    <PlanSummary ew={ew} onEdit={() => void openPlan()} />
+                  )}
                   {ew.started_before_plan && (
                     <p className="muted small" data-testid="ew-header-started-early" style={{ margin: "8px 0 0" }}>
                       {t("list.startedEarlyWhy")}
@@ -2285,7 +2351,29 @@ export function ExtraWorkDetailPage() {
 
                 {/* CLASSIFICATION — how this request is filed. */}
                 <section className="ew-facts-group" data-testid="ew-facts-classification">
-                  <h4 className="ew-facts-group-title">{t("detail.group_classification")}</h4>
+                  {/* W9 §4 — ONE control for the group, not a pencil on
+                      one of its values.
+
+                      The pencil lived on Work type. `LabelsEditor` has
+                      always edited Department AND Work type together, so
+                      the screen was telling the reader that one of the
+                      two was locked and the other was not. A control on
+                      the group's own heading covers what the dialog
+                      actually covers. */}
+                  <div className="ew-facts-group-head">
+                    <h4 className="ew-facts-group-title">{t("detail.group_classification")}</h4>
+                    {isProvider && !ew.labels_locked && !labelsOpen && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setLabelsOpen(true)}
+                        data-testid="extra-work-labels-edit"
+                      >
+                        <Pencil size={13} strokeWidth={2} aria-hidden="true" />
+                        {t("detail.labels_edit_both")}
+                      </button>
+                    )}
+                  </div>
                   {isProvider && labelsOpen && !ew.labels_locked ? (
                     <LabelsEditor
                       key={`labels-${ew.id}-${ew.department ?? ""}-${ew.work_type ?? ""}`}
@@ -2304,22 +2392,10 @@ export function ExtraWorkDetailPage() {
                       </div>
                       <div>
                         <div className="ew-fact-label">{t("detail.labels_field_work_type")}</div>
-                        <div className="ew-fact-value ew-fact-with-action">
+                        <div className="ew-fact-value">
                           <span data-testid="extra-work-labels-work-type-value">
                             {ew.work_type_name ? customerLabelName(ew.work_type_name, t) : t("detail.empty_dash")}
                           </span>
-                          {isProvider && !ew.labels_locked && (
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm ew-labels-icon-btn"
-                              onClick={() => setLabelsOpen(true)}
-                              title={t("detail.labels_edit")}
-                              aria-label={t("detail.labels_edit")}
-                              data-testid="extra-work-labels-edit"
-                            >
-                              <Pencil size={13} strokeWidth={2} />
-                            </button>
-                          )}
                         </div>
                       </div>
                       {/* W8 §3 — the CATEGORY. It was a grey chip in the
@@ -2373,47 +2449,7 @@ export function ExtraWorkDetailPage() {
                   </section>
                 )}
 
-                {/* DESCRIPTION, and the notes that are more of the same
-                    kind of thing: prose about this request. */}
-                <section className="ew-facts-group" data-testid="ew-facts-description">
-                  <h4 className="ew-facts-group-title">{t("detail.group_description")}</h4>
-                  <div className="ew-fact-prose">{ew.description}</div>
-                  {ew.customer_visible_note && (
-                    <div className="ew-fact-note">
-                      <div className="ew-fact-label">{t("detail.field_customer_visible_note")}</div>
-                      <div className="ew-fact-prose">{ew.customer_visible_note}</div>
-                    </div>
-                  )}
-                  {ew.pricing_note && (
-                    <div className="ew-fact-note">
-                      <div className="ew-fact-label">{t("detail.field_pricing_note")}</div>
-                      <div className="ew-fact-prose">{ew.pricing_note}</div>
-                    </div>
-                  )}
-                  {isProvider && ew.manager_note && (
-                    <div className="ew-fact-note">
-                      <div className="ew-fact-label">{t("detail.field_manager_note")}</div>
-                      <div className="ew-fact-prose">{ew.manager_note}</div>
-                    </div>
-                  )}
-                  {isProvider && ew.internal_cost_note && (
-                    <div className="ew-fact-note">
-                      <div className="ew-fact-label">{t("detail.field_internal_cost_note")}</div>
-                      <div className="ew-fact-prose">{ew.internal_cost_note}</div>
-                    </div>
-                  )}
-                  {isProvider && ew.override_at && (
-                    <div className="alert-warning" style={{ marginTop: 12 }}>
-                      <strong>{t("detail.override_applied")}</strong>
-                      {ew.override_reason && (
-                        <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{ew.override_reason}</div>
-                      )}
-                      <div className="muted small" style={{ marginTop: 4 }}>
-                        {formatDateTime(ew.override_at)}
-                      </div>
-                    </div>
-                  )}
-                </section>
+
 
                 </div>
             </div>

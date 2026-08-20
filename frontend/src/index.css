@@ -64,6 +64,56 @@
   color-scheme: light;
 }
 
+/* ====================================================================
+   W9 — THE MEANING SCALE
+
+   Two small sets of tokens, and the rule they exist to enforce: a
+   colour on this product tells the reader something, or it is not
+   there. The palette above is named for what a colour LOOKS like
+   (--amber, --green); these are named for what it MEANS, so a screen
+   says "this is waiting" rather than "this is orange", and so the same
+   fact is the same colour on every page that adopts them.
+
+   The state trio aliases the existing hues rather than restating their
+   hex, so there is still one place a hue is defined. --value-money is
+   the one genuinely new colour: money had no colour at all, so an
+   amount and a date read identically, and the owner scans this product
+   for amounts.
+
+   There is deliberately NO token for dates. A date is told apart from
+   an amount by the amount being coloured; giving dates a colour of
+   their own would put a second blue-ish hue next to the money one and
+   take the distinction away again.
+
+   USED BY: the Extra Work detail page and its components. Chat D
+   applies the same names to the ticket page.
+   ==================================================================== */
+:root {
+  /* Waiting on somebody: a customer decision, a price, a review. */
+  --state-waiting:     var(--amber);
+  --state-waiting-bg:  var(--amber-soft);
+  /* Settled: approved, completed, agreed, invoiced. */
+  --state-done:        var(--green);
+  --state-done-bg:     var(--green-soft);
+  /* Past a deadline, or over what was planned. */
+  --state-late:        var(--red);
+  --state-late-bg:     var(--red-soft);
+
+  /* Money, and ONLY money. Never an hours figure: keeping the two
+     apart on screen is the same distinction the modules keep in code,
+     where `timesheets` records hours and never computes a price. */
+  --value-money:       #1F4E8C;
+
+  /* One text scale, smallest to largest. The old page hard-coded 10.5,
+     11, 11.5, 12, 12.5 and 13 px, which is six sizes doing the work of
+     three and none of them adjustable. --font-base is a step up from
+     the 14px body: the owner asked for slightly larger text. */
+  --font-xs:    12px;   /* labels and captions */
+  --font-sm:    13.5px; /* secondary text, meta lines */
+  --font-base:  15px;   /* body: values, prose, list rows */
+  --font-lg:    17px;   /* the thing a section is about */
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
 body {
@@ -8199,9 +8249,9 @@ a.attn-row:hover {
    the hard cap is the thing the reference system's own business had
    removed. Red would read as a refusal. */
 .ew-plan-overrun {
-  background: var(--amber-soft);
+  background: var(--state-waiting-bg);
   border: 1px solid var(--amber-border);
-  color: var(--amber);
+  color: var(--state-waiting);
 }
 .ew-plan-overrun-title {
   font-weight: 700;
@@ -8252,30 +8302,81 @@ a.attn-row:hover {
   padding-top: 12px;
   border-top: 1px solid var(--border-soft);
 }
+/* W9 §3 — the section's own title row, so the control that edits the
+   plan sits on the section that shows it. */
+.ew-plan-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .ew-plan-summary-title {
-  font-weight: 600;
+  font-family: var(--f-head);
+  font-size: var(--font-xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 .ew-plan-summary-figures {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 24px;
+  font-size: var(--font-base);
 }
+/* WAITING, not late: this page has always held that an overrun warns
+   and never blocks, and the alert below and the hours panel both render
+   it in the warning ink. A red figure here would be a third opinion
+   about one fact. */
+.ew-plan-summary-figure-over {
+  color: var(--state-waiting);
+  font-weight: 700;
+}
+/* W9 §2 — HOURS FIRST, THEN THE NAME.
+
+   The owner: "the names are all the way on the left and the hours are
+   all the way on the right. Imagine there are 10 people. It becomes
+   very difficult to understand which number of hours belongs to which
+   person."
+
+   `justify-content: space-between` was the whole defect: it pinned the
+   two halves of one fact to opposite edges of a card that gets wider on
+   every screen, so ten people read as two unrelated columns with a gulf
+   down the middle.
+
+   Now the list is a two-column grid sized to its CONTENT, not to the
+   card, and each row is `display: contents` so the grid owns both
+   cells. Two things follow, and both are the point: the hours sit
+   directly beside the name however wide the card gets, and they still
+   line up with each other down the column, so ten rows can be scanned
+   as well as read.
+
+   Hours lead because they are the fixed-width half. A number column on
+   the left stays a column; a name column on the left makes the numbers
+   ragged, which is the version that cannot be scanned. */
 .ew-plan-summary-crew {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, max-content);
+  align-content: start;
+  justify-content: start;
+  gap: 4px 12px;
+  font-size: var(--font-base);
   /* Bounded for the same reason the dialog's crew list is. */
   max-height: 180px;
   overflow-y: auto;
 }
 .ew-plan-summary-crew-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
+  display: contents;
+}
+.ew-plan-summary-crew-hours {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 .ew-plan-summary-crew-name {
   min-width: 0;
@@ -8283,13 +8384,14 @@ a.attn-row:hover {
 }
 .ew-plan-summary-unassigned {
   margin-left: 8px;
-  font-size: 11px;
-  color: var(--amber);
+  font-size: var(--font-xs);
+  color: var(--state-waiting);
 }
 .ew-plan-summary-flags {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
+  font-size: var(--font-sm);
 }
 
 .ew-labels-inline-actions {
@@ -11792,8 +11894,8 @@ a.wp-card-title:hover { text-decoration: underline; }
   margin: 0;
 }
 .ew-money-strip-sub {
-  font-size: 12px;
-  color: var(--text-faint);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
   margin: 0;
 }
 .ew-money-strip-row {
@@ -11816,7 +11918,7 @@ a.wp-card-title:hover { text-decoration: underline; }
 }
 .ew-money-card-label {
   font-family: var(--f-head);
-  font-size: 10.5px;
+  font-size: var(--font-xs);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -11827,24 +11929,31 @@ a.wp-card-title:hover { text-decoration: underline; }
   font-size: 20px;
   font-weight: 800;
   letter-spacing: -0.01em;
-  color: var(--text);
+  /* W9 §1 — the one place a colour is spent on a KIND of value rather
+     than on a state. Every figure in this strip is money and nothing
+     else on the page is, so an amount is now recognisable as an amount
+     before it is read. The hours panel next door keeps text colour,
+     which is the distinction the strip exists to make. */
+  color: var(--value-money);
   line-height: 1.2;
 }
 /* The sentence that means an operator never has to ask what the figure
    is. It wraps rather than truncating — a clipped explanation is the
    same as no explanation. */
 .ew-money-card-meta {
-  font-size: 11.5px;
-  line-height: 1.3;
-  color: var(--text-faint);
+  font-size: var(--font-sm);
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 .ew-money-card-foot {
-  font-size: 11px;
-  line-height: 1.3;
-  color: var(--text-faint);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+  color: var(--text-muted);
 }
+/* Not yet priced is WAITING on somebody, so it takes the waiting ink
+   rather than a hue picked here. */
 .ew-money-card-unpriced {
-  color: var(--amber);
+  color: var(--state-waiting);
 }
 
 @media (max-width: 960px) {
@@ -11956,19 +12065,19 @@ a.wp-card-title:hover { text-decoration: underline; }
 }
 .ew-hours-variance {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--font-sm);
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.4;
 }
 /* The direction is in the words; these only reinforce it. Over budget
-   is amber, not red: an overrun is a warning, and the plan is explicit
-   that we warn and never block. */
+   takes the WAITING ink rather than the late one: an overrun is a
+   warning, and the plan is explicit that we warn and never block. */
 .ew-hours-tone-over {
-  color: var(--amber);
+  color: var(--state-waiting);
 }
 .ew-hours-tone-under,
 .ew-hours-tone-on {
-  color: var(--green-2);
+  color: var(--state-done);
 }
 .ew-hours-tone-none {
   color: var(--text-faint);
@@ -12013,7 +12122,10 @@ a.wp-card-title:hover { text-decoration: underline; }
   font-size: 18px;
   font-weight: 800;
   letter-spacing: -0.01em;
-  color: var(--text);
+  /* Money, so it takes the money ink — the same one the strip above the
+     page uses. The HOURS figures in this same panel deliberately do not:
+     that is the distinction the panel was built to make visible. */
+  color: var(--value-money);
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -12035,7 +12147,7 @@ a.wp-card-title:hover { text-decoration: underline; }
 }
 .ew-hours-figure-label {
   font-family: var(--f-head);
-  font-size: 10.5px;
+  font-size: var(--font-xs);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -12054,9 +12166,9 @@ a.wp-card-title:hover { text-decoration: underline; }
    these sentences carry "no rate configured" and "your own hours only",
    which are the two things a reader must not miss. */
 .ew-hours-figure-meta {
-  font-size: 11.5px;
-  line-height: 1.3;
-  color: var(--text-faint);
+  font-size: var(--font-sm);
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 /* The day columns. Narrow and right-aligned so a fortnight of them fits
    before the horizontal scroll the `.table-wrap` wrapper provides. */
@@ -12544,7 +12656,7 @@ a.wp-card-title:hover { text-decoration: underline; }
    value the same weight. */
 .ew-ctx-label {
   font-family: var(--f-head);
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -12554,19 +12666,22 @@ a.wp-card-title:hover { text-decoration: underline; }
 .ew-ctx-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ew-ctx-strong {
   font-family: var(--f-head);
-  font-size: 16px;
+  font-size: var(--font-lg);
   font-weight: 800;
   color: var(--text);
   overflow-wrap: anywhere;
 }
-.ew-ctx-sub { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+/* The money block, and the same block when there is no price yet. */
+.ew-ctx-money { color: var(--value-money); }
+.ew-ctx-unpriced { color: var(--state-waiting); }
+.ew-ctx-sub { font-size: var(--font-sm); color: var(--text-muted); overflow-wrap: anywhere; }
 .ew-ctx-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* W8 §2 — the one sentence and the one button. The sentence is body
    text, not muted: it is an instruction, and a greyed instruction reads
    as a disclaimer. */
 .ew-next { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
-.ew-next-sentence { margin: 0; font-size: 13px; color: var(--text); }
+.ew-next-sentence { margin: 0; font-size: var(--font-base); line-height: 1.5; color: var(--text); }
 .ew-next-button { align-self: stretch; justify-content: center; }
 
 @media (max-width: 1100px) {
@@ -12592,10 +12707,25 @@ a.wp-card-title:hover { text-decoration: underline; }
 .ew-facts-group { padding: 16px 0; border-top: 1px solid var(--border-soft); }
 .ew-facts-group:first-child { padding-top: 0; border-top: none; }
 .ew-facts-group:last-child { padding-bottom: 0; }
+/* W9 §4 — the group's heading row: its name on the left, the one
+   control that edits everything in it on the right. A group whose
+   values are all editable together says so once, at the top, instead of
+   putting a pencil on whichever value happened to get one. */
+.ew-facts-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ew-facts-group-head .ew-facts-group-title {
+  margin: 0;
+}
 .ew-facts-group-title {
   margin: 0 0 10px;
   font-family: var(--f-head);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -12607,11 +12737,13 @@ a.wp-card-title:hover { text-decoration: underline; }
   gap: 14px 24px;
 }
 /* The label carries WHOSE fact this is, so it must be readable rather
-   than faint; the value is what the eye lands on. */
-.ew-fact-label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
-.ew-fact-value { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+   than faint; the value is what the eye lands on. W9 §1 puts both on
+   the shared scale — the value at reading size, the label one step
+   down — instead of at 11px and 13px picked per rule. */
+.ew-fact-label { font-size: var(--font-xs); color: var(--text-muted); margin-bottom: 2px; }
+.ew-fact-value { font-size: var(--font-base); color: var(--text); overflow-wrap: anywhere; }
 .ew-fact-with-action { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.ew-fact-prose { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ew-fact-prose { font-size: var(--font-base); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ew-fact-note { margin-top: 12px; }
 
 .ew-detail-tabs {

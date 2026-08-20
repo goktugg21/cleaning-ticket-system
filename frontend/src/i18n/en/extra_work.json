@@ -469,7 +469,7 @@
   "detail.labels_field_work_type": "Work type",
   "detail.labels_none": "None",
   "detail.labels_save": "Save",
-  "detail.labels_edit": "Edit labels",
+  "detail.labels_edit_both": "Edit classification",
   "detail.labels_saving": "Saving…",
   "detail.labels_locked_by": "Locked by invoice {{number}}.",
   "detail.labels_locked_howto": "To change this, credit the invoice, relabel, then re-invoice.",
@@ -592,6 +592,7 @@
   "hours_panel.where_numbers_live": "Hours come from the timesheets module; labour cost is computed in reporting. There is no hourly-rate field on this screen, and that is deliberate.",
   "plan": {
     "open_button": "Plan work",
+    "edit_button": "Edit plan",
     "dialog_title": "Plan and start work",
     "dialog_subtitle": "Set how many hours this work may take, when we carry it out and who works on it.",
     "budget_hours_label": "Budget hours",

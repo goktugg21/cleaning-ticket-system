@@ -116,7 +116,18 @@ export function ExtraWorkContextHeader({
       </Block>
 
       <Block label={t("detail.ctx_money")} testId="extra-work-ctx-money">
-        <div className="ew-ctx-strong" data-testid="extra-work-header-total">
+        {/* W9 §1 — an amount is coloured as an amount; a job with no
+            price yet is coloured as WAITING, because that is what it is
+            waiting for. Same two tokens the money strip and the hours
+            panel use, so one fact is one colour across the page. */}
+        <div
+          className={
+            ew.is_priced === false
+              ? "ew-ctx-strong ew-ctx-unpriced"
+              : "ew-ctx-strong ew-ctx-money"
+          }
+          data-testid="extra-work-header-total"
+        >
           {ew.is_priced === false
             ? t("detail.ctx_not_priced")
             : formatMoney(rowAmounts(ew).total)}
