@@ -7532,13 +7532,22 @@ a.attn-row:hover {
    including the ones with two contacts (panel 218px, no scrollbar). */
 .ew-contacts-panel {
   min-width: 0;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* Matches `.field`'s own label-to-value gap, so the heading sits the
+     same distance above its content as "Description" does above the
+     description text. */
+  gap: 6px;
+  /* W3-F — NO padding, NO background, NO border box.
+     W2-B drew this as a filled, bordered, padded card sitting inside
+     the details card: a nested box, and 12px of its own padding meant
+     its heading started 12px lower than the "Description" heading it
+     was supposed to line up with. It is a COLUMN of the card, not a
+     thing on top of it. The only remaining separator is the rule down
+     its left edge, which says "different column" without saying
+     "different card". */
+  padding: 0 0 0 16px;
+  border-left: 1px solid var(--border-soft);
 }
 .ew-contacts-panel-head {
   display: flex;
@@ -7546,13 +7555,13 @@ a.attn-row:hover {
   justify-content: space-between;
   gap: 8px;
 }
+/* Deliberately `.muted small`'s size and colour rather than a heading
+   style of its own: every other label in this half of the card
+   ("Description", "Billing month", "Routing") is a muted small line,
+   and the first thing "align with the other sections" means is that
+   this one is too. Same font, same size, same colour, same baseline. */
 .ew-contacts-panel-title {
-  font-family: var(--f-head);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-2);
+  font-weight: 600;
 }
 .ew-contacts-panel-empty {
   margin: 0;
@@ -7650,41 +7659,295 @@ a.attn-row:hover {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-/* W2-B fix 1 — the labels editor, open IN the cell rather than below
-   the whole grid.
+/* W3-F — Department and Work Type are edited IN PLACE.
 
-   Stacked, not side by side. Sprint 189 put the form under the grid on
-   the reasoning that two selects and a save button "do not fit in a
-   half-width grid cell" — they do not fit in a ROW in that cell, which
-   is a layout choice. One per line, they fit, and the control is where
-   the person who opened it is looking. The selects go full-width so a
-   long department name is readable at the cell's width. */
-.ew-labels-editor {
+   W2-B opened a form under the two values: two full-width dropdowns and
+   a button row, which pushed Description, the billing month, the
+   override and routing down the page every time somebody pressed Edit.
+   The owner's instruction is the plain one — make the existing lines
+   editable and keep the layout intact.
+
+   THE WHOLE RULE: the closed cell and the open cell must measure the
+   same. Two rules hold it.
+
+   1. `.ew-label-value` (the read state's text) and
+      `.ew-label-inline-select` (the edit state's control) are pinned to
+      the same `height`. `box-sizing: border-box` is global, so the
+      select's 1px underline is inside that height and costs nothing.
+      The select is otherwise stripped of chrome — no box, no padding,
+      `font: inherit` — because a control that has to occupy a line of
+      text's height cannot also carry a control's padding.
+   2. The action slot holds ONE `.btn-sm` when closed and TWO when open,
+      both 30px, both icon-only. Icons rather than labels because
+      "Opslaan" + "Annuleren" side by side can wrap at this cell width,
+      and a wrapped button row is height.
+
+   Anything that could grow the cell is deliberately somewhere else: a
+   save error is a toast (see `LabelsEditor`), and the invoice-lock
+   notice renders only in the state where there is no editor at all. */
+.ew-label-value,
+.ew-label-inline-select {
+  height: 22px;
+  line-height: 22px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ew-label-inline-select {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  /* The one affordance that survives stripping the box: an underline
+     that turns green on focus, matching `.field-select:focus`. */
+  cursor: pointer;
+}
+.ew-label-inline-select:focus {
+  outline: none;
+  border-bottom-color: var(--green);
+}
+/* ====================================================================
+   W3-F — the planning layer's screen.
+
+   Placed in the `.ew-*` block, beside the other Extra Work detail
+   rules, because that is where every consumer of these classes lives.
+
+   NOTHING HERE IS MONEY. Budget hours, distributed hours and the
+   overrun are planning and control numbers; the money treatments
+   (`.ew-list-total`, the figure strip) are deliberately not reused, so
+   nobody reading the stylesheet can mistake one for the other.
+   ==================================================================== */
+.ew-plan-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+.ew-plan-dialog {
+  width: 100%;
+  max-width: 560px;
+  /* The dialog scrolls INSIDE itself. At 1280px and shorter viewports
+     the crew list plus two date fields plus the switches exceed the
+     window, and a modal that overflows the page instead of itself
+     takes the scrollbar with it. */
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ew-plan-dialog-title {
+  margin: 0;
+}
+.ew-plan-dialog-sub {
+  margin: -10px 0 0;
+}
+.ew-plan-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ew-plan-section-title {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.ew-plan-section-hint {
+  margin: -6px 0 0;
+}
+.ew-plan-budget {
+  max-width: 220px;
+}
+.ew-plan-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+/* The customer's dates, read-only, beside ours. Recessed rather than
+   styled as fields, because they are context here and editing them is
+   another endpoint's job entirely. */
+.ew-plan-customer-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.ew-plan-crew {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 8px;
-  padding-top: 10px;
+  /* Bounded: a job can carry a large crew and the dialog must not grow
+     past the viewport to show it. */
+  max-height: 220px;
+  overflow-y: auto;
+}
+.ew-plan-crew-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.ew-plan-crew-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ew-plan-crew-hours {
+  width: 96px;
+  flex: none;
+}
+.ew-plan-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
   border-top: 1px solid var(--border-soft);
 }
-.ew-labels-editor-fields {
+.ew-plan-empty,
+.ew-plan-overrun {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+}
+.ew-plan-empty {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.ew-plan-empty-title {
+  font-weight: 700;
+}
+/* AMBER, not red, and never beside a disabled button. This warns that
+   the distribution is over budget and the save proceeds regardless —
+   the hard cap is the thing the reference system's own business had
+   removed. Red would read as a refusal. */
+.ew-plan-overrun {
+  background: var(--amber-soft);
+  border: 1px solid var(--amber-border);
+  color: var(--amber);
+}
+.ew-plan-overrun-title {
+  font-weight: 700;
+}
+.ew-plan-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.ew-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+.ew-plan-bulk-targets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ew-plan-bulk-target {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 620px) {
+  .ew-plan-dates {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The plan as it reads back, at the end of the details card's left
+   column. A field group, not a card: the run it joins is
+   description / notes / billing / routing, and a boxed panel here would
+   be the same nested-box mistake the contacts column just stopped
+   making. */
+.ew-plan-summary {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
 }
-.ew-labels-editor-field {
+.ew-plan-summary-title {
+  font-weight: 600;
+}
+.ew-plan-summary-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.ew-plan-summary-crew {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* Bounded for the same reason the dialog's crew list is. */
+  max-height: 180px;
+  overflow-y: auto;
+}
+.ew-plan-summary-crew-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   min-width: 0;
 }
-.ew-labels-editor-field .field-select {
-  width: 100%;
+.ew-plan-summary-crew-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
-.ew-labels-editor-actions {
+.ew-plan-summary-unassigned {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--amber);
+}
+.ew-plan-summary-flags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px 16px;
+}
+
+.ew-labels-inline-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+/* Square, so two of them take about the width the one labelled button
+   took and the row cannot wrap where it did not wrap before. */
+.ew-labels-icon-btn {
+  width: 30px;
+  padding: 0;
+  flex: none;
 }
 .ew-agreed-price-item-label {
   font-size: 12px;

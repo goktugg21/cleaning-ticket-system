@@ -11,9 +11,12 @@ import type {
   ExtraWorkAssignment,
   ExtraWorkAssignmentRole,
   ExtraWorkBulkAssignResult,
+  ExtraWorkBulkPlanResult,
   EwMessageRecipient,
   EwMessageType,
   EwMessageVisibility,
+  ExtraWorkPlanPayload,
+  ExtraWorkPlanResult,
   ExtraWorkPreviewPayload,
   ExtraWorkPreviewResponse,
   ExtraWorkPricingLineItem,
@@ -292,6 +295,46 @@ export async function bulkSetExtraWorkDates(payload: {
 }): Promise<{ updated: number }> {
   const response = await api.post<{ updated: number }>(
     "/extra-work/bulk-dates/",
+    payload,
+  );
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// W2-D planning layer — W3-F consumes it.
+//
+// BOTH endpoints are pinned to DRF's `JSONParser` and answer 415 to form
+// data. That is deliberate on the server's side and it is why these two
+// functions hand axios a plain OBJECT (serialised as JSON) and never a
+// FormData: DRF reads a boolean that is absent from form input as
+// `false`, so a form-encoded plan that never mentioned
+// `file_upload_required` would write it to false on every work it
+// touched. Do not "fix" a 415 here by switching to FormData.
+//
+// The payload is read by KEY PRESENCE end to end, so a field the caller
+// did not collect must be OMITTED, not sent as null or false.
+// ---------------------------------------------------------------------------
+
+/** Plan one work, and start it. Returns the refreshed detail with a
+ *  `plan` result block attached. */
+export async function planExtraWork(
+  id: number,
+  payload: ExtraWorkPlanPayload,
+): Promise<ExtraWorkRequestDetail & { plan?: ExtraWorkPlanResult }> {
+  const response = await api.post<
+    ExtraWorkRequestDetail & { plan?: ExtraWorkPlanResult }
+  >(`/extra-work/${id}/plan/`, payload);
+  return response.data;
+}
+
+/** Plan a selection. ONE payload, applied to every id — the endpoint is
+ *  shaped that way, and it is all-or-nothing: a single unresolvable id
+ *  rejects the batch with zero writes. */
+export async function bulkPlanExtraWork(
+  payload: ExtraWorkPlanPayload & { requests: number[] },
+): Promise<ExtraWorkBulkPlanResult> {
+  const response = await api.post<ExtraWorkBulkPlanResult>(
+    "/extra-work/bulk-plan/",
     payload,
   );
   return response.data;

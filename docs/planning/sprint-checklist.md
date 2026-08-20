@@ -946,6 +946,83 @@ that decides nothing.
   operational ticket, which is what this sprint hardened;
   `backend/extra_work/**` was not touched.
 
+### Done — W3-F (Extra Work detail page + the planning screen, wave 3, chat F of 2)
+
+Frontend only. `ExtraWorkDetailPage.tsx`, three new components under
+`components/extra-work/`, the planning types in `api/types.ts`, the
+`.ew-*` block of `index.css`, and the bulk action on the list page.
+Every layout number below is read off the live DOM at 1440px against the
+same page built from the branch point in a second worktree.
+
+- **Department and Work Type are edited IN PLACE.** Pressing Edit used to
+  open a form under the two values — two full-width dropdowns and a
+  button row — which pushed Description, the billing month, the override
+  and Routing down the page by 169px every time. There is no form now:
+  the two values become selects in the slots they already occupy, and
+  Save / Cancel stand where the Edit button stood. **Measured, closed vs
+  open: Description 477 / 477, Billing month 533 / 533, Routing 725 /
+  725, card height 610 / 610.** Before the change the same four numbers
+  were 477 / 646, 533 / 702, 725 / 894, 638 / 807. Held by three things
+  together: identical outer markup in both states, one pinned height
+  shared by `.ew-label-value` and `.ew-label-inline-select`, and a save
+  error that goes to a TOAST rather than an inline banner — an error
+  banner in that cell would push the page down at the worst moment.
+- **Customer contacts reads as a column of the card, not a box on top of
+  it.** Its heading sat 13px below the Description heading it was meant
+  to line up with, because the panel carried 12px of its own padding
+  inside a filled, bordered box. Padding, background and border are
+  gone; a rule down its left edge says "different column" without saying
+  "different card", and the heading wears the same `muted small` class as
+  every other label in that half. **Description 477, contacts heading
+  477.** The wave-2 scroll behaviour is intact: 12 contacts, 712px of
+  content inside a 300px box, panel 322px, page overflow 0.
+- **The planning layer has a screen.** W2-D shipped `plan/` and
+  `bulk-plan/` complete and tested and nothing called them, so from the
+  owner's chair the feature did not exist. There is now a Plan work
+  action on the detail page opening a modal with budget hours, OUR
+  committed window (labelled as ours, with the customer's requested date
+  and deadline shown beside it read-only), one row per assigned person,
+  and the two completion switches. The button says PLAN AND START.
+  Measured 560x779 at 1440px and at 1280px, page overflow 0 at both.
+- **The overrun warns and does not block, and that was measured, not
+  asserted.** With 6 budget hours and 9 distributed the warning renders
+  and `submit disabled` reads FALSE. A real submit went through at 200
+  with `content-type: application/json`, the dialog closed, and the
+  summary rendered the budget, the distribution, the window, the per-
+  person hours and the overrun.
+- **A real bug the measurement caught.** The first build tracked both
+  completion switches with ONE "touched" flag, so flipping "photo
+  required" also sent `completion_notes_required: false`. Harmless on
+  the single-work dialog, where both switches are seeded from the row —
+  and the reference system's exact defect on the BULK dialog, where they
+  start at false because the selected works disagree and there is
+  nothing to seed from. One flip would have cleared the notes flag on
+  every work in the batch. Now one flag per switch, verified on the
+  wire: touching only the photo switch sends
+  `{"requests":[...],"budget_hours":"4","file_upload_required":true}`
+  and no notes key at all.
+- **Bulk plan** is on the Extra Work list's edit-mode toolbar. 560x672,
+  page overflow 0 at 1440 and 1280, the selected works listed in a
+  bounded box, Confirm disabled only when there is literally nothing to
+  write.
+
+### Deliberately NOT done — W3-F
+
+- **No per-work values in the bulk table.** `POST /extra-work/bulk-plan/`
+  takes ONE payload and applies it to every id; a grid of per-work values
+  would need either an API change (forbidden this sprint) or N separate
+  calls, which would throw away the endpoint's all-or-nothing property.
+  The dialog says plainly that the values go to every selected work.
+- **No planned hours in the bulk dialog.** The server refuses hours for
+  anybody not assigned to EACH selected work, so one shared distribution
+  is only valid when the same crew is on every job; offering the field
+  would produce a 400 that reads as a bug in the dialog. Hours are
+  planned per work.
+- **No client-side block on the overrun anywhere**, by instruction and on
+  the evidence: the reference system's own `validateTotalHours()` is a
+  complete function that is never called, under the comment "// Hours
+  validation removed per user request".
+
 
 ## Historical — Sprint 181
 

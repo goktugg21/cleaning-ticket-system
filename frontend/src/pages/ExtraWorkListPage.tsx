@@ -12,6 +12,7 @@ import { listAllCustomers, listCustomerBuildings } from "../api/admin";
 import { listLabels } from "../api/customerLabels";
 import {
   bulkAssignExtraWork,
+  bulkPlanExtraWork,
   bulkSetExtraWorkDates,
   listAllExtraWork,
   listExtraWorkAssignmentCandidates,
@@ -26,6 +27,7 @@ import type {
   CustomerLabel,
   ExtraWorkBilledTo,
   ExtraWorkCategory,
+  ExtraWorkPlanPayload,
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
@@ -45,6 +47,7 @@ import {
   ticketStatusLabelKey,
 } from "../lib/enumLabels";
 import { EditModeToggle } from "../components/EditModeToggle";
+import { BulkPlanDialog } from "../components/extra-work/BulkPlanDialog";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
 import { useEditMode } from "../lib/useEditMode";
@@ -413,6 +416,16 @@ export function ExtraWorkList({
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
   const [assignError, setAssignError] = useState("");
+  // W3-F — bulk plan, behind the same edit gate as the two bulk actions
+  // beside it. ONE payload applied to the whole selection, which is what
+  // the endpoint does; per-work hours are planned on the detail page,
+  // because the server refuses hours for anybody not assigned to EACH
+  // selected work and one shared distribution is only ever valid when
+  // the same crew is on every job.
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planError, setPlanError] = useState("");
+
   // Sprint 176 §3 — bulk deadline / planned end, behind the same edit gate.
   const [datesOpen, setDatesOpen] = useState(false);
   const [datesBusy, setDatesBusy] = useState(false);
@@ -891,6 +904,36 @@ export function ExtraWorkList({
     }
   }
 
+  /** W3-F — one plan across a selection.
+   *
+   *  Same OMIT-what-was-not-touched discipline as `runBulkDates` above,
+   *  and for a sharper reason: the two completion flags are booleans the
+   *  server reads by KEY PRESENCE, so spreading the dialog's state would
+   *  write `false` for a switch nobody looked at and silently clear the
+   *  flag on every selected work. The dialog therefore hands back only
+   *  the fields it was actually given.
+   *
+   *  All-or-nothing at the far end: one unresolvable id rejects the
+   *  batch with zero writes, so there is no partial state to reconcile
+   *  and the list is simply reloaded on success. */
+  async function runBulkPlan(payload: ExtraWorkPlanPayload) {
+    setPlanBusy(true);
+    setPlanError("");
+    try {
+      await bulkPlanExtraWork({
+        requests: edit.selection,
+        ...payload,
+      });
+      setPlanOpen(false);
+      edit.exit();
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setPlanError(getApiError(err));
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
   // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
   // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
   // BOM so Excel reads Dutch characters, CRLF line endings, quoted fields.
@@ -1022,6 +1065,18 @@ export function ExtraWorkList({
           error={datesError}
           onCancel={() => setDatesOpen(false)}
           onConfirm={runBulkDates}
+        />
+      )}
+
+      {/* W3-F — bulk plan. Conditionally mounted like its two
+          neighbours; a plain overlay, not a native `<dialog>`. */}
+      {planOpen && (
+        <BulkPlanDialog
+          rows={rows.filter((row) => edit.selection.includes(row.id))}
+          busy={planBusy}
+          error={planError}
+          onCancel={() => setPlanOpen(false)}
+          onConfirm={(payload) => void runBulkPlan(payload)}
         />
       )}
 
@@ -1529,6 +1584,15 @@ export function ExtraWorkList({
                   onClick: () => {
                     setDatesError("");
                     setDatesOpen(true);
+                  },
+                },
+                // W3-F — the bulk half of the planning layer.
+                {
+                  key: "plan",
+                  label: t("plan.bulk_button"),
+                  onClick: () => {
+                    setPlanError("");
+                    setPlanOpen(true);
                   },
                 },
               ]}

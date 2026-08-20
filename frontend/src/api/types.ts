@@ -1803,6 +1803,117 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   // the wire). Detail only — the list serializer omits it to avoid an N+1.
   labels_locked?: boolean;
   labels_locked_invoice?: string | null;
+
+  // ---- W2-D planning layer, consumed by W3-F -------------------------
+  // PROVIDER-ONLY on the wire: the backend strips all four for a
+  // CUSTOMER_USER (`ExtraWorkRequestDetailSerializer._PROVIDER_ONLY_FIELDS`
+  // — "a customer must never see the budget, who is doing what for how
+  // long, or whether we are over our own estimate"). Optional here for
+  // exactly that reason: absent is a real, expected shape, not a legacy
+  // one, and the UI must key on the role check rather than on truthiness.
+  /** Decimal string, e.g. "8.00". The planning number. NEVER a price. */
+  budget_hours?: string | null;
+  planned_hours?: ExtraWorkPlannedHoursRow[];
+  /** Decimal string — the sum of `planned_hours`, computed server-side. */
+  planned_hours_total?: string;
+  /** Present and non-null ONLY when the distribution exceeds the budget.
+   *  A warning the read surface carries so the manager approving the
+   *  work sees the overrun on the screen they approve from. */
+  planned_hours_overrun?: ExtraWorkHoursOverrun | null;
+  /** The two completion requirements, set at plan time, both default
+   *  off. NOT provider-only — they are a promise about the evidence the
+   *  customer will get, not a number about our own people. */
+  file_upload_required?: boolean;
+  completion_notes_required?: boolean;
+  /** The window WE committed to. Separate stored values from the
+   *  customer's `preferred_date` / `planned_end_date` / `deadline`, and
+   *  the plan endpoint never touches those. */
+  provider_planned_date?: string | null;
+  provider_planned_end_date?: string | null;
+}
+
+/** W2-D — one person's share of the budget.
+ *
+ *  `is_assigned` false means the person was planned hours and has since
+ *  been taken off the work. The row STAYS in the list and stays in the
+ *  total, deliberately: the reference system builds its grid from the
+ *  assignment list instead, so hours belonging to a removed worker
+ *  vanish from the screen while still counting in every total, and the
+ *  screen and the total disagree with nothing on screen to explain it. */
+export interface ExtraWorkPlannedHoursRow {
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: string;
+  /** Decimal string, e.g. "4.00". Zero is legal and means "on the crew,
+   *  no hours budgeted yet" — dropping the row to say so would lose the
+   *  fact that they are on the job. */
+  hours: string;
+  is_assigned: boolean;
+  set_at: string;
+}
+
+/** W2-D — the overrun body, from `planning.hours_overrun`. Every figure
+ *  is a decimal STRING of HOURS. Nothing here is money and nothing here
+ *  goes near `rowAmounts()`. */
+export interface ExtraWorkHoursOverrun {
+  code: string;
+  budget_hours: string;
+  distributed_hours: string;
+  over_by: string;
+}
+
+/** The plan payload, for `POST /extra-work/<id>/plan/` and
+ *  `POST /extra-work/bulk-plan/`.
+ *
+ *  EVERY FIELD IS OPTIONAL AND ABSENCE MEANS "LEAVE IT ALONE" — the
+ *  backend reads this payload by KEY PRESENCE, including the two
+ *  booleans. That is why the client must OMIT a field it did not
+ *  collect rather than send a default: sending `file_upload_required:
+ *  false` because a dialog did not ask about it is precisely the
+ *  reference system's defect, where 0 of 78 live records has either
+ *  flag set because every write path silently discarded them.
+ *
+ *  BOTH ENDPOINTS ARE PINNED TO `JSONParser` AND ANSWER 415 TO FORM
+ *  DATA, on purpose: DRF reads an absent boolean out of form input as
+ *  `false`, which would wipe both flags on every work in a bulk plan.
+ *  axios serialises a plain object as JSON, which is what these calls
+ *  send. */
+export interface ExtraWorkPlanPayload {
+  budget_hours?: string | null;
+  provider_planned_date?: string | null;
+  provider_planned_end_date?: string | null;
+  planned_hours?: { user: number; hours: string }[];
+  file_upload_required?: boolean;
+  completion_notes_required?: boolean;
+  /** Absent means START — plan and start are one action. Send `false`
+   *  to plan without starting. */
+  start?: boolean;
+}
+
+/** What a plan write reports back, on the `plan` key of the detail
+ *  response. `warnings` carries the hours overrun; a `started` of false
+ *  with a `start_skipped` code is a NORMAL outcome (the work already has
+ *  an operational ticket driving its status), not a failure. */
+export interface ExtraWorkPlanResult {
+  warnings: ExtraWorkHoursOverrun[];
+  started: boolean;
+  start_skipped: string | null;
+  tickets_moved: number[];
+  tickets_kept_own_date: number[];
+}
+
+/** The bulk-plan reply. One entry per work, in id order. */
+export interface ExtraWorkBulkPlanResult {
+  updated: number;
+  results: {
+    extra_work: number;
+    warnings: ExtraWorkHoursOverrun[];
+    started: boolean;
+    start_skipped: string | null;
+  }[];
+  tickets_moved: number[];
+  tickets_kept_own_date: number[];
 }
 
 // Mirrors backend `extra_work/serializers.py::ExtraWorkRequestDetailSerializer.get_actions`.

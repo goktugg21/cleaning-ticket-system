@@ -34,7 +34,14 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { FileSearch, FileText, Pencil } from "lucide-react";
+import {
+  CalendarClock,
+  Check,
+  FileSearch,
+  FileText,
+  Pencil,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import axios from "axios";
@@ -53,7 +60,9 @@ import {
   getExtraWork,
   listEwMessages,
   listProposalsForEw,
+  listExtraWorkAssignments,
   listSpawnedTickets,
+  planExtraWork,
   relabelExtraWork,
   updateExtraWorkDates,
   retrySpawnTicketsForExtraWork,
@@ -64,6 +73,8 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { ExtraWorkAssignmentCard } from "../components/extra-work/ExtraWorkAssignmentCard";
 import { ExtraWorkHoursPanel } from "../components/extra-work/ExtraWorkHoursPanel";
+import { PlanSummary } from "../components/extra-work/PlanSummary";
+import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
 import type {
   Contact,
@@ -71,7 +82,9 @@ import type {
   EwMessage,
   EwMessageRecipient,
   EwMessageType,
+  ExtraWorkAssignment,
   ExtraWorkCategory,
+  ExtraWorkPlanPayload,
   ExtraWorkRequestDetail,
   ExtraWorkStatus,
   ExtraWorkUrgency,
@@ -709,15 +722,31 @@ function DatesEditor({
  *  values are rendered by the parent, in the cell, with an Edit trigger
  *  beside them.
  *
- *  W2-B fix 1 — and the form now opens IN THAT CELL, directly under the
- *  two values, instead of below the whole grid on the far LEFT of the
- *  card. Sprint 189 put it there on the reasoning that "two selects and
- *  a save button do not fit in a half-width grid cell"; they do not fit
- *  SIDE BY SIDE, which is a layout choice, not a constraint. Stacked,
- *  they fit, and the person who pressed Edit on the right of the card
- *  no longer has to look across it to find what they opened. The one
- *  rule this keeps from `DatesEditor` is that a save reseeds from the
- *  row (the parent keys the mount), not the place it opens in.
+ *  W2-B fix 1 moved the form into that cell. It was still a FORM: two
+ *  full-width dropdowns and a button row that appeared underneath and
+ *  pushed Description, the billing month, the override and routing down
+ *  the page every time somebody pressed Edit.
+ *
+ *  W3-F — there is no form. This component renders the SAME row the
+ *  read state renders, with the two values swapped for selects in the
+ *  slots they already occupy and Save / Cancel standing where the Edit
+ *  button stood. Nothing is added, so nothing below can move.
+ *
+ *  The zero-movement property is not a nice finish, it is the
+ *  acceptance test, and it is held by three things together:
+ *
+ *    * the outer markup is identical — `.ew-labels-inline` with two
+ *      label/value stacks and one action slot, in both states;
+ *    * `.ew-label-value` and `.ew-label-inline-select` are pinned to the
+ *      SAME fixed height in CSS, so the stacks measure the same open or
+ *      closed (`box-sizing: border-box` is global, so the select's
+ *      border costs nothing);
+ *    * a save error goes to a TOAST, never to an inline `.alert-error`.
+ *      An error banner in this cell would push the page down at the
+ *      worst possible moment — while the operator is reading why their
+ *      change did not land.
+ *
+ *  Measured both ways at 1440px; the numbers are in the sprint report.
  *
  *  Mounted only while open AND only while the labels are unlocked: a
  *  work frozen by an issued invoice has nothing to edit, and the parent
@@ -743,7 +772,6 @@ function LabelsEditor({
   );
   const [wtId, setWtId] = useState(ew.work_type ? String(ew.work_type) : "");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -789,7 +817,6 @@ function LabelsEditor({
 
   async function save() {
     setSaving(true);
-    setError("");
     try {
       const updated = await relabelExtraWork(ew.id, {
         department: deptId ? Number(deptId) : null,
@@ -802,11 +829,17 @@ function LabelsEditor({
       onClose();
     } catch (err) {
       const code = labelErrorCode(err);
-      setError(
-        code && code in LABELS_ERROR_I18N_KEY
-          ? t(LABELS_ERROR_I18N_KEY[code])
-          : getApiError(err),
-      );
+      // W3-F — a TOAST, not an inline banner. The banner used to render
+      // inside this cell, which means a failed save pushed the whole
+      // lower half of the card down while the operator was reading why
+      // it failed. This cell must not change height for any reason.
+      pushToast({
+        variant: "error",
+        title:
+          code && code in LABELS_ERROR_I18N_KEY
+            ? t(LABELS_ERROR_I18N_KEY[code])
+            : getApiError(err),
+      });
       // Raced with an issuance in another tab — reload so the cell above
       // flips to the read-only locked state (§4).
       if (code === "labels_locked_by_invoice") onRefresh();
@@ -816,69 +849,75 @@ function LabelsEditor({
   }
 
   return (
-    <div className="ew-labels-editor" data-testid="extra-work-labels-editor">
-      <div className="ew-labels-editor-fields">
-        <label className="ew-labels-editor-field">
-          <span className="muted small">
-            {t("detail.labels_field_department")}
-          </span>
-          <select
-            className="field-select"
-            value={deptId}
-            onChange={(e) => setDeptId(e.target.value)}
-            data-testid="extra-work-labels-department"
-          >
-            <option value="">{t("detail.labels_none")}</option>
-            {deptOptions.map((d) => (
-              <option key={d.id} value={d.id}>
-                {customerLabelName(d.name, t)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="ew-labels-editor-field">
-          <span className="muted small">
-            {t("detail.labels_field_work_type")}
-          </span>
-          <select
-            className="field-select"
-            value={wtId}
-            onChange={(e) => setWtId(e.target.value)}
-            data-testid="extra-work-labels-work-type"
-          >
-            <option value="">{t("detail.labels_none")}</option>
-            {wtOptions.map((w) => (
-              <option key={w.id} value={w.id}>
-                {customerLabelName(w.name, t)}
-              </option>
-            ))}
-          </select>
-        </label>
+    <div className="ew-labels-inline" data-testid="extra-work-labels-editor">
+      <div>
+        <div className="muted small">
+          {t("detail.labels_field_department")}
+        </div>
+        {/* In the value's slot, at the value's height. The label above
+            it is the read state's own label, unchanged. */}
+        <select
+          className="ew-label-inline-select"
+          value={deptId}
+          onChange={(e) => setDeptId(e.target.value)}
+          aria-label={t("detail.labels_field_department")}
+          data-testid="extra-work-labels-department"
+        >
+          <option value="">{t("detail.labels_none")}</option>
+          {deptOptions.map((d) => (
+            <option key={d.id} value={d.id}>
+              {customerLabelName(d.name, t)}
+            </option>
+          ))}
+        </select>
       </div>
-      <div className="ew-labels-editor-actions">
+      <div>
+        <div className="muted small">
+          {t("detail.labels_field_work_type")}
+        </div>
+        <select
+          className="ew-label-inline-select"
+          value={wtId}
+          onChange={(e) => setWtId(e.target.value)}
+          aria-label={t("detail.labels_field_work_type")}
+          data-testid="extra-work-labels-work-type"
+        >
+          <option value="">{t("detail.labels_none")}</option>
+          {wtOptions.map((w) => (
+            <option key={w.id} value={w.id}>
+              {customerLabelName(w.name, t)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {/* Standing exactly where the Edit button stood. Icon-only and
+          `.btn-sm`, so the slot is the same height as that button and
+          NARROWER than it — two labelled buttons could wrap onto a
+          second line at this cell width, and a wrap is height. */}
+      <div className="ew-labels-inline-actions">
         <button
           type="button"
-          className="btn btn-primary btn-sm"
+          className="btn btn-primary btn-sm ew-labels-icon-btn"
           disabled={saving}
           onClick={() => void save()}
+          title={t("detail.labels_save")}
+          aria-label={t("detail.labels_save")}
           data-testid="extra-work-labels-save"
         >
-          {saving ? t("detail.labels_saving") : t("detail.labels_save")}
+          <Check size={14} strokeWidth={2.4} aria-hidden="true" />
         </button>
         <button
           type="button"
-          className="btn btn-secondary btn-sm"
+          className="btn btn-secondary btn-sm ew-labels-icon-btn"
           onClick={onClose}
           disabled={saving}
+          title={t("common:cancel")}
+          aria-label={t("common:cancel")}
+          data-testid="extra-work-labels-cancel"
         >
-          {t("common:cancel")}
+          <X size={14} strokeWidth={2.4} aria-hidden="true" />
         </button>
       </div>
-      {error && (
-        <div className="alert-error" style={{ marginTop: 8 }}>
-          {error}
-        </div>
-      )}
     </div>
   );
 }
@@ -915,7 +954,10 @@ function CustomerContactsPanel({ contacts }: { contacts: Contact[] }) {
       data-testid="extra-work-customer-contacts-panel"
     >
       <div className="ew-contacts-panel-head">
-        <span className="ew-contacts-panel-title">
+        {/* `muted small` is the class every other label in this half of
+            the card carries. Wearing it is what makes the heading line
+            up with "Description" rather than merely sit near it. */}
+        <span className="muted small ew-contacts-panel-title">
           {t("customer_contacts.panel_title", { ns: "common" })}
         </span>
         <span className="muted small">
@@ -978,6 +1020,18 @@ export function ExtraWorkDetailPage() {
   // Sprint 189 §1 — same shape for the labels editor, which now opens in
   // the same place from a trigger in the same grid.
   const [labelsOpen, setLabelsOpen] = useState(false);
+  // W3-F — the plan modal. The assignment list is fetched WHEN THE
+  // DIALOG OPENS rather than with the page: the backend refuses hours
+  // for anybody not currently assigned, so the crew the dialog offers
+  // has to be the crew as of the moment somebody plans, not as of the
+  // last page load.
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planAssignments, setPlanAssignments] = useState<
+    ExtraWorkAssignment[]
+  >([]);
+  const [planAssignmentsLoading, setPlanAssignmentsLoading] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planError, setPlanError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -1759,6 +1813,67 @@ export function ExtraWorkDetailPage() {
   // fix shipped). The backend still re-validates role + status +
   // emptiness; this handler maps the stable `code` field to a
   // localized toast on failure.
+  /** W3-F — open the plan modal, reading the crew as of NOW.
+   *
+   *  The assignment list is the dialog's row source because the backend
+   *  refuses hours for anybody not currently assigned, and refuses them
+   *  with the same body it uses for an id that does not exist — so a
+   *  client working from a stale list would produce a 400 nobody could
+   *  explain from the screen. A read failure leaves the crew empty,
+   *  which renders the "assign somebody first" state rather than a
+   *  half-built grid.
+   */
+  async function openPlan() {
+    setPlanError("");
+    setPlanAssignments([]);
+    setPlanAssignmentsLoading(true);
+    setPlanOpen(true);
+    try {
+      const rows = await listExtraWorkAssignments(Number(id));
+      setPlanAssignments(rows);
+    } catch {
+      setPlanAssignments([]);
+    } finally {
+      setPlanAssignmentsLoading(false);
+    }
+  }
+
+  /** Plan and start. One call, and the response IS the refreshed detail
+   *  (with a `plan` block attached), so the page does not re-fetch.
+   *
+   *  `plan.warnings` carries the overrun. It is surfaced as a toast and
+   *  it is NOT an error: the save has already happened by the time the
+   *  warning exists, and `planned_hours_overrun` on the refreshed detail
+   *  keeps it on the page afterwards. */
+  async function submitPlan(payload: ExtraWorkPlanPayload) {
+    setPlanBusy(true);
+    setPlanError("");
+    try {
+      const updated = await planExtraWork(Number(id), payload);
+      setEw(updated);
+      setPlanOpen(false);
+      pushToast({ variant: "success", title: t("plan.saved") });
+      const overrun = updated.plan?.warnings?.[0];
+      if (overrun) {
+        pushToast({
+          variant: "warning",
+          title: t("plan.overrun_title", { over: overrun.over_by }),
+        });
+      }
+      // A start that could not happen is a NORMAL outcome once the work
+      // has an operational ticket driving its status — reported, not
+      // raised, and the plan landed either way. Saying so beats leaving
+      // the operator to notice the status did not move.
+      if (updated.plan && !updated.plan.started) {
+        pushToast({ variant: "info", title: t("plan.not_started_notice") });
+      }
+    } catch (err) {
+      setPlanError(getApiError(err));
+    } finally {
+      setPlanBusy(false);
+    }
+  }
+
   async function handleRetrySpawn() {
     if (!ew) return;
     setRetrySpawnBusy(true);
@@ -2205,12 +2320,34 @@ export function ExtraWorkDetailPage() {
                     does not invent one. */}
                 {isProvider && (
                   <div data-testid="extra-work-labels">
+                    {/* W3-F — ONE of two rows, never a row plus a form.
+                        Both branches render the same `.ew-labels-inline`
+                        shape: two label/value stacks and one action
+                        slot. The editor swaps the values for selects of
+                        the same pinned height and the Edit button for
+                        Save / Cancel of the same `.btn-sm` height, so
+                        the cell measures identically in both states and
+                        nothing below it can move. */}
+                    {labelsOpen && !ew.labels_locked ? (
+                      <LabelsEditor
+                        key={`labels-${ew.id}-${ew.department ?? ""}-${
+                          ew.work_type ?? ""
+                        }`}
+                        ew={ew}
+                        onUpdated={(detail) => setEw(detail)}
+                        onRefresh={() => void refresh()}
+                        onClose={() => setLabelsOpen(false)}
+                      />
+                    ) : (
                     <div className="ew-labels-inline">
                       <div>
                         <div className="muted small">
                           {t("detail.labels_field_department")}
                         </div>
-                        <div data-testid="extra-work-labels-department-value">
+                        <div
+                          className="ew-label-value"
+                          data-testid="extra-work-labels-department-value"
+                        >
                           {ew.department_name
                             ? customerLabelName(ew.department_name, t)
                             : t("detail.empty_dash")}
@@ -2220,7 +2357,10 @@ export function ExtraWorkDetailPage() {
                         <div className="muted small">
                           {t("detail.labels_field_work_type")}
                         </div>
-                        <div data-testid="extra-work-labels-work-type-value">
+                        <div
+                          className="ew-label-value"
+                          data-testid="extra-work-labels-work-type-value"
+                        >
                           {ew.work_type_name
                             ? customerLabelName(ew.work_type_name, t)
                             : t("detail.empty_dash")}
@@ -2228,18 +2368,22 @@ export function ExtraWorkDetailPage() {
                       </div>
                       {/* The trigger sits beside the values it edits, the
                           same idiom as the deadline cell to the left. */}
-                      {!ew.labels_locked && !labelsOpen && (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => setLabelsOpen(true)}
-                          data-testid="extra-work-labels-edit"
-                        >
-                          <Pencil size={13} strokeWidth={2} />
-                          {t("detail.labels_edit")}
-                        </button>
+                      {!ew.labels_locked && (
+                        <div className="ew-labels-inline-actions">
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm ew-labels-icon-btn"
+                            onClick={() => setLabelsOpen(true)}
+                            title={t("detail.labels_edit")}
+                            aria-label={t("detail.labels_edit")}
+                            data-testid="extra-work-labels-edit"
+                          >
+                            <Pencil size={13} strokeWidth={2} />
+                          </button>
+                        </div>
                       )}
                     </div>
+                    )}
                     {/* Frozen by an issued invoice — there is nothing to
                         edit, so the reason and the way out take the
                         trigger's place rather than hiding behind a dead
@@ -2263,26 +2407,6 @@ export function ExtraWorkDetailPage() {
                         </div>
                         <div>{t("detail.labels_locked_howto")}</div>
                       </div>
-                    )}
-                    {/* W2-B fix 1 — the editor opens HERE, in the same
-                        cell, directly under the values it edits. It used
-                        to open below the entire grid on the far left of
-                        the card: the operator pressed Edit on the right
-                        and the control appeared somewhere else entirely,
-                        with the fields it belonged to still showing
-                        their old values above it. Keyed by the values it
-                        seeds from, so a save-then-reopen shows what was
-                        saved. */}
-                    {labelsOpen && !ew.labels_locked && (
-                      <LabelsEditor
-                        key={`labels-${ew.id}-${ew.department ?? ""}-${
-                          ew.work_type ?? ""
-                        }`}
-                        ew={ew}
-                        onUpdated={(detail) => setEw(detail)}
-                        onRefresh={() => void refresh()}
-                        onClose={() => setLabelsOpen(false)}
-                      />
                     )}
                   </div>
                 )}
@@ -2466,6 +2590,11 @@ export function ExtraWorkDetailPage() {
                         : t("detail.routing_decision_proposal")}
                     </div>
                   </div>
+                  {/* W3-F — the plan, read back. Renders nothing at all
+                      until there IS a plan, so an unplanned job is not
+                      given an empty block to explain. Provider-only for
+                      the same reason the button is. */}
+                  {isProvider && <PlanSummary ew={ew} />}
                 </div>
                 {canSeeCustomerContacts && (
                   <CustomerContactsPanel contacts={customerContacts} />
@@ -2505,6 +2634,25 @@ export function ExtraWorkDetailPage() {
                 </p>
               )}
               <div className="ew-workflow-actions">
+                {/* W3-F — the entry point to the planning layer W2-D
+                    built. Provider-only, and it rides the page's
+                    existing `isProvider` check rather than inventing a
+                    role rule of its own: the endpoint refuses any other
+                    role at the door with `plan_provider_only`, and the
+                    four planning fields are stripped from a customer's
+                    response anyway. First in the list because on an
+                    approved job planning IS the next thing to do. */}
+                {isProvider && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => void openPlan()}
+                    data-testid="extra-work-plan-button"
+                  >
+                    <CalendarClock size={14} strokeWidth={2.2} aria-hidden="true" />
+                    {t("plan.open_button")}
+                  </button>
+                )}
                 {canAutoStart && (
                   <div
                     className="ew-auto-start"
@@ -3240,6 +3388,28 @@ export function ExtraWorkDetailPage() {
             {t("detail.updated_at", { date: formatDateTime(ew.updated_at) })}
           </div>
       </div>
+
+      {/* W3-F — the plan modal. Conditionally mounted, which is correct
+          HERE and would be a bug for a native `<dialog>`: this is a
+          plain overlay div (the split `BulkAssignDialog` documents), so
+          neither the invisible-dialog trap (Sprint 128) nor the
+          frozen-page trap (Sprint 118) applies. Keyed by the work and
+          its stored plan so reopening after a save seeds from what was
+          saved rather than from what was on screen when it opened. */}
+      {planOpen && (
+        <PlanWorkDialog
+          key={`plan-${ew.id}-${ew.budget_hours ?? ""}-${
+            ew.planned_hours_total ?? ""
+          }`}
+          ew={ew}
+          assignments={planAssignments}
+          assignmentsLoading={planAssignmentsLoading}
+          busy={planBusy}
+          error={planError}
+          onCancel={() => setPlanOpen(false)}
+          onSubmit={(payload) => void submitPlan(payload)}
+        />
+      )}
 
       {/* Sprint 28 Batch 15.4 — customer-side reject dialog. Captures
           the mandatory `customer_reject_reason` the backend now
