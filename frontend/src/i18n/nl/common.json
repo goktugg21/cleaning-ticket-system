@@ -2521,7 +2521,10 @@
     "state_count": "{{withRate}} van {{total}} medewerkers hebben kosten per uur",
     "state_none": "Zolang die niet zijn ingesteld rapporteren hun uren helemaal geen loonkosten - niet nul, maar leeg.",
     "state_some": "{{missing}} rapporteren nog geen loonkosten.",
-    "preview": "10 uur van deze medewerker rapporteert straks {{amount}} aan loonkosten, voor werk vanaf {{from}}.",
+    "where_prefix": "Wordt maar op een plek gelezen:",
+    "where_link": "Loonkosten bij een Extra werk",
+    "where_suffix": ". Nooit in wat een klant betaalt.",
+    "preview": "10 uur van deze medewerker verschijnt als {{amount}} onder Loonkosten, voor werk vanaf {{from}}.",
     "preview_no_date": "de ingangsdatum die u kiest"
   },
   "nav.sla_warnings": "SLA-waarschuwingen",

@@ -13072,3 +13072,13 @@ a.wp-card-title:hover { text-decoration: underline; }
 .pva-diff-none {
   color: var(--text-faint);
 }
+
+/* W-E §2 — the Extra Work billing choice. One radio row per invoice the
+   work could land on; the option's own text is the consequence, so the
+   row only has to keep the control and the text on one baseline. */
+.ew-billed-to-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 8px;
+}

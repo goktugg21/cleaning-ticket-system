@@ -47,7 +47,6 @@ import type {
   SlaCompanyThresholds,
   SlaThresholdRow,
 } from "../../api/types";
-import { useAuth } from "../../auth/AuthContext";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
 import { formatDate } from "../../lib/intl";
@@ -148,16 +147,7 @@ function draftFrom(company: SlaCompanyThresholds | null): Record<string, string>
 
 export function SlaWarningsAdminPage() {
   const { t } = useTranslation("common");
-  const { me } = useAuth();
   const { push: pushToast } = useToast();
-  // A STABLE PRIMITIVE, not a ref and not the array itself. The load
-  // below needs the viewer's companies to choose which one to open on,
-  // and it must not re-run on every render: an array literal changes
-  // identity each time, and reading a ref during render is its own
-  // violation. Joining the ids gives the effect a dependency that
-  // changes only when the ids genuinely do — which is effectively never
-  // inside one session, so the load still happens once.
-  const ownCompanyKey = (me?.company_ids ?? []).join(",");
   const [companies, setCompanies] = useState<SlaCompanyThresholds[]>([]);
   const [window_, setWindow] = useState<SlaBusinessWindow | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -178,23 +168,19 @@ export function SlaWarningsAdminPage() {
         if (cancelled) return;
         setCompanies(data.results);
         setWindow(data.business_window);
-        // W8 §2 — OPEN ON YOUR OWN COMPANY, not on whichever row the
-        // server happened to return first.
+        // The server hands back the caller's OWN company first
+        // (`sla.views_thresholds._own_company_first`), so opening on
+        // the first row IS opening on your own company.
         //
-        // The owner reported three times that "the defaults differ per
-        // company". They do not: every field of every company on this
-        // deployment resolves to the same platform number, checked
-        // field by field. What differs is WHICH COMPANY the page opens
-        // on — `results[0]` is the server's ordering, so a SUPER_ADMIN
-        // landed on an unrelated tenant, and flipping the picker while
-        // comparing remembered numbers reads exactly like per-company
-        // defaults. Landing on your own company removes the illusion at
-        // its source instead of explaining it away.
-        const ownIds = ownCompanyKey === "" ? [] : ownCompanyKey.split(",");
-        const own = data.results.find((row) =>
-          ownIds.includes(String(row.company)),
-        );
-        const first = own ?? data.results[0] ?? null;
+        // W8 tried to choose here instead, out of `me.company_ids`.
+        // That set is every company on the platform for a SUPER_ADMIN
+        // (`accounts.scoping.company_ids_for` returns the whole table
+        // for that role), so the "find the one that is mine" call
+        // matched row zero every time and the page went on opening on
+        // whichever tenant sorted first alphabetically. One place
+        // decides the order now, and it is the place that knows which
+        // company the deployment belongs to.
+        const first = data.results[0] ?? null;
         setSelectedId(first ? first.company : null);
         setDraft(draftFrom(first));
       })
@@ -207,7 +193,7 @@ export function SlaWarningsAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [ownCompanyKey]);
+  }, []);
 
   const selected = useMemo(
     () => companies.find((c) => c.company === selectedId) ?? null,
@@ -324,8 +310,8 @@ export function SlaWarningsAdminPage() {
         eyebrow={t("sla_warnings.eyebrow")}
         /* W8 §2 — WHICH COMPANY, in the title. The owner asked "which
            company?" of a page whose answer was a dropdown halfway down
-           it. A SUPER_ADMIN has no home company, so the picker still
-           decides; the heading now says out loud which one it picked. */
+           it. The picker still decides; the heading says out loud which
+           one it is on. */
         title={
           selected
             ? t("sla_warnings.title_for_company", {

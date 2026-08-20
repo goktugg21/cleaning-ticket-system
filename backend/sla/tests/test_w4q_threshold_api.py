@@ -304,3 +304,48 @@ class ThresholdApiWriteTests(TenantFixtureMixin, APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ThresholdListOrderingTests(TenantFixtureMixin, APITestCase):
+    """The screen opens on `results[0]`, so the order IS the default
+    company. Reported wrong four waves running because the previous fix
+    lived on the screen and asked `me.company_ids` which company was the
+    caller's own — a set that is EVERY company for a SUPER_ADMIN, so the
+    lookup matched row zero and changed nothing."""
+
+    def test_super_admin_gets_the_platform_company_first(self):
+        # "Company B" is this deployment's own company and sorts LAST by
+        # name, so a passing assertion cannot be alphabetical luck.
+        self.authenticate(self.super_admin)
+        with self.settings(PLATFORM_BRAND_SLUG=self.other_company.slug):
+            response = self.client.get(LIST_URL)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["results"][0]["company"], self.other_company.id
+        )
+
+    def test_the_rest_stay_in_name_order(self):
+        self.authenticate(self.super_admin)
+        with self.settings(PLATFORM_BRAND_SLUG=self.other_company.slug):
+            response = self.client.get(LIST_URL)
+        names = [row["company_name"] for row in response.data["results"]]
+        self.assertEqual(names[0], self.other_company.name)
+        self.assertEqual(names[1:], sorted(names[1:]))
+
+    def test_unknown_brand_slug_falls_back_to_name_order(self):
+        """A deployment whose brand slug matches no company still gets a
+        stable list rather than an arbitrary one."""
+        self.authenticate(self.super_admin)
+        with self.settings(PLATFORM_BRAND_SLUG="not-a-company"):
+            response = self.client.get(LIST_URL)
+        names = [row["company_name"] for row in response.data["results"]]
+        self.assertEqual(names, sorted(names))
+
+    def test_company_admin_gets_their_own_company_first(self):
+        """Trivially true — they only receive their own — and asserted so
+        that a future "own company first" rule cannot quietly drop it."""
+        self.authenticate(self.company_admin)
+        response = self.client.get(LIST_URL)
+        self.assertEqual(
+            response.data["results"][0]["company"], self.company.id
+        )

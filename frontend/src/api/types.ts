@@ -184,6 +184,12 @@ export interface Customer {
   /** Sprint 185 §3 — where the relationship is. DESCRIPTIVE ONLY:
    *  `is_active` above still decides access. */
   lifecycle: CustomerLifecycle;
+  /** Sprint 182 §3 — which invoice this customer's work lands on by
+   *  default. Read here so the Extra Work create form can say what
+   *  "follow the customer" resolves to for THIS customer instead of
+   *  naming a setting the reader would have to go and look up.
+   *  Optional: a server that predates the split does not send it. */
+  invoice_billing_target?: InvoiceBillingTarget;
   // RF-1 — customer company logo URL (null when unset).
   logo_url?: string | null;
   // Per-current-user, per-customer capability block. Optional so
@@ -1646,15 +1652,20 @@ export type ExtraWorkUnitType =
   | "ITEM"
   | "OTHER";
 
-/** Sprint 180 §3 — WHO the finished work is charged to. Exactly two
- *  values, and the pair is the feature: the building (the answer 99% of
- *  the time, and the default) or the customer organisation.
+/** Sprint 180 §3 — WHICH INVOICE this work's amount lands on: one
+ *  addressed to the building, or one addressed to the customer
+ *  organisation. It moves the line between documents and touches no
+ *  amount, no VAT and no hour — `invoicing/billing_target.py` is the
+ *  only reader.
  *
- *  NOT the customer's `invoice_granularity_default`
- *  (CUSTOMER / PER_BUILDING / PER_BUILDING_DEPARTMENT_WORK_TYPE), which
- *  decides how many invoice DOCUMENTS a month's work is cut into. That
- *  one is a property of the customer's paperwork; this one is a
- *  property of the job. Mirrors `extra_work.models.ExtraWorkBilledTo`. */
+ *  NULL is the third state and the normal one (Sprint 182 §6, migration
+ *  0032 nulled every existing row): "this job has no opinion, follow the
+ *  customer's own `invoice_billing_target`". A non-null value overrules
+ *  that customer setting for this one job, which is why it is never a
+ *  default — writing BUILDING into a row nobody touched silently routes
+ *  a customer-level customer per building.
+ *
+ *  Mirrors `extra_work.models.ExtraWorkBilledTo`. */
 export type ExtraWorkBilledTo = "BUILDING" | "CUSTOMER";
 
 /** Sprint 180 §2 — an operational ticket born from an Extra Work.
@@ -1748,9 +1759,11 @@ export interface ExtraWorkRequestList {
   // existed: the list reads a null group as "not a series" and changes
   // nothing about the row.
   group: ExtraWorkGroupSummary | null;
-  // Sprint 180 §3 — who the finished work is charged to. Not
-  // provider-only: the customer picks it on their own create form.
-  billed_to: ExtraWorkBilledTo;
+  // Sprint 180 §3 — which invoice this work lands on. Not provider-only:
+  // the customer picks it on their own create form. NULL — the state
+  // nearly every row is in — means "follow the customer's setting", and
+  // is a different answer from BUILDING, not a missing one.
+  billed_to: ExtraWorkBilledTo | null;
   // M4 — billing month / invoice run. Provider-only (the backend redacts
   // these for CUSTOMER_USER), hence optional.
   invoice_date?: string | null;
@@ -2339,11 +2352,10 @@ export interface ExtraWorkRequestCartCreatePayload {
   // (`derive_default_intent`) when omitted, so older callers and the
   // graceful-degradation path (preview unavailable) stay valid.
   request_intent?: ExtraWorkRequestIntent;
-  // Sprint 180 §3 — who the finished work is charged to. Optional on
-  // the wire: the backend defaults to BUILDING, so every existing
-  // caller keeps working and takes the answer that is right 99% of the
-  // time.
-  billed_to?: ExtraWorkBilledTo;
+  // Sprint 180 §3 — which invoice this work lands on. Omitted and null
+  // mean the same thing to the server (Sprint 182 §6 removed the
+  // BUILDING default outright): follow the customer's setting.
+  billed_to?: ExtraWorkBilledTo | null;
   // Each line is either a catalog service (`service`) OR a free-text
   // custom line (`custom_description`) — XOR, the create form guarantees
   // exactly one is set. A custom line carries no `service`; the backend

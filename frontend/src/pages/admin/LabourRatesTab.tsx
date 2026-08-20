@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import { getApiError } from "../../api/client";
 import {
@@ -304,6 +305,23 @@ export function LabourRatesTab({
               : t("labour_rates.state_some", {
                   missing: employees.length - withRateCount,
                 })}
+          </span>
+          {/* W-E §3 — WHERE THE NUMBER COMES OUT.
+              The count above says what is missing; it did not say what
+              is missing FROM. A rate is read in exactly one place —
+              `reports/labour_cost.py`, surfaced as Labour cost on an
+              Extra Work's Hours tab — and the owner asked twice how
+              these values connect to the rest of the system. A link is
+              the answer: the destination is one click away instead of
+              being described, and naming it here is also what says the
+              rate never reaches a customer price, because the place it
+              does reach is named and it is not an invoice. */}
+          <span className="muted small" data-testid="labour-rates-where">
+            {t("labour_rates.where_prefix")}{" "}
+            <Link to="/extra-work" className="link">
+              {t("labour_rates.where_link")}
+            </Link>
+            {t("labour_rates.where_suffix")}
           </span>
         </div>
       )}

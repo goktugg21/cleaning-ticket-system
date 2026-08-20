@@ -25,7 +25,6 @@ import type {
   ExtraWorkAssignmentRole,
   CustomerBuildingMembership,
   CustomerLabel,
-  ExtraWorkBilledTo,
   ExtraWorkCategory,
   ExtraWorkBulkPlanItem,
   ExtraWorkRequestIntent,
@@ -59,6 +58,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { SeriesHeaderRow } from "../components/extra-work/SeriesHeaderRow";
 import { SeriesEditorDialog } from "../components/extra-work/SeriesEditorDialog";
 import { foldSeries } from "../lib/extraWorkSeries";
+import { billedToKey } from "../lib/billedTo";
 import { isPriced, rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
@@ -84,16 +84,6 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
 // approved" — the crisp name, because what the customer approved is the
 // QUOTE. One row could therefore say one thing on screen and another in
 // the CSV taken from it. `extraWorkStatusLabelKey` is the one source now.
-
-/** Sprint 180 §3 — the two billing targets. A `Record` over the union
- *  rather than a second array literal: adding a third value to
- *  `ExtraWorkBilledTo` then fails the compiler here instead of rendering
- *  a blank cell (CLAUDE.md — a hardcoded array defeats exhaustiveness
- *  checking, which is how Sprint 126's headerless column shipped). */
-const BILLED_TO_I18N_KEY: Record<ExtraWorkBilledTo, string> = {
-  BUILDING: "billed_to.building",
-  CUSTOMER: "billed_to.customer",
-};
 
 /**
  * Sprint 181 §2 — nine chips became four, twice.
@@ -1166,7 +1156,7 @@ export function ExtraWorkList({
                     )}
                     {isWorkStarted && (
                       <td data-testid={`ew-billed-to-cell-${row.id}`}>
-                        {t(BILLED_TO_I18N_KEY[row.billed_to])}
+                        {t(billedToKey(row.billed_to))}
                       </td>
                     )}
                     <td>{formatDate(row.requested_at)}</td>
@@ -2012,7 +2002,7 @@ export function ExtraWorkList({
                     {isWorkStarted && (
                       <div className="admin-card-meta-row">
                         <dt>{t("list.column_billed_to")}</dt>
-                        <dd>{t(BILLED_TO_I18N_KEY[row.billed_to])}</dd>
+                        <dd>{t(billedToKey(row.billed_to))}</dd>
                       </div>
                     )}
                     {isWorkStarted && isProvider && (

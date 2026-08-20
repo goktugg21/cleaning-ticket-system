@@ -17,6 +17,7 @@ that decides that, and BOTH the list and the detail routes go through
 it — a detail route with its own membership check is how the two drift
 until one of them forgets.
 """
+from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -33,6 +34,29 @@ from .serializers_thresholds import (
     serialize_company_thresholds,
 )
 from .thresholds import THRESHOLD_FIELDS, defaults
+
+
+def _own_company_first(companies):
+    """The caller's OWN company first, then the rest by name.
+
+    The screen opens on `results[0]`, so this ordering IS the default
+    selection — reported wrong four waves running, and the reason is
+    here rather than on the screen.
+
+    A COMPANY_ADMIN only ever receives companies they are a member of,
+    so every row is already "own" and name order stands. A SUPER_ADMIN
+    receives every company and belongs to none of them
+    (`accounts.scoping.company_ids_for` returns the whole table for that
+    role and `CompanyUserMembership` is empty), so "the companies you
+    belong to" cannot pick one out. The platform's OWN company can:
+    `settings.PLATFORM_BRAND_SLUG` is the slug this deployment is run
+    by, and `config.pdf_branding` already treats it as "us".
+    """
+    brand = getattr(settings, "PLATFORM_BRAND_SLUG", "")
+    return sorted(
+        companies,
+        key=lambda company: (0 if brand and company.slug == brand else 1),
+    )
 
 
 def _allowed_company_ids(user):
@@ -92,7 +116,7 @@ class SlaWarningThresholdListView(APIView):
 
     def get(self, request):
         allowed = _allowed_company_ids(request.user)
-        companies = list(
+        companies = _own_company_first(
             Company.objects.filter(id__in=allowed).order_by("name")
         )
         rows = {

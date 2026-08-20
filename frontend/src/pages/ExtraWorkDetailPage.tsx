@@ -103,6 +103,7 @@ import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { PageHeader } from "../components/PageHeader";
 import { ProposalBuilder } from "../components/ProposalBuilder";
+import { billedToKey } from "../lib/billedTo";
 import { customerLabelName } from "../lib/customerLabelName";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { StatusBadge } from "../components/StatusBadge";
@@ -2426,7 +2427,7 @@ export function ExtraWorkDetailPage() {
                       <div>
                         <div className="ew-fact-label">{t("detail.field_billed_to")}</div>
                         <div className="ew-fact-value" data-testid="extra-work-billed-to">
-                          {ew.billed_to === "CUSTOMER" ? t("billed_to.customer") : t("billed_to.building")}
+                          {t(billedToKey(ew.billed_to))}
                         </div>
                       </div>
                     </div>

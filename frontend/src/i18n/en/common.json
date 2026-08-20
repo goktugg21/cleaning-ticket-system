@@ -2521,7 +2521,10 @@
     "state_count": "{{withRate}} of {{total}} people have a cost per hour",
     "state_none": "Until one is set, their hours report no labour cost at all - not zero, blank.",
     "state_some": "{{missing}} still report no labour cost.",
-    "preview": "10 hours of this person's time will report as {{amount}} of labour cost, for work done from {{from}}.",
+    "where_prefix": "Read in one place only:",
+    "where_link": "Labour cost on an Extra Work",
+    "where_suffix": ". Never in what a customer is charged.",
+    "preview": "10 hours of this person's time shows as {{amount}} under Labour cost, for work done from {{from}}.",
     "preview_no_date": "the start date you pick"
   },
   "nav.sla_warnings": "SLA warnings",

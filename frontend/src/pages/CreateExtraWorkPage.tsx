@@ -410,11 +410,16 @@ export function CreateExtraWorkPage({
   } | null>(null);
   const [departmentId, setDepartmentId] = useState("");
   const [workTypeId, setWorkTypeId] = useState("");
-  // Sprint 180 §3 — who the finished work is charged to. Seeded to
-  // BUILDING, which is both the model default and the owner's own
-  // "99% of the time", so an operator who ignores the control gets the
-  // right answer rather than an empty one.
-  const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo>("BUILDING");
+  // W-E §2 — which invoice this work lands on. `""` is the DEFAULT and
+  // is a real answer, not an empty one: it posts null, which the server
+  // reads as "follow this customer's own invoicing setting"
+  // (`invoicing/billing_target.py`). Seeding it to BUILDING, as this
+  // form did, wrote a per-building override onto every extra work an
+  // operator created without looking — overruling the setting of every
+  // customer who is invoiced at organisation level. Sprint 182 §6 had
+  // already removed that default server-side and migration 0032 nulled
+  // the whole table; the form was the last place still writing it.
+  const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo | "">("");
   // Search filter for the agreed-prices dropdown (scales to long
   // contract lists — the list scrolls and filters rather than dumping
   // every row inline).
@@ -539,6 +544,20 @@ export function CreateExtraWorkPage({
   // of use and the operator picks again. Same pattern the department /
   // work-type fields below already use (`effectiveDepartmentId`).
   const selectableCustomers = customers;
+
+  // W-E §2 — the two names the billing choice is ABOUT. The choice is
+  // between two invoice documents, so the options name the documents:
+  // "the invoice for B1 Amsterdam" and "one invoice for Acme B.V." are
+  // a choice a reader can make; "Building" and "Customer" are a glossary
+  // they have to have read first.
+  const chosenCustomer = useMemo(
+    () => customers.find((c) => String(c.id) === form.customer) ?? null,
+    [customers, form.customer],
+  );
+  const chosenBuilding = useMemo(
+    () => buildings.find((b) => String(b.id) === form.building) ?? null,
+    [buildings, form.building],
+  );
 
   const filteredBuildings = useMemo(() => {
     if (!form.customer) return buildings;
@@ -1455,11 +1474,10 @@ export function CreateExtraWorkPage({
         ...(effectiveWorkTypeId
           ? { work_type: Number(effectiveWorkTypeId) }
           : {}),
-        // Sprint 180 §3 — always sent (never omitted): the control has
-        // no unset state, so there is no case where "leave it to the
-        // server" and "the operator chose BUILDING" mean different
-        // things.
-        billed_to: billedTo,
+        // Null is a real answer ("follow the customer"), so it is sent
+        // rather than omitted — the server treats the two identically
+        // and sending it keeps the payload a full statement of the form.
+        billed_to: billedTo === "" ? null : billedTo,
         // Send the validated intent (a member of the latest preview's
         // allowed_intents). Omitted when no fresh preview exists: the
         // backend then derives a safe default — identical to the
@@ -1875,42 +1893,129 @@ export function CreateExtraWorkPage({
                 )}
               </div>
             </div>
-            {/* Sprint 180 §3 — who pays for this one.
-                Asked HERE, in the parent section next to the building
-                and the customer, because those are the two things it
-                chooses between: the answer is only meaningful once you
-                can see both names on screen.
-                This page IS both create surfaces — the customer-facing
-                one (a CUSTOMER_USER, customer and building fixed by
-                their own access) and the provider-facing one (the
-                pickers above) — so a single control serves both, and
-                both post the same `billed_to` to the same endpoint.
-                Two options and no empty first option, because there is
-                no "unset": the field is non-null server-side with
-                BUILDING as its default, which is the honest answer 99%
-                of the time rather than a placeholder. */}
-            <div className="form-2col">
-              <div className="field">
-                <label className="field-label" htmlFor="ew-billed-to">
-                  {t("create.field_billed_to")}
-                </label>
-                <select
-                  id="ew-billed-to"
-                  data-testid="extra-work-create-billed-to"
-                  className="field-select"
-                  value={billedTo}
-                  onChange={(event) =>
-                    setBilledTo(event.target.value as ExtraWorkBilledTo)
-                  }
-                >
-                  <option value="BUILDING">{t("billed_to.building")}</option>
-                  <option value="CUSTOMER">{t("billed_to.customer")}</option>
-                </select>
-                <span className="muted small">
-                  {t("create.field_billed_to_hint")}
+            {/* W-E §2 — THE CHOICE CARRIES ITS OWN MEANING.
+                It used to be a two-option dropdown labelled "Billed to"
+                with a hint under it, and the owner's questions about it
+                were "what does it control, what does changing it affect,
+                does it affect the invoice, the amount, the hours, the
+                customer". Every one of those is answered by naming the
+                thing the control actually moves, which is WHICH INVOICE
+                the amount lands on — nothing else. So the label is that
+                question and each option is the resulting document, by
+                name.
+
+                THREE options, because the field has three states and the
+                dropdown offered two. The default is "follow the
+                customer", which is what the server does with a null
+                (`invoicing/billing_target.py`), and its second line
+                resolves what that means for THIS customer right now
+                rather than sending the reader to Customer settings to
+                find out.
+
+                Asked HERE, next to the building and the customer,
+                because those are the two names it chooses between. The
+                page IS both create surfaces — a CUSTOMER_USER with
+                their customer and building fixed, and a provider with
+                the pickers above — and both post the same field. */}
+            <fieldset
+              className="field"
+              style={{ border: 0, padding: 0, margin: 0 }}
+              data-testid="extra-work-create-billed-to"
+            >
+              <span className="field-label">
+                {t("create.billed_to_question")}
+              </span>
+
+              <label className="ew-billed-to-option">
+                <input
+                  type="radio"
+                  name="ew-billed-to"
+                  checked={billedTo === ""}
+                  onChange={() => setBilledTo("")}
+                  data-testid="extra-work-create-billed-to-follow"
+                />
+                <span>
+                  <strong>
+                    {chosenCustomer
+                      ? t("create.billed_to_follow", {
+                          customer: chosenCustomer.name,
+                        })
+                      : t("create.billed_to_follow_unknown_customer")}
+                  </strong>
+                  <span className="muted small" style={{ display: "block" }}>
+                    {/* What "follow the customer" RESOLVES TO, not what
+                        it means in the abstract. Unknown is its own
+                        wording: a customer nobody has picked yet, or a
+                        server that predates the setting, must not be
+                        made to look like a decision. */}
+                    {chosenCustomer?.invoice_billing_target === "BUILDING"
+                      ? t("create.billed_to_follow_now_building")
+                      : chosenCustomer?.invoice_billing_target === "CUSTOMER"
+                        ? t("create.billed_to_follow_now_customer", {
+                            customer: chosenCustomer.name,
+                          })
+                        : t("create.billed_to_follow_now_unknown")}
+                  </span>
                 </span>
-              </div>
-            </div>
+              </label>
+
+              <label className="ew-billed-to-option">
+                <input
+                  type="radio"
+                  name="ew-billed-to"
+                  checked={billedTo === "BUILDING"}
+                  onChange={() => setBilledTo("BUILDING")}
+                  data-testid="extra-work-create-billed-to-building"
+                />
+                <span>
+                  <strong>
+                    {chosenBuilding
+                      ? t("create.billed_to_building_named", {
+                          building: chosenBuilding.name,
+                        })
+                      : t("create.billed_to_building_unnamed")}
+                  </strong>
+                </span>
+              </label>
+
+              <label className="ew-billed-to-option">
+                <input
+                  type="radio"
+                  name="ew-billed-to"
+                  checked={billedTo === "CUSTOMER"}
+                  onChange={() => setBilledTo("CUSTOMER")}
+                  data-testid="extra-work-create-billed-to-customer"
+                />
+                <span>
+                  <strong>
+                    {chosenCustomer
+                      ? t("create.billed_to_customer_named", {
+                          customer: chosenCustomer.name,
+                        })
+                      : t("create.billed_to_customer_unnamed")}
+                  </strong>
+                </span>
+              </label>
+
+              {/* WHAT HAPPENS NEXT, and only when it applies. An
+                  override moves this one job between documents and
+                  leaves the customer's setting exactly where it was —
+                  worth saying at the moment somebody overrides, and
+                  worth not saying at any other moment. */}
+              {billedTo !== "" && (
+                <span
+                  className="muted small"
+                  style={{ display: "block", marginTop: 8 }}
+                  data-testid="extra-work-create-billed-to-override-note"
+                >
+                  {chosenCustomer
+                    ? t("create.billed_to_override_note", {
+                        customer: chosenCustomer.name,
+                      })
+                    : t("create.billed_to_override_note_unknown_customer")}
+                </span>
+              )}
+            </fieldset>
           </div>
 
           <div className="form-section">
