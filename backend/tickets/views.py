@@ -36,6 +36,7 @@ from .filters import (
     exclude_finished_extra_work,
     parse_is_extra_work,
 )
+from .attachment_visibility import resolve_upload_visibility
 from .models import (
     AttachmentVisibility,
     Ticket,
@@ -47,6 +48,7 @@ from .models import (
     TicketStatus,
     TicketStatusHistory,
     TicketType,
+    UploadVisibilitySource,
 )
 from buildings.models import BuildingManagerAssignment
 from .permissions import (
@@ -1913,31 +1915,26 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         return slot
 
     def _default_visibility(self, ticket, user):
-        """Sprint 191 §2.5 — the level an upload lands at when the
-        uploader did not choose one. THE one place that default lives.
+        """W4-P — the level an upload lands at when the uploader did not
+        choose one, and the rung of the ladder that decided it.
 
-        Three cases, in order:
+        Sprint 191 §2.5 shipped this as three inline cases. W4-P added
+        two more rungs above the per-work setting (the uploader's
+        per-ticket permission and their standing permission) and moved
+        the whole ladder into `tickets/attachment_visibility.py`, which
+        writes the order out in full:
 
-          1. A customer-side uploader gets CUSTOMER. Their own file must
-             not be hidden from them, and it was never internal in the
-             first place.
-          2. A provider-side upload on a work whose
-             `staff_uploads_customer_visible` is set gets CUSTOMER — the
-             per-work opt-in for the customers who asked to see the job
-             as it happens.
-          3. Everything else gets INTERNAL. That is the decision: nothing
-             a worker uploads crosses the wall until a provider promotes
-             it.
+            per-ticket > standing > per-work setting > default
+
+        This method is now the call site and nothing else. Do not
+        re-implement any rung here — a resolution order with two copies
+        is a resolution order with two answers.
 
         Provider management can still override at upload time by sending
         `visibility` (see `TicketAttachmentSerializer.validate_
-        visibility`); STAFF and customer-side cannot, and get this.
+        visibility`); STAFF and customer-side cannot, and get the ladder.
         """
-        if not is_staff_role(user):
-            return AttachmentVisibility.CUSTOMER
-        if ticket.staff_uploads_customer_visible:
-            return AttachmentVisibility.CUSTOMER
-        return AttachmentVisibility.INTERNAL
+        return resolve_upload_visibility(ticket, user)
 
     def perform_create(self, serializer):
         ticket = self._get_ticket()
@@ -1945,9 +1942,17 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         uploaded_file = serializer.validated_data["file"]
 
         is_hidden = serializer.validated_data.get("is_hidden", False)
-        visibility = serializer.validated_data.get(
-            "visibility"
-        ) or self._default_visibility(ticket, user)
+        # W4-P — a value the uploader typed is recorded as such; anything
+        # else runs the ladder and records which rung answered, so the
+        # tile can say WHY it is where it is.
+        chosen = serializer.validated_data.get("visibility")
+        if chosen:
+            visibility = chosen
+            visibility_source = UploadVisibilitySource.UPLOADER_CHOICE
+        else:
+            resolved = self._default_visibility(ticket, user)
+            visibility = resolved.visibility
+            visibility_source = resolved.source
 
         # Sprint 12 — optional per-slot evidence link (pop the write-only
         # input so it is not double-applied via validated_data).
@@ -1967,6 +1972,7 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
             file_size=getattr(uploaded_file, "size", 0),
             is_hidden=is_hidden,
             visibility=visibility,
+            visibility_source=visibility_source,
         )
 
 
@@ -2067,7 +2073,13 @@ class TicketAttachmentVisibilityView(generics.GenericAPIView):
 
         if attachment.visibility != new_visibility:
             attachment.visibility = new_visibility
-            attachment.save(update_fields=["visibility"])
+            # W4-P — a hand change is the one an operator most needs to
+            # tell apart from a rule, so it stamps its own source rather
+            # than leaving the rung that produced the original value.
+            attachment.visibility_source = UploadVisibilitySource.MANUAL
+            attachment.save(
+                update_fields=["visibility", "visibility_source"]
+            )
 
         return Response(
             TicketAttachmentSerializer(

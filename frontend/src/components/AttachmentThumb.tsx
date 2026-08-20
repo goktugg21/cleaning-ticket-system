@@ -16,15 +16,44 @@
 // A staff upload lands INTERNAL, so without a visible state here a worker
 // cannot tell whether the customer is seeing their photo and a manager has
 // nothing to click.
+//
+// W4-P — and WHY it is on that side. With standing and per-ticket permissions
+// in play, "internal" is no longer one rule with one cause: it can be the
+// default, a per-job setting, a standing permission or a per-ticket refusal.
+// A manager who cannot tell those apart promotes photo by photo against a rule
+// that already decided, or worse, assumes a rule where there is none. The
+// server records the deciding rung at upload (`visibility_source`) and the
+// pill's tooltip reads it back in words. It is a tooltip and not a second pill
+// because it explains a state the pill already names — two pills per tile would
+// be shouting.
 import { useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { api } from "../api/client";
-import type { AttachmentVisibility, TicketAttachment } from "../api/types";
+import type {
+  AttachmentVisibility,
+  TicketAttachment,
+  UploadVisibilitySource,
+} from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole, isStaffRole } from "../auth/permissions";
 import { DocumentThumb } from "./DocumentThumb";
+
+// One record keyed by the full union, so adding a source to
+// `UPLOAD_VISIBILITY_SOURCES` fails the typecheck here instead of rendering a
+// raw enum value at a manager (the Sprint 130 lesson, applied to a map rather
+// than an array).
+const SOURCE_LABEL_KEYS: Record<UploadVisibilitySource, string> = {
+  "": "attachment_visibility.source_unrecorded",
+  UPLOADER_CHOICE: "attachment_visibility.source_uploader_choice",
+  CUSTOMER_UPLOAD: "attachment_visibility.source_customer_upload",
+  TICKET_GRANT: "attachment_visibility.source_ticket_grant",
+  STANDING_GRANT: "attachment_visibility.source_standing_grant",
+  WORK_SETTING: "attachment_visibility.source_work_setting",
+  DEFAULT_INTERNAL: "attachment_visibility.source_default_internal",
+  MANUAL: "attachment_visibility.source_manual",
+};
 
 export function AttachmentThumb({
   ticketId,
@@ -37,12 +66,14 @@ export function AttachmentThumb({
 }) {
   // The inner component holds the visibility the user is currently looking
   // at, which the promote action changes without the page refetching. Keying
-  // by id AND by the server's value means a later refetch always wins: a
+  // by id AND by the server's values means a later refetch always wins: a
   // changed prop remounts the inner component instead of being shadowed by
-  // stale local state (the prop-derived-state rule in CLAUDE.md).
+  // stale local state (the prop-derived-state rule in CLAUDE.md). W4-P adds
+  // `visibility_source` to the key for the same reason it added the state:
+  // the pair moves together and a refetch must be able to correct both.
   return (
     <AttachmentThumbInner
-      key={`${attachment.id}:${attachment.visibility}`}
+      key={`${attachment.id}:${attachment.visibility}:${attachment.visibility_source}`}
       ticketId={ticketId}
       attachment={attachment}
       fallback={fallback}
@@ -63,6 +94,12 @@ function AttachmentThumbInner({
   const { me } = useAuth();
   const [visibility, setVisibility] = useState<AttachmentVisibility>(
     attachment.visibility,
+  );
+  // W4-P — the rung that decided, kept beside the value it decided. The
+  // promote endpoint answers with the row it wrote (source MANUAL), so the
+  // tooltip stops claiming a rule the moment a human overrode it.
+  const [source, setSource] = useState<UploadVisibilitySource>(
+    attachment.visibility_source,
   );
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -95,6 +132,7 @@ function AttachmentThumbInner({
         { visibility: nextVisibility },
       );
       setVisibility(data.visibility);
+      setSource(data.visibility_source);
     } catch {
       setFailed(true);
     } finally {
@@ -122,6 +160,8 @@ function AttachmentThumbInner({
           className={`att-vis-pill ${isInternal ? "is-internal" : "is-customer"}`}
           data-testid="attachment-visibility-pill"
           data-visibility={visibility}
+          data-visibility-source={source}
+          title={t(SOURCE_LABEL_KEYS[source])}
         >
           {t(
             isInternal

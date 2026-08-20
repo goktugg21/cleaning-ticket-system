@@ -711,6 +711,33 @@ class AttachmentPhase(models.TextChoices):
     AFTER = "AFTER", "After"
 
 
+class UploadVisibilitySource(models.TextChoices):
+    """
+    W4-P — WHICH level of the resolution ladder decided this row's
+    `visibility` at upload time.
+
+    Recorded so an operator can answer "why is this photo internal?"
+    without reading code, and so a reviewer can tell a deliberate
+    manager choice apart from a default that nobody ever touched. It is
+    a record of a past decision, written once at upload and never
+    recomputed: changing a grant afterwards does NOT rewrite it, exactly
+    as changing `Ticket.staff_uploads_customer_visible` does not
+    retro-promote what is already stored.
+
+    `UNRECORDED` (the blank default) is every row that existed before
+    this column did. It means "we do not know", not "default".
+    """
+
+    UNRECORDED = "", "Unrecorded (pre-W4-P row)"
+    UPLOADER_CHOICE = "UPLOADER_CHOICE", "Chosen by the uploader"
+    CUSTOMER_UPLOAD = "CUSTOMER_UPLOAD", "The customer's own upload"
+    TICKET_GRANT = "TICKET_GRANT", "Per-ticket permission"
+    STANDING_GRANT = "STANDING_GRANT", "Standing permission"
+    WORK_SETTING = "WORK_SETTING", "Per-work setting"
+    DEFAULT_INTERNAL = "DEFAULT_INTERNAL", "Default (internal)"
+    MANUAL = "MANUAL", "Changed by hand afterwards"
+
+
 class TicketAttachment(models.Model):
     ticket = models.ForeignKey(
         Ticket,
@@ -771,6 +798,19 @@ class TicketAttachment(models.Model):
         default=AttachmentPhase.UNSPECIFIED,
     )
 
+    # W4-P — WHICH rung of the resolution ladder produced `visibility`
+    # at upload time. See `UploadVisibilitySource`. Written once, at
+    # create; the promote endpoint stamps MANUAL because a hand change
+    # is exactly the thing an operator most needs to be able to tell
+    # apart from a rule. Blank on every pre-W4-P row, which reads
+    # "unrecorded" and never "default".
+    visibility_source = models.CharField(
+        max_length=24,
+        choices=UploadVisibilitySource.choices,
+        default=UploadVisibilitySource.UNRECORDED,
+        blank=True,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -778,6 +818,115 @@ class TicketAttachment(models.Model):
 
     def __str__(self):
         return self.original_filename
+
+
+class UploadVisibilityGrant(models.Model):
+    """
+    W4-P — the standing / per-ticket permission that lets a named
+    person's uploads land customer-visible without a manager promoting
+    each photo by hand.
+
+    ONE model, TWO scopes, told apart by `ticket`:
+
+      * `ticket IS NULL`  — STANDING. This person's uploads on EVERY
+        ticket. Granted on the person's admin page. SUPER_ADMIN /
+        COMPANY_ADMIN only.
+      * `ticket IS NOT NULL` — PER-TICKET. This person's uploads on THIS
+        ticket only. Granted on the ticket's Assignment card. Provider
+        management (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER)
+        holding scope on the ticket.
+
+    `uploads_customer_visible` is an EXPLICIT decision in both
+    directions and the row's existence is what makes it explicit:
+
+      * row absent      — no decision at this level; the resolver falls
+                          through to the next one down.
+      * value True      — a grant. Uploads land CUSTOMER.
+      * value False     — a refusal. Uploads land INTERNAL even if a
+                          less specific level said yes.
+
+    That three-state shape is deliberately the one this codebase already
+    uses for `BuildingManagerAssignment.permission_overrides` (absence =
+    fall through to the default, an explicit entry = a decision), and
+    the row-per-grant shape is `CredentialCustomerVisibility`'s. It is
+    not a sixth bespoke mechanism; it is the fifth one's two patterns
+    put together, with a nullable scope column so one table answers both
+    questions.
+
+    WHAT IT DOES NOT DO. It grants nobody the right to SEE anything: the
+    customer wall, `scope_tickets_for` and the per-role attachment
+    filters are untouched, so a photo still reaches only the customer of
+    its own ticket. It never rewrites a stored row — it changes the
+    level the NEXT upload lands at. And it is invisible to the
+    completion-evidence gates, which read `is_hidden` and never
+    `visibility`.
+
+    See `tickets/attachment_visibility.py` for the resolution order this
+    feeds, written out in full.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="upload_visibility_grants",
+        help_text="The person whose uploads this decides.",
+    )
+    # NULL is the STANDING scope, and the two partial unique constraints
+    # below are why it has to be modelled this way rather than as a
+    # plain `unique_together`: Postgres treats NULLs as distinct, so
+    # `unique_together(user, ticket)` alone would happily store five
+    # standing rows for one person.
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="upload_visibility_grants",
+        help_text="NULL = standing (every ticket). Set = this ticket only.",
+    )
+    uploads_customer_visible = models.BooleanField(
+        help_text=(
+            "True = this person's uploads land customer-visible at this "
+            "scope. False = they stay internal at this scope, overriding "
+            "anything less specific. No default: the row exists only "
+            "when somebody decided."
+        ),
+    )
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="upload_visibility_grants_made",
+    )
+    reason = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # One decision per (person, ticket) ...
+            models.UniqueConstraint(
+                fields=["user", "ticket"],
+                condition=models.Q(ticket__isnull=False),
+                name="uniq_upload_visibility_grant_per_ticket",
+            ),
+            # ... and exactly one standing decision per person.
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(ticket__isnull=True),
+                name="uniq_upload_visibility_grant_standing",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["ticket", "user"]),
+        ]
+
+    def __str__(self):
+        scope = "standing" if self.ticket_id is None else f"ticket={self.ticket_id}"
+        state = "visible" if self.uploads_customer_visible else "internal"
+        return f"UploadVisibilityGrant<user={self.user_id} {scope} {state}>"
 
 
 class TicketStatusHistory(models.Model):

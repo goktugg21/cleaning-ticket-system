@@ -1690,6 +1690,10 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             # who may upload at all, because a label grants nothing.
             "visibility",
             "phase",
+            # W4-P — WHICH rung of the resolution ladder decided
+            # `visibility` when this row was created. Read-only in every
+            # direction: it is a record of a decision, not an input.
+            "visibility_source",
             "created_at",
         ]
         read_only_fields = [
@@ -1703,6 +1707,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "original_filename",
             "mime_type",
             "file_size",
+            "visibility_source",
             "created_at",
         ]
 

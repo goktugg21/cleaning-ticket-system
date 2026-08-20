@@ -617,6 +617,57 @@ export type AttachmentVisibility = (typeof ATTACHMENT_VISIBILITIES)[number];
 export const ATTACHMENT_PHASES = ["UNSPECIFIED", "BEFORE", "AFTER"] as const;
 export type AttachmentPhase = (typeof ATTACHMENT_PHASES)[number];
 
+// W4-P — tickets.models.UploadVisibilitySource. WHICH rung of the
+// resolution ladder decided a stored attachment's visibility at upload:
+// per-ticket > standing > per-work setting > default. "" is every row
+// written before the column existed and reads "unrecorded", never
+// "default".
+export const UPLOAD_VISIBILITY_SOURCES = [
+  "",
+  "UPLOADER_CHOICE",
+  "CUSTOMER_UPLOAD",
+  "TICKET_GRANT",
+  "STANDING_GRANT",
+  "WORK_SETTING",
+  "DEFAULT_INTERNAL",
+  "MANUAL",
+] as const;
+export type UploadVisibilitySource =
+  (typeof UPLOAD_VISIBILITY_SOURCES)[number];
+
+// W4-P — one scope's answer for one person. `uploads_customer_visible`
+// is a TRI-STATE and the three states are not interchangeable:
+//   true  = a grant     — this person's uploads land customer-visible
+//   false = a refusal   — they stay internal, beating anything less
+//                         specific
+//   null  = no decision — the next rung down answers
+export interface UploadVisibilityGrantState {
+  user_id: number;
+  ticket_id: number | null;
+  uploads_customer_visible: boolean | null;
+  reason: string;
+  granted_by_id: number | null;
+  updated_at: string | null;
+}
+
+// W4-P — the per-ticket read (`GET /tickets/<id>/upload-visibility/`),
+// one entry per DISTINCT person holding a slot on the ticket. Carries
+// every rung so the Assignment card can state which one is deciding.
+export interface TicketUploadVisibilityPerson
+  extends UploadVisibilityGrantState {
+  user_email: string;
+  user_full_name: string;
+  standing_uploads_customer_visible: boolean | null;
+  effective_visibility: AttachmentVisibility;
+  effective_source: UploadVisibilitySource;
+}
+
+export interface TicketUploadVisibility {
+  ticket_id: number;
+  staff_uploads_customer_visible: boolean;
+  people: TicketUploadVisibilityPerson[];
+}
+
 export interface TicketAttachment {
   id: number;
   ticket: number;
@@ -630,6 +681,8 @@ export interface TicketAttachment {
   is_hidden: boolean;
   visibility: AttachmentVisibility;
   phase: AttachmentPhase;
+  // W4-P — read-only record of WHICH rung produced `visibility`.
+  visibility_source: UploadVisibilitySource;
   created_at: string;
 }
 

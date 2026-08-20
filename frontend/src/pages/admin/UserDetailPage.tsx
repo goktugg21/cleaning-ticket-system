@@ -56,6 +56,7 @@ import { PermissionsRollupChip } from "../../components/PermissionsRollupChip";
 import { PermissionsRollupSummary } from "../../components/PermissionsRollupSummary";
 import { RoleBadge } from "../../components/RoleBadge";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+import { UploadVisibilityCard } from "./UploadVisibilityCard";
 import { formatDateTime } from "../../lib/intl";
 import { Toggle } from "../../components/Toggle";
 
@@ -1026,6 +1027,17 @@ export function UserDetailPage() {
               </BoundedList>
             </section>
           )}
+
+          {/* W4-P — the GLOBAL half of the photo-upload permission:
+              this person's uploads are customer-visible on EVERY
+              ticket. The per-ticket half lives on the ticket's
+              Assignment card. The card renders itself away for a
+              viewer who cannot read the endpoint, so it is mounted
+              unconditionally here. */}
+          <UploadVisibilityCard
+            userId={user.id}
+            userFullName={user.full_name || user.email}
+          />
 
           {/* M2 P6 — read-only staff sections per the GLOBAL view-first
               rule: the detail page SHOWS staff profile, staff

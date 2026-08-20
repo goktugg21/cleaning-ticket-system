@@ -1322,6 +1322,106 @@ privacy rule that has to come with it.
   renders as words, never as EUR 0,00.
 
 
+### Done — W4-P (wave 4, chat P of 6): pre-permission for a worker's photos
+
+Wave 3 made a worker's photo internal until a provider releases it. The
+owner then asked for the escape hatch: *"sometimes the provider or the
+manager should be able to give permissions to the staff to not need this.
+for example give pre permission to ahmet and from then his uploaded photos
+are in the pool. this should be in the permissions page and ticket
+assignment page as well. permission page is for all of the tickets. and the
+tickets assignment is that spesific ticket. and this should be clearly
+stated."*
+
+Two scopes, and the whole point is that they are distinguishable.
+
+- **§1 — one model, two scopes.** `tickets.UploadVisibilityGrant`, keyed
+  by (person, ticket) where `ticket IS NULL` is the STANDING scope (every
+  ticket) and a set `ticket` is the PER-TICKET scope. Two PARTIAL unique
+  constraints, because Postgres treats NULLs as distinct and one
+  `unique_together` would allow any number of standing rows per person.
+  Not a sixth bespoke mechanism: the three-state "absent = fall through,
+  explicit entry = a decision" shape is
+  `BuildingManagerAssignment.permission_overrides`, and the row-per-grant
+  shape is `CredentialCustomerVisibility`. Migration `0028`, additive, no
+  backfill.
+- **§2 — the resolution order, in one place and in words.**
+  `backend/tickets/attachment_visibility.py`: **per-ticket > standing >
+  per-work setting > default. Most specific wins. Any explicit grant makes
+  the photo customer-visible. Internal is the default when nothing has
+  been granted at any level.** `views.py::_default_visibility` is now a
+  one-line call site — no rung is implemented twice. The per-work rung is
+  the one that speaks in a single direction: its column default is
+  `False`, so "off" cannot be told from "never set", and reading it as a
+  veto would make the standing grant useless on every work in the system.
+- **§3 — `TicketAttachment.visibility_source`.** WHICH rung decided, written
+  once at upload. "Internal" is no longer one rule with one cause, and a
+  manager who cannot tell a default from a refusal promotes against a rule
+  that already decided. Blank on every pre-W4-P row, which reads
+  *unrecorded* and never *default*.
+- **§4 — granting is privileged, and never self-service.** Both scopes
+  refuse the actor's own user id with 403. STANDING is SUPER_ADMIN /
+  COMPANY_ADMIN only and a COMPANY_ADMIN only inside their own company
+  (`manageable_user_ids_for`); PER-TICKET is provider management with
+  scope on the ticket, which is exactly the line the per-attachment
+  promote action already draws, because a per-ticket grant IS a
+  pre-authorised promote. A BUILDING_MANAGER may therefore do per-ticket
+  and not standing.
+- **§5 — the permissions screen.** `UploadVisibilityCard`, mounted on
+  `/admin/users/<id>`. THREE states, not a toggle: granted / refused /
+  not set. A two-state toggle cannot express "refused" and "not set"
+  separately, and collapsing them would turn every unset person into a
+  refusal the moment somebody opened a work up. The card states its reach
+  ("applies to EVERY ticket") and names the per-ticket setting as the thing
+  that overrides it.
+
+**THE CONTRACT FOR CHAT M** (the per-ticket UI on the Assignment card):
+
+```
+GET   /api/tickets/<ticket_id>/upload-visibility/
+      -> { ticket_id, staff_uploads_customer_visible,
+           people: [ { user_id, user_email, user_full_name,
+                       uploads_customer_visible,          # per-ticket, tri-state
+                       standing_uploads_customer_visible, # tri-state
+                       reason, granted_by_id, updated_at,
+                       effective_visibility,   # INTERNAL | CUSTOMER
+                       effective_source } ] }  # which rung decided
+PATCH /api/tickets/<ticket_id>/upload-visibility/<user_id>/
+      { "uploads_customer_visible": true | false | null, "reason": "" }
+      -> one `people` entry, recomputed
+```
+
+- One entry per DISTINCT person holding a staff slot (a person may hold
+  several dated slots; the permission is about the person, not the slot).
+- `true` grants, `false` refuses, **`null` clears** — three different
+  things. The key is required; omitting it is a 400.
+- Roles: SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER with scope on the
+  ticket. 403 `upload_visibility_forbidden` otherwise, 403
+  `upload_visibility_self_grant_forbidden` on your own id, 404 for an
+  out-of-scope ticket or a person with no slot here.
+- **Do not re-derive the effective value client-side.** Render
+  `effective_visibility` / `effective_source`. Typed client:
+  `frontend/src/api/uploadVisibility.ts`.
+- What a customer sees is unchanged by any of this: the grant decides the
+  LEVEL an upload lands at, never who may read a stored row.
+
+### Deliberately NOT done — W4-P
+
+- **No per-building scope.** A third scope between standing and per-ticket
+  was not asked for, and every added rung is another row in a table an
+  operator has to hold in their head.
+- **No retro-promotion.** A grant changes the level the NEXT upload lands
+  at. Photos already stored keep the level they were given, exactly as
+  `staff_uploads_customer_visible` already behaved.
+- **`UploadVisibilityGrant` is NOT in the generic audit CRUD trio.** A
+  clear is a DELETE and the row that says what was cleared has to carry the
+  scope, which the generic differ would not know to include. Every
+  create / change / clear writes one hand-written AuditLog row naming
+  STANDING or TICKET (H-10).
+- **The per-ticket UI is chat M's.** This sprint ships its backend and its
+  typed client, and nothing on `TicketDetailPage.tsx`.
+
+
 ## Historical — Sprint 181
 
 **Branch:** `feat/sprint-181`, cut from the INTEGRATED Sprint 180 (see

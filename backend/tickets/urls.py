@@ -20,6 +20,10 @@ from .views_staff_assignments import (
     TicketStaffAssignmentListCreateView,
 )
 from .views_staff_requests import StaffAssignmentRequestViewSet
+from .views_upload_visibility import (
+    StandingUploadVisibilityView,
+    TicketUploadVisibilityView,
+)
 from .views_work_plan import WorkPlanView
 from .views_sub_tasks import (
     TicketSubTaskDetailView,
@@ -62,6 +66,22 @@ urlpatterns = [
         "categories/<int:category_id>/",
         WorkCategoryDetailView.as_view(),
         name="work-category-detail",
+    ),
+    # W4-P — the STANDING upload-visibility permission (every ticket).
+    # Before the router for the same reason `bulk-assign/` is: the
+    # router's `<pk>` detail pattern would otherwise swallow the literal.
+    # It lives under `/api/tickets/` because the thing it decides is a
+    # ticket attachment's visibility, and mounting it anywhere else would
+    # put the two halves of one rule in two URL trees.
+    path(
+        "upload-visibility/standing/",
+        StandingUploadVisibilityView.as_view(),
+        name="upload-visibility-standing",
+    ),
+    path(
+        "upload-visibility/standing/<int:user_id>/",
+        StandingUploadVisibilityView.as_view(),
+        name="upload-visibility-standing-detail",
     ),
     # Sprint 158 §1 — bulk assign, and the picker's candidate read.
     # Before the router for the same reason `my-slots/` is: the router's
@@ -109,6 +129,18 @@ urlpatterns = [
         "<int:ticket_id>/attachments/",
         TicketAttachmentListCreateView.as_view(),
         name="ticket-attachments",
+    ),
+    # W4-P — the PER-TICKET upload-visibility permission (this ticket
+    # only). The Assignment card's surface; chat M renders it.
+    path(
+        "<int:ticket_id>/upload-visibility/",
+        TicketUploadVisibilityView.as_view(),
+        name="ticket-upload-visibility",
+    ),
+    path(
+        "<int:ticket_id>/upload-visibility/<int:user_id>/",
+        TicketUploadVisibilityView.as_view(),
+        name="ticket-upload-visibility-detail",
     ),
     path(
         "<int:ticket_id>/messages/",
