@@ -847,12 +847,37 @@ class OnePayloadOneWriterTests(APITestCase):
         self.assertEqual(declared, set(PLAN_FIELDS))
 
     def test_the_bulk_payload_is_the_single_payload_plus_the_selection(self):
-        from extra_work.serializers import ExtraWorkPlanSerializer
-        from extra_work.views_planning import _BulkPlanInputSerializer
+        """W4-O widened what "the selection" means, not what a plan is.
 
+        The bulk body now has TWO spellings — `requests` (one plan for
+        all of them) and `items` (a plan per work) — so the field set
+        gained one name. The invariant this test exists for is
+        untouched: every field the single plan action accepts is still a
+        field the bulk body accepts, by construction rather than by two
+        lists being kept in step.
+
+        The second assertion is the one W4-O adds, and it is the same
+        lesson one level down: a ROW is a plan payload with an id bolted
+        on and NOTHING else. Re-declaring the plan fields inside the row
+        serializer is all it would take for the per-work table to
+        quietly stop carrying a field the single form offers — the
+        payload would validate, the write would land, and the field
+        would be gone.
+        """
+        from extra_work.serializers import ExtraWorkPlanSerializer
+        from extra_work.views_planning import (
+            _BulkPlanInputSerializer,
+            _BulkPlanItemSerializer,
+        )
+
+        plan_fields = set(ExtraWorkPlanSerializer().fields)
         self.assertEqual(
             set(_BulkPlanInputSerializer().fields),
-            set(ExtraWorkPlanSerializer().fields) | {"requests"},
+            plan_fields | {"requests", "items"},
+        )
+        self.assertEqual(
+            set(_BulkPlanItemSerializer().fields),
+            plan_fields | {"request"},
         )
 
 

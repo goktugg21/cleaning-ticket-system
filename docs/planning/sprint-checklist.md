@@ -192,6 +192,73 @@ worktree.
   one they flipped. Each row also states what the next photo would
   actually do and which rung of chat P's ladder decided it.
 
+### Done — W4-O: one bulk plan, one set of values PER WORK (wave 4, chat O)
+
+`POST /api/extra-work/bulk-plan/` took ONE payload and copied it onto every
+selected id. Work A could not be given four hours while work B got six, and
+planned hours per person were absent from the bulk dialog entirely — the server
+validates a distribution against the crew of EACH work, so a shared
+distribution was only ever valid when the identical crew was on every selected
+job, and offering the field would have produced a 400 that reads as a broken
+dialog.
+
+- **§1 — per-work values, still one transaction.** The body may now be
+  `{"items": [{"request": 258, "budget_hours": "4", ...}, ...]}`. The older
+  `{"requests": [...], ...shared}` spelling is NOT a second endpoint and not a
+  second code path: `_normalise` in `views_planning.py` turns it into exactly
+  the per-work list it is shorthand for, and everything downstream sees one
+  list of `(id, payload)` pairs. Kept alive because `bulk-dates` and
+  `bulk-assign` speak the same dialect, and because "the same window on all
+  six" should be sayable once. **Mixing the two is a 400 with its own code** —
+  `items` beside a shared field would need a precedence rule, and a precedence
+  rule is a thing an operator has to learn and a client can get wrong silently.
+  All-or-nothing survives: an invalid ninth row rolls back the eight before it,
+  proven across BOTH write paths (plain columns and the hours rows, which are
+  written by different code).
+- **§2 — planned hours per person, per work.** Each row's distribution
+  validates against that row's own crew. A person who is not assigned to a
+  given work now produces an error **naming the work and the person**
+  (`extra_work`, `extra_work_title`, `user` on the body) instead of a generic
+  400. That is not an H-1 regression and the test proves it as a property
+  rather than by eyeball: the body is a pure function of the request — every id
+  in it is one the caller SENT, on a work the caller already resolved through
+  its own scope — so "not assigned", "another tenant's person" and "no such
+  account" still produce one identical sentence. The single-work endpoint keeps
+  its constant body unchanged; there is no "which row" question when there is
+  one row.
+- **§3 — the dialog is a table, one row per work, every row editable.** Seven
+  columns: work, budget, our start, our end, photo required, notes required,
+  and hours-per-person behind a per-row expander. Hours got the expander rather
+  than a column because a crew is a list of unknown length and a column would
+  make every row as tall as the largest crew in the selection. An **Apply to
+  all** strip fills values down INTO the rows (nothing from it reaches the
+  wire), so the old one-payload ergonomics survive as one click. Its two
+  completion controls are tri-state `<select>`s, not toggles — "leave every row
+  alone" is a third state a toggle cannot express, and it is the default.
+- **§4 — the table is seeded, not blank.** New
+  `GET /api/extra-work/bulk-plan/?requests=1,2,3` returns what each selected
+  work plans now plus its crew, in **two queries for the whole selection**
+  (pinned by a test that compares the query count for 2 works against 8 — the
+  obvious implementation calls the detail serializer's helper per work, which
+  is two queries EACH). Same view, same door, same scope resolution as the
+  POST. A blank table over existing plans is not neutral: the operator cannot
+  tell "no budget" from "the dialog did not load it", and a save reads as a
+  wipe.
+- **§5 — the three things that must not regress, each pinned.**
+  (a) Both plan endpoints stay on `JSONParser` — DRF reads an absent boolean
+  from form data as `false`, and the per-work shape raises the stakes because a
+  nested `items` list has no form-data spelling at all. (b) Switch
+  independence is now per field per row by CONSTRUCTION: every field is
+  compared against its own seed and omitted when equal, so no control can ride
+  along with another; measured on the wire, not asserted in a comment. (c)
+  Overrun WARNS — the row shows the number and nothing is disabled, nothing is
+  capped, nothing is refused. The reference system built that hard cap and the
+  business had it removed; `validateTotalHours()` is still in their code,
+  uncalled, beside `// Hours validation removed per user request`.
+
+Budget hours still never touch money: not one figure in `planning.py` reaches a
+price, and `rowAmounts()` remains the one billing-total rule.
+
 ### Done — Sprint 191 (wave 3, chat E of 2): Location & Customer, third time
 
 The owner asked for these two facts in the page HEADER three times. Sprint 189

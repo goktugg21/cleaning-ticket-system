@@ -1,12 +1,23 @@
 """W2-D — the planning layer: what we said the job would take.
 
     POST /api/extra-work/<id>/plan/       one work
-    POST /api/extra-work/bulk-plan/       many works, one body
+    POST /api/extra-work/bulk-plan/       many works, one body PER WORK
 
 Both go through `apply_plan` below, so a field the single form writes and
 a field the bulk table writes cannot mean two different things. That is
 not a tidiness preference — it is the specific defect this module was
 written against.
+
+W4-O — ONE CALL, DIFFERENT VALUES PER WORK. `apply_plan` was always
+per-work; what changed is what the bulk endpoint hands it. It used to
+copy ONE payload onto every selected id, so work A and work B could not
+be given four and six hours, and hours per person were unusable in bulk
+at all (they validate against the crew of EACH work, so a shared
+distribution was only ever valid when the same crew was on every job).
+The endpoint now normalises whatever shape it is given into a list of
+`(work, payload)` pairs and calls this function once per pair, inside
+one transaction. Nothing about the write path changed; the difference is
+that the batch stopped being forced to say the same thing twelve times.
 
 In the reference system NEITHER completion flag survives a write at all.
 The plan modal sends `upload_is_required` and `notes_is_required`, the
@@ -130,6 +141,48 @@ PLANNED_HOURS_INVALID_MESSAGE = (
     "assigned to this work. Nothing was changed."
 )
 
+#: W4-O — the same refusal, said in a way an operator staring at a
+#: twelve-row bulk table can act on.
+#:
+#: A batch has a question a single work does not: WHICH ROW. A constant
+#: body is the right answer to "which person" (see above) and the wrong
+#: answer to "which of the twelve works I just edited" — an operator who
+#: is told only "something was wrong somewhere" re-reads twelve rows, or
+#: reads the dialog as broken, which is exactly the failure mode the
+#: gap-closing brief names.
+#:
+#: NAMING THE ROW IS NOT AN ORACLE, AND THE DIFFERENCE IS PRECISE. The
+#: only values this body carries beyond the constant text are values the
+#: CALLER SENT (`extra_work`, `user`) plus the title of a work the caller
+#: has ALREADY resolved through its own scope — every id in the batch is
+#: scope-checked before a single row is read. The body is therefore a
+#: pure function of the request, so it answers "does this user id exist"
+#: and "does that person work here" exactly as the constant body does:
+#: not at all. The three causes — not assigned, not visible, not a real
+#: account — still produce one identical sentence.
+#:
+#: The SINGLE-work endpoint keeps the constant body. There is no "which
+#: row" question when there is one row, so the ids would buy nothing
+#: there, and `test_w2d_planning.py`'s equality test is a floor worth
+#: leaving exactly where it is.
+PLANNED_HOURS_INVALID_IN_BATCH_MESSAGE = (
+    'On "{title}" (#{extra_work}): person #{user} could not be given '
+    "hours here — they are not assigned to this work, or could not be "
+    "resolved. Nothing was changed, on any of the selected works."
+)
+
+PLANNED_HOURS_DUPLICATE_IN_BATCH_MESSAGE = (
+    'On "{title}" (#{extra_work}): person #{user} appears twice in the '
+    "hours distribution. Nothing was changed, on any of the selected "
+    "works."
+)
+
+NOTHING_TO_PLAN_IN_BATCH_MESSAGE = (
+    'On "{title}" (#{extra_work}): no planning field was given, and no '
+    "start was asked for. Nothing was changed, on any of the selected "
+    "works."
+)
+
 #: The one warning this module raises. See the module docstring for why
 #: it is a warning and not a refusal.
 WARN_HOURS_OVERRUN = "hours_overrun"
@@ -154,11 +207,31 @@ class PlanRejected(Exception):
         self.body = body
 
 
-def _reject_hours() -> None:
+def _reject_hours(extra_work=None, user_id=None) -> None:
+    """Refuse a distribution. `extra_work` set => name the row (W4-O).
+
+    `extra_work is None` is the single-work path and produces the
+    constant body byte for byte. See the two message constants above for
+    why the batch path may say more without becoming an oracle.
+    """
+    if extra_work is None:
+        raise PlanRejected(
+            {
+                "detail": PLANNED_HOURS_INVALID_MESSAGE,
+                "code": ERR_PLANNED_HOURS_INVALID,
+            }
+        )
     raise PlanRejected(
         {
-            "detail": PLANNED_HOURS_INVALID_MESSAGE,
+            "detail": PLANNED_HOURS_INVALID_IN_BATCH_MESSAGE.format(
+                title=extra_work.title,
+                extra_work=extra_work.id,
+                user=user_id,
+            ),
             "code": ERR_PLANNED_HOURS_INVALID,
+            "extra_work": extra_work.id,
+            "extra_work_title": extra_work.title,
+            "user": user_id,
         }
     )
 
@@ -205,7 +278,9 @@ def hours_overrun(extra_work) -> dict | None:
     }
 
 
-def resolve_planned_hours(extra_work, rows) -> list[tuple[int, Decimal]]:
+def resolve_planned_hours(
+    extra_work, rows, *, name_the_work: bool = False
+) -> list[tuple[int, Decimal]]:
     """Validate a `[{user, hours}, ...]` distribution against ONE work.
 
     Returns `[(user_id, hours), ...]`. Raises `PlanRejected` — with the
@@ -217,7 +292,18 @@ def resolve_planned_hours(extra_work, rows) -> list[tuple[int, Decimal]]:
     it (`POST /api/extra-work/bulk-assign/`) and then budget their hours.
     Deriving the crew from this endpoint instead would give it a second,
     unscoped way to attach a person to a job.
+
+    W4-O — EVERY WORK IN A BATCH VALIDATES ITS HOURS AGAINST ITS OWN
+    CREW. This function was already per-work; what changed is that the
+    bulk endpoint now hands it a DIFFERENT distribution per work instead
+    of the same one for all of them, so "the same crew must be on every
+    selected job" stopped being a precondition of planning hours in bulk.
+
+    `name_the_work` puts the row and the person into the refusal — see
+    `PLANNED_HOURS_INVALID_IN_BATCH_MESSAGE` for why that is not an
+    oracle and why the single-work path leaves it off.
     """
+    context = extra_work if name_the_work else None
     resolved: list[tuple[int, Decimal]] = []
     seen: set[int] = set()
     for row in rows:
@@ -225,15 +311,25 @@ def resolve_planned_hours(extra_work, rows) -> list[tuple[int, Decimal]]:
         if user_id in seen:
             # About the PAYLOAD, not about any id — so it says what is
             # wrong without becoming an existence oracle.
-            raise PlanRejected(
-                {
-                    "detail": (
-                        "The same person appears twice in the hours "
-                        "distribution."
-                    ),
-                    "code": ERR_PLANNED_HOURS_DUPLICATE,
-                }
-            )
+            body = {
+                "detail": (
+                    "The same person appears twice in the hours "
+                    "distribution."
+                ),
+                "code": ERR_PLANNED_HOURS_DUPLICATE,
+            }
+            if context is not None:
+                body["detail"] = (
+                    PLANNED_HOURS_DUPLICATE_IN_BATCH_MESSAGE.format(
+                        title=context.title,
+                        extra_work=context.id,
+                        user=user_id,
+                    )
+                )
+                body["extra_work"] = context.id
+                body["extra_work_title"] = context.title
+                body["user"] = user_id
+            raise PlanRejected(body)
         seen.add(user_id)
         resolved.append((user_id, _q2(row["hours"])))
 
@@ -246,7 +342,14 @@ def resolve_planned_hours(extra_work, rows) -> list[tuple[int, Decimal]]:
         ).values_list("user_id", flat=True)
     )
     if assigned != seen:
-        _reject_hours()
+        # The FIRST unresolved person in PAYLOAD order, so the id named
+        # is a function of the request and not of iteration order over a
+        # set — two identical requests must produce two identical
+        # bodies, or the equality property above is not a property.
+        first_bad = next(
+            (uid for uid, _ in resolved if uid not in assigned), None
+        )
+        _reject_hours(context, first_bad)
     return resolved
 
 
@@ -329,7 +432,9 @@ def _start(extra_work, *, actor) -> tuple[bool, str | None, object]:
     return True, None, row
 
 
-def apply_plan(extra_work, data: dict, *, actor) -> dict:
+def apply_plan(
+    extra_work, data: dict, *, actor, name_the_work: bool = False
+) -> dict:
     """Write the plan onto `extra_work`, then start the work.
 
     `data` is a validated payload (see `ExtraWorkPlanSerializer`) read by
@@ -344,24 +449,36 @@ def apply_plan(extra_work, data: dict, *, actor) -> dict:
 
     The caller supplies the transaction. Everything is resolved before
     anything is written, so a refusal leaves the row exactly as it was.
+
+    W4-O — `name_the_work` makes every refusal say WHICH work it is
+    about. The bulk endpoint sets it because a batch has a "which row"
+    question a single work does not; the single endpoint leaves it off
+    so its bodies stay byte-for-byte what they were.
     """
     touched = [field for field in PLAN_FIELDS if field in data]
     if not touched and "start" not in data:
-        raise PlanRejected(
-            {
-                "detail": (
-                    "Provide at least one planning field to set, or "
-                    "start: true."
-                ),
-                "code": ERR_NOTHING_TO_PLAN,
-            }
-        )
+        body = {
+            "detail": (
+                "Provide at least one planning field to set, or "
+                "start: true."
+            ),
+            "code": ERR_NOTHING_TO_PLAN,
+        }
+        if name_the_work:
+            body["detail"] = NOTHING_TO_PLAN_IN_BATCH_MESSAGE.format(
+                title=extra_work.title, extra_work=extra_work.id
+            )
+            body["extra_work"] = extra_work.id
+            body["extra_work_title"] = extra_work.title
+        raise PlanRejected(body)
 
     # ---- resolve everything first ------------------------------------
     resolved_hours = None
     if "planned_hours" in data:
         resolved_hours = resolve_planned_hours(
-            extra_work, data["planned_hours"] or []
+            extra_work,
+            data["planned_hours"] or [],
+            name_the_work=name_the_work,
         )
 
     note_parts: list[str] = []
@@ -373,6 +490,16 @@ def apply_plan(extra_work, data: dict, *, actor) -> dict:
     if date_fields:
         error = apply_extra_work_dates(extra_work, date_fields)
         if error is not None:
+            if name_the_work:
+                # Same reason as every other refusal here: in a batch the
+                # operator needs to know which of the rows they just
+                # edited has the impossible window. The date module's own
+                # wording and code are left untouched and only annotated.
+                error = {
+                    **error,
+                    "extra_work": extra_work.id,
+                    "extra_work_title": extra_work.title,
+                }
             raise PlanRejected(error)
         note_parts.append(
             "committed window "

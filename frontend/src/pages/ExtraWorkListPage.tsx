@@ -27,7 +27,7 @@ import type {
   CustomerLabel,
   ExtraWorkBilledTo,
   ExtraWorkCategory,
-  ExtraWorkPlanPayload,
+  ExtraWorkBulkPlanItem,
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
@@ -904,26 +904,26 @@ export function ExtraWorkList({
     }
   }
 
-  /** W3-F — one plan across a selection.
+  /** W3-F / W4-O — a plan PER WORK across a selection, in one call.
    *
    *  Same OMIT-what-was-not-touched discipline as `runBulkDates` above,
    *  and for a sharper reason: the two completion flags are booleans the
-   *  server reads by KEY PRESENCE, so spreading the dialog's state would
+   *  server reads by KEY PRESENCE, so spreading a dialog's state would
    *  write `false` for a switch nobody looked at and silently clear the
-   *  flag on every selected work. The dialog therefore hands back only
-   *  the fields it was actually given.
+   *  flag on every selected work. The dialog therefore builds each row's
+   *  item from what actually changed on that row, and the ids ride
+   *  INSIDE the items — this function no longer decides which works the
+   *  payload lands on, because with per-work values that is the same
+   *  decision as which values land.
    *
    *  All-or-nothing at the far end: one unresolvable id rejects the
    *  batch with zero writes, so there is no partial state to reconcile
    *  and the list is simply reloaded on success. */
-  async function runBulkPlan(payload: ExtraWorkPlanPayload) {
+  async function runBulkPlan(items: ExtraWorkBulkPlanItem[]) {
     setPlanBusy(true);
     setPlanError("");
     try {
-      await bulkPlanExtraWork({
-        requests: edit.selection,
-        ...payload,
-      });
+      await bulkPlanExtraWork({ items });
       setPlanOpen(false);
       edit.exit();
       setReloadKey((key) => key + 1);
@@ -1076,7 +1076,7 @@ export function ExtraWorkList({
           busy={planBusy}
           error={planError}
           onCancel={() => setPlanOpen(false)}
-          onConfirm={(payload) => void runBulkPlan(payload)}
+          onConfirm={(items) => void runBulkPlan(items)}
         />
       )}
 

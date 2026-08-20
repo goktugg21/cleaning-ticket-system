@@ -1903,6 +1903,83 @@ export interface ExtraWorkPlanResult {
   tickets_kept_own_date: number[];
 }
 
+/** W4-O — ONE work's own plan inside a bulk call.
+ *
+ *  A row is an `ExtraWorkPlanPayload` with an id bolted on and nothing
+ *  else, mirroring the backend's `_BulkPlanItemSerializer`, which is
+ *  `ExtraWorkPlanSerializer` plus `request`. Extending the payload type
+ *  rather than restating its fields is what stops "what may a row set"
+ *  from drifting away from "what may a plan set". */
+export interface ExtraWorkBulkPlanItem extends ExtraWorkPlanPayload {
+  request: number;
+}
+
+/** W4-O — the bulk-plan body, in either of its two spellings.
+ *
+ *  A UNION, not an object with two optional halves, because the server
+ *  refuses a mixture outright: `items` beside a shared field would need
+ *  a precedence rule ("does the row's budget beat the shared one?"),
+ *  and a precedence rule is a thing an operator has to learn and a
+ *  client can get wrong in silence. The union makes the mixture
+ *  unspellable here rather than a 400 discovered at runtime.
+ *
+ *  The shared spelling is not a second endpoint: the server normalises
+ *  it into the per-work list it is shorthand for. It stays because
+ *  `bulk-dates` and `bulk-assign` speak it too, and because "the same
+ *  window on all six" should be sayable once rather than copied six
+ *  times — the fifth copy being subtly different is the data-entry
+ *  failure the endpoint exists to prevent. */
+export type ExtraWorkBulkPlanPayload =
+  | ({ requests: number[] } & ExtraWorkPlanPayload)
+  | { items: ExtraWorkBulkPlanItem[] };
+
+/** W4-O — one person currently assigned to a work, as the bulk planning
+ *  context reports them. Distinct from `ExtraWorkPlannedHoursRow`: this
+ *  is who is ON the job, that is who has HOURS on it, and the two lists
+ *  deliberately do not have to match (see `is_assigned` there). */
+export interface ExtraWorkBulkPlanCrewMember {
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: string;
+  assignment_role: string;
+}
+
+/** W4-O — what one selected work plans RIGHT NOW.
+ *
+ *  A per-work table has to be seeded or every row opens blank and
+ *  saving looks like it wiped what was there. The list payload carries
+ *  none of these fields (they are provider-only detail fields) and none
+ *  of the crew, so this is the read that fills the table — the whole
+ *  selection in one request rather than one detail fetch per row. */
+export interface ExtraWorkBulkPlanContextRow {
+  extra_work: number;
+  title: string;
+  building_name: string;
+  status: ExtraWorkStatus;
+  /** Decimal string, or null for "nobody has budgeted this yet". Those
+   *  are different facts from "0.00", and the dialog must not render
+   *  them the same. */
+  budget_hours: string | null;
+  provider_planned_date: string | null;
+  provider_planned_end_date: string | null;
+  /** What the CUSTOMER asked for. Read-only context: a plan never
+   *  writes these, and setting our window without seeing the deadline
+   *  it is measured against is planning blind. */
+  preferred_date: string | null;
+  deadline: string | null;
+  file_upload_required: boolean;
+  completion_notes_required: boolean;
+  crew: ExtraWorkBulkPlanCrewMember[];
+  planned_hours: ExtraWorkPlannedHoursRow[];
+  planned_hours_total: string;
+  planned_hours_overrun: ExtraWorkHoursOverrun | null;
+}
+
+export interface ExtraWorkBulkPlanContext {
+  works: ExtraWorkBulkPlanContextRow[];
+}
+
 /** The bulk-plan reply. One entry per work, in id order. */
 export interface ExtraWorkBulkPlanResult {
   updated: number;

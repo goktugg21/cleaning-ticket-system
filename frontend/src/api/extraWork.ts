@@ -11,6 +11,8 @@ import type {
   ExtraWorkAssignment,
   ExtraWorkAssignmentRole,
   ExtraWorkBulkAssignResult,
+  ExtraWorkBulkPlanContext,
+  ExtraWorkBulkPlanPayload,
   ExtraWorkBulkPlanResult,
   EwMessageRecipient,
   EwMessageType,
@@ -327,11 +329,39 @@ export async function planExtraWork(
   return response.data;
 }
 
-/** Plan a selection. ONE payload, applied to every id — the endpoint is
- *  shaped that way, and it is all-or-nothing: a single unresolvable id
- *  rejects the batch with zero writes. */
+/** W4-O — what the selected works plan RIGHT NOW, in one request.
+ *
+ *  Seeds the per-work table. Without it every row opens blank and a
+ *  save reads as a wipe: the list payload carries none of the planning
+ *  fields (provider-only detail fields) and none of the crew, so the
+ *  alternative is one detail fetch per selected work.
+ *
+ *  Ids go as a comma list rather than repeated keys purely because it
+ *  is the shorter URL; the server accepts both spellings, which is
+ *  pinned by a test — a client that sent the other one and silently got
+ *  a context for one work would be very hard to notice. */
+export async function getBulkPlanContext(
+  ids: number[],
+): Promise<ExtraWorkBulkPlanContext> {
+  const response = await api.get<ExtraWorkBulkPlanContext>(
+    "/extra-work/bulk-plan/",
+    { params: { requests: ids.join(",") } },
+  );
+  return response.data;
+}
+
+/** Plan a selection, all or nothing — one unresolvable id rejects the
+ *  batch with zero writes.
+ *
+ *  W4-O: takes EITHER spelling. `{items: [...]}` gives each work its own
+ *  budget, its own window, its own completion flags and its own
+ *  per-person hours in a single atomic call; `{requests: [...], ...}`
+ *  is the older shorthand for "the same values on all of them" and the
+ *  server normalises it into exactly that per-work list. Never both at
+ *  once — the union type above makes the mixture unspellable, and the
+ *  server refuses it rather than inventing a precedence rule. */
 export async function bulkPlanExtraWork(
-  payload: ExtraWorkPlanPayload & { requests: number[] },
+  payload: ExtraWorkBulkPlanPayload,
 ): Promise<ExtraWorkBulkPlanResult> {
   const response = await api.post<ExtraWorkBulkPlanResult>(
     "/extra-work/bulk-plan/",

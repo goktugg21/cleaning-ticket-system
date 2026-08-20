@@ -11925,3 +11925,119 @@ a.wp-card-title:hover { text-decoration: underline; }
   text-align: right;
   white-space: nowrap;
 }
+
+/* --------------------------------------------------------------------
+   W4-O — the per-work bulk plan table.
+
+   SEVEN COLUMNS IS THE HORIZONTAL BUDGET, and the layout is built
+   around that rather than around the fields. The work identity, the
+   budget, the two committed dates and the two completion switches are
+   always visible; hours-per-person is the seventh column and is a
+   BUTTON that opens a full-width sub-row, because a crew is a list of
+   unknown length and giving it a column would have made every row as
+   tall as the largest crew in the selection.
+
+   The dialog is widened only for this variant (`.ew-plan-dialog-wide`),
+   so the single-work plan modal keeps its 560px reading width. Below
+   the table's own minimum the `.table-wrap` wrapper scrolls
+   HORIZONTALLY and the work column stays pinned — a scrolled row whose
+   title has slid off is a row an operator cannot safely edit.
+   -------------------------------------------------------------------- */
+.ew-plan-dialog-wide {
+  max-width: min(1240px, 96vw);
+}
+.ew-bulk-plan-table {
+  min-width: 940px;
+}
+.ew-bulk-plan-table th,
+.ew-bulk-plan-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+}
+/* Pinned so the row stays identifiable while the value columns scroll.
+   Opaque background, or the scrolled cells read through it. */
+.ew-bulk-plan-table .ew-bulk-plan-work-col {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  min-width: 240px;
+  max-width: 280px;
+}
+.ew-bulk-plan-table thead .ew-bulk-plan-work-col {
+  background: var(--surface-2);
+  z-index: 3;
+}
+.ew-bulk-plan-work-title {
+  font-weight: 700;
+}
+.ew-bulk-plan-num {
+  width: 88px;
+  text-align: right;
+}
+.ew-bulk-plan-date {
+  width: 148px;
+}
+.ew-bulk-plan-hours-btn {
+  white-space: nowrap;
+}
+/* A WARNING, never a block — it colours a line of text and disables
+   nothing. See BulkPlanDialog.tsx for the evidence behind that rule. */
+.ew-bulk-plan-overrun {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warn, #b45309);
+}
+.ew-bulk-plan-hours-cell {
+  background: var(--surface-2);
+}
+.ew-bulk-plan-crew {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+.ew-bulk-plan-crew-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ew-bulk-plan-crew-name {
+  font-size: 13px;
+}
+.ew-bulk-plan-stale {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--warn, #b45309);
+}
+/* The fill-down strip. Wraps rather than scrolls: it is a form, not a
+   row of the table, and it must stay usable at the narrow widths where
+   the table itself has already given up and started scrolling. */
+.ew-bulk-plan-fill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.ew-bulk-plan-fill .field {
+  min-width: 132px;
+}
+.ew-bulk-plan-fill-apply {
+  margin-bottom: 2px;
+}
+/* The per-row switch's click target. `.toggle-switch input` is a
+   zero-size, transparent box and the slider next to it is a plain
+   <span>, so without a wrapping label the control is visible and
+   inert. The row cells carry no caption text, so the label is the
+   target rather than a caption. */
+.ew-bulk-plan-switch {
+  display: inline-block;
+  cursor: pointer;
+  line-height: 0;
+}
