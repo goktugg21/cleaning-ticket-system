@@ -13132,6 +13132,14 @@ a.wp-card-title:hover { text-decoration: underline; }
    container rather than escaping it. Dropping `nowrap` lets the cell
    shrink first, so in practice there is nothing to scroll. */
 .pva-table .pva-action { width: 1%; text-align: right; }
+/* `table.data-table` carries `min-width: 860px`, a floor meant for the
+   wide admin tables. This panel has four short columns and lives in the
+   ticket page's 745px column, so that floor was the whole bug: the
+   table could not compress, the Record button sat at x=1025 in a card
+   ending at 1029, and the sticky side column took the click.
+   Same specificity as the base rule (element + class) and declared
+   later, so it wins without !important, and no other table changes. */
+table.pva-table { min-width: 0; }
 .pva-record {
   display: flex;
   flex-wrap: wrap;
