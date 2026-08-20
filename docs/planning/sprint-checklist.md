@@ -36,6 +36,77 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — W5-B: day-by-day (multi-date) Extra Work
+
+The last feature from the reference system that had never been scheduled. An
+operator agrees a series of visits in one conversation — every Tuesday in
+November, or three slots on the handover day — and had to type the job once per
+visit.
+
+- **§1 — an entry mode on the create form.** SINGLE is unchanged. MULTIPLE turns
+  the title into a STANDARD title and opens a day picker; each picked day/time
+  becomes its own Extra Work sharing customer, building, description, labels and
+  cart. **Every member goes through `ExtraWorkRequestCreateSerializer`** — the
+  same serializer the single form posts to, with the same classification, intent
+  validation, routing decision and ticket spawn. There is no second writer, which
+  is the whole reason the reference system's batch path drifted from its single
+  path: over there `requested_at` holds the SCHEDULED SLOT rather than a request
+  time (22 days before `created_at` on live record 476), `requested_by` is never
+  set, and products are written with a `unit` string where the single path writes
+  `unit_id`.
+- **§2 — a group owns nothing.** It is a creation and editing convenience.
+  Members keep their own status, price, hours and invoice; no total anywhere is
+  computed from a group; the FK is `SET_NULL` so losing the receipt cannot take
+  real work with it. `rowAmounts()` remains the one billing-total rule, and
+  `test_sprint182_money_rules` + `test_m4_billing_fields` ran green alongside the
+  new module to prove the money surface did not move.
+- **§3 — three things deliberately NOT built**, each against a recorded defect.
+  No group-status endpoint (theirs is a query-builder mass update whose target
+  status is never validated and which bypasses every event — live group 17 has
+  eight members in the invoicing pool with `approved_at` null, having skipped
+  approval). No group-delete (theirs soft-deletes every member with **no status
+  check at all**, so a series holding invoiced work goes in one click, then
+  hard-deletes the group row and orphans what it removed). No group planning
+  path — planning already has two doors and bulk-plan has taken per-work values
+  since W4-O.
+- **§4 — `condition` is a real nullable column.** At / before / after handover,
+  plus NULL meaning nobody was asked — which is the honest state of every ad-hoc
+  work and a different fact from "at handover". The reference system cannot
+  express the difference (`match($entry['condition'] ?? 'at')`) and A7 §2.2
+  records the cost in one line. Over there the value is never persisted at all:
+  it is five characters inside the title that every reader recovers by regex.
+- **§5 — the title suffix is composed, never parsed.** `[WK47-19.11.2026:18:00:op]`
+  is generated once from the columns, and every fact in it is also a column.
+  `compose_member_title` runs one way and has no inverse; "rebuild titles"
+  re-derives from the columns. Their title IS the storage, which produced two
+  incompatible suffix formats whose parser understands only one, a week number
+  taken from the group rather than the row, and a bulk editor that overwrites the
+  stored title with the editing user's language variant — a title that becomes
+  the invoice line description.
+- **§6 — all or nothing, and a ceiling of 60.** One transaction around every
+  member and the group, with the group created AFTER the members and its tenant
+  anchors read off them, so a group cannot disagree with its own members and a
+  group with zero members is not expressible. Theirs has no transaction and
+  creates the group first: **15 of their 19 live group rows have no members.**
+  The cap is enforced server-side; a weekly visit for a year is 52 and daily for
+  two months is 60, while "every weekday next year" is 260 works each spawning a
+  ticket and a notification fan-out.
+- **§7 — the list folds a series into one row** carrying the standard title, the
+  member count and a per-status spread. The counts are WHOLE-SERIES truth
+  computed server-side, so a badge never depends on pagination, and there is no
+  header record and no `group_sequence == 1` election — that election is what
+  makes their list totals disagree with their own statistics endpoint. **A work
+  with no series renders exactly as before.**
+- **§8 — a series editor**: one value across every member with per-row override,
+  for title, time and condition. Date, budget hours and assigned people are
+  deliberately absent and the footer names the buttons that own them.
+
+NOT DONE, and left for a follow-up: no browser measurement of the new UI (no
+geometry is claimed anywhere), no Playwright spec, and the DETAIL page shows no
+sign that a work belongs to a series — the detail serializer does not emit the
+`group` block, so that needs a serializer field plus a card. Handed off rather
+than built because `ExtraWorkDetailPage.tsx` was owned by another chat.
+
 ### Done — W4-N (wave 4, chat N of 6): contacts beside the whole card, and the hours card
 
 Two owner corrections on the Extra Work detail page. Frontend only — no
