@@ -158,8 +158,35 @@ def planned_vs_actual_report(user, extra_work) -> dict:
     planned_total = sum(planned_by_id.values(), Decimal("0"))
     actual_total = sum(actual_by_id.values(), Decimal("0"))
 
+    # W9 — the CONTEXT the row needs to record an hour without asking
+    # the reader for anything the page already knows.
+    #
+    # The panel grew an inline "record hours" control, and the three
+    # things that control must not ask for are the person (the row), the
+    # job (this report) and the building (the job's). Two of those were
+    # already here; the building and the company were not, so the client
+    # would have had to fetch the extra work a second time to learn
+    # facts this response is already computed from.
+    #
+    # It is context, not a second write path: the client still POSTs to
+    # `timesheets/entries/`, which owns every rule about employees,
+    # companies, hour types and week locks.
+    manager = is_timesheet_manager(user)
+    for row in people:
+        # A manager may record for anyone this report already admits;
+        # everybody else only for themselves. This MIRRORS
+        # `timesheets.views_entries._resolve_write_employee` -- it does
+        # not replace it. The endpoint refuses regardless; this only
+        # stops the UI offering an action that would 403.
+        row["can_record_hours"] = manager or row["employee_id"] == user.pk
+
     return {
         "extra_work_id": extra_work.id,
+        # Where the hours get booked. `building_id` may be None -- a
+        # `TimeEntry.building` is nullable and an extra work without a
+        # building simply writes none.
+        "building_id": extra_work.building_id,
+        "company_id": extra_work.company_id,
         # "company" = the crew. "self" = this caller's own line and
         # nothing else, which is what a BUILDING_MANAGER and a STAFF
         # user get. The screen titles itself off this rather than

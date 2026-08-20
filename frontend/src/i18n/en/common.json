@@ -2580,7 +2580,14 @@
   "planned_vs_actual.more": "{{hours}} more",
   "planned_vs_actual.less": "{{hours}} less",
   "planned_vs_actual.same": "Same",
-  "planned_vs_actual.not_planned": "Not planned",
+  "planned_vs_actual.not_planned": "Not planned yet",
+  "record_hours.open": "Record hours",
+  "record_hours.date": "Day",
+  "record_hours.hours": "Hours worked",
+  "record_hours.hour_type": "Kind of hour",
+  "record_hours.save": "Save these hours",
+  "record_hours.saved": "{{hours}} hours recorded for {{name}} on this job.",
+  "record_hours.week_closed": "That week is closed, so hours cannot be added to it. Ask an administrator to reopen the week under Hours, then try again.",
   "planned_vs_actual.empty": "Nobody has been planned on this job yet.",
   "planned_vs_actual.empty_self": "You are not planned on this job."
 }

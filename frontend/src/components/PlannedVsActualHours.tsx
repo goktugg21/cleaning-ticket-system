@@ -44,7 +44,7 @@
  *
  * Customers never reach the endpoint at all.
  */
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../api/client";
@@ -53,6 +53,7 @@ import {
   type PlannedVsActualReport,
 } from "../api/plannedVsActual";
 import { formatNumber } from "../lib/intl";
+import { RecordHoursOnRow } from "./RecordHoursOnRow";
 
 const HOURS = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
 
@@ -77,6 +78,12 @@ export function PlannedVsActualHours({
   // prescribes for prop-derived state, so a different job is a different
   // component and starts true again.
   const [loading, setLoading] = useState(true);
+  /** W9 — which row has its hour entry open. One at a time: two open
+   *  forms on one table is two places to type the same fact. */
+  const [recordingFor, setRecordingFor] = useState<number | null>(null);
+  /** Bumped after a save so the table re-reads in place. The user
+   *  never leaves the page, which is the whole point. */
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +102,7 @@ export function PlannedVsActualHours({
     return () => {
       cancelled = true;
     };
-  }, [extraWorkId]);
+  }, [extraWorkId, reloadKey]);
 
   const isSelf = report?.visibility === "self";
   const title = isSelf
@@ -166,26 +173,64 @@ export function PlannedVsActualHours({
                   {t("planned_vs_actual.col_worked")}
                 </th>
                 <th>{t("planned_vs_actual.col_difference")}</th>
+                <th className="pva-action" />
               </tr>
             </thead>
             <tbody>
               {report.people.map((person) => (
-                <tr key={person.employee_id} data-testid={`${testId}-row`}>
-                  <td>{person.employee_name}</td>
-                  <td className="pva-num">
-                    {person.planned_hours === null ? (
-                      <span className="muted">
-                        {t("planned_vs_actual.not_planned")}
-                      </span>
-                    ) : (
-                      formatNumber(person.planned_hours, HOURS)
-                    )}
-                  </td>
-                  <td className="pva-num">
-                    {formatNumber(person.actual_hours, HOURS)}
-                  </td>
-                  <td>{difference(person.difference_hours)}</td>
-                </tr>
+                <Fragment key={person.employee_id}>
+                  <tr data-testid={`${testId}-row`}>
+                    <td>{person.employee_name}</td>
+                    <td className="pva-num">
+                      {person.planned_hours === null ? (
+                        <span className="muted">
+                          {t("planned_vs_actual.not_planned")}
+                        </span>
+                      ) : (
+                        formatNumber(person.planned_hours, HOURS)
+                      )}
+                    </td>
+                    <td className="pva-num">
+                      {formatNumber(person.actual_hours, HOURS)}
+                    </td>
+                    <td>{difference(person.difference_hours)}</td>
+                    {/* W9 — the control that closes the gap, on the row
+                        that shows it. Person, job and building are
+                        already known and are never asked for. */}
+                    <td className="pva-action">
+                      {person.can_record_hours &&
+                        recordingFor !== person.employee_id && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setRecordingFor(person.employee_id)}
+                            data-testid={`${testId}-record-${person.employee_id}`}
+                          >
+                            {t("record_hours.open")}
+                          </button>
+                        )}
+                    </td>
+                  </tr>
+                  {recordingFor === person.employee_id && (
+                    <tr data-testid={`${testId}-record-row`}>
+                      <td colSpan={5}>
+                        <RecordHoursOnRow
+                          employeeId={person.employee_id}
+                          employeeName={person.employee_name}
+                          extraWorkId={extraWorkId}
+                          buildingId={report.building_id}
+                          companyId={report.company_id}
+                          onSaved={() => {
+                            setRecordingFor(null);
+                            setReloadKey((n) => n + 1);
+                          }}
+                          onCancel={() => setRecordingFor(null)}
+                          testId={`${testId}-record-form`}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
             {/* The job total, only where it means something. On a self
@@ -207,6 +252,7 @@ export function PlannedVsActualHours({
                     {formatNumber(report.totals.actual_hours, HOURS)}
                   </td>
                   <td>{difference(report.totals.difference_hours)}</td>
+                  <td className="pva-action" />
                 </tr>
               </tfoot>
             )}

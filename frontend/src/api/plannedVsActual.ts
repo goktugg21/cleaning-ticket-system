@@ -38,10 +38,18 @@ export interface PlannedVsActualPerson {
   actual_hours: string;
   /** worked minus planned. Positive is over. null when unplanned. */
   difference_hours: string | null;
+  /** W9 — may the CALLER book hours for this person? Mirrors
+   *  `timesheets.views_entries._resolve_write_employee`; the endpoint
+   *  refuses regardless, this only stops the UI offering a 403. */
+  can_record_hours: boolean;
 }
 
 export interface PlannedVsActualReport {
   extra_work_id: number;
+  /** W9 — where an hour recorded from this panel gets booked. Null is
+   *  legal: `TimeEntry.building` is nullable. */
+  building_id: number | null;
+  company_id: number | null;
   /** "company" = the crew. "self" = the caller's own line only. */
   visibility: "company" | "self";
   /** false = nobody the caller may see has been planned. */

@@ -2580,7 +2580,14 @@
   "planned_vs_actual.more": "{{hours}} meer",
   "planned_vs_actual.less": "{{hours}} minder",
   "planned_vs_actual.same": "Gelijk",
-  "planned_vs_actual.not_planned": "Niet ingepland",
-  "planned_vs_actual.empty": "Er is nog niemand ingepland op deze klus.",
+  "planned_vs_actual.not_planned": "Nog niet gepland",
+  "record_hours.open": "Uren vastleggen",
+  "record_hours.date": "Dag",
+  "record_hours.hours": "Gewerkte uren",
+  "record_hours.hour_type": "Soort uur",
+  "record_hours.save": "Deze uren opslaan",
+  "record_hours.saved": "{{hours}} uur vastgelegd voor {{name}} op deze klus.",
+  "record_hours.week_closed": "Die week is afgesloten, dus er kunnen geen uren aan worden toegevoegd. Vraag een beheerder de week te heropenen onder Uren en probeer het opnieuw.",
+  "planned_vs_actual.empty": "Er is nog niemand op deze klus gepland.",
   "planned_vs_actual.empty_self": "U bent niet ingepland op deze klus."
 }

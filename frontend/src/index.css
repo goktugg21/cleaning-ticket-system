@@ -13107,6 +13107,35 @@ a.wp-card-title:hover { text-decoration: underline; }
    `components/PlannedVsActualHours.tsx`, mounted on the operational
    ticket. APPEND-ONLY: nothing above this line is touched.
    =================================================================== */
+/* --------------------------------------------------------------------
+   W9 — recording hours from the row that shows the gap.
+
+   The form sits INSIDE the table, in a full-width row directly under
+   the person it is about, so the name it belongs to is the line above
+   it and never has to be repeated in a heading.
+   -------------------------------------------------------------------- */
+.pva-table .pva-action { width: 1%; white-space: nowrap; text-align: right; }
+.pva-record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px 2px;
+}
+.pva-record-field { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
+.pva-record-label { font-size: 11px; color: var(--text-muted); }
+.pva-record-actions { display: flex; gap: 8px; align-items: center; }
+/* The two states that stop a save. Both are full-width so they sit
+   under the fields rather than squeezing between them. */
+.pva-record-blocked,
+.pva-record-error {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 12px;
+}
+.pva-record-blocked { color: var(--amber); }
+.pva-record-error { color: var(--red); }
+
 .pva-body {
   padding: 4px 0 2px;
 }
