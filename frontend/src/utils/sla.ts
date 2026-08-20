@@ -42,3 +42,35 @@ export const BUSINESS_HOURS_PER_DAY = 8;
 export const SECONDS_PER_HOUR = 60 * 60;
 export const SECONDS_PER_BUSINESS_DAY =
   BUSINESS_HOURS_PER_DAY * SECONDS_PER_HOUR;
+
+/**
+ * A business-time duration as a bare number of units — "45m", "1h 37m",
+ * "2d 3h" — with NO word attached to it.
+ *
+ * The word is the caller's job, and that is the whole point. The old
+ * `useFormatSLATime` glued the suffix on here ("1h 37m overdue"), so a
+ * screen that wanted to say "Late by 1h 37m" had to render the state
+ * word and this string side by side and the reader got the same fact
+ * twice: a "Breached" pill next to the words "Breached — 1h 37m
+ * overdue". One sentence needs one string, so the duration comes out
+ * naked and `useDeadlineText` builds the sentence around it.
+ *
+ * Unit letters are identical in both languages, exactly as they were
+ * before — this is not a translated string and never was.
+ */
+export function formatBusinessDuration(businessSeconds: number): string {
+  const abs = Math.abs(businessSeconds);
+  if (abs < 60 * 60) {
+    return `${Math.max(1, Math.ceil(abs / 60))}m`;
+  }
+  const totalMinutes = Math.floor(abs / 60);
+  if (abs < SECONDS_PER_BUSINESS_DAY) {
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return m === 0 ? `${h}h` : `${h}h ${m}m`;
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  const days = Math.floor(totalHours / BUSINESS_HOURS_PER_DAY);
+  const hoursRemainder = totalHours % BUSINESS_HOURS_PER_DAY;
+  return hoursRemainder === 0 ? `${days}d` : `${days}d ${hoursRemainder}h`;
+}

@@ -2709,6 +2709,13 @@ table.data-table {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  /* W7 DESIGN 6 — the pair sits lower than the title's own baseline.
+     The band aligns its two columns at `start`, which put LOCATION level
+     with the ticket-number chips, and the owner reads that as the block
+     crowding the title. 18px is the one number in this rule that is a
+     judgement rather than a derivation: it clears the 36px title's cap
+     height without pushing the pair below the description. */
+  padding-top: 18px;
   /* W4-M §1 — 12px read as one blob once the type came down; the two
      pairs are two separate facts and now say so. W5 took it to 24px,
      which overshot: the block then read as two unrelated islands rather
@@ -2751,14 +2758,22 @@ table.data-table {
      looking at. Weight down to 600, tracking with it. The colour stays
      --text-muted (5.31:1 on the page ground) because --text-faint is
      2.75:1 and unreadable at this size. */
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  /* Was --text-faint (#8A9B91): 2.75:1 against the page ground
-     (#F7F8F6). At 9.5px that is unreadable as well as below AA;
-     --text-muted (#5A6B61) is 5.31:1 on the same ground and still
-     reads as a label rather than as content. */
+  /* W7 DESIGN 6 — a QUIET label. Uppercase micro-caps at 0.1em tracking
+     is a headline treatment, and two of them stacked beside two values
+     is what the owner is calling "bold labels that look bad": the label
+     was competing with the thing it names. So it stops shouting — the
+     body font instead of the display font, sentence case instead of
+     caps, no tracking, 500 weight — and gets one step LARGER, because a
+     label that is quiet still has to be readable. The value keeps its
+     16px/800 in the head font, so the hierarchy inside the pair is
+     wider than it was, not narrower.
+     Colour stays --text-muted (5.31:1 on the page ground); --text-faint
+     is 2.75:1 and fails AA at any of these sizes. */
+  font-family: var(--f-body);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-muted);
 }
 .detail-header-place-label svg {
@@ -2803,6 +2818,10 @@ table.data-table {
     align-items: flex-start;
     text-align: left;
     max-width: 100%;
+    /* Stacked, the block already sits under the title, so the top
+       padding that pushed it clear of the title on the wide layout has
+       nothing left to clear. */
+    padding-top: 0;
   }
   /* Stacked, the block is left-aligned, so the label has to turn round
      with it — see the flex-container note above. */
@@ -3906,11 +3925,19 @@ a.attention-row:hover {
 .page-sub-link:hover {
   color: var(--green-2);
 }
+/* W7 DESIGN 4 — the cards in a band END on the same line.
+   `align-items: start` sized each card to its own content, so "Today"
+   floated with its bottom edge somewhere up the side of "Needs
+   attention" and the pair read as two unrelated boxes. `stretch` is the
+   grid default and is all that was needed: every `.attention-card` is
+   already a flex column whose list carries `flex: 1`, so the extra
+   height goes into the list and the footer link lands on the shared
+   bottom edge. */
 .attention-layout {
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 14px;
-  align-items: start;
+  align-items: stretch;
 }
 @media (max-width: 1100px) {
   .attention-layout {
@@ -3923,6 +3950,10 @@ a.attention-row:hover {
   padding: 0;
   display: flex;
   flex-direction: column;
+  /* W7 DESIGN 4 — the rows sit at the top and the slack goes to the
+     bottom of the card, so a short card grown to match a tall one does
+     not float its rows down the middle. */
+  flex: 0 0 auto;
 }
 .attn-item + .attn-item {
   border-top: 1px solid var(--border);
@@ -4051,7 +4082,9 @@ a.attn-row:hover {
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   margin-top: 12px;
-  align-items: start;
+  /* W7 DESIGN 4 — same rule as `.attention-layout`: Billing and Latest
+     tickets / extra work are one band and end on one line. */
+  align-items: stretch;
 }
 @media (max-width: 1100px) {
   .dashboard-bottom-band {
@@ -4544,7 +4577,6 @@ a.attn-row:hover {
   line-height: 1;
 }
 .sla-badge-md { height: 26px; padding: 0 11px; font-size: 12px; }
-.sla-badge-time { font-weight: 600; opacity: 0.85; }
 .sla-badge-on_track {
   background: var(--green-soft); color: var(--green);
   border-color: rgba(11,107,66,0.2);
@@ -4570,24 +4602,11 @@ a.attn-row:hover {
   border-color: var(--border);
 }
 
-/* SLA detail block — sits in the ticket detail right rail. */
+/* The deadline block in the ticket detail right rail. W7 DESIGN 2 took
+   the label/value timestamp grid off the screen — `.sla-detail-meta*`
+   went with the markup that used it — and what is left is the badge row
+   plus the explainer paragraph appended at the foot of this file. */
 .sla-detail-row { display: flex; align-items: center; gap: 8px; }
-.sla-detail-meta {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 12px;
-  font-size: 12.5px;
-}
-.sla-detail-meta-label {
-  color: var(--text-faint);
-  font-family: var(--f-head);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.sla-detail-meta-value { color: var(--text-2); }
 
 /* ====================================================================
    SPRINT 12 — additions
@@ -10232,6 +10251,63 @@ details[open] > .ew-department-tree-summary::before {
 .hours-filter-line .field { min-width: 150px; }
 .hours-filter-reset { margin-left: auto; }
 
+/* W7 §1 — the GROUPED tab bar on /admin/hours.
+   Seven equal pills in one row told an operator nothing about which of
+   the three jobs each tab did. The pills are untouched (`composer-toggle`
+   / `composer-toggle-btn`, the shared shape); what is new is the caption
+   above each cluster and the rule between clusters. The caption is the
+   whole point, so it is NOT muted into invisibility: uppercase, tracked,
+   and carrying the group's icon.
+   Wraps onto a second line rather than scrolling, because a group whose
+   caption has scrolled off is a group again. */
+.hours-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 18px;
+  margin-bottom: 16px;
+}
+.hours-tab-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 18px;
+  border-left: 1px solid var(--border);
+}
+/* The first group needs no divider — there is nothing to its left. */
+.hours-tab-bar > .hours-tab-group:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+.hours-tab-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+@media (max-width: 720px) {
+  /* Stacked: a vertical rule between clusters would separate nothing,
+     so it becomes a horizontal one above each following cluster. */
+  .hours-tab-bar { flex-direction: column; gap: 12px; }
+  .hours-tab-group {
+    padding-left: 0;
+    border-left: none;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    width: 100%;
+  }
+  .hours-tab-bar > .hours-tab-group:first-child {
+    padding-top: 0;
+    border-top: none;
+  }
+  .hours-tab-group .composer-toggle { flex-wrap: wrap; }
+}
+
 /* The stat tiles. Same visual weight as the Extra Work list's KPI
    strip, because they are the same thing: four numbers describing the
    rows underneath. */
@@ -11404,6 +11480,21 @@ a.wp-card-title:hover { text-decoration: underline; }
   margin-bottom: 10px;
 }
 
+/* W7 §4 — the caption ABOVE a money KPI, not the muted line under it.
+   A big amount followed by a small grey word is read as a number first
+   and identified second, which is how a reader ends up with figures
+   they cannot name. The caption is set small but NOT muted, so it is
+   read before the eye reaches the amount. */
+.report-kpi-caption {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
 /* ---------------------------------------------------------------------------
    Sprint 181 §7 — the chip that rendered as one word.
 
@@ -12469,4 +12560,242 @@ a.wp-card-title:hover { text-decoration: underline; }
 }
 .ew-billing-input {
   width: 160px;
+}
+/* ---------------------------------------------------------------------------
+   W7 §7 — /admin/sla-warnings, read as a settings page for three warnings.
+
+   It rendered four identical cards, each headed by an alarm-clock icon
+   and a paragraph, with two muted explanation lines under every one of
+   the seven inputs. The owner read that as an alarm console. Nothing
+   about what it CONFIGURES changed; what changed is that the three
+   warnings are numbered and the repeat interval is visibly not a fourth
+   one. The numeral does the work an icon was doing badly.
+   --------------------------------------------------------------------- */
+.sla-warning-card,
+.sla-timing-card {
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+/* The timing setting is a setting ABOUT the three above it, so it is set
+   back rather than presented as a peer. */
+.sla-timing-card {
+  background: var(--surface-2);
+  margin-top: 22px;
+}
+.sla-warning-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.sla-warning-num {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--green-soft);
+  color: var(--green);
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 800;
+}
+.sla-warning-title {
+  margin: 2px 0 2px;
+  font-size: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sla-warning-of {
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.sla-warning-what { margin: 0; }
+.sla-warning-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 24px;
+  margin-top: 12px;
+}
+.sla-warning-field { min-width: 240px; flex: 1 1 240px; margin: 0; }
+.sla-field-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* Where the number came from, beside its label instead of a second
+   sentence beneath the input. */
+.sla-source-chip {
+  font-family: var(--f-head);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+.sla-source-chip.is-own {
+  background: var(--green-soft);
+  border-color: rgba(11, 107, 66, 0.25);
+  color: var(--green);
+}
+.sla-warning-who {
+  margin: 14px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px;
+  color: var(--text);
+}
+.sla-who-label {
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-right: 8px;
+}
+
+/* ===================================================================
+   W7 — the deadline, the ticket-list filter row, and the ticket-detail
+   deadline explainer. APPEND-ONLY: nothing above this line is touched.
+   =================================================================== */
+
+/* W7 DESIGN 3 — the deadline as TEXT in a table cell, not as a pill.
+
+   A chip is a control. The deadline cell never was one: it stated a
+   fact, sat in a column that already carries a heading saying what the
+   fact is, and did it beside a status pill, a priority pill and an
+   origin pill. Four pills in a row is what the owner means by too many
+   chips. The colour survives — late still reads red at a glance — and
+   the pill geometry goes. */
+.sla-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.sla-text-on_track { color: var(--green); }
+.sla-text-at_risk { color: var(--amber); }
+/* Late is the one state a person has to act on today, so it is the one
+   state set heavier than its neighbours. */
+.sla-text-breached { color: var(--red); font-weight: 800; }
+.sla-text-paused { color: var(--teal); }
+.sla-text-completed { color: var(--text-muted); font-weight: 500; }
+/* "No deadline" is a true statement, not a warning: it must be legible
+   and must not compete with a row that IS late. */
+.sla-text-historical { color: var(--text-muted); font-weight: 500; }
+
+/* W7 DESIGN 2 — the one line under the ticket-detail deadline badge
+   that says what the deadline is measured against. The date it must be
+   met by leads, because that is the actionable half; the explanation of
+   how the date is derived follows it in the same paragraph rather than
+   in a second block, so it reads as one thought. */
+.sla-detail-explainer {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.sla-detail-explainer-due {
+  display: block;
+  color: var(--text);
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+/* ====================================================================
+   W7 DESIGN 3 — the ticket list stops wearing chips
+   --------------------------------------------------------------------
+   Two additions, both replacing a lozenge with type.
+
+   1. `.cell-prio` — priority as TEXT in the table. Every row carried a
+      `.cell-tag` pill for priority, which put a fourth coloured lozenge
+      on a line that already had status, deadline and (on chargeable
+      rows) origin. A table column has a heading, so the pill was
+      carrying colour and nothing else; the colour stays and the pill
+      goes. NORMAL — which is most rows — drops to muted text, because
+      "this one is ordinary" should not be shouted on every line. The
+      phone card keeps the pill: a card has no column heading, so there
+      the surface is what says which fact this is.
+
+   2. `.list-summary` — the five stacked fact-chips that used to sit in
+      the section head ("Showing only your items", "Showing only
+      unassigned", "…awaiting customer approval for 14+ days",
+      "Finished extra work is hidden", "Finished extra work is shown"),
+      as one line of English under the filters. It leads with the one
+      number on the page that is exact, says in words what is being held
+      back, and ends with the single control that undoes all of it.
+   ==================================================================== */
+.cell-prio {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.cell-prio-normal {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.cell-prio-high { color: var(--amber); }
+/* Urgent is the only priority that should pull the eye across a full
+   page of rows, so it is the only one set at display weight. */
+.cell-prio-urgent { color: var(--red); font-weight: 800; }
+
+.list-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 10px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.list-summary-count {
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.list-summary-detail {
+  min-width: 0;
+}
+/* A real button, not a chip with an × in it: the thing that undoes a
+   filter should look like something you press. */
+.list-summary-reset {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  padding: 3px 12px;
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--green-2);
+  cursor: pointer;
+}
+.list-summary-reset:hover {
+  border-color: var(--green);
+  background: var(--green-faint);
+}
+@media (max-width: 700px) {
+  .list-summary-reset {
+    margin-left: 0;
+  }
 }

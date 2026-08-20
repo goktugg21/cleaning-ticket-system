@@ -107,6 +107,60 @@ type WorkTypeFilter = "all" | "tickets" | "chargeable";
 
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 
+/**
+ * W7 BUG 1 — the dashboard's "My work" number and the page it opens are
+ * ONE query, spelled out in the link.
+ *
+ * The owner's worst bug: "My work -> Tickets: 8", click it, and the page
+ * lists two rows under a tile reading 21. Three surfaces, three different
+ * predicates, all three called tickets.
+ *
+ *   * the CHIP counted `created_by=me & exclude_type=REPORT` — every
+ *     status, chargeable work included, finished extra work included;
+ *   * the PAGE it opened silently added its own three defaults on top
+ *     (status=OPEN, ordinary tickets only, finished extra work hidden),
+ *     because `?mine=1` says nothing about any of them and an absent
+ *     parameter falls through to the default rather than to "no opinion";
+ *   * the TILES above the rows counted `/tickets/stats/`, which has never
+ *     been told about `created_by` at all, so it answered for the whole
+ *     company.
+ *
+ * A deep link must therefore state the WHOLE predicate, not the one part
+ * that is interesting. `status=ALL` is the existing "everything" escape
+ * hatch the status parser already understands, `work=all` turns off the
+ * ordinary-tickets narrowing, and `finished_extra_work=1` is the existing
+ * URL opt-out of the hide. With all three present the page applies
+ * exactly `created_by` + the type narrowing and nothing else — which is
+ * precisely the query `loadMyCounts` counts.
+ */
+const MY_WORK_LINK_PARAMS = "status=ALL&work=all&finished_extra_work=1";
+
+/**
+ * The parameters `/tickets/stats/` understands.
+ *
+ * Everything the LIST can send that is not in this set is invisible to
+ * the count endpoint, so a page carrying one of those has tiles that
+ * cannot describe their own rows. `statsAreBlind` below turns that into
+ * an em dash instead of into a confident wrong number — the rule
+ * `StatusTiles` was built around, applied to the four narrowings that
+ * were quietly exempt from it.
+ *
+ * `status` / `status__in` / `page` are deliberately absent: the tiles ARE
+ * the status axis (a tile counts one status, so the request must not
+ * pre-filter by status) and `visibleTicketTotal` already subtracts
+ * exactly the statuses `status__in` hides.
+ */
+const STATS_KNOWN_PARAMS = new Set([
+  "page",
+  "status",
+  "status__in",
+  "customer",
+  "category",
+  "category__isnull",
+  "is_extra_work",
+  "hide_finished_extra_work",
+]);
+
 // Sprint 180 §1 — how long a ticket may sit in WAITING_CUSTOMER_APPROVAL
 // before the dashboard calls it overdue. Mirrors
 // `backend/tickets/auto_close.py::STALLED_CUSTOMER_APPROVAL_DAYS`; the
@@ -141,6 +195,28 @@ const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "" | "historical">[] = [
 
 function priorityCellClass(priority: string): string {
   return `cell-tag cell-tag-${priority.toLowerCase()}`;
+}
+
+/**
+ * W7 DESIGN 3 — priority as TEXT in the table, not as a fourth pill.
+ *
+ * Every row carried a priority chip, a status chip, a deadline chip and
+ * (on chargeable rows) an origin chip. Four pills across one line is the
+ * "paragraph wearing chips" the owner is describing: the eye reads a
+ * stripe of coloured lozenges and has to decode each one to find out
+ * which of them is the thing it came for.
+ *
+ * A table column has a heading, so the pill was never carrying the
+ * label — only the colour. The colour stays (urgent and high still read
+ * red and amber at a glance); the lozenge goes. NORMAL, which is most
+ * rows, drops to muted text, because "this one is ordinary" does not
+ * deserve to be shouted on every line.
+ *
+ * The phone card keeps the pill: there is no column heading on a card,
+ * so the surface is what says "this is the priority".
+ */
+function priorityTextClass(priority: string): string {
+  return `cell-prio cell-prio-${priority.toLowerCase()}`;
 }
 
 // Sprint 182 §2 — `statusCellClass` is gone with the two cells that
@@ -392,6 +468,31 @@ export function DashboardPage({
     },
     [searchParams, setSearchParams],
   );
+  /**
+   * W7 BUG 2 — "Showing only your items" is a FILTER, so it turns on as
+   * well as off.
+   *
+   * It used to be a fact-chip whose only control was a `<Link to="/tickets">`.
+   * That is a one-way door twice over: nothing on the page could switch it
+   * back on, and because the link threw the whole query string away it also
+   * silently dropped whatever else was set — the type narrowing, the
+   * deadline filter, the page. Now it is URL-backed state with a labelled
+   * control in the filter bar, and toggling it rewrites one parameter and
+   * leaves the rest alone.
+   */
+  const mineOnly = searchParams.get("mine") === "1";
+  const setMineOnly = useCallback(
+    (value: boolean) => {
+      const nextSearch = new URLSearchParams(searchParams);
+      if (value) nextSearch.set("mine", "1");
+      else nextSearch.delete("mine");
+      setSearchParams(nextSearch, { replace: true });
+      setPage(1);
+      setSelectedIds(new Set<number>());
+    },
+    [searchParams, setSearchParams],
+  );
+
   const [adminRequiredBanner, setAdminRequiredBanner] = useState(false);
 
   useEffect(() => {
@@ -471,7 +572,7 @@ export function DashboardPage({
       else if (workTypeFilter === "tickets") params.is_extra_work = "false";
     }
     if (isTicketsPage) {
-      if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
+      if (mineOnly && me?.id) params.created_by = me.id;
       const typeParam = searchParams.get("type");
       if (typeParam) params.type = typeParam;
       const exclTypeParam = searchParams.get("exclude_type");
@@ -490,10 +591,45 @@ export function DashboardPage({
     stalledApprovalFilter,
     hideFinishedExtraWork,
     searchParams,
+    mineOnly,
     me,
     isTicketsPage,
     workTypeFilter,
   ]);
+
+  /**
+   * W7 BUG 1 — the SAME object, split in two: what the count endpoint can
+   * be told, and what it cannot.
+   *
+   * Derived from `queryParams` rather than re-listed beside it, so a
+   * filter added to the list in future is blind by default. That is the
+   * safe direction to fail: a new filter that nobody remembered to teach
+   * the stats endpoint makes the tiles say "I cannot know", which is
+   * true, instead of leaving them confidently counting the whole company.
+   */
+  // A STRING, not an object: `useCallback` compares dependencies with
+  // Object.is, so a freshly-built object would give `loadStats` a new
+  // identity on every page turn and fire a redundant count request each
+  // time. Sorted, so key order cannot manufacture a change either.
+  const statsParamsKey = useMemo(() => {
+    const known: Record<string, string> = {};
+    for (const [key, value] of Object.entries(queryParams)) {
+      // `status` is the tile axis and `page` is not a narrowing at all.
+      if (key === "page" || key === "status") continue;
+      if (STATS_KNOWN_PARAMS.has(key)) known[key] = String(value);
+    }
+    return JSON.stringify(
+      Object.fromEntries(Object.entries(known).sort(([a], [b]) => (a < b ? -1 : 1))),
+    );
+  }, [queryParams]);
+
+  const statsAreBlind = useMemo(
+    () =>
+      Object.keys(queryParams).some(
+        (key) => key !== "page" && !STATS_KNOWN_PARAMS.has(key),
+      ),
+    [queryParams],
+  );
 
   const loadTickets = useCallback(async () => {
     // RF-16 — the ticket LIST only renders on the Tickets page now.
@@ -685,53 +821,25 @@ export function DashboardPage({
 
   const loadStats = useCallback(async () => {
     try {
-      // Sprint 180 §2 — the status tiles sit directly above the rows
-      // they count, so they must be counting the same rows. When the
-      // Tickets page is hiding finished Extra Work, the stats request
-      // carries the same flag and the endpoint applies the same
-      // exclusion. The DASHBOARD is a summary of everything and sends
-      // nothing, so its KPI strip is unchanged.
-      // Sprint 183 integration — the chips also carry the WORK-TYPE
-      // narrowing now. Sprint 183 gave `/tickets/stats/` the same
-      // `is_extra_work` the list takes, but the page never sent it and
-      // the tiles kept the old "we cannot know" em-dash fallback. Once
-      // the Tickets page started defaulting to ordinary tickets, that
-      // fallback fired on the DEFAULT view and every chip read as a dash.
-      const statsParams: Record<string, string> = {};
-      if (isTicketsPage && hideFinishedExtraWork)
-        statsParams.hide_finished_extra_work = "true";
-      if (isTicketsPage && workTypeFilter === "chargeable")
-        statsParams.is_extra_work = "true";
-      else if (isTicketsPage && workTypeFilter === "tickets")
-        statsParams.is_extra_work = "false";
-      // The customer's own page pins the list to that customer; the
-      // chips must be pinned to the same thing or they describe the
-      // whole company while sitting above one customer's rows.
-      if (customerId !== undefined) statsParams.customer = String(customerId);
-      // Sprint 187 §5 — the chips count the rows they sit above. Sprint
-      // 185 taught the category dropdown to the LIST only, so choosing a
-      // category narrowed the rows and left the chips describing the
-      // whole company: the same defect as the work-type dash directly
-      // above and the customer's "25" beside it, one filter later.
-      if (isTicketsPage) {
-        if (categoryFilter === "none") statsParams.category__isnull = "true";
-        else if (categoryFilter !== "")
-          statsParams.category = String(categoryFilter);
-      }
+      // W7 BUG 1 — the tiles are asked for exactly the set the rows are
+      // asked for, minus the status axis they themselves select on.
+      //
+      // The four hand-rolled `if` blocks that used to live here
+      // (hide-finished, work type, customer, category) were four separate
+      // memories of what the list sends, added one sprint at a time, each
+      // one after the tiles had already been caught describing a
+      // different set than the rows beneath them. `statsParams` is
+      // derived from the list's own `queryParams`, so there is nothing
+      // left to remember.
+      const parsed = JSON.parse(statsParamsKey) as Record<string, string>;
       const response = await api.get<TicketStats>("/tickets/stats/", {
-        params: Object.keys(statsParams).length ? statsParams : undefined,
+        params: Object.keys(parsed).length ? parsed : undefined,
       });
       setStats(response.data);
     } catch {
       // KPI cards fall back to "—" placeholders if the endpoint fails.
     }
-  }, [
-    isTicketsPage,
-    hideFinishedExtraWork,
-    workTypeFilter,
-    customerId,
-    categoryFilter,
-  ]);
+  }, [statsParamsKey]);
 
   // M6.3 — "my work" summary counts (provider-management only). Each
   // count is the PaginatedResponse.count for a created_by=me query;
@@ -752,12 +860,28 @@ export function DashboardPage({
     const meId = me?.id;
     if (!meId || !isProviderManagementRole(userRole)) return;
     try {
+      // W7 BUG 1 — `status__in` is the one narrowing the Tickets page
+      // applies that no URL parameter can switch off: with no status
+      // chosen it always asks for the statuses the list works in, which
+      // drops CONVERTED_TO_EXTRA_WORK. So the chip counts it too, from
+      // the same constant, and "8" is the number of rows the click
+      // produces rather than a number nine tenths like it.
       const [tk, ml, ew, qr] = await Promise.all([
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { created_by: meId, exclude_type: "REPORT", page_size: 1 },
+          params: {
+            created_by: meId,
+            exclude_type: "REPORT",
+            status__in: ticketListStatusParam(),
+            page_size: 1,
+          },
         }),
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { created_by: meId, type: "REPORT", page_size: 1 },
+          params: {
+            created_by: meId,
+            type: "REPORT",
+            status__in: ticketListStatusParam(),
+            page_size: 1,
+          },
         }),
         listExtraWork({ created_by: meId, page_size: 1 }),
         listExtraWork({
@@ -996,6 +1120,18 @@ export function DashboardPage({
     setSearchActive(searchInput);
   }
 
+  /**
+   * W7 DESIGN 3 — one control that puts the list back to showing
+   * everything.
+   *
+   * It used to reset five of the eight narrowings and leave the other
+   * three — "only mine", the approval-overdue preset and the
+   * finished-extra-work hide — still on, with the list still short and
+   * the button gone, which is the worst possible state to leave a
+   * non-developer in. Everything that narrows this list is cleared here,
+   * and the summary line above the table says in words what is still on
+   * until you press it.
+   */
   function clearFilters() {
     setPage(1);
     setStatusFilter("");
@@ -1003,17 +1139,90 @@ export function DashboardPage({
     setPriorityFilter("");
     setSearchInput("");
     setSearchActive("");
-    setSlaFilter("");
     setUnassignedFilter(false);
+    setStalledApprovalFilter(false);
+    setHideFinishedExtraWork(false);
+    // The Chargeable work page IS this list pinned to chargeable work by
+    // its route. "Show everything" clears the filters a person chose; it
+    // does not turn the page into a different page.
+    if (!isChargeableWork) setWorkTypeFilter("all");
     // Sprint 7 — clearing filters also leaves the bulk-confirm queue.
     setSelectedIds(new Set<number>());
+
+    // ONE write to the query string.
+    //
+    // `setSlaFilter` and `setMineOnly` each build their next URL from
+    // the same `searchParams` snapshot, so calling both from here would
+    // apply the second and silently discard the first — the reader
+    // would press "Show everything" and watch one filter survive.
+    //
+    // The three narrowings that are ON BY DEFAULT have to be written
+    // POSITIVELY rather than deleted: an absent `status` means OPEN, an
+    // absent `work` means ordinary tickets only, and an absent
+    // `finished_extra_work` means finished work is hidden. Deleting them
+    // would put the page back exactly where it started, and a refresh
+    // would undo the click. This is the same lesson as the "My work"
+    // link at the top of this file: a URL has to state the whole
+    // predicate, because an absent parameter is a default and not an
+    // opinion.
+    const next = new URLSearchParams(searchParams);
+    for (const key of ["sla", "mine", "stalled", "unassigned", "type", "exclude_type"]) {
+      next.delete(key);
+    }
+    next.set("status", "ALL");
+    if (!isChargeableWork) next.set("work", "all");
+    next.set("finished_extra_work", "1");
+    setSearchParams(next, { replace: true });
   }
 
+  // Narrowings the reader chose. `hideFinishedExtraWork` and the
+  // work-type default are ON when the page opens, so they are described
+  // in the summary line but do not by themselves claim the list is
+  // filtered — otherwise "Show everything" would be lit on arrival and
+  // pressing it would change what the page means by default.
   const hasActiveFilters = Boolean(
     statusFilter || priorityFilter || categoryFilter !== "" ||
       searchActive || slaFilter ||
-      unassignedFilter,
+      unassignedFilter || stalledApprovalFilter || mineOnly,
   );
+
+  /**
+   * W7 DESIGN 3 — the active narrowings as SENTENCES, not as chips.
+   *
+   * "A chip filters. It never states a fact." Every one of these was a
+   * pill sitting in the section head stating a fact about the query, and
+   * five of them could stack. They are one plain line now, and the
+   * controls that change them are labelled selects in the filter bar
+   * below, where a person looks for a filter.
+   */
+  const activeNarrowings = useMemo(() => {
+    const out: string[] = [];
+    if (mineOnly) out.push(t("filter_summary.mine"));
+    if (unassignedFilter) out.push(t("filter_summary.unassigned"));
+    if (stalledApprovalFilter)
+      out.push(t("filter_summary.stalled", { days: STALLED_APPROVAL_DAYS }));
+    if (workTypeFilter === "tickets") out.push(t("filter_summary.tickets_only"));
+    if (hideFinishedExtraWork) out.push(t("filter_summary.finished_hidden"));
+    return out;
+  }, [
+    mineOnly,
+    unassignedFilter,
+    stalledApprovalFilter,
+    workTypeFilter,
+    hideFinishedExtraWork,
+    t,
+  ]);
+
+  /**
+   * W7 DESIGN 7 — the manager-review queue explains itself on arrival.
+   *
+   * "Manager review queue" names the queue after the role that owns it,
+   * which tells the reader nothing about what is in it or why it is
+   * costing them anything. What is in it: work a cleaner has reported
+   * finished. Why it matters: until somebody checks it the customer
+   * never sees it and it cannot be invoiced.
+   */
+  const isReviewQueue = statusFilter === "WAITING_MANAGER_REVIEW";
 
   // Sprint 28 Batch 13 (rework) — operations-level KPI summary. Derived
   // from existing TicketStats + ExtraWorkStats; no client-side
@@ -1528,7 +1737,7 @@ export function DashboardPage({
                 </div>
                 <div className="mywork-chips">
                   <Link
-                    to="/tickets?mine=1&exclude_type=REPORT"
+                    to={`/tickets?mine=1&exclude_type=REPORT&${MY_WORK_LINK_PARAMS}`}
                     className="mywork-chip"
                     data-testid="dashboard-my-tickets"
                   >
@@ -1538,7 +1747,7 @@ export function DashboardPage({
                     </span>
                   </Link>
                   <Link
-                    to="/tickets?mine=1&type=REPORT"
+                    to={`/tickets?mine=1&type=REPORT&${MY_WORK_LINK_PARAMS}`}
                     className="mywork-chip"
                     data-testid="dashboard-my-meldingen"
                   >
@@ -1940,48 +2149,32 @@ export function DashboardPage({
             precisely why these come from the stats endpoint and
             not from `tickets`. Until it resolves, `-1` renders
             an em dash rather than a wrong number. */}
-        {/* Sprint 183 — ONE chip: "Tickets only". Pressed = ordinary
-            tickets; unpressed = everything, the default, always one click
-            away. The owner asked for the redundant CHARGEABLE chip to go,
-            not the Chargeable work sub-page — that page is the only way to
-            see chargeable work as a group and it stays. Sprint 183 read
-            the instruction the other way round and deleted the page; the
-            integration restored it. */}
-        {!isChargeableWork && (
-        <div className="work-strip" style={{ marginBottom: 12 }}>
-          <div className="work-strip-toggle" data-testid="tickets-work-type">
-            <button
-              type="button"
-              className={`btn btn-sm ${
-                workTypeFilter === "all" ? "btn-primary" : "btn-secondary"
-              }`}
-              aria-pressed={workTypeFilter === "all"}
-              data-testid="tickets-work-type-tickets"
-              onClick={() => {
-                const next_value =
-                  workTypeFilter === "all" ? "tickets" : "all";
-                setPage(1);
-                setSelectedIds(new Set<number>());
-                setWorkTypeFilter(next_value);
-                const next = new URLSearchParams(searchParams);
-                if (next_value === "tickets") next.delete("work");
-                else next.set("work", next_value);
-                setSearchParams(next, { replace: true });
-              }}
-            >
-              {t("work_type.include_chargeable")}
-            </button>
-          </div>
-        </div>
-        )}
+        {/* W7 DESIGN 3 — the work-type control moved into the filter bar.
 
-        {/* Sprint 182 §1/§4 — the counts and the rows describe the same
-            set, or the counts say they cannot know.
+            It was a lone pressed/unpressed button floating in its own
+            strip above the tiles, which reads as a chip stating a fact
+            rather than as the filter it is. It is a labelled dropdown
+            beside the other filters now: same parameter, same URL, same
+            testids, but a person looking for "how do I change what this
+            list shows" finds it where every other answer to that
+            question already lives. */}
 
-            The stats request carries the SAME work-type and
-            hide-finished flags as the list, so the tiles count exactly
-            the rows beneath them. The em dash is now reserved for its
-            real meaning: the stats call itself failed. */}
+        {/* W7 BUG 1 — the counts describe the rows beneath them, or they
+            say they cannot know. There is no third option, and there is
+            certainly no option where they describe a different set in the
+            same type size as the number the reader came here for.
+
+            `statsAreBlind` is true when the list carries a narrowing the
+            count endpoint has never been taught — "only mine" is the one
+            that produced the owner's 21 above two rows, but a search
+            term, a priority and the two attention-card presets were all
+            equally invisible to it. When it is true the per-status tiles
+            show no number at all, and the "All" tile falls back to the
+            list's OWN `count`, which is the one number on the page that
+            is exact by construction: it is what the server said when it
+            returned these rows. That fallback only holds with no status
+            chosen, because with one chosen `count` describes that status
+            rather than the whole list. */}
         <StatusTiles
           tiles={TICKET_LIST_STATUSES.map((value) => ({
             value,
@@ -1989,7 +2182,7 @@ export function DashboardPage({
             // the dropdown below uses — a second labelling path
             // here rendered raw enum names.
             label: tStatus(value),
-            count: stats ? (stats.by_status[value] ?? 0) : -1,
+            count: statsAreBlind ? -1 : stats ? (stats.by_status[value] ?? 0) : -1,
           }))}
           active={statusFilter}
           onChange={(value: string) => {
@@ -1997,17 +2190,13 @@ export function DashboardPage({
             setPage(1);
             setSelectedIds(new Set<number>());
           }}
-          // "All" counts what the chips count: the same stats response,
-          // minus exactly the statuses this list does not show.
-          //
-          // It used to fall back to the list's own `count` under a
-          // work-type narrowing, and to an em dash when a status chip was
-          // also active — because the stats endpoint could not then be
-          // asked for a narrowed total. It can now (the request carries
-          // the same `is_extra_work`), so the fallbacks are gone: once the
-          // Tickets page began defaulting to ordinary tickets, "All" was
-          // reading a dash on the default view with a status selected.
-          totalCount={visibleTicketTotal(stats)}
+          totalCount={
+            statsAreBlind
+              ? statusFilter === "" && !loading
+                ? count
+                : -1
+              : visibleTicketTotal(stats)
+          }
           testIdPrefix="tickets-status"
         />
 
@@ -2017,123 +2206,26 @@ export function DashboardPage({
           >
             <div className="dash-main">
               <div className="card" style={{ overflow: "hidden" }}>
+                {/* W7 DESIGN 3 + DESIGN 7 — the head says what this list
+                    is, and nothing else. The five fact-chips that used to
+                    stack here (only yours / only unassigned / awaiting
+                    approval 14+ days / finished extra work hidden /
+                    finished extra work shown) are one sentence below the
+                    filters, and each of them now has a labelled control
+                    among the filters instead of a pill with an × on it. */}
                 <div className="section-head">
                   <div>
                     <div className="section-head-title">
-                      {t("section_recent_title")}
+                      {isReviewQueue
+                        ? t("review_queue.title")
+                        : t("section_recent_title")}
                     </div>
                     <div className="section-head-sub">
-                      {t("section_recent_sub")}
+                      {isReviewQueue
+                        ? t("review_queue.sub")
+                        : t("section_recent_sub")}
                     </div>
                   </div>
-                  {searchParams.get("mine") === "1" && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-mine-filter-chip"
-                    >
-                      <span>{t("my_work.filter_chip")}</span>
-                      <Link to="/tickets" className="active-filter-clear">
-                        {t("my_work.filter_clear")}
-                      </Link>
-                    </div>
-                  )}
-                  {unassignedFilter && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-unassigned-filter-chip"
-                    >
-                      <span>{t("attention.unassigned_chip")}</span>
-                      <button
-                        type="button"
-                        className="active-filter-clear"
-                        onClick={() => {
-                          setPage(1);
-                          setUnassignedFilter(false);
-                        }}
-                      >
-                        {t("my_work.filter_clear")}
-                      </button>
-                    </div>
-                  )}
-                  {/* Sprint 180 §1 — approval-overdue preset chip. */}
-                  {stalledApprovalFilter && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-stalled-approval-chip"
-                    >
-                      <span>
-                        {t("attention.approval_overdue_chip", {
-                          days: STALLED_APPROVAL_DAYS,
-                        })}
-                      </span>
-                      <button
-                        type="button"
-                        className="active-filter-clear"
-                        onClick={() => {
-                          setPage(1);
-                          setStalledApprovalFilter(false);
-                        }}
-                      >
-                        {t("my_work.filter_clear")}
-                      </button>
-                    </div>
-                  )}
-                  {/* Sprint 180 §2 — the escape hatch for the hide.
-                      Rendered whenever the hide is ON, so the list
-                      never quietly omits rows: it says what it is
-                      holding back and undoes it in one click. */}
-                  {hideFinishedExtraWork && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-hide-finished-ew-chip"
-                    >
-                      <span>{t("finished_extra_work.hidden_chip")}</span>
-                      <button
-                        type="button"
-                        className="active-filter-clear"
-                        onClick={() => {
-                          setPage(1);
-                          setHideFinishedExtraWork(false);
-                        }}
-                        data-testid="dashboard-hide-finished-ew-show"
-                      >
-                        {t("finished_extra_work.show_all")}
-                      </button>
-                    </div>
-                  )}
-                  {/* ...and the way back to hiding, so the control is
-                      a toggle rather than a one-way door. */}
-                  {!hideFinishedExtraWork && (
-                    <div
-                      className="active-filter-chip"
-                      data-testid="dashboard-show-finished-ew-chip"
-                    >
-                      <span>{t("finished_extra_work.shown_chip")}</span>
-                      <button
-                        type="button"
-                        className="active-filter-clear"
-                        onClick={() => {
-                          setPage(1);
-                          setHideFinishedExtraWork(true);
-                        }}
-                        data-testid="dashboard-hide-finished-ew-hide"
-                      >
-                        {t("finished_extra_work.hide_again")}
-                      </button>
-                    </div>
-                  )}
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 11,
-                      fontWeight: 800,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                      color: "var(--green-2)",
-                    }}
-                  >
-                    {t("rows_label", { count: tickets.length })}
-                  </span>
                   {isProviderManagementRole(userRole) && (
                     <EditModeToggle
                       editMode={edit.editMode}
@@ -2251,6 +2343,118 @@ export function DashboardPage({
                       ))}
                     </select>
                   </div>
+                  {/* W7 BUG 2 — the "only your items" filter, as a
+                      control that goes both ways.
+
+                      This is the whole of that bug: the state existed,
+                      the URL carried it, the page honoured it, and the
+                      only thing on screen that could touch it was a link
+                      that turned it off and threw the rest of the query
+                      string away with it. A two-option select turns it
+                      on again, and it sits with the other filters rather
+                      than in the heading. */}
+                  {me?.id != null && (
+                    <div className="filter-field">
+                      <span className="filter-label">
+                        {t("filters.created_by")}
+                      </span>
+                      <select
+                        className="filter-control"
+                        value={mineOnly ? "me" : "anyone"}
+                        data-testid="tickets-filter-mine"
+                        onChange={(event) =>
+                          setMineOnly(event.target.value === "me")
+                        }
+                      >
+                        <option value="anyone">
+                          {t("filters.created_by_anyone")}
+                        </option>
+                        <option value="me">{t("filters.created_by_me")}</option>
+                      </select>
+                    </div>
+                  )}
+                  {/* The attention card's "Unassigned" deep link used to
+                      arrive as a chip with a Clear button and no way
+                      back. Same fix, same reason. */}
+                  <div className="filter-field">
+                    <span className="filter-label">
+                      {t("filters.assigned")}
+                    </span>
+                    <select
+                      className="filter-control"
+                      value={unassignedFilter ? "nobody" : "anyone"}
+                      data-testid="tickets-filter-assigned"
+                      onChange={(event) => {
+                        setPage(1);
+                        setSelectedIds(new Set<number>());
+                        setUnassignedFilter(event.target.value === "nobody");
+                      }}
+                    >
+                      <option value="anyone">
+                        {t("filters.assigned_anyone")}
+                      </option>
+                      <option value="nobody">
+                        {t("filters.assigned_nobody")}
+                      </option>
+                    </select>
+                  </div>
+                  {/* W7 DESIGN 3 — the work-type narrowing (was a lone
+                      pressed button in its own strip) and the
+                      finished-extra-work hide (was a pair of mutually
+                      exclusive fact-chips) as two ordinary dropdowns.
+                      The Chargeable work page pins the work type from
+                      its route, so it offers no control for it. */}
+                  {!isChargeableWork && (
+                    <div className="filter-field">
+                      <span className="filter-label">
+                        {t("work_type.label")}
+                      </span>
+                      <select
+                        className="filter-control"
+                        value={workTypeFilter === "tickets" ? "tickets" : "all"}
+                        data-testid="tickets-work-type"
+                        onChange={(event) => {
+                          const value =
+                            event.target.value === "tickets" ? "tickets" : "all";
+                          setPage(1);
+                          setSelectedIds(new Set<number>());
+                          setWorkTypeFilter(value);
+                          const next = new URLSearchParams(searchParams);
+                          if (value === "tickets") next.delete("work");
+                          else next.set("work", value);
+                          setSearchParams(next, { replace: true });
+                        }}
+                      >
+                        <option value="tickets">
+                          {t("work_type.tickets_only")}
+                        </option>
+                        <option value="all">{t("work_type.all")}</option>
+                      </select>
+                    </div>
+                  )}
+                  <div className="filter-field">
+                    <span className="filter-label">
+                      {t("finished_extra_work.label")}
+                    </span>
+                    <select
+                      className="filter-control"
+                      value={hideFinishedExtraWork ? "hidden" : "shown"}
+                      data-testid="tickets-filter-finished-extra-work"
+                      onChange={(event) => {
+                        setPage(1);
+                        setHideFinishedExtraWork(
+                          event.target.value === "hidden",
+                        );
+                      }}
+                    >
+                      <option value="hidden">
+                        {t("finished_extra_work.option_hidden")}
+                      </option>
+                      <option value="shown">
+                        {t("finished_extra_work.option_shown")}
+                      </option>
+                    </select>
+                  </div>
                   <div className="filter-field search">
                     <span className="filter-label">{t("common:search")}</span>
                     <input
@@ -2277,7 +2481,7 @@ export function DashboardPage({
                             setStatusFilter("WAITING_MANAGER_REVIEW");
                           }}
                         >
-                          {t("bulk_confirm.queue_preset")}
+                          {t("review_queue.preset")}
                         </button>
                       )}
                     {hasActiveFilters && (
@@ -2291,6 +2495,42 @@ export function DashboardPage({
                     )}
                   </div>
                 </form>
+
+                {/* W7 DESIGN 3 — the facts, as one line of text.
+                    A count the reader can trust, then what is being held
+                    back and why, then the single control that undoes all
+                    of it. No pills: every one of these is a statement,
+                    and the things that FILTER are the dropdowns above. */}
+                <p
+                  className="list-summary"
+                  data-testid="tickets-list-summary"
+                  aria-live="polite"
+                >
+                  <span className="list-summary-count">
+                    {loading
+                      ? t("loading")
+                      : t("filter_summary.count", {
+                          visible: tickets.length,
+                          count,
+                        })}
+                  </span>
+                  {activeNarrowings.length > 0 && (
+                    <span className="list-summary-detail">
+                      {" — "}
+                      {activeNarrowings.join(" · ")}
+                    </span>
+                  )}
+                  {(hasActiveFilters || activeNarrowings.length > 0) && (
+                    <button
+                      type="button"
+                      className="list-summary-reset"
+                      onClick={clearFilters}
+                      data-testid="tickets-show-everything"
+                    >
+                      {t("filter_summary.show_everything")}
+                    </button>
+                  )}
+                </p>
 
                 {assignOpen && (
                   <AssignPeopleDialog
@@ -2521,8 +2761,7 @@ export function DashboardPage({
                             </>
                           ) : (
                             <td>
-                              <span className={priorityCellClass(ticket.priority)}>
-                                <i />
+                              <span className={priorityTextClass(ticket.priority)}>
                                 {tPriority(ticket.priority)}
                               </span>
                             </td>
@@ -2548,12 +2787,19 @@ export function DashboardPage({
                               pills read as one string. The rule marks
                               where "how is this job going" ends and
                               "are we late" begins. */}
+                          {/* W7 BUG 3 + DESIGN 1/2 — ONE sentence about
+                              the deadline, as text. It reads "On time —
+                              6h left", "Almost late — 1h left", "Late by
+                              1h 37m", "Waiting on customer", "Finished"
+                              or "No deadline"; the last of those is the
+                              row that used to render an empty cell. */}
                           <td className="td-sla">
                             <SLABadge
                               state={ticket.sla_display_state}
                               remainingSeconds={
                                 ticket.sla_remaining_business_seconds
                               }
+                              variant="plain"
                             />
                           </td>
                           <td className="td-facility">
@@ -2842,8 +3088,18 @@ export function DashboardPage({
                     </div>
                   </div>
                 </div>
+                {/* W7 BUG 1 — the fourth surface that counted tickets.
+                    This panel reads the same `/tickets/stats/` response
+                    the tiles do, so when that response cannot describe
+                    the current list it cannot describe it here either.
+                    Showing the company-wide breakdown beside a filtered
+                    list is the same defect one card to the right. */}
                 <div style={{ padding: "14px 18px 18px" }}>
-                  {!stats ? (
+                  {statsAreBlind ? (
+                    <p className="muted small" data-testid="tickets-breakdown-blind">
+                      {t("section_status_filtered")}
+                    </p>
+                  ) : !stats ? (
                     <p className="muted small">{t("loading")}</p>
                   ) : (
                     <div className="bld-list">

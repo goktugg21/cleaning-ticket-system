@@ -81,8 +81,6 @@ import { useToast } from "../components/ToastProvider";
 import { RouteBadge } from "../components/RouteBadge";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
-import { useFormatSLATime } from "../utils/useFormatSLATime";
-import { useSLALabel } from "../utils/useSLALabel";
 import { ticketStatusLabelKey } from "../lib/enumLabels";
 
 // B7 four-tier note taxonomy — per-tier UI vocabulary. The bubble class
@@ -457,8 +455,6 @@ export function TicketDetailPage() {
   // namespace; keys are NOT duplicated here).
   const { t: tCred } = useTranslation("staff_credentials");
   const toast = useToast();
-  const slaLabel = useSLALabel();
-  const formatSLATime = useFormatSLATime();
 
   const tStatus = (status: TicketStatus | string | null): string => {
     if (!status) return t("status_default_created");
@@ -3897,10 +3893,26 @@ export function TicketDetailPage() {
               </div>
             )}
 
-            {/* Sprint 30 Batch 30.1.1 — SLA subsection inline. The rich
-                rendering (badge + paused/breached/completed meta) is
-                preserved verbatim; only the wrapping card collapsed to
-                a subsection inside Details. */}
+            {/* W7 DESIGN 2 — ONE statement, then what it is measured
+                against.
+
+                What was here: a heading, a coloured pill, the SAME words
+                repeated as prose beside the pill, and a four-row
+                label/value grid of raw timestamps. Six fragments for one
+                idea — the owner's "paragraph wearing chips" — and not
+                one of them said where the deadline came from, so there
+                was no way to tell whether "1h 37m over" was a scandal or
+                a rounding error.
+
+                Now: the sentence ("Late by 1h 37m"), the date it had to
+                be done by, and one line of plain English saying how that
+                date is worked out. Late is said ONCE, with the amount.
+
+                The timestamps that only meant something to somebody who
+                already understood the engine (started at / first
+                breached at / paused since) are off the screen. The
+                status history below is where this ticket's chronology
+                lives and it was already telling that story. */}
             <div
               style={{
                 borderTop: "1px solid var(--border)",
@@ -3925,57 +3937,32 @@ export function TicketDetailPage() {
                   remainingSeconds={ticket.sla_remaining_business_seconds}
                   size="md"
                 />
-                <span style={{ color: "var(--text-2)", fontSize: 13 }}>
-                  {slaLabel(ticket.sla_display_state)}
-                  {ticket.sla_display_state !== "PAUSED" &&
-                    ticket.sla_display_state !== "COMPLETED" &&
-                    ticket.sla_display_state !== "HISTORICAL" &&
-                    ticket.sla_remaining_business_seconds !== null && (
-                      <>
-                        {" — "}
-                        {formatSLATime(
-                          ticket.sla_remaining_business_seconds,
-                        )}
-                      </>
+              </div>
+              {/* The deadline as a date a person can put in a diary, and
+                  only while there is still one to meet: on a finished
+                  ticket the date is history, and repeating it invites
+                  the reader to check arithmetic that no longer decides
+                  anything. */}
+              <p
+                className="sla-detail-explainer"
+                data-testid="ticket-deadline-basis"
+              >
+                {ticket.sla_display_state === "HISTORICAL" ||
+                !ticket.sla_due_at ? (
+                  t("common:sla.no_deadline_explain")
+                ) : (
+                  <>
+                    {ticket.sla_display_state !== "COMPLETED" && (
+                      <strong className="sla-detail-explainer-due">
+                        {t("common:sla.due_on", {
+                          when: formatDateTime(ticket.sla_due_at),
+                        })}
+                      </strong>
                     )}
-                </span>
-              </div>
-              <div className="sla-detail-meta">
-                {ticket.sla_due_at &&
-                  ticket.sla_display_state !== "HISTORICAL" &&
-                  ticket.sla_display_state !== "COMPLETED" && (
-                    <>
-                      <span className="sla-detail-meta-label">{t("sla_due_label")}</span>
-                      <span className="sla-detail-meta-value">
-                        {formatDate(ticket.sla_due_at)}
-                      </span>
-                    </>
-                  )}
-                {ticket.sla_paused_at && (
-                  <>
-                    <span className="sla-detail-meta-label">{t("sla_paused_since_label")}</span>
-                    <span className="sla-detail-meta-value">
-                      {formatDate(ticket.sla_paused_at)}
-                    </span>
+                    {t("common:sla.basis")}
                   </>
                 )}
-                {ticket.sla_first_breached_at && (
-                  <>
-                    <span className="sla-detail-meta-label">{t("sla_first_breached_label")}</span>
-                    <span className="sla-detail-meta-value">
-                      {formatDate(ticket.sla_first_breached_at)}
-                    </span>
-                  </>
-                )}
-                {ticket.sla_completed_at && (
-                  <>
-                    <span className="sla-detail-meta-label">{t("sla_completed_label")}</span>
-                    <span className="sla-detail-meta-value">
-                      {formatDate(ticket.sla_completed_at)}
-                    </span>
-                  </>
-                )}
-              </div>
+              </p>
             </div>
 
             {/* Sprint 30 Batch 30.1.1 — Delete-link footer. Demoted
