@@ -37,7 +37,12 @@ from .models import (
     MONTHS_PER_PERIOD,
 )
 from .numbering import allocate_contract_number
-from .revisions import display_revision, is_locked, revision_totals
+from .revisions import (
+    contract_has_been_invoiced,
+    display_revision,
+    is_locked,
+    revision_totals,
+)
 from .scope import (
     filter_buildings_for_contracts,
     filter_contract_types_for,
@@ -250,7 +255,12 @@ class ContractRevisionSerializer(serializers.ModelSerializer):
         return revision_totals(obj)["line_count"]
 
     def get_is_locked(self, obj) -> bool:
-        return is_locked(obj)
+        # One existence query per CONTRACT, not per revision: the detail
+        # page serializes every revision a contract has.
+        cache = self.context.setdefault("_contract_invoiced", {})
+        if obj.contract_id not in cache:
+            cache[obj.contract_id] = contract_has_been_invoiced(obj.contract_id)
+        return is_locked(obj, contract_invoiced=cache[obj.contract_id])
 
     def get_is_active(self, obj) -> bool:
         """True for the ONE revision currently in force. Computed from

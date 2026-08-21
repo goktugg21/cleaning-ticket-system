@@ -320,9 +320,48 @@ def run_daily_invoice_run(today=None):
             customers_invoiced += 1
             created_total += len(created)
 
+    # W11 — THE RECURRING FEE, on the same run.
+    #
+    # A contract is the standing agreement: so many square metres, so
+    # many hours a year, for so much a month. Its generator has existed
+    # and been tested since Sprint 164 but nothing ever called it outside
+    # a management command somebody had to type, so every contract read
+    # EUR 0.00 on the billing tab and the module looked broken rather
+    # than unwired. This is that wire.
+    #
+    # The SAME run, deliberately, not a second one: one schedule, one
+    # place to look when a month is wrong. It runs after the Extra Work
+    # loop because the two are independent -- contract periods are driven
+    # by the contract's own billing period and first invoice date, Extra
+    # Work by the customer's billing day -- and a failure in one must not
+    # cost the other its run.
+    #
+    # `system=True` rather than an actor: `Invoice.created_by` has been
+    # nullable since Sprint 183 §3 exactly so a scheduled run stops
+    # putting a person's name on documents nobody created, and the Extra
+    # Work half above already does this. Contract drafts now render as
+    # System beside them.
+    #
+    # Double-creation is refused by the database, not by this function:
+    # `ContractInvoice` carries UniqueConstraint(contract, period_start),
+    # and the generator treats the IntegrityError as "another run has
+    # this period". That is the same data-is-the-key argument the Extra
+    # Work claim makes above.
+    contracts_created = 0
+    try:
+        from contracts.invoice_generation import generate_invoices
+
+        contracts_created = len(
+            generate_invoices(system=True, on=day).created
+        )
+    except Exception:  # noqa: BLE001 — contracts must not cost EW its run.
+        failed += 1
+        logger.exception("W11: contract invoice generation failed")
+
     return {
         "date": day.isoformat(),
         "customers_invoiced": customers_invoiced,
         "invoices_created": created_total,
+        "contract_invoices_created": contracts_created,
         "failed": failed,
     }

@@ -211,18 +211,63 @@ def revision_totals(revision) -> dict:
     return agg
 
 
-def is_locked(revision, on: Optional[date] = None) -> bool:
+def contract_has_been_invoiced(contract_id) -> bool:
+    """Has any period of this contract ever been billed?
+
+    One existence query. `ContractInvoice` is the claim the generator
+    writes, so this is the same fact the generator uses to refuse a
+    second run — not a second opinion about it.
+    """
+    from .models import ContractInvoice
+
+    return ContractInvoice.objects.filter(contract_id=contract_id).exists()
+
+
+def is_locked(
+    revision,
+    on: Optional[date] = None,
+    *,
+    contract_invoiced: Optional[bool] = None,
+) -> bool:
     """True when `revision` may no longer be edited.
 
-    A revision closes as soon as its effective date has ARRIVED: from
-    that moment it is what the contract agreed, and money has been
-    computed against it. A correction is a new revision, exactly as a
-    SENT invoice is corrected by a reversal rather than an edit.
+    Two conditions, and W11 added the second one after the first ate the
+    feature.
 
-    A future-dated revision stays open, which is the whole point of
-    being able to author one ahead of time.
+    A future-dated revision stays open. That is the whole point of being
+    able to author one ahead of time, and it is unchanged.
+
+    A revision whose date has ARRIVED closes ONCE THE CONTRACT HAS BEEN
+    INVOICED. The reason the rule exists is that money has been computed
+    against what was agreed; before the first invoice, no money has been
+    computed, so there is nothing for an edit to contradict.
+
+    Closing on the date alone — which is what this did — made the app
+    unusable in its most ordinary case and was reported as two separate
+    bugs for six waves:
+
+      * A contract starts today, so its first revision is effective
+        today, so it is born locked. No line can ever be added to it and
+        the contract is permanently worth EUR 0.00. Reported as "a
+        Project cannot be added to a new contract".
+      * The detail page only edits the revision in force TODAY. A
+        revision authored for next month is correctly open but is not in
+        force, so the page looks identical after creating one. Reported
+        as "Create Revision does nothing".
+
+    Both are this one line. The protection is not weakened: the moment a
+    period is billed, every past-dated revision of that contract closes
+    exactly as before, and the correction path is still a new revision.
+
+    `contract_invoiced` lets a caller that already knows the answer for a
+    whole contract pass it in, so serializing N revisions is one query
+    rather than N.
     """
     if revision is None:
         return False
     target = on or timezone.localdate()
-    return revision.effective_from <= target
+    if revision.effective_from > target:
+        return False
+    if contract_invoiced is None:
+        contract_invoiced = contract_has_been_invoiced(revision.contract_id)
+    return contract_invoiced

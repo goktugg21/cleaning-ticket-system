@@ -173,6 +173,7 @@
     "add": "Add",
     "empty": "No projects on this revision yet.",
     "lockedNotice": "\"{{label}}\" is in force and can no longer be changed. Create a new revision to change anything.",
+    "draftNotice": "You are editing \"{{label}}\", which takes effect on {{date}}. Projects you add here apply from that date.",
     "deleteTitle": "Remove project",
     "deleteBody": "Remove \"{{name}}\" from this revision?",
     "groupCount": "{{count}} lines",

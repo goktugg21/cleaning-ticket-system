@@ -117,13 +117,34 @@ export function ContractDetailPage() {
   const locale = i18n.language;
   const activeRevision =
     revisions.find((revision) => revision.is_active) ?? null;
-  // The lines an operator may actually change: those of the active
-  // revision, and only while that revision has not taken effect.
-  const editableRevision =
-    activeRevision && !activeRevision.is_locked ? activeRevision : null;
+  /**
+   * W11 — the revision this page is WORKING ON, which is not always the
+   * one in force.
+   *
+   * The page used to edit only the in-force revision, and that is half
+   * of why contracts have been a dead end. Author a revision for next
+   * month and it is correctly open, but it is not in force, so the page
+   * went on showing the old one: the write succeeded and the screen
+   * looked identical. That is the whole of "Create Revision does
+   * nothing" — nothing was broken, there was just nowhere for the result
+   * to appear.
+   *
+   * So: the revision being authored is the LATEST OPEN one; if every
+   * revision is closed, the page shows the one in force, read-only, and
+   * "New revision" is the way to change it. One revision on screen, and
+   * the header says which.
+   */
+  const openRevision =
+    [...revisions]
+      .filter((revision) => !revision.is_locked)
+      .sort((a, b) =>
+        a.effective_from < b.effective_from ? 1 : a.effective_from > b.effective_from ? -1 : b.id - a.id,
+      )[0] ?? null;
+  const shownRevision = openRevision ?? activeRevision;
+  const editableRevision = openRevision;
   // Memoised because the grouping below depends on it: a fresh `[]`
   // literal on every render would re-run the grouping on every render.
-  const lines = useMemo(() => activeRevision?.lines ?? [], [activeRevision]);
+  const lines = useMemo(() => shownRevision?.lines ?? [], [shownRevision]);
 
   const lineEdit = useEditMode<number>(
     editableRevision ? lines.map((line) => line.id) : [],
@@ -416,9 +437,18 @@ export function ContractDetailPage() {
             )}
           </header>
 
-          {activeRevision && activeRevision.is_locked && (
-            <p className="muted" data-testid="contract-lines-locked">
-              {t("projects.lockedNotice", { label: activeRevision.label })}
+          {/* W11 — which revision these projects belong to, always.
+              Without it, a page that sometimes shows the agreement in
+              force and sometimes the one being drafted is a page whose
+              numbers a reader cannot place. */}
+          {shownRevision && (
+            <p className="muted" data-testid="contract-lines-scope">
+              {shownRevision.is_locked
+                ? t("projects.lockedNotice", { label: shownRevision.label })
+                : t("projects.draftNotice", {
+                    label: shownRevision.label,
+                    date: shownRevision.effective_from,
+                  })}
             </p>
           )}
 

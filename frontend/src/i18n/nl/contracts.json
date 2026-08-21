@@ -173,6 +173,7 @@
     "add": "Toevoegen",
     "empty": "Nog geen projecten op deze versie.",
     "lockedNotice": "\"{{label}}\" is inmiddels ingegaan en kan niet meer worden gewijzigd. Maak een nieuwe versie om iets te veranderen.",
+    "draftNotice": "U bewerkt \"{{label}}\", die ingaat op {{date}}. Projecten die u hier toevoegt gelden vanaf die datum.",
     "deleteTitle": "Project verwijderen",
     "deleteBody": "\"{{name}}\" van deze versie verwijderen?",
     "groupCount": "{{count}} regels",
