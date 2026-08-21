@@ -389,6 +389,9 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
 
 
 class TicketListSerializer(serializers.ModelSerializer):
+    archived_by_name = serializers.CharField(
+        source="archived_by.full_name", read_only=True, default=None
+    )
     building_name = serializers.CharField(source="building.name", read_only=True)
     # Sprint 185 E §1 — the KIND OF WORK, beside `type`'s kind of
     # message. `default=None` because the FK is nullable and traversing
@@ -446,6 +449,14 @@ class TicketListSerializer(serializers.ModelSerializer):
             "scheduled_end_at",
             "time_window_label",
             "schedule_status",
+            # W-H §1 — the archive, as ONE fact plus who and when.
+            # `archived_at` is the state (set = archived); the two
+            # companions are the trail. The list carries them too, so a
+            # row in the archive view can say who filed it without a
+            # per-row detail fetch.
+            "archived_at",
+            "archived_by_name",
+            "archive_note",
         ]
         read_only_fields = fields
 
@@ -583,6 +594,9 @@ class TicketAttachmentVisibilitySerializer(serializers.Serializer):
 
 
 class TicketDetailSerializer(serializers.ModelSerializer):
+    archived_by_name = serializers.CharField(
+        source="archived_by.full_name", read_only=True, default=None
+    )
     building_name = serializers.CharField(source="building.name", read_only=True)
     # Sprint 185 E §1 — see `TicketListSerializer`: the kind of WORK,
     # rendered beside the kind of MESSAGE. Nullable FK, so `default=None`.
@@ -677,6 +691,14 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "rejected_at",
             "resolved_at",
             "closed_at",
+            # W-H §1 — the archive, as ONE fact plus who and when.
+            # `archived_at` is the state (set = archived); the two
+            # companions are the trail. The list carries them too, so a
+            # row in the archive view can say who filed it without a
+            # per-row detail fetch.
+            "archived_at",
+            "archived_by_name",
+            "archive_note",
             # Sprint 184 §3 — the customer's wanted date, so the provider
             # can see what was asked for. A wish; it never decides late.
             "customer_wanted_date",

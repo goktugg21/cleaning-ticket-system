@@ -5,6 +5,7 @@ from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ErrorDetail, ValidationError
@@ -32,6 +33,7 @@ from notifications.services import (
 
 from .filters import (
     TicketFilter,
+    apply_archived,
     apply_is_extra_work,
     exclude_finished_extra_work,
     parse_is_extra_work,
@@ -39,6 +41,7 @@ from .filters import (
 from .attachment_visibility import resolve_upload_visibility
 from .schedule_history import compose_schedule_note
 from .models import (
+    TERMINAL_TICKET_STATUSES,
     AttachmentVisibility,
     Ticket,
     TicketAttachment,
@@ -1396,9 +1399,187 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    def filter_queryset(self, queryset):
+        """W-H §2 — the archive gate, on the LIST and nowhere else.
+
+        DRF resolves a detail route through `filter_queryset` too, so
+        putting this on the FilterSet made an archived ticket 404 on its
+        own page and left it unarchivable. The list is the only place
+        "absent means exclude" belongs: `retrieve`, and every custom
+        action that calls `get_object`, must still reach an archived
+        row.
+
+        `apply_archived` is the same helper `stats` calls, so the chips
+        and the rows are counted from one definition.
+        """
+        queryset = super().filter_queryset(queryset)
+        if self.action != "list":
+            return queryset
+        raw = self.request.query_params.get("archived")
+        return apply_archived(
+            queryset, raw in {"true", "True", "1"}
+        )
+
+    @action(detail=True, methods=["post"], url_path="archive")
+    def archive(self, request, pk=None):
+        """
+        W-H §1 — file finished work away. POST body: {"note": "..."}
+        (optional).
+
+        ONE ACT. The system this closes the gap against carries
+        request / approve / reject columns, but its own reference notes
+        record that no request endpoint exists and that `approveArchive`
+        back-fills the request timestamp with `?? now()` in the same
+        statement — a real row has both stamps equal to the second. The
+        review cycle is an artefact of the approve path, so there is
+        nothing there to copy. What is copied is the INTERACTION: a
+        modal that takes a note before it happens.
+
+        THE SERVER ENFORCES, which is the half that system does not.
+        Two rules, both here and not in the browser:
+          * provider management only, and
+          * the ticket must be in a terminal status. Filing live work
+            away is how work gets lost, so it is refused with the
+            status that refused it.
+        """
+        ticket = self.get_object()
+
+        if not is_provider_management_role(request.user):
+            return Response(
+                {
+                    "detail": "Only provider management can archive a ticket.",
+                    "code": "archive_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if ticket.archived_at is not None:
+            return Response(
+                {
+                    "detail": "This ticket is already archived.",
+                    "code": "already_archived",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ticket.status not in TERMINAL_TICKET_STATUSES:
+            return Response(
+                {
+                    "detail": (
+                        "Only finished work can be archived. This ticket is "
+                        f"{ticket.get_status_display()}."
+                    ),
+                    "code": "archive_not_finished",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        note = str(request.data.get("note") or "").strip()
+        with transaction.atomic():
+            ticket.archived_at = timezone.now()
+            ticket.archived_by = request.user
+            ticket.archive_note = note
+            # The AuditLog row for these three fields is written by
+            # `audit.signals._on_ticket_archive_post_save_update`, which
+            # is connected to exactly this field set.
+            ticket.save(
+                update_fields=["archived_at", "archived_by", "archive_note"]
+            )
+        return Response(
+            self.get_serializer(ticket).data, status=status.HTTP_200_OK
+        )
+
+    @action(detail=True, methods=["post"], url_path="unarchive")
+    def unarchive(self, request, pk=None):
+        """
+        W-H §1 — bring a ticket back into the working list. POST body:
+        {"reason": "..."} and the reason is REQUIRED.
+
+        Asymmetric on purpose, and it is the one thing the reference
+        system gets right: filing finished work away needs no
+        justification, but pulling something back out of the archive is
+        a decision somebody has to answer for. Its `rejectArchive`
+        requires a reason and appends it to a log; ours puts the reason
+        on the AuditLog row, which is the log this system already has.
+        """
+        ticket = self.get_object()
+
+        if not is_provider_management_role(request.user):
+            return Response(
+                {
+                    "detail": "Only provider management can unarchive a ticket.",
+                    "code": "archive_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if ticket.archived_at is None:
+            return Response(
+                {
+                    "detail": "This ticket is not archived.",
+                    "code": "not_archived",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response(
+                {
+                    "detail": "A reason is required to take a ticket out of the archive.",
+                    "code": "unarchive_reason_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            # The reason rides the AuditLog's own `reason` column — the
+            # same channel every other privileged mutation in this system
+            # uses (Sprint 27F-B2) — rather than a seventh archive column
+            # nobody else reads.
+            audit_context.set_current_reason(reason)
+            ticket.archived_at = None
+            ticket.archived_by = None
+            ticket.archive_note = ""
+            ticket.save(
+                update_fields=["archived_at", "archived_by", "archive_note"]
+            )
+        return Response(
+            self.get_serializer(ticket).data, status=status.HTTP_200_OK
+        )
+
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):
         scoped = scope_tickets_for(request.user)
+
+        # W-H §2 — the chips count the working list, not the archive.
+        # Same helper the list filter uses, for the reason the two
+        # blocks below already record: a chip counting a different set
+        # from the rows under it is worse than no chip at all. Absent
+        # param means the working list here exactly as it does there.
+        raw_archived = request.query_params.get("archived")
+        scoped = apply_archived(
+            scoped,
+            True if raw_archived in {"true", "True", "1"} else None,
+        )
+
+        # W-H §3 — and the PERIOD, for the same reason. The Tickets page
+        # always sends one (it opens on this month), so without this the
+        # tiles would be permanently blind and every one of them would
+        # render an em dash — the exact defect W8 BUG 2 removed.
+        #
+        # Parsed the same way `TicketFilter.date_from` / `date_to` parse
+        # it: a calendar day compared against the DATE of `created_at`,
+        # inclusive at both ends. An unparseable value is ignored rather
+        # than 400ing a count request that sits beside a list which
+        # would have ignored it too.
+        for param, lookup in (
+            ("date_from", "created_at__date__gte"),
+            ("date_to", "created_at__date__lte"),
+        ):
+            raw = request.query_params.get(param)
+            if not raw:
+                continue
+            parsed = parse_date(raw)
+            if parsed is not None:
+                scoped = scoped.filter(**{lookup: parsed})
 
         # Sprint 180 §2 — the count chips sit directly above the rows
         # they count, so they have to be counting the same thing. When

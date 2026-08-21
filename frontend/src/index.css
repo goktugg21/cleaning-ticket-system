@@ -13683,3 +13683,30 @@ table.pva-table { min-width: 0; }
 .assign-picker { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; padding: 4px 0 12px; }
 .assign-picker-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-radius: var(--r-sm); cursor: pointer; }
 .assign-picker-row:hover { background: var(--green-faint); }
+
+/* W-H §3 — the period control and the working-list / archive pair, on
+   one line above the status tiles. The period's own two date boxes sit
+   inside it when Custom is chosen, which is why the range is a nested
+   row rather than two more children here. */
+.list-scope-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  margin-bottom: var(--space-4);
+}
+.period-filter {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.period-filter .field { min-width: 170px; }
+.period-filter-range {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border-soft);
+}
+.period-filter-range .field { min-width: 150px; }

@@ -352,6 +352,57 @@ class Ticket(models.Model):
         related_name="deleted_tickets",
     )
 
+    # ------------------------------------------------------------------
+    # W-H §1 — THE ARCHIVE. One act, not a review cycle.
+    #
+    # The owner's father, after twenty minutes on the ticket page: "All
+    # the tickets from five years ago can sit in Closed. You need an
+    # archive." And on how it should feel: "I put a button saying my job
+    # on this ticket is finished."
+    #
+    # ## Why ONE act and not request / approve / reject
+    #
+    # The system we are closing the gap against carries six archive
+    # columns that look like a review cycle — requested / approved /
+    # rejected, each with a `_by`. It is not one. Its own reference
+    # notes record that there is **no request-archive endpoint
+    # anywhere**: `approveArchive` back-fills `archive_requested_at` with
+    # `?? now()` in the same statement that approves it, and a real row
+    # (476) has the two timestamps equal to the second. So the "request"
+    # half is a fiction written by the approve half, and copying it here
+    # would be copying an artefact.
+    #
+    # What that system actually has is what we implement: one act that
+    # files finished work away, and one act that brings it back with a
+    # reason. Nothing waits on anybody.
+    #
+    # ## Archived is NOT a status
+    #
+    # `TicketStatus` says what is happening to the work; this says
+    # whether we are still looking at it. Making it a status would put
+    # one fact in two places (a CLOSED ticket that is archived is still
+    # closed) and would need a transition into and out of every terminal
+    # state. A nullable timestamp has one owner and one meaning: set is
+    # archived, null is not.
+    #
+    # Only a ticket in `TERMINAL_TICKET_STATUSES` may be archived —
+    # filing live work away is how work gets lost.
+    # ------------------------------------------------------------------
+    archived_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    archived_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="archived_tickets",
+    )
+    #: Optional. The reason a job was filed away is almost always "it is
+    #: finished", which the status already says; this is for the times it
+    #: is not. Bringing a ticket BACK requires a reason and that reason
+    #: lands on the AuditLog, which is where a decision somebody has to
+    #: answer for belongs.
+    archive_note = models.TextField(blank=True, default="")
+
     first_response_at = models.DateTimeField(null=True, blank=True)
     sent_for_approval_at = models.DateTimeField(null=True, blank=True)
     # Sprint 28 Batch 11 — stamped when the ticket enters

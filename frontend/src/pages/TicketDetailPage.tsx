@@ -2,6 +2,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  Archive,
   ArrowRightLeft,
   ChevronDown,
   ChevronLeft,
@@ -73,6 +74,7 @@ import { AttachmentThumb } from "../components/AttachmentThumb";
 import { BillingCutoffNotice } from "../components/BillingCutoffNotice";
 import { BoundedList } from "../components/BoundedList";
 import { CollapsibleCard } from "../components/CollapsibleCard";
+import { TicketArchiveDialog } from "../components/TicketArchiveDialog";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Toggle } from "../components/Toggle";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
@@ -939,6 +941,25 @@ export function TicketDetailPage() {
     isProviderManagementRole(me?.role) &&
     CONVERTIBLE_TICKET_STATUSES.has(ticket.status) &&
     !ticket.extra_work_origin;
+
+  /* W-H §1 — THE ARCHIVE, and it is the same button in two directions.
+   *
+   * Terminal-only, so it can never take live work out of the list, and
+   * `TERMINAL_UI_STATUSES` is disjoint from `CONVERTIBLE_TICKET_STATUSES`
+   * — which is what keeps rule 2 (one primary action) true in the
+   * header: on a finished ticket Convert is impossible, and archiving IS
+   * the next thing to do. */
+  const isArchived = !!ticket?.archived_at;
+  const canArchive =
+    !!ticket &&
+    isProviderManagementRole(me?.role) &&
+    TERMINAL_UI_STATUSES.has(ticket.status) &&
+    !isArchived;
+  const canUnarchive =
+    !!ticket && isProviderManagementRole(me?.role) && isArchived;
+  const [archiveMode, setArchiveMode] = useState<
+    "archive" | "unarchive" | null
+  >(null);
 
   const loadTicket = useCallback(async () => {
     if (!id) return;
@@ -1909,6 +1930,43 @@ export function TicketDetailPage() {
               <span style={{ marginLeft: 6 }}>
                 {t("workflow_convert_to_extra_work")}
               </span>
+            </button>
+          )}
+          {/* W-H §1 — "I put a button saying my job on this ticket is
+              finished." On a finished ticket this is the only thing
+              left to do, so it is the primary. */}
+          {canArchive && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setArchiveMode("archive")}
+              data-testid="ticket-archive-button"
+            >
+              <Archive size={14} strokeWidth={2.2} aria-hidden="true" />
+              <span style={{ marginLeft: 6 }}>{t("common:archive.button")}</span>
+            </button>
+          )}
+          {/* A STATE IS A SENTENCE ABOUT THE WORK, A BUTTON IS A VERB
+              (rule 5): the chip says it is archived and by whom, the
+              button says what pressing it does. Never the same words. */}
+          {isArchived && (
+            <span className="cell-tag" data-testid="ticket-archived-badge">
+              {ticket?.archived_by_name
+                ? t("common:archive.by", {
+                    who: ticket.archived_by_name,
+                    when: formatDate(ticket.archived_at ?? null),
+                  })
+                : t("common:archive.badge")}
+            </span>
+          )}
+          {canUnarchive && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setArchiveMode("unarchive")}
+              data-testid="ticket-unarchive-button"
+            >
+              {t("common:archive.unarchive_button")}
             </button>
           )}
         </div>
@@ -4404,6 +4462,29 @@ export function TicketDetailPage() {
       {/* Sprint 7B (frontend) — Convert-to-Extra-Work dialog. Posts to
           the dedicated convert endpoint and, on success, navigates to
           the freshly-created ExtraWorkRequest detail page. */}
+      {/* W-H §1 — RULE 4: EVERY ACTION ANSWERS. The toast says what
+          changed in words ("Archived. It has left the working list."),
+          the header chip changes, and the button becomes its opposite.
+          A person who presses it is never left wondering what it did. */}
+      {archiveMode && ticket && (
+        <TicketArchiveDialog
+          ticketId={ticket.id}
+          mode={archiveMode}
+          onCancel={() => setArchiveMode(null)}
+          onDone={(updated, mode) => {
+            setTicket(updated);
+            setArchiveMode(null);
+            toast.push({
+              variant: "success",
+              title: t(
+                mode === "archive"
+                  ? "common:archive.done"
+                  : "common:archive.unarchive_done",
+              ),
+            });
+          }}
+        />
+      )}
       {convertOpen && (
         <ConvertToExtraWorkDialog
           ticketId={ticket.id}

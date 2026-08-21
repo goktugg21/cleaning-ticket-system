@@ -176,3 +176,29 @@ export async function setTicketCategory(
   );
   return response.data;
 }
+
+// W-H §1 — the archive. Two acts, and the asymmetry is the design: a
+// note is optional on the way in, a reason is REQUIRED on the way out.
+// Both are enforced by the server (`TicketViewSet.archive` /
+// `.unarchive`); these wrappers only carry the call.
+export async function archiveTicket(
+  ticketId: number | string,
+  note: string,
+): Promise<TicketDetail> {
+  const response = await api.post<TicketDetail>(
+    `/tickets/${ticketId}/archive/`,
+    { note },
+  );
+  return response.data;
+}
+
+export async function unarchiveTicket(
+  ticketId: number | string,
+  reason: string,
+): Promise<TicketDetail> {
+  const response = await api.post<TicketDetail>(
+    `/tickets/${ticketId}/unarchive/`,
+    { reason },
+  );
+  return response.data;
+}

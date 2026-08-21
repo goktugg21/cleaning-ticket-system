@@ -759,6 +759,82 @@ def _on_building_staff_visibility_post_save_update(
         )
 
 
+# W-H §1 — `Ticket` ARCHIVE fields, and ONLY those three.
+#
+# `Ticket` is deliberately NOT on the full-CRUD list above: its audit
+# trail is `TicketStatusHistory`, and CLAUDE.md / H-11 are explicit that
+# the history row IS the trail and must not be doubled up on the generic
+# AuditLog. Archiving is not a status transition, so it writes no history
+# row and would otherwise leave no trace at all.
+#
+# So this is the narrowest possible handler: three fields, UPDATE only.
+# Every other edit to a Ticket still records nothing here, exactly as
+# before. The UNARCHIVE reason rides `AuditLog.reason`, which the view
+# sets through `audit.context.set_current_reason` before saving — the
+# same channel every other privileged mutation uses.
+_TICKET_ARCHIVE_TRACKED_FIELDS = (
+    "archived_at",
+    "archived_by_id",
+    "archive_note",
+)
+
+
+def _ticket_archive_snapshot_for_pre_save(instance):
+    if instance.pk is None:
+        return None
+    from tickets.models import Ticket
+
+    try:
+        previous = Ticket.objects.get(pk=instance.pk)
+    except Ticket.DoesNotExist:
+        return None
+    return {
+        field: serialize_value(getattr(previous, field))
+        for field in _TICKET_ARCHIVE_TRACKED_FIELDS
+    }
+
+
+def _on_ticket_pre_save(sender, instance, **kwargs):
+    try:
+        _state_map()[("tickets.Ticket.archive", instance.pk)] = (
+            _ticket_archive_snapshot_for_pre_save(instance)
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: Ticket archive pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_ticket_post_save_archive_update(sender, instance, created, **kwargs):
+    """UPDATE-only, archive-fields-only. A ticket save that touches none
+    of the three writes nothing, which is what keeps every other Ticket
+    edit off this log."""
+    if created:
+        _state_map().pop(("tickets.Ticket.archive", instance.pk), None)
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("tickets.Ticket.archive", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _TICKET_ARCHIVE_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = serialize_value(getattr(instance, field))
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: Ticket archive post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 # Sprint 14E — `TicketStaffAssignment` slot fields. The model is on the
 # membership-style CREATE / DELETE handlers (the slot CREATE = "staff
 # assigned"; DELETE = "slot removed"). This pair adds the UPDATE-diff
@@ -1876,6 +1952,25 @@ def _connect():
         sender=ExtraWorkRequest,
         weak=False,
         dispatch_uid="audit:ewb:post_update:ExtraWorkRequest",
+    )
+
+    # W-H §1 — the three archive fields on Ticket, UPDATE only. Ticket
+    # is not in the CRUD trio above and must not be: its trail is
+    # TicketStatusHistory (H-11). Archiving writes no history row, so
+    # without this pair it would leave no trace anywhere.
+    from tickets.models import Ticket as _TicketModel
+
+    pre_save.connect(
+        _on_ticket_pre_save,
+        sender=_TicketModel,
+        weak=False,
+        dispatch_uid="audit:ticket:pre:archive",
+    )
+    post_save.connect(
+        _on_ticket_post_save_archive_update,
+        sender=_TicketModel,
+        weak=False,
+        dispatch_uid="audit:ticket:post_update:archive",
     )
 
     pre_save.connect(

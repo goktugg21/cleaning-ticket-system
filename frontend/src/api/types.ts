@@ -231,6 +231,13 @@ export interface WorkCategory {
 }
 
 export interface TicketList {
+  // W-H §1 — the archive, on the LIST as well as the detail, so the
+  // archive view can name who filed each row without a per-row fetch.
+  // `archived_at` IS the state: set means the ticket has left the
+  // working list. Nothing reads the other two to decide anything.
+  archived_at?: string | null;
+  archived_by_name?: string | null;
+  archive_note?: string;
   id: number;
   ticket_no: string;
   title: string;

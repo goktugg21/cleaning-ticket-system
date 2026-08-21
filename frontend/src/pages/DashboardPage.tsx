@@ -47,6 +47,9 @@ import { FinancialStrip } from "../components/extra-work/FinancialStrip";
 import { SLABadge } from "../components/sla/SLABadge";
 import { StatusTiles } from "../components/StatusTiles";
 import { listScope } from "../lib/listScope";
+import { PeriodFilter } from "../components/PeriodFilter";
+import { periodParams, periodState } from "../lib/period";
+import type { PeriodState } from "../lib/period";
 import { useToast } from "../components/ToastProvider";
 import { useEditMode } from "../lib/useEditMode";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
@@ -242,6 +245,14 @@ const STATS_KNOWN_PARAMS = new Set([
   "category__isnull",
   "is_extra_work",
   "hide_finished_extra_work",
+  // W-H §2/§3 — `/tickets/stats/` learned all three in the same commit
+  // that added them to the list, which is the only way the tiles can go
+  // on counting the rows they sit above. The Tickets page always sends
+  // a period, so leaving these out would have made the tiles blind on
+  // every load rather than in the rare case this set exists for.
+  "archived",
+  "date_from",
+  "date_to",
 ]);
 
 // Sprint 180 §1 — how long a ticket may sit in WAITING_CUSTOMER_APPROVAL
@@ -496,6 +507,19 @@ export function DashboardPage({
         "finished_extra_work",
       ) !== "1",
   );
+  /* W-H §3/§4 — THE PERIOD, and THIS MONTH is what the page opens on.
+   *
+   * The owner: "I need to be able to see this month's jobs." The
+   * default matters more than the filter: a Tickets page that opens on
+   * every ticket ever raised is the pile his father was looking at.
+   * This month is what somebody has to act on today; everything older
+   * is one dropdown away and the archive is one toggle away. */
+  const [period, setPeriod] = useState<PeriodState>(() =>
+    periodState("this_month"),
+  );
+  /* W-H §2 — the working list or the archive. Never both: an archive
+   * that still turns up among live work is a flag, not an archive. */
+  const [showArchive, setShowArchive] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
@@ -666,6 +690,14 @@ export function DashboardPage({
     if (isTicketsPage && hideFinishedExtraWork) {
       params.hide_finished_extra_work = "true";
     }
+    /* W-H §2/§3 — both only on the Tickets page. The dashboard widgets
+     * share this fetch helper and count totals; narrowing those to a
+     * month would silently change what every KPI on the landing page
+     * means. */
+    if (isTicketsPage) {
+      if (showArchive) params.archived = "true";
+      Object.assign(params, periodParams(period));
+    }
     // M6.3 — "my work" deep-links. Only applied on the Tickets page
     // (where the clear chip is shown).
     // The fixed customer, when this list is mounted inside one.
@@ -701,6 +733,8 @@ export function DashboardPage({
     unassignedFilter,
     stalledApprovalFilter,
     hideFinishedExtraWork,
+    period,
+    showArchive,
     searchParams,
     mineOnly,
     isTicketsPage,
@@ -2196,6 +2230,53 @@ export function DashboardPage({
             So when `/tickets/stats/` cannot describe these rows, the
             whole row drops its numbers and goes on being what it also
             always was: the status filter. Nothing to explain. */}
+        {/* W-H §2/§3 — the period, and which pile you are looking at.
+            Above the status tiles because they narrow WHICH ROWS the
+            tiles count, and the tiles already follow this filter (the
+            stats call carries `archived` and the period the same way
+            the list does).
+
+            Two controls, no prose. "Working list / Archive" is a pair
+            of states, not a verb, so it reads as a place you are rather
+            than a thing you do. */}
+        <div className="list-scope-row" data-testid="tickets-scope-row">
+          <PeriodFilter
+            idPrefix="tickets"
+            value={period}
+            onChange={(next) => {
+              setPeriod(next);
+              setPage(1);
+            }}
+          />
+          <div className="composer-toggle" role="tablist" aria-label={t("period.label")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!showArchive}
+              className={`composer-toggle-btn ${!showArchive ? "active" : ""}`}
+              onClick={() => {
+                setShowArchive(false);
+                setPage(1);
+              }}
+              data-testid="tickets-show-working"
+            >
+              {t("archive.show_working")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={showArchive}
+              className={`composer-toggle-btn ${showArchive ? "active" : ""}`}
+              onClick={() => {
+                setShowArchive(true);
+                setPage(1);
+              }}
+              data-testid="tickets-show-archive"
+            >
+              {t("archive.show")}
+            </button>
+          </div>
+        </div>
         <StatusTiles
           tiles={TICKET_LIST_STATUSES.map((value) => ({
             value,

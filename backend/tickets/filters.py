@@ -61,6 +61,20 @@ def _extra_work_origin_q() -> Q:
     )
 
 
+def apply_archived(queryset, value):
+    """The archive gate, in ONE place.
+
+    `None` (the param was not sent) and `False` both mean the working
+    list; only an explicit `True` opens the archive. The list filter and
+    the stats chips both call this, for the reason
+    `apply_is_extra_work` records: a chip counting a different set from
+    the list under it is worse than no chip at all.
+    """
+    if value is True:
+        return queryset.filter(archived_at__isnull=False)
+    return queryset.filter(archived_at__isnull=True)
+
+
 def apply_is_extra_work(queryset, value):
     """Narrow to chargeable work (`True`) or to ordinary tickets
     (`False`); `None` leaves the queryset alone.
@@ -216,6 +230,53 @@ class TicketFilter(df.FilterSet):
     # an absent param leaves the queryset alone, so no existing caller
     # changes behaviour.
     is_extra_work = df.BooleanFilter(method="filter_is_extra_work")
+
+    # W-H §2 — THE ARCHIVE IS NOT LOADED UNLESS YOU ASK FOR IT.
+    #
+    # "You don't load the archive all the time." Absent means live work,
+    # which is the opposite default from every other filter on this
+    # class and is deliberate: an archive that still turns up in the
+    # working list is a flag, not an archive.
+    #
+    #   absent  -> archived rows are EXCLUDED (the working list)
+    #   true    -> archived rows ONLY (the archive)
+    #   false   -> archived rows are EXCLUDED (an explicit way to say
+    #              the default out loud, so a saved link can pin it)
+    #
+    # NOT a declared `BooleanFilter`, and NOT handled in this class at
+    # all. Two reasons, and the second one cost a test:
+    #
+    #  1. django-filter only runs a filter whose parameter is PRESENT,
+    #     so a declared one can express "true means X" and "false means
+    #     Y" but never "absent means Y". Declaring it read correctly and
+    #     did nothing.
+    #  2. A FilterSet-level override then hides archived rows from
+    #     `get_object` too, because DRF resolves a detail route through
+    #     `filter_queryset`. That made an archived ticket 404 on its own
+    #     page -- so it could never be unarchived, which is the one
+    #     thing an archive must never do.
+    #
+    # It lives on the VIEWSET (`TicketViewSet.filter_queryset`, list
+    # action only) for exactly that reason.
+    #
+    # No existing caller changes behaviour on the day this ships,
+    # because no ticket is archived yet.
+
+    # W-H §3 — THE PERIOD, on the ticket's own date.
+    #
+    # `created_at` and not `scheduled_start_at`: the second is null on
+    # every unscheduled ticket, so a period filter over it would
+    # silently drop exactly the rows an operator is looking for, and
+    # "the tickets from five years ago" is an age, which is what
+    # `created_at` measures. `scheduled_from` / `scheduled_to` above
+    # already answer the scheduling question and are untouched.
+    #
+    # Inclusive at both ends. `date_to` is a DATE and the column is a
+    # DATETIME, so `lte` on the raw value would drop everything after
+    # 00:00 on the last day; `__date` compares calendar days, which is
+    # what the person picking "31 March" means.
+    date_from = df.DateFilter(field_name="created_at", lookup_expr="date__gte")
+    date_to = df.DateFilter(field_name="created_at", lookup_expr="date__lte")
 
     class Meta:
         model = Ticket
