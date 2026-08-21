@@ -7,6 +7,7 @@
 import { api } from "./client";
 import type { PaginatedResponse } from "./types";
 import type {
+  ContractHoursPattern,
   HourType,
   HourTypeWritePayload,
   StandardSetResult,
@@ -264,9 +265,34 @@ export async function fillWeekFromContracts(payload: {
   iso_year: number;
   iso_week: number;
   company?: number | "";
+  /** W12 — fill ONE person's week. A manager may name anybody; for
+   *  everybody else the server ignores this and uses the caller, so
+   *  **My hours** simply omits it. */
+  employee?: number | "";
 }): Promise<{ created: number; skipped_existing: number }> {
   const response = await api.post("/timesheets/entries/fill-week/", cleanParams(payload));
   return response.data;
+}
+
+/**
+ * W12 §5 — this employee's standing agreements in force during a date
+ * window.
+ *
+ * `employee` is a filter, not a permission: the endpoint restricts a
+ * non-manager to their own rows regardless of what is asked for, so
+ * this cannot be turned into a way to read a colleague's contract by
+ * changing one number in the request.
+ */
+export async function listContractHoursPatterns(params: {
+  employee: number;
+  valid_between_start: string;
+  valid_between_end: string;
+}): Promise<ContractHoursPattern[]> {
+  const response = await api.get<{ results: ContractHoursPattern[] }>(
+    "/timesheets/contract-hours/",
+    { params: cleanParams(params) },
+  );
+  return response.data.results ?? [];
 }
 
 export async function closeWeek(payload: {

@@ -29,7 +29,7 @@ from config.pagination import UnboundedPagination
 from .contract_hours import in_force_between, in_force_on
 from .models import ContractHours, ContractHoursStatus
 from .permissions import IsTimesheetManager, IsTimesheetUser
-from .scope import filter_contract_hours_for
+from .scope import filter_contract_hours_for, restrict_contract_hours_to_self
 from .serializers_contract_hours import (
     ContractHoursBulkSerializer,
     ContractHoursSerializer,
@@ -42,10 +42,26 @@ ERR_BAD_TRANSITION = "contract_hours_bad_transition"
 
 
 def _base_queryset(user):
-    return filter_contract_hours_for(
+    """The two scoping helpers, applied as the PAIR they are.
+
+    W12 — `restrict_contract_hours_to_self` was missing here.
+    `filter_contract_hours_for` answers the tenant question (H-1) and
+    nothing else, so with only that applied, GET was
+    `IsTimesheetUser` — every provider-side role — over the whole
+    company's standing agreements: a STAFF member could read every
+    colleague's contracted weekly pattern, building and hour type
+    through this endpoint. That is precisely the defect Sprint 182 §1
+    found in `reports`, which is why the self-restriction helper
+    already existed and was already documented as one half of a pair.
+    It had a second caller and now has its third.
+    """
+    return restrict_contract_hours_to_self(
         user,
-        ContractHours.objects.select_related(
-            "employee", "building", "hour_type", "company"
+        filter_contract_hours_for(
+            user,
+            ContractHours.objects.select_related(
+                "employee", "building", "hour_type", "company"
+            ),
         ),
     )
 

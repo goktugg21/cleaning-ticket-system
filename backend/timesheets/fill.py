@@ -100,20 +100,30 @@ def week_days(iso_year: int, iso_week: int) -> list[date]:
     return [monday + timedelta(days=i) for i in range(7)]
 
 
-def _agreements_for_week(company_id: int, days: list[date]):
+def _agreements_for_week(
+    company_id: int, days: list[date], employee_id: int | None = None
+):
     """Auto-fill agreements whose window overlaps this week at all.
 
     Overlap, not containment: an agreement that starts on Wednesday
     fills Wednesday to Sunday, and the per-day check below drops the
     days before it. The alternative — requiring the whole week — would
     silently skip the first and last week of every agreement.
+
+    `employee_id` narrows it to ONE person. That is what lets a worker
+    fill their own week without writing a row for a colleague — see
+    `fill_week`.
     """
     first, last = days[0], days[-1]
+    narrowed = (
+        {} if employee_id is None else {"employee_id": employee_id}
+    )
     return (
         ContractHours.objects.filter(
             company_id=company_id,
             auto_fill=True,
             valid_from__lte=last,
+            **narrowed,
         )
         .filter(Q(valid_to__isnull=True) | Q(valid_to__gte=first))
         .select_related("employee", "hour_type", "building")
@@ -124,18 +134,32 @@ def _agreements_for_week(company_id: int, days: list[date]):
 
 
 @transaction.atomic
-def fill_week(company_id: int, iso_year: int, iso_week: int, *, actor) -> FillResult:
+def fill_week(
+    company_id: int,
+    iso_year: int,
+    iso_week: int,
+    *,
+    actor,
+    employee_id: int | None = None,
+) -> FillResult:
     """Materialise one company-week from its auto-fill agreements.
 
     Safe to call as often as you like: see the module docstring for why
     the unit of idempotency is the employee-week.
+
+    W12 — `employee_id` fills ONE person's week and nobody else's. The
+    unit of idempotency is already the employee-week, so narrowing the
+    agreements is the whole change: the same rules, applied to one row
+    of the crew instead of all of them. It exists because "my hours"
+    is opened by a worker, and a worker asking for their own contracted
+    week must not write hours for the colleague at the next building.
     """
     days = week_days(iso_year, iso_week)
 
     if is_week_closed(company_id, iso_year, iso_week):
         return FillResult(skipped_closed=1)
 
-    agreements = list(_agreements_for_week(company_id, days))
+    agreements = list(_agreements_for_week(company_id, days, employee_id))
     if not agreements:
         return FillResult()
 

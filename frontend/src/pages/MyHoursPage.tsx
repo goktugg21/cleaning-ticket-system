@@ -10,11 +10,14 @@ import {
   createTimeEntry,
   deleteTimeEntry,
   fetchWeekStatus,
+  fillWeekFromContracts,
+  listContractHoursPatterns,
   listHourTypes,
   listTimeEntries,
   updateTimeEntry,
 } from "../api/timesheets";
 import type {
+  ContractHoursPattern,
   HourType,
   TimeEntry,
   TimeEntryWritePayload,
@@ -98,8 +101,11 @@ export function MyHoursPage() {
 
   const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
   const [entries, setEntries] = useState<TimeEntry[]>([]);
-  // Sprint 154 §M — the week grid, collapsed by default.
-  const [gridOpen, setGridOpen] = useState(false);
+  // W12 §2 — the grid is no longer behind a toggle. It WAS the week's
+  // one entry surface hidden behind a button labelled "Weekraster",
+  // opening onto "0 assignments / no rows for this week yet" — a
+  // mechanic to understand before a single hour could be typed. It is
+  // the page now, and the table below it is the record.
   const { me } = useAuth();
   // On THIS page the employee is always the signed-in user. The server
   // enforces that independently (a non-manager naming someone else is a
@@ -131,7 +137,15 @@ export function MyHoursPage() {
   /** Sprint 179B §2 — the pickable jobs, purely so a stored
    *  `(source_type, source_id)` can be printed as words. */
   const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
+  /** W12 §5 — this person's standing agreements covering the shown
+   *  week, read for ONE purpose: which weekdays they are scheduled to
+   *  work. See `quietDays` below. */
+  const [patterns, setPatterns] = useState<ContractHoursPattern[]>([]);
   const [loadError, setLoadError] = useState("");
+  /** W12 §3 — "the grid holds hours that are not saved yet", reported
+   *  by the grid from its own event handlers. It is what makes paging
+   *  to another week ask first instead of discarding them silently. */
+  const [gridDirty, setGridDirty] = useState(false);
 
   // `loading` is DERIVED, not stored: it is true exactly while the week
   // in view is not the week last loaded. Storing it would mean a
@@ -155,6 +169,13 @@ export function MyHoursPage() {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<TimeEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  /** W12 §3 — the week the four navigation controls are asking for
+   *  while the "you have unsaved hours" dialog is up. A ref, not state:
+   *  nothing renders it, and holding it in state would re-render the
+   *  whole page on every blocked click. */
+  const leaveDialogRef = useRef<ConfirmDialogHandle>(null);
+  const pendingWeekRef = useRef<IsoWeek | null>(null);
 
   const weekDays = useMemo(() => isoWeekDays(week), [week]);
   const weekStartLabel = useMemo(
@@ -205,6 +226,40 @@ export function MyHoursPage() {
   // much be closed.
   useEffect(() => {
     let cancelled = false;
+    /* W12 §1 — fill this week from THIS person's standing agreements
+       before reading it, which is what the admin week wizard has done
+       since W10 and this page never did.
+
+       That asymmetry is the whole of the owner's first complaint: W10
+       wrote the fill, wired it into the wizard, and left the endpoint
+       manager-only — so a contracted worker opening their own week got
+       a blank sheet, and could not have filled it even if a button had
+       been offered. The endpoint now admits the person whose week it
+       is and fills theirs alone.
+
+       Idempotent and window-bounded server-side, and it never touches
+       a week that already holds a row, so calling it on every week
+       change re-fills nothing and overwrites nothing. A failure is not
+       fatal: the sheet then shows what is already there.
+
+       `employee` is sent EXPLICITLY, and it is this page's own user.
+       For a STAFF member the server ignores it and uses the caller
+       anyway — but a SUPER_ADMIN or COMPANY_ADMIN also has a "My
+       hours", and for them an omitted `employee` means "the whole
+       company", so opening their own page would have quietly
+       materialised every colleague's week. This page is about one
+       person's hours in every other respect and it is about one
+       person's hours here. */
+    (myEmployeeId === null
+      ? Promise.resolve()
+      : fillWeekFromContracts({
+          iso_year: week.isoYear,
+          iso_week: week.isoWeek,
+          employee: myEmployeeId,
+        })
+    )
+      .catch(() => undefined)
+      .then(() =>
     Promise.all([
       listTimeEntries({
         iso_year: week.isoYear,
@@ -224,11 +279,43 @@ export function MyHoursPage() {
         if (cancelled) return;
         setLoadError(getApiError(err));
         setLoadedWeekKey(weekKey);
+      }));
+    return () => {
+      cancelled = true;
+    };
+  }, [week, weekKey, myEmployeeId]);
+
+  /**
+   * W12 §5 — the weekly PATTERN behind the day columns.
+   *
+   * Read from the standing agreements in force during this week, and
+   * used for one thing: telling a day this person is scheduled to work
+   * apart from one they are not. The agreement is where that fact is
+   * already written, so nothing here is a second copy of it and no
+   * screen asks anybody which days they work.
+   *
+   * Non-fatal on failure and non-fatal on absence: a worker with no
+   * agreement has no stated pattern, and the fallback below invents
+   * none for them beyond the calendar's own weekend.
+   */
+  useEffect(() => {
+    if (myEmployeeId === null) return;
+    let cancelled = false;
+    listContractHoursPatterns({
+      employee: myEmployeeId,
+      valid_between_start: toDateString(isoWeekStart(week)),
+      valid_between_end: toDateString(isoWeekDays(week)[6]),
+    })
+      .then((rows) => {
+        if (!cancelled) setPatterns(rows);
+      })
+      .catch(() => {
+        /* non-fatal: the seven days then read as the plain week */
       });
     return () => {
       cancelled = true;
     };
-  }, [week, weekKey]);
+  }, [myEmployeeId, week]);
 
   // The form's pickers. Fetched once — they do not depend on the week.
   // Only ACTIVE hour types: an archived one is not offerable for a new
@@ -306,6 +393,95 @@ export function MyHoursPage() {
       hours: sumDecimalStrings(bucket.hours),
     }));
   }, [entries, t]);
+
+  /**
+   * W12 §5 — the days the grid prints quietly: the ones this person is
+   * not scheduled to work.
+   *
+   * Two sources, in order, and the order is the point:
+   *
+   *  1. a standing agreement in force this week — a weekday it puts at
+   *     zero is a day this person does not work, stated by the
+   *     agreement itself. Several agreements (two buildings, say) are
+   *     summed, so a Saturday worked at one of them is not quiet;
+   *  2. no agreement at all — then nobody has stated a pattern and this
+   *     page will not invent one. It falls back to the calendar's own
+   *     distinction, Saturday and Sunday, which is a fact about the
+   *     week rather than a claim about the person.
+   *
+   * Either way the columns stay editable. Covering a Saturday shift is
+   * precisely when an accurate hour matters.
+   */
+  const quietDays = useMemo(() => {
+    const dayFields = [
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+      "sunday",
+    ] as const;
+    if (patterns.length === 0) {
+      return [toDateString(weekDays[5]), toDateString(weekDays[6])];
+    }
+    return dayFields
+      .map((field, index) => ({ field, index }))
+      .filter(({ field }) =>
+        patterns.every((pattern) => Number(pattern[field]) === 0),
+      )
+      .map(({ index }) => toDateString(weekDays[index]));
+  }, [patterns, weekDays]);
+
+  /**
+   * W12 §2 — what the grid seeds an EMPTY week with.
+   *
+   * The page used to pass `[]`, which meant no seed, which meant no
+   * block, which meant no row — and `+ Add type` lives inside a block,
+   * so an empty week offered literally no way in through the grid. The
+   * owner's screenshot is that state: "0 assignments", "no rows for
+   * this week yet", and a fill control above a table with nothing to
+   * fill.
+   *
+   * One seat, and only while the week is genuinely empty: a week that
+   * already holds rows is seeded from those rows, and adding a blank
+   * "no building" line beside them would be a row nobody asked for.
+   */
+  const gridSeed = useMemo<(number | null)[]>(
+    () => (entries.length === 0 ? [null] : []),
+    [entries.length],
+  );
+
+  /**
+   * W12 §3 — every route to another week runs through here.
+   *
+   * The grid posts the week it is showing and is remounted per week, so
+   * paging away used to discard whatever was typed and not yet saved —
+   * which the grid warned about in a permanent sentence above the
+   * table. The warning is gone and the loss is asked about at the
+   * moment it would happen, which is the only moment it means anything.
+   */
+  function requestWeek(next: IsoWeek) {
+    if (gridDirty) {
+      pendingWeekRef.current = next;
+      leaveDialogRef.current?.open();
+      return;
+    }
+    setWeek(next);
+  }
+
+  function handleConfirmLeaveWeek() {
+    const next = pendingWeekRef.current;
+    pendingWeekRef.current = null;
+    leaveDialogRef.current?.close();
+    setGridDirty(false);
+    if (next) setWeek(next);
+  }
+
+  function handleCancelLeaveWeek() {
+    pendingWeekRef.current = null;
+    leaveDialogRef.current?.close();
+  }
 
   function openCreate(dateValue?: string) {
     setMode("create");
@@ -436,7 +612,7 @@ export function MyHoursPage() {
             type="button"
             className="btn btn-ghost btn-sm"
             data-testid="my-hours-prev-week"
-            onClick={() => setWeek((current) => shiftIsoWeek(current, -1))}
+            onClick={() => requestWeek(shiftIsoWeek(week, -1))}
           >
             {t("my_hours.previous_week")}
           </button>
@@ -452,7 +628,7 @@ export function MyHoursPage() {
             type="button"
             className="btn btn-ghost btn-sm"
             data-testid="my-hours-next-week"
-            onClick={() => setWeek((current) => shiftIsoWeek(current, 1))}
+            onClick={() => requestWeek(shiftIsoWeek(week, 1))}
           >
             {t("my_hours.next_week")}
           </button>
@@ -460,7 +636,7 @@ export function MyHoursPage() {
             type="button"
             className="btn btn-ghost btn-sm"
             data-testid="my-hours-this-week"
-            onClick={() => setWeek(currentIsoWeek())}
+            onClick={() => requestWeek(currentIsoWeek())}
           >
             {t("my_hours.this_week")}
           </button>
@@ -480,7 +656,7 @@ export function MyHoursPage() {
               value={toDateString(weekDays[0])}
               onChange={(event) => {
                 if (!event.target.value) return;
-                setWeek(isoWeekOf(fromDateString(event.target.value)));
+                requestWeek(isoWeekOf(fromDateString(event.target.value)));
               }}
             />
           </div>
@@ -521,65 +697,72 @@ export function MyHoursPage() {
         </div>
       ) : (
         <>
-        {/* Sprint 154 §M — the week grid, collapsed by default so the
-            page still opens on the list it always showed. `employee` is
-            omitted: a non-manager may only ever write their own hours,
-            and the server forces that regardless of what is sent. */}
+        {/* W12 §2 — the grid, open, and the page's primary surface.
+            No toggle, no head strip: the card above already says which
+            week this is and the header says whose hours these are, so
+            the strip's title and count restated both and then spent two
+            sentences teaching grid mechanics. `employee` is omitted: a
+            non-manager may only ever write their own hours, and the
+            server forces that regardless of what is sent.
+
+            Rendered only once we know WHO is signed in. Handed an
+            empty employee list the grid says "choose one or more
+            employees first", which is a sentence with no meaning on a
+            page that has no chooser. */}
+        {gridEmployees.length > 0 && (
         <div
           className="card"
           style={{ marginBottom: 16, padding: "16px 18px" }}
           data-testid="my-hours-week-grid-card"
         >
-          <div className="section-head" style={{ marginBottom: gridOpen ? 12 : 0 }}>
-            <div>
-              <div className="section-head-title">
-                {t("hours_week_grid.title")}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => setGridOpen((open) => !open)}
-              data-testid="my-hours-week-grid-toggle"
-            >
-              {gridOpen
-                ? t("hours_week_grid.close_grid")
-                : t("hours_week_grid.open_grid")}
-            </button>
-          </div>
-          {gridOpen && (
-            <HoursWeekGrid
-              /* Sprint 180 §2 — keyed by the week, for the same reason
-                 the week wizard is: the grid's cells are keyed by date
-                 and Save posts one week, so anything typed for the week
-                 you just paged away from was invisible AND unsaveable. */
-              key={weekKey}
-              week={week}
-              /* Sprint 155 §5 — the grid renders a block per employee it
-                 is given. Here that is exactly one person: this page
-                 writes only the signed-in user's own hours, so there is
-                 no selector and nothing to choose. Same component as the
-                 admin page, one member in the list. */
-              employees={gridEmployees}
-              hourTypes={hourTypes}
-              buildings={buildings}
-              entriesByEmployee={gridEntries}
-              /* Sprint 157 §1 — no setup modal on this page: it writes
-                 only the signed-in user's own hours, and there is
-                 nothing to choose. Rows come from the week's existing
-                 entries plus Add row, exactly as before. */
-              seedBuildingIds={[]}
-              /* Sprint 179B §2 — this page's rows come from whatever the
-                 week already holds, and those can be tagged to a job by
-                 the admin wizard, so the column belongs here too. */
-              sourceOptions={sourceOptions}
-              showSource
-              weekClosed={weekClosed}
-              onSaved={refresh}
-            />
-          )}
+          <HoursWeekGrid
+            /* Sprint 180 §2 — keyed by the week, for the same reason
+               the week wizard is: the grid's cells are keyed by date
+               and Save posts one week, so anything typed for the week
+               you just paged away from was invisible AND unsaveable. */
+            key={weekKey}
+            week={week}
+            /* Sprint 155 §5 — the grid renders a block per employee it
+               is given. Here that is exactly one person: this page
+               writes only the signed-in user's own hours, so there is
+               no selector and nothing to choose. Same component as the
+               admin page, one member in the list. */
+            employees={gridEmployees}
+            hourTypes={hourTypes}
+            buildings={buildings}
+            entriesByEmployee={gridEntries}
+            /* W12 §2 — one seat on an EMPTY week, so there is always a
+               row to type in and `+ Add type` is always reachable. See
+               `gridSeed`. */
+            seedBuildingIds={gridSeed}
+            /* Sprint 179B §2 — this page's rows come from whatever the
+               week already holds, and those can be tagged to a job by
+               the admin wizard, so the column belongs here too. */
+            sourceOptions={sourceOptions}
+            showSource
+            /* W12 §2 / §3 — both off for a worker: the head restated
+               the week and explained mechanics, and "fill this weekday
+               on every row" is an admin verb that needed a paragraph of
+               rules to be usable. */
+            showHead={false}
+            showApplyRow={false}
+            /* W12 §5 — the days this person is not scheduled for. */
+            quietDays={quietDays}
+            weekClosed={weekClosed}
+            onDirtyChange={setGridDirty}
+            onSaved={refresh}
+          />
         </div>
+        )}
 
+        {/* W12 §2 — the record of what is already filed, and ONLY when
+            there is something filed.
+            An empty week used to show it anyway, as a second empty
+            state ("no hours yet — add your first entry") pointing at a
+            second way to do what the grid above was already offering.
+            A worker opening a blank week now has exactly one surface
+            and one verb. */}
+        {entries.length > 0 && (
         <div className="card" data-testid="my-hours-list">
           <BoundedList
             size="lg"
@@ -587,17 +770,6 @@ export function MyHoursPage() {
             ariaLabel={t("my_hours.list_aria")}
             testIdPrefix="my-hours"
             className="table-wrap"
-            emptyState={
-              <div
-                style={{ padding: "32px 24px", textAlign: "center" }}
-                data-testid="my-hours-empty"
-              >
-                <h3 className="empty-title" style={{ marginBottom: 8 }}>{t("my_hours.empty_title")}</h3>
-                <p className="muted" style={{ margin: 0 }}>
-                  {t("my_hours.empty_description")}
-                </p>
-              </div>
-            }
           >
             <table className="data-table">
               <thead>
@@ -671,9 +843,12 @@ export function MyHoursPage() {
             </table>
           </BoundedList>
         </div>
+        )}
         </>
       )}
 
+      {/* W12 §2 — totals of nothing are not a total. */}
+      {entries.length > 0 && (
       <section
         className="card"
         style={{ marginTop: 16, padding: "18px 22px" }}
@@ -708,6 +883,7 @@ export function MyHoursPage() {
           ))}
         </div>
       </section>
+      )}
 
       {mode !== null && (
         <div
@@ -955,6 +1131,19 @@ export function MyHoursPage() {
       {/* Unconditionally rendered and ref-driven (CLAUDE.md §3): a
           native <dialog> wrapped in a condition mounts INVISIBLE and the
           trigger looks dead. */}
+      {/* W12 §3 — asked at the moment work would be lost, in place of a
+          sentence that sat above the table permanently warning about
+          it. Ref-driven and unconditional, like its neighbour. */}
+      <ConfirmDialog
+        ref={leaveDialogRef}
+        title={t("my_hours.leave_week_title")}
+        body={t("my_hours.leave_week_body")}
+        confirmLabel={t("my_hours.leave_week_confirm")}
+        onConfirm={handleConfirmLeaveWeek}
+        onCancel={handleCancelLeaveWeek}
+        destructive
+      />
+
       <ConfirmDialog
         ref={deleteDialogRef}
         title={t("my_hours.delete_confirm_title")}

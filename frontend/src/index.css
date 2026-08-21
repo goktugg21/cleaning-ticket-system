@@ -13566,3 +13566,37 @@ table.pva-table { min-width: 0; }
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ==================================================================
+   W12 §5 — the days somebody is NOT scheduled to work.
+
+   Saturday looked exactly like Tuesday: same header weight, same white
+   box, same invitation. For a worker whose agreement puts zero hours on
+   a weekday, that box is asking a question with a known answer.
+
+   Marked, never removed. A column that vanished on Saturday would be
+   unusable on the Saturday somebody actually covers a shift — which is
+   the day an accurate hour matters most. So the header drops to the
+   faint text colour and the box loses its white ground and its border
+   weight; it still focuses, still types, still saves.
+
+   WHICH days these are is not decided here. `MyHoursPage` reads it off
+   the standing agreement's own seven columns and hands the grid a list
+   of dates (`quietDays`), so the pattern has exactly one owner.
+   ================================================================== */
+.hours-week-day-quiet {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+.hours-week-cell-quiet {
+  background: var(--surface-2);
+  border-color: transparent;
+  color: var(--text-faint);
+}
+.hours-week-cell-quiet:focus {
+  /* On focus it is an ordinary field again: the quiet treatment says
+     "not expected", not "not allowed". */
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}

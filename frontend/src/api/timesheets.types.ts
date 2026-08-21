@@ -243,3 +243,24 @@ export interface TimesheetSummary {
   by_building: TimesheetSummaryBuildingBucket[];
   by_week: TimesheetSummaryWeekBucket[];
 }
+
+/**
+ * W12 §5 — the WEEKLY PATTERN half of a standing agreement.
+ *
+ * Deliberately not the whole `ContractHours` row: **My hours** reads it
+ * for exactly one purpose — which weekdays this person is scheduled to
+ * work — and typing the rest here would invite a second screen to grow
+ * out of the same call. The admin tab that edits the full row keeps its
+ * own untyped read; this is the worker-side slice.
+ */
+export interface ContractHoursPattern {
+  id: number;
+  employee: number;
+  monday: string;
+  tuesday: string;
+  wednesday: string;
+  thursday: string;
+  friday: string;
+  saturday: string;
+  sunday: string;
+}

@@ -149,6 +149,9 @@ interface GridRow {
  *  does not hand this component a fresh array on every render. */
 const NO_SOURCE_OPTIONS: HourSourceOption[] = [];
 
+/** The same stable-default trick for `quietDays` (W12 §5). */
+const NO_QUIET_DAYS: string[] = [];
+
 function rowKey(
   hourTypeId: number | "",
   buildingId: number | "",
@@ -166,6 +169,28 @@ function rowId(employeeId: number, key: string) {
 
 function cellKey(rowIdValue: string, day: string) {
   return `${rowIdValue}|${day}`;
+}
+
+/**
+ * W12 §4 — is this something a person could have typed while typing a
+ * NUMBER OF HOURS?
+ *
+ * The cells are `type="text"` because `type="number"` refuses a comma
+ * on a Dutch keyboard and silently reports an empty string for
+ * anything it dislikes, which loses a half-typed value. The price of
+ * that choice was that the box accepted anything at all: the owner's
+ * screenshot has the letter "g" sitting in an hours cell, saved-looking
+ * and counted as zero by `parseHours` below.
+ *
+ * So the field rejects the KEYSTROKE instead. Rejecting means the state
+ * is not updated, so the character never appears — no error message to
+ * read, no value to go back and correct. Two integer digits (a day has
+ * 24 hours), one separator of either kind, two decimals.
+ */
+const HOURS_INPUT = /^\d{0,2}([.,]\d{0,2})?$/;
+
+function acceptsHoursInput(raw: string): boolean {
+  return HOURS_INPUT.test(raw);
 }
 
 function parseHours(raw: string): number {
@@ -193,6 +218,9 @@ export function HoursWeekGrid({
   seedSources = [],
   sourceOptions = NO_SOURCE_OPTIONS,
   showSource = false,
+  showHead = true,
+  showApplyRow = true,
+  quietDays = NO_QUIET_DAYS,
   weekClosed,
   onSaved,
   onCancel,
@@ -236,6 +264,33 @@ export function HoursWeekGrid({
    *  bulk dialog leaves this off rather than render a column that is
    *  "—" on every row for a concept that does not apply to it. */
   showSource?: boolean;
+  /** W12 §2 — whether the grid prints its own title, row count and
+   *  hints above the table.
+   *
+   *  On the admin week wizard it is the only heading there is. On **My
+   *  hours** the page header two centimetres above already names the
+   *  week and the person, so the strip restated it and then spent two
+   *  sentences explaining grid mechanics to somebody who came to type
+   *  five numbers. */
+  showHead?: boolean;
+  /** W12 §3 — whether the fill-a-whole-weekday row is offered.
+   *
+   *  "Put 8 on Tuesday for every row" is an ADMIN verb: it earns its
+   *  place above a crew of nine and it needs a rule stated
+   *  (`apply_all_hint`) to be usable at all. A worker filling their own
+   *  week has one or two rows in front of them, for which the verb is
+   *  "type 8 twice" — so on that page the control is absent rather than
+   *  present-and-explained. */
+  showApplyRow?: boolean;
+  /** W12 §5 — the days this person is NOT scheduled to work, as
+   *  "YYYY-MM-DD" keys.
+   *
+   *  They stay typeable: covering a Saturday shift is exactly when an
+   *  accurate hour matters. They simply stop looking like the other
+   *  five. The caller decides which days these are, because the fact
+   *  belongs to the caller's data (`ContractHours`' seven columns), not
+   *  to a table that renders whatever week it is handed. */
+  quietDays?: string[];
   /** The hour types chosen in the setup. Empty falls back to the first
    *  active type. */
   weekClosed: boolean;
@@ -288,6 +343,8 @@ export function HoursWeekGrid({
 
   const days = useMemo(() => isoWeekDays(week), [week]);
   const dayKeys = useMemo(() => days.map(toDateString), [days]);
+  /** W12 §5 — membership test for the day columns, built once. */
+  const quiet = useMemo(() => new Set(quietDays), [quietDays]);
 
   /**
    * Every row of the table, DERIVED from the existing entries plus the
@@ -387,6 +444,9 @@ export function HoursWeekGrid({
     edits[cellKey(row.id, dayKey)] ?? row.cells[dayKey] ?? "";
 
   const setCell = (row: GridRow, dayKey: string, value: string) => {
+    // W12 §4 — a rejected keystroke leaves the state alone, so the
+    // character simply never lands. See `acceptsHoursInput`.
+    if (!acceptsHoursInput(value)) return;
     setEdits((current) => ({ ...current, [cellKey(row.id, dayKey)]: value }));
     // Sprint 180 §2 — told, never derived in an effect. Every path that
     // can create an unsaved value says so from its own event handler,
@@ -526,6 +586,10 @@ export function HoursWeekGrid({
    * a week meant watching your own work disappear.
    */
   function applyToAllDay(dayKey: string, value: string) {
+    // W12 §4 — the same field rule as a data cell: this box writes into
+    // the same cells and must not be the way "g" gets into seven of
+    // them at once.
+    if (!acceptsHoursInput(value)) return;
     // Kept until the dialog closes or the operator clears it. Applying
     // is still immediate — this is a record of what was filled, not a
     // pending edit waiting on a commit.
@@ -760,6 +824,7 @@ export function HoursWeekGrid({
           left blank is simply not written — rather than borrowing the
           reference's sentence about seeding one hour on Monday, which
           is not what ours does. */}
+      {showHead && (
       <div className="hours-week-table-head">
         <span className="hours-week-table-title">
           {t("hours_week_grid.table_title")}
@@ -780,6 +845,7 @@ export function HoursWeekGrid({
           {t("hours_week_grid.week_switch_hint")}
         </span>
       </div>
+      )}
 
       <div className="table-wrap hours-week-table-wrap">
         <table className="data-table data-table-dense hours-week-grid-table">
@@ -792,7 +858,19 @@ export function HoursWeekGrid({
               {showSource && <th>{t("hours_week_grid.job")}</th>}
               <th>{t("hours_week_grid.hour_type")}</th>
               {days.map((day, index) => (
-                <th key={dayKeys[index]} style={{ textAlign: "right" }}>
+                <th
+                  key={dayKeys[index]}
+                  style={{ textAlign: "right" }}
+                  /* W12 §5 — a day this person is not scheduled for is
+                     printed quieter than the five they are. The column
+                     still accepts hours; it just stops claiming to
+                     expect them. */
+                  className={
+                    quiet.has(dayKeys[index])
+                      ? "hours-week-day-quiet"
+                      : undefined
+                  }
+                >
                   {dayLabel(day)}
                 </th>
               ))}
@@ -801,6 +879,7 @@ export function HoursWeekGrid({
               </th>
               <th aria-label={t("hours_week_grid.remove_row")} />
             </tr>
+            {showApplyRow && (
             <tr
               className="hours-week-apply-row"
               data-testid="hours-week-apply-row"
@@ -846,6 +925,7 @@ export function HoursWeekGrid({
               <th />
               <th />
             </tr>
+            )}
           </thead>
           <tbody>
             {blocks.length === 0 && (
@@ -904,7 +984,11 @@ export function HoursWeekGrid({
                     {dayKeys.map((dayKey, dayIndex) => (
                       <td key={dayKey} style={{ textAlign: "right" }}>
                         <input
-                          className="field-input hours-week-grid-cell"
+                          className={
+                            quiet.has(dayKey)
+                              ? "field-input hours-week-grid-cell hours-week-cell-quiet"
+                              : "field-input hours-week-grid-cell"
+                          }
                           type="text"
                           inputMode="decimal"
                           value={cellValue(row, dayKey)}
@@ -932,8 +1016,17 @@ export function HoursWeekGrid({
                           that exists on the server is cleared by zeroing
                           its cells, not by removing it from the grid —
                           removing it here would look like a delete that
-                          never happened. */}
-                      {row.added && (
+                          never happened.
+
+                          W12 — `manual`, not `added`. `removeRow` drops
+                          a row out of `extraRows`, and only a row from
+                          `+ Add type` is ever IN `extraRows`: a SEEDED
+                          row is derived from `seedBuildingIds` on every
+                          render, so its Remove button removed nothing
+                          and re-rendered the same row. A dead control,
+                          and on My hours it would have sat on the one
+                          row an empty week has. */}
+                      {row.manual && (
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
