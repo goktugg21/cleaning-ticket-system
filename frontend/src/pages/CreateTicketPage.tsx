@@ -136,7 +136,22 @@ export function CreateTicketPage() {
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState<CreateTicketForm>(EMPTY_FORM);
+  /** W11 — the kind of ticket, when the door already asked.
+   *
+   *  `/new` asks "what is this about" in plain words and lands here with
+   *  the answer in `?type=`. Reading it means the form does not put the
+   *  same question a second time in the vocabulary the first one avoided.
+   *
+   *  Validated against the form's own option list, so a hand-typed or
+   *  stale value falls back to the default rather than submitting a type
+   *  the backend would reject. Read once, at mount: the select owns the
+   *  value afterwards. */
+  const [form, setForm] = useState<CreateTicketForm>(() => {
+    const raw = new URLSearchParams(window.location.search).get("type");
+    return raw && (TICKET_TYPE_VALUES as string[]).includes(raw)
+      ? { ...EMPTY_FORM, type: raw }
+      : EMPTY_FORM;
+  });
   /** Sprint 185 E §1 — the company's kinds of work, for the picker.
    *  Only the ACTIVE ones: an archived category stays on the meldingen
    *  that carry it and is not offerable for new ones. */

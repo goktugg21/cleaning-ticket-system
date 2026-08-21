@@ -516,6 +516,18 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.dashboard")}
               </NavLink>
+              {/* W11 — ONE DOOR, at the top, above every list.
+                  It asks what happened and picks the record type from
+                  the answers. The specialised entries further down this
+                  menu are untouched and still go straight to their own
+                  forms, for people who already know which one they
+                  want. */}
+              <NavLink to="/new" className={navClass} data-testid="sidebar-new">
+                <span className="nav-icon">
+                  <PlusCircle size={16} strokeWidth={2} />
+                </span>
+                {t("nav.new_work")}
+              </NavLink>
               {/* RF-3 (Ramazan 2026-06-23) — providers/staff open a
                   top-level Tickets LIST (New Ticket lives inside it),
                   mirroring the Extra Work entry, instead of the old bare

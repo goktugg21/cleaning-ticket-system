@@ -13367,3 +13367,96 @@ table.pva-table { min-width: 0; }
   align-items: flex-start;
   margin-top: var(--space-2);
 }
+
+/* ===================================================================
+   W11 — the one door. `pages/NewWorkPage.tsx`.
+   APPEND-ONLY: nothing above this line is touched.
+   =================================================================== */
+.new-work-card {
+  padding: 22px 24px 24px;
+  max-width: 720px;
+}
+/* A question already answered collapses to one line: what was asked,
+   what was said, and the way back. It stays on screen because the next
+   question only makes sense in the light of it. */
+.new-work-answered {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.new-work-answered-q {
+  font-size: var(--font-sm, 13.5px);
+  color: var(--text-muted);
+}
+.new-work-answered-a {
+  font-family: var(--f-head);
+  font-weight: 800;
+  color: var(--text);
+  margin-right: auto;
+}
+.new-work-question {
+  margin: 0 0 14px;
+  font-family: var(--f-head);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.new-work-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* One answer per row rather than a grid of tiles: these are sentences,
+   not options in a toolbar, and a person reads them top to bottom. */
+.new-work-answer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.new-work-answer:hover {
+  border-color: var(--green);
+  background: var(--green-faint);
+}
+.new-work-answer-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.new-work-answer-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.new-work-answer-label {
+  font-family: var(--f-head);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+}
+/* The line that does the work. "Extra work request" and "Request a
+   quote" are not self-describing a month after you last used them;
+   "outside the agreement, and you want to know the cost first" is. */
+.new-work-answer-desc {
+  font-size: var(--font-sm, 13.5px);
+  line-height: 1.45;
+  color: var(--text-muted);
+}

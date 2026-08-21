@@ -24,6 +24,7 @@ import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { CreateExtraWorkPage } from "./pages/CreateExtraWorkPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
+import { NewWorkPage } from "./pages/NewWorkPage";
 import { AgendaPage } from "./pages/AgendaPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { MyHoursPage } from "./pages/MyHoursPage";
@@ -241,6 +242,20 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <DashboardPage key="chargeable-work" variant="chargeable-work" />
+              </ProtectedRoute>
+            }
+          />
+          {/* W11 — ONE DOOR. Asks what happened and picks the record
+              type from the answers, then hands off to one of the create
+              routes below, all of which are unchanged and still work as
+              deep links. `ProtectedRoute` only: which options the page
+              offers is a role question it answers itself, and the route
+              each answer lands on keeps its own guard. */}
+          <Route
+            path="/new"
+            element={
+              <ProtectedRoute>
+                <NewWorkPage />
               </ProtectedRoute>
             }
           />
