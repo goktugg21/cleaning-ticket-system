@@ -68,7 +68,6 @@ function toInputTime(value: string | null): string {
 }
 
 interface RowState {
-  title: string;
   /** "" is a real value: no time given. Not midnight. */
   time: string;
   /** "" is a real value: nobody was asked. Not "at handover". */
@@ -77,7 +76,6 @@ interface RowState {
 
 function seedRow(member: ExtraWorkGroupMember): RowState {
   return {
-    title: member.title,
     time: toInputTime(member.scheduled_time),
     condition: member.condition ?? "",
   };
@@ -108,7 +106,6 @@ export function SeriesEditorDialog({
   // option rather than a set of buttons.
   const [allTime, setAllTime] = useState("");
   const [allCondition, setAllCondition] = useState<"" | ExtraWorkCondition>("");
-  const [regenerate, setRegenerate] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -167,10 +164,6 @@ export function SeriesEditorDialog({
       const edit: ExtraWorkGroupMemberEdit = { extra_work: id };
       let touched = false;
 
-      if (row.title !== seed.title) {
-        edit.title = row.title;
-        touched = true;
-      }
       if (row.time !== seed.time) {
         edit.scheduled_time = row.time === "" ? null : row.time;
         touched = true;
@@ -179,11 +172,18 @@ export function SeriesEditorDialog({
         edit.condition = row.condition === "" ? null : row.condition;
         touched = true;
       }
-      if (regenerate) {
+      // W12 FIX 3 — the title is DERIVED, so nobody is asked about it.
+      //
+      // It used to be a text box per row plus a "Rebuild titles from
+      // date, time and moment" switch with its own paragraph explaining
+      // it. A value recomposed from three stored fields has one owner —
+      // those fields — and asking a human to authorise the recomposition
+      // is asking them to keep a derived value in sync by hand. A row
+      // whose time or moment moved gets its title rebuilt, always.
+      if (touched) {
         edit.regenerate_title = true;
-        touched = true;
+        edits.push(edit);
       }
-      if (touched) edits.push(edit);
     }
     return edits;
   }
@@ -253,9 +253,6 @@ export function SeriesEditorDialog({
           <div className="ew-plan-section-title">
             {t("series.apply_all_title")}
           </div>
-          <p className="muted small ew-plan-section-hint">
-            {t("series.apply_all_hint")}
-          </p>
           <div className="ew-bulk-plan-fill">
             <label className="field">
               <span className="muted small">{t("series.col_time")}</span>
@@ -312,7 +309,6 @@ export function SeriesEditorDialog({
               <thead>
                 <tr>
                   <th>{t("series.col_when")}</th>
-                  <th>{t("series.col_title")}</th>
                   <th>{t("series.col_time")}</th>
                   <th>{t("series.col_condition")}</th>
                   <th>{t("series.col_status")}</th>
@@ -330,18 +326,6 @@ export function SeriesEditorDialog({
                     >
                       <td className="ew-series-when">
                         {member.preferred_date ?? "-"}
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          className="field-input"
-                          value={row.title}
-                          aria-label={`${t("series.col_title")} ${member.extra_work}`}
-                          onChange={(e) =>
-                            patch(member.extra_work, { title: e.target.value })
-                          }
-                          data-testid="extra-work-series-title"
-                        />
                       </td>
                       <td>
                         <input
@@ -399,28 +383,6 @@ export function SeriesEditorDialog({
               </tbody>
             </table>
           </BoundedList>
-        </div>
-
-        <div className="ew-plan-section">
-          <label className="ew-plan-switch">
-            <input
-              type="checkbox"
-              className="checkbox-input"
-              checked={regenerate}
-              onChange={(e) => setRegenerate(e.target.checked)}
-              data-testid="extra-work-series-regenerate"
-            />
-            <span>{t("series.regenerate_label")}</span>
-          </label>
-          <p className="muted small ew-plan-section-hint">
-            {t("series.regenerate_hint")}
-          </p>
-          {/* The controls that are deliberately NOT here, named, with
-              where they live. An absent control without an explanation
-              reads as a missing feature. */}
-          <p className="muted small ew-plan-section-hint">
-            {t("series.elsewhere_hint")}
-          </p>
         </div>
 
         <div className="ew-plan-actions">

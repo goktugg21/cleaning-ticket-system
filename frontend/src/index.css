@@ -12935,9 +12935,24 @@ a.wp-card-title:hover { text-decoration: underline; }
   text-transform: uppercase;
   color: var(--text-muted);
 }
+/* W12 FIX 1 — Details and Classification share ONE column structure.
+
+   MEASURED. `auto-fit` sizes tracks from the container and then
+   COLLAPSES the ones no item landed in, so the number of columns depends
+   on how many facts a block happens to hold. Dates holds four,
+   Classification holds five, and from 1600px up that is two different
+   grids stacked on each other:
+
+     1600px  dates   1, 313, 624, 936
+             class   1, 250, 499, 749, 998
+
+   Nothing below the first column lined up, which is exactly what the
+   owner reported. `auto-fill` keeps the empty track instead of
+   collapsing it, so both blocks get the same tracks at the same widths
+   whatever they contain, and a reader's eye travels straight down. */
 .ew-facts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--space-4) var(--space-6);
 }
 /* The label carries WHOSE fact this is, so it must be readable rather

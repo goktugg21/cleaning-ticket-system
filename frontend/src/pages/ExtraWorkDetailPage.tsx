@@ -643,6 +643,16 @@ function DatesEditor({
   }
 
   return (
+    /* W12 FIX 2 — this editor edits OUR dates, and only ours.
+       It used to carry a third date: the customer's preferred date,
+       read-only, inside a box for editing. Three dates in one small box,
+       one of them not editable and not ours, and no label saying whose
+       any of them were. The customer's date is theirs, it is already in
+       the Dates block directly above this, and one fact has one place.
+       What is left is the two commitments we make, wearing the SAME
+       labels the values above them wear -- the same keys, so the field
+       you edit cannot come to be called something else than the value
+       you just read. */
     <div className="form-section" data-testid="extra-work-dates-editor">
       <div
         style={{
@@ -655,7 +665,7 @@ function DatesEditor({
       >
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span className="muted small">
-            {t("detail.field_planned_end_date")}
+            {t("detail.date_planned_end")}
           </span>
           <input
             type="date"
@@ -666,7 +676,7 @@ function DatesEditor({
           />
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span className="muted small">{t("detail.deadline")}</span>
+          <span className="muted small">{t("detail.date_deadline")}</span>
           <input
             type="date"
             className="field-input"
@@ -692,15 +702,6 @@ function DatesEditor({
         >
           {t("common:cancel")}
         </button>
-      </div>
-      {/* The customer's wish, restated beside the field that answers it —
-          §3 asks for it prominently wherever a deadline is set. */}
-      <div className="muted small" style={{ marginTop: 6 }}>
-        {t("detail.dates_preferred_hint", {
-          date: ew.preferred_date
-            ? formatDate(ew.preferred_date)
-            : t("detail.empty_dash"),
-        })}
       </div>
       {error && (
         <div className="alert-error" style={{ marginTop: 6 }}>
