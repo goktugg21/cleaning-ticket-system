@@ -9481,6 +9481,33 @@ a.attn-row:hover {
 .workflow-body .status-btn[data-tone="correct"] .status-btn-arrow {
   color: var(--state-waiting);
 }
+/* W11 §1 — the correction-actions disclosure. A quiet text toggle, not
+   a button: opening a drawer is not an action on the ticket, and giving
+   it a button's weight would put it in competition with the moves above
+   it. The list it opens is not built until it opens. */
+.workflow-corrections {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.workflow-corrections-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-family: var(--f-head);
+  font-size: var(--font-xs);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.workflow-corrections-toggle:hover {
+  color: var(--state-waiting);
+}
 .workflow-secondary-list {
   margin-top: 6px;
   padding-top: 8px;

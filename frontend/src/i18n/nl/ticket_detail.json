@@ -166,11 +166,11 @@
   "assigned_staff_admin_banner_removed": "{{name}} verwijderd uit toegewezen medewerkers.",
   "override_modal_title": "Klantbeslissing overschrijven",
   "override_modal_prompt": "Waarom overschrijf je de beslissing van de klant? Dit wordt vastgelegd in het auditlog.",
-  "override_inline_helper": "Dit overschrijft de beslissing van de klant en wordt vastgelegd in de statusgeschiedenis.",
   "override_modal_reason_label": "Reden",
   "override_modal_reason_required": "Een reden is verplicht.",
   "override_modal_submit_approve": "Bevestig overschrijven → Klant goedgekeurd",
   "override_modal_submit_reject": "Bevestig overschrijven → Klant afgewezen",
+  "override_modal_submit_generic": "Bevestig overschrijven → {{status}}",
   "override_modal_cancel": "Annuleren",
   "timeline_override_badge": "Overrule",
   "timeline_override_reason": "Reden: {{reason}}",
@@ -269,6 +269,8 @@
   "detail.my_planned_no_day": "Nog geen dag",
   "detail.my_planned_hours_value": "{{hours}} uur",
   "workflow_correction_heading": "Laatste stap ongedaan maken",
+  "workflow_corrections_show": "Correctieacties tonen",
+  "workflow_corrections_hide": "Correctieacties verbergen",
   "workflow_move_back_to": "Terugzetten naar {{status}}",
   "workflow_upcoming": "Gepland - start op {{when}}."
 }

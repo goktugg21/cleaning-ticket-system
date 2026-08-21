@@ -166,11 +166,11 @@
   "assigned_staff_admin_banner_removed": "{{name}} removed from assigned staff.",
   "override_modal_title": "Override customer decision",
   "override_modal_prompt": "Why are you overriding the customer's decision? This will be recorded in the audit log.",
-  "override_inline_helper": "This overrides the customer's decision and is recorded in the status history.",
   "override_modal_reason_label": "Reason",
   "override_modal_reason_required": "A reason is required.",
   "override_modal_submit_approve": "Confirm override → Customer approved",
   "override_modal_submit_reject": "Confirm override → Customer rejected",
+  "override_modal_submit_generic": "Confirm override → {{status}}",
   "override_modal_cancel": "Cancel",
   "timeline_override_badge": "Override",
   "timeline_override_reason": "Reason: {{reason}}",
@@ -269,6 +269,8 @@
   "detail.my_planned_no_day": "No day yet",
   "detail.my_planned_hours_value": "{{hours}} h",
   "workflow_correction_heading": "Undo the last step",
+  "workflow_corrections_show": "Show correction actions",
+  "workflow_corrections_hide": "Hide correction actions",
   "workflow_move_back_to": "Move back to {{status}}",
   "workflow_upcoming": "Upcoming - planned to start {{when}}."
 }
