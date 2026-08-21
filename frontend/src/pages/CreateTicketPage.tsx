@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -15,8 +15,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { listAllBuildings, listAllCustomers } from "../api/admin";
 import { api, getApiError } from "../api/client";
-import type { Building, Customer, WorkCategory } from "../api/types";
-import { listWorkCategories } from "../api/tickets";
+import type { Building, Customer, TicketCategory } from "../api/types";
+import { listTicketCategories } from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
 import { isCustomerUser } from "../auth/permissions";
 
@@ -24,7 +24,6 @@ interface CreateTicketForm {
   title: string;
   description: string;
   room_label: string;
-  type: string;
   priority: string;
   building: string;
   customer: string;
@@ -34,20 +33,11 @@ interface CreateTicketForm {
    *  into `ExtraWorkRequest.preferred_date` if this melding is later
    *  converted, so a date somebody typed does not vanish. */
   customer_wanted_date: string;
-  /** Sprint 185 E §1 — the kind of WORK, from the company's own catalog.
+  /** W13 — THE classification, and the only one this form asks for.
    *  A string because it is a `<select>` value; "" means "not yet
    *  classified", which is a legitimate answer at intake. */
   category: string;
 }
-
-type TicketTypeValue =
-  | "REPORT"
-  | "COMPLAINT"
-  | "REQUEST"
-  | "SUGGESTION"
-  | "QUOTE_REQUEST"
-  // Sprint 143 §2 — the catch-all operators asked for.
-  | "OTHER";
 
 type PriorityValue = "NORMAL" | "HIGH" | "URGENT";
 
@@ -57,24 +47,6 @@ interface PriorityCard {
   helperKey: string;
   icon: typeof Info;
 }
-
-const TICKET_TYPE_VALUES: TicketTypeValue[] = [
-  "REPORT",
-  "COMPLAINT",
-  "REQUEST",
-  "SUGGESTION",
-  "QUOTE_REQUEST",
-  "OTHER",
-];
-
-const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
-  REPORT: "type_report",
-  COMPLAINT: "type_complaint",
-  REQUEST: "type_request",
-  SUGGESTION: "type_suggestion",
-  QUOTE_REQUEST: "type_quote_request",
-  OTHER: "type_other",
-};
 
 const PRIORITY_CARDS: PriorityCard[] = [
   {
@@ -101,7 +73,6 @@ const EMPTY_FORM: CreateTicketForm = {
   title: "",
   description: "",
   room_label: "",
-  type: "REPORT",
   priority: "NORMAL",
   building: "",
   customer: "",
@@ -146,16 +117,26 @@ export function CreateTicketPage() {
    *  stale value falls back to the default rather than submitting a type
    *  the backend would reject. Read once, at mount: the select owns the
    *  value afterwards. */
-  const [form, setForm] = useState<CreateTicketForm>(() => {
-    const raw = new URLSearchParams(window.location.search).get("type");
-    return raw && (TICKET_TYPE_VALUES as string[]).includes(raw)
-      ? { ...EMPTY_FORM, type: raw }
-      : EMPTY_FORM;
-  });
-  /** Sprint 185 E §1 — the company's kinds of work, for the picker.
-   *  Only the ACTIVE ones: an archived category stays on the meldingen
-   *  that carry it and is not offerable for new ones. */
-  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+  const [form, setForm] = useState<CreateTicketForm>(EMPTY_FORM);
+  /** W13 — the company's categories, and the only classification this
+   *  form asks for.
+   *
+   *  Two narrowings, both server-side: ACTIVE (an archived category
+   *  stays on the meldingen carrying it and is not offerable for new
+   *  ones) and AVAILABLE AT INTAKE (§4 — "Ongegrond" is a verdict, so it
+   *  is absent here rather than present and disabled). */
+  const [categories, setCategories] = useState<TicketCategory[]>([]);
+  /** W13 — what `/new` already asked.
+   *
+   *  `NewWorkPage` asks "what is this about" in plain words and lands
+   *  here with the answer in `?category=<slug>`. Reading it means this
+   *  form does not put the same question a second time — a slug rather
+   *  than an id because the id differs per company and the slug does
+   *  not. Applied once the catalog has loaded, since a slug can only be
+   *  resolved against it. */
+  const preselectSlug = useRef(
+    new URLSearchParams(window.location.search).get("category"),
+  );
   const [stagedAttachments, setStagedAttachments] = useState<File[]>([]);
   // Set only when the ticket was created but one or more attachments
   // failed to upload. The ticket is never rolled back, so we hold the id
@@ -259,15 +240,40 @@ export function CreateTicketPage() {
     }
   }, [form.building, form.customer, customers]);
 
-  // Sprint 185 E §1 — the pickable categories, loaded once for provider
-  // operators. Non-fatal: a catalog that would not load must never stop
-  // somebody opening a melding.
+  // W13 — the pickable categories, for EVERY author.
+  //
+  // The customer half of this is the change: the old kind-of-work
+  // catalog was provider-only because knowing which trade a job belongs
+  // to is a provider's job. Knowing whether you are making a complaint,
+  // a request or a compliment is not — it is the one thing the person
+  // raising it knows best, and it is exactly what the owner's father
+  // went looking for and could not find.
+  //
+  // Non-fatal: a catalog that would not load must never stop somebody
+  // opening a melding. The field simply does not render and the melding
+  // is filed uncategorised, which is a state the system already has.
   useEffect(() => {
-    if (isCustomer) return;
     let cancelled = false;
-    listWorkCategories({ is_active: "true" })
+    listTicketCategories({
+      is_active: "true",
+      available_at_intake: "true",
+    })
       .then((rows) => {
-        if (!cancelled) setWorkCategories(rows);
+        if (cancelled) return;
+        setCategories(rows);
+        // Seeded inside the .then() and only once, never in an effect
+        // body: the select owns the value from here on.
+        const slug = preselectSlug.current;
+        preselectSlug.current = null;
+        if (!slug) return;
+        const match = rows.find((row) => row.slug === slug);
+        if (match) {
+          setForm((current) =>
+            current.category === ""
+              ? { ...current, category: String(match.id) }
+              : current,
+          );
+        }
       })
       .catch(() => {
         /* non-fatal: the melding can be opened uncategorised */
@@ -275,7 +281,7 @@ export function CreateTicketPage() {
     return () => {
       cancelled = true;
     };
-  }, [isCustomer]);
+  }, []);
 
   useEffect(() => {
     if (!form.customer) return;
@@ -353,7 +359,11 @@ export function CreateTicketPage() {
         title: form.title.trim(),
         description: form.description.trim(),
         room_label: form.room_label.trim(),
-        type: form.type,
+        // W13 — `type` is NOT sent. It is the superseded enum; the
+        // server derives it from the category (`legacy_type`) so the
+        // pre-existing tickets-by-type report keeps meaning something,
+        // and deriving it in ONE place server-side is what stops this
+        // form and that report disagreeing.
         priority: form.priority,
         building: Number(form.building),
         customer: Number(form.customer),
@@ -361,9 +371,9 @@ export function CreateTicketPage() {
         // distinguishable from a date they chose — so it is sent as
         // null rather than "".
         customer_wanted_date: form.customer_wanted_date || null,
-        // Sprint 185 E §1 — omitted entirely when unset: the serializer
-        // treats absence as "no category", and sending null would be the
-        // same thing said less clearly.
+        // Omitted entirely when unset: the serializer treats absence as
+        // "no category", and sending null would be the same thing said
+        // less clearly.
         ...(form.category ? { category: Number(form.category) } : {}),
       });
 
@@ -501,41 +511,21 @@ export function CreateTicketPage() {
               </div>
             </div>
             <div className="form-2col">
-              {!isCustomer && (
-                <div className="field">
-                  <label className="field-label" htmlFor="f-type">
-                    {t("field_category_label")}
-                  </label>
-                  <select
-                    id="f-type"
-                    className="field-select"
-                    value={form.type}
-                    onChange={(event) => update("type", event.target.value)}
-                  >
-                    {TICKET_TYPE_VALUES.map((value) => (
-                      <option key={value} value={value}>
-                        {t(TICKET_TYPE_KEYS[value])}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {/* Sprint 185 E §1 — WHAT KIND OF WORK, beside the field
-                  above it that says what kind of MESSAGE this is. Two
-                  classifications, two questions; the label above reads
-                  "category" and holds the message type, which is exactly
-                  the confusion this catalog exists to end.
+              {/* W13 — ONE question, in the words the owner uses.
+                  It replaces two fields whose labels both read
+                  "category": the `TicketType` enum (labelled Category,
+                  holding the kind of message) and the Sprint 185
+                  work-category catalog (labelled Work category, holding
+                  the kind of work). A reader looking for "is this a
+                  complaint, a request, a compliment" found neither.
 
-                  Provider-side only: a customer describing the problem
-                  should not have to know which trade it belongs to, and
-                  the category feeds a provider-side report. Optional
-                  everywhere — a melding often arrives before anyone
-                  knows the trade, and forcing a guess at intake would
-                  fill the report with noise. */}
-              {!isCustomer && workCategories.length > 0 && (
+                  Rendered only when the catalog loaded. An empty select
+                  is a control that cannot be used, and a melding files
+                  perfectly well uncategorised. */}
+              {categories.length > 0 && (
                 <div className="field">
                   <label className="field-label" htmlFor="f-category">
-                    {t("common:work_categories.field_label")}
+                    {t("field_category_label")}
                   </label>
                   <select
                     id="f-category"
@@ -545,11 +535,11 @@ export function CreateTicketPage() {
                     data-testid="create-ticket-category"
                   >
                     <option value="">
-                      {t("common:work_categories.none")}
+                      {t("common:ticket_categories.none")}
                     </option>
-                    {workCategories.map((row) => (
+                    {categories.map((row) => (
                       <option key={row.id} value={row.id}>
-                        {row.name}
+                        {row.label}
                       </option>
                     ))}
                   </select>
@@ -835,10 +825,8 @@ export function CreateTicketPage() {
                 <div className="preview-row">
                   <span className="preview-key">{t("summary_category")}</span>
                   <span className="preview-val">
-                    {t(
-                      TICKET_TYPE_KEYS[form.type as TicketTypeValue] ??
-                        "type_report",
-                    )}
+                    {categories.find((row) => String(row.id) === form.category)
+                      ?.label ?? t("common:ticket_categories.none")}
                   </span>
                 </div>
                 <div className="preview-row">

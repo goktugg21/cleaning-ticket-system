@@ -21,7 +21,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from test_utils import TenantFixtureMixin
-from tickets.models import Ticket, WorkCategory
+from tickets.models import Ticket, TicketCategory
 
 URL = "/api/reports/meldingen-by-category/"
 
@@ -29,11 +29,15 @@ URL = "/api/reports/meldingen-by-category/"
 class MeldingenByCategoryTests(TenantFixtureMixin, APITestCase):
     def setUp(self):
         super().setUp()
-        self.sanitair = WorkCategory.objects.create(
-            company=self.company, name="Sanitair"
+        # W13 — the catalog behind this report is now the owner's
+        # seeded list, so the fixture uses two of its rows instead of
+        # inventing trade names. The report's shape did not change; what
+        # the rows are called did.
+        self.sanitair = TicketCategory.objects.get(
+            company=self.company, slug="storing"
         )
-        self.glas = WorkCategory.objects.create(
-            company=self.company, name="Glasbewassing"
+        self.glas = TicketCategory.objects.get(
+            company=self.company, slug="klacht"
         )
         # The fixture's own ticket, categorised.
         self.ticket.category = self.sanitair
@@ -73,8 +77,8 @@ class MeldingenByCategoryTests(TenantFixtureMixin, APITestCase):
         counts = {
             row["category_name"]: row["count"] for row in bucket["categories"]
         }
-        self.assertEqual(counts["Sanitair"], 2)
-        self.assertEqual(counts["Glasbewassing"], 1)
+        self.assertEqual(counts["Storing"], 2)
+        self.assertEqual(counts["Klacht"], 1)
         self.assertEqual(bucket["total"], 3)
         self.assertEqual(response.data["total"], 3)
 
@@ -92,10 +96,21 @@ class MeldingenByCategoryTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.data["uncategorised"], 1)
 
     def test_it_costs_the_same_number_of_queries_whatever_the_period_holds(self):
-        """Two aggregates, flat. A report that got slower as a tenant got
-        busier would stop being opened."""
+        """THREE aggregates, flat. A report that got slower as a tenant
+        got busier would stop being opened.
+
+        W13 raised the pin from 2 to 3: the groups roll-up
+        ("how many tickets in 2026, and in what groups") is its own
+        aggregate rather than a Python sum of the per-building rows, for
+        the same reason the per-building totals are — two numbers shown
+        beside each other must not be able to disagree, and the first
+        thing anyone checks is whether they do.
+
+        What the pin protects is unchanged and is the point: the cost is
+        CONSTANT in the size of the period. Three queries for one melding
+        and three for ten thousand. The loop below is what proves it."""
         self.as_(self.company_admin).get(URL, self._params())  # warm auth
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             from reports.category_report import build_meldingen_by_category
 
             today = timezone.localdate()
@@ -106,7 +121,9 @@ class MeldingenByCategoryTests(TenantFixtureMixin, APITestCase):
         for _ in range(10):
             self._melding(category=self.glas)
 
-        with self.assertNumQueries(2):
+        # Ten times the data, the SAME three queries. This is the half
+        # of the test that matters.
+        with self.assertNumQueries(3):
             from reports.category_report import build_meldingen_by_category
 
             today = timezone.localdate()
@@ -128,8 +145,11 @@ class MeldingenByCategoryTests(TenantFixtureMixin, APITestCase):
     def test_another_tenants_meldingen_are_not_counted(self):
         """H-1: the other company's melding exists and is categorised; it
         must not appear in this company admin's answer."""
-        other_category = WorkCategory.objects.create(
-            company=self.other_company, name="Foreign"
+        other_category = TicketCategory.objects.create(
+            company=self.other_company,
+            slug="foreign",
+            label_nl="Foreign",
+            label_en="Foreign",
         )
         self.other_ticket.category = other_category
         self.other_ticket.save(update_fields=["category"])
@@ -151,4 +171,4 @@ class MeldingenByCategoryTests(TenantFixtureMixin, APITestCase):
         body = b"".join(response.streaming_content).decode() if getattr(
             response, "streaming", False
         ) else response.content.decode()
-        self.assertIn("Glasbewassing", body)
+        self.assertIn("Klacht", body)

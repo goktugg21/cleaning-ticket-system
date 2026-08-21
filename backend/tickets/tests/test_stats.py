@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from test_utils import TenantFixtureMixin
-from tickets.models import Ticket, TicketPriority, TicketStatus, WorkCategory
+from tickets.models import Ticket, TicketCategory, TicketPriority, TicketStatus
 
 
 class TicketStatsTests(TenantFixtureMixin, APITestCase):
@@ -97,10 +97,13 @@ class TicketStatsTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.data["waiting_customer_approval"], 1)
 
 
-class TicketStatsWorkCategoryTests(TenantFixtureMixin, APITestCase):
+class TicketStatsCategoryTests(TenantFixtureMixin, APITestCase):
     """Sprint 187 §5 — the chips count the rows they sit above.
 
-    Sprint 185 gave the Tickets page a work-category dropdown and taught
+    (W13 renamed the catalog behind this filter from `WorkCategory` to
+    `TicketCategory`; the defect and the fix are unchanged.)
+
+    Sprint 185 gave the Tickets page a category dropdown and taught
     it to the LIST only: `/tickets/stats/` never learned the filter at
     all. Choosing a category narrowed the rows and left the counts above
     them describing the whole company — the same defect as the work-type
@@ -115,11 +118,15 @@ class TicketStatsWorkCategoryTests(TenantFixtureMixin, APITestCase):
 
     def setUp(self):
         super().setUp()
-        self.category = WorkCategory.objects.create(
-            company=self.company, name="Sanitair"
+        # W13 — two of the company's SEEDED categories, which every
+        # company now has. Creating fresh ones would work too; using the
+        # seeded pair keeps the fixture honest about what a real tenant
+        # has in front of it.
+        self.category = TicketCategory.objects.get(
+            company=self.company, slug="klacht"
         )
-        self.other_category = WorkCategory.objects.create(
-            company=self.company, name="Glasbewassing"
+        self.other_category = TicketCategory.objects.get(
+            company=self.company, slug="verzoek"
         )
         self.ticket.category = self.category
         self.ticket.save(update_fields=["category"])
@@ -186,8 +193,8 @@ class TicketStatsWorkCategoryTests(TenantFixtureMixin, APITestCase):
         """H-1: narrowing runs INSIDE `scope_tickets_for`, so a company
         admin naming another company's ticket category still sees only
         their own — never the other tenant's rows."""
-        other_category = WorkCategory.objects.create(
-            company=self.other_company, name="Other-co category"
+        other_category = TicketCategory.objects.get(
+            company=self.other_company, slug="klacht"
         )
         self.other_ticket.category = other_category
         self.other_ticket.save(update_fields=["category"])

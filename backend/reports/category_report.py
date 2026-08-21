@@ -1,12 +1,25 @@
 """
-Sprint 185 E §1 — meldingen per CATEGORY per BUILDING, per period.
+Meldingen per CATEGORY, per BUILDING, per period.
 
     GET /api/reports/meldingen-by-category/?from=&to=&company=&building=
 
-This is the report the owner asked for in these words: the monthly
-customer review is *"how many meldingen per category per building"*, and
-until Sprint 185 no tenant could answer it — there was no field holding
-the kind of WORK at all (`Ticket.type` holds the kind of MESSAGE).
+Two questions, one report, because they are asked in the same breath.
+
+The first is the monthly customer review: *"how many meldingen per
+category per building"*. That is the buildings list below.
+
+The second is W13's, and it arrived from a programmer of twenty years
+reading over the owner's shoulder: *"the person says, how many tickets
+did we open in 2026? What are the groups of these tickets?"* That is
+`categories` — the same period rolled up ACROSS buildings, one line per
+group. It is a separate aggregate rather than a sum of the first, for
+the reason the per-building totals are: adding up a database result in
+Python and presenting the sum beside the rows it came from means two
+numbers that can disagree, and the first thing anyone checks is whether
+they do.
+
+Set `from=2026-01-01&to=2026-12-31` and `categories` is his answer,
+literally.
 
 ## The shape: buildings outside, categories inside
 
@@ -19,8 +32,8 @@ Reports page renders it with the machinery it has.
 ## Counting, not listing
 
 Every other report on this page lists rows. This one COUNTS them, which
-is the whole request: "how many". So it is two aggregates, not a row
-list bucketed in Python, and it stays two whatever the period holds —
+is the whole request: "how many". So it is three aggregates, not a row
+list bucketed in Python, and it stays three whatever the period holds —
 pinned by `assertNumQueries`. A report that got slower as a tenant got
 busier would stop being opened.
 
@@ -86,17 +99,23 @@ def _scoped_tickets(user, date_from: date, date_to: date, scope=None):
 
 
 def build_meldingen_by_category(user, date_from: date, date_to: date, scope=None):
-    """Meldingen counted per (building, category) for the period.
+    """Meldingen counted per (building, category) for the period, plus
+    the roll-up across buildings.
 
-    Two queries, flat:
+    THREE queries, flat:
 
       1. the grouped counts, `values(...).annotate(Count)`;
-      2. the per-building totals, from the same queryset.
+      2. the per-building totals, from the same queryset;
+      3. the groups roll-up (`build_meldingen_by_category_totals`).
 
-    The second is not derivable from the first without trusting Python
-    arithmetic over a database aggregate, and the two must agree — so
-    both come from the database and a mismatch is impossible rather than
-    unlikely.
+    None is derivable from the others without trusting Python arithmetic
+    over a database aggregate, and all three are shown on one screen
+    beside each other — so each comes from the database and a mismatch
+    between them is impossible rather than unlikely.
+
+    Three, and three whatever the period holds: the cost is constant in
+    the number of meldingen, which is what the `assertNumQueries` pin in
+    `reports/tests/test_category_report.py` exists to keep true.
     """
     date_from, date_to = _period(date_from, date_to)
     tickets = _scoped_tickets(user, date_from, date_to, scope)
@@ -106,10 +125,18 @@ def build_meldingen_by_category(user, date_from: date, date_to: date, scope=None
             "building_id",
             "building__name",
             "category_id",
-            "category__name",
+            # W13 — both labels, plus the slug and the colour. Selecting
+            # a label per row rather than joining the catalog again keeps
+            # this at its pinned query count; they are functionally
+            # dependent on `category_id`, so grouping by them cannot
+            # split a bucket.
+            "category__slug",
+            "category__label_nl",
+            "category__label_en",
+            "category__color",
         )
         .annotate(count=Count("id"))
-        .order_by("building__name", "category__name")
+        .order_by("building__name", "category__sort_order", "category__label_nl")
     )
 
     per_building_totals = {
@@ -137,22 +164,17 @@ def build_meldingen_by_category(user, date_from: date, date_to: date, scope=None
         total += count
         if row["category_id"] is None:
             uncategorised += count
-        bucket["categories"].append(
-            {
-                "category": row["category_id"],
-                # `None` and not a translated word: the reader's language
-                # is a client concern, and the CSV and the PDF pick their
-                # own dash. A server-side "Uncategorised" would be an
-                # English string in a Dutch export.
-                "category_name": row["category__name"],
-                "count": count,
-            }
-        )
+        bucket["categories"].append(_category_row(row, count))
 
     return {
         "from": date_from.isoformat(),
         "to": date_to.isoformat(),
         "buildings": buildings,
+        # W13 — the roll-up across buildings. "How many tickets did we
+        # open in 2026, and what are the groups?" is this list.
+        "categories": build_meldingen_by_category_totals(
+            user, date_from, date_to, scope
+        ),
         "total": total,
         # The number that says whether the taxonomy is being used at all.
         # Reported beside the total rather than left for the reader to
@@ -160,6 +182,57 @@ def build_meldingen_by_category(user, date_from: date, date_to: date, scope=None
         # the question this answers on the way to the real one.
         "uncategorised": uncategorised,
     }
+
+
+#: The label keys a grouped row carries, so the reader-language pick and
+#: the "uncategorised is a null, never a word" rule are written once.
+def _category_row(row, count: int) -> dict:
+    """One category line, from a grouped row.
+
+    `category_name` stays the key it has always been, so every existing
+    consumer keeps working; what changed is that the value comes from
+    the owner's catalog and exists in two languages.
+
+    Both labels travel, and neither is resolved here. The reader's
+    language is a CLIENT concern — the JSON goes to a browser that knows
+    it, and the CSV/PDF exporters state their own choice. Picking one
+    here would put an English word in a Dutch export, which is the bug
+    this shape avoids.
+
+    `None` and not a translated word for an uncategorised bucket, for the
+    same reason.
+    """
+    return {
+        "category": row["category_id"],
+        "category_slug": row["category__slug"],
+        "category_name": row["category__label_nl"],
+        "category_name_en": row["category__label_en"],
+        "category_color": row["category__color"] or None,
+        "count": count,
+    }
+
+
+def build_meldingen_by_category_totals(user, date_from: date, date_to: date, scope=None):
+    """"What are the groups of these tickets?" — one line per group, for
+    the whole period, across every building.
+
+    Its own aggregate, from the same `_scoped_tickets`. See the module
+    docstring for why it is not summed out of the per-building rows.
+    """
+    date_from, date_to = _period(date_from, date_to)
+    tickets = _scoped_tickets(user, date_from, date_to, scope)
+    rows = (
+        tickets.values(
+            "category_id",
+            "category__slug",
+            "category__label_nl",
+            "category__label_en",
+            "category__color",
+        )
+        .annotate(count=Count("id"))
+        .order_by("category__sort_order", "category__label_nl")
+    )
+    return [_category_row(row, row["count"]) for row in rows]
 
 
 def build_meldingen_by_category_summary(

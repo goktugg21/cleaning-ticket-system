@@ -31,7 +31,7 @@ from .models import (
     TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
-    WorkCategory,
+    TicketCategory,
 )
 from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
 from .schedule_history import latest_schedule_change
@@ -388,17 +388,51 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
         return data
 
 
-class TicketListSerializer(serializers.ModelSerializer):
+class TicketCategoryFieldsMixin:
+    """W13 — how a melding's category is printed, in ONE place.
+
+    Both the list and the detail serializer show the same three things:
+    the label in the reader's language, the slug (so a client can match
+    on something stable) and the colour (so the list can draw a chip
+    instead of another line of grey text). Writing them twice is how the
+    two screens end up naming one row differently, which is the exact
+    defect the reference system's audit records about its own catalog.
+
+    `default=None` everywhere: the FK is nullable, "not categorised yet"
+    is a real state, and traversing it must render rather than raise.
+    """
+
+    def get_category_label(self, obj) -> str | None:
+        if obj.category_id is None or obj.category is None:
+            return None
+        request = self.context.get("request")
+        language = (
+            request.headers.get("Accept-Language") if request is not None else None
+        )
+        return obj.category.label_for(language)
+
+    def get_category_slug(self, obj) -> str | None:
+        return obj.category.slug if obj.category_id and obj.category else None
+
+    def get_category_color(self, obj) -> str | None:
+        if obj.category_id is None or obj.category is None:
+            return None
+        return obj.category.color or None
+
+
+class TicketListSerializer(
+    TicketCategoryFieldsMixin, serializers.ModelSerializer
+):
     archived_by_name = serializers.CharField(
         source="archived_by.full_name", read_only=True, default=None
     )
     building_name = serializers.CharField(source="building.name", read_only=True)
-    # Sprint 185 E §1 — the KIND OF WORK, beside `type`'s kind of
-    # message. `default=None` because the FK is nullable and traversing
-    # `category.name` on an untagged melding must render, not raise.
-    category_name = serializers.CharField(
-        source="category.name", read_only=True, default=None
-    )
+    # W13 — WHAT KIND OF MELDING. Kept named `category_name` because
+    # that is what every existing caller reads; what changed is the
+    # catalog behind it and that the value is now language-resolved.
+    category_name = serializers.SerializerMethodField(method_name="get_category_label")
+    category_slug = serializers.SerializerMethodField()
+    category_color = serializers.SerializerMethodField()
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
@@ -427,6 +461,8 @@ class TicketListSerializer(serializers.ModelSerializer):
             "type",
             "category",
             "category_name",
+            "category_slug",
+            "category_color",
             "priority",
             "status",
             "company",
@@ -561,7 +597,7 @@ class TicketCategorySerializer(serializers.Serializer):
     """
 
     category = serializers.PrimaryKeyRelatedField(
-        queryset=WorkCategory.objects.all(),
+        queryset=TicketCategory.objects.all(),
         allow_null=True,
     )
 
@@ -593,16 +629,18 @@ class TicketAttachmentVisibilitySerializer(serializers.Serializer):
     visibility = serializers.ChoiceField(choices=AttachmentVisibility.choices)
 
 
-class TicketDetailSerializer(serializers.ModelSerializer):
+class TicketDetailSerializer(
+    TicketCategoryFieldsMixin, serializers.ModelSerializer
+):
     archived_by_name = serializers.CharField(
         source="archived_by.full_name", read_only=True, default=None
     )
     building_name = serializers.CharField(source="building.name", read_only=True)
-    # Sprint 185 E §1 — see `TicketListSerializer`: the kind of WORK,
-    # rendered beside the kind of MESSAGE. Nullable FK, so `default=None`.
-    category_name = serializers.CharField(
-        source="category.name", read_only=True, default=None
-    )
+    # W13 — see `TicketListSerializer`. One mixin, so the two screens
+    # cannot print one category two ways.
+    category_name = serializers.SerializerMethodField(method_name="get_category_label")
+    category_slug = serializers.SerializerMethodField()
+    category_color = serializers.SerializerMethodField()
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     created_by_email = serializers.CharField(source="created_by.email", read_only=True)
@@ -667,6 +705,8 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "type",
             "category",
             "category_name",
+            "category_slug",
+            "category_color",
             "priority",
             "status",
             "company",
@@ -1343,12 +1383,17 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "room_label",
+            # W13 — `type` stays writable for the API's existing
+            # callers, but no screen offers it any more: the CREATE FORM
+            # asks one question, "what kind of melding is this", and the
+            # answer is a `category`. See `TicketCategory` for why the
+            # column survives the field going.
             "type",
-            # Sprint 185 E §1 — the kind of WORK, offered at intake.
-            # Optional: a melding may arrive before anyone knows which
-            # trade it belongs to, and forcing a guess here would fill
-            # the category report with noise. Validated against the
-            # ticket's own company in `validate()` below.
+            # W13 — THE classification, and the only one a form asks
+            # for. Optional: a melding can arrive before anyone has
+            # decided, and forcing a guess here would fill the category
+            # report with noise. Validated against the ticket's own
+            # company AND against `available_at_intake` in `validate()`.
             "category",
             "priority",
             "building",
@@ -1381,16 +1426,28 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                 {"customer": "Customer is not linked to the selected building."}
             )
 
-        # Sprint 185 E §1 — a category belongs to ONE provider company,
-        # and the ticket's company is the building's. Naming another
-        # company's category would tag this melding with a row the
-        # actor cannot see and would put a foreign name into this
-        # tenant's category report, so it reads as nonexistent (H-1)
-        # rather than as a permission error.
+        # A category belongs to ONE provider company, and the ticket's
+        # company is the building's. Naming another company's category
+        # would tag this melding with a row the actor cannot see and
+        # would put a foreign name into this tenant's category report,
+        # so it reads as nonexistent (H-1) rather than as a permission
+        # error.
+        #
+        # W13 §4 — the same answer for a category that exists but is not
+        # offerable AT INTAKE, and for an archived one. "Ongegrond" is a
+        # VERDICT: it is reached by reading the melding, not declared by
+        # whoever raises it. The create forms do not show it, and this is
+        # what makes that a RULE rather than a UI habit — the reference
+        # system does the modal and skips the enforcement, and its own
+        # audit records what that costs.
         category = attrs.get("category")
-        if category is not None and category.company_id != building.company_id:
+        if category is not None and (
+            category.company_id != building.company_id
+            or not category.is_active
+            or not category.available_at_intake
+        ):
             raise serializers.ValidationError(
-                {"category": "Unknown work category."}
+                {"category": "Unknown category."}
             )
 
         if not building.is_active:
@@ -1518,6 +1575,35 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         validated_data["company"] = building.company
         validated_data["created_by"] = request.user
         validated_data["status"] = TicketStatus.OPEN
+        # W13 — the ONE place `type` is derived from `category`.
+        #
+        # No screen asks for `type` any more, but the column is NOT NULL
+        # and the pre-existing tickets-by-type report reads it, so a
+        # create that left it at the model default would quietly file
+        # every new melding as a REPORT and rot that report. The mapping
+        # is declared on the category row (`legacy_type`), so this reads
+        # it rather than deciding it.
+        #
+        # Only when NOBODY has already stated a type. Two places can:
+        #
+        #   * the request body (`initial_data`) — the API contract is
+        #     unchanged for callers still sending one;
+        #   * a `serializer.save(type=...)` kwarg, which DRF merges into
+        #     `validated_data` before this runs. That is how M7 coerces a
+        #     customer-created melding to REPORT, and the M6 meldingen
+        #     split reads the result.
+        #
+        # Checking only the first was a real bug: for a customer picking
+        # "Klacht", `perform_create` set REPORT and this line then
+        # overwrote it with COMPLAINT, breaking an invariant with its own
+        # test. A derived value must never win over a stated one.
+        category = validated_data.get("category")
+        if (
+            category is not None
+            and "type" not in self.initial_data
+            and "type" not in validated_data
+        ):
+            validated_data["type"] = category.legacy_type
         return super().create(validated_data)
 
 

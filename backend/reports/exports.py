@@ -1373,7 +1373,7 @@ def build_ticket_report_pdf(payload: dict) -> bytes:
     return _pdf_bytes(pdf)
 
 
-# Sprint 185 E §1 — meldingen per category per building.
+# Meldingen per category per building (W13: plus the groups roll-up).
 #
 # The CSV is FLAT — one row per (building, category) pair — while the
 # JSON is nested. A spreadsheet is opened to be sorted and pivoted, and
@@ -1416,6 +1416,34 @@ def build_meldingen_by_category_pdf(payload: dict) -> bytes:
         new_y="NEXT",
     )
     pdf.ln(2)
+    # W13 — the groups, before the buildings.
+    #
+    # "How many tickets did we open in 2026? What are the groups of
+    # these tickets?" is answered by this one table, so it goes at the
+    # top: a reader who only wants that number should not have to add up
+    # a per-building breakdown to find it. The per-building detail
+    # follows for the customer review, which is a different reading of
+    # the same period.
+    #
+    # The CSV deliberately does NOT carry this table: it is flat, one
+    # row per (building, category), and a spreadsheet pivots to exactly
+    # these totals in two clicks. A second shape inside one file is what
+    # makes a CSV awkward to open.
+    groups = payload.get("categories") or []
+    if groups:
+        pdf.set_font(FONT_FAMILY, "B", 9)
+        pdf.cell(0, 6, "Groups", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(FONT_FAMILY, "", 8)
+        _draw_table(
+            pdf,
+            ["Category", "Meldingen"],
+            [120, 30],
+            [
+                [row["category_name"] or "--", str(row["count"])]
+                for row in groups
+            ],
+        )
+        pdf.ln(3)
     for bucket in payload["buildings"]:
         pdf.set_font(FONT_FAMILY, "B", 9)
         pdf.cell(

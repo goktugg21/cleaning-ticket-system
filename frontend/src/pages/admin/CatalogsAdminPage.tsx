@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { PageHeader } from "../../components/PageHeader";
 import { BuildingTypesTab } from "./BuildingTypesTab";
-import { WorkCategoriesTab } from "./WorkCategoriesTab";
+import { TicketCategoriesTab } from "./TicketCategoriesTab";
 import { HourTypesTab } from "./HourTypesTab";
 import { ManagedUnitsTab } from "./ManagedUnitsTab";
 import { WorkTypesTab } from "./WorkTypesTab";
@@ -43,7 +43,7 @@ type Tab =
   | "contract_types"
   | "building_types"
   // Sprint 185 E §1 — the kinds of WORK a melding can be about.
-  | "work_categories"
+  | "ticket_categories"
   | "managed_units";
 
 const TABS: { key: Tab; labelKey: string }[] = [
@@ -51,7 +51,7 @@ const TABS: { key: Tab; labelKey: string }[] = [
   { key: "work_types", labelKey: "catalogs.tab_work_types" },
   { key: "contract_types", labelKey: "catalogs.tab_contract_types" },
   { key: "building_types", labelKey: "catalogs.tab_building_types" },
-  { key: "work_categories", labelKey: "catalogs.tab_work_categories" },
+  { key: "ticket_categories", labelKey: "catalogs.tab_ticket_categories" },
   { key: "managed_units", labelKey: "catalogs.tab_managed_units" },
 ];
 
@@ -96,7 +96,7 @@ export function CatalogsAdminPage() {
       {tab === "work_types" && <WorkTypesTab />}
       {tab === "contract_types" && <ContractTypesTab />}
       {tab === "building_types" && <BuildingTypesTab />}
-      {tab === "work_categories" && <WorkCategoriesTab />}
+      {tab === "ticket_categories" && <TicketCategoriesTab />}
       {tab === "managed_units" && <ManagedUnitsTab />}
 
       {/* Sprint 179B §4 — `card-detail-pad`, the padding every detail

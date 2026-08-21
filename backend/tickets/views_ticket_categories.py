@@ -1,8 +1,13 @@
 """
-Sprint 185 E §1 — work-category catalog endpoints.
+W13 — ticket-category catalog endpoints.
 
     GET  / POST            /api/tickets/categories/
     GET  / PATCH / DELETE  /api/tickets/categories/<int:category_id>/
+
+Same four verbs on the same two URLs as the `WorkCategory` catalog they
+replace, because the URLs were never the problem -- what sat behind them
+was. A caller that asked for "the ticket categories" still asks the same
+question and now gets the owner's list.
 
 Deliberately the `buildings.views_building_types` shape, which is itself
 the `timesheets.views_work_types` shape, because that shape is settled:
@@ -12,21 +17,22 @@ COMPANY_ADMIN and checked against the ROW'S owning company rather than
 the actor's — the check that stops a two-company admin writing into the
 wrong one.
 
-**No standard-set endpoint.** The kinds of work a cleaning company
-distinguishes are its own vocabulary; seeding a "standard" list would be
-inventing product content nobody asked for. `CatalogTab` treats
-`standardSetUrl` as optional for exactly this case (Sprint 178 §1).
+**No standard-set endpoint, because the standard set is already there.**
+Every company is seeded with the owner's seven when it is created, so
+the picker is never empty and there is nothing for a "load the standard
+list" button to do. That button exists on the hour-type catalog because
+that catalog genuinely starts empty.
 
-**Adding a category must never need a deployment.** That is the test of
-whether this worked, and it is why the catalog is data behind these four
-verbs rather than an enum: a company types a name, one melding carries
-it, and it appears in the meldingen filter and the category report from
-that moment.
+**Adding an eighth category must never need a deployment.** That is the
+test of whether this worked, and it is why the list is data behind these
+four verbs rather than the `TicketType` enum it replaces: a company types
+a label, one melding carries it, and it appears in the meldingen filter
+and the category report from that moment.
 
-There is no `scope_work_categories_for` helper: a category is owned by a
-company and carries no per-building visibility, so scoping is the company
-filter below. Reusing `scope_tickets_for` would be reading a ticket rule
-onto a catalog row.
+There is no `scope_ticket_categories_for` helper: a category is owned by
+a company and carries no per-building visibility, so scoping is the
+company filter below. Reusing `scope_tickets_for` would be reading a
+ticket rule onto a catalog row.
 """
 from __future__ import annotations
 
@@ -41,22 +47,22 @@ from audit import context as audit_context
 from companies.models import CompanyUserMembership
 from config.pagination import UnboundedPagination
 
-from .models import WorkCategory
-from .serializers_work_categories import (
-    ERR_WORK_CATEGORY_NAME_NOT_UNIQUE,
-    WorkCategorySerializer,
+from .models import TicketCategory
+from .serializers_ticket_categories import (
+    ERR_TICKET_CATEGORY_LABEL_NOT_UNIQUE,
+    TicketCategorySerializer,
 )
 
 
 def _visible_categories(user):
-    """Every work category this actor may READ.
+    """Every ticket category this actor may READ.
 
     SUPER_ADMIN sees all; anyone else sees the categories of the
     companies they belong to. A customer-side actor belongs to no
     provider company and therefore sees none — the same answer as "there
     are none", which is the H-1 equivalence.
     """
-    queryset = WorkCategory.objects.select_related("company")
+    queryset = TicketCategory.objects.select_related("company")
     if user.role == UserRole.SUPER_ADMIN:
         return queryset
     company_ids = CompanyUserMembership.objects.filter(user=user).values_list(
@@ -89,10 +95,10 @@ def _annotate_usage(queryset):
     return queryset.annotate(annotated_usage_count=Count("tickets"))
 
 
-class WorkCategoryListCreateView(generics.ListCreateAPIView):
+class TicketCategoryListCreateView(generics.ListCreateAPIView):
     """GET (any provider-side actor) / POST (SA + CA of that company)."""
 
-    serializer_class = WorkCategorySerializer
+    serializer_class = TicketCategorySerializer
     permission_classes = [IsAuthenticatedAndActive]
     # The catalog is a picker source and a filter source; both want the
     # whole list, and no caller of this endpoint has pagination UI.
@@ -106,6 +112,15 @@ class WorkCategoryListCreateView(generics.ListCreateAPIView):
         active = self.request.query_params.get("is_active")
         if active in ("true", "false"):
             queryset = queryset.filter(is_active=active == "true")
+        # W13 §4 — what a CREATE form may offer. The create forms ask
+        # for `?available_at_intake=true` and render exactly what comes
+        # back, so "Ongegrond" is absent there rather than present and
+        # disabled: a control a role cannot use should not be on the
+        # screen at all. Filtering server-side rather than in each form
+        # means one rule, not one per form.
+        intake = self.request.query_params.get("available_at_intake")
+        if intake in ("true", "false"):
+            queryset = queryset.filter(available_at_intake=intake == "true")
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -115,14 +130,14 @@ class WorkCategoryListCreateView(generics.ListCreateAPIView):
         if not _may_manage(request.user, company.id):
             return Response(
                 {
-                    "detail": "You may not manage this company's work "
+                    "detail": "You may not manage this company's ticket "
                     "categories.",
-                    "code": "work_category_forbidden",
+                    "code": "ticket_category_forbidden",
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
         try:
-            audit_context.set_current_reason("work_category_create")
+            audit_context.set_current_reason("ticket_category_create")
         except Exception:  # pragma: no cover - defensive
             pass
         try:
@@ -132,19 +147,19 @@ class WorkCategoryListCreateView(generics.ListCreateAPIView):
             # check is a friendlier duplicate of it and can lose a race.
             return Response(
                 {
-                    "detail": "A work category with this name already "
+                    "detail": "A category with this Dutch label already "
                     "exists for this company.",
-                    "code": ERR_WORK_CATEGORY_NAME_NOT_UNIQUE,
+                    "code": ERR_TICKET_CATEGORY_LABEL_NOT_UNIQUE,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
-class WorkCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
+class TicketCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
     """GET / PATCH / DELETE one category."""
 
-    serializer_class = WorkCategorySerializer
+    serializer_class = TicketCategorySerializer
     permission_classes = [IsAuthenticatedAndActive]
     lookup_url_kwarg = "category_id"
 
@@ -155,9 +170,9 @@ class WorkCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
         if not _may_manage(self.request.user, instance.company_id):
             return Response(
                 {
-                    "detail": "You may not manage this company's work "
+                    "detail": "You may not manage this company's ticket "
                     "categories.",
-                    "code": "work_category_forbidden",
+                    "code": "ticket_category_forbidden",
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -173,7 +188,7 @@ class WorkCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
         )
         serializer.is_valid(raise_exception=True)
         try:
-            audit_context.set_current_reason("work_category_update")
+            audit_context.set_current_reason("ticket_category_update")
         except Exception:  # pragma: no cover - defensive
             pass
         try:
@@ -181,9 +196,9 @@ class WorkCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
         except IntegrityError:
             return Response(
                 {
-                    "detail": "A work category with this name already "
+                    "detail": "A category with this Dutch label already "
                     "exists for this company.",
-                    "code": ERR_WORK_CATEGORY_NAME_NOT_UNIQUE,
+                    "code": ERR_TICKET_CATEGORY_LABEL_NOT_UNIQUE,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -210,12 +225,12 @@ class WorkCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
                         "Archive it instead — archiving stops it being "
                         "offered without untagging anything."
                     ),
-                    "code": "work_category_in_use",
+                    "code": "ticket_category_in_use",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            audit_context.set_current_reason("work_category_delete")
+            audit_context.set_current_reason("ticket_category_delete")
         except Exception:  # pragma: no cover - defensive
             pass
         instance.delete()

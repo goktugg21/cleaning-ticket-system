@@ -13710,3 +13710,40 @@ table.pva-table { min-width: 0; }
   border-left: 2px solid var(--border-soft);
 }
 .period-filter-range .field { min-width: 150px; }
+
+/* ==================================================================
+   W13 — the ticket category, made visible.
+
+   The owner's father asked "where is its category? you have to show all
+   of it -- is it a complaint, a request, a compliment?" The list could
+   already FILTER by category and printed it nowhere, so the answer was
+   reachable only by opening every row one at a time.
+
+   Two marks, and the colour comes from the catalog row rather than from
+   here: a company chooses what Klacht looks like, and a palette hard
+   coded in a stylesheet would be this file deciding a tenant's
+   vocabulary.
+
+   `.ticket-category-chip` is the solid dot used where the label is
+   already beside it (the admin table, the report roll-up).
+   `.ticket-category-tag` is the outlined pill used in the meldingen
+   list, where the tag IS the label -- outlined and not filled so seven
+   coloured pills down a column stay readable as text.
+   ================================================================== */
+.ticket-category-chip {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+  /* The fallback when a category has no colour: visible, neutral, and
+     never invisible-on-white. */
+  background: var(--text-faint);
+}
+.ticket-category-tag {
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: transparent;
+  white-space: nowrap;
+}

@@ -1201,13 +1201,25 @@ class TicketViewSet(
                 target_id=ticket.id,
                 changes={
                     "category": {
+                        # W13 — the Dutch label and the slug. The label
+                        # is what a reader recognises; the slug is what
+                        # survives the label being renamed, which is the
+                        # whole reason this row records a name at all.
                         "before": (
-                            {"id": old_category.id, "name": old_category.name}
+                            {
+                                "id": old_category.id,
+                                "slug": old_category.slug,
+                                "name": old_category.label_nl,
+                            }
                             if old_category
                             else None
                         ),
                         "after": (
-                            {"id": new_category.id, "name": new_category.name}
+                            {
+                                "id": new_category.id,
+                                "slug": new_category.slug,
+                                "name": new_category.label_nl,
+                            }
                             if new_category
                             else None
                         ),

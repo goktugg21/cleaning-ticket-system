@@ -358,27 +358,44 @@ export function TicketReportView({ filters }: ReportViewProps) {
   );
 }
 
+/** One category line, in the buildings breakdown and in the roll-up.
+ *  Both come from the same server-side builder, so they cannot be
+ *  shaped differently. */
+interface MeldingenCategoryRow {
+  category: number | null;
+  category_name: string | null;
+  category_name_en: string | null;
+  category_slug: string | null;
+  category_color: string | null;
+  count: number;
+}
+
 interface MeldingenByCategoryPayload extends PeriodPayload {
   buildings: {
     building: number | null;
     building_name: string | null;
     total: number;
-    categories: {
-      category: number | null;
-      category_name: string | null;
-      count: number;
-    }[];
+    categories: MeldingenCategoryRow[];
   }[];
+  /** W13 — the same period rolled up ACROSS buildings, one line per
+   *  group. "How many tickets did we open in 2026, and what are the
+   *  groups?" is this list. */
+  categories: MeldingenCategoryRow[];
+  total: number;
   uncategorised: number;
 }
 
 /**
- * Sprint 185 E §1 — "how many meldingen per category per building".
+ * Two readings of one period, in the order they are asked for.
  *
- * The monthly customer review, which was unanswerable before this sprint
- * because nothing in the system classified the WORK. Same shell as the
- * three hours reports (period picker, CSV, PDF, empty state), same
- * building-outside / rows-inside shape as `employee-hours-by-building`.
+ * FIRST, the groups: "how many tickets did we open in 2026? What are the
+ * groups of these tickets?" — W13's question, and it is answered by the
+ * table at the top without the reader adding anything up.
+ *
+ * THEN, per building: "how many meldingen per category per building",
+ * the monthly customer review. Same shell as the three hours reports
+ * (period picker, CSV, PDF, empty state), same building-outside /
+ * rows-inside shape as `employee-hours-by-building`.
  *
  * An UNCATEGORISED bucket arrives with `category_name: null` and is
  * rendered as a named row rather than dropped: the report's total has to
@@ -397,6 +414,52 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
     >
       {(payload) => (
         <div className="table-wrap">
+          {/* W13 — the groups, before the buildings. */}
+          {payload.categories.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div className="form-section-title report-group-title">
+                {t("meldingen_groups_title")} — {payload.total}
+              </div>
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("common:ticket_categories.field_label")}</th>
+                    <th className="contract-num">{t("meldingen_count")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payload.categories.map((row) => (
+                    <tr
+                      key={row.category ?? "none"}
+                      data-testid="meldingen-group-row"
+                    >
+                      <td>
+                        {row.category_name ? (
+                          <>
+                            <span
+                              className="ticket-category-chip"
+                              style={
+                                row.category_color
+                                  ? { background: row.category_color }
+                                  : undefined
+                              }
+                              aria-hidden="true"
+                            />
+                            {row.category_name}
+                          </>
+                        ) : (
+                          <span className="muted-empty">
+                            {t("meldingen_uncategorised")}
+                          </span>
+                        )}
+                      </td>
+                      <td className="contract-num">{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {payload.buildings.map((bucket) => (
             <div
               key={bucket.building ?? "none"}
@@ -408,7 +471,7 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
               <table className="data-table data-table-dense">
                 <thead>
                   <tr>
-                    <th>{t("common:work_categories.field_label")}</th>
+                    <th>{t("common:ticket_categories.field_label")}</th>
                     <th className="contract-num">{t("meldingen_count")}</th>
                   </tr>
                 </thead>

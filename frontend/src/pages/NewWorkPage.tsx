@@ -76,11 +76,14 @@ export function NewWorkPage() {
   const [about, setAbout] = useState<About | null>(null);
   const [repeats, setRepeats] = useState<Repeats | null>(null);
 
-  /** Every destination already exists. `type` is the ticket form's own
-   *  field, pre-filled from what was just asked so the form does not
-   *  ask it a second time. */
-  const goTicket = (type: "REPORT" | "REQUEST") =>
-    navigate(`/tickets/new?type=${type}`);
+  /** Every destination already exists. W13 — the ticket form's field is
+   *  now a CATEGORY from the company's catalog, so this hands over the
+   *  category SLUG rather than the superseded `type` enum. A slug and
+   *  not an id because the id differs per company and the slug does
+   *  not. Pre-filled from what was just asked, so the form does not ask
+   *  it a second time. */
+  const goTicket = (categorySlug: "melden" | "verzoek") =>
+    navigate(`/tickets/new?category=${categorySlug}`);
   const goRecurring = () => navigate("/planned-work/new");
   const goOrder = () => navigate("/extra-work/new");
   const goQuote = () => navigate("/extra-work/request-quote");
@@ -90,7 +93,7 @@ export function NewWorkPage() {
   // calling `navigate()` here: a redirect is what this render RETURNS,
   // not something it does on the side.
   if (!mayExtraWork && !mayRecur) {
-    return <Navigate to="/tickets/new?type=REPORT" replace />;
+    return <Navigate to="/tickets/new?category=melden" replace />;
   }
 
   const aboutAnswers: Answer[] = [
@@ -99,7 +102,7 @@ export function NewWorkPage() {
       label: t("new_work.about_problem"),
       description: t("new_work.about_problem_desc"),
       icon: AlertTriangle,
-      onPick: () => goTicket("REPORT"),
+      onPick: () => goTicket("melden"),
     },
     {
       key: "request",
@@ -138,7 +141,7 @@ export function NewWorkPage() {
       label: t("new_work.pays_agreement"),
       description: t("new_work.pays_agreement_desc"),
       icon: FileText,
-      onPick: () => goTicket("REQUEST"),
+      onPick: () => goTicket("verzoek"),
     },
     {
       key: "order",

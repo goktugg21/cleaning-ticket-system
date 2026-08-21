@@ -214,17 +214,39 @@ export type SLAStatus =
 
 export type SLADisplayState = SLAStatus | "PAUSED";
 
-/** Sprint 185 E §1 — one row of the per-company work-category catalog
- *  (`GET /api/tickets/categories/`). The `CatalogTab` shape, shared with
- *  building types, hour types, work types, contract types and managed
- *  units. */
-export interface WorkCategory {
+/** W13 — one row of the per-company ticket-category catalog
+ *  (`GET /api/tickets/categories/`): the owner's list, Verzoek / Extra /
+ *  Compliment / Melden / Storing / Ongegrond / Klacht.
+ *
+ *  Replaces `WorkCategory`, the Sprint 185 kind-of-work catalog, which
+ *  sat beside the `TicketType` enum and gave a melding two overlapping
+ *  classifications with near-identical labels. There is one now. */
+export interface TicketCategory {
   id: number;
   company: number;
   company_name: string;
-  name: string;
-  is_active: boolean;
+  /** Stable machine key. What code matches on, so a company renaming
+   *  its label never breaks a mapping. */
+  slug: string;
+  /** The label in the READER's language, resolved server-side by the
+   *  one resolver (`TicketCategory.label_for`). Read-only: write
+   *  `label_nl` / `label_en`. */
+  label: string;
+  label_nl: string;
+  label_en: string;
+  /** "#rrggbb", or "" for no chip colour. */
+  color: string;
   sort_order: number;
+  is_active: boolean;
+  /** W13 §4 — may this be chosen when a melding is CREATED? False for
+   *  "Ongegrond", a verdict somebody reaches afterwards. The create
+   *  forms ask the server for `available_at_intake=true` and render
+   *  what comes back, so such a category is absent there rather than
+   *  present and disabled. */
+  available_at_intake: boolean;
+  /** The pre-W13 `Ticket.type` this category stands in for. A
+   *  compatibility bridge; see the model. */
+  legacy_type: string;
   usage_count: number;
   created_at: string;
   updated_at: string;
@@ -242,12 +264,23 @@ export interface TicketList {
   ticket_no: string;
   title: string;
   type: string;
-  /** Sprint 185 E §1 — the kind of WORK, from the company's own
-   *  catalog. `type` above says what kind of MESSAGE it is; the two
-   *  answer different questions and a melding carries both. Null until
-   *  somebody classifies it, which is a real and common state. */
+  /** W13 — WHAT KIND OF MELDING, from the company's catalog. The one
+   *  classification any screen offers; `type` above is the superseded
+   *  enum, still on the row and still written by the API, offered by
+   *  nothing.
+   *
+   *  Null until somebody classifies it — a real and common state, and
+   *  where the two legacy types with no home in the owner's list
+   *  (SUGGESTION, OTHER) landed at migration.
+   *
+   *  `category_name` is already in the reader's language; the resolver
+   *  is server-side so two screens cannot name one row two ways. */
   category: number | null;
   category_name: string | null;
+  category_slug: string | null;
+  /** "#rrggbb" or null. The chip colour, which is what turns a column
+   *  of grey words into groups you can see. */
+  category_color: string | null;
   priority: string;
   status: TicketStatus;
   company: number;

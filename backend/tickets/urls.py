@@ -48,24 +48,24 @@ from .views_bulk_assign import (
     TicketAssignableUsersView,
     TicketBulkAssignView,
 )
-from .views_work_categories import (
-    WorkCategoryDetailView,
-    WorkCategoryListCreateView,
+from .views_ticket_categories import (
+    TicketCategoryDetailView,
+    TicketCategoryListCreateView,
 )
 
 urlpatterns = [
-    # Sprint 185 E §1 — the work-category catalog. Before the router for
-    # the same reason `bulk-assign/` and `my-slots/` are: the router's
-    # `<pk>` detail pattern would otherwise swallow the literal.
+    # W13 — the ticket-category catalog. Before the router for the same
+    # reason `bulk-assign/` and `my-slots/` are: the router's `<pk>`
+    # detail pattern would otherwise swallow the literal.
     path(
         "categories/",
-        WorkCategoryListCreateView.as_view(),
-        name="work-category-list",
+        TicketCategoryListCreateView.as_view(),
+        name="ticket-category-list",
     ),
     path(
         "categories/<int:category_id>/",
-        WorkCategoryDetailView.as_view(),
-        name="work-category-detail",
+        TicketCategoryDetailView.as_view(),
+        name="ticket-category-detail",
     ),
     # W4-P — the STANDING upload-visibility permission (every ticket).
     # Before the router for the same reason `bulk-assign/` is: the

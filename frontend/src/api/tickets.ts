@@ -13,7 +13,7 @@ import type {
   TicketConvertToExtraWorkResponse,
   TicketDetail,
   TicketList,
-  WorkCategory,
+  TicketCategory,
 } from "./types";
 
 // M6.1 (frontend) — provider customer-detail ticket lists. The backend
@@ -142,21 +142,72 @@ export async function bulkAssignTickets(payload: {
 // Sprint 185 E §1 — the work-category catalog, and one melding's category
 // ---------------------------------------------------------------------------
 
-/** Every work category this actor may see, newest catalog shape.
+/** Every ticket category this actor may see.
  *
- *  `is_active` narrows to the ones still OFFERABLE, which is what a
- *  picker wants; the meldingen FILTER deliberately asks for all of them,
- *  because an archived category still has last month's meldingen on it
- *  and they must stay findable. */
-export async function listWorkCategories(params?: {
+ *  Three narrowings, and each caller uses a different pair:
+ *
+ *   - `is_active=true` — still OFFERABLE. What a picker wants. The
+ *     meldingen FILTER deliberately asks for ALL of them, because an
+ *     archived category still has last month's meldingen on it and they
+ *     must stay findable.
+ *   - `available_at_intake=true` — choosable when a melding is CREATED.
+ *     Both create forms send this, which is how "Ongegrond" is absent
+ *     from them rather than present and disabled (W13 §4). The rule is
+ *     applied server-side so it holds for every caller, including ones
+ *     that forget to ask.
+ *   - `company` — for a SUPER_ADMIN managing one tenant's list. */
+export async function listTicketCategories(params?: {
   company?: number | "";
   is_active?: "true" | "false";
-}): Promise<WorkCategory[]> {
-  const response = await api.get<{ results: WorkCategory[] }>(
+  available_at_intake?: "true" | "false";
+}): Promise<TicketCategory[]> {
+  const response = await api.get<{ results: TicketCategory[] }>(
     "/tickets/categories/",
     { params },
   );
   return response.data.results;
+}
+
+/** W13 — what a create/update of a ticket category may carry.
+ *
+ *  `slug` is create-only in practice: renaming a label is ordinary,
+ *  renaming the key every mapping matches on is not, so the admin form
+ *  offers it once and shows it read-only afterwards.
+ */
+export interface TicketCategoryWritePayload {
+  company?: number | "";
+  slug?: string;
+  label_nl?: string;
+  label_en?: string;
+  color?: string;
+  sort_order?: number;
+  is_active?: boolean;
+  available_at_intake?: boolean;
+}
+
+export async function createTicketCategory(
+  payload: TicketCategoryWritePayload,
+): Promise<TicketCategory> {
+  const response = await api.post<TicketCategory>(
+    "/tickets/categories/",
+    payload,
+  );
+  return response.data;
+}
+
+export async function updateTicketCategory(
+  id: number,
+  payload: TicketCategoryWritePayload,
+): Promise<TicketCategory> {
+  const response = await api.patch<TicketCategory>(
+    `/tickets/categories/${id}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteTicketCategory(id: number): Promise<void> {
+  await api.delete(`/tickets/categories/${id}/`);
 }
 
 /** Set or CLEAR one melding's category.

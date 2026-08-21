@@ -25,13 +25,13 @@ import type {
   TicketStatsByBuildingResponse,
   TicketStatsByBuildingRow,
   TicketStatus,
-  WorkCategory,
+  TicketCategory,
 } from "../api/types";
 import {
   bulkAssignTickets,
   bulkConfirmTickets,
   listTicketAssignmentCandidates,
-  listWorkCategories,
+  listTicketCategories,
 } from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -449,7 +449,7 @@ export function DashboardPage({
   // decides the list params, the stats params and the "filters are
   // active" test, so the three cannot disagree.
   const [categoryFilter, setCategoryFilter] = useState<number | "" | "none">("");
-  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+  const [categories, setCategories] = useState<TicketCategory[]>([]);
 
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
@@ -637,15 +637,20 @@ export function DashboardPage({
 
   const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
-  // Sprint 185 E §1 — the catalog behind the filter above. Loaded once
-  // on the tickets page; non-fatal, and the filter is simply not
-  // rendered when the company has no categories yet.
+  // W13 — the catalog behind the filter above. Loaded once on the
+  // tickets page; non-fatal, and the filter is simply not rendered when
+  // the company has no categories yet.
+  //
+  // Deliberately UNFILTERED: an archived category still has last
+  // month's meldingen on it, and a filter that could not ask for them
+  // would make those rows unfindable. The create forms narrow instead
+  // (`is_active` + `available_at_intake`), which is the opposite job.
   useEffect(() => {
     if (!isTicketsPage) return;
     let cancelled = false;
-    listWorkCategories()
+    listTicketCategories()
       .then((rows) => {
-        if (!cancelled) setWorkCategories(rows);
+        if (!cancelled) setCategories(rows);
       })
       .catch(() => {
         /* non-fatal: the list still reads without its filter */
@@ -2378,10 +2383,10 @@ export function DashboardPage({
                       empty state is what explains where it comes from
                       (the Sprint 178 rule for the building-type filter,
                       restated here rather than re-decided). */}
-                  {workCategories.length > 0 && (
+                  {categories.length > 0 && (
                     <div className="filter-field">
                       <span className="filter-label">
-                        {t("common:work_categories.field_label")}
+                        {t("common:ticket_categories.field_label")}
                       </span>
                       <select
                         className="filter-control"
@@ -2401,7 +2406,7 @@ export function DashboardPage({
                         }}
                       >
                         <option value="">
-                          {t("common:work_categories.filter_all")}
+                          {t("common:ticket_categories.filter_all")}
                         </option>
                         {/* Sprint 187 §5 — the backend has been able to
                             list "not yet categorised" since the catalog
@@ -2411,11 +2416,11 @@ export function DashboardPage({
                             was the one they could only find by reading
                             every row. */}
                         <option value="none">
-                          {t("common:work_categories.filter_uncategorised")}
+                          {t("common:ticket_categories.filter_uncategorised")}
                         </option>
-                        {workCategories.map((row) => (
+                        {categories.map((row) => (
                           <option key={row.id} value={row.id}>
-                            {row.name}
+                            {row.label}
                           </option>
                         ))}
                       </select>
@@ -2744,7 +2749,18 @@ export function DashboardPage({
                             <th>{t("chargeable.col_route")}</th>
                           </>
                         ) : (
-                          <th>{t("common:priority")}</th>
+                          <>
+                            {/* W13 — "you have to show all of it: is it
+                                a complaint, a request, a compliment?"
+                                The list could FILTER by category since
+                                Sprint 185 and never printed it, so the
+                                answer was reachable only by opening
+                                every row. Not on Chargeable work, which
+                                spends these two columns on the extra
+                                work a row came from. */}
+                            <th>{t("common:ticket_categories.field_label")}</th>
+                            <th>{t("common:priority")}</th>
+                          </>
                         )}
                         <th>{t("common:status")}</th>
                         <th className="td-sla">{t("common:sla")}</th>
@@ -2819,6 +2835,37 @@ export function DashboardPage({
                                 </span>
                               )}
                           </td>
+                          {!isChargeableWork && (
+                            <td>
+                              {ticket.category_name ? (
+                                <span
+                                  className="cell-tag ticket-category-tag"
+                                  style={
+                                    ticket.category_color
+                                      ? {
+                                          borderColor: ticket.category_color,
+                                          color: ticket.category_color,
+                                        }
+                                      : undefined
+                                  }
+                                  data-testid="ticket-row-category"
+                                >
+                                  {ticket.category_name}
+                                </span>
+                              ) : (
+                                /* Shown, not hidden. "Not classified
+                                   yet" is the state an operator works
+                                   through, and a blank cell reads as a
+                                   rendering fault rather than a job. */
+                                <span
+                                  className="muted-empty"
+                                  data-testid="ticket-row-category-none"
+                                >
+                                  {t("common:ticket_categories.none")}
+                                </span>
+                              )}
+                            </td>
+                          )}
                           {isChargeableWork ? (
                             <>
                               <td>

@@ -28,7 +28,7 @@ import {
   listCustomerContacts,
   listStaffAssignmentRequests,
 } from "../api/admin";
-import { listWorkCategories, setTicketCategory } from "../api/tickets";
+import { listTicketCategories, setTicketCategory } from "../api/tickets";
 import { getMessageRecipients } from "../api/notifications";
 import { downloadDocumentFromUrl } from "../api/staffCredentials";
 import { formatDateTime } from "../lib/intl";
@@ -49,7 +49,7 @@ import type {
   TicketMessageType,
   TicketStatus,
   TicketStatusChangePayload,
-  WorkCategory,
+  TicketCategory,
   TicketTimelineRow,
   // W6 §3 — the SHARED upload-visibility wire types. This page carried
   // its own copies of all three until now; see the note above
@@ -590,7 +590,7 @@ export function TicketDetailPage() {
    *  Loaded once; non-fatal on failure, like every other optional picker
    *  here — a catalog that would not load must not stop somebody reading
    *  the melding. */
-  const [workCategories, setWorkCategories] = useState<WorkCategory[]>([]);
+  const [categories, setCategories] = useState<TicketCategory[]>([]);
   const [categoryBusy, setCategoryBusy] = useState(false);
   // W4-M §4a — the per-work photo-visibility switch (PA/SA only). One
   // busy flag; the value itself is read straight off the ticket so the
@@ -1322,22 +1322,21 @@ export function TicketDetailPage() {
     ticket.status === "IN_PROGRESS" &&
     ticket.is_assigned_staff === true;
 
-  /** Sprint 185 E §1 — set or clear the melding's work category.
-   *
-   *  Its own endpoint (`PATCH /tickets/<id>/category/`) because the
-   *  ticket viewset carries no update mixin; every single-field ticket
-   *  edit in this system is an action of its own. The response is the
-   *  full detail payload, so the page re-renders from the server's
-   *  answer rather than from an optimistic guess. */
-  // Sprint 185 E §1 — the pickable categories, loaded once. Non-fatal:
-  // a catalog that would not load must not stop somebody reading the
-  // melding, and the row falls back to the stored name.
+  // W13 — the pickable categories, loaded once. Non-fatal: a catalog
+  // that would not load must not stop somebody reading the melding, and
+  // the row falls back to the stored name.
+  //
+  // UNFILTERED, unlike the create forms. This screen must offer
+  // "Ongegrond" (§4 — the verdict is reached here) and must keep
+  // offering an archived category the melding already carries, so
+  // narrowing happens in the `.filter()` at the picker rather than in
+  // the request.
   useEffect(() => {
     if (!isProviderManagementRole(me?.role)) return;
     let cancelled = false;
-    listWorkCategories()
+    listTicketCategories()
       .then((rows) => {
-        if (!cancelled) setWorkCategories(rows);
+        if (!cancelled) setCategories(rows);
       })
       .catch(() => {
         /* non-fatal: the melding still reads */
@@ -4002,23 +4001,27 @@ export function TicketDetailPage() {
                     {ticket.customer_name}
                   </span>
                 </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">{t("details_category")}</span>
-                  <span className="detail-kv-val">{ticket.type}</span>
-                </div>
-                {/* Sprint 185 E §1 — the kind of WORK, beside the kind of
-                    MESSAGE above it. The label above says "category" and
-                    holds `ticket.type`, which is the confusion this item
-                    exists to end; that key is in the `ticket_detail`
-                    bundle and is not this batch's to rename, so the new
-                    row states what it is in its own words instead.
+                {/* W13 — ONE category row.
+                    There were two: `details_category`, which printed the
+                    raw `ticket.type` enum value, and a second row for
+                    the Sprint 185 work-category catalog. Between them a
+                    reader saw the word "category" twice with different
+                    vocabularies underneath. `type` is superseded and no
+                    longer shown anywhere.
 
                     Editable in place for provider operators — the
                     dedicated action endpoint, since the ticket viewset
-                    has no PATCH — and read-only for everyone else. */}
+                    has no PATCH — and read-only for everyone else.
+
+                    §4 — this picker offers the WHOLE active catalog,
+                    including "Ongegrond", which the create forms leave
+                    out. That is not an inconsistency, it is the point:
+                    unfounded is a verdict reached by reading the
+                    melding, and this is the screen where somebody reads
+                    it. */}
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">
-                    {t("common:work_categories.field_label")}
+                    {t("details_category")}
                   </span>
                   <span className="detail-kv-val">
                     {isProviderManagementRole(me?.role) ? (
@@ -4033,20 +4036,20 @@ export function TicketDetailPage() {
                         }}
                       >
                         <option value="">
-                          {t("common:work_categories.none")}
+                          {t("common:ticket_categories.none")}
                         </option>
                         {/* An ARCHIVED category stays offerable when the
                             melding already carries it: otherwise opening
                             an old melding and touching anything would
                             silently retag it. */}
-                        {workCategories
+                        {categories
                           .filter(
                             (row) =>
                               row.is_active || row.id === ticket.category,
                           )
                           .map((row) => (
                             <option key={row.id} value={row.id}>
-                              {row.name}
+                              {row.label}
                             </option>
                           ))}
                       </select>
