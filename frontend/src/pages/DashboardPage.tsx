@@ -702,7 +702,6 @@ export function DashboardPage({
     hideFinishedExtraWork,
     searchParams,
     mineOnly,
-    me,
     isTicketsPage,
     workTypeFilter,
   ]);
