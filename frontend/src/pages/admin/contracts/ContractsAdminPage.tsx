@@ -432,13 +432,26 @@ export function ContractsAdminPage() {
         style={{ overflow: "hidden" }}
         hidden={pageTab !== "list"}
       >
+        {/* W12 — SEVEN tiles, ONE row.
+
+            The column count was pinned inline at `repeat(5, ...)` while
+            this strip renders seven — five statuses plus the two money
+            tiles — so the last two wrapped onto a second row that was
+            five-sevenths empty. The count was written by hand and the
+            tiles were added later, which is the same hardcoded-literal
+            failure CLAUDE.md records twice: a number kept in sync by
+            memory drifts the moment somebody adds an entry.
+
+            `.contracts-stat-grid` takes its column count FROM THE
+            CHILDREN, so an eighth tile widens the row instead of
+            silently wrapping and there is no number to maintain. It is
+            also a class rather than an inline style, which is the other
+            half of the bug: an inline `grid-template-columns` outranks
+            every media query, so this strip was the one summary grid in
+            the app that never went responsive. */}
         <div
-          className="summary-grid"
+          className="summary-grid contracts-stat-grid"
           data-testid="contracts-stats"
-          style={{
-            gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-            margin: "14px 18px 4px",
-          }}
         >
           <div className="summary-stat" data-testid="contracts-stat-total">
             <span className="summary-stat-label">{t("stats.total")}</span>

@@ -13493,3 +13493,33 @@ table.pva-table { min-width: 0; }
   line-height: 1.45;
   color: var(--text-muted);
 }
+
+/* ===================================================================
+   W12 — the contracts stat strip. One row, however many tiles.
+   APPEND-ONLY: nothing above this line is touched.
+   =================================================================== */
+.summary-grid.contracts-stat-grid {
+  /* The column count comes from the children: `auto-flow: column` makes
+     one track per tile, so adding an eighth cannot wrap it onto a second
+     row and there is no hand-written number to keep in step. */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-template-columns: none;
+  gap: 10px;
+  margin: 14px 18px 4px;
+}
+/* Seven tiles in one row stop being readable long before a phone. Below
+   the app's own summary-grid breakpoints the strip goes back to wrapping
+   rows, which is what every other summary grid does — the inline style
+   this replaced overrode those media queries and never wrapped at all. */
+@media (max-width: 1100px) {
+  .summary-grid.contracts-stat-grid {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .summary-grid.contracts-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
