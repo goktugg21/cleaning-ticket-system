@@ -174,44 +174,39 @@ function getVisibleWorkflowStatuses(ticket: TicketDetail): TicketStatus[] {
 // transitions are legal — 30.1.1's `visibleNextStatuses` gate still
 // runs first; this only changes how the legal set is laid out.
 const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
-  // W10 §1 — acknowledging is the FIRST offer on an open job, because
-  // it is the honest one: somebody has seen it. Starting stays available
-  // beside it for a job that begins today.
-  OPEN: ["ACKNOWLEDGED", "IN_PROGRESS"],
-  ACKNOWLEDGED: ["IN_PROGRESS", "ON_HOLD"],
-  // W10 §2 — one way out, and it is forward.
+  // W13 §1 — ONE entry per status. The renderer takes the FIRST legal
+  // one and puts every other legal move behind "other actions".
+  //
+  // The owner's father, on a card offering three: "I press it, I don't
+  // know what it does, I don't know why I press it — because you are
+  // telling me to press it." Two buttons that both look like the next
+  // step mean the page has not decided, and a reader cannot decide
+  // either. The list is still a LIST because the first entry may be
+  // illegal for this actor; the second is then the primary, and so on.
+  //
+  // IN_PROGRESS carried three (manager review, customer approval, on
+  // hold). Manager review is first because it is the system's own
+  // default: `BuildingStaffVisibility.staff_completion_routes_to_customer`
+  // is false unless somebody set it, and when it IS set the backend
+  // narrows `allowed_next_statuses` to the customer route for that
+  // staffer, so the first LEGAL entry resolves to the right one without
+  // this table knowing anything about the flag.
+  OPEN: ["ACKNOWLEDGED"],
+  ACKNOWLEDGED: ["IN_PROGRESS"],
   ON_HOLD: ["IN_PROGRESS"],
-  // W9 §2 — CLOSED was listed here and IS NOT REACHABLE from
-  // IN_PROGRESS. `ALLOWED_TRANSITIONS` offers exactly two targets
-  // (manager review, customer approval), so naming a third did nothing
-  // except push the real second option — send it straight to the
-  // customer — into the hidden list.
-  IN_PROGRESS: [
-    "WAITING_MANAGER_REVIEW",
-    "WAITING_CUSTOMER_APPROVAL",
-    "ON_HOLD",
-  ],
-  // W9 §2 — THIS LINE IS WHY THE OWNER COULD NOT FIND ANYTHING.
-  // APPROVED and REJECTED are not reachable from WAITING_MANAGER_REVIEW
-  // — the backend allows only WAITING_CUSTOMER_APPROVAL (accept and
-  // forward) and IN_PROGRESS (send back to the worker). Because neither
-  // named status was legal, `partitionTransitions` produced an EMPTY
-  // primary list and dropped BOTH real actions behind "Show correction
-  // actions". On the one screen where a manager has a decision to make,
-  // the card looked like it offered nothing.
+  IN_PROGRESS: ["WAITING_MANAGER_REVIEW", "WAITING_CUSTOMER_APPROVAL"],
   WAITING_MANAGER_REVIEW: ["WAITING_CUSTOMER_APPROVAL"],
+  // The customer's own decision is a genuine pair: approving and
+  // rejecting are opposite answers to one question, not two candidate
+  // next steps, and hiding "reject" behind a disclosure would be a
+  // dishonest screen. This is the one deliberate exception.
   WAITING_CUSTOMER_APPROVAL: ["APPROVED", "REJECTED"],
   APPROVED: ["CLOSED"],
   REJECTED: ["IN_PROGRESS"],
-  // Reopening is the only move a closed ticket has, and it is a
-  // correction — it is rendered by the correction group below, not
-  // here, so it never wears a forward button's colour.
   CLOSED: [],
   REOPENED_BY_ADMIN: ["IN_PROGRESS"],
-  // Terminal — no further status moves once converted to Extra Work.
   CONVERTED_TO_EXTRA_WORK: [],
 };
-
 /**
  * W9 §2 — WHICH MOVES UNDO PROGRESS, by rank rather than by list.
  *
@@ -340,9 +335,20 @@ function partitionTransitions(
   // PRIMARY_TRANSITIONS names it. `WAITING_MANAGER_REVIEW` legitimately
   // lists IN_PROGRESS as one of its two real targets; it belongs in the
   // correction group, which is where the split below puts it.
-  const primary = primaryOrder.filter(
+  const legalPrimaries = primaryOrder.filter(
     (s) => allowedSet.has(s) && !isCorrection(currentStatus, s),
   );
+  // W13 §1 — ONE primary, and the first legal one wins.
+  //
+  // The exception is a QUESTION PUT TO THE READER rather than a next
+  // step: approve and reject are the two answers to "do you accept
+  // this work", and putting one behind a disclosure would hide half
+  // the question. Everywhere else, a second forward button means the
+  // page has not decided.
+  const primary =
+    currentStatus === "WAITING_CUSTOMER_APPROVAL"
+      ? legalPrimaries
+      : legalPrimaries.slice(0, 1);
   const primarySet = new Set(primary);
   const secondary = allowed.filter((s) => !primarySet.has(s));
   return { primary, secondary };
@@ -2798,8 +2804,13 @@ export function TicketDetailPage() {
                       className="workflow-current-status-dot"
                       aria-hidden="true"
                     />
+                    {/* W13 §4 — A STATE IS A SENTENCE ABOUT THE WORK.
+                        The enum label ("Scheduled, not started") is a
+                        filing category; this says what is true of the
+                        job right now, which is what somebody arriving
+                        at the page is actually asking. */}
                     <span data-testid="workflow-current-status-text">
-                      {tStatus(ticket.status)}
+                      {t(`workflow_state.${ticket.status}`)}
                     </span>
                   </span>
                   {currentStatusSince && (
@@ -2852,24 +2863,17 @@ export function TicketDetailPage() {
                     />
                   </div>
 
-                  {/* Sprint 25C — OSIUS staff-completion evidence hint.
-                      Backend rejects the IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
-                      hop unless the ticket carries a note OR at least one
-                      visible attachment. The page already has a full
-                      attachments card lower down (upload + list); this hint
-                      nudges the operator toward proof-of-work without
-                      blocking the flow when a note alone is enough. */}
-                  {isStaff &&
-                    ticket.status === "IN_PROGRESS" &&
-                    visibleNextStatuses.includes("WAITING_CUSTOMER_APPROVAL") && (
-                      <p
-                        className="muted small"
-                        data-testid="workflow-completion-evidence-hint"
-                        style={{ marginTop: 4, marginBottom: 4 }}
-                      >
-                        {t("workflow_completion_evidence_hint")}
-                      </p>
-                    )}
+                  {/* W13 §5 — the paragraph is DELETED, not moved.
+                      "Please upload a photo of the completed work if
+                      possible..." sat between the status and the
+                      buttons, which is where the reader is deciding
+                      what to press, not where a photo is wanted. The
+                      completion modal already states the same rule at
+                      the moment it applies
+                      (`ticket_staff_complete.note_label_or_photo` and
+                      `note_or_photo_hint`), and the server enforces it
+                      there, so this was a third copy of one fact in
+                      the place it helped least. */}
 
                   {/* W5 fix 3 — the billing-cutoff notice, above the
                       customer's approve / reject buttons.
@@ -3094,13 +3098,24 @@ export function TicketDetailPage() {
                                     the list. It reads "Move back to" with a
                                     left arrow wherever it lands; the amber is
                                     what the correction slot adds on top. */}
+                                {/* W13 §4 — A BUTTON IS A VERB.
+                                    It used to read "Move to <status
+                                    name>", so the owner's father met
+                                    "Move to Scheduled, not started",
+                                    which is neither a state nor an
+                                    action. The status name says where
+                                    the work IS; the button says what
+                                    pressing it DOES, and they are
+                                    never the same words.
+                                    A correction keeps naming its
+                                    destination: undoing is the one case
+                                    where "where does this put it back
+                                    to" is the question. */}
                                 {isCorrection(ticket.status, status)
                                   ? t("workflow_move_back_to", {
                                       status: tStatus(status),
                                     })
-                                  : t("workflow_move_to", {
-                                      status: tStatus(status),
-                                    })}
+                                  : t(`workflow_action.${status}`)}
                                 <span className="status-btn-arrow">
                                   {isCorrection(ticket.status, status)
                                     ? "←"
