@@ -2642,5 +2642,9 @@
   "archive.unarchive_confirm": "Terughalen",
   "archive.unarchive_done": "Terug in de werklijst.",
   "archive.show": "Archief",
-  "archive.show_working": "Werklijst"
+  "archive.show_working": "Werklijst",
+  "change.moved_to": "Verplaatst naar {{status}}.",
+  "change.assigned_now": "{{names}} is toegewezen.",
+  "change.nobody_assigned": "Er is nu niemand toegewezen.",
+  "change.failed": "Dit is niet gelukt. Er is niets gewijzigd."
 }

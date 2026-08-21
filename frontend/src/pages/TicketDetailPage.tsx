@@ -84,6 +84,7 @@ import { RouteBadge } from "../components/RouteBadge";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
 import { PlannedVsActualHours } from "../components/PlannedVsActualHours";
+import { describeTicketChange } from "../lib/describeTicketChange";
 import { ticketStatusLabelKey } from "../lib/enumLabels";
 
 // B7 four-tier note taxonomy — per-tier UI vocabulary. The bubble class
@@ -1501,8 +1502,14 @@ export function TicketDetailPage() {
         payload,
       );
 
+      // W13 — the transition ANSWERS. It used to do exactly these two
+      // lines and nothing else, which is the father's "I press it, I
+      // don't know what it does": the page looked slightly different
+      // afterwards and you were left to work out whether that was you.
+      const said = describeTicketChange(ticket, response.data, t, tStatus);
       setTicket(response.data);
       setStatusNote("");
+      if (said) toast.push({ variant: "success", ...said });
     } catch (err) {
       // W10 §4 — the backend asked for a reason, so give the operator
       // somewhere to type one instead of an error they cannot act on.
@@ -1517,6 +1524,16 @@ export function TicketDetailPage() {
           return;
         }
       }
+      // W13 — a failure is louder than a success and names the next
+      // move. `error` toasts are sticky in the provider, so this waits
+      // to be dismissed rather than vanishing unread, and it says the
+      // ticket did NOT move — the thing an operator has to know before
+      // pressing anything again.
+      toast.push({
+        variant: "error",
+        title: t("change.failed"),
+        description: getApiError(err),
+      });
       setError(getApiError(err));
     } finally {
       setStatusBusy(null);

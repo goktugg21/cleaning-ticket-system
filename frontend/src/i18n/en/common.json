@@ -2642,5 +2642,9 @@
   "archive.unarchive_confirm": "Take it out",
   "archive.unarchive_done": "Back in the working list.",
   "archive.show": "Archive",
-  "archive.show_working": "Working list"
+  "archive.show_working": "Working list",
+  "change.moved_to": "Moved to {{status}}.",
+  "change.assigned_now": "{{names}} is assigned.",
+  "change.nobody_assigned": "Nobody is assigned now.",
+  "change.failed": "That did not go through. Nothing has changed."
 }
