@@ -187,13 +187,23 @@ function isAdminCustomerDecisionOverride(
 // transitions are legal — 30.1.1's `visibleNextStatuses` gate still
 // runs first; this only changes how the legal set is laid out.
 const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
-  OPEN: ["IN_PROGRESS"],
+  // W10 §1 — acknowledging is the FIRST offer on an open job, because
+  // it is the honest one: somebody has seen it. Starting stays available
+  // beside it for a job that begins today.
+  OPEN: ["ACKNOWLEDGED", "IN_PROGRESS"],
+  ACKNOWLEDGED: ["IN_PROGRESS", "ON_HOLD"],
+  // W10 §2 — one way out, and it is forward.
+  ON_HOLD: ["IN_PROGRESS"],
   // W9 §2 — CLOSED was listed here and IS NOT REACHABLE from
   // IN_PROGRESS. `ALLOWED_TRANSITIONS` offers exactly two targets
   // (manager review, customer approval), so naming a third did nothing
   // except push the real second option — send it straight to the
   // customer — into the hidden list.
-  IN_PROGRESS: ["WAITING_MANAGER_REVIEW", "WAITING_CUSTOMER_APPROVAL"],
+  IN_PROGRESS: [
+    "WAITING_MANAGER_REVIEW",
+    "WAITING_CUSTOMER_APPROVAL",
+    "ON_HOLD",
+  ],
   // W9 §2 — THIS LINE IS WHY THE OWNER COULD NOT FIND ANYTHING.
   // APPROVED and REJECTED are not reachable from WAITING_MANAGER_REVIEW
   // — the backend allows only WAITING_CUSTOMER_APPROVAL (accept and
@@ -244,7 +254,13 @@ const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
  */
 const STATUS_RANK: Record<TicketStatus, number> = {
   OPEN: 0,
+  // W10 §1 — between open and started, which is what it means.
+  ACKNOWLEDGED: 0.5,
   IN_PROGRESS: 1,
+  // W10 §2 — a hold is a PAUSE, not a step back. It ranks with the work
+  // it interrupts, so resuming reads as forward and parking does not
+  // read as a correction.
+  ON_HOLD: 1,
   // Back in the crew's hands, so it ranks with IN_PROGRESS rather than
   // after CLOSED, where its name would otherwise put it.
   REOPENED_BY_ADMIN: 1,
@@ -268,41 +284,6 @@ const RESUME_TARGETS: Partial<Record<TicketStatus, TicketStatus[]>> = {
   REJECTED: ["IN_PROGRESS"],
   REOPENED_BY_ADMIN: ["IN_PROGRESS"],
 };
-
-/**
- * W9 §2 — THE ONE WAY BACK, not every way back.
- *
- * A SUPER_ADMIN may move a ticket to any earlier status, so "show every
- * correction" put seven amber buttons under a closed job and nothing
- * else. That is not a control an owner reads in ten seconds; it is a
- * list to be afraid of. The group therefore offers the single obvious
- * step — put the job back where work happens — and every other backward
- * move stays in the quiet list below it, exactly where it already was.
- * Nothing a role may do is taken away; one thing is made obvious.
- *
- * From a finished job (approved, rejected, closed) that step is
- * REOPENED_BY_ADMIN, the status the system has for precisely this and
- * the one that leaves a visible mark that an admin reopened it. From
- * anywhere else it is IN_PROGRESS. Failing both, the nearest earlier
- * status, so a role with an unusual permission set still gets one.
- */
-function pickCorrectionTarget(
-  currentStatus: TicketStatus,
-  candidates: TicketStatus[],
-): TicketStatus | null {
-  if (candidates.length === 0) return null;
-  const prefer: TicketStatus[] =
-    STATUS_RANK[currentStatus] >= 4
-      ? ["REOPENED_BY_ADMIN", "IN_PROGRESS"]
-      : ["IN_PROGRESS", "REOPENED_BY_ADMIN"];
-  for (const wanted of prefer) {
-    if (candidates.includes(wanted)) return wanted;
-  }
-  // Nearest earlier status: the highest rank still below the current one.
-  return [...candidates].sort(
-    (x, y) => STATUS_RANK[y] - STATUS_RANK[x],
-  )[0];
-}
 
 /** Is this move a correction rather than a step forward? */
 function isCorrection(
@@ -329,10 +310,24 @@ function isCorrection(
 // "reject". CONVERTED_TO_EXTRA_WORK is filtered out of both render
 // arrays and never reaches a button; it is listed so the Record stays
 // total.
-type WorkflowTone = "advance" | "reject";
+type WorkflowTone = "advance" | "reject" | "hold";
+
+/** Work that is over. A finished job is never "upcoming", whatever its
+ *  planned start says. */
+const TERMINAL_UI_STATUSES = new Set<TicketStatus>([
+  "APPROVED",
+  "REJECTED",
+  "CLOSED",
+  "CONVERTED_TO_EXTRA_WORK",
+]);
 const WORKFLOW_TONE: Record<TicketStatus, WorkflowTone> = {
   OPEN: "advance",
+  ACKNOWLEDGED: "advance",
   IN_PROGRESS: "advance",
+  // Parking a job is neither progress nor a rejection. It gets the
+  // "needs a person to act" tone, which is what `--state-waiting` is
+  // for, rather than the green of a step completed.
+  ON_HOLD: "hold",
   WAITING_MANAGER_REVIEW: "advance",
   WAITING_CUSTOMER_APPROVAL: "advance",
   APPROVED: "advance",
@@ -1234,6 +1229,76 @@ export function TicketDetailPage() {
     return latest;
   }, [ticket]);
 
+  /**
+   * W10 §5 — THE STEP JUST TAKEN, which is the only step there is
+   * anything to undo.
+   *
+   * Corrections used to be every reverse edge in the graph, listed at
+   * once, always. On a closed ticket a SUPER_ADMIN saw seven ways
+   * backwards — a menu of moves nobody had made and nobody wanted. A
+   * correction is only meaningful against a MISTAKE, and the mistake it
+   * can plausibly fix is the last transition.
+   *
+   * So this reads the newest history row's `old_status`: where the
+   * ticket came from. `status_history` already owns that fact, so
+   * nothing new is stored and there is no second place to keep it in
+   * step. A ticket that has never moved has no previous status and
+   * therefore offers no correction, which is right — there is nothing
+   * to take back.
+   *
+   * This applies to SUPER_ADMIN exactly as to everyone else; the owner
+   * asked for that by name. It removes no power: every other backward
+   * move a role holds is still in the quiet list below, and the backend
+   * still decides what is legal.
+   */
+  /**
+   * W10 §3 — is this job still in the future?
+   *
+   * True when a planned start exists, is still ahead of now, and the
+   * work is not finished. Derived on every render from the clock, so it
+   * turns itself off when the date arrives — no job, no flag, nobody
+   * remembering. `scheduled_start_at` is the single owner of when the
+   * work is due; this reads it and stores nothing.
+   */
+  // THE CLOCK IS NOT READ DURING RENDER. `Date.now()` in a memo is
+  // impure — and it is also wrong for this feature: a memo over the
+  // ticket never recomputes just because time passed, so the strip
+  // would still claim "upcoming" at midday on the day the job started.
+  // The tick is what makes "moves itself when the date arrives" true
+  // rather than a thing somebody has to reload the page for. It starts
+  // at 0 so the first render reads no clock at all; the immediate
+  // timeout fills it in a moment later, and the interval keeps it
+  // honest once a minute.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const immediate = setTimeout(tick, 0);
+    const every = setInterval(tick, 60_000);
+    return () => {
+      clearTimeout(immediate);
+      clearInterval(every);
+    };
+  }, []);
+
+  const isUpcoming = useMemo(() => {
+    if (now === 0) return false;
+    if (!ticket?.scheduled_start_at) return false;
+    if (TERMINAL_UI_STATUSES.has(ticket.status)) return false;
+    return new Date(ticket.scheduled_start_at).getTime() > now;
+  }, [ticket, now]);
+
+  const previousStatus = useMemo<TicketStatus | null>(() => {
+    if (!ticket) return null;
+    let newest: { at: string; from: TicketStatus } | null = null;
+    for (const row of ticket.status_history ?? []) {
+      if (row.new_status !== ticket.status) continue;
+      if (newest === null || row.created_at > newest.at) {
+        newest = { at: row.created_at, from: row.old_status as TicketStatus };
+      }
+    }
+    return newest?.from ?? null;
+  }, [ticket]);
+
   // Sprint 30 Batch 30.1.1.5 — partition the already-legal transition
   // set into "obvious next step" primaries vs "edge-case" secondaries.
   // The partition is purely about visibility; both groups dispatch
@@ -1401,6 +1466,39 @@ export function TicketDetailPage() {
       me?.role,
     );
 
+    // W10 §4 — A REQUIRED FIELD THAT DOES NOT EXIST MAKES THE ACTION
+    // IMPOSSIBLE. This is the bug the owner hit: he tried to move a
+    // ticket back to Open, was told a reason was required, and had
+    // nowhere to type one.
+    //
+    // Sprint 184 §2 made EVERY jump outside `ALLOWED_TRANSITIONS` an
+    // override that demands `override_reason` — correctly, because a
+    // hand-typed jump was otherwise indistinguishable from a step
+    // somebody earned. But the page only ever collected a reason for
+    // ONE case, the provider driving a customer decision on
+    // WAITING_CUSTOMER_APPROVAL. Every other jump posted `note` alone
+    // and came back 400 `override_reason_required`, with no field on
+    // screen for the reason it was asking for. For a SUPER_ADMIN, whose
+    // `allowed_next_statuses` is every status, that is most of the
+    // buttons on the card.
+    //
+    // WHO KNOWS WHICH MOVES NEED A REASON. The state machine, and only
+    // the state machine. Mirroring `ALLOWED_TRANSITIONS` here to predict
+    // it would put one fact in two files and guarantee they drift — the
+    // failure this codebase has already had twice. So the page does not
+    // predict: it asks, the backend refuses with the stable code
+    // `override_reason_required`, and the catch below opens this same
+    // prompt and resubmits. One owner, and a page that cannot be wrong
+    // about a rule it does not hold.
+    //
+    // The pre-emptive branch stays for the customer-decision case only,
+    // because there the prompt is a deliberate speed bump rather than a
+    // reaction to a refusal.
+    //
+    // The status note is NOT the reason and is not repurposed as one:
+    // the note is the operational comment on the move, `override_reason`
+    // is the justification the audit row carries, and collapsing them
+    // would put one value in two meanings.
     if (needsAdminDecisionOverride) {
       setOverrideDecision(toStatus);
       setOverrideReason("");
@@ -1433,6 +1531,19 @@ export function TicketDetailPage() {
       setTicket(response.data);
       setStatusNote("");
     } catch (err) {
+      // W10 §4 — the backend asked for a reason, so give the operator
+      // somewhere to type one instead of an error they cannot act on.
+      // Matching the stable `code`, never the message.
+      if (axios.isAxiosError(err)) {
+        const data = err.response?.data as { code?: string } | undefined;
+        if (data?.code === "override_reason_required") {
+          setOverrideDecision(toStatus);
+          setOverrideReason("");
+          setOverrideError(null);
+          setStatusBusy(null);
+          return;
+        }
+      }
       setError(getApiError(err));
     } finally {
       setStatusBusy(null);
@@ -1455,9 +1566,17 @@ export function TicketDetailPage() {
     setOverrideError(null);
     setOverrideBusy(true);
     try {
+      // W10 §4 — `is_override` is the BACKEND's call, not ours.
+      //
+      // It coerces the flag True for a provider-driven customer decision
+      // and for any jump outside the transition table, and it stores the
+      // reason only when the flag is set. Asserting `is_override: true`
+      // from here on a move the backend considers ordinary would stamp a
+      // legitimate step as an override in the audit trail — a fact
+      // written by the wrong owner. Sending the reason and letting the
+      // machine decide keeps the history telling the truth either way.
       const payload: TicketStatusChangePayload = {
         to_status: overrideDecision,
-        is_override: true,
         override_reason: overrideReason.trim(),
         note: statusNote.trim(),
       };
@@ -2632,6 +2751,23 @@ export function TicketDetailPage() {
             defaultOpen
             testId="side-card-workflow"
           >
+            {/* W10 §3 — FUTURE-DATED WORK IS NOT ACTIVE WORK.
+                A job whose planned start is still ahead says so, and
+                stops saying it the moment the date arrives. Nothing is
+                stored and nothing has to be remembered: this is read
+                from `scheduled_start_at`, which already owns when the
+                work is due, compared against now. There is no second
+                field, no status change, and nobody to move it — "active"
+                simply means the planned start has arrived and the job is
+                not finished. */}
+            {isUpcoming && (
+              <p className="workflow-upcoming" data-testid="workflow-upcoming">
+                <Clock size={14} strokeWidth={2.4} aria-hidden="true" />
+                {t("workflow_upcoming", {
+                  when: formatDateTime(ticket.scheduled_start_at as string),
+                })}
+              </p>
+            )}
             {/* W9 §1 — the card carries the colour of WHERE THE JOB IS.
                 The owner asked for "more visually informative rather
                 than everything being white and green", and the most
@@ -2972,12 +3108,21 @@ export function TicketDetailPage() {
                     // that is neither a named forward step nor a
                     // correction keeps the old quiet list, so nothing a
                     // role is allowed to do disappears from the screen.
-                    const correctionTarget = pickCorrectionTarget(
-                      ticket.status,
-                      secondaryForRender.filter((st) =>
-                        isCorrection(ticket.status, st),
-                      ),
-                    );
+                    // W10 §5 — CONTEXTUAL, NOT PERMANENT. The only
+                    // correction offered is the one that undoes the step
+                    // just taken, and only while the backend still
+                    // permits it.
+                    const correctionTarget =
+                      previousStatus !== null &&
+                      previousStatus !== ticket.status &&
+                      // `some`, not `includes`: `secondaryForRender` is
+                      // narrowed by its own filter and would refuse the
+                      // full union as an argument. A cast would silence
+                      // that rather than answer it.
+                      secondaryForRender.some((st) => st === previousStatus) &&
+                      isCorrection(ticket.status, previousStatus)
+                        ? previousStatus
+                        : null;
                     const correctionForRender =
                       correctionTarget === null ? [] : [correctionTarget];
                     const otherSecondaryForRender = secondaryForRender.filter(

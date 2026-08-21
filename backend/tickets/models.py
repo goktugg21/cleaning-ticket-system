@@ -137,7 +137,30 @@ class TicketScheduleStatus(models.TextChoices):
 
 class TicketStatus(models.TextChoices):
     OPEN = "OPEN", "Open"
+    # W10 §1 — SEEN AND SCHEDULED, NOT STARTED.
+    #
+    # The gap this closes is the operator's, not the model's: opening a
+    # September job in August, the only honest options were to leave it
+    # at OPEN (which reads to the customer as ignored) or to move it to
+    # IN_PROGRESS (which claims work that has not begun). ACKNOWLEDGED is
+    # the true third answer — a human has seen it, it is scheduled, and
+    # nobody has started.
+    #
+    # It is a WORKFLOW status and nothing else. WHEN the work is due is
+    # already owned by `scheduled_start_at` and is not duplicated here;
+    # this says only that somebody has taken responsibility for it.
+    ACKNOWLEDGED = "ACKNOWLEDGED", "Acknowledged"
     IN_PROGRESS = "IN_PROGRESS", "In Progress"
+    # W10 §2 — STALLED ON SOMETHING WE DO NOT CONTROL.
+    #
+    # Waiting on a part, on access, on the customer to clear a room. Not
+    # cancelled, not in progress, and deliberately NOT terminal: it is in
+    # `ALLOWED_TRANSITIONS` with a way back to IN_PROGRESS, it is not in
+    # `TERMINAL_TICKET_STATUSES`, and `inTicketList` is true in the
+    # frontend spec, so a job parked here is still a chip somebody has to
+    # work. That combination is what stops it becoming a hiding place —
+    # a status you can enter and never leave is a bin, not a state.
+    ON_HOLD = "ON_HOLD", "On Hold"
     # Sprint 28 Batch 11 — STAFF default completion route. When a STAFF
     # user marks their work done, the ticket lands here for BM review.
     # BM accepts -> WAITING_CUSTOMER_APPROVAL, or rejects -> IN_PROGRESS.

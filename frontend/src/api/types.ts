@@ -32,7 +32,15 @@ export type EmploymentType = "INTERNAL_STAFF" | "ZZP" | "INHUUR";
 // IN_PROGRESS and WAITING_CUSTOMER_APPROVAL.
 export type TicketStatus =
   | "OPEN"
+  // W10 §1 — seen and scheduled, work not begun. Between OPEN and
+  // IN_PROGRESS so an operator opening a September job in August has a
+  // true answer instead of choosing between "ignored" and "started".
+  | "ACKNOWLEDGED"
   | "IN_PROGRESS"
+  // W10 §2 — stalled on something outside our control. Not cancelled,
+  // not in progress, and not terminal: it has a way back to IN_PROGRESS
+  // and it stays on the ticket list.
+  | "ON_HOLD"
   | "WAITING_MANAGER_REVIEW"
   | "WAITING_CUSTOMER_APPROVAL"
   | "APPROVED"

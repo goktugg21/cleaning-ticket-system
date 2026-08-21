@@ -268,6 +268,7 @@
   "detail.my_planned_days_label": "Your planned days:",
   "detail.my_planned_no_day": "No day yet",
   "detail.my_planned_hours_value": "{{hours}} h",
-  "workflow_correction_heading": "Correct a mistake",
-  "workflow_move_back_to": "Move back to {{status}}"
+  "workflow_correction_heading": "Undo the last step",
+  "workflow_move_back_to": "Move back to {{status}}",
+  "workflow_upcoming": "Upcoming - planned to start {{when}}."
 }

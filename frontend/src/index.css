@@ -9351,6 +9351,35 @@ a.attn-row:hover {
   text-transform: uppercase;
   color: var(--state-waiting);
 }
+/* W10 §2 — parking a job is neither progress nor a rejection, so it
+   gets the "needs a person to act" tone rather than the green of a step
+   completed. Same `--state-waiting` the correction group uses, because
+   it is the same meaning: this one is waiting on somebody. */
+.workflow-body .status-btn[data-tone="hold"] {
+  color: var(--state-waiting);
+  border-color: var(--amber-border);
+  background: var(--surface);
+}
+.workflow-body .status-btn[data-tone="hold"]:hover {
+  border-color: var(--state-waiting);
+  background: var(--state-waiting-bg);
+}
+.workflow-body .status-btn[data-tone="hold"] .status-btn-arrow {
+  color: var(--state-waiting);
+}
+/* W10 §3 — UPCOMING. Derived from `scheduled_start_at`, never stored. */
+.workflow-upcoming {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--state-waiting-bg);
+  color: var(--state-waiting);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
 .workflow-body .status-btn[data-tone="correct"] {
   color: var(--state-waiting);
   border-color: var(--amber-border);

@@ -2587,5 +2587,7 @@
   "planned_vs_actual.not_planned": "Nog niet gepland",
   "planned_vs_actual.see_week": "Week bekijken of aanpassen",
   "planned_vs_actual.empty": "Er is nog niemand op deze klus gepland.",
-  "planned_vs_actual.empty_self": "U bent niet ingepland op deze klus."
+  "planned_vs_actual.empty_self": "U bent niet ingepland op deze klus.",
+  "ticket_status.acknowledged": "Ingepland, nog niet gestart",
+  "ticket_status.on_hold": "In wacht"
 }

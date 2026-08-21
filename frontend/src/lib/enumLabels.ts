@@ -158,8 +158,12 @@ export function ticketStatusLabelKey(status: TicketStatus | string): string {
   switch (status) {
     case "OPEN":
       return "ticket_status.open";
+    case "ACKNOWLEDGED":
+      return "ticket_status.acknowledged";
     case "IN_PROGRESS":
       return "ticket_status.in_progress";
+    case "ON_HOLD":
+      return "ticket_status.on_hold";
     case "WAITING_MANAGER_REVIEW":
       return "ticket_status.waiting_manager_review";
     case "WAITING_CUSTOMER_APPROVAL":

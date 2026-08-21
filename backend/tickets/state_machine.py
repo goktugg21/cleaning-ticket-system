@@ -99,6 +99,64 @@ ALLOWED_TRANSITIONS = {
         UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
         UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
     },
+    # W10 §1 — ACKNOWLEDGED sits between OPEN and IN_PROGRESS, with ONE
+    # way in and ONE way out, through this table like every other status.
+    # There is no bulk path to it and no endpoint that sets it directly:
+    # it is reached by `apply_transition` and therefore writes a
+    # `TicketStatusHistory` row like every other move.
+    #
+    # The roles are exactly OPEN -> IN_PROGRESS's. Acknowledging is the
+    # same act of taking responsibility for a job, one step earlier, so
+    # anyone who could start it can say they have seen it.
+    (TicketStatus.OPEN, TicketStatus.ACKNOWLEDGED): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
+    (TicketStatus.ACKNOWLEDGED, TicketStatus.IN_PROGRESS): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+        # A staffer who turns up and starts is the person who knows the
+        # work began. They may start an acknowledged job exactly as they
+        # may complete one they are assigned to.
+        UserRole.STAFF: SCOPE_STAFF_ASSIGNED,
+    },
+    # W10 §2 — ON_HOLD. WHICH STATES MAY ENTER AND LEAVE IT, and why
+    # these:
+    #
+    #   IN, from ACKNOWLEDGED and IN_PROGRESS. Those are the two states
+    #   where WE hold the job and can therefore be blocked on somebody
+    #   else. A scheduled job whose access falls through, and a started
+    #   job whose part has not arrived, are the two real cases.
+    #
+    #   OUT, to IN_PROGRESS. One way out, deliberately: whatever the
+    #   hold was, clearing it means the crew is working. Sending it back
+    #   to ACKNOWLEDGED would let a job bounce between two not-started
+    #   states forever, which is the shape a hiding place takes.
+    #
+    #   NOT from WAITING_CUSTOMER_APPROVAL. "Waiting on the customer" is
+    #   what that status already means, and a second status for the same
+    #   fact would be two owners for one thing.
+    #
+    # STAFF cannot park a job. Deciding that work is blocked is a
+    # dispatch decision with a customer consequence, and H-5's principle
+    # — staff do not make the customer-facing call — extends to it.
+    (TicketStatus.ACKNOWLEDGED, TicketStatus.ON_HOLD): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
+    (TicketStatus.IN_PROGRESS, TicketStatus.ON_HOLD): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
+    (TicketStatus.ON_HOLD, TicketStatus.IN_PROGRESS): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
     # Sprint 28 Batch 11 — STAFF default-route completion path. The
     # `apply_transition` routing-flag check below decides which of the
     # two STAFF-permitted IN_PROGRESS targets a given staff actually

@@ -2587,5 +2587,7 @@
   "planned_vs_actual.not_planned": "Not planned yet",
   "planned_vs_actual.see_week": "See or edit the week",
   "planned_vs_actual.empty": "Nobody has been planned on this job yet.",
-  "planned_vs_actual.empty_self": "You are not planned on this job."
+  "planned_vs_actual.empty_self": "You are not planned on this job.",
+  "ticket_status.acknowledged": "Scheduled, not started",
+  "ticket_status.on_hold": "On hold"
 }

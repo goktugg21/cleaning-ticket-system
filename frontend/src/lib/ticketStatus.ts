@@ -52,7 +52,14 @@ interface TicketStatusSpec {
 
 const TICKET_STATUS_SPEC: Record<TicketStatus, TicketStatusSpec> = {
   OPEN: { rank: 10, inTicketList: true },
+  // W10 §1 — slots between OPEN and IN_PROGRESS. The ranks were spaced
+  // in tens for exactly this, so nothing else had to move.
+  ACKNOWLEDGED: { rank: 15, inTicketList: true },
   IN_PROGRESS: { rank: 20, inTicketList: true },
+  // W10 §2 — ON THE LIST, deliberately. A held job must stay somewhere
+  // somebody looks; `inTicketList: false` would make this status the
+  // hiding place the brief warned about, and the chip is what stops it.
+  ON_HOLD: { rank: 25, inTicketList: true },
   // Sprint 7 — the manager-review queue is surfaced so provider
   // management can preset the list to the bulk-confirm view.
   WAITING_MANAGER_REVIEW: { rank: 30, inTicketList: true },
