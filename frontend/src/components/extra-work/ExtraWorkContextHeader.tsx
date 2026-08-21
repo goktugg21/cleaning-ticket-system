@@ -27,11 +27,49 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { ExtraWorkRequestDetail } from "../../api/types";
+import { Link } from "react-router-dom";
+import { CalendarClock } from "lucide-react";
+
+import type {
+  ExtraWorkRequestDetail,
+  ExtraWorkSpawnedTicket,
+} from "../../api/types";
 import { StatusBadge } from "../StatusBadge";
 import { SpawnedTicketLinks } from "./SpawnedTicketLinks";
-import { formatMoney } from "../../lib/intl";
+import { formatDate, formatMoney } from "../../lib/intl";
 import { rowAmounts } from "../../lib/billing";
+
+/**
+ * W12 §2 — the ticket that kept a date of its own.
+ *
+ * Planning an extra work MOVES its tickets: writing
+ * `provider_planned_date` calls `apply_planned_date_to_tickets`, which
+ * sets each spawned ticket's `scheduled_start_at`. It deliberately
+ * refuses to overwrite a ticket somebody rescheduled BY HAND, and
+ * reports that on `planned_date_ticket_result` for the caller to
+ * surface. Nothing surfaced it. A provider set a delivery date, a
+ * ticket kept a different one, and the screen said nothing.
+ *
+ * Derived from the two rows themselves rather than from the plan
+ * response, and that is the point: the response is a one-shot event that
+ * a page reload loses, while the disagreement is a STATE that persists
+ * until somebody resolves it. The ticket owns its date; this compares
+ * the two and links to the row that can change it.
+ */
+function ticketsKeepingOwnDate(
+  ew: ExtraWorkRequestDetail,
+): ExtraWorkSpawnedTicket[] {
+  const planned = ew.provider_planned_date;
+  if (!planned) return [];
+  return ew.spawned_tickets.filter(
+    (ticket) =>
+      ticket.schedule_status === "RESCHEDULED" &&
+      ticket.scheduled_start_at !== null &&
+      // Compare the DAY. The plan is a date, the ticket carries a
+      // timestamp at local midnight, and an equal day is not a conflict.
+      ticket.scheduled_start_at.slice(0, 10) !== planned.slice(0, 10),
+  );
+}
 
 function Block({
   label,
@@ -65,6 +103,7 @@ export function ExtraWorkContextHeader({
   nextStep: ReactNode;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
+  const conflicts = ticketsKeepingOwnDate(ew);
 
   // The status a person means when they ask "where is this?". Once an
   // operational ticket exists the ticket IS what is happening, which is
@@ -144,6 +183,34 @@ export function ExtraWorkContextHeader({
 
       <Block label={t("detail.ctx_what_next")} testId="extra-work-ctx-next">
         {nextStep}
+        {/* The conflict, where the next move is decided. It names the
+            ticket, names the date it kept, and links to the row that can
+            change it — so "how to change it if they meant to" is the
+            link rather than an instruction. */}
+        {conflicts.length > 0 && (
+          <div
+            className="ew-ctx-date-conflict"
+            data-testid="extra-work-ctx-date-conflict"
+          >
+            <CalendarClock size={14} strokeWidth={2.4} aria-hidden="true" />
+            <span>
+              {conflicts.map((ticket, index) => (
+                <span key={ticket.id}>
+                  {index > 0 && " "}
+                  {t("detail.ctx_ticket_kept_own_date", {
+                    ticket: ticket.ticket_no ?? `#${ticket.id}`,
+                    date: formatDate(
+                      (ticket.scheduled_start_at as string).slice(0, 10),
+                    ),
+                  })}{" "}
+                  <Link to={`/tickets/${ticket.id}`}>
+                    {t("detail.ctx_ticket_kept_own_date_link")}
+                  </Link>
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
       </Block>
     </div>
   );

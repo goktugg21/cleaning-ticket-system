@@ -25,7 +25,7 @@
  * that the ball is in the customer's court — so the actor is an input,
  * not an afterthought.
  */
-import type { ExtraWorkStatus } from "../../api/types";
+import type { ExtraWorkStatus, TicketStatus } from "../../api/types";
 
 /** What the one button does. `none` pairs with a null label. */
 export type NextStepAction =
@@ -53,6 +53,22 @@ export interface NextStepInput {
   hasSpawnedTickets: boolean;
   /** A live invoice covers this request. */
   isInvoiced: boolean;
+  /**
+   * W12 §3 — the OPERATIONAL status, once a ticket exists.
+   *
+   * The header badge four pixels away already shows the ticket's status
+   * rather than the request's once there is a ticket, because that is
+   * what "where is this?" means after work is scheduled. The sentence
+   * has to resolve the same way or the two contradict each other on one
+   * line. Null before a ticket exists.
+   */
+  ticketStatus?: TicketStatus | null;
+  /**
+   * The day the crew is expected. `provider_planned_date`, which is
+   * also what moved the ticket's own schedule, so there is one date
+   * here and not a second copy of it.
+   */
+  plannedDate?: string | null;
 }
 
 const WAITING: NextStep = {
@@ -67,7 +83,11 @@ const WAITING: NextStep = {
  * the cleaning company's, and saying so is more useful than showing a
  * button that 403s.
  */
-function customerNextStep(status: ExtraWorkStatus): NextStep {
+function customerNextStep(
+  status: ExtraWorkStatus,
+  ticketStatus: TicketStatus | null,
+  plannedDate: string | null,
+): NextStep {
   if (status === "PRICING_PROPOSED") {
     return {
       sentenceKey: "next.customer.pricing_proposed",
@@ -85,6 +105,50 @@ function customerNextStep(status: ExtraWorkStatus): NextStep {
   if (status === "COMPLETED") {
     return { ...WAITING, sentenceKey: "next.customer.completed" };
   }
+
+  // W12 §3 — ONCE THERE IS A TICKET, THE TICKET IS WHAT IS HAPPENING.
+  //
+  // Every one of these used to collapse into "Waiting for the cleaning
+  // company", which is true of all of them and useful about none. A
+  // customer whose job is scheduled for 15 September and a customer
+  // whose job is being done right now read the same eight words, so the
+  // scheduled one rings to ask. Same resolution the status badge uses.
+  if (ticketStatus) {
+    switch (ticketStatus) {
+      case "ACKNOWLEDGED":
+        // The date is the whole point of telling them. Without one this
+        // is still better than "waiting": somebody has it in hand.
+        return {
+          ...WAITING,
+          sentenceKey: plannedDate
+            ? "next.customer.acknowledged_dated"
+            : "next.customer.acknowledged",
+        };
+      case "ON_HOLD":
+        return { ...WAITING, sentenceKey: "next.customer.on_hold" };
+      case "IN_PROGRESS":
+        return { ...WAITING, sentenceKey: "next.customer.in_progress" };
+      case "WAITING_MANAGER_REVIEW":
+        return { ...WAITING, sentenceKey: "next.customer.being_checked" };
+      case "WAITING_CUSTOMER_APPROVAL":
+        return { ...WAITING, sentenceKey: "next.customer.your_approval" };
+      case "APPROVED":
+      case "CLOSED":
+        return { ...WAITING, sentenceKey: "next.customer.completed" };
+      case "REJECTED":
+        return { ...WAITING, sentenceKey: "next.customer.redoing" };
+      case "OPEN":
+      case "REOPENED_BY_ADMIN":
+      case "CONVERTED_TO_EXTRA_WORK":
+        break;
+    }
+  }
+
+  // Approved, no ticket yet: accepted and being scheduled.
+  if (status === "CUSTOMER_APPROVED") {
+    return { ...WAITING, sentenceKey: "next.customer.approved_scheduling" };
+  }
+  // REQUESTED / UNDER_REVIEW — we have it and are working out the price.
   return { ...WAITING, sentenceKey: "next.customer.waiting_on_provider" };
 }
 
@@ -93,8 +157,16 @@ export function resolveNextStep({
   isProvider,
   hasSpawnedTickets,
   isInvoiced,
+  ticketStatus,
+  plannedDate,
 }: NextStepInput): NextStep {
-  if (!isProvider) return customerNextStep(status);
+  if (!isProvider) {
+    return customerNextStep(
+      status,
+      ticketStatus ?? null,
+      plannedDate ?? null,
+    );
+  }
 
   switch (status) {
     case "REQUESTED":

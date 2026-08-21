@@ -1687,6 +1687,14 @@ export interface ExtraWorkSpawnedTicket {
   id: number;
   ticket_no: string | null;
   status: TicketStatus;
+  /** W12 §2 — the ticket's OWN scheduled start, echoed read-only so the
+   *  Extra Work screen can show when a ticket kept a date of its own
+   *  instead of the one the plan set. The ticket still owns it. */
+  scheduled_start_at: string | null;
+  /** RESCHEDULED means a person moved this ticket by hand, which is
+   *  exactly the case `apply_planned_date_to_tickets` refuses to
+   *  overwrite. */
+  schedule_status: "UNSCHEDULED" | "SCHEDULED" | "RESCHEDULED";
 }
 
 // List shape (lean — no description / notes / line items).

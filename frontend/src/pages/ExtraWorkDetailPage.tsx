@@ -2093,6 +2093,11 @@ export function ExtraWorkDetailPage() {
     isProvider,
     hasSpawnedTickets: ew.spawned_tickets.length > 0,
     isInvoiced: ew.is_invoiced,
+    // W12 §3 — the two facts the customer sentence needs, from the rows
+    // that already own them: the operational status (same resolution the
+    // header badge uses) and the day the crew is due.
+    ticketStatus: ew.spawned_tickets[0]?.status ?? null,
+    plannedDate: ew.provider_planned_date ?? null,
   });
   const nextStepBusy =
     proposalBusy ||

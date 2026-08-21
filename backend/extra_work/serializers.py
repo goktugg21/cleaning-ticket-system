@@ -660,11 +660,28 @@ def _spawned_tickets_for(obj):
 
 
 def _serialize_spawned_tickets(obj):
+    # W12 §2 — the ticket's OWN schedule, published so the screen can
+    # show a conflict it currently computes and throws away.
+    #
+    # `apply_planned_date_to_tickets` refuses to overwrite a ticket
+    # somebody rescheduled by hand and reports it on
+    # `planned_date_ticket_result`. Every caller passes that through, and
+    # nothing in the frontend reads it — so a provider sets a delivery
+    # date, one ticket keeps a different one, and nobody is told. The
+    # response carried the ticket IDS but not their dates, which is
+    # enough to say "something disagreed" and not enough to say WHAT.
+    #
+    # THIS IS NOT A SECOND OWNER. The ticket still owns its schedule;
+    # these two fields are read-only echoes of it, exactly like `status`
+    # beside them, so the Extra Work screen can name the date and link to
+    # the row that holds it instead of storing its own copy.
     return [
         {
             "id": ticket.id,
             "ticket_no": ticket.ticket_no,
             "status": ticket.status,
+            "scheduled_start_at": ticket.scheduled_start_at,
+            "schedule_status": ticket.schedule_status,
         }
         for ticket in _spawned_tickets_for(obj)
     ]

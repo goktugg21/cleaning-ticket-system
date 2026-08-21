@@ -12876,6 +12876,22 @@ a.wp-card-title:hover { text-decoration: underline; }
 .ew-ctx-unpriced { color: var(--state-waiting); }
 .ew-ctx-sub { font-size: var(--font-sm); color: var(--text-muted); overflow-wrap: anywhere; }
 .ew-ctx-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* W12 §2 — a ticket that kept a date of its own. Waiting-toned, because
+   that is what it is: somebody has to decide which date is right. */
+.ew-ctx-date-conflict {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: var(--r);
+  background: var(--state-waiting-bg);
+  color: var(--state-waiting);
+  font-size: var(--font-sm);
+  line-height: 1.35;
+}
+.ew-ctx-date-conflict svg { flex: none; margin-top: 2px; }
+.ew-ctx-date-conflict a { color: inherit; text-decoration: underline; }
 
 /* W8 §2 — the one sentence and the one button. The sentence is body
    text, not muted: it is an instruction, and a greyed instruction reads

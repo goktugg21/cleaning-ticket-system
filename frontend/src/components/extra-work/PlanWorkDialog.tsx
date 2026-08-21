@@ -500,9 +500,6 @@ export function PlanWorkDialog({
             <span className="ew-plan-step">1</span>
             {t("plan.our_window_title")}
           </div>
-          <p className="muted small ew-plan-section-hint">
-            {t("plan.our_window_hint")}
-          </p>
           <div className="ew-plan-dates">
             <label className="field">
               <span className="muted small">{t("plan.our_start_label")}</span>
