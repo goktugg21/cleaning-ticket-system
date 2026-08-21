@@ -13179,10 +13179,34 @@ table.pva-table { min-width: 0; }
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* W10 FIX 3 — "Whole job" sits on the same grid as the rows above it.
+   MEASURED: the column BOXES were always identical (a table shares its
+   columns), but `.data-table` styles `thead th` and `tbody td` and has
+   no `tfoot td` rule at all, so the total row fell back to the browser
+   default `padding: 0`. Its figures therefore painted 18px right of the
+   ones above them, and in that row the right-aligned Worked value ended
+   exactly where the Difference value began -- zero pixels between them,
+   which is the "6,0014,00 less" the owner read as a single number.
+   Padding matched to `.data-table tbody td` (12px 18px, 20px on the
+   first cell) so the total lines up with its own column and the values
+   stop touching. Scoped to `.pva-table`: the same gap exists for every
+   `.data-table` with a tfoot, but the base rule is not this panel's to
+   change. */
 .pva-table tfoot td {
   border-top: 2px solid var(--border);
   font-weight: 800;
+  padding: 12px 18px;
 }
+.pva-table tfoot td:first-child { padding-left: 20px; }
+/* The way out to where worked hours are actually owned. A link, because
+   it goes somewhere; it is not a control that writes. */
+.pva-week-link {
+  color: var(--green);
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.pva-week-link:hover { text-decoration: underline; }
 .pva-diff {
   font-weight: 700;
   white-space: nowrap;

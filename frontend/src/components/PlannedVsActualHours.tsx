@@ -42,9 +42,20 @@
  * crew heading, or beside a total that equals it, is a screen that
  * misleads without saying anything false.
  *
+ * ## It is a VIEW. Nothing here writes an hour.
+ *
+ * W9 put a Record-hours form on each row. It read as the obvious fix —
+ * the gap was on the row, so the control went on the row — and it was
+ * the wrong one: worked hours already have an owner in the Hours module,
+ * and a second place to type them is a second place for them to be
+ * wrong. The navigation complaint it answered was real, so the answer is
+ * a LINK that carries what this screen already knows, not a form that
+ * asks for it again.
+ *
  * Customers never reach the endpoint at all.
  */
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../api/client";
@@ -53,7 +64,6 @@ import {
   type PlannedVsActualReport,
 } from "../api/plannedVsActual";
 import { formatNumber } from "../lib/intl";
-import { RecordHoursOnRow } from "./RecordHoursOnRow";
 
 const HOURS = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
 
@@ -78,12 +88,6 @@ export function PlannedVsActualHours({
   // prescribes for prop-derived state, so a different job is a different
   // component and starts true again.
   const [loading, setLoading] = useState(true);
-  /** W9 — which row has its hour entry open. One at a time: two open
-   *  forms on one table is two places to type the same fact. */
-  const [recordingFor, setRecordingFor] = useState<number | null>(null);
-  /** Bumped after a save so the table re-reads in place. The user
-   *  never leaves the page, which is the whole point. */
-  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,12 +106,28 @@ export function PlannedVsActualHours({
     return () => {
       cancelled = true;
     };
-  }, [extraWorkId, reloadKey]);
+  }, [extraWorkId]);
 
   const isSelf = report?.visibility === "self";
   const title = isSelf
     ? t("planned_vs_actual.title_self")
     : t("planned_vs_actual.title");
+
+  /**
+   * Where this person's week is read or corrected.
+   *
+   * RULE 3 — the destination is told everything this screen already
+   * knows: which person, and which job the hours belong to. It asks for
+   * neither. The week itself is not in this payload and is NOT invented
+   * here; see the report handoff.
+   *
+   * A self answer goes to the person's own hours; a crew answer goes to
+   * the Hours module, which is where worked hours are owned.
+   */
+  const weekHref = (employeeId: number) =>
+    isSelf
+      ? "/my-hours"
+      : `/admin/hours?employee=${employeeId}&source_type=EXTRA_WORK&source_id=${extraWorkId}`;
 
   /** The difference cell: a word, never a sign. */
   const difference = (value: string | null) => {
@@ -172,15 +192,16 @@ export function PlannedVsActualHours({
                 <th className="pva-num">
                   {t("planned_vs_actual.col_worked")}
                 </th>
-                <th>{t("planned_vs_actual.col_difference")}</th>
+                <th className="pva-num">
+                  {t("planned_vs_actual.col_difference")}
+                </th>
                 <th className="pva-action" />
               </tr>
             </thead>
             <tbody>
               {report.people.map((person) => (
-                <Fragment key={person.employee_id}>
-                  <tr data-testid={`${testId}-row`}>
-                    <td>{person.employee_name}</td>
+                <tr key={person.employee_id} data-testid={`${testId}-row`}>
+                  <td>{person.employee_name}</td>
                     <td className="pva-num">
                       {person.planned_hours === null ? (
                         <span className="muted">
@@ -193,44 +214,21 @@ export function PlannedVsActualHours({
                     <td className="pva-num">
                       {formatNumber(person.actual_hours, HOURS)}
                     </td>
-                    <td>{difference(person.difference_hours)}</td>
-                    {/* W9 — the control that closes the gap, on the row
-                        that shows it. Person, job and building are
-                        already known and are never asked for. */}
-                    <td className="pva-action">
-                      {person.can_record_hours &&
-                        recordingFor !== person.employee_id && (
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => setRecordingFor(person.employee_id)}
-                            data-testid={`${testId}-record-${person.employee_id}`}
-                          >
-                            {t("record_hours.open")}
-                          </button>
-                        )}
+                    <td className="pva-num">
+                      {difference(person.difference_hours)}
                     </td>
-                  </tr>
-                  {recordingFor === person.employee_id && (
-                    <tr data-testid={`${testId}-record-row`}>
-                      <td colSpan={5}>
-                        <RecordHoursOnRow
-                          employeeId={person.employee_id}
-                          employeeName={person.employee_name}
-                          extraWorkId={extraWorkId}
-                          buildingId={report.building_id}
-                          companyId={report.company_id}
-                          onSaved={() => {
-                            setRecordingFor(null);
-                            setReloadKey((n) => n + 1);
-                          }}
-                          onCancel={() => setRecordingFor(null)}
-                          testId={`${testId}-record-form`}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                    {/* W10 — a LINK, not a form. Worked hours have one
+                        owner and it is not this panel. */}
+                    <td className="pva-action">
+                      <Link
+                        to={weekHref(person.employee_id)}
+                        className="pva-week-link"
+                        data-testid={`${testId}-week-${person.employee_id}`}
+                      >
+                        {t("planned_vs_actual.see_week")}
+                      </Link>
+                    </td>
+                </tr>
               ))}
             </tbody>
             {/* The job total, only where it means something. On a self
@@ -251,7 +249,9 @@ export function PlannedVsActualHours({
                   <td className="pva-num">
                     {formatNumber(report.totals.actual_hours, HOURS)}
                   </td>
-                  <td>{difference(report.totals.difference_hours)}</td>
+                  <td className="pva-num">
+                    {difference(report.totals.difference_hours)}
+                  </td>
                   <td className="pva-action" />
                 </tr>
               </tfoot>
