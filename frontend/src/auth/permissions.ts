@@ -353,6 +353,37 @@ export function canReadCustomerArea(role: Role | null | undefined): boolean {
 // to contact-list reads). STAFF / CUSTOMER_USER never see this panel.
 export const canViewCustomerContacts = isProviderAdmin;
 
+// W-G — WHO WE PUT ON A JOB, AND HOW LONG IT TOOK. The Extra Work
+// Hours and People tabs.
+//
+// Provider-management only, and the two tabs share one predicate
+// because they are one fact about a job: its staffing. Backends:
+//   - hours  `reports.permissions.IsRevenueReportConsumer` (403s STAFF
+//            and every customer-side role)
+//   - people `extra_work.views_assignments.ExtraWorkAssignmentListView`
+//            is scoped rather than role-gated, but the only thing the
+//            People tab renders is `ExtraWorkAssignmentCard`, which is
+//            an ASSIGN control -- a customer has nothing to do there.
+//
+// This exists because both tabs used to render for a customer and draw
+// literally nothing: the hours panel returns null for a non-provider
+// and the assignments card is wrapped in a provider check, so the tab
+// bar offered two buttons that led to a blank page. A role that cannot
+// use a thing does not see it.
+//
+// `isProviderManagementRole` is deliberately NOT aliased: a future
+// widening of that predicate must not silently hand a fourth role the
+// crew list and the hours they booked, which are personnel facts.
+export function canSeeExtraWorkStaffing(
+  role: Role | null | undefined,
+): boolean {
+  return (
+    role === "SUPER_ADMIN" ||
+    role === "COMPANY_ADMIN" ||
+    role === "BUILDING_MANAGER"
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Note tier (M1 B5 five-channel taxonomy on TicketMessage.message_type)
 // ---------------------------------------------------------------------------

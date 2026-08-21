@@ -99,11 +99,14 @@ export function SlotCompletionDialog({
   if (eitherRequired && !hasNote && !hasFile) missing.push("either");
   const hasEvidence = missing.length === 0;
 
-  /** One sentence saying what THIS job needs, before anything is typed.
-   *  "Completing a slot requires a note or a photo" was true of every
-   *  job until this sprint and is now true of some of them, which makes
-   *  it the worst kind of instruction: right often enough to be
-   *  believed. */
+  /** W-G §2 — one sentence saying what THIS job needs, and NOTHING when
+   *  it needs nothing.
+   *
+   *  It used to end in a `requires_nothing` branch reading "This job
+   *  requires no evidence. You can still add a note or a photo." That is
+   *  a sentence explaining an absence, which is the design being wrong:
+   *  a job that requires nothing should not have a requirements line at
+   *  all. `null` here, and the paragraph is not rendered. */
   const requirementText = eitherRequired
     ? // The pre-W3-G sentence, reused rather than re-typed: it already
       // says exactly "a note or at least one photo", and two strings
@@ -115,10 +118,10 @@ export function SlotCompletionDialog({
         ? t("complete.requires_note")
         : fileRequired
           ? t("complete.requires_file")
-          : t("complete.requires_nothing");
+          : null;
 
   async function handleSubmit() {
-    if (!hasEvidence) {
+    if (!hasEvidence && requirementText) {
       setError(requirementText);
       return;
     }
@@ -168,13 +171,24 @@ export function SlotCompletionDialog({
     >
       <div className="reject-modal" style={{ maxWidth: 460 }}>
         <h3 className="reject-modal-title">{t("complete.dialog_title")}</h3>
+        {/* W-G §2 — WHAT HAPPENS NEXT, not what to bring.
+            This line used to open "Add a completion note and/or photos
+            as proof of the work", which asked every worker for evidence
+            on every job no matter what the job required, and directly
+            contradicted the requirements line under it. That is the
+            "Ahmet is still being asked for a photo or a description"
+            report: two owners for one fact, and the wrong one first.
+            What is left is the half that is true of every slot and is
+            not a requirement at all. */}
         <p className="reject-modal-desc">{t("complete.dialog_desc")}</p>
-        <p
-          className="reject-modal-desc"
-          data-testid="slot-complete-requirements"
-        >
-          <strong>{requirementText}</strong>
-        </p>
+        {requirementText && (
+          <p
+            className="reject-modal-desc"
+            data-testid="slot-complete-requirements"
+          >
+            <strong>{requirementText}</strong>
+          </p>
+        )}
 
         {error && (
           <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>

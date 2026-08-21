@@ -77,7 +77,12 @@ import { PlanSummary } from "../components/extra-work/PlanSummary";
 import { ExtraWorkContextHeader } from "../components/extra-work/ExtraWorkContextHeader";
 import { resolveNextStep } from "../components/extra-work/nextStep";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
-import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
+import {
+  canSeeExtraWorkStaffing,
+  isCustomerUser,
+  isProviderAdmin,
+  isProviderManagementRole,
+} from "../auth/permissions";
 import type {
   Contact,
   CustomerLabel,
@@ -92,7 +97,6 @@ import type {
   ExtraWorkUrgency,
   Proposal,
   ProposalDetail,
-  Role,
   TicketList,
   TicketStatus,
 } from "../api/types";
@@ -296,18 +300,18 @@ const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
   URGENT: "urgency.urgent",
 };
 
-const PROVIDER_ROLES: Set<Role> = new Set([
-  "SUPER_ADMIN",
-  "COMPANY_ADMIN",
-  "BUILDING_MANAGER",
-]);
+/* Reads as a rule rather than as an omission on the entries that have
+ * no restriction. */
+const everyone = () => true;
 
 // Sprint 30 Batch 30.1 — roles allowed to call POST /extra-work/<id>/spawn/.
 // The backend gate is intentionally narrower than the broader provider set
 // (BUILDING_MANAGER is excluded — this is a corrective admin action). The
 // UI must mirror that gate exactly so the button never renders for a role
 // the API will refuse anyway.
-const RETRY_SPAWN_ROLES: Set<Role> = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+// W-G §1 — `isProviderAdmin` is that pair, already named once in
+// `auth/permissions`. A local Set spelling out the same two roles was a
+// second place the same fact was written.
 
 // Sprint 30 Batch 30.1 — map the backend's stable `code` field on the
 // retry-spawn endpoint to a localized toast title. Any other / missing
@@ -1018,12 +1022,29 @@ function CustomerContactsPanel({ contacts }: { contacts: Contact[] }) {
  *  endpoint, no client. A Files tab would be a new feature (and a
  *  backend one), which this sprint forbids. An empty tab that promises
  *  a feature that does not exist is worse than no tab. */
+/* W-G §1 — A TAB DECLARES WHO IT IS FOR.
+ *
+ * The owner opened an Extra Work on a customer account and found the
+ * Hours and People tabs rendering a blank page: "is it always like this
+ * or only for this specific extra work? Either way a completely empty
+ * page is not nice."
+ *
+ * Always, and for every customer. Both tabs are provider-management
+ * surfaces down to the last element -- the hours panel returns null for
+ * anyone else and the People tab is one provider-gated card -- so a
+ * customer was offered two buttons that could never draw anything.
+ *
+ * `visibleTo` is on the entry rather than in a second list, so the tab
+ * bar and the bodies below cannot disagree about who gets what, and a
+ * sixth tab cannot be added without answering the question. The
+ * predicate itself lives in `auth/permissions`, which is where every
+ * other "which role sees this" answer lives. */
 const EW_TABS = [
-  { key: "overview", labelKey: "detail.tab_overview" },
-  { key: "money", labelKey: "detail.tab_money" },
-  { key: "hours", labelKey: "detail.tab_hours" },
-  { key: "people", labelKey: "detail.tab_people" },
-  { key: "messages", labelKey: "detail.tab_messages" },
+  { key: "overview", labelKey: "detail.tab_overview", visibleTo: everyone },
+  { key: "money", labelKey: "detail.tab_money", visibleTo: everyone },
+  { key: "hours", labelKey: "detail.tab_hours", visibleTo: canSeeExtraWorkStaffing },
+  { key: "people", labelKey: "detail.tab_people", visibleTo: canSeeExtraWorkStaffing },
+  { key: "messages", labelKey: "detail.tab_messages", visibleTo: everyone },
 ] as const;
 
 type EwTab = (typeof EW_TABS)[number]["key"];
@@ -1083,7 +1104,7 @@ export function ExtraWorkDetailPage() {
   // M4 (3d) — per-EW billing-month override. billingDraft=null means
   // "show ew's current value"; the input is derived at render (never synced
   // via an effect, to avoid a setState-in-effect violation).
-  const [tab, setTab] = useState<EwTab>("overview");
+  const [requestedTab, setTab] = useState<EwTab>("overview");
   const [billingDraft, setBillingDraft] = useState<string | null>(null);
   const [billingSaving, setBillingSaving] = useState(false);
   const [billingError, setBillingError] = useState("");
@@ -1159,10 +1180,30 @@ export function ExtraWorkDetailPage() {
     };
   }, [id]);
 
+  /* W-G §1 — one owner. This page kept its own `PROVIDER_ROLES` set
+   * naming the same three roles `isProviderManagementRole` already
+   * names, so "who is a provider" was written twice and could drift.
+   * The local copy is gone. */
   const isProvider = useMemo(
-    () => !!me?.role && PROVIDER_ROLES.has(me.role),
+    () => isProviderManagementRole(me?.role),
     [me],
   );
+
+  /* The tabs this viewer actually has. DERIVED, never stored: a stored
+   * copy would need an effect to correct itself when `me` lands, and a
+   * synchronous setState in an effect body is the house rule this file
+   * already follows. */
+  const visibleTabs = useMemo(
+    () => EW_TABS.filter((entry) => entry.visibleTo(me?.role)),
+    [me],
+  );
+
+  /* Falling back rather than correcting state: a customer who somehow
+   * holds "hours" (a stale render, a future deep link) reads the first
+   * tab they do have instead of a blank page. */
+  const tab: EwTab = visibleTabs.some((entry) => entry.key === requestedTab)
+    ? requestedTab
+    : (visibleTabs[0]?.key ?? "overview");
 
   // `ewId` (hoisted Sprint 8A-fix) — the EW id, or null while loading.
   // Used by the actual-hours active-set logic below and the proposals /
@@ -1673,8 +1714,7 @@ export function ExtraWorkDetailPage() {
   // backend gate matches: SUPER_ADMIN / COMPANY_ADMIN only, status
   // must be CUSTOMER_APPROVED, no tickets yet.
   const canRetrySpawn =
-    !!me?.role &&
-    RETRY_SPAWN_ROLES.has(me.role) &&
+    isProviderAdmin(me?.role) &&
     ew.status === "CUSTOMER_APPROVED" &&
     spawnedTickets.length === 0;
 
@@ -2188,7 +2228,7 @@ export function ExtraWorkDetailPage() {
             role="tablist"
             aria-label={t("detail.tabs_aria")}
           >
-            {EW_TABS.map((entry) => (
+            {visibleTabs.map((entry) => (
               <button
                 key={entry.key}
                 type="button"
