@@ -145,6 +145,32 @@ else:
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "cleaning_ticket_password"),
             "HOST": os.environ.get("POSTGRES_HOST", "db"),
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            # Persistent database connections.
+            #
+            # Django's default is CONN_MAX_AGE=0, which opens a BRAND NEW
+            # Postgres connection for every single HTTP request and closes
+            # it again at request_finished. On crmtest that handshake was
+            # measured at a median 204.5 ms (same PK query: 11.0 ms on a
+            # persistent connection vs 215.5 ms on a fresh one), because the
+            # host is a single-vCPU box and the connection setup is
+            # CPU-bound, not query-bound.
+            #
+            # The ticket detail page issues ~15 API calls, so that default
+            # was costing roughly 3 seconds of pure connection setup per
+            # page load — and each of those seconds occupied one of only
+            # GUNICORN_WORKERS (3) synchronous workers, which is what turns
+            # a slow box into an unresponsive one.
+            #
+            # CONN_HEALTH_CHECKS (Django 4.1+) is what makes reuse safe: at
+            # the start of each request Django pings the pooled connection
+            # and transparently replaces it if the server closed it (db
+            # container restart, idle timeout), so a recycled connection can
+            # never surface as a "connection already closed" 500.
+            #
+            # Connection budget: 3 gunicorn workers + 2 celery workers +
+            # beat hold at most ~6 connections against max_connections=100.
+            "CONN_MAX_AGE": int(os.environ.get("CONN_MAX_AGE", "60")),
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 
@@ -553,3 +579,9 @@ validate_production_settings(globals(), environ=os.environ)
 if "test" in sys.argv or os.environ.get("DJANGO_TEST", "") == "1":
     CELERY_TASK_ALWAYS_EAGER = True
     CELERY_TASK_EAGER_PROPAGATES = True
+    # Persistent connections are a production latency optimisation only.
+    # The test runner wraps each test in a transaction on a connection it
+    # owns; leaving CONN_MAX_AGE at the production default would keep
+    # connections alive across tests for no benefit, so pin it back to
+    # Django's per-request default here.
+    DATABASES["default"]["CONN_MAX_AGE"] = 0
