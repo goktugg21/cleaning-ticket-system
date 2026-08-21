@@ -13382,6 +13382,24 @@ table.pva-table { min-width: 0; }
   align-items: flex-start;
   margin-top: var(--space-2);
 }
+/* W12 — the marker that says which option is the customer's own answer.
+   A chip ON the option, not a sentence under the group: the fact
+   belongs to one of the two choices and reads as a property of it. */
+.ew-billed-to-default {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--green-soft);
+  border: 1px solid rgba(11, 107, 66, 0.25);
+  color: var(--green);
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
 
 /* ===================================================================
    W11 — the one door. `pages/NewWorkPage.tsx`.

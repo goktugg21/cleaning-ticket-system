@@ -419,7 +419,12 @@ export function CreateExtraWorkPage({
   // customer who is invoiced at organisation level. Sprint 182 §6 had
   // already removed that default server-side and migration 0032 nulled
   // the whole table; the form was the last place still writing it.
-  const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo | "">("");
+  /* W12 — the user's EXPLICIT pick, or null for "did not touch it".
+     Not the value that gets posted: see `billedToPayload` below. The
+     two are different on purpose, because "I left it alone" and "I
+     chose the same thing the customer already has" must not both pin
+     the job to a value the customer can no longer move. */
+  const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo | null>(null);
   // Search filter for the agreed-prices dropdown (scales to long
   // contract lists — the list scrolls and filters rather than dumping
   // every row inline).
@@ -554,6 +559,29 @@ export function CreateExtraWorkPage({
     () => customers.find((c) => String(c.id) === form.customer) ?? null,
     [customers, form.customer],
   );
+
+  /* W12 — what the customer's own setting resolves to, and therefore
+     what happens if nobody touches the control.
+
+     `invoice_billing_target` is NOT NULL on `Customer` with a CUSTOMER
+     default, so a customer always HAS a setting; the optional `?` on the
+     type is about whether this response carried it, not about whether
+     one exists. When it did not arrive we fall back to the same CUSTOMER
+     the model defaults to, so the screen and the server agree. */
+  const resolvedBilledTo: ExtraWorkBilledTo =
+    chosenCustomer?.invoice_billing_target === "BUILDING"
+      ? "BUILDING"
+      : "CUSTOMER";
+  const customerSettingKnown =
+    chosenCustomer?.invoice_billing_target !== undefined;
+  /** The radio that is on. Untouched shows the customer's own answer. */
+  const selectedBilledTo: ExtraWorkBilledTo = billedTo ?? resolvedBilledTo;
+  /** What is POSTED. Matching the customer stores NULL, so a customer
+     who later changes their setting moves every job that never
+     disagreed with them. Only a divergence is written down. */
+  const billedToPayload: ExtraWorkBilledTo | null =
+    selectedBilledTo === resolvedBilledTo ? null : selectedBilledTo;
+
   const chosenBuilding = useMemo(
     () => buildings.find((b) => String(b.id) === form.building) ?? null,
     [buildings, form.building],
@@ -1477,7 +1505,7 @@ export function CreateExtraWorkPage({
         // Null is a real answer ("follow the customer"), so it is sent
         // rather than omitted — the server treats the two identically
         // and sending it keeps the payload a full statement of the form.
-        billed_to: billedTo === "" ? null : billedTo,
+        billed_to: billedToPayload,
         // Send the validated intent (a member of the latest preview's
         // allowed_intents). Omitted when no fresh preview exists: the
         // backend then derives a safe default — identical to the
@@ -1904,13 +1932,11 @@ export function CreateExtraWorkPage({
                 question and each option is the resulting document, by
                 name.
 
-                THREE options, because the field has three states and the
-                dropdown offered two. The default is "follow the
-                customer", which is what the server does with a null
-                (`invoicing/billing_target.py`), and its second line
-                resolves what that means for THIS customer right now
-                rather than sending the reader to Customer settings to
-                find out.
+                W12 — TWO options. The column still has three states,
+                and the third one is not a thing to choose: NULL is what
+                is stored when the answer matches the customer, which is
+                what the server already reads it as
+                (`invoicing/billing_target.py`).
 
                 Asked HERE, next to the building and the customer,
                 because those are the two names it chooses between. The
@@ -1926,44 +1952,24 @@ export function CreateExtraWorkPage({
                 {t("create.billed_to_question")}
               </span>
 
-              <label className="ew-billed-to-option">
-                <input
-                  type="radio"
-                  name="ew-billed-to"
-                  checked={billedTo === ""}
-                  onChange={() => setBilledTo("")}
-                  data-testid="extra-work-create-billed-to-follow"
-                />
-                <span>
-                  <strong>
-                    {chosenCustomer
-                      ? t("create.billed_to_follow", {
-                          customer: chosenCustomer.name,
-                        })
-                      : t("create.billed_to_follow_unknown_customer")}
-                  </strong>
-                  <span className="muted small" style={{ display: "block" }}>
-                    {/* What "follow the customer" RESOLVES TO, not what
-                        it means in the abstract. Unknown is its own
-                        wording: a customer nobody has picked yet, or a
-                        server that predates the setting, must not be
-                        made to look like a decision. */}
-                    {chosenCustomer?.invoice_billing_target === "BUILDING"
-                      ? t("create.billed_to_follow_now_building")
-                      : chosenCustomer?.invoice_billing_target === "CUSTOMER"
-                        ? t("create.billed_to_follow_now_customer", {
-                            customer: chosenCustomer.name,
-                          })
-                        : t("create.billed_to_follow_now_unknown")}
-                  </span>
-                </span>
-              </label>
+              {/* W12 — TWO options, and the one the customer's own
+                  setting produces is already on, and says so on itself.
 
+                  "Follow the customer's setting" was a third radio. It
+                  deferred the question instead of answering it: you
+                  could not tell what you had chosen without leaving the
+                  page to look the customer up. The marker below carries
+                  that fact ON the option it applies to, so choosing the
+                  other one is a visible disagreement with a visible
+                  default rather than a jump into the unknown.
+
+                  Leaving it alone posts NULL, not this value — see
+                  `billedToPayload`. */}
               <label className="ew-billed-to-option">
                 <input
                   type="radio"
                   name="ew-billed-to"
-                  checked={billedTo === "BUILDING"}
+                  checked={selectedBilledTo === "BUILDING"}
                   onChange={() => setBilledTo("BUILDING")}
                   data-testid="extra-work-create-billed-to-building"
                 />
@@ -1975,6 +1981,16 @@ export function CreateExtraWorkPage({
                         })
                       : t("create.billed_to_building_unnamed")}
                   </strong>
+                  {resolvedBilledTo === "BUILDING" && (
+                    <span
+                      className="ew-billed-to-default"
+                      data-testid="extra-work-create-billed-to-default-marker"
+                    >
+                      {customerSettingKnown
+                        ? t("create.billed_to_customer_setting")
+                        : t("create.billed_to_setting_unknown")}
+                    </span>
+                  )}
                 </span>
               </label>
 
@@ -1982,7 +1998,7 @@ export function CreateExtraWorkPage({
                 <input
                   type="radio"
                   name="ew-billed-to"
-                  checked={billedTo === "CUSTOMER"}
+                  checked={selectedBilledTo === "CUSTOMER"}
                   onChange={() => setBilledTo("CUSTOMER")}
                   data-testid="extra-work-create-billed-to-customer"
                 />
@@ -1994,27 +2010,19 @@ export function CreateExtraWorkPage({
                         })
                       : t("create.billed_to_customer_unnamed")}
                   </strong>
+                  {resolvedBilledTo === "CUSTOMER" && (
+                    <span
+                      className="ew-billed-to-default"
+                      data-testid="extra-work-create-billed-to-default-marker"
+                    >
+                      {customerSettingKnown
+                        ? t("create.billed_to_customer_setting")
+                        : t("create.billed_to_setting_unknown")}
+                    </span>
+                  )}
                 </span>
               </label>
 
-              {/* WHAT HAPPENS NEXT, and only when it applies. An
-                  override moves this one job between documents and
-                  leaves the customer's setting exactly where it was —
-                  worth saying at the moment somebody overrides, and
-                  worth not saying at any other moment. */}
-              {billedTo !== "" && (
-                <span
-                  className="muted small"
-                  style={{ display: "block", marginTop: 8 }}
-                  data-testid="extra-work-create-billed-to-override-note"
-                >
-                  {chosenCustomer
-                    ? t("create.billed_to_override_note", {
-                        customer: chosenCustomer.name,
-                      })
-                    : t("create.billed_to_override_note_unknown_customer")}
-                </span>
-              )}
             </fieldset>
           </div>
 
