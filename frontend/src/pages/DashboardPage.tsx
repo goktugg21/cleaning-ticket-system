@@ -46,6 +46,7 @@ import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { FinancialStrip } from "../components/extra-work/FinancialStrip";
 import { SLABadge } from "../components/sla/SLABadge";
 import { StatusTiles } from "../components/StatusTiles";
+import { listScope } from "../lib/listScope";
 import { useToast } from "../components/ToastProvider";
 import { useEditMode } from "../lib/useEditMode";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
@@ -731,6 +732,19 @@ export function DashboardPage({
       Object.fromEntries(Object.entries(known).sort(([a], [b]) => (a < b ? -1 : 1))),
     );
   }, [queryParams]);
+
+  /* W10 — see `lib/listScope`. Built from the SAME three inputs the
+     query uses, never from the route name, so a page that changes its
+     defaults cannot start lying about them. */
+  const scope = useMemo(
+    () =>
+      listScope({
+        work: workTypeFilter,
+        status: statusFilter,
+        hidesFinished: hideFinishedExtraWork,
+      }),
+    [workTypeFilter, statusFilter, hideFinishedExtraWork],
+  );
 
   const statsAreBlind = useMemo(
     () =>
@@ -2225,10 +2239,28 @@ export function DashboardPage({
                         ? t(`queue.${activeQueue.key}.title`)
                         : t("section_recent_title")}
                     </div>
-                    <div className="section-head-sub">
-                      {activeQueue
-                        ? t(`queue.${activeQueue.key}.why`)
-                        : t("section_recent_sub")}
+                    {/* W10 — WHY THESE ROWS. Tickets, Chargeable work
+                        and this page's own defaults are three filters
+                        over one set of records, and the line here used
+                        to read "Everything you are allowed to see" on a
+                        page showing open ordinary tickets with
+                        chargeable work excluded. Derived from the same
+                        state the query is built from, so it cannot
+                        describe a different list than the one below.
+                        A dashboard queue keeps its own wording: it is
+                        more specific than anything derivable here. */}
+                    <div
+                      className="section-head-sub"
+                      data-testid="tickets-scope-sentence"
+                    >
+                      {activeQueue ? (
+                        t(`queue.${activeQueue.key}.why`)
+                      ) : (
+                        <>
+                          {t(scope.key)}
+                          {scope.hiddenKey ? ` ${t(scope.hiddenKey)}` : ""}
+                        </>
+                      )}
                     </div>
                   </div>
                   {isProviderManagementRole(userRole) &&

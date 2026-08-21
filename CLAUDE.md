@@ -133,14 +133,16 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   provides one); mock only the SMTP transport. Test-first for new features.
 - **Frontend gate** (all three, in `node:22-alpine`):
   `tsc --noEmit -p tsconfig.app.json` + `eslint .` + `npm run build`.
-  **ESLint baseline is EXACTLY 45 (42 errors, 3 warnings)** as of
-  `231dc11`. The three warnings, all `react-hooks/exhaustive-deps`, are
+  **ESLint baseline is EXACTLY 44 (42 errors, 2 warnings)** as of
+  `4823b17`. The two warnings, both `react-hooks/exhaustive-deps`, are
   `hooks/useSavedBanner.ts:28` (missing `flagMap` — omitted on purpose,
-  it changes identity every render), `pages/DashboardPage.tsx:692`
-  (unnecessary `me`) and `pages/TicketDetailPage.tsx:1051` (missing
-  `ticket`). Re-measure with ONE full run and read the whole output —
-  the count moved from 44 to 45 unnoticed because three chats each read
-  a tail and named a different file. Add **no** new
+  it changes identity every render) and `pages/TicketDetailPage.tsx`
+  (missing `ticket`; the line moves, the file does not). It was briefly
+  45: W8 added an unnecessary `me` dependency in `DashboardPage`, and
+  `0a5f725` removed it. Re-measure with ONE full run and read the WHOLE
+  output — the drift went unnoticed because several chats each read a
+  tail and named a different file, and one of the files named had no
+  warning at all. Add **no** new
   violations and **no** new `eslint-disable`. No synchronous `setState` in an
   effect body; for prop-derived state, key the component by id.
 
