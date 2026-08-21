@@ -94,6 +94,7 @@ class ContractHoursSerializer(serializers.ModelSerializer):
             "weekly_total",
             "status",
             "is_locked",
+            "auto_fill",
             "approved_by",
             "approved_at",
             "created_at",
@@ -212,6 +213,9 @@ class ContractHoursRowSerializer(serializers.Serializer):
     building = serializers.IntegerField(required=False, allow_null=True)
     hour_type = serializers.IntegerField()
     work_type = serializers.IntegerField(required=False, allow_null=True)
+    # W10 — the fill flag is per ROW, because the grid lets an operator
+    # set twelve people at once and one of them may be the exception.
+    auto_fill = serializers.BooleanField(required=False, default=False)
     monday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
     tuesday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
     wednesday = serializers.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0.00"))
@@ -242,6 +246,10 @@ class ContractHoursBulkSerializer(serializers.Serializer):
     """
 
     rows = ContractHoursRowSerializer(many=True, required=False)
+
+    # W10 — the cross-product shorthand's own flag, applied to every
+    # pair it generates. The per-row `rows` shape carries its own.
+    auto_fill = serializers.BooleanField(required=False, default=False)
 
     employees = serializers.ListField(
         child=serializers.IntegerField(), allow_empty=False, required=False
@@ -350,6 +358,7 @@ class ContractHoursBulkSerializer(serializers.Serializer):
                         "building_id": row.get("building") or None,
                         "hour_type_id": row["hour_type"],
                         "work_type_id": row.get("work_type") or None,
+                        "auto_fill": bool(row.get("auto_fill", False)),
                         "days": {day: row.get(day, Decimal("0.00")) for day in WEEKDAYS},
                     }
                 )
@@ -363,6 +372,7 @@ class ContractHoursBulkSerializer(serializers.Serializer):
                             "building_id": building_id,
                             "hour_type_id": hour_type_id,
                             "work_type_id": work_type_id,
+                            "auto_fill": bool(validated_data.get("auto_fill", False)),
                             "days": dict(pattern),
                         }
                     )
@@ -412,6 +422,7 @@ class ContractHoursBulkSerializer(serializers.Serializer):
                     work_type_id=row["work_type_id"],
                     valid_from=valid_from,
                     valid_to=valid_to,
+                    auto_fill=row["auto_fill"],
                     created_by=created_by,
                     **row["days"],
                 )

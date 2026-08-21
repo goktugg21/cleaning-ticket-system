@@ -246,7 +246,32 @@ class ContractHoursBulkView(APIView):
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             created = serializer.save(created_by=request.user)
+        # W10 — the answer takes effect immediately, on the week the
+        # operator is standing in. Every OTHER week fills when it is
+        # opened (`entries/fill-week/`), which is what keeps this
+        # bounded: a `valid_from` two years back must not turn one
+        # assignment into a hundred weeks of writes.
+        _fill_current_week(created, request.user)
         return Response(
             ContractHoursSerializer(created, many=True).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+def _fill_current_week(rows, actor) -> None:
+    """Fill this week for every company an auto-fill row just landed in.
+
+    Per COMPANY, not per row: `fill_week` already walks that company's
+    agreements, so calling it once per created row would do the same
+    work N times for the same answer.
+    """
+    from datetime import date as _date
+
+    from .fill import fill_week
+
+    companies = {r.company_id for r in rows if r.auto_fill}
+    if not companies:
+        return
+    iso_year, iso_week, _ = _date.today().isocalendar()
+    for company_id in companies:
+        fill_week(company_id, iso_year, iso_week, actor=actor)

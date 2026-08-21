@@ -253,6 +253,22 @@ export async function fetchWeekStatus(params: {
   return response.data;
 }
 
+/** W10 — materialise one week from the standing agreements.
+ *
+ *  Idempotent, so the week view calls it every time a week is opened:
+ *  that is what makes a sheet arrive filled without anybody pressing
+ *  anything. The rules (validity window, closed weeks, and never
+ *  touching a week somebody has already worked in) live on the server.
+ */
+export async function fillWeekFromContracts(payload: {
+  iso_year: number;
+  iso_week: number;
+  company?: number | "";
+}): Promise<{ created: number; skipped_existing: number }> {
+  const response = await api.post("/timesheets/entries/fill-week/", cleanParams(payload));
+  return response.data;
+}
+
 export async function closeWeek(payload: {
   iso_year: number;
   iso_week: number;

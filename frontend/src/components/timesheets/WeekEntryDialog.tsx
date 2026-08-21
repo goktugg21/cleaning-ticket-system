@@ -49,6 +49,7 @@ import { ChipMultiSelect } from "../ChipMultiSelect";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { ConfirmDialogHandle } from "../ConfirmDialog";
 import { usePickerReserve } from "../../lib/usePickerReserve";
+import { fillWeekFromContracts } from "../../api/timesheets";
 import { formatIsoWeek, parseIsoWeek } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { HoursWeekGrid } from "./HoursWeekGrid";
@@ -148,6 +149,18 @@ export function WeekEntryDialog({
   useEffect(() => {
     if (employeeIds.length === 0) return;
     let cancelled = false;
+    /* W10 — fill this week from the standing agreements BEFORE reading
+       it, so a contracted week is never blank and nobody has to press
+       anything weekly. Idempotent server-side, and it never touches a
+       week that already has rows, so re-opening a week the operator has
+       edited changes nothing. A failure is not fatal: the sheet then
+       simply shows what is already there. */
+    const ready = fillWeekFromContracts({
+      iso_year: week.isoYear,
+      iso_week: week.isoWeek,
+      company: companyId ?? "",
+    }).catch(() => undefined);
+    ready.then(() =>
     Promise.allSettled(
       employeeIds.map((employeeId) =>
         listTimeEntries({
@@ -167,11 +180,11 @@ export function WeekEntryDialog({
         }
       }
       setEntriesByEmployee(next);
-    });
+    }));
     return () => {
       cancelled = true;
     };
-  }, [employeeIds, week]);
+  }, [employeeIds, week, companyId]);
 
   // The lock, read INDEPENDENTLY — see the header comment.
   useEffect(() => {

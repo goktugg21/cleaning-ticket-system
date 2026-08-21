@@ -30,6 +30,7 @@ from .views_hour_types import (
     HourTypeStandardSetView,
 )
 from .views_summary import TimesheetSummaryCSVView, TimesheetSummaryView
+from .views_fill import TimeEntryFillWeekView
 from .views_week_grid import TimeEntryWeekGridView
 from .views_weeks import (
     WeekCloseView,
@@ -111,6 +112,13 @@ urlpatterns = [
         "entries/bulk-week/",
         TimeEntryWeekGridView.as_view(),
         name="timesheet-entry-bulk-week",
+    ),
+    # W10 — fill one week from the standing agreements. Literal segment
+    # before `entries/<int:...>/`, the ordering this file keeps.
+    path(
+        "entries/fill-week/",
+        TimeEntryFillWeekView.as_view(),
+        name="timesheet-entry-fill-week",
     ),
     path(
         "entries/",

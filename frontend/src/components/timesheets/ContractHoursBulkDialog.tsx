@@ -99,6 +99,10 @@ export function ContractHoursBulkDialog({
   const [employeeIds, setEmployeeIds] = useState<number[]>([]);
   const [buildingIds, setBuildingIds] = useState<number[]>([]);
   const [workType, setWorkType] = useState<number | "">("");
+  /* W10 — asked ONCE, here, for everybody in this assignment. The
+     alternative is a weekly "apply the contract to these people"
+     button, which is a thing somebody has to remember every Monday. */
+  const [autoFill, setAutoFill] = useState(true);
   const [validFrom, setValidFrom] = useState(() =>
     toDateString(new Date()),
   );
@@ -210,7 +214,7 @@ export function ContractHoursBulkDialog({
       const index = (fromDateString(cell.date).getDay() + 6) % 7;
       row[DAYS[index]] = cell.hours;
     }
-    const rows = [...byKey.values()];
+    const rows = [...byKey.values()].map((row) => ({ ...row, auto_fill: autoFill }));
     if (rows.length === 0) return 0;
     // ONE request, all-or-nothing server-side: an operator who filled in
     // twelve rows and got eight saved could not tell which four missed.
@@ -319,6 +323,23 @@ export function ContractHoursBulkDialog({
             <p className="muted small" style={{ margin: "6px 0 0" }}>
               {t("contract_hours.bulk_week_hint")}
             </p>
+          </div>
+
+          {/* Under the dates, because it is a statement ABOUT the
+              window: from this date until it ends, these weeks fill
+              themselves. */}
+          <div className="field">
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+            >
+              <input
+                type="checkbox"
+                checked={autoFill}
+                onChange={(event) => setAutoFill(event.target.checked)}
+                data-testid="bulk-auto-fill"
+              />
+              <span>{t("contract_hours.auto_fill_label")}</span>
+            </label>
           </div>
 
           <div className="field">
