@@ -432,6 +432,28 @@ export interface TicketExtraWorkOrigin {
    *  rate, no cost, no other person's name. */
   my_planned_hours?: { date: string | null; hours: string }[];
   actual_hours_required?: boolean;
+  /** W-H — THE PARENT EXTRA WORK'S DATES.
+   *
+   *  The backend has sent all four since Sprint 184 §1 and this type
+   *  did not declare them, so no screen could read them: the ticket
+   *  page showed a lone `Scheduled date` while the answers to "when was
+   *  this asked for, by when is it owed, what did we commit to" sat
+   *  unread in the same response.
+   *
+   *  Two pairs and one due date, exactly as
+   *  `extra_work/models.py` documents them:
+   *    ASKED FOR   preferred_date -> planned_end_date
+   *    COMMITTED   provider_planned_date -> provider_planned_end_date
+   *    OWED BY     deadline
+   *
+   *  Borrowed, never copied: the extra work owns them and the ticket
+   *  links back. Optional because the list serializer stops before the
+   *  heavier keys. */
+  preferred_date?: string | null;
+  planned_end_date?: string | null;
+  deadline?: string | null;
+  provider_planned_date?: string | null;
+  provider_planned_end_date?: string | null;
 }
 
 // Sprint 9B (backend) — operational schedule lifecycle on a ticket.
@@ -466,6 +488,19 @@ export interface TicketDetail extends TicketList {
   // the backend `Ticket.manager_review_at` column.
   manager_review_at: string | null;
   status_history: TicketStatusHistory[];
+  /** Sprint 184 §3 — the date the CUSTOMER would like this done. A wish,
+   *  never a commitment: it decides nothing and never makes a ticket
+   *  late. On the wire since Sprint 184 and undeclared here until W-H,
+   *  which is why the Scheduling card could not show the operator what
+   *  was asked for while they set their own date. */
+  customer_wanted_date: string | null;
+  /** W-H — who set the current schedule, and when. Computed by the
+   *  backend from the schedule annotation row on `status_history`;
+   *  nothing new is stored. Null for a CUSTOMER_USER (which employee
+   *  typed the date is internal staffing detail, gated like
+   *  `reschedule_reason`) and null on a ticket nobody has planned. */
+  schedule_planned_by_name: string | null;
+  schedule_planned_at: string | null;
   allowed_next_statuses: TicketStatus[];
   sla_status: SLAStatus;
   sla_due_at: string | null;

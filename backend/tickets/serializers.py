@@ -34,6 +34,7 @@ from .models import (
     WorkCategory,
 )
 from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
+from .schedule_history import latest_schedule_change
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
 
 # Sprint 7B — reuse the Extra Work cart-line input contract for the
@@ -298,6 +299,15 @@ def resolve_extra_work_origin_core(ticket) -> dict | None:
         "planned_end_date": _iso_date(ew_request.planned_end_date),
         "deadline": _iso_date(ew_request.deadline),
         "provider_planned_date": _iso_date(ew_request.provider_planned_date),
+        # W-H — the other half of the committed pair. W2-D added
+        # `provider_planned_end_date` to the extra work and this dict
+        # was not updated, so a ticket spawned from a job planned to run
+        # Monday to Wednesday could borrow the Monday and nothing else.
+        # Read-only here for the same reason its start is: the extra
+        # work owns both, the ticket shows them and links.
+        "provider_planned_end_date": _iso_date(
+            ew_request.provider_planned_end_date
+        ),
     }
 
 
@@ -584,6 +594,8 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     created_by_email = serializers.CharField(source="created_by.email", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
     status_history = TicketStatusHistorySerializer(many=True, read_only=True)
+    schedule_planned_by_name = serializers.SerializerMethodField()
+    schedule_planned_at = serializers.SerializerMethodField()
     allowed_next_statuses = serializers.SerializerMethodField()
     # Per-record per-current-user actions block. Lets BM / STAFF /
     # CUSTOMER_USER (who cannot self-introspect via the admin-only
@@ -692,6 +704,19 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "schedule_status",
             "rescheduled_from",
             "reschedule_reason",
+            # W-H — WHO PLANNED IT, and when they did.
+            #
+            # Not stored: read off the schedule annotation row on
+            # `status_history`, which has recorded the operator since
+            # Sprint 9B and is already prefetched for this view. A
+            # `planned_by` column on Ticket would be the same fact in a
+            # second place.
+            #
+            # Provider-side only. Which employee typed the date is
+            # internal staffing detail, gated exactly like
+            # `reschedule_reason` and `rescheduled_from` below.
+            "schedule_planned_by_name",
+            "schedule_planned_at",
             # Sprint 4 — sub-tasks + auto-complete opt-in (additive).
             "sub_tasks",
             "auto_complete_on_subtasks",
@@ -732,8 +757,30 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         if getattr(viewer, "role", None) == UserRole.CUSTOMER_USER:
             data["reschedule_reason"] = ""
             data["rescheduled_from"] = None
+            data["schedule_planned_by_name"] = None
+            data["schedule_planned_at"] = None
             data["sub_tasks"] = []
         return data
+
+    def _schedule_change_row(self, obj):
+        """The newest schedule annotation row, resolved once per render."""
+        cache = getattr(self, "_schedule_row_cache", None)
+        if cache is not None and cache[0] == obj.id:
+            return cache[1]
+        row = latest_schedule_change(obj)
+        self._schedule_row_cache = (obj.id, row)
+        return row
+
+    def get_schedule_planned_by_name(self, obj):
+        row = self._schedule_change_row(obj)
+        actor = getattr(row, "changed_by", None) if row else None
+        if actor is None:
+            return None
+        return (actor.full_name or "").strip() or actor.email
+
+    def get_schedule_planned_at(self, obj):
+        row = self._schedule_change_row(obj)
+        return row.created_at if row else None
 
     def _resolve_allowed_next_statuses(self, obj):
         """Single computation shared by the top-level

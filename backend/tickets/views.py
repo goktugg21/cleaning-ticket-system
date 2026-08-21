@@ -37,6 +37,7 @@ from .filters import (
     parse_is_extra_work,
 )
 from .attachment_visibility import resolve_upload_visibility
+from .schedule_history import compose_schedule_note
 from .models import (
     AttachmentVisibility,
     Ticket,
@@ -698,19 +699,20 @@ class TicketViewSet(
     def _schedule_history_note(
         self, *, action: str, old_start, new_start, window_label, reason
     ) -> str:
-        """Sprint 9B — compose the TicketStatusHistory annotation-row note
-        summarizing a schedule set / reschedule / clear."""
-        def _fmt(dt):
-            return dt.isoformat() if dt is not None else "—"
+        """Sprint 9B — the TicketStatusHistory annotation-row note for a
+        schedule set / reschedule / clear.
 
-        if action == "clear":
-            return f"Schedule cleared (was {_fmt(old_start)})."
-        parts = [f"Schedule {action}: {_fmt(old_start)} -> {_fmt(new_start)}"]
-        if window_label:
-            parts.append(f"window={window_label}")
-        if reason:
-            parts.append(f"reason={reason}")
-        return "; ".join(parts)
+        W-H — the composition moved to `tickets/schedule_history.py` so
+        the wording lives with the prefix that identifies it, and the
+        serializer can recognise these rows without knowing their prose.
+        """
+        return compose_schedule_note(
+            action=action,
+            old_start=old_start,
+            new_start=new_start,
+            window_label=window_label,
+            reason=reason,
+        )
 
     @action(detail=True, methods=["post", "delete"], url_path="schedule")
     def schedule(self, request, pk=None):

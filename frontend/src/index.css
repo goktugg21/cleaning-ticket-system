@@ -8587,7 +8587,8 @@ a.attn-row:hover {
    codebase today). Confined to the namespace `.reject-modal-*` so it
    never collides with future generic modal styles.
    ==================================================================== */
-.reject-modal-backdrop {
+.reject-modal-backdrop,
+.plan-modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.45);
@@ -8597,7 +8598,8 @@ a.attn-row:hover {
   z-index: 1000;
   padding: 16px;
 }
-.reject-modal {
+.reject-modal,
+.plan-modal {
   background: var(--surface, #fff);
   border: 1px solid var(--border-soft, #e5e7eb);
   border-radius: 12px;
@@ -8616,7 +8618,8 @@ a.attn-row:hover {
   max-height: calc(100vh - 32px);
   overflow-y: auto;
 }
-.reject-modal-title {
+.reject-modal-title,
+.plan-modal-title {
   margin: 0;
   /* Sprint 179B §4 — same slip as `.contract-forecast-header h3`: 16px
      bold in the BODY face. The house dialog heading is Plus Jakarta
@@ -8645,7 +8648,8 @@ a.attn-row:hover {
   min-height: 92px;
   resize: vertical;
 }
-.reject-modal-actions {
+.reject-modal-actions,
+.plan-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -8655,6 +8659,64 @@ a.attn-row:hover {
 .reject-modal-confirm[disabled] {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* ====================================================================
+   W-H — THE SCHEDULING MODAL AND THE "WHAT WAS ASKED FOR" BLOCK.
+
+   The shell (backdrop, panel, title, action row) is the app's existing
+   dialog, reached by adding this name to those selectors above rather
+   than restating their values here. Only what is genuinely new to this
+   dialog lives below.
+   ==================================================================== */
+.plan-modal {
+  /* Wider than the single-textarea dialogs: this one holds a
+     two-column date/time grid. */
+  max-width: 540px;
+}
+.plan-modal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+@media (max-width: 480px) {
+  .plan-modal-grid {
+    grid-template-columns: 1fr;
+  }
+}
+/* Clearing a plan is the one destructive move in this dialog, so it
+   sits at the far end of the row from Save and never beside it. */
+.plan-modal-clear {
+  margin-right: auto;
+  color: var(--red);
+}
+/* What the customer asked for, and what the parent extra work
+   committed to. Read-only, and rendered by one function used by both
+   the card and the modal. */
+.plan-asked {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  background: var(--bg-soft, var(--surface-2, transparent));
+}
+.plan-asked-head {
+  font-family: var(--f-head);
+  font-size: var(--font-xs);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.plan-asked-link {
+  margin-left: 8px;
+  color: var(--brand, var(--green));
+  font-weight: 600;
+  text-decoration: none;
+}
+.plan-asked-link:hover {
+  text-decoration: underline;
 }
 
 /* =========================================================================
