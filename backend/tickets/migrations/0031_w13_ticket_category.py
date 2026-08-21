@@ -161,7 +161,11 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("companies", "0001_initial"),
-        ("tickets", "0029_w10_acknowledged_and_on_hold"),
+        # Chained after W-H's archive migration rather than beside it:
+        # two leaf nodes in one app is a `makemigrations --merge` prompt
+        # on every deploy, and this one has to run after any migration
+        # that touches `Ticket` so the table it rewrites is settled.
+        ("tickets", "0030_w_h_ticket_archive"),
     ]
 
     operations = [
