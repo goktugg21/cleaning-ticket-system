@@ -14,7 +14,6 @@ import {
   TriangleAlert,
   Undo2,
   UploadCloud,
-  UserPlus,
   Users,
 } from "lucide-react";
 import axios from "axios";
@@ -827,8 +826,6 @@ export function TicketDetailPage() {
   const [assignableManagers, setAssignableManagers] = useState<
     AssignableManager[]
   >([]);
-  const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>("");
-  const [assigningTicket, setAssigningTicket] = useState(false);
 
   // Phase B — the dated staff-slot CRUD (Sprint 25A's flat add/remove
   // superseded) now lives in <StaffSlotEditor>, which owns its own state.
@@ -1018,14 +1015,6 @@ export function TicketDetailPage() {
     auditTimelineHistoryLen,
     auditReloadNonce,
   ]);
-
-  useEffect(() => {
-    setSelectedAssigneeId(
-      ticket && ticket.assigned_to !== null
-        ? String(ticket.assigned_to)
-        : "",
-    );
-  }, [ticket?.id, ticket?.assigned_to]);
 
   // Sprint 27F-F1 — clear any pending override modal state when the
   // ticket loads or its status changes (so a successful transition
@@ -1383,28 +1372,6 @@ export function TicketDetailPage() {
     }
   }
 
-  async function submitAssignment(event: FormEvent) {
-    event.preventDefault();
-    if (!id) return;
-    setError("");
-    setAssigningTicket(true);
-    try {
-      const assignedTo =
-        selectedAssigneeId === "" ? null : Number(selectedAssigneeId);
-      const response = await api.post<TicketDetail>(
-        `/tickets/${id}/assign/`,
-        { assigned_to: assignedTo },
-      );
-      setTicket(response.data);
-      // Assignment changes emit an audit_log row but do NOT change the
-      // status-history length, so nudge the timeline to refetch.
-      setAuditReloadNonce((n) => n + 1);
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setAssigningTicket(false);
-    }
-  }
 
   function openDeleteDialog() {
     setDeleteConfirmText("");
@@ -3324,100 +3291,18 @@ export function TicketDetailPage() {
             testId="side-card-assignment"
           >
 
-            {/* --- Subsection 1: Building manager (owner) --- */}
-            <div className="assign-body">
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
-                  marginBottom: 2,
-                }}
-              >
-                {t("assignment_section_bm_heading")}
-              </div>
-              <p
-                className="muted small"
-                style={{ margin: "0 0 8px" }}
-                data-testid="assignment-section-bm-helper"
-              >
-                {t("assignment_section_bm_helper")}
-              </p>
-              <div className="assignee-row">
-                <div className="assignee-avatar">
-                  {getInitials(ticket.assigned_to_email || "unassigned@")}
-                </div>
-                <div className="assignee-info">
-                  <span className="assignee-name">
-                    {ticket.assigned_to_email
-                      ? humanName(ticket.assigned_to_email, t("unassigned"))
-                      : t("unassigned")}
-                  </span>
-                  <span className="assignee-role">
-                    {ticket.assigned_to_email
-                      ? t("operations_lead")
-                      : t("awaiting_assignment")}
-                  </span>
-                </div>
-              </div>
+            {/* W13 — the second manager control is GONE.
 
-              {isStaff ? (
-                <form
-                  onSubmit={submitAssignment}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
-                  <select
-                    className="assign-select"
-                    value={selectedAssigneeId}
-                    onChange={(event) =>
-                      setSelectedAssigneeId(event.target.value)
-                    }
-                    disabled={assigningTicket}
-                  >
-                    <option value="">{t("unassigned")}</option>
-                    {ticket.assigned_to !== null &&
-                      !assignableManagers.some(
-                        (m) => m.id === ticket.assigned_to,
-                      ) && (
-                        <option value={String(ticket.assigned_to)}>
-                          {ticket.assigned_to_email ??
-                            t("assignment_user_n", {
-                              id: ticket.assigned_to,
-                            })}
-                          {t("assignment_current")}
-                        </option>
-                      )}
-                    {assignableManagers.map((manager) => (
-                      <option key={manager.id} value={manager.id}>
-                        {manager.full_name?.trim() || manager.email}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="submit"
-                    className="btn btn-secondary"
-                    style={{ width: "100%" }}
-                    disabled={
-                      assigningTicket ||
-                      selectedAssigneeId ===
-                        (ticket.assigned_to !== null
-                          ? String(ticket.assigned_to)
-                          : "")
-                    }
-                  >
-                    <UserPlus size={14} strokeWidth={2} />
-                    {assigningTicket ? t("updating") : t("update_assignment")}
-                  </button>
-                </form>
-              ) : null}
-            </div>
-
+                This subsection was a dropdown writing `ticket.assigned_to`
+                (the "head manager"), sitting directly above a separate
+                "Responsible managers" card writing the M:N. The owner:
+                "Why is there a head manager AND a responsible manager?
+                There is no permission difference. It is cosmetic."
+                Verified before removing -- neither field appears in
+                `accounts/scoping.py`, eligibility for both is identical,
+                and `TicketFilter.my_managed` is already their union. One
+                Managers section now, and it is the one that can hold more
+                than one person. */}
             {/* --- Subsection 2: Field staff (dispatch) --- */}
             {/* Sprint 23B — Assigned-staff list. Backend gates the
                 contact-visibility per Customer.show_assigned_staff_*

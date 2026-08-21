@@ -1,17 +1,31 @@
-// #7 Part B — the per-ticket "Responsible managers" M:N surface
-// (TicketManagerAssignment), DISTINCT from the single ticket.assigned_to
-// primary pointer. Lets a ticket carry several responsible BUILDING_MANAGERs.
+// W13 — MANAGERS. One named section, one table, one button.
 //
-// PROVIDER-MANAGEMENT ONLY: the whole section is gated on `canManage`
-// (isProviderManagementRole = SA / CA / BM). The component is always
-// rendered by TicketDetailPage but SELF-GATES: for STAFF / CUSTOMER_USER it
-// returns null and the fetch effect early-returns, so they never see
-// add/remove and never call the endpoint. A BM without the building's
-// `osius.ticket.assign_staff` key gets a LIST 403 -> we hide the section
-// (set `hidden`) rather than erroring the page. State is only set inside
-// async callbacks (no synchronous setState in an effect body).
+// The owner's father, twenty years a programmer, used this page for
+// twenty minutes: "I understood nothing right now." "You have put
+// everything one under the other. Have you never used a form?"
+//
+// He also asked why a ticket has a head manager AND a responsible
+// manager. It has both because two sprints added one each, and the
+// answer to "what is the difference" is: nothing a user can act on.
+// Checked before collapsing them:
+//
+//   * PERMISSION: neither grants any. A BUILDING_MANAGER's visibility
+//     comes from `BuildingManagerAssignment` (building-level) in
+//     `accounts/scoping.py`; neither `Ticket.assigned_to` nor
+//     `TicketManagerAssignment` appears there at all.
+//   * ELIGIBILITY: identical -- role BUILDING_MANAGER plus a
+//     BuildingManagerAssignment for this ticket's building.
+//   * FILTERING: `TicketFilter.my_managed` is the UNION of the two, so
+//     the rest of the app already treats them as one thing.
+//   * The ONE real difference: writing `assigned_to` sends assignment /
+//     unassignment email; adding a responsible manager sends none.
+//
+// So the two are collapsed HERE, in the UI, onto the M:N -- the one that
+// can hold more than one person, which is what a ticket actually needs.
+// The single pointer and its emails are untouched on the server; nothing
+// on this page writes it any more. Turning those emails on for this path
+// is a product decision, not a cleanup, and is called out in the report.
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -42,7 +56,9 @@ export function ResponsibleManagersSection({
   const [rows, setRows] = useState<TicketManagerAssignment[]>([]);
   const [hidden, setHidden] = useState(false);
   const [error, setError] = useState("");
-  const [addUserId, setAddUserId] = useState<string>("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /** W13 — a SET, because a manager assigns two people at once. */
+  const [picked, setPicked] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   // Bumped to force a refetch after a successful add/remove (state is only
   // set in async callbacks, never synchronously in the effect body).
@@ -97,14 +113,14 @@ export function ResponsibleManagersSection({
   const assignedIds = new Set(rows.map((r) => r.user_id));
   const candidates = assignableManagers.filter((m) => !assignedIds.has(m.id));
 
-  async function handleAdd(event: FormEvent) {
-    event.preventDefault();
-    if (addUserId === "") return;
+  async function handleAdd() {
+    if (picked.length === 0) return;
     setBusy(true);
     setError("");
     try {
-      await addManagerAssignments(ticketId, [Number(addUserId)]);
-      setAddUserId("");
+      await addManagerAssignments(ticketId, picked);
+      setPicked([]);
+      setPickerOpen(false);
       setReloadNonce((n) => n + 1);
       onChanged?.();
     } catch (err) {
@@ -139,10 +155,6 @@ export function ResponsibleManagersSection({
       testId="responsible-managers-section"
     >
       <div style={{ padding: "0 18px 14px" }}>
-        <p className="muted small" style={{ margin: "0 0 10px" }}>
-          {t("resp_mgr.desc")}
-        </p>
-
         {error && (
           <div
             className="alert-error"
@@ -155,94 +167,139 @@ export function ResponsibleManagersSection({
         )}
 
         {rows.length === 0 ? (
-          <p
-            className="muted small"
-            data-testid="responsible-managers-empty"
-            style={{ margin: "0 0 10px" }}
-          >
-            {t("resp_mgr.empty")}
-          </p>
-        ) : (
-          <ul
-            data-testid="responsible-managers-list"
-            style={{
-              listStyle: "none",
-              margin: "0 0 10px",
-              padding: 0,
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 8,
-            }}
-          >
-            {rows.map((row) => (
-              <li
-                key={row.id}
-                className="cell-tag cell-tag-open"
-                data-testid="responsible-manager-chip"
-                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-              >
-                <i />
-                <span>{row.user_full_name?.trim() || row.user_email}</span>
-                <button
-                  type="button"
-                  onClick={() => handleRemove(row.user_id)}
-                  disabled={busy}
-                  aria-label={t("resp_mgr.remove")}
-                  data-testid="responsible-manager-remove"
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    padding: 0,
-                    display: "inline-flex",
-                    color: "inherit",
-                  }}
-                >
-                  <X size={13} strokeWidth={2.5} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <form
-          onSubmit={handleAdd}
-          style={{ display: "flex", gap: 8, alignItems: "flex-end" }}
-        >
-          <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-            <label className="field-label" htmlFor="resp-mgr-add">
-              {t("resp_mgr.add_label")}
-            </label>
-            <select
-              id="resp-mgr-add"
-              className="field-select"
-              value={addUserId}
-              onChange={(event) => setAddUserId(event.target.value)}
-              disabled={busy || candidates.length === 0}
-              data-testid="responsible-managers-add-select"
+          /* The empty state says what to do, and the button that does it
+             is the only button in the section. */
+          <div className="assign-empty" data-testid="responsible-managers-empty">
+            <p className="assign-empty-title">{t("resp_mgr.empty")}</p>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setPickerOpen(true)}
+              disabled={busy}
+              data-testid="responsible-managers-add-first"
             >
-              <option value="">
-                {candidates.length === 0
-                  ? t("resp_mgr.no_candidates")
-                  : t("resp_mgr.add_placeholder")}
-              </option>
-              {candidates.map((manager) => (
-                <option key={manager.id} value={manager.id}>
-                  {manager.full_name?.trim() || manager.email}
-                </option>
-              ))}
-            </select>
+              {t("resp_mgr.add_first")}
+            </button>
           </div>
-          <button
-            type="submit"
-            className="btn btn-secondary"
-            disabled={busy || addUserId === ""}
-            data-testid="responsible-managers-add-button"
-          >
-            {busy ? t("resp_mgr.adding") : t("resp_mgr.add_button")}
-          </button>
-        </form>
+        ) : (
+          <>
+            <table
+              className="data-table data-table-dense assign-table"
+              data-testid="responsible-managers-list"
+            >
+              <thead>
+                <tr>
+                  <th>{t("resp_mgr.col_person")}</th>
+                  <th>{t("resp_mgr.col_since")}</th>
+                  <th className="assign-table-actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id} data-testid="responsible-manager-row">
+                    <td>{row.user_full_name?.trim() || row.user_email}</td>
+                    <td>{row.assigned_at?.slice(0, 10) ?? "-"}</td>
+                    <td className="assign-table-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => void handleRemove(row.user_id)}
+                        disabled={busy}
+                        data-testid="responsible-manager-remove"
+                      >
+                        <X size={13} strokeWidth={2.5} aria-hidden="true" />
+                        {t("resp_mgr.remove")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="assign-actions">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setPickerOpen(true)}
+                disabled={busy}
+                data-testid="responsible-managers-add-open"
+              >
+                {t("resp_mgr.add_button")}
+              </button>
+            </div>
+          </>
+        )}
       </div>
+
+      {/* W13 — the picker is a MODAL. "You click something on the right
+          and it appears at the far left of the page."
+          Candidates EXCLUDE everyone already on the ticket, so the same
+          person cannot be added twice -- prevented where the choice is
+          made, not reported afterwards. No date is asked for: a date
+          nobody needs in order to assign belongs to editing, later. */}
+      {pickerOpen && (
+        <div
+          className="ew-plan-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("resp_mgr.add_button")}
+          data-testid="responsible-managers-dialog"
+        >
+          <div className="card ew-plan-dialog">
+            <h3 className="section-title ew-plan-dialog-title">
+              {t("resp_mgr.add_button")}
+            </h3>
+            <div className="assign-picker">
+              {candidates.length === 0 ? (
+                <p className="muted small" data-testid="responsible-managers-none-left">
+                  {t("resp_mgr.no_candidates")}
+                </p>
+              ) : (
+                candidates.map((manager) => (
+                  <label key={manager.id} className="assign-picker-row">
+                    <input
+                      type="checkbox"
+                      className="checkbox-input"
+                      checked={picked.includes(manager.id)}
+                      onChange={(event) =>
+                        setPicked((current) =>
+                          event.target.checked
+                            ? [...current, manager.id]
+                            : current.filter((id) => id !== manager.id),
+                        )
+                      }
+                      data-testid="responsible-managers-candidate"
+                    />
+                    <span>{manager.full_name?.trim() || manager.email}</span>
+                  </label>
+                ))
+              )}
+            </div>
+            <div className="ew-plan-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setPicked([]);
+                  setPickerOpen(false);
+                }}
+                disabled={busy}
+                data-testid="responsible-managers-cancel"
+              >
+                {t("common:cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void handleAdd()}
+                disabled={busy || picked.length === 0}
+                data-testid="responsible-managers-confirm"
+              >
+                {t("resp_mgr.add_confirm", { count: picked.length })}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </CollapsibleCard>
   );
 }

@@ -13600,3 +13600,15 @@ table.pva-table { min-width: 0; }
   border-color: var(--border);
   color: var(--text);
 }
+
+/* W13 — the assignment area: a name, a table, one button.
+   The owner's father: "You have put everything one under the other. Have
+   you never used a form?" These four rules are the whole treatment. */
+.assign-table { min-width: 0; }
+.assign-table .assign-table-actions { width: 1%; text-align: right; white-space: nowrap; }
+.assign-actions { display: flex; justify-content: flex-end; padding-top: 10px; }
+.assign-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 6px 0 4px; }
+.assign-empty-title { margin: 0; color: var(--text-muted); font-size: var(--font-sm); }
+.assign-picker { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; padding: 4px 0 12px; }
+.assign-picker-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-radius: var(--r-sm); cursor: pointer; }
+.assign-picker-row:hover { background: var(--green-faint); }
