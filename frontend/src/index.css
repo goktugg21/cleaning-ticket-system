@@ -114,6 +114,66 @@
   --font-lg:    17px;   /* the thing a section is about */
 }
 
+/* ====================================================================
+   W-F — THE SPACING SCALE
+
+   Six waves reported the same complaint and six waves fixed the padding
+   they could see, because there was nothing underneath to fix. Every
+   gap in this file was typed at the point of use: 2, 4, 6, 8, 10, 11,
+   12, 13, 14, 16, 18, 20, 22, 24, 28 px, all of them somebody's
+   judgement on one afternoon, none of them answerable to anything.
+
+   These are the steps. A gap is one of them, or a component token
+   below that resolves to one. A number typed into a rule is a number
+   with no owner, and it is how this came back six times.
+   ==================================================================== */
+:root {
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+
+  /* THE GAP BETWEEN A VALUE AND THE DIVIDER BENEATH IT.
+
+     This is the case that kept being hit, so it gets a name and one
+     owner instead of being re-decided per divider.
+
+     A horizontal rule is drawn by the block BELOW it (`border-top`),
+     which makes that block the only element that can hold both sides
+     apart. So that block owns both:
+
+       --rule-above : between the last value above and the line
+       --rule-below : between the line and what it introduces
+
+     A block that draws a top rule and sets neither is a value touching
+     a line. `.ew-plan-summary` was exactly that, measured at 0px under
+     "Aug 5, 2026, 09:15 PM" on the Extra Work Overview. */
+  --rule-above: var(--space-4);
+  --rule-below: var(--space-3);
+
+  /* A TABLE CELL'S INSET. Header, body AND footer take these three.
+
+     A footer row that styles neither is what "Whole job" was: the
+     global reset zeroes every cell, `.data-table` styled `thead th`
+     and `tbody td`, and `tfoot td` was left at 0 on all four sides.
+     Measured, the totals sat 0px apart horizontally and 1px under the
+     rule above them. Naming the inset once is what stops a fourth
+     section of a table from being forgotten a fifth time. */
+  --cell-y:      var(--space-3);
+  --cell-x:      var(--space-4);
+  /* The first column also carries the distance to the card edge, which
+     is a different job from the gap between two columns. */
+  --cell-x-edge: var(--space-5);
+
+  /* The inset shared by a bounded list and the "N items" caption under
+     it. One token, because a caption that does not line up with the
+     thing it counts is the same defect at 8px that it is at 1px. */
+  --list-inset: var(--space-3);
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
 body {
@@ -1572,7 +1632,7 @@ table.data-table {
   min-width: 860px;
 }
 .data-table thead th {
-  padding: 11px 18px;
+  padding: var(--cell-y) var(--cell-x);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   font-family: var(--f-head);
@@ -1585,25 +1645,41 @@ table.data-table {
   white-space: nowrap;
   user-select: none;
 }
-.data-table thead th:first-child { padding-left: 20px; }
+.data-table thead th:first-child { padding-left: var(--cell-x-edge); }
 .data-table tbody td {
-  padding: 12px 18px;
+  padding: var(--cell-y) var(--cell-x);
   border-bottom: 1px solid var(--border-soft);
   font-size: 13px;
   color: var(--text-muted);
   vertical-align: middle;
 }
-.data-table tbody td:first-child { padding-left: 20px; }
+.data-table tbody td:first-child { padding-left: var(--cell-x-edge); }
 .data-table tbody tr:last-child td { border-bottom: none; }
+/* THE THIRD SECTION OF A TABLE. `*{padding:0}` zeroes every cell and
+   the two rules above only re-inset the head and the body, so a
+   `<tfoot>` rendered with no inset at all: measured on "Whole job",
+   two totals 0px apart with 1px between them and the rule above.
+   Four tables in this product have a footer and every one of them was
+   in that state. It takes the same three tokens as the body, so the
+   answer cannot drift from the rows it totals. */
+.data-table tfoot td { padding: var(--cell-y) var(--cell-x); }
+.data-table tfoot td:first-child { padding-left: var(--cell-x-edge); }
 .data-table tbody tr:hover td { background: var(--green-faint); cursor: pointer; }
 /* Sprint 153 §3.6 — density MODIFIER. `.data-table` itself is used by
    dozens of pages and is deliberately untouched; only a table that opts
    in by adding `.data-table-dense` gets the tighter row box. Font size
    stays at 13px and the row hover stays, per the prompt's floor. */
-.data-table-dense thead th { padding: 8px 14px; }
-.data-table-dense thead th:first-child { padding-left: 16px; }
-.data-table-dense tbody td { padding: 8px 14px; }
-.data-table-dense tbody td:first-child { padding-left: 16px; }
+/* Dense means SHORTER ROWS, not narrower columns: it overrides the
+   vertical inset and takes the horizontal one from the same token every
+   other table uses. Written as 8px/14px it quietly ran 4px tighter
+   between columns than the tables beside it, which is half of "the
+   Hours tab tables generally". */
+.data-table-dense thead th,
+.data-table-dense tbody td,
+.data-table-dense tfoot td { padding: var(--space-2) var(--cell-x); }
+.data-table-dense thead th:first-child,
+.data-table-dense tbody td:first-child,
+.data-table-dense tfoot td:first-child { padding-left: var(--cell-x-edge); }
 
 /* Sprint 188 — the Chargeable work table only. It carries 9 columns
    where the tickets page carries 8 (Extra work + Route in place of
@@ -1626,13 +1702,15 @@ table.data-table {
    side on top of `data-table-dense`. Nine columns x 12px is what closes
    the gap. Vertical padding is untouched, so row height does not move. */
 .data-table-fit thead th,
-.data-table-fit tbody td {
-  padding-left: 8px;
-  padding-right: 8px;
+.data-table-fit tbody td,
+.data-table-fit tfoot td {
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
 }
 .data-table-fit thead th:first-child,
-.data-table-fit tbody td:first-child {
-  padding-left: 14px;
+.data-table-fit tbody td:first-child,
+.data-table-fit tfoot td:first-child {
+  padding-left: var(--space-3);
 }
 
 /* Sprint 153 §3.3 — sortable column header. The clickable thing is a
@@ -2183,7 +2261,7 @@ table.data-table {
    else in this stylesheet and silently drops the whole rule on browsers
    that lack it, which would revert this very fix. */
 .bounded-list:not(.table-wrap) {
-  padding: 8px 12px;
+  padding: var(--space-2) var(--list-inset);
 }
 .bounded-list:focus-visible {
   outline: 2px solid var(--green);
@@ -2206,10 +2284,14 @@ table.data-table {
   z-index: 1;
 }
 .bounded-list-count {
-  /* Sprint 121 — 6px sat the "N items" label tight under the box; 8px
-     aligns it to the same 8/12 spacing scale as the list padding above. */
-  margin-top: 8px;
-  font-size: 12px;
+  /* The caption sits OUTSIDE the bordered box, so it inherits whatever
+     inset its card has -- and a card holding a full-bleed table has
+     none. Measured on /admin/hours [Entries]: "25 items" 1px from the
+     card border. It takes the list's own inset token, so the count and
+     the list it counts can never be inset differently. */
+  margin-top: var(--space-2);
+  padding-inline: var(--list-inset);
+  font-size: var(--font-xs);
   color: var(--text-muted);
 }
 
@@ -8298,8 +8380,14 @@ a.attn-row:hover {
 .ew-plan-summary {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
+  gap: var(--space-2);
+  /* THE DIVIDER RULE. This block draws the line, so this block holds
+     both sides of it apart. `margin-top` was absent, which put the
+     line against the bottom of the Dates grid directly above -- the
+     "Aug 5, 2026, 09:15 PM is touching the divider" report, measured
+     at 0px. */
+  margin-top: var(--rule-above);
+  padding-top: var(--rule-below);
   border-top: 1px solid var(--border-soft);
 }
 /* W9 §3 — the section's own title row, so the control that edits the
@@ -10423,11 +10511,15 @@ details[open] > .ew-department-tree-summary::before {
 .hours-filter-line {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: nowrap;
   overflow-x: auto;
-  padding: 14px 16px;
-  margin-bottom: 14px;
+  /* The filter bar is a card on every /admin/hours tab, so its inset is
+     the one the reader measures the page by. Off the scale it was
+     14/16; on it, it is the same inset the first table column uses, so
+     a filter label and the column it filters start on one line. */
+  padding: var(--space-4) var(--cell-x-edge);
+  margin-bottom: var(--space-4);
 }
 .hours-filter-line > * { flex-shrink: 0; }
 .hours-filter-line .field { min-width: 150px; }
@@ -12812,7 +12904,11 @@ a.wp-card-title:hover { text-decoration: underline; }
    group visible as a group without a box around it.
    -------------------------------------------------------------------- */
 .ew-facts { display: flex; flex-direction: column; }
-.ew-facts-group { padding: 16px 0; border-top: 1px solid var(--border-soft); }
+/* The group draws its own top rule, so it holds both sides of it:
+   --rule-below under the line (before this group's title) and
+   --rule-above over the NEXT group's line (after this group's last
+   value). Written in that order, top to bottom. */
+.ew-facts-group { padding: var(--rule-below) 0 var(--rule-above); border-top: 1px solid var(--border-soft); }
 .ew-facts-group:first-child { padding-top: 0; border-top: none; }
 .ew-facts-group:last-child { padding-bottom: 0; }
 /* W9 §4 — the group's heading row: its name on the left, the one
@@ -12823,15 +12919,15 @@ a.wp-card-title:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-3);
 }
 .ew-facts-group-head .ew-facts-group-title {
   margin: 0;
 }
 .ew-facts-group-title {
-  margin: 0 0 10px;
+  margin: 0 0 var(--space-3);
   font-family: var(--f-head);
   font-size: var(--font-xs);
   font-weight: 800;
@@ -12842,17 +12938,17 @@ a.wp-card-title:hover { text-decoration: underline; }
 .ew-facts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 14px 24px;
+  gap: var(--space-4) var(--space-6);
 }
 /* The label carries WHOSE fact this is, so it must be readable rather
    than faint; the value is what the eye lands on. W9 §1 puts both on
    the shared scale — the value at reading size, the label one step
    down — instead of at 11px and 13px picked per rule. */
-.ew-fact-label { font-size: var(--font-xs); color: var(--text-muted); margin-bottom: 2px; }
+.ew-fact-label { font-size: var(--font-xs); color: var(--text-muted); margin-bottom: var(--space-1); }
 .ew-fact-value { font-size: var(--font-base); color: var(--text); overflow-wrap: anywhere; }
-.ew-fact-with-action { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ew-fact-with-action { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .ew-fact-prose { font-size: var(--font-base); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.ew-fact-note { margin-top: 12px; }
+.ew-fact-note { margin-top: var(--space-3); }
 
 .ew-detail-tabs {
   margin-bottom: 16px;
@@ -13173,32 +13269,38 @@ table.pva-table { min-width: 0; }
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 12px;
-  padding: 12px 2px;
+  /* Was `gap: 12px; padding: 12px 2px`. The 2px is the whole of the
+     "numbers too close together" report: the row sat 2px from its own
+     container edge, so the first control was flush with the table it
+     opens under. Row inset and column gap now come off the scale, and
+     the inset matches the cell inset of the table above it so the
+     fields line up with the columns they are filling in. */
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-4) var(--cell-x-edge);
 }
-.pva-record-field { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
-.pva-record-label { font-size: 11px; color: var(--text-muted); }
-.pva-record-actions { display: flex; gap: 8px; align-items: center; }
+.pva-record-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 130px; }
+.pva-record-label { font-size: var(--font-xs); color: var(--text-muted); }
+.pva-record-actions { display: flex; gap: var(--space-2); align-items: center; }
 /* The two states that stop a save. Both are full-width so they sit
    under the fields rather than squeezing between them. */
 .pva-record-blocked,
 .pva-record-error {
   flex: 1 0 100%;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 .pva-record-blocked { color: var(--amber); }
 .pva-record-error { color: var(--red); }
 
 .pva-body {
-  padding: 4px 0 2px;
+  padding: var(--space-1) 0 var(--space-1);
   /* See the .pva-action note above: the table must scroll inside this
      card rather than grow past it and slide under the sticky side
      column. */
   overflow-x: auto;
 }
 .pva-body > .muted {
-  padding: 10px 20px 16px;
+  padding: var(--space-3) var(--cell-x-edge) var(--space-4);
 }
 /* Hours are read down the column and compared across the row, so they
    are lined up and tabular: proportional digits make 8,00 and 11,50
@@ -13261,7 +13363,7 @@ table.pva-table { min-width: 0; }
    row only has to keep the control and the text on one baseline. */
 .ew-billed-to-option {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: flex-start;
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
