@@ -777,5 +777,8 @@
   "next.customer.your_approval": "The work is done. Please approve it or tell us what is wrong.",
   "next.customer.redoing": "You told us this was not right. We are putting it right.",
   "detail.ctx_ticket_kept_own_date": "Ticket {{ticket}} keeps its own date, {{date}}.",
-  "detail.ctx_ticket_kept_own_date_link": "Open the ticket to change it"
+  "detail.ctx_ticket_kept_own_date_link": "Open the ticket to change it",
+  "create.proof_question": "What do you want to see before we call this done?",
+  "create.proof_photo": "A photo of the finished work",
+  "create.proof_note": "A written note describing what was done"
 }

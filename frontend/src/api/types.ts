@@ -1998,6 +1998,12 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
    *  customer will get, not a number about our own people. */
   file_upload_required?: boolean;
   completion_notes_required?: boolean;
+  /** W13 — the CUSTOMER's own asks, set when they raised the request.
+   *  A second origin for the same requirement, deliberately kept apart
+   *  from the provider pair above so neither side erases the other's.
+   *  The completion gate requires whatever either side asked for. */
+  customer_requires_photo?: boolean;
+  customer_requires_note?: boolean;
   /** The window WE committed to. Separate stored values from the
    *  customer's `preferred_date` / `planned_end_date` / `deadline`, and
    *  the plan endpoint never touches those. */

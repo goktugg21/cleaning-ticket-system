@@ -148,5 +148,10 @@
   "agenda.overview_overdue_other": "{{count}} overdue",
   "agenda.day_count": "{{count}} job",
   "agenda.day_count_other": "{{count}} jobs",
-  "agenda.search_placeholder": "Search title, ticket, building or customer"
+  "agenda.search_placeholder": "Search title, ticket, building or customer",
+  "complete.asked_photo": "{{who}} asked for a photo of this.",
+  "complete.asked_note": "{{who}} asked for a written note.",
+  "complete.asked_by_customer": "The customer",
+  "complete.asked_by_provider": "Your manager",
+  "complete.asked_by_both": "The customer and your manager"
 }

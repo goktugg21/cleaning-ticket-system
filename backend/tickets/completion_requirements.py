@@ -77,6 +77,14 @@ SOURCE_EXTRA_WORK = "extra_work"
 SOURCE_DEFAULT = "default"
 
 
+#: W13 — WHO ASKED. A cleaner treats "the customer wants a photo of
+#: this" differently from "your manager wants a note", so the gate
+#: reports the origin of each requirement rather than only its
+#: existence. Both may be true of the same requirement.
+ASKED_BY_CUSTOMER = "customer"
+ASKED_BY_PROVIDER = "provider"
+
+
 @dataclass(frozen=True)
 class CompletionRequirements:
     """What one job needs before it may be reported done.
@@ -85,12 +93,20 @@ class CompletionRequirements:
     requirements and are independent. `either_required` is the legacy
     rule and is mutually exclusive with them: when it is True the other
     two are False, and vice versa.
+
+    W13 — `note_asked_by` / `file_asked_by` say WHO asked for each one,
+    as a tuple that may hold both origins. They are reporting only: the
+    gate refuses on `note_required` / `file_required`, which are already
+    the union, so a caller that ignores the origins enforces exactly the
+    same rule.
     """
 
     note_required: bool
     file_required: bool
     either_required: bool
     source: str
+    note_asked_by: tuple[str, ...] = ()
+    file_asked_by: tuple[str, ...] = ()
 
     @property
     def anything_required(self) -> bool:
@@ -102,6 +118,8 @@ class CompletionRequirements:
             "file_required": self.file_required,
             "either_required": self.either_required,
             "source": self.source,
+            "note_asked_by": list(self.note_asked_by),
+            "file_asked_by": list(self.file_asked_by),
         }
 
 
@@ -125,11 +143,39 @@ def requirements_for_ticket(ticket) -> CompletionRequirements:
     extra_work = getattr(ticket, "extra_work_request", None) if ticket else None
     if extra_work is None:
         return LEGACY_NOTE_OR_PHOTO
+
+    # W13 — THE UNION OF THE TWO ORIGINS.
+    #
+    # The provider sets its pair when planning; the customer sets theirs
+    # when raising the request. If either asked, it is required; if both
+    # asked, both origins are reported and the single requirement still
+    # only has to be satisfied once. A photo does not have to be
+    # uploaded twice because two people wanted it.
+    #
+    # This is the whole enforcement change. It is here, in the one place
+    # that already decides completion, so both existing gates — the
+    # per-slot one and the ticket-level transition — pick it up without
+    # a second check being written anywhere.
+    provider_note = bool(extra_work.completion_notes_required)
+    provider_file = bool(extra_work.file_upload_required)
+    customer_note = bool(getattr(extra_work, "customer_requires_note", False))
+    customer_file = bool(getattr(extra_work, "customer_requires_photo", False))
+
+    def _asked(by_customer: bool, by_provider: bool) -> tuple[str, ...]:
+        out = []
+        if by_customer:
+            out.append(ASKED_BY_CUSTOMER)
+        if by_provider:
+            out.append(ASKED_BY_PROVIDER)
+        return tuple(out)
+
     return CompletionRequirements(
-        note_required=bool(extra_work.completion_notes_required),
-        file_required=bool(extra_work.file_upload_required),
+        note_required=provider_note or customer_note,
+        file_required=provider_file or customer_file,
         either_required=False,
         source=SOURCE_EXTRA_WORK,
+        note_asked_by=_asked(customer_note, provider_note),
+        file_asked_by=_asked(customer_file, provider_file),
     )
 
 

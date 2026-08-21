@@ -664,6 +664,44 @@ class ExtraWorkRequest(models.Model):
         ),
     )
 
+    # W13 — THE CUSTOMER MAY ASK TOO, AND IT IS A DIFFERENT FACT.
+    #
+    # The owner's father put the case plainly: "A person opens a ticket
+    # saying clean here, you left this dirty. I say I cleaned it.
+    # Uploading a photo is at my own initiative. But the person says I
+    # will see it, I want proof by photo. Then you cannot say finished
+    # without adding a photo."
+    #
+    # WHY TWO MORE COLUMNS RATHER THAN REUSING THE TWO ABOVE. Those are
+    # written at PLAN time by the provider; these are written at CREATE
+    # time by the customer, and each side may withdraw its own ask
+    # without touching the other's. Folding them into one pair would
+    # make the last writer win — a provider planning the job would erase
+    # the customer's demand for a photo by saving a form that never
+    # showed it. Two origins is the actual shape of the fact.
+    #
+    # The gate reads the UNION of the pairs, in
+    # `tickets.completion_requirements`, which is the one place
+    # completion is decided. Nothing else reads these.
+    customer_requires_photo = models.BooleanField(
+        default=False,
+        help_text=(
+            "W13 — the CUSTOMER asked for photo proof when they raised "
+            "this request. Independent of the provider's "
+            "`file_upload_required`; the completion gate requires "
+            "evidence if either is set."
+        ),
+    )
+    customer_requires_note = models.BooleanField(
+        default=False,
+        help_text=(
+            "W13 — the CUSTOMER asked for a written note when they "
+            "raised this request. Independent of the provider's "
+            "`completion_notes_required`; the completion gate requires "
+            "a note if either is set."
+        ),
+    )
+
     @property
     def is_overdue(self) -> bool:
         """Past its deadline and not finished.

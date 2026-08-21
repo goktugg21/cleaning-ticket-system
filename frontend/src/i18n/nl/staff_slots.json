@@ -148,5 +148,10 @@
   "agenda.overview_overdue_other": "{{count}} te laat",
   "agenda.day_count": "{{count}} klus",
   "agenda.day_count_other": "{{count}} klussen",
-  "agenda.search_placeholder": "Zoek op titel, ticket, gebouw of klant"
+  "agenda.search_placeholder": "Zoek op titel, ticket, gebouw of klant",
+  "complete.asked_photo": "{{who}} vroeg om een foto hiervan.",
+  "complete.asked_note": "{{who}} vroeg om een geschreven notitie.",
+  "complete.asked_by_customer": "De klant",
+  "complete.asked_by_provider": "Uw manager",
+  "complete.asked_by_both": "De klant en uw manager"
 }

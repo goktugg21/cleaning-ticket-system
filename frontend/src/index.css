@@ -8625,6 +8625,15 @@ a.attn-row:hover {
   font-size: 15px;
   font-weight: 700;
 }
+/* W13 — who asked for each requirement. One line per thing actually
+   required; a list, because two askers is two facts. */
+.slot-complete-asked-by {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+.slot-complete-asked-by li { margin: 2px 0; }
 .reject-modal-desc {
   margin: 0;
   color: var(--text-muted);

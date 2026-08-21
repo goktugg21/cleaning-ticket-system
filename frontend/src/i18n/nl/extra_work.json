@@ -777,5 +777,8 @@
   "next.customer.your_approval": "Het werk is klaar. Keur het goed of laat ons weten wat er mis is.",
   "next.customer.redoing": "U gaf aan dat dit niet goed was. Wij lossen het op.",
   "detail.ctx_ticket_kept_own_date": "Ticket {{ticket}} houdt zijn eigen datum, {{date}}.",
-  "detail.ctx_ticket_kept_own_date_link": "Open het ticket om dit te wijzigen"
+  "detail.ctx_ticket_kept_own_date_link": "Open het ticket om dit te wijzigen",
+  "create.proof_question": "Wat wilt u zien voordat wij dit als klaar melden?",
+  "create.proof_photo": "Een foto van het afgeronde werk",
+  "create.proof_note": "Een geschreven notitie over wat er is gedaan"
 }

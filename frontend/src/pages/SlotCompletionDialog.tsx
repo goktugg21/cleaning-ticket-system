@@ -120,6 +120,38 @@ export function SlotCompletionDialog({
           ? t("complete.requires_file")
           : null;
 
+  /** W13 — WHO IS ASKING, per requirement.
+   *
+   *  "The customer asked for a photo of this" is a different
+   *  instruction from "your manager wants a note", and a cleaner will
+   *  treat them differently — which is the whole reason the gate
+   *  reports the origin rather than only the requirement. One line per
+   *  thing actually required; nothing when nothing is.
+   *
+   *  It says WHO ASKED, never what to bring: the field labels above
+   *  carry that, and repeating it here would be the two-owners mistake
+   *  the requirements line was already fixed for. */
+  const askedLines = ((): string[] => {
+    if (!requirements || eitherRequired) return [];
+    const line = (
+      what: "photo" | "note",
+      by: ("customer" | "provider")[],
+    ): string | null => {
+      if (by.length === 0) return null;
+      const who =
+        by.length > 1
+          ? t("complete.asked_by_both")
+          : by[0] === "customer"
+            ? t("complete.asked_by_customer")
+            : t("complete.asked_by_provider");
+      return t(`complete.asked_${what}`, { who });
+    };
+    return [
+      line("photo", requirements.file_asked_by ?? []),
+      line("note", requirements.note_asked_by ?? []),
+    ].filter((x): x is string => x !== null);
+  })();
+
   async function handleSubmit() {
     if (!hasEvidence && requirementText) {
       setError(requirementText);
@@ -188,6 +220,16 @@ export function SlotCompletionDialog({
           >
             <strong>{requirementText}</strong>
           </p>
+        )}
+        {askedLines.length > 0 && (
+          <ul
+            className="slot-complete-asked-by"
+            data-testid="slot-complete-asked-by"
+          >
+            {askedLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         )}
 
         {error && (

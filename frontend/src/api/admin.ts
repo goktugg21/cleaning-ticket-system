@@ -1589,6 +1589,14 @@ export interface SlotCompletionRequirements {
    *  photo. Mutually exclusive with the two flags above. */
   either_required: boolean;
   source: "extra_work" | "default";
+  /** W13 — WHO ASKED for each requirement. Both origins may hold the
+   *  same one. A cleaner treats "the customer wants a photo of this"
+   *  differently from "your manager wants a note", and the sentence in
+   *  the dialog says which. Reporting only: `note_required` and
+   *  `file_required` above are already the union and are what the
+   *  server refuses on. */
+  note_asked_by: ("customer" | "provider")[];
+  file_asked_by: ("customer" | "provider")[];
 }
 
 export async function getSlotCompletionRequirements(

@@ -929,6 +929,11 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "budget_hours",
             "file_upload_required",
             "completion_notes_required",
+            # W13 — the customer's own asks, read-only wherever they
+            # appear except the create form. Not provider-only: the
+            # customer wrote them and must be able to see they stuck.
+            "customer_requires_photo",
+            "customer_requires_note",
             "is_overdue",
             "started_before_plan",
             # Sprint 28 Batch 6 — cart routing taxonomy. Surfaced on
@@ -1164,6 +1169,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "planned_hours_overrun",
             "file_upload_required",
             "completion_notes_required",
+            # W13 — the customer's own asks, read-only wherever they
+            # appear except the create form. Not provider-only: the
+            # customer wrote them and must be able to see they stuck.
+            "customer_requires_photo",
+            "customer_requires_note",
             "deadline",
             "is_overdue",
             "started_before_plan",
@@ -1266,6 +1276,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "budget_hours",
             "file_upload_required",
             "completion_notes_required",
+            # W13 — the customer's own asks, read-only wherever they
+            # appear except the create form. Not provider-only: the
+            # customer wrote them and must be able to see they stuck.
+            "customer_requires_photo",
+            "customer_requires_note",
             "created_by",
             "created_by_email",
             "requested_at",
@@ -1727,6 +1742,12 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "request_intent",
             # Sprint 180 §3 — the billing target, chosen at create time.
             "billed_to",
+            # W13 — what the CUSTOMER asks to see before this is called
+            # done. Writable at create because that is when they are
+            # asking; the provider's own two flags are written at plan
+            # time through the plan endpoint and are not on this form.
+            "customer_requires_photo",
+            "customer_requires_note",
             "line_items",
         ]
         read_only_fields = ["id"]

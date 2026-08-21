@@ -425,6 +425,10 @@ export function CreateExtraWorkPage({
      chose the same thing the customer already has" must not both pin
      the job to a value the customer can no longer move. */
   const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo | null>(null);
+  // W13 — what the requester wants to see before this may be called
+  // done. Off by default: asking for proof is a decision.
+  const [requirePhoto, setRequirePhoto] = useState(false);
+  const [requireNote, setRequireNote] = useState(false);
   // Search filter for the agreed-prices dropdown (scales to long
   // contract lists — the list scrolls and filters rather than dumping
   // every row inline).
@@ -1506,6 +1510,11 @@ export function CreateExtraWorkPage({
         // rather than omitted — the server treats the two identically
         // and sending it keeps the payload a full statement of the form.
         billed_to: billedToPayload,
+        // W13 — the customer's own asks. Always sent, both values, so
+        // the payload is a full statement of the form rather than a
+        // list of the boxes that happened to be ticked.
+        customer_requires_photo: requirePhoto,
+        customer_requires_note: requireNote,
         // Send the validated intent (a member of the latest preview's
         // allowed_intents). Omitted when no fresh preview exists: the
         // backend then derives a safe default — identical to the
@@ -2023,6 +2032,44 @@ export function CreateExtraWorkPage({
                 </span>
               </label>
 
+            </fieldset>
+
+            {/* W13 — WHAT THE CUSTOMER WANTS TO SEE BEFORE THIS IS DONE.
+                The owner's father's case: "the person says I will see
+                it, I want proof by photo. Then you cannot say finished
+                without adding a photo."
+
+                Two checkboxes, no prose. Each label is the whole
+                instruction, written as what the asker gets rather than
+                as a rule about a flag, and off is the honest default -
+                asking for proof is a decision, not a form somebody
+                clicks through. The provider can add its own ask when
+                planning; the two are independent and the completion
+                gate requires whatever either side asked for. */}
+            <fieldset
+              className="field"
+              style={{ border: 0, padding: 0, margin: 0 }}
+              data-testid="extra-work-create-proof"
+            >
+              <span className="field-label">{t("create.proof_question")}</span>
+              <label className="ew-billed-to-option">
+                <input
+                  type="checkbox"
+                  checked={requirePhoto}
+                  onChange={(e) => setRequirePhoto(e.target.checked)}
+                  data-testid="extra-work-create-require-photo"
+                />
+                <span>{t("create.proof_photo")}</span>
+              </label>
+              <label className="ew-billed-to-option">
+                <input
+                  type="checkbox"
+                  checked={requireNote}
+                  onChange={(e) => setRequireNote(e.target.checked)}
+                  data-testid="extra-work-create-require-note"
+                />
+                <span>{t("create.proof_note")}</span>
+              </label>
             </fieldset>
           </div>
 
