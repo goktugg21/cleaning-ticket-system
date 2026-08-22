@@ -96,6 +96,16 @@ i18n.use(initReactI18next).init({
     escapeValue: false,
   },
   returnNull: false,
+  react: {
+    // Every page binds `useTranslation(["<page>", "common"])`, which only
+    // means "fall back to common" when nsMode says so. Without this,
+    // react-i18next binds `t` to namespaces[0] alone
+    // (react-i18next/useTranslation.js: `nsMode === "fallback" ? namespaces
+    // : namespaces[0]`), so any key that lives in common.json renders as its
+    // own key name. That is how `archive.show`, `archive.show_working`,
+    // `period.label` and `change.moved_to` reached the owner's screen.
+    nsMode: "fallback",
+  },
 });
 
 export default i18n;
