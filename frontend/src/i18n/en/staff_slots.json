@@ -199,5 +199,7 @@
   "parts.toast_auto_on": "This ticket now goes to manager review automatically once every part is done.",
   "parts.toast_auto_off": "This ticket no longer goes to manager review automatically.",
   "assign.error_duplicate_one": "{{names}} is already on this ticket without a time. Give this assignment a start time or a different time window to add them again.",
-  "assign.error_duplicate_other": "{{names}} are already on this ticket without a time. Give this assignment a start time or a different time window to add them again."
+  "assign.error_duplicate_other": "{{names}} are already on this ticket without a time. Give this assignment a start time or a different time window to add them again.",
+  "parts.remove_dialog_title": "Remove part “{{title}}”?",
+  "parts.remove_dialog_body": "Its assignments go back to the job itself — nothing is lost. No assignment and no completion evidence is deleted."
 }

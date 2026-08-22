@@ -815,10 +815,10 @@ export function StaffAssignmentSection({
 
       <ConfirmDialog
         ref={removePartRef}
-        title={t("subtasks.remove_dialog_title", {
+        title={t("parts.remove_dialog_title", {
           title: removePartTarget ? removePartTarget.title : "",
         })}
-        body={t("subtasks.remove_dialog_body")}
+        body={t("parts.remove_dialog_body")}
         confirmLabel={t("parts.remove")}
         onConfirm={handleConfirmRemovePart}
         onCancel={() => setRemovePartTarget(null)}
