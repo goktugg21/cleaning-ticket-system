@@ -13694,6 +13694,14 @@ table.assign-table { min-width: 0; width: 100%; }
    button, and the date lost a few pixels to padding. Auto layout sizes
    from the widest cell, which is what these three columns want -- the
    name takes what is left, the date and the button take what they need. */
+/* MEASURED: with default `--cell-x` this table came to 327px inside a
+   322px track -- 5px over, nothing clipped, but still a scrollbar for
+   five pixels. These three columns sit in a ~320px side card, so they
+   take the tighter inset rather than the full-width page one. */
+.assign-table thead th,
+.assign-table tbody td { padding-left: 8px; padding-right: 8px; }
+.assign-table thead th:first-child,
+.assign-table tbody td:first-child { padding-left: 10px; }
 .assign-table .assign-table-since { white-space: nowrap; width: 1%; }
 .assign-table .assign-table-person { overflow-wrap: anywhere; }
 .assign-table thead th { white-space: nowrap; }
