@@ -355,7 +355,15 @@ export interface TicketStatusChangePayload {
 export type TransitionRequirementKey =
   | "assignee"
   | "schedule"
-  | "completion_evidence";
+  | "completion_evidence"
+  // W14 §4 — the justification an OVERRIDE carries, reported by
+  // `state_machine.transition_needs_override_reason`. Unlike the other
+  // three it can never arrive satisfied: a reason is written FOR the
+  // move, so there is nothing on the ticket that could already answer
+  // it. Reported by the requirements ENDPOINT and rendered by the
+  // modal; the refusal itself keeps its own stable code
+  // (`override_reason_required`) one layer down in `apply_transition`.
+  | "override_reason";
 
 export interface TransitionRequirement {
   key: TransitionRequirementKey;

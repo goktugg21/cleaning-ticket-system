@@ -209,6 +209,104 @@ CLAUDE.md names in `TicketDetailPage.tsx` does not exist — the one
 warning is `hooks/useSavedBanner.ts:28`. This branch: typecheck clean,
 `eslint .` **42 (41 errors, 1 warning)**, `npm run build` OK.
 
+### Done — W14: four things the owner could not use, each one measured first
+
+The owner, after W13-FIX: four reports, and the standing instruction
+that a claim is not evidence. Every item below was reproduced on the
+LIVE crmtest stack before a line was changed, and the measurement is
+quoted in the code comment that fixes it.
+
+1. **The category picker still offered every tenant's list, and the
+   ticket rows were still in the wrong language.** Two separate causes,
+   and W13-FIX had fixed neither completely.
+
+   *Duplication:* `CreateTicketPage.tsx` sent `?company=` CONDITIONALLY
+   (`...(intakeCompanyId ? { company: intakeCompanyId } : {})`), so the
+   one caller who most needs the scope — a SUPER_ADMIN before picking a
+   building, which is every SUPER_ADMIN on first render — sent no
+   company and got the unscoped list. Measured on crmtest: 18 rows, six
+   labels once per tenant. The company is now resolved from the
+   building, else the customer's building, else the author's own company
+   when they belong to exactly one; with none of the three there is no
+   list rather than all of them.
+
+   *Language:* W13-FIX taught the CATALOG serializer to read
+   `user.language` and left the OTHER resolver alone.
+   `serializers.TicketCategoryFieldsMixin` — which prints the category on
+   every list row and on the detail page — still read `Accept-Language`,
+   a header nothing in `frontend/src` sets, so it was the BROWSER's
+   locale. Measured as user 9 (`language='en'`): the picker said
+   "Malfunction" while the chip beside it said "Storing". Both call
+   sites now import one `reader_language`.
+
+   Also found while checking every surface: `_annotate_usage`'s
+   `Count("tickets")` adds a GROUP BY, which makes Django DROP
+   `Meta.ordering` (`queryset.ordered` was `False`), so the picker's
+   options arrived in database order. The order is re-stated after the
+   annotate.
+
+2. **The archive showed the working list's status chips.**
+   `filters.apply_archived` gated the rows cleanly and the counts
+   followed, but `StatusTiles` drew `TICKET_LIST_STATUSES` regardless.
+   `TicketViewSet.archive` refuses anything not in
+   `TERMINAL_TICKET_STATUSES` (`archive_not_finished`), so seven of the
+   ten chips could only ever read 0 — measured: `by_status` came back
+   `{}` for `?archived=true`. `TICKET_STATUS_SPEC` gained an
+   `archivable` field (a `Record` over the union, so a new status must
+   answer for itself) and the chips, the `status__in` on the rows and
+   the "All" total all follow the pile that is open. A chip selected in
+   one pile is dropped when it does not exist in the other.
+
+3. **The browser Back button.** Two defects, both measured with
+   `history.pushState` instrumented on the live site.
+
+   *One click, two entries.* The ticket rows are a
+   `<tr onClick={navigate}>` wrapped around `<Link>`s to the same place;
+   the link navigated and the click then bubbled to the row, which
+   navigated again. One click on ticket 343 logged `PUSH /tickets/343`
+   twice and `history.state.idx` went 1 -> 3, so one press of Back
+   landed on the page it was pressed from. The same pattern was in the
+   buildings, customers and companies admin lists.
+
+   *The back link pointed at the dashboard.* All three of
+   `TicketDetailPage`'s back links were `<Link to="/">` under the label
+   `back_to_tickets` — the owner's "it throws me to the dashboard",
+   literally — and being a `<Link>` they PUSHED, so the browser's Back
+   then went forwards into the ticket just left.
+
+   `lib/navHistory.ts` records the path at each `history.state.idx`;
+   `hooks/useBackLink.ts` steps the history back when the entry behind
+   this one IS the page the label names, and otherwise follows the href.
+   `PageHeader` routes its `backLink` through it, which fixes both of
+   `ExtraWorkDetailPage`'s hardcoded `/extra-work` links and every other
+   page that mounts one. The label can no longer lie and the reader gets
+   the list back with its filters and scroll.
+
+4. **Undo and the correction actions were being refused silently.** Not
+   hidden and not broken: 43 of 87 crmtest tickets DO offer an undo, and
+   the button renders enabled. Walked on ticket 356 (ACKNOWLEDGED, undo
+   to OPEN):
+
+       GET  /tickets/356/transition-requirements/?to_status=OPEN
+            -> {"requirements": [], "unmet": []}
+       POST /tickets/356/status/
+            -> 400 {"code": "override_reason_required"}
+
+   `ACKNOWLEDGED -> OPEN` is not in `ALLOWED_TRANSITIONS`, so Sprint 184
+   §2 coerces it to an override and demands a reason. The requirements
+   endpoint did not know that, so the modal asked only for an optional
+   note; on the 400 the page CLOSED the modal, raised no toast, and
+   armed a different inline reason form further down the card. From the
+   operator's chair the button did nothing.
+
+   `state_machine.transition_needs_override_reason` is now the one
+   definition — the same two predicates `apply_transition` coerces on —
+   and `transition_requirements` calls it, so the modal asks for the
+   reason before the press. `unmet()`, the ENFORCEMENT half, excludes it
+   deliberately: the reason keeps its own gate and its own stable code
+   one layer down. The 400 branch survives as a safety net but now keeps
+   the modal open with the refusal inside it instead of vanishing.
+
 ### Done — W13-FIX: the eight things that were reported done and were not
 
 The owner, after the W13 deploy to crmtest: "FIX WHAT WAS CLAIMED AND

@@ -91,8 +91,23 @@ def _annotate_usage(queryset):
     """One aggregate for the whole page: how many meldingen carry this
     category. The UI needs the number to decide whether to offer Delete,
     and a per-row count would be the N+1 the query-count tests exist to
-    catch."""
-    return queryset.annotate(annotated_usage_count=Count("tickets"))
+    catch.
+
+    W14 §1 -- THE ORDER IS RE-STATED, because the annotate drops it.
+    `TicketCategory.Meta.ordering` is `["sort_order", "label_nl", "id"]`,
+    but a `Count` over the reverse `tickets` relation adds a GROUP BY and
+    Django clears the default ordering when it does; `queryset.ordered`
+    was measurably `False` and the picker's options arrived in whatever
+    order the database happened to return them (measured on crmtest:
+    compliment, storing, extra, klacht, storing, melden, verzoek).
+
+    A picker whose options move between loads is a picker nobody can
+    build muscle memory on, so the same three columns are named again
+    here -- after the annotate, where they survive.
+    """
+    return queryset.annotate(annotated_usage_count=Count("tickets")).order_by(
+        "sort_order", "label_nl", "id"
+    )
 
 
 class TicketCategoryListCreateView(generics.ListCreateAPIView):

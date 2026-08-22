@@ -255,20 +255,66 @@ export function CreateTicketPage() {
   //
   // W13-FIX §3 — scoped to the company that will own this melding. The
   // seven are seeded per company, so without this the picker offered
-  // seven per tenant. The building decides the company, so the request
-  // waits for one to be chosen; before that there is nothing to offer
-  // and the field is not usable anyway.
+  // seven per tenant.
+  //
+  // W14 §1 — AND THE SCOPE IS NOT OPTIONAL.
+  //
+  // `...(intakeCompanyId ? { company: intakeCompanyId } : {})` made the
+  // filter CONDITIONAL, so the one caller that most needs it — a
+  // SUPER_ADMIN who has not picked a building yet, which is every
+  // SUPER_ADMIN on first render — sent no `company` at all and got the
+  // unscoped list back. Measured on crmtest, `GET
+  // /api/tickets/categories/?is_active=true&available_at_intake=true`
+  // with no company: 18 rows, six labels repeated once per tenant. The
+  // owner's screenshot was this list.
+  //
+  // So the company is resolved, or there is no list. Three sources, in
+  // the order they become knowable, and never a fourth that means "all
+  // of them":
+  //
+  //   1. the BUILDING, which owns the company outright;
+  //   2. the CUSTOMER's building, for the moment between choosing a
+  //      customer and choosing which of its buildings;
+  //   3. the AUTHOR's own company, when they belong to exactly one —
+  //      true for every COMPANY_ADMIN, BUILDING_MANAGER and STAFF here,
+  //      which is what lets them see the picker before they have
+  //      touched anything.
+  //
+  // A SUPER_ADMIN of several companies matches none of the three until
+  // they pick a building, and gets no picker until they do. That is the
+  // right answer: with no company chosen there is no correct list to
+  // show, and showing every tenant's was the defect.
   const intakeCompanyId = useMemo(() => {
-    if (!form.building) return undefined;
-    return buildings.find((b) => b.id === Number(form.building))?.company;
-  }, [buildings, form.building]);
+    if (form.building) {
+      const fromBuilding = buildings.find(
+        (b) => b.id === Number(form.building),
+      )?.company;
+      if (fromBuilding) return fromBuilding;
+    }
+    if (form.customer) {
+      const customer = customers.find((c) => String(c.id) === form.customer);
+      const fromCustomer = customer
+        ? buildings.find((b) => customerMatchesBuilding(customer, b.id))
+            ?.company
+        : undefined;
+      if (fromCustomer) return fromCustomer;
+    }
+    if (me?.company_ids?.length === 1) return me.company_ids[0];
+    return undefined;
+  }, [buildings, customers, form.building, form.customer, me]);
 
   useEffect(() => {
     let cancelled = false;
+    // No company, no list. Never every company's. Nothing is SET here —
+    // `categoryOptions` below is what the field renders, and it is
+    // derived, so an un-resolved company shows nothing without this
+    // effect writing state (which is both the house rule and the only
+    // way the field cannot flash the previous company's rows).
+    if (!intakeCompanyId) return;
     listTicketCategories({
       is_active: "true",
       available_at_intake: "true",
-      ...(intakeCompanyId ? { company: intakeCompanyId } : {}),
+      company: intakeCompanyId,
     })
       .then((rows) => {
         if (cancelled) return;
@@ -294,6 +340,36 @@ export function CreateTicketPage() {
       cancelled = true;
     };
   }, [intakeCompanyId]);
+
+  /** W14 §1 — WHAT THE FIELD RENDERS: this company's rows, or none.
+   *
+   *  Derived rather than stored, so the list can never disagree with
+   *  the company the form has resolved. Between switching buildings and
+   *  the new request returning, `categories` still holds the PREVIOUS
+   *  company's rows; filtering on the resolved company here means that
+   *  instant shows an empty picker rather than seven labels belonging
+   *  to somebody else. */
+  const categoryOptions = useMemo(
+    () =>
+      intakeCompanyId
+        ? categories.filter((row) => row.company === intakeCompanyId)
+        : [],
+    [categories, intakeCompanyId],
+  );
+
+  /** The chosen category, but only while it is still on offer.
+   *
+   *  Derived for the same reason as `categoryOptions`: a stale id from
+   *  the previously-resolved company must not reach the select's value
+   *  or the POST body, and clearing it from an effect would be a
+   *  `setState` in an effect body (banned) plus a render where the two
+   *  disagree. */
+  const selectedCategoryId = useMemo(() => {
+    const chosen = categoryOptions.find(
+      (row) => String(row.id) === form.category,
+    );
+    return chosen ? chosen.id : null;
+  }, [categoryOptions, form.category]);
 
   useEffect(() => {
     if (!form.customer) return;
@@ -386,7 +462,13 @@ export function CreateTicketPage() {
         // Omitted entirely when unset: the serializer treats absence as
         // "no category", and sending null would be the same thing said
         // less clearly.
-        ...(form.category ? { category: Number(form.category) } : {}),
+        // W14 §1 — only a category this company OWNS. Switching the
+        // building switches the catalog, and `form.category` still
+        // holds the id picked from the previous one; sending it would
+        // file the melding under another tenant's row. `categoryOptions`
+        // is already scoped to the resolved company, so membership in
+        // it is the whole check.
+        ...(selectedCategoryId ? { category: selectedCategoryId } : {}),
       });
 
       const newId = response.data.id;
@@ -534,7 +616,7 @@ export function CreateTicketPage() {
                   Rendered only when the catalog loaded. An empty select
                   is a control that cannot be used, and a melding files
                   perfectly well uncategorised. */}
-              {categories.length > 0 && (
+              {categoryOptions.length > 0 && (
                 <div className="field">
                   <label className="field-label" htmlFor="f-category">
                     {t("field_category_label")}
@@ -542,14 +624,14 @@ export function CreateTicketPage() {
                   <select
                     id="f-category"
                     className="field-select"
-                    value={form.category}
+                    value={selectedCategoryId === null ? "" : form.category}
                     onChange={(event) => update("category", event.target.value)}
                     data-testid="create-ticket-category"
                   >
                     <option value="">
                       {t("common:ticket_categories.none")}
                     </option>
-                    {categories.map((row) => (
+                    {categoryOptions.map((row) => (
                       <option key={row.id} value={row.id}>
                         {row.label}
                       </option>
@@ -837,7 +919,7 @@ export function CreateTicketPage() {
                 <div className="preview-row">
                   <span className="preview-key">{t("summary_category")}</span>
                   <span className="preview-val">
-                    {categories.find((row) => String(row.id) === form.category)
+                    {categoryOptions.find((row) => row.id === selectedCategoryId)
                       ?.label ?? t("common:ticket_categories.none")}
                   </span>
                 </div>

@@ -55,7 +55,10 @@ import { useEditMode } from "../lib/useEditMode";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
 import { ticketStatusLabelKey } from "../lib/enumLabels";
 import {
+  TICKET_ARCHIVE_STATUSES,
   TICKET_LIST_STATUSES,
+  archivedTicketTotal,
+  ticketArchiveStatusParam,
   ticketListStatusParam,
   visibleTicketTotal,
 } from "../lib/ticketStatus";
@@ -254,6 +257,25 @@ const STATS_KNOWN_PARAMS = new Set([
   "date_from",
   "date_to",
 ]);
+
+/**
+ * W14 §2 — carry a status chip across the working-list / archive toggle
+ * only when the pile being opened actually has that chip.
+ *
+ * Both directions drop something: the tickets page opens on `OPEN`,
+ * which the archive cannot hold (`archive_not_finished`), and the
+ * archive can be sitting on `CONVERTED_TO_EXTRA_WORK`, which the
+ * working list deliberately does not show. Either survivor leaves an
+ * empty list with no chip lit to explain why, so the filter is dropped
+ * to "all" rather than kept as a narrowing nobody can see.
+ */
+function keepStatusFilter(
+  current: TicketStatus | "",
+  axis: readonly TicketStatus[],
+): TicketStatus | "" {
+  if (current === "") return "";
+  return axis.includes(current) ? current : "";
+}
 
 // Sprint 180 §1 — how long a ticket may sit in WAITING_CUSTOMER_APPROVAL
 // before the dashboard calls it overdue. Mirrors
@@ -704,7 +726,15 @@ export function DashboardPage({
     // Server-side via `status__in`, because filtering the current page
     // in the client would leave `count` — and therefore the pager and
     // the "All" tile — describing a different set than the rows.
-    else if (isTicketsPage) params.status__in = ticketListStatusParam();
+    // W14 §2 — and the ROWS follow the same axis the chips do. In the
+    // archive that is the archivable set: sending the working list's
+    // `status__in` would hide an archived CONVERTED_TO_EXTRA_WORK
+    // ticket from the only place it is meant to be findable.
+    else if (isTicketsPage) {
+      params.status__in = showArchive
+        ? ticketArchiveStatusParam()
+        : ticketListStatusParam();
+    }
     if (priorityFilter) params.priority = priorityFilter;
     // Sprint 185 E §1 — server-side, so it survives pagination instead
     // of filtering one page while `count` describes another set.
@@ -2295,6 +2325,16 @@ export function DashboardPage({
               onClick={() => {
                 setShowArchive(false);
                 setPage(1);
+                // W14 §2 — the two piles do not share a status axis, so
+                // a chip selected in one must not survive into the
+                // other. Carrying `CLOSED` back into the working list is
+                // harmless; carrying `OPEN` into the archive is not — it
+                // narrows the rows to a status the archive cannot hold
+                // and leaves an empty list with no chip lit to explain
+                // it. Cleared in BOTH directions so the rule is one rule.
+                setStatusFilter((current) =>
+                  keepStatusFilter(current, TICKET_LIST_STATUSES),
+                );
               }}
               data-testid="tickets-show-working"
             >
@@ -2308,6 +2348,12 @@ export function DashboardPage({
               onClick={() => {
                 setShowArchive(true);
                 setPage(1);
+                // See the sibling above. The tickets page opens on
+                // `OPEN`, so without this every first press of Archive
+                // showed an empty archive.
+                setStatusFilter((current) =>
+                  keepStatusFilter(current, TICKET_ARCHIVE_STATUSES),
+                );
               }}
               data-testid="tickets-show-archive"
             >
@@ -2315,8 +2361,22 @@ export function DashboardPage({
             </button>
           </div>
         </div>
+        {/* W14 §2 — THE CHIPS BELONG TO THE PILE THAT IS OPEN.
+            The archive gate (`filters.apply_archived`) was clean and the
+            counts followed it, but the row above the list went on
+            drawing the WORKING LIST's ten statuses over it. The owner:
+            "why am I seeing normal ticket status chips while the archive
+            chip is selected?" — and he was right to ask: the server
+            refuses to archive anything that is not terminal
+            (`archive_not_finished`), so seven of those ten chips could
+            only ever read 0. Measured on crmtest with `?archived=true`:
+            `by_status` came back `{}` for all ten.
+            One axis, chosen by which pile is open. */}
         <StatusTiles
-          tiles={TICKET_LIST_STATUSES.map((value) => ({
+          tiles={(showArchive
+            ? TICKET_ARCHIVE_STATUSES
+            : TICKET_LIST_STATUSES
+          ).map((value) => ({
             value,
             label: tStatus(value),
             count: stats ? (stats.by_status[value] ?? 0) : -1,
@@ -2327,7 +2387,9 @@ export function DashboardPage({
             setPage(1);
             setSelectedIds(new Set<number>());
           }}
-          totalCount={visibleTicketTotal(stats)}
+          totalCount={
+            showArchive ? archivedTicketTotal(stats) : visibleTicketTotal(stats)
+          }
           showCounts={!statsAreBlind}
           testIdPrefix="tickets-status"
         />
@@ -2819,7 +2881,29 @@ export function DashboardPage({
                           className="ticket-row-clickable"
                           role="link"
                           tabIndex={0}
-                          onClick={() => navigate(`/tickets/${ticket.id}`)}
+                          /* W14 §3 — ONE CLICK, ONE HISTORY ENTRY.
+                             The row is clickable AND contains `<Link>`s
+                             to the same ticket. Clicking a link
+                             navigated, the click then bubbled to here,
+                             and this navigated again. Instrumenting
+                             `history.pushState` on crmtest, one click
+                             on ticket 343 logged `PUSH /tickets/343`
+                             TWICE and `history.state.idx` went 1 -> 3 —
+                             so one press of the browser's Back landed
+                             back on the ticket it was pressed from, and
+                             only for the cells that happen to be links.
+                             The anchor is left to be an anchor
+                             (open-in-new-tab, middle click, the status
+                             bar showing where it goes); the row handles
+                             only the cells that are not one. */
+                          onClick={(event) => {
+                            if (
+                              (event.target as HTMLElement).closest("a,button")
+                            ) {
+                              return;
+                            }
+                            navigate(`/tickets/${ticket.id}`);
+                          }}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();

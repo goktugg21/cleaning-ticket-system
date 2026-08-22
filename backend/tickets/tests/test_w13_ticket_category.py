@@ -325,13 +325,77 @@ class TheCategoryIsVisibleAndFilterable(TicketCategoryFixture):
         self.assertEqual(response.data["category_slug"], "storing")
 
     def test_the_english_reader_gets_the_english_label(self):
+        """W14 §1 — "the English reader" is the reader whose LANGUAGE is
+        English, not the one whose browser happens to be.
+
+        This test previously set `HTTP_ACCEPT_LANGUAGE="en-GB"` and
+        asserted "Complaint". It passed, and it was asserting the
+        defect: nothing in `frontend/src` sets `Accept-Language`, so the
+        value the serializer read was the BROWSER's locale, and the
+        owner's Dutch operator on a Dutch page in an English-locale
+        browser was served English labels on every ticket row.
+        `user.language` is the app's language -- the same field
+        `i18n/useLanguageSync.ts` reads from `/auth/me/` and hands to
+        i18next -- so it is the only value that can agree with the rest
+        of the page. See `serializers_ticket_categories.reader_language`.
+        """
         self.ticket.category = self.cat("klacht")
         self.ticket.save(update_fields=["category"])
+        self.company_admin.language = "en"
+        self.company_admin.save(update_fields=["language"])
+        response = self.as_(self.company_admin).get(
+            f"/api/tickets/{self.ticket.id}/"
+        )
+        self.assertEqual(response.data["category_name"], "Complaint")
+
+    def test_the_browsers_locale_does_not_override_the_users_language(self):
+        """W14 §1 — the owner's report, locked down.
+
+        A Dutch operator reading a Dutch page from an English-locale
+        browser gets Dutch. The header is present and is ignored,
+        because the reader already told us what language they read in.
+        """
+        self.ticket.category = self.cat("klacht")
+        self.ticket.save(update_fields=["category"])
+        self.assertEqual(self.company_admin.language, "nl")
         self.client.force_authenticate(user=self.company_admin)
         response = self.client.get(
             f"/api/tickets/{self.ticket.id}/", HTTP_ACCEPT_LANGUAGE="en-GB"
         )
-        self.assertEqual(response.data["category_name"], "Complaint")
+        self.assertEqual(response.data["category_name"], "Klacht")
+
+    def test_the_list_and_the_picker_name_one_row_the_same_way(self):
+        """W14 §1 — the defect was that they did not.
+
+        W13-FIX moved the CATALOG serializer onto `user.language` and
+        left `TicketCategoryFieldsMixin` reading the header, so on one
+        screen the picker said "Malfunction" while the chip beside it
+        said "Storing". One resolver now, so this cannot come back
+        without failing here.
+        """
+        klacht = self.cat("klacht")
+        self.ticket.category = klacht
+        self.ticket.save(update_fields=["category"])
+        self.company_admin.language = "en"
+        self.company_admin.save(update_fields=["language"])
+
+        detail = self.as_(self.company_admin).get(
+            f"/api/tickets/{self.ticket.id}/"
+        )
+        listing = self.as_(self.company_admin).get(TICKETS)
+        row = next(
+            r for r in listing.data["results"] if r["id"] == self.ticket.id
+        )
+        catalog = self.as_(self.company_admin).get(
+            f"{LIST}?company={self.company.id}"
+        )
+        picker = next(
+            c for c in catalog.data["results"] if c["id"] == klacht.id
+        )
+
+        self.assertEqual(detail.data["category_name"], "Complaint")
+        self.assertEqual(row["category_name"], "Complaint")
+        self.assertEqual(picker["label"], "Complaint")
 
     def test_filtering_by_one_category_narrows_to_it(self):
         self.ticket.category = self.cat("klacht")

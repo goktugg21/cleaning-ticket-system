@@ -86,6 +86,10 @@ ERR_TRANSITION_REQUIREMENTS = "transition_requirements_unmet"
 REQ_ASSIGNEE = "assignee"
 REQ_SCHEDULE = "schedule"
 REQ_COMPLETION_EVIDENCE = "completion_evidence"
+#: W14 §4 — the justification an OVERRIDE carries. Not data the ticket
+#: can already have (see `transition_needs_override_reason`), so it is
+#: reported unmet whenever it applies.
+REQ_OVERRIDE_REASON = "override_reason"
 
 
 #: The forward moves into work. A rejection landing on IN_PROGRESS is a
@@ -163,11 +167,60 @@ def requirements_for_transition(ticket, to_status, user=None) -> list[Requiremen
         reqs.append(Requirement(REQ_ASSIGNEE, _has_assignee(ticket)))
         reqs.append(Requirement(REQ_SCHEDULE, _has_schedule(ticket)))
 
+    # W14 §4 — AND THE REASON, WHEN THE MOVE IS AN OVERRIDE.
+    #
+    # The module docstring above used to end "it does not touch the
+    # override-reason contract (Sprint 27F-B1) -- that stays exactly
+    # where it is". Keeping the CONTRACT where it is was right; keeping
+    # the QUESTION out of the modal was not. The modal renders a field
+    # per unmet requirement and nothing else, so a requirement this
+    # endpoint does not report is a field the operator is never offered
+    # and a 400 they meet instead. Measured: ACKNOWLEDGED -> OPEN
+    # reported `unmet: []` and was then refused with
+    # `override_reason_required`.
+    #
+    # The rule itself is NOT restated here. `state_machine
+    # .transition_needs_override_reason` is the one definition, and it
+    # is the same pair of predicates `apply_transition` coerces on, so
+    # the modal cannot ask for a reason on a move that would not need
+    # one, or stay silent on one that would.
+    #
+    # Imported inside the function: `state_machine` imports nothing from
+    # here, and a module-level import in the other direction would make
+    # the pair circular the moment it did.
+    from .state_machine import transition_needs_override_reason
+
+    if transition_needs_override_reason(ticket, to_status, user):
+        # Never pre-satisfied: a reason is written FOR the move, so
+        # there is nothing on the ticket that could already answer it.
+        reqs.append(Requirement(REQ_OVERRIDE_REASON, False))
+
     return reqs
 
 
 def unmet(ticket, to_status, user=None) -> list[str]:
-    """The keys that block this move right now."""
+    """The keys that block this move right now, FOR THE GATE.
+
+    W14 §4 — `REQ_OVERRIDE_REASON` is deliberately excluded here, and
+    only here.
+
+    This function is the ENFORCEMENT half:
+    `TicketStatusChangeSerializer.save` calls it and refuses with
+    `transition_requirements_unmet`. The override reason already has its
+    own gate one layer down, in `apply_transition`, with its own stable
+    code `override_reason_required` — the code the page branches on and
+    several tests assert. Letting a missing reason ALSO trip this gate
+    would replace a precise refusal ("you need to say why") with a
+    generic one, and change an established contract for no gain.
+
+    The ASKING half is `requirements_for_transition`, which the
+    `transition-requirements` endpoint calls directly and which does
+    report it. That asymmetry is the point: the modal must ask for the
+    reason, and `apply_transition` must remain the one thing that
+    refuses without it.
+    """
     return [
-        r.key for r in requirements_for_transition(ticket, to_status, user) if not r.satisfied
+        r.key
+        for r in requirements_for_transition(ticket, to_status, user)
+        if not r.satisfied and r.key != REQ_OVERRIDE_REASON
     ]

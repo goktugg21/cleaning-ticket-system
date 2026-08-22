@@ -36,6 +36,7 @@ from .models import (
 )
 from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
 from .schedule_history import latest_schedule_change
+from .serializers_ticket_categories import reader_language
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
 from .transition_requirements import (
     ERR_TRANSITION_REQUIREMENTS,
@@ -408,13 +409,23 @@ class TicketCategoryFieldsMixin:
     """
 
     def get_category_label(self, obj) -> str | None:
+        """W14 §1 -- the reader's language, from the ONE resolver.
+
+        This read `Accept-Language` alone, which is the BROWSER's locale
+        and never the app's: nothing in `frontend/src` sets that header.
+        So the ticket LIST and the ticket DETAIL printed the category in
+        whatever language the browser was installed in, while the
+        picker directly beside them printed it in the language the user
+        chose. Same row, two names, one screen.
+
+        `reader_language` is that one resolver; see it for the measured
+        before/after.
+        """
         if obj.category_id is None or obj.category is None:
             return None
-        request = self.context.get("request")
-        language = (
-            request.headers.get("Accept-Language") if request is not None else None
+        return obj.category.label_for(
+            reader_language(self.context.get("request"))
         )
-        return obj.category.label_for(language)
 
     def get_category_slug(self, obj) -> str | None:
         return obj.category.slug if obj.category_id and obj.category else None

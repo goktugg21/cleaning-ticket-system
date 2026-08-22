@@ -385,6 +385,86 @@ def can_transition(user, ticket, to_status):
 
 
 @transaction.atomic
+def _is_provider_driven_customer_decision(ticket, to_status, user) -> bool:
+    """A provider operator answering the CUSTOMER's question.
+
+    Sprint 27F-B1: SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER
+    driving WAITING_CUSTOMER_APPROVAL -> APPROVED / REJECTED is by
+    definition an override of a decision that is not theirs, even when
+    the client forgot the flag.
+    """
+    return (
+        getattr(user, "role", None)
+        in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }
+        and str(ticket.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        and str(to_status)
+        in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
+    )
+
+
+def _is_out_of_machine_jump(ticket, to_status, user) -> bool:
+    """A move the transition table does not contain.
+
+    Sprint 184 §2. Only a SUPER_ADMIN can reach one (`can_transition`
+    lets that role past any pair). `user is not None` guards the SYSTEM
+    actor, which drives its own `SYSTEM_AUTO_TRANSITIONS` pairs and has
+    nobody to ask for a reason.
+    """
+    return (
+        user is not None
+        and (ticket.status, to_status) not in ALLOWED_TRANSITIONS
+    )
+
+
+def transition_needs_override_reason(ticket, to_status, user) -> bool:
+    """W14 §4 — WILL THIS MOVE BE REFUSED WITHOUT AN `override_reason`?
+
+    ## Why this function exists
+
+    `apply_transition` has always known the answer; nothing else could
+    ask it. So `GET /tickets/<id>/transition-requirements/` — the
+    endpoint the transition modal renders itself from — reported
+    `unmet: []` for a move the very next request would refuse.
+
+    Measured on crmtest, ticket 356, ACKNOWLEDGED, undoing its last
+    step:
+
+        GET  /api/tickets/356/transition-requirements/?to_status=OPEN
+             -> {"requirements": [], "unmet": []}
+        POST /api/tickets/356/status/  {"to_status": "OPEN", ...}
+             -> 400 {"code": "override_reason_required"}
+
+    From the operator's chair, which is where the owner was sitting:
+    press "Undo the last step", get a modal that asks only for an
+    optional note, press its button, and the modal vanishes with no
+    message and no change. His words: "undo and the correction actions
+    do not seem to work. I could not get them to work." They were not
+    hidden and they were not broken — they were being refused silently,
+    for a field the form never offered.
+
+    ## Why a predicate and not a copy of the rule
+
+    Both coercion branches above call the SAME two helpers this does, so
+    the question "does this move need a reason" has exactly one
+    definition. Mirroring `ALLOWED_TRANSITIONS` inside
+    `transition_requirements.py` — or worse, inside the page — is the
+    two-copies-of-one-fact failure CLAUDE.md records twice already.
+
+    Note the asymmetry with the requirements in
+    `transition_requirements.py`: those are DATA a step needs and can
+    already be satisfied by the ticket as it stands. A reason can never
+    be pre-satisfied; it is written fresh for the move, which is why it
+    is always reported unmet when it applies.
+    """
+    return _is_provider_driven_customer_decision(
+        ticket, to_status, user
+    ) or _is_out_of_machine_jump(ticket, to_status, user)
+
+
 def apply_transition(
     ticket,
     user,
@@ -424,16 +504,8 @@ def apply_transition(
     # B1 added BUILDING_MANAGER to this coercion set because the
     # business doc explicitly admits BM to act on behalf of the
     # customer (typical case: customer approves verbally / by phone).
-    provider_driven_customer_decision = (
-        getattr(user, "role", None)
-        in {
-            UserRole.SUPER_ADMIN,
-            UserRole.COMPANY_ADMIN,
-            UserRole.BUILDING_MANAGER,
-        }
-        and str(ticket.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
-        and str(to_status)
-        in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
+    provider_driven_customer_decision = _is_provider_driven_customer_decision(
+        ticket, to_status, user
     )
     if provider_driven_customer_decision:
         # B6 — BM customer-decision override is revocable per-(BM,
@@ -489,10 +561,7 @@ def apply_transition(
     # `user is not None` guards the SYSTEM actor: it drives its own
     # `SYSTEM_AUTO_TRANSITIONS` pairs and there is nobody to ask for a
     # reason.
-    out_of_machine_jump = (
-        user is not None
-        and (ticket.status, to_status) not in ALLOWED_TRANSITIONS
-    )
+    out_of_machine_jump = _is_out_of_machine_jump(ticket, to_status, user)
     if out_of_machine_jump:
         is_override = True
 

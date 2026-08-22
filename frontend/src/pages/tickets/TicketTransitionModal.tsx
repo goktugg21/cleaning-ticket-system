@@ -45,6 +45,11 @@ export interface TransitionAnswers {
   note: string;
   assigned_staff_ids?: number[];
   scheduled_start_at?: string;
+  /** W14 §4 — the justification an OVERRIDE carries. Never merged into
+   *  `note`: the note is the operational comment on the move, the
+   *  reason is what the audit row records, and collapsing them would
+   *  put one value in two meanings. */
+  override_reason?: string;
 }
 
 export interface TicketTransitionModalProps {
@@ -86,21 +91,42 @@ export function TicketTransitionModal({
   const [note, setNote] = useState("");
   const [picked, setPicked] = useState<number[]>([]);
   const [startsAt, setStartsAt] = useState("");
+  const [reason, setReason] = useState("");
 
   const unmet = useMemo(() => requirements?.unmet ?? [], [requirements]);
   const needsAssignee = unmet.includes("assignee");
   const needsSchedule = unmet.includes("schedule");
+  /**
+   * W14 §4 — THE MOVE IS AN OVERRIDE AND THE SERVER WILL WANT A REASON.
+   *
+   * Not predicted here. `state_machine.transition_needs_override_reason`
+   * decides, `transition-requirements` reports it, and this renders
+   * whatever comes back — the same "the page does not predict, it asks"
+   * the module was built on.
+   *
+   * Before this, the endpoint did not report it and so this form never
+   * asked: the operator pressed Undo, was shown a modal wanting only an
+   * optional note, pressed its button, and the modal closed on a 400
+   * nobody was shown. The owner: "undo and the correction actions do
+   * not seem to work. I could not get them to work."
+   */
+  const needsReason = unmet.includes("override_reason");
 
   // Every unmet requirement must have an answer before the move is
   // offered. This is the "DOES NOT TRANSITION until it is answered"
   // half that lives on the screen; the backend enforces the same thing
   // independently, so a client that skipped this still cannot move it.
   const answered =
-    (!needsAssignee || picked.length > 0) && (!needsSchedule || startsAt !== "");
+    (!needsAssignee || picked.length > 0) &&
+    (!needsSchedule || startsAt !== "") &&
+    (!needsReason || reason.trim() !== "");
 
   function confirm() {
     const answers: TransitionAnswers = { note: note.trim() };
     if (needsAssignee && picked.length > 0) answers.assigned_staff_ids = picked;
+    if (needsReason && reason.trim() !== "") {
+      answers.override_reason = reason.trim();
+    }
     if (needsSchedule && startsAt !== "") {
       // <input type="datetime-local"> has no zone; the browser's own
       // offset is the operator's intent, so build the instant locally
@@ -190,6 +216,33 @@ export function TicketTransitionModal({
                   value={startsAt}
                   onChange={(event) => setStartsAt(event.target.value)}
                   data-testid="transition-starts-at"
+                />
+              </div>
+            )}
+
+            {needsReason && (
+              <div
+                className="transition-field"
+                data-testid="transition-field-override-reason"
+              >
+                <label
+                  className="field-label"
+                  htmlFor="transition-override-reason"
+                >
+                  {t("transition.reason_label")}
+                </label>
+                {/* Says WHY it is being asked for, because "this is not
+                    a step the workflow offers" is the whole reason the
+                    field is here and the operator cannot see the
+                    transition table. */}
+                <p className="muted small">{t("transition.reason_hint")}</p>
+                <textarea
+                  id="transition-override-reason"
+                  className="filter-control"
+                  rows={3}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  data-testid="transition-override-reason"
                 />
               </div>
             )}

@@ -314,5 +314,8 @@
   "transition.when_label": "Wanneer begint het?",
   "transition.when_hint": "De geplande startdatum en -tijd van het werk.",
   "transition.note_label": "Toelichting (optioneel)",
-  "transition.note_hint": "Wat moet iemand weten over deze stap? Komt onder Activiteitstijdlijn te staan, bij deze stap."
+  "transition.note_hint": "Wat moet iemand weten over deze stap? Komt onder Activiteitstijdlijn te staan, bij deze stap.",
+  "transition.reason_label": "Reden (verplicht)",
+  "transition.reason_hint": "Deze stap zit niet in de normale werkstroom, dus de reden wordt vastgelegd bij de melding. Zonder reden weigert het systeem de stap.",
+  "transition.reason_required": "Geef een reden op. Deze stap wordt zonder reden geweigerd."
 }

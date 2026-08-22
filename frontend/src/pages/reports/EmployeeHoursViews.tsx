@@ -403,7 +403,21 @@ interface MeldingenByCategoryPayload extends PeriodPayload {
  * untagged" is the number that says whether the taxonomy is being used.
  */
 export function MeldingenByCategoryView({ filters }: ReportViewProps) {
-  const { t } = useTranslation(["reports", "common"]);
+  const { t, i18n } = useTranslation(["reports", "common"]);
+  /* W14 §1 — THE READER'S LANGUAGE, ON THE ONE SURFACE THAT WAS TOLD TO
+     PICK AND NEVER DID.
+     `reports/category_report.py::_category_row` ships BOTH labels and
+     says so in as many words: "neither is resolved here. The reader's
+     language is a CLIENT concern." This client then rendered
+     `category_name` — the Dutch column — unconditionally, so an English
+     reader met "Storing" in the report while the ticket list beside it
+     said "Malfunction". `i18n.language` is the same value the rest of
+     the page is rendered in; the Dutch label stays the fallback for an
+     English label nobody filled in, matching `label_for`. */
+  const label = (row: MeldingenCategoryRow) =>
+    i18n.language.startsWith("en")
+      ? row.category_name_en || row.category_name
+      : row.category_name;
   return (
     <PeriodReportView<MeldingenByCategoryPayload>
       endpoint="/reports/meldingen-by-category/"
@@ -434,7 +448,7 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
                       data-testid="meldingen-group-row"
                     >
                       <td>
-                        {row.category_name ? (
+                        {label(row) ? (
                           <>
                             <span
                               className="ticket-category-chip"
@@ -445,7 +459,7 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
                               }
                               aria-hidden="true"
                             />
-                            {row.category_name}
+                            {label(row)}
                           </>
                         ) : (
                           <span className="muted-empty">
@@ -479,7 +493,7 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
                   {bucket.categories.map((row) => (
                     <tr key={row.category ?? "none"}>
                       <td>
-                        {row.category_name ?? (
+                        {label(row) ?? (
                           <span className="muted-empty">
                             {t("meldingen_uncategorised")}
                           </span>

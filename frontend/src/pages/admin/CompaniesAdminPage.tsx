@@ -372,7 +372,18 @@ export function CompaniesAdminPage() {
                     role="link"
                     tabIndex={0}
                     aria-label={t("admin.view") + ": " + company.name}
-                    onClick={openDetail}
+                    /* W14 §3 — one click, one history entry. The row
+                       navigates AND contains a `<Link>` to the same
+                       place, so a click on the link pushed twice and
+                       the browser's Back then landed on the page it was
+                       pressed from. Same defect, same fix, as the
+                       tickets list. */
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest("a,button")) {
+                        return;
+                      }
+                      openDetail();
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();

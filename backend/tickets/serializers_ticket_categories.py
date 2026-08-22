@@ -23,6 +23,48 @@ ERR_TICKET_CATEGORY_LABEL_NOT_UNIQUE = "ticket_category_label_not_unique"
 ERR_TICKET_CATEGORY_SLUG_NOT_UNIQUE = "ticket_category_slug_not_unique"
 
 
+def reader_language(request) -> str | None:
+    """THE READER'S LANGUAGE, resolved in ONE place.
+
+    W14 §1 -- W13-FIX taught THIS serializer to read `user.language`
+    instead of `Accept-Language`, and left the OTHER resolver alone.
+    `serializers.TicketCategoryFieldsMixin` -- which prints the category
+    on every ticket LIST row and on the ticket DETAIL page -- went on
+    reading the header, so one screen printed one row two ways: the
+    picker said "Malfunction" (the user's language) while the chip
+    beside it said "Storing" (the browser's).
+
+    Measured on crmtest before the fix, as user 9 whose `language` is
+    `en`:
+
+        GET /api/tickets/?page_size=5                -> "Storing"
+        GET /api/tickets/?page_size=5  (nl-NL hdr)   -> "Storing"
+        GET /api/tickets/?page_size=5  (en-GB hdr)   -> "Malfunction"
+        GET /api/tickets/categories/                 -> "Malfunction"
+
+    Nothing in `frontend/src` sets `Accept-Language`, so the header is
+    the BROWSER's locale and never the app's. The app's language is
+    `user.language`, the field `i18n/useLanguageSync.ts` reads from
+    `/auth/me/` and hands to i18next -- the same value the rest of the
+    page is rendered in, and therefore the only one that can agree with
+    it.
+
+    The header stays as the fallback for an anonymous or tokenless read;
+    `TicketCategory.label_for` falls back to Dutch after that.
+
+    Both call sites import THIS function. A second copy is what produced
+    the defect above, and the reference system's own audit of its
+    `OvertimeType` records the identical failure: "the same overtime
+    type is named differently on two screens."
+    """
+    if request is None:
+        return None
+    user = getattr(request, "user", None)
+    return getattr(user, "language", None) or request.headers.get(
+        "Accept-Language"
+    )
+
+
 def normalise_label(value: str) -> str:
     """What the operator typed, with the whitespace the DB constraint
     ignores removed on the way in.
@@ -67,29 +109,11 @@ class TicketCategorySerializer(serializers.ModelSerializer):
 
         W13-FIX §3 — THE READER'S LANGUAGE IS THE ONE THEY CHOSE.
 
-        This used to read `Accept-Language`, on the stated assumption
-        that "the SPA already sends" it. It does not, and never did:
-        nothing in `frontend/src` sets that header, so the value here
-        was the BROWSER's locale. A Dutch operator on a Dutch page in an
-        English-locale browser was served the English label -- which is
-        exactly the "seven categories, in English, on a Dutch page" the
-        owner reported.
-
-        The app's language is `user.language`, the field
-        `i18n/useLanguageSync.ts` reads from `/auth/me/` and hands to
-        i18next. That is the same value the rest of the page is rendered
-        in, so it is the only one that can agree with it. The header
-        stays as a fallback for an anonymous or tokenless read, and
-        `label_for` falls back to Dutch after that.
+        The rule, and why it is not `Accept-Language`, lives in
+        `reader_language` above -- one resolver, because W14 §1 found
+        the second copy of it had drifted.
         """
-        request = self.context.get("request")
-        language = None
-        if request is not None:
-            user = getattr(request, "user", None)
-            language = getattr(user, "language", None) or request.headers.get(
-                "Accept-Language"
-            )
-        return obj.label_for(language)
+        return obj.label_for(reader_language(self.context.get("request")))
 
     def get_usage_count(self, obj) -> int:
         # The view annotates this for the page; the fallback keeps a

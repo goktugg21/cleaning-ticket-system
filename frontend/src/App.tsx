@@ -21,6 +21,7 @@ import { TimesheetsRoute } from "./components/TimesheetsRoute";
 import { SlaWarningsRoute } from "./components/SlaWarningsRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
 import { AppShell } from "./layout/AppShell";
+import { HistoryRecorder } from "./hooks/useRecordHistory";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { CreateExtraWorkPage } from "./pages/CreateExtraWorkPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
@@ -201,6 +202,11 @@ export default function App() {
     <AuthProvider>
       <ToastProvider>
         <BrowserRouter>
+          {/* W14 §3 — the app remembers where it has been, so a back
+              link can go BACK to it instead of pushing a fourth entry
+              onto the pile. One mount, above the routes, because every
+              route change has to be seen. See lib/navHistory.ts. */}
+          <HistoryRecorder />
           <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route

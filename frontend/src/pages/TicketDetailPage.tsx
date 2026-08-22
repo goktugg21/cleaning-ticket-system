@@ -72,6 +72,7 @@ import {
 } from "../api/uploadVisibility";
 import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
+import { useBackLink } from "../hooks/useBackLink";
 import {
   composerTiersForRole,
   isCustomerUser,
@@ -570,6 +571,22 @@ function sanitizeStatusNote(raw: string | null | undefined): string {
 export function TicketDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  /**
+   * W14 §3 — "BACK TO TICKETS" NOW GOES TO TICKETS.
+   *
+   * All three of this page's back links were `<Link to="/">` under the
+   * label `back_to_tickets`. So the control that says "Back to tickets"
+   * landed on the DASHBOARD — the owner's "it throws me to the
+   * dashboard", in the literal sense that the link pointed there — and
+   * being a `<Link>` it PUSHED, so the browser's own Back then came
+   * straight back into the ticket.
+   *
+   * `/tickets` is the page the label names and the page the reader came
+   * from, and `useBackLink` steps the history back to it when it is the
+   * entry behind this one, so the list returns with its filters, its
+   * page and its scroll rather than remounted from scratch.
+   */
+  const backToTickets = useBackLink("/tickets");
   const { me } = useAuth();
   const { t } = useTranslation(["ticket_detail", "common"]);
   // M2 P5 — type / customer-facing labels for the resolver-gated
@@ -1603,6 +1620,14 @@ export function TicketDetailPage() {
         ...(answers?.scheduled_start_at
           ? { scheduled_start_at: answers.scheduled_start_at }
           : {}),
+        // W14 §4 — the modal asked for it because
+        // `transition-requirements` said this move is an override, so
+        // it travels with the move. Absent on every ordinary step, and
+        // `apply_transition` stores it only when it coerces the flag —
+        // whether this IS an override stays the backend's call.
+        ...(answers?.override_reason
+          ? { override_reason: answers.override_reason }
+          : {}),
       };
       const response = await api.post<TicketDetail>(
         `/tickets/${id}/status/`,
@@ -1641,15 +1666,36 @@ export function TicketDetailPage() {
       if (axios.isAxiosError(err)) {
         const data = err.response?.data as { code?: string } | undefined;
         if (data?.code === "override_reason_required") {
-          // W13-FIX §1 — hand off to the reason prompt and CLOSE this
-          // modal. Two overlapping surfaces asking for two different
-          // things is the confusion the modal exists to remove.
-          setTransitionTarget(null);
-          setTransitionReqs(null);
-          setTransitionError("");
-          setOverrideDecision(toStatus);
-          setOverrideReason("");
-          setOverrideError(null);
+          // W14 §4 — THE MODAL STAYS OPEN AND SAYS WHAT IS MISSING.
+          //
+          // This used to close the modal and arm the small inline
+          // reason prompt in the workflow card instead. Walked on
+          // crmtest: the modal vanished, no toast was raised, nothing
+          // said the ticket had not moved, and a different form
+          // appeared somewhere else on the page. From the operator's
+          // chair the button simply did nothing — the owner's "I could
+          // not get them to work".
+          //
+          // With `transition-requirements` now reporting
+          // `override_reason` this branch should no longer be reached
+          // for a move the modal opened; it stays as the safety net for
+          // the case the two ever disagree, and a safety net that
+          // silently swallows the refusal is not one. So: same surface,
+          // requirement added, answers already typed kept, and the
+          // reason stated inside the modal that asked.
+          setTransitionReqs((current) =>
+            current === null || current.unmet.includes("override_reason")
+              ? current
+              : {
+                  ...current,
+                  requirements: [
+                    ...current.requirements,
+                    { key: "override_reason", satisfied: false },
+                  ],
+                  unmet: [...current.unmet, "override_reason"],
+                },
+          );
+          setTransitionError(t("transition.reason_required"));
           setStatusBusy(null);
           return;
         }
@@ -2090,7 +2136,7 @@ export function TicketDetailPage() {
   if (loading && !ticket) {
     return (
       <div>
-        <Link to="/" className="link-back">
+        <Link {...backToTickets} className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
           {t("back_to_tickets")}
         </Link>
@@ -2105,7 +2151,7 @@ export function TicketDetailPage() {
   if (!ticket) {
     return (
       <div>
-        <Link to="/" className="link-back">
+        <Link {...backToTickets} className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
           {t("back_to_tickets")}
         </Link>
@@ -2118,7 +2164,7 @@ export function TicketDetailPage() {
     <div>
       <div className="detail-header">
         <div className="detail-header-top">
-          <Link to="/" className="link-back">
+          <Link {...backToTickets} className="link-back">
             <ChevronLeft size={14} strokeWidth={2.5} />
             {t("back_to_tickets")}
           </Link>

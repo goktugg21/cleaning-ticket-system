@@ -314,5 +314,8 @@
   "transition.when_label": "When does it start?",
   "transition.when_hint": "The planned start date and time of the work.",
   "transition.note_label": "Note (optional)",
-  "transition.note_hint": "What should somebody know about this step? It appears on the Activity Timeline, against this step."
+  "transition.note_hint": "What should somebody know about this step? It appears on the Activity Timeline, against this step.",
+  "transition.reason_label": "Reason (required)",
+  "transition.reason_hint": "This step is not part of the normal workflow, so the reason is recorded on the ticket. The system refuses the step without one.",
+  "transition.reason_required": "Give a reason. This step is refused without one."
 }
