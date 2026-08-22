@@ -60,7 +60,7 @@ const TERMINAL_SCHEDULE_STATUSES: ReadonlySet<TicketStatus> = new Set<
 // The stored value is a DateTimeField. The form splits it into a
 // calendar day and a clock time so the operator picks each with the
 // control built for it, and joins them back on save. Local time
-// throughout, mirroring StaffSlotEditor's round-trip: the day the
+// throughout, mirroring StaffAssignmentSection's round-trip: the day the
 // operator picked is the day stored and the day read back.
 // ---------------------------------------------------------------------
 function pad(n: number): string {

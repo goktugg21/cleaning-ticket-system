@@ -34,7 +34,7 @@ import { listTicketCategories, setTicketCategory } from "../api/tickets";
 import { getMessageRecipients } from "../api/notifications";
 import { downloadDocumentFromUrl } from "../api/staffCredentials";
 import { formatDateTime } from "../lib/intl";
-import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
+import { StaffAssignmentSection } from "./tickets/StaffAssignmentSection";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
 import {
@@ -857,7 +857,7 @@ export function TicketDetailPage() {
   const [transitionError, setTransitionError] = useState("");
 
   // Phase B — the dated staff-slot CRUD (Sprint 25A's flat add/remove
-  // superseded) now lives in <StaffSlotEditor>, which owns its own state.
+  // superseded) now lives in <StaffAssignmentSection>, which owns its own state.
 
   const [error, setError] = useState("");
 
@@ -3532,33 +3532,51 @@ export function TicketDetailPage() {
                 testid on the subsection wrapper (was the outer card in
                 the pre-30.1.1 layout). Existing Playwright specs assert
                 visibility via this testid. */}
+            {/* W14 — for a PROVIDER MANAGER this heading and the list
+                under it are gone. They render the same people as the
+                assignment table below, one card apart, under a second
+                name -- two of the four headings the owner counted for
+                the single idea "put people on this job". The card's own
+                title is the name now, and the table below is the list.
+
+                Customer-side and STAFF viewers keep it: it is the ONLY
+                staffing surface they have (they never get the manager
+                section), it is the one that carries the anonymised
+                "{{company}} staff" entry and the resolver-gated
+                credential summaries, and it is read-only for them. */}
             <div
               data-testid="assigned-staff-card"
-              style={{
-                marginTop: 14,
-                paddingTop: 14,
-                borderTop: "1px solid var(--border)",
-              }}
+              style={
+                isStaff
+                  ? undefined
+                  : {
+                      marginTop: 14,
+                      paddingTop: 14,
+                      borderTop: "1px solid var(--border)",
+                    }
+              }
             >
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
-                  padding: "0 18px",
-                  marginBottom: 6,
-                }}
-              >
-                {ticket.company_name
-                  ? t("assignment_section_field_staff_heading", {
-                      companyName: ticket.company_name,
-                    })
-                  : t("assignment_section_field_staff_heading_unknown")}
-              </div>
+              {!isStaff && (
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "var(--text-faint)",
+                    padding: "0 18px",
+                    marginBottom: 6,
+                  }}
+                >
+                  {ticket.company_name
+                    ? t("assignment_section_field_staff_heading", {
+                        companyName: ticket.company_name,
+                      })
+                    : t("assignment_section_field_staff_heading_unknown")}
+                </div>
+              )}
               <div className="assign-body">
-              {ticket.assigned_staff.length === 0 ? (
+              {isStaff ? null : ticket.assigned_staff.length === 0 ? (
                 <p
                   className="muted small"
                   style={{ padding: "4px 0 12px" }}
@@ -3775,6 +3793,29 @@ export function TicketDetailPage() {
                 </ul>
               )}
 
+              {/* W14 — ONE named thing, ONE table, ONE button. The
+                  read-only staff list ABOVE is hidden for this viewer
+                  (see there): it and this table are the same people, and
+                  the owner counted the duplicate as one of the four
+                  headings he was reading for a single idea. */}
+              {isStaff && (
+                <StaffAssignmentSection
+                  // Key by ticket id so the section REMOUNTS on an A->B
+                  // ticket change and its useState(autoCompleteOnSubtasks)-
+                  // seeded autoFlag re-seeds from the new ticket. A
+                  // same-ticket reload keeps the key, so local state is
+                  // correctly preserved.
+                  key={ticket.id}
+                  ticketId={ticket.id}
+                  onChanged={() => {
+                    void loadTicket();
+                  }}
+                  autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
+                  canSetAutoCompleteFlag={isProviderAdmin(me?.role)}
+                  ticketStatus={ticket.status}
+                />
+              )}
+
               {/* W4-M §4b — PER-TICKET PHOTO PERMISSION, per assigned
                   person.
 
@@ -3897,23 +3938,6 @@ export function TicketDetailPage() {
                 </div>
               )}
 
-              {isStaff && (
-                <StaffSlotEditor
-                  // Key by ticket id so the editor REMOUNTS on an A->B ticket
-                  // change and its useState(autoCompleteOnSubtasks)-seeded
-                  // autoFlag re-seeds from the new ticket (fixes a stale
-                  // checkbox after navigation). A same-ticket reload keeps the
-                  // key, so the local toggle state is correctly preserved.
-                  key={ticket.id}
-                  ticketId={ticket.id}
-                  onChanged={() => {
-                    void loadTicket();
-                  }}
-                  autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
-                  canSetAutoCompleteFlag={isProviderAdmin(me?.role)}
-                  ticketStatus={ticket.status}
-                />
-              )}
 
               {/* Sprint 5 — read-only sub-tasks for NON-manager viewers.
                   STAFF (provider-side) see full detail; customer-side

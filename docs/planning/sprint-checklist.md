@@ -36,6 +36,55 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — W14: one door onto "put people on this job"
+
+The owner, reading a ticket's assignment area top to bottom, counted
+four headings, two explanatory paragraphs and three buttons for a single
+idea, and asked: **"why can I not assign several staff at once AND
+separately with time slots?"**
+
+1. **ONE modal.** `pages/tickets/AssignStaffDialog.tsx` — tick several
+   people, optionally give them a time (**one window for everybody**, or
+   one radio across, **a separate window per person**), optionally file
+   the work under a named part of the job, **one confirm**. Assigning
+   three people to the same morning is one action; giving each of them a
+   different window is the same modal, expanded. The same dialog in
+   `edit` mode is where an existing person's window is changed, so there
+   is no second door for "the same thing, afterwards".
+2. **The section is a NAME, a TABLE and ONE BUTTON.**
+   `pages/tickets/StaffAssignmentSection.tsx` replaces
+   `StaffSlotEditor.tsx` (deleted, 1364 lines). Same shape as the
+   managers table next door: a table, an empty state, one primary
+   button. Both explanatory paragraphs are gone, and so is the inline
+   add form — the picker is a modal, not something that unfolds inside
+   the card.
+3. **"Add slot" and "Add sub-task" resolved to one.** They were not the
+   same operation (one attaches a PERSON, one names a PART of the job)
+   but they sat side by side under one heading looking like a choice
+   between two ways to do the same thing. Creating a part now happens
+   INSIDE the assign dialog ("file this under a new part, called …"), so
+   the standalone `Add sub-task` button is gone. Parts get their own
+   named section with its own table — and ONLY once parts exist. On a
+   ticket with none, nothing about parts is on the page at all.
+4. **The duplicate heading is gone.** For a provider manager the
+   read-only "Assigned {{company}} staff" list rendered the same people
+   as the table one card down, under a second name. It is now absent for
+   that viewer. Customer-side and STAFF viewers keep it — it is their
+   only staffing surface, it carries the anonymised entry and the
+   resolver-gated credential summaries, and it is read-only for them.
+5. **Every action answers in a sentence.** "Ahmet Yıldız and Noah Bakker
+   assigned to this ticket." / "…assigned to 'Atrium, second round'." /
+   "{{name}} is taken off this ticket." / "The part is now called …".
+6. **A refusal names the person it refused.** W13-FIX §6c pre-filtered
+   an indistinguishable duplicate OUT of the picker and then needed a
+   sentence of prose to explain the empty list. Everyone eligible is
+   offered now; the SERVER refuses (`duplicate_flat_assignment`, backend
+   unchanged) and the dialog says who was refused and what to change.
+   Writes are per person, so the ones that landed are kept and
+   announced and the table is reloaded either way.
+
+Backend unchanged. Frontend-only; `nl`/`en` in lockstep.
+
 ### Done — W13-FIX: the eight things that were reported done and were not
 
 The owner, after the W13 deploy to crmtest: "FIX WHAT WAS CLAIMED AND
