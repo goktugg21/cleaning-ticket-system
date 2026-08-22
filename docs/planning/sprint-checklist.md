@@ -48,8 +48,13 @@ was visibly broken on the live site.
    press and the move does not happen until it is answered.
    `backend/tickets/transition_requirements.py` is the ONE rule set —
    the modal reads it through
-   `GET /tickets/<id>/transition-requirements/` and `apply_transition`
-   enforces it, so the form and the gate cannot drift. -> ACKNOWLEDGED
+   `GET /tickets/<id>/transition-requirements/` and
+   `TicketStatusChangeSerializer.save` (i.e. `POST /status/`) enforces
+   it, so the form and the gate cannot drift. The gate was first put on
+   `apply_transition` and that was wrong: it is also the primitive
+   `auto_close`, the rollup, the extra-work hook, the seeder and most
+   test setup use to WALK a ticket into a state, and 71 tests failed
+   saying so. -> ACKNOWLEDGED
    needs a date (its own docstring already said "seen and SCHEDULED");
    the forward moves into IN_PROGRESS need who and when. System-driven
    transitions (`user=None`) carry no requirements.
@@ -81,7 +86,9 @@ was visibly broken on the live site.
    overflowing (`table.data-table` carries `min-width: 860px` and the
    intended `.assign-table` override lost on specificity — measured
    860px inside a 322px track); the same person can no longer be added
-   twice into an indistinguishable slot (dated AM/PM slots still can);
+   twice into an indistinguishable slot — one with neither a start time
+   nor a distinct `time_window_label`, which is what ticket 355 had;
+   dated AM/PM slots and labelled morning/afternoon splits still can;
    and the staff picker is checkboxes, several at once.
 
 7. **"Take it on" is now "Mark as seen and planned"** — the action, in
