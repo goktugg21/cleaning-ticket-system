@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile, UserRole
@@ -254,10 +255,48 @@ class DirectStaffAssignmentTests(TestCase):
         self.assertNotIn(self.admin_a.id, ids)
         self.assertNotIn(self.manager_a.id, ids)
 
-    def test_re_post_creates_another_slot(self):
-        # Multi-slot per staff — re-POSTing the same staff is NO LONGER
-        # idempotent: each POST creates a NEW slot row (201), so one staff
-        # member can hold several dated slots on the ticket.
+    def test_re_post_creates_another_slot_when_it_is_distinguishable(self):
+        # Multi-slot per staff — re-POSTing the same staff is NOT
+        # idempotent: a second slot that SAYS SOMETHING DIFFERENT is a
+        # new row (201), so one staff member can hold several dated
+        # slots on the ticket.
+        #
+        # W13-FIX §6c — this test used to post the same body twice and
+        # assert 201, which is the bug the owner reported: Ahmet Yildiz
+        # held two rows on ticket 355 with the same sub-task, no dates
+        # and no labels, and nothing on either row to tell them apart.
+        # The capability this test exists for is the AM/PM split, and
+        # that is what it exercises now: the second slot carries a start
+        # time. The indistinguishable case has its own test below.
+        client = self._api(self.admin_a)
+        first = client.post(
+            self._list_url(self.ticket_a),
+            {"user_id": self.staff_a.id},
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)
+        second = client.post(
+            self._list_url(self.ticket_a),
+            {
+                "user_id": self.staff_a.id,
+                "scheduled_start_at": timezone.now().isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertNotEqual(first.data["id"], second.data["id"])
+        self.assertEqual(
+            TicketStaffAssignment.objects.filter(
+                ticket=self.ticket_a, user=self.staff_a
+            ).count(),
+            2,
+        )
+
+    def test_re_post_of_an_indistinguishable_slot_is_refused(self):
+        # W13-FIX §6c — the owner's report, as a test. Same person, same
+        # placement, no date and no label on either row: there is nothing
+        # to tell the two apart on screen or in the data, so the second
+        # one is not a slot, it is a duplicate.
         client = self._api(self.admin_a)
         first = client.post(
             self._list_url(self.ticket_a),
@@ -270,13 +309,13 @@ class DirectStaffAssignmentTests(TestCase):
             {"user_id": self.staff_a.id},
             format="json",
         )
-        self.assertEqual(second.status_code, 201)
-        self.assertNotEqual(first.data["id"], second.data["id"])
+        self.assertEqual(second.status_code, 400)
+        self.assertEqual(second.data["code"], "duplicate_flat_assignment")
         self.assertEqual(
             TicketStaffAssignment.objects.filter(
                 ticket=self.ticket_a, user=self.staff_a
             ).count(),
-            2,
+            1,
         )
 
     def test_delete_unknown_returns_404(self):

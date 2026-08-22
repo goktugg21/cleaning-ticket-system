@@ -479,26 +479,39 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         # both, no dates and no window label on either -- nothing that
         # tells them apart, on screen or in the data.
         #
-        # The dated case is the one the dropped constraint exists for and
-        # it is untouched. What is refused is a second FLAT slot in the
-        # same placement: same ticket, same user, same sub_task, no start
-        # time on the new row and none on the row already there. Give it a
-        # start time and it is allowed again, because then the two rows
-        # mean different things.
+        # INDISTINGUISHABLE means: same placement, and nothing on either
+        # row that tells them apart. This codebase already says what
+        # "tells them apart" means, and it is TWO things, not one:
+        #
+        #   * a start time -- Ahmet 09:00-11:00 vs 15:00-17:00, the case
+        #     the dropped constraint exists for; and
+        #   * a `time_window_label` -- Sprint 14E's own tests add two
+        #     UNDATED slots labelled "morning" and "afternoon" and expect
+        #     both, which is a legitimate split somebody has not put
+        #     clock times on yet.
+        #
+        # So a second row is refused only when it has neither: no start
+        # time, and the same (or equally empty) window label as one
+        # already there. Ticket 355's pair had `label=''` on both, which
+        # is exactly this case. Give the new row a start time OR a
+        # distinct label and it is allowed, because then the two rows say
+        # different things.
         placement = slot_ser.validated_data.get("sub_task")
+        new_label = (slot_ser.validated_data.get("time_window_label") or "").strip()
         if slot_ser.validated_data.get("scheduled_start_at") is None:
-            duplicate = TicketStaffAssignment.objects.filter(
+            siblings = TicketStaffAssignment.objects.filter(
                 ticket=ticket,
                 user=target,
                 sub_task=placement,
                 scheduled_start_at__isnull=True,
-            ).exists()
-            if duplicate:
+            ).values_list("time_window_label", flat=True)
+            if any((label or "").strip() == new_label for label in siblings):
                 return Response(
                     {
                         "detail": (
                             "This person already holds an unscheduled slot "
-                            "here. Give the new slot a start time to add "
+                            "here with the same label. Give the new slot a "
+                            "start time or a different time window to add "
                             "them again."
                         ),
                         "code": "duplicate_flat_assignment",

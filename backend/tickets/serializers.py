@@ -37,6 +37,10 @@ from .models import (
 from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
 from .schedule_history import latest_schedule_change
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
+from .transition_requirements import (
+    ERR_TRANSITION_REQUIREMENTS,
+    unmet as transition_unmet,
+)
 
 # Sprint 7B — reuse the Extra Work cart-line input contract for the
 # convert-to-extra-work endpoint. `extra_work.serializers` does NOT
@@ -2133,6 +2137,39 @@ class TicketStatusChangeSerializer(serializers.Serializer):
             # behind.
             with transaction.atomic():
                 self._apply_transition_answers(ticket, user)
+
+                # W13-FIX §1 — WHAT THE STEP NEEDS, checked at the door
+                # the operator came through.
+                #
+                # This gate lives HERE and not in `apply_transition`,
+                # and the difference matters. `apply_transition` is the
+                # STATE MACHINE: it owns which moves are legal for which
+                # role, and it is also the programmatic primitive that
+                # `auto_close`, the sub-task rollup, the extra-work sync
+                # hook, the demo seeder and a great deal of test setup
+                # use to WALK a ticket into a state. None of those is a
+                # person filling in a form, and putting a form-
+                # completeness rule on the primitive made 71 unrelated
+                # tests fail for the right reason: it was the wrong
+                # layer.
+                #
+                # `POST /tickets/<id>/status/` IS the operator pressing
+                # the button, so it is where "did you answer what this
+                # step needs" belongs. A client that skips the modal
+                # still cannot get past it, which is the guarantee that
+                # was actually asked for.
+                #
+                # Checked AFTER `_apply_transition_answers` so the
+                # answers the modal collected count towards satisfying
+                # it, and inside the same transaction so a refusal
+                # leaves neither the date nor the assignment behind.
+                missing = transition_unmet(ticket, self.validated_data["to_status"], user)
+                if missing:
+                    raise TransitionError(
+                        "This step still needs: " + ", ".join(missing) + ".",
+                        code=ERR_TRANSITION_REQUIREMENTS,
+                    )
+
                 return apply_transition(
                     ticket=ticket,
                     user=user,

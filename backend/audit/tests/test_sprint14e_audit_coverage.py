@@ -10,6 +10,7 @@ internal note bodies never leak. GET endpoints write no audit.
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -237,6 +238,15 @@ class SlotAuditTests(_AuditFixture):
 
 class NoDoubleWriteStatusTests(_AuditFixture):
     def test_status_transition_writes_history_not_generic_ticket_audit(self):
+        # W13-FIX §1 — starting work needs somebody doing it and a start
+        # time (`tickets/transition_requirements.py`). This test is about
+        # H-11 (the status trail row, not a generic AuditLog), so it
+        # states the precondition and moves on.
+        self.ticket.assigned_to = self.super_admin
+        self.ticket.scheduled_start_at = timezone.now()
+        self.ticket.save(
+            update_fields=["assigned_to", "scheduled_start_at", "updated_at"]
+        )
         before_hist = TicketStatusHistory.objects.filter(
             ticket=self.ticket
         ).count()

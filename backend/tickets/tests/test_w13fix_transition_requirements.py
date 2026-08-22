@@ -213,6 +213,46 @@ class DuplicateFlatAssignmentTests(TenantFixtureMixin, APITestCase):
             1,
         )
 
+    def test_a_differently_labelled_flat_slot_is_still_allowed(self):
+        """Sprint 14E splits an undated day into "morning" / "afternoon"
+        with no clock times. Those two rows DO say different things."""
+        self.authenticate(self.company_admin)
+        url = f"/api/tickets/{self.ticket.id}/staff-assignments/"
+        first = self.client.post(
+            url,
+            {"user_id": self.staff.id, "time_window_label": "morning"},
+            format="json",
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post(
+            url,
+            {"user_id": self.staff.id, "time_window_label": "afternoon"},
+            format="json",
+        )
+        self.assertEqual(second.status_code, status.HTTP_201_CREATED, second.data)
+        self.assertEqual(
+            TicketStaffAssignment.objects.filter(
+                ticket=self.ticket, user=self.staff
+            ).count(),
+            2,
+        )
+
+    def test_the_same_label_twice_is_still_refused(self):
+        self.authenticate(self.company_admin)
+        url = f"/api/tickets/{self.ticket.id}/staff-assignments/"
+        self.client.post(
+            url,
+            {"user_id": self.staff.id, "time_window_label": "morning"},
+            format="json",
+        )
+        again = self.client.post(
+            url,
+            {"user_id": self.staff.id, "time_window_label": "morning"},
+            format="json",
+        )
+        self.assertEqual(again.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(again.data["code"], "duplicate_flat_assignment")
+
     def test_a_dated_slot_for_the_same_person_is_still_allowed(self):
         """The dropped uniqueness exists for the AM/PM split. It stays."""
         self.authenticate(self.company_admin)

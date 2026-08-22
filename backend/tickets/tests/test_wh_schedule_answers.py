@@ -144,6 +144,11 @@ class SchedulePlannerTests(SchedulingBaseTest):
         """Only schedule rows count. An ordinary status change writes a
         history row too, and must not end up answering "who planned it"."""
         self._plan_as(self.bm)
+        # W13-FIX §1 — the plan above satisfies "when"; starting work
+        # also needs somebody doing it. This test is about who PLANNED
+        # it, so it satisfies the other half and moves on.
+        self.ticket.assigned_to = self.bm
+        self.ticket.save(update_fields=["assigned_to", "updated_at"])
         self._auth(self.sa)
         moved = self.client.post(
             f"/api/tickets/{self.ticket.id}/status/",

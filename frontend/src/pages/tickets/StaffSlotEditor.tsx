@@ -251,26 +251,34 @@ export function StaffSlotEditor({
   // apart. That is a duplicate, not a slot.
   //
   // The `(ticket, user)` uniqueness was dropped on purpose so one person
-  // CAN hold several DATED slots (Ahmet 09:00-11:00 and 15:00-17:00), so
-  // the rule cannot be "never twice". It is: a person may not be added
-  // again into a slot indistinguishable from one they already hold --
-  // same sub-task, and no start time to tell the two apart. Give the new
-  // slot a start time and they are offered again, because then the two
-  // rows mean different things.
+  // CAN hold several slots, so the rule cannot be "never twice". Two
+  // things make two rows mean different things, and this codebase uses
+  // both: a START TIME (Ahmet 09:00-11:00 and 15:00-17:00) and a
+  // TIME WINDOW LABEL (Sprint 14E adds undated "morning" / "afternoon"
+  // slots and expects both to exist).
+  //
+  // So a person is kept out of the picker only while the slot being
+  // built would be indistinguishable from one they already hold: same
+  // sub-task, no start time, and the same (or equally empty) label.
+  // Type a time or a different window and they come back.
   //
   // Prevented HERE, where the choice is made, and again in the API
   // (`views_staff_assignments.create`) so a client that skipped the UI
-  // cannot write the row either.
+  // cannot write the row either. Same rule in both places.
   const addPlacement =
     subTasks.length > 0 && !isTerminal && addForm.subTask !== ""
       ? Number(addForm.subTask)
       : null;
   const addIsFlat = addForm.start.trim() === "";
+  const addLabel = addForm.windowLabel.trim();
   const blockedUserIds = new Set(
     addIsFlat
       ? slots
           .filter(
-            (slot) => slot.sub_task === addPlacement && !slot.scheduled_start_at,
+            (slot) =>
+              slot.sub_task === addPlacement &&
+              !slot.scheduled_start_at &&
+              (slot.time_window_label ?? "").trim() === addLabel,
           )
           .map((slot) => slot.user_id)
       : [],

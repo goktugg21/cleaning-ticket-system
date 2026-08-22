@@ -16,7 +16,23 @@ and both sides read it:
 
   * `GET /api/tickets/<id>/transition-requirements/?to_status=X` --
     the modal renders a field per unsatisfied requirement.
-  * `apply_transition` -- refuses the move while one is unmet.
+  * `TicketStatusChangeSerializer.save` -- refuses the move while one
+    is unmet, so a client that skipped the modal gets no further.
+
+WHY THE SERIALIZER AND NOT `apply_transition`
+----------------------------------------------
+The first version of this gated `apply_transition` itself. That is the
+state machine -- it owns which moves are LEGAL for which role -- and it
+is also the programmatic primitive that `auto_close`, the sub-task
+rollup, the extra-work sync hook, the demo seeder and much test setup
+use to walk a ticket into a state. None of those is a person filling in
+a form, and 71 tests failed for exactly the right reason.
+
+"Did the operator answer what this step needs" is a question about a
+REQUEST, so it belongs at the door a request arrives through:
+`POST /tickets/<id>/status/`. The guarantee asked for -- you cannot
+move it without answering -- is unchanged for every caller that is
+actually a caller.
 
 That is the point of putting it here rather than in the page: a screen
 that predicted the rule would be a second copy of it, and this codebase

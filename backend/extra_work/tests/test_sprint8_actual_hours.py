@@ -303,6 +303,14 @@ class ActualHoursFixtureMixin:
     def _drive_ticket(self, ew, *, to_status, actor=None, note="done"):
         actor = actor or self.admin
         ticket = self._ticket_for(ew)
+        # W13-FIX §1 — starting work needs somebody doing it
+        # (`tickets/transition_requirements.py`). These tests are about
+        # the ACTUAL-HOURS gate, so the helper satisfies the precondition
+        # once here rather than every test restating it. The spawned
+        # ticket already carries a planned date.
+        if to_status == TicketStatus.IN_PROGRESS and ticket.assigned_to_id is None:
+            ticket.assigned_to = self.admin
+            ticket.save(update_fields=["assigned_to", "updated_at"])
         return self._api(actor).post(
             f"/api/tickets/{ticket.id}/status/",
             {"to_status": to_status, "note": note},
