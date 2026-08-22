@@ -85,6 +85,130 @@ separately with time slots?"**
 
 Backend unchanged. Frontend-only; `nl`/`en` in lockstep.
 
+### Done — W14: the status where the eye lands, and the note that had nowhere to land
+
+Two things the owner reported after reading the live site. One of them
+cost him a mistake, and his father made the same one independently.
+
+**1. The status was not visible enough, and a big Approve button was.**
+"I went into a ticket detail without looking at its status and a huge
+Approve button appeared. Why am I approving an open job? It turned out
+the work was in customer approval."
+
+Why it was possible: the header status was an 11px `.badge`, third in a
+row of three (`TCK-…`, priority, status) above a 36px title. The
+Workflow card's own readout — `.workflow-current-status`, 20px, with the
+state SENTENCE under it — renders **only in the `visibleNextStatuses.length
+=== 0` branch**, i.e. only when the role has no buttons. So on exactly
+the screen he was on (WCA, SUPER_ADMIN, Approve and Reject present)
+there was no status sentence anywhere on the page.
+
+The status now has its own block at the head of the header band, **left
+of the Location / Customer pair**, which is where the owner asked for
+it. Quiet label, the status name at 20px/800 with a tone dot, and the
+state sentence underneath — `workflow_state.<STATUS>`, the same string
+the Workflow card prints, so there is one vocabulary and not two. Plain
+text, like the pair beside it: no border, no surface, no panel. The chip
+is gone from the meta row; one status display, not two.
+
+MEASURED on the built bundle at 1440x1000, ticket 8
+(WAITING_CUSTOMER_APPROVAL, SUPER_ADMIN):
+
+    STATUS block   x=1031 y=124  230x121
+    PLACE  block   x=1297 y=124  115x103
+    status right edge 1261 <= place left edge 1297   -> LEFT OF, same row
+    status bottom      245 <= Approve button top 436 -> 191px ABOVE it
+    status text "Waiting for the customer", 20px/800, dot rgb(15,107,94)
+    sentence    "With the customer. They have not answered yet."
+    `.detail-header-meta .badge.badge-waiting_customer_approval` count: 0
+
+The narrow-desktop case was measured too, not assumed: with all three
+facts on one line the title column was squeezed to **107px** at 820px.
+`flex-wrap` did not save it (the band's `auto` column keeps taking its
+max-content and starves the `1fr` title column), so between 1080px and
+the existing 760px stack the aside stacks on its own. Re-measured after
+the fix, same four widths:
+
+    w=1440  status y=124  place y=124  (one row)   title 711px
+    w=1200  status y=124  place y=124  (one row)   title 471px
+    w=1000  status y=124  place y=259  (stacked)   title 422px  (was 271)
+    w= 820  status y=116  place y=251  (stacked)   title 258px  (was 107)
+
+No horizontal overflow (`scrollWidth == innerWidth`) at any of the four.
+
+**2. The status note went somewhere; nothing showed the writer where.**
+"Where does the note I write here go, what is it for? I write it and
+leave — does it show anywhere?"
+
+It was never swallowed, and the prompt's premise that it was is wrong.
+It is `TicketStatusHistory.note`, written inside `apply_transition`'s
+`@transaction.atomic` (`tickets/state_machine.py:651`); it comes back on
+`GET /api/tickets/<id>/` as `status_history[].note` AND on
+`GET /api/audit/tickets/<id>/timeline/`; and both timeline renderers on
+this page (`UnifiedTimeline` for provider-audit roles, the status-history
+fallback for everyone else) already print it against the transition row
+it belongs to.
+
+What was missing was the ROOM. The Activity card is collapsed by default
+(RF-4, deliberately: "at a glance minimal, depth behind a click") and
+sits under three other cards, so somebody who typed a note, pressed a
+button and left never saw it arrive and had no reason to believe it had.
+
+So the page shows them, at the one moment it is an answer:
+
+- the field names its destination — "Note on this step (optional)" /
+  "Appears on the Activity Timeline, against this step". The transition
+  modal's note hint says the same, because it is the same field by the
+  other door;
+- the transition's answer carries `change.note_recorded` alongside the
+  status sentence;
+- `revealStatusNote()` opens the drawer and the effect beside it scrolls
+  the card into view once the row exists.
+
+The scroll could NOT be done in the click handler and the first cut that
+tried was measured not working — the card ended at y=911 in a 1000px
+viewport. Two reasons, both real: the transition modal is a native
+`<dialog>`, and the page behind an open one is inert, so a
+`scrollIntoView()` fired in the same block as `setTransitionTarget(null)`
+does nothing; and the row being scrolled to does not exist yet, because
+the ticket has only just been replaced and the audit timeline has not
+refetched. Hence the effect, which runs after the dialog unmounts and
+after the rows land.
+
+MEASURED click path (ticket 10, OPEN -> ACKNOWLEDGED, one browser, one
+walk):
+
+    BEFORE  label       "Note on this step (optional)"
+            placeholder "Appears on the Activity Timeline, against this step"
+            drawer      closed
+            typed       "W14 click path: sleutelkastje code gewijzigd, ..."
+            pressed     "Mark as seen and planned"
+            modal       opened and asked for a start time (rule 3)
+            POST /api/tickets/10/status/ -> 200
+    AFTER   header      "Scheduled, not started"
+            drawer      OPEN
+            toast       "Moved to Scheduled, not started. Your note is on
+                         the Activity Timeline, against this step."
+            timeline[0] "Superadmin changed status from Open to Scheduled,
+                         not started. W14 click path: sleutelkastje code
+                         gewijzigd, doorgegeven aan de klant."
+            card rect   top=807 bottom=972 in a 1000px viewport (in view;
+                        it was 911..1491 before the effect fix)
+
+`sprint27f_ticket_override.spec.ts` asserted the header status through
+`.detail-header-meta .badge.badge-approved`; it now asserts
+`[data-testid='ticket-header-status']`'s `data-status`. That spec also
+asserts the timeline override badge is VISIBLE, which the
+collapsed-by-default drawer had been failing since RF-4 — the override
+path reveals the drawer now, so it can pass again.
+
+**Gate**, measured against a pristine `origin/feat/ew-gap-closing`
+worktree at 94d5605 in the same container: origin is **42 (41 errors, 1
+warning)**, not the 44 CLAUDE.md still claims, and the second warning
+CLAUDE.md names in `TicketDetailPage.tsx` does not exist — the one
+warning is `hooks/useSavedBanner.ts:28`. This branch: typecheck clean,
+`eslint .` **42 (41 errors, 1 warning)**, `npm run build` OK.
+
 ### Done — W13-FIX: the eight things that were reported done and were not
 
 The owner, after the W13 deploy to crmtest: "FIX WHAT WAS CLAIMED AND

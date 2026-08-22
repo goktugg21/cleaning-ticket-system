@@ -2647,5 +2647,6 @@
   "change.moved_to": "Moved to {{status}}.",
   "change.assigned_now": "{{names}} is assigned.",
   "change.nobody_assigned": "Nobody is assigned now.",
+  "change.note_recorded": "Your note is on the Activity Timeline, against this step.",
   "change.failed": "That did not go through. Nothing has changed."
 }

@@ -2,6 +2,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  Activity,
   Archive,
   ArrowRightLeft,
   ChevronDown,
@@ -637,6 +638,12 @@ export function TicketDetailPage() {
   // are otherwise condensed away while the drawer is open.
   const [activityOpen, setActivityOpen] = useState(false);
   const [showSystemEvents, setShowSystemEvents] = useState(false);
+  // W14 §2 — where the Activity card sits on the page, so a note that
+  // was just written can be shown ARRIVING instead of described.
+  const activityCardRef = useRef<HTMLDivElement>(null);
+  // Armed by `revealStatusNote()`, consumed by the effect that does the
+  // scrolling once the drawer and its rows are actually on the page.
+  const revealPendingRef = useRef(false);
   // Bumped on every ticket reload that follows an audited mutation (message,
   // attachment, assignment, status/override, completion). Drives a timeline
   // refetch so non-status audit rows appear without a full page reload, in
@@ -1611,7 +1618,22 @@ export function TicketDetailPage() {
       setStatusNote("");
       setTransitionTarget(null);
       setTransitionReqs(null);
-      if (said) toast.push({ variant: "success", ...said });
+      // W14 §2 — EVERY ACTION ANSWERS (rule 4), and when the operator
+      // wrote something the answer has to account for it too. The
+      // sentence names the place, and `revealStatusNote()` below opens
+      // it, so the words and the page say the same thing.
+      const noteLine = effectiveNote ? t("change.note_recorded") : null;
+      if (said) {
+        const detail = [said.description, noteLine].filter(
+          (part): part is string => Boolean(part),
+        );
+        toast.push({
+          variant: "success",
+          title: said.title,
+          description: detail.length > 0 ? detail.join(" ") : undefined,
+        });
+      }
+      if (effectiveNote) revealStatusNote();
     } catch (err) {
       // W10 §4 — the backend asked for a reason, so give the operator
       // somewhere to type one instead of an error they cannot act on.
@@ -1651,6 +1673,68 @@ export function TicketDetailPage() {
     }
   }
 
+  // W14 §2 — SHOW THE NOTE LANDING.
+  //
+  // "Where does the note I write here go, what is it for? I write it and
+  // leave — does it show anywhere?"
+  //
+  // It was never swallowed. It is `TicketStatusHistory.note`, it comes
+  // back on `GET /api/tickets/<id>/` as `status_history[].note` and on
+  // `GET /api/audit/tickets/<id>/timeline/`, and BOTH timeline
+  // renderers on this page already print it against the transition row
+  // it belongs to. What was missing was the room: the Activity card is
+  // collapsed by default (RF-4, on purpose — "at a glance minimal") and
+  // sits under three other cards, so somebody who typed a note, pressed
+  // a button and left never saw it arrive and had no reason to believe
+  // it had.
+  //
+  // So the page shows them, once, at the only moment it is an answer to
+  // a question they just asked: the drawer opens and the card is
+  // scrolled to, right after a transition that carried something. Every
+  // other arrival at this page is untouched — RF-4's default still
+  // holds.
+  //
+  // THE SCROLL CANNOT HAPPEN HERE, and the first cut of this that did
+  // was measured not working: the card ended up at y=911 in a 1000px
+  // viewport, barely on screen. Two reasons, both real. The transition
+  // modal is a native `<dialog>`, and while one is open the page behind
+  // it is inert — a `scrollIntoView()` fired in the same synchronous
+  // block as `setTransitionTarget(null)` runs before the dialog is
+  // actually gone, and does nothing. And the row being scrolled to does
+  // not exist yet: the ticket has only just been replaced and the audit
+  // timeline has not refetched, so the card is still at its old height
+  // and its old place on the page. Both are fixed by deferring to the
+  // effect below, which runs after the dialog has unmounted and after
+  // the rows that move the card have rendered.
+  function revealStatusNote() {
+    revealPendingRef.current = true;
+    setActivityOpen(true);
+  }
+
+  // W14 §2 — the deferred half of `revealStatusNote()`.
+  //
+  // Runs on the render after the drawer opened, which is also the render
+  // after the transition modal unmounted, so the page is scrollable
+  // again. `ticket` and `auditTimeline` are dependencies because they
+  // are what MOVES the card: each one lands more rows in the drawer and
+  // pushes the card's position on the page. The ref makes every one of
+  // those re-runs a no-op except the first that finds something to show.
+  //
+  // `block: "center"` rather than "start": the card ends up in the
+  // middle of the viewport with the new row inside it, instead of
+  // pinned to the top edge where the reader has to work out that the
+  // page moved at all.
+  useEffect(() => {
+    const rowsOnPage =
+      (ticket?.status_history.length ?? 0) + (auditTimeline?.rows.length ?? 0);
+    if (!revealPendingRef.current || !activityOpen || rowsOnPage === 0) return;
+    revealPendingRef.current = false;
+    activityCardRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }, [activityOpen, ticket, auditTimeline]);
+
   // Sprint 27F-F1 — mirrors ExtraWorkDetailPage.handleOverrideSubmit.
   // Submits {to_status, is_override:true, override_reason} and
   // refetches the ticket on success so the timeline picks up the new
@@ -1685,9 +1769,14 @@ export function TicketDetailPage() {
       // Refetch via loadTicket so messages / attachments stay in sync
       // alongside the new status_history row.
       await loadTicket();
+      // W14 §2 — this path carries the SAME status-note field plus the
+      // override reason, and both land on the same timeline row. A note
+      // written here would otherwise be the one that still vanished.
+      const wroteSomething = Boolean(statusNote.trim() || overrideReason.trim());
       setStatusNote("");
       setOverrideDecision(null);
       setOverrideReason("");
+      if (wroteSomething) revealStatusNote();
     } catch (err) {
       if (axios.isAxiosError(err)) {
         const data = err.response?.data as
@@ -2114,13 +2203,19 @@ export function TicketDetailPage() {
             nothing disappears. */}
         <div className="detail-header-band">
           <div className="detail-header-band-main">
+        {/* W14 §1 — THE STATUS IS NOT A CHIP IN THIS ROW ANY MORE.
+            It was an 11px badge third in a line of three, above a 36px
+            title, and the owner opened a ticket that was sitting at
+            "waiting for the customer", read none of it, and met a big
+            Approve button. It now has its own block at the head of the
+            band (see `.detail-header-status` below), where it is read
+            before the buttons in the side column underneath it. This
+            row keeps the two facts that were never in question: which
+            ticket this is, and how urgent it is. */}
         <div className="detail-header-meta">
           <span className="detail-header-no">{ticket.ticket_no}</span>
           <span className={`badge badge-${ticket.priority.toLowerCase()}`}>
             {priorityLabelLong(ticket.priority)}
-          </span>
-          <span className={`badge badge-${ticket.status.toLowerCase()}`}>
-            {tStatus(ticket.status)}
           </span>
         </div>
         <h1 className="detail-header-title">{ticket.title}</h1>
@@ -2187,6 +2282,53 @@ export function TicketDetailPage() {
         )}
           </div>{/* end .detail-header-band-main */}
 
+          {/* W14 §1 — the right of the band is now THREE facts in one
+              row, in the order somebody actually needs them: what state
+              this job is in, where it is, who it is for.
+
+              The owner asked for the status "left of the Location /
+              Customer block", and that is what this is. It is also the
+              reading order that fixes the mistake he made: the side
+              column with the transition buttons starts directly under
+              this block, so the state is passed over on the way to the
+              button, not after it. Same plain-text treatment as the
+              pair beside it — no border, no surface, no panel. */}
+          <div className="detail-header-aside">
+          <div
+            className="detail-header-status"
+            data-testid="ticket-header-status"
+            data-status={ticket.status}
+          >
+            <span className="detail-header-status-label">
+              <Activity size={10} strokeWidth={2.6} aria-hidden="true" />
+              {t("workflow_current_status_label")}
+            </span>
+            <span className="detail-header-status-value">
+              {/* The tone lives in the dot, not in the word: the dot
+                  colours are the same tokens `.workflow-current-status`
+                  uses, and every status has one (the `.badge-*` family
+                  has no rule for WAITING_MANAGER_REVIEW or
+                  CONVERTED_TO_EXTRA_WORK and would render those two
+                  invisible). */}
+              <span className="detail-header-status-dot" aria-hidden="true" />
+              <span data-testid="ticket-header-status-text">
+                {tStatus(ticket.status)}
+              </span>
+            </span>
+            {/* A STATE IS A SENTENCE ABOUT THE WORK (rule 5). The name
+                above is what the system files it under; this is what is
+                true of the job right now, and it is the half that
+                answers "why is there an Approve button on my screen".
+                Same string the Workflow card prints when a role has no
+                buttons — one vocabulary, one owner. */}
+            <span
+              className="detail-header-status-sentence"
+              data-testid="ticket-header-status-sentence"
+            >
+              {t(`workflow_state.${ticket.status}`)}
+            </span>
+          </div>
+
           {/* WHERE the work is and WHO it is for. Still ALSO rendered
               inside the Ticket details card below — this is an added
               display, not a move, and that has been right since Sprint
@@ -2233,6 +2375,7 @@ export function TicketDetailPage() {
               </span>
             </div>
           </div>
+          </div>{/* end .detail-header-aside */}
         </div>{/* end .detail-header-band */}
       </div>
 
@@ -2658,7 +2801,11 @@ export function TicketDetailPage() {
             )}
           </div>
 
-          <div className="card">
+          <div
+            className="card"
+            ref={activityCardRef}
+            data-testid="ticket-activity-card"
+          >
             {/* RF-4 (Ramazan 2026-06-23) — the audit timeline is valuable but
                 should not dominate the page at first glance. It now lives in a
                 drawer collapsed by default: the header IS the toggle; the

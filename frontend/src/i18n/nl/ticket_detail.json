@@ -103,10 +103,10 @@
   "workflow_state.CONVERTED_TO_EXTRA_WORK": "Omgezet naar een meerwerkaanvraag.",
   "workflow_current_status_since": "Sinds {{when}}",
   "workflow_no_transitions_available": "Er zijn op dit moment geen verdere statusovergangen beschikbaar.",
-  "workflow_status_note_label": "Statusnotitie (optioneel)",
+  "workflow_status_note_label": "Notitie bij deze stap (optioneel)",
   "workflow_status_note_label_staff_required": "Voeg een afrondingsnotitie toe of bevestig met een foto van het uitgevoerde werk (verplicht)",
   "workflow_rejection_reason_label": "Afwijzingsreden (verplicht bij afwijzen)",
-  "workflow_status_note_placeholder": "Voeg een korte notitie toe voor het auditspoor",
+  "workflow_status_note_placeholder": "Komt onder Activiteitstijdlijn te staan, bij deze stap",
   "workflow_rejection_reason_placeholder": "Leg uit waarom u dit ticket afwijst",
   "workflow_admin_override_approved": "Normaal moet de klant dit ticket goedkeuren. Klik nogmaals om als beheerder goed te keuren.",
   "workflow_admin_override_rejected": "Normaal moet de klant dit ticket afwijzen en uitleggen waarom. Klik nogmaals om als beheerder af te wijzen.",
@@ -314,5 +314,5 @@
   "transition.when_label": "Wanneer begint het?",
   "transition.when_hint": "De geplande startdatum en -tijd van het werk.",
   "transition.note_label": "Toelichting (optioneel)",
-  "transition.note_hint": "Wat moet iemand weten over deze stap?"
+  "transition.note_hint": "Wat moet iemand weten over deze stap? Komt onder Activiteitstijdlijn te staan, bij deze stap."
 }

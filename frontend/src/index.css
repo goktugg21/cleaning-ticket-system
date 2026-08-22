@@ -2837,6 +2837,127 @@ table.data-table {
 .detail-header-band-main {
   min-width: 0;
 }
+
+/* --------------------------------------------------------------------
+   W14 §1 — THE STATUS BLOCK, and the aside that holds the band's right
+   hand side together.
+
+   The status used to be an 11px `.badge` sitting third in the meta row
+   above a 36px title. The owner opened a ticket that was at "waiting for
+   the customer", did not read it, and met a big Approve button; his
+   father read the same page the same way. So the state gets its own
+   block, at the head of the pair that was already here.
+
+   `.detail-header-aside` is a flex ROW rather than two more grid
+   columns: the band keeps its `minmax(0, 1fr) auto` shape, so the title
+   column is unchanged and the existing 760px stacking rule keeps
+   working with one line added instead of a second breakpoint.
+   -------------------------------------------------------------------- */
+.detail-header-aside {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  /* Wraps rather than squeezing the title's column: between the desktop
+     width where all three fit on one line and the 760px stack below,
+     the status drops onto its own line above the pair instead of
+     stealing the title's room. */
+  flex-wrap: wrap;
+  column-gap: 36px;
+  row-gap: 14px;
+  min-width: 0;
+}
+.detail-header-status {
+  display: flex;
+  flex-direction: column;
+  /* Level with the Location / Customer pair beside it — the same 18px
+     that clears the 36px title's cap height. */
+  padding-top: 18px;
+  gap: 2px;
+  /* LEFT aligned, unlike the pair beside it, and deliberately: the
+     sentence under the status name is the longest text on this side of
+     the band and a right-ragged two-line sentence reads badly. The pair
+     stays right-aligned against the page edge; this block reads as
+     ordinary text in front of it. */
+  text-align: left;
+  /* Wide enough for "The customer turned the work down." on two lines,
+     narrow enough that the title keeps the rest of the row. */
+  max-width: 230px;
+  min-width: 0;
+}
+.detail-header-status-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* The same quiet label treatment as `.detail-header-place-label`:
+     body font, sentence case, no tracking. Two shouting micro-caps
+     beside a value is what W7 took out of the pair next to it, and a
+     third one here would put it straight back. --text-muted is 5.31:1
+     on the page ground; --text-faint is 2.75:1 and fails AA. */
+  font-family: var(--f-body);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+.detail-header-status-label svg {
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.detail-header-status-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--f-head);
+  /* 20px against the pair's 16px. The status is the loudest thing on
+     this side of the band on purpose — it is the one fact that has to
+     be read before a button is pressed. */
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.detail-header-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  /* Neutral default — a status with no rule below still gets a dot. */
+  background: var(--text-faint);
+}
+/* Same status-to-token mapping as `.workflow-current-status-dot`. */
+.detail-header-status[data-status="OPEN"] .detail-header-status-dot,
+.detail-header-status[data-status="REOPENED_BY_ADMIN"] .detail-header-status-dot,
+.detail-header-status[data-status="IN_PROGRESS"] .detail-header-status-dot {
+  background: var(--green);
+}
+.detail-header-status[data-status="WAITING_CUSTOMER_APPROVAL"] .detail-header-status-dot,
+.detail-header-status[data-status="WAITING_MANAGER_REVIEW"] .detail-header-status-dot {
+  background: var(--teal);
+}
+.detail-header-status[data-status="ACKNOWLEDGED"] .detail-header-status-dot,
+.detail-header-status[data-status="ON_HOLD"] .detail-header-status-dot {
+  background: var(--amber);
+}
+.detail-header-status[data-status="APPROVED"] .detail-header-status-dot {
+  background: var(--green-2);
+}
+.detail-header-status[data-status="REJECTED"] .detail-header-status-dot {
+  background: var(--red);
+}
+.detail-header-status[data-status="CLOSED"] .detail-header-status-dot,
+.detail-header-status[data-status="CONVERTED_TO_EXTRA_WORK"] .detail-header-status-dot {
+  background: var(--closed);
+}
+.detail-header-status-sentence {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
 .detail-header-place {
   display: flex;
   flex-direction: column;
@@ -2938,6 +3059,27 @@ table.data-table {
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
+/* W14 §1 — the narrow-desktop band.
+   MEASURED, not guessed: with all three facts on one line at 820px the
+   title column was squeezed to 107px wide and three lines tall (the
+   sidebar takes 276px and the aside 381px, leaving the title 107). The
+   `flex-wrap` above never fired, because the band's `auto` column keeps
+   giving the aside its max-content width and starves the `1fr` title
+   column instead.
+
+   So between the wide layout and the 760px stack the ASIDE stacks on
+   its own: status above the pair, both still hard against the right
+   edge. That returns the title column to 278px at 820px and 430px at
+   1000px, both measured. Above 1080px nothing changes.
+   -------------------------------------------------------------------- */
+@media (max-width: 1080px) and (min-width: 761px) {
+  .detail-header-aside {
+    flex-direction: column;
+    align-items: flex-end;
+    row-gap: 14px;
+  }
+}
+
 /* Below the two-column detail grid's own breakpoint the header stacks:
    the block goes under the title, left-aligned with everything else,
    rather than clinging to a right edge that no longer means anything. */
@@ -2945,6 +3087,16 @@ table.data-table {
   .detail-header-band {
     grid-template-columns: 1fr;
     gap: 14px;
+  }
+  /* Stacked, the three facts go one under the other rather than
+     squeezing three columns into a phone width. */
+  .detail-header-aside {
+    flex-direction: column;
+    gap: 14px;
+  }
+  .detail-header-status {
+    padding-top: 0;
+    max-width: 100%;
   }
   .detail-header-place {
     align-items: flex-start;

@@ -212,9 +212,12 @@ test("COMPANY_ADMIN — typed reason confirms override and tags the timeline", a
   await expect(modal).toBeHidden({ timeout: 10_000 });
 
   // Status header reflects APPROVED.
+  // W14 §1 — the header status is no longer an 11px chip in the meta
+  // row; it is its own block at the head of the band, left of Location
+  // and Customer. Same assertion, new home.
   await expect(
-    page.locator(".detail-header-meta .badge.badge-approved"),
-  ).toBeVisible({ timeout: 10_000 });
+    page.locator("[data-testid='ticket-header-status']"),
+  ).toHaveAttribute("data-status", "APPROVED", { timeout: 10_000 });
 
   // The new timeline row carries the override badge + the reason.
   const overrideBadges = page.locator(

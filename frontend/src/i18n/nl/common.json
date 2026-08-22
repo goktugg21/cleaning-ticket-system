@@ -2647,5 +2647,6 @@
   "change.moved_to": "Verplaatst naar {{status}}.",
   "change.assigned_now": "{{names}} is toegewezen.",
   "change.nobody_assigned": "Er is nu niemand toegewezen.",
+  "change.note_recorded": "Uw notitie staat onder Activiteitstijdlijn, bij deze stap.",
   "change.failed": "Dit is niet gelukt. Er is niets gewijzigd."
 }

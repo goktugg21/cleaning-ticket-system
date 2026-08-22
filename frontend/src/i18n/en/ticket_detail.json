@@ -103,10 +103,10 @@
   "workflow_state.CONVERTED_TO_EXTRA_WORK": "Turned into an extra work request.",
   "workflow_current_status_since": "Since {{when}}",
   "workflow_no_transitions_available": "No further status transitions are available right now.",
-  "workflow_status_note_label": "Status note (optional)",
+  "workflow_status_note_label": "Note on this step (optional)",
   "workflow_status_note_label_staff_required": "Add a completion note or attach a photo of the completed work (required)",
   "workflow_rejection_reason_label": "Rejection reason (required if rejecting)",
-  "workflow_status_note_placeholder": "Add a short note for the audit trail",
+  "workflow_status_note_placeholder": "Appears on the Activity Timeline, against this step",
   "workflow_rejection_reason_placeholder": "Explain why you reject this ticket",
   "workflow_admin_override_approved": "Normally the customer should approve this ticket. Click the button again to approve it as admin override.",
   "workflow_admin_override_rejected": "Normally the customer should reject this ticket and explain why. Click the button again to reject it as admin override.",
@@ -314,5 +314,5 @@
   "transition.when_label": "When does it start?",
   "transition.when_hint": "The planned start date and time of the work.",
   "transition.note_label": "Note (optional)",
-  "transition.note_hint": "What should somebody know about this step?"
+  "transition.note_hint": "What should somebody know about this step? It appears on the Activity Timeline, against this step."
 }
