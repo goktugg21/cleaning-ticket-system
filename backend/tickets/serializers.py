@@ -2147,22 +2147,64 @@ class TicketStatusChangeSerializer(serializers.Serializer):
     def _apply_transition_answers(self, ticket, user):
         """Write the modal's answers onto the ticket, if it sent any.
 
-        Staff ids are validated through the SAME gate the dedicated
-        assignment endpoint uses (`_validate_target_staff`), so this
-        cannot become a side door that assigns somebody the assignment
-        endpoint would refuse.
+        EVERY write here goes through the SAME authority as the endpoint
+        that owns it. This is a convenience path, not a second set of
+        rules, and a convenience path that skipped a permission check
+        would be a side door: `POST /status/` would let a role schedule
+        or dispatch what `POST /schedule/` and
+        `POST /staff-assignments/` refuse it. H-11 -- a workflow move is
+        not a permission override.
+
+          * the date   -> the schedule action's role set + the same
+                          `osius.ticket.view_building` scope check.
+          * the people -> `views_staff_assignments._gate_actor` (may the
+                          ACTOR dispatch here) AND `_validate_target_staff`
+                          (may this PERSON be dispatched to this ticket).
         """
+        from accounts.permissions_v2 import user_has_osius_permission
+
         from .models import TicketStaffAssignment
-        from .views_staff_assignments import _validate_target_staff
+        from .views import _SCHEDULE_ALLOWED_ROLES
+        from .views_staff_assignments import _gate_actor, _validate_target_staff
 
         staff_ids = self.validated_data.get("assigned_staff_ids")
         scheduled_start_at = self.validated_data.get("scheduled_start_at")
+        request = self.context["request"]
 
         if scheduled_start_at is not None:
+            if user.role not in _SCHEDULE_ALLOWED_ROLES:
+                raise serializers.ValidationError(
+                    {
+                        "scheduled_start_at": "This role cannot schedule tickets.",
+                        "code": "schedule_forbidden_for_role",
+                    }
+                )
+            if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+                user,
+                "osius.ticket.view_building",
+                building_id=ticket.building_id,
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "scheduled_start_at": (
+                            "You do not have provider-side scope to schedule "
+                            "this ticket."
+                        ),
+                        "code": "schedule_forbidden_scope",
+                    }
+                )
             ticket.scheduled_start_at = scheduled_start_at
             ticket.save(update_fields=["scheduled_start_at"])
 
         if staff_ids:
+            if _gate_actor(request, ticket) is not None:
+                raise serializers.ValidationError(
+                    {
+                        "assigned_staff_ids": (
+                            "Not allowed to assign staff for this building."
+                        )
+                    }
+                )
             existing = set(
                 ticket.staff_assignments.values_list("user_id", flat=True)
             )

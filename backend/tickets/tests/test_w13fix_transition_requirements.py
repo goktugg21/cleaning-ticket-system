@@ -87,6 +87,53 @@ class TransitionRequirementsGateTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(self.ticket.status, TicketStatus.OPEN)
 
 
+class TransitionAnswersAreNotASideDoorTests(TenantFixtureMixin, APITestCase):
+    """H-11 — a workflow move is not a permission override.
+
+    The optional `scheduled_start_at` / `assigned_staff_ids` on the
+    status endpoint are a CONVENIENCE, not a second set of rules. If
+    they skipped the checks that `POST /schedule/` and
+    `POST /staff-assignments/` apply, then `POST /status/` would let a
+    role do what those endpoints refuse it.
+    """
+
+    def test_customer_user_cannot_schedule_through_the_status_endpoint(self):
+        self.authenticate(self.customer_user)
+        response = self.client.post(
+            f"/api/tickets/{self.ticket.id}/status/",
+            {
+                "to_status": TicketStatus.ACKNOWLEDGED,
+                "scheduled_start_at": timezone.now().isoformat(),
+            },
+            format="json",
+        )
+        self.assertIn(
+            response.status_code,
+            (status.HTTP_400_BAD_REQUEST, status.HTTP_403_FORBIDDEN),
+        )
+        self.ticket.refresh_from_db()
+        self.assertIsNone(self.ticket.scheduled_start_at)
+
+    def test_out_of_scope_manager_cannot_schedule_another_tenants_ticket(self):
+        """The other tenant's ticket 404s on scope before anything is
+        written -- the H-1 boundary is not softened by this path."""
+        self.authenticate(self.manager)
+        response = self.client.post(
+            f"/api/tickets/{self.other_ticket.id}/status/",
+            {
+                "to_status": TicketStatus.ACKNOWLEDGED,
+                "scheduled_start_at": timezone.now().isoformat(),
+            },
+            format="json",
+        )
+        self.assertIn(
+            response.status_code,
+            (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
+        )
+        self.other_ticket.refresh_from_db()
+        self.assertIsNone(self.other_ticket.scheduled_start_at)
+
+
 class TransitionRequirementsEndpointTests(TenantFixtureMixin, APITestCase):
     def test_endpoint_reports_what_the_step_is_missing(self):
         self.authenticate(self.manager)
