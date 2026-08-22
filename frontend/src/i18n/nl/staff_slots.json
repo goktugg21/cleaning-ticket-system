@@ -19,6 +19,7 @@
   "editor.field_assignee": "Medewerker",
   "editor.select_assignee": "Kies een medewerker",
   "editor.no_eligible": "Geen geschikte medewerkers voor dit gebouw",
+  "editor.all_already_flat": "Iedereen die hier kan werken heeft al een werkblok zonder tijd. Vul een starttijd of een dagdeel in om iemand opnieuw toe te wijzen.",
   "editor.field_start": "Start",
   "editor.field_end": "Einde",
   "editor.field_window": "Label tijdvenster",

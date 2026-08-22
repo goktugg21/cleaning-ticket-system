@@ -865,7 +865,15 @@ export function StaffSlotEditor({
             setShowAdd(true);
             setError("");
           }}
-          disabled={busy || candidates.length === 0}
+          // W13-FIX §6c — gated on whether ANYONE is eligible for this
+          // building, NOT on the duplicate-filtered list. Gating on the
+          // filtered list made this button dead exactly when every
+          // eligible person already held an unscheduled slot, which is
+          // the common case on a ticket that is already staffed -- and a
+          // dead primary button is the failure mode CLAUDE.md calls out.
+          // The form opens, and explains inside it why the list is empty
+          // and what makes it fill up again.
+          disabled={busy || assignable.length === 0}
           data-testid="staff-slot-add-toggle"
         >
           <Plus size={15} strokeWidth={2.2} />
@@ -1043,7 +1051,9 @@ export function StaffSlotEditor({
                 choice is made rather than reported afterwards. */}
             {candidates.length === 0 ? (
               <p className="muted small" data-testid="staff-slot-add-none">
-                {t("editor.no_eligible")}
+                {assignable.length === 0
+                  ? t("editor.no_eligible")
+                  : t("editor.all_already_flat")}
               </p>
             ) : (
               <div

@@ -19,6 +19,7 @@
   "editor.field_assignee": "Staff member",
   "editor.select_assignee": "Select a staff member",
   "editor.no_eligible": "No eligible staff for this building",
+  "editor.all_already_flat": "Everyone who can work here already has a slot with no time on it. Enter a start time or a time window to assign someone again.",
   "editor.field_start": "Start",
   "editor.field_end": "End",
   "editor.field_window": "Time window label",

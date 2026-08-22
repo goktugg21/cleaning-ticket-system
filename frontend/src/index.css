@@ -13687,11 +13687,15 @@ table.pva-table { min-width: 0; }
    (0,1,0). Matching the element+class specificity is the whole fix. The
    actions column stays sized to its button; the two text columns share
    what is left, and the date is given room to print in full. */
-table.assign-table { min-width: 0; width: 100%; table-layout: fixed; }
-.assign-table .assign-table-person { width: auto; }
-.assign-table .assign-table-since { width: 92px; white-space: nowrap; }
-.assign-table th,
-.assign-table td { overflow: hidden; text-overflow: ellipsis; }
+table.assign-table { min-width: 0; width: 100%; }
+/* Auto layout, NOT `table-layout: fixed`. Fixed made the table fit but
+   sized the columns from the header row alone: the actions column,
+   whose header is empty, collapsed to 3px and clipped its own Remove
+   button, and the date lost a few pixels to padding. Auto layout sizes
+   from the widest cell, which is what these three columns want -- the
+   name takes what is left, the date and the button take what they need. */
+.assign-table .assign-table-since { white-space: nowrap; width: 1%; }
+.assign-table .assign-table-person { overflow-wrap: anywhere; }
 .assign-table thead th { white-space: nowrap; }
 .assign-table .assign-table-actions { width: 1%; text-align: right; white-space: nowrap; }
 .assign-actions { display: flex; justify-content: flex-end; padding-top: 10px; }
