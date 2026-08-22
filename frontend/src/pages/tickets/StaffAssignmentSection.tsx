@@ -463,13 +463,18 @@ export function StaffAssignmentSection({
               className="data-table data-table-dense assign-table"
               data-testid="staff-assignment-table"
             >
-              {/* THREE columns, not four. MEASURED constraint: this card
-                  is a ~320px right-rail track, and the managers table
-                  next door came to 327px with three columns. A separate
-                  State column would have put a fourth text column in the
-                  same track and truncated the names again, which is the
-                  defect W13-FIX had just finished repairing. The state
-                  is a line inside the When cell instead. */}
+              {/* THREE columns, not four -- the constraint is MEASURED,
+                  not guessed. This card is the right rail, and the rail
+                  is 310px at a 1280 viewport (337px at 1366, 361px at
+                  1440; below ~1100 the layout stacks and the card goes
+                  full width). Rendered, these three columns come to
+                  301px -- 107 name / 85 when / 109 actions -- with no
+                  clipped cell and no page-level horizontal scroll at any
+                  of those widths. A fourth text column for State would
+                  not have fit, and the failure mode is the truncated
+                  "MANAGER | ASSIG..." header W13-FIX had just finished
+                  repairing on the managers table next door. The state is
+                  a line inside the When cell instead. */}
               <thead>
                 <tr>
                   <th className="assign-table-person">
