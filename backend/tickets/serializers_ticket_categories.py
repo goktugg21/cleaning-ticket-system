@@ -65,14 +65,30 @@ class TicketCategorySerializer(serializers.ModelSerializer):
     def get_label(self, obj) -> str:
         """The row in the READER's language.
 
-        The language comes from the request's `Accept-Language`, which is
-        what the SPA already sends; absent, `label_for` falls back to
-        Dutch, the primary language.
+        W13-FIX §3 — THE READER'S LANGUAGE IS THE ONE THEY CHOSE.
+
+        This used to read `Accept-Language`, on the stated assumption
+        that "the SPA already sends" it. It does not, and never did:
+        nothing in `frontend/src` sets that header, so the value here
+        was the BROWSER's locale. A Dutch operator on a Dutch page in an
+        English-locale browser was served the English label -- which is
+        exactly the "seven categories, in English, on a Dutch page" the
+        owner reported.
+
+        The app's language is `user.language`, the field
+        `i18n/useLanguageSync.ts` reads from `/auth/me/` and hands to
+        i18next. That is the same value the rest of the page is rendered
+        in, so it is the only one that can agree with it. The header
+        stays as a fallback for an anonymous or tokenless read, and
+        `label_for` falls back to Dutch after that.
         """
         request = self.context.get("request")
         language = None
         if request is not None:
-            language = request.headers.get("Accept-Language")
+            user = getattr(request, "user", None)
+            language = getattr(user, "language", None) or request.headers.get(
+                "Accept-Language"
+            )
         return obj.label_for(language)
 
     def get_usage_count(self, obj) -> int:

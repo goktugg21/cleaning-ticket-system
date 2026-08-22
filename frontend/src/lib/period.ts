@@ -5,7 +5,8 @@
  * The owner: "I need to be able to see this month's jobs, a selected
  * period's jobs." Four answers, and the same four everywhere:
  *
- *   this month  -  last 3 months  -  this year  -  a range you pick
+ *   this month  -  last 3 months  -  this year  -  all time  -  a range
+ *   you pick
  *
  * Learning it once has to be enough, so the KEYS, the RESOLUTION to two
  * dates, and the DEFAULT live here rather than in each page. A page
@@ -23,6 +24,13 @@ export const PERIOD_KEYS = [
   "this_month",
   "last_3_months",
   "this_year",
+  // W13-FIX 5 — "all time". The three dated options could not answer
+  // "show me everything", so anything older than January was invisible
+  // and there was no way to ask for it. It resolves to NO dates, which
+  // is what every list endpoint already treats as unbounded, so no
+  // endpoint changes. It is deliberately NOT the default: a page still
+  // opens on its own chosen period.
+  "all_time",
   "custom",
 ] as const;
 
@@ -35,6 +43,7 @@ export const PERIOD_LABEL_KEY: Record<PeriodKey, string> = {
   this_month: "period.this_month",
   last_3_months: "period.last_3_months",
   this_year: "period.this_year",
+  all_time: "period.all_time",
   custom: "period.custom",
 };
 
@@ -82,6 +91,11 @@ export function resolvePeriod(state: PeriodState): { from: string; to: string } 
         from: iso(new Date(now.getFullYear(), 0, 1)),
         to: iso(new Date(now.getFullYear(), 11, 31)),
       };
+    case "all_time":
+      // Both ends open. `periodParams` drops empty sides, so the request
+      // carries neither date_from nor date_to and the server returns the
+      // unfiltered set.
+      return { from: "", to: "" };
     case "custom":
       return { from: state.from, to: state.to };
   }

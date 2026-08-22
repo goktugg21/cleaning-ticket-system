@@ -645,10 +645,26 @@ export function DashboardPage({
   // month's meldingen on it, and a filter that could not ask for them
   // would make those rows unfindable. The create forms narrow instead
   // (`is_active` + `available_at_intake`), which is the opposite job.
+  //
+  // W13-FIX §3 — the seven categories are seeded PER COMPANY, so an
+  // unfiltered read returns seven per tenant. An operator who belongs to
+  // exactly one company can only ever file against that company's
+  // seven, so ask for those and the dropdown holds seven rather than
+  // twenty-one.
+  //
+  // A SUPER_ADMIN spanning several companies is the one case where the
+  // list genuinely IS cross-company -- narrowing it would hide other
+  // tenants' meldingen from their own filter. That case keeps every row
+  // and groups them by company below, so the repeated names read as
+  // "Melden, at each of three companies" instead of the same word three
+  // times with no way to tell which is which.
+  const scopeCompanyId =
+    me?.company_ids?.length === 1 ? me.company_ids[0] : undefined;
+
   useEffect(() => {
     if (!isTicketsPage) return;
     let cancelled = false;
-    listTicketCategories()
+    listTicketCategories(scopeCompanyId ? { company: scopeCompanyId } : undefined)
       .then((rows) => {
         if (!cancelled) setCategories(rows);
       })
@@ -658,7 +674,24 @@ export function DashboardPage({
     return () => {
       cancelled = true;
     };
-  }, [isTicketsPage]);
+  }, [isTicketsPage, scopeCompanyId]);
+
+  /** The dropdown's rows grouped by owning company, in a stable order.
+   *  One group means one tenant, and the render falls back to a flat
+   *  list -- an <optgroup> around the only company on screen would be
+   *  a label nobody needs. */
+  const categoryOptionGroups = useMemo(() => {
+    const byCompany = new Map<string, typeof categories>();
+    for (const row of categories) {
+      const key = row.company_name || String(row.company);
+      const bucket = byCompany.get(key);
+      if (bucket) bucket.push(row);
+      else byCompany.set(key, [row]);
+    }
+    return [...byCompany.entries()]
+      .map(([company, rows]) => ({ company, rows }))
+      .sort((a, b) => a.company.localeCompare(b.company));
+  }, [categories]);
 
   const queryParams = useMemo(() => {
     const params: Record<string, string | number> = { page };
@@ -2418,11 +2451,21 @@ export function DashboardPage({
                         <option value="none">
                           {t("common:ticket_categories.filter_uncategorised")}
                         </option>
-                        {categories.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.label}
-                          </option>
-                        ))}
+                        {categoryOptionGroups.length > 1
+                          ? categoryOptionGroups.map((group) => (
+                              <optgroup key={group.company} label={group.company}>
+                                {group.rows.map((row) => (
+                                  <option key={row.id} value={row.id}>
+                                    {row.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))
+                          : categories.map((row) => (
+                              <option key={row.id} value={row.id}>
+                                {row.label}
+                              </option>
+                            ))}
                       </select>
                     </div>
                   )}
@@ -2837,19 +2880,31 @@ export function DashboardPage({
                           </td>
                           {!isChargeableWork && (
                             <td>
+              {/* W13-FIX §4 — REVERTED to the row's own chip.
+                                  The owner: "who told you to change them,
+                                  revert them, they look terrible."
+
+                                  W13 gave this one cell an outlined pill
+                                  with the catalog colour painted onto its
+                                  border AND its text, which no other tag
+                                  in this table does. It is `.cell-tag`
+                                  again, exactly like the cells beside it,
+                                  and the category's colour rides on the
+                                  `<i>` dot that `.cell-tag` has always
+                                  used for precisely this -- so nothing is
+                                  restyled and no colour is lost. */}
                               {ticket.category_name ? (
                                 <span
-                                  className="cell-tag ticket-category-tag"
-                                  style={
-                                    ticket.category_color
-                                      ? {
-                                          borderColor: ticket.category_color,
-                                          color: ticket.category_color,
-                                        }
-                                      : undefined
-                                  }
+                                  className="cell-tag"
                                   data-testid="ticket-row-category"
                                 >
+                                  <i
+                                    style={
+                                      ticket.category_color
+                                        ? { background: ticket.category_color }
+                                        : undefined
+                                    }
+                                  />
                                   {ticket.category_name}
                                 </span>
                               ) : (

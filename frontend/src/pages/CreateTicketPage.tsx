@@ -252,11 +252,23 @@ export function CreateTicketPage() {
   // Non-fatal: a catalog that would not load must never stop somebody
   // opening a melding. The field simply does not render and the melding
   // is filed uncategorised, which is a state the system already has.
+  //
+  // W13-FIX §3 — scoped to the company that will own this melding. The
+  // seven are seeded per company, so without this the picker offered
+  // seven per tenant. The building decides the company, so the request
+  // waits for one to be chosen; before that there is nothing to offer
+  // and the field is not usable anyway.
+  const intakeCompanyId = useMemo(() => {
+    if (!form.building) return undefined;
+    return buildings.find((b) => b.id === Number(form.building))?.company;
+  }, [buildings, form.building]);
+
   useEffect(() => {
     let cancelled = false;
     listTicketCategories({
       is_active: "true",
       available_at_intake: "true",
+      ...(intakeCompanyId ? { company: intakeCompanyId } : {}),
     })
       .then((rows) => {
         if (cancelled) return;
@@ -281,7 +293,7 @@ export function CreateTicketPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [intakeCompanyId]);
 
   useEffect(() => {
     if (!form.customer) return;

@@ -676,7 +676,7 @@
     "member_count_other": "{{count}} werken",
     "on_this_page": "{{shown}} van {{total}} op deze pagina",
     "title": "Reeks",
-    "editor_title": "Titels en tijden bewerken",
+    "editor_title": "Werken in deze reeks aanpassen",
     "loading": "Bezig met laden van de reeks...",
     "apply_all_title": "Op alle regels toepassen",
     "apply_all_button": "Toepassen op alle regels",
@@ -692,7 +692,7 @@
     "condition_after": "Na oplevering",
     "save": "Opslaan ({{count}} gewijzigd)",
     "saving": "Bezig met opslaan...",
-    "edit_button": "Titels en tijden bewerken",
+    "edit_button": "Werken aanpassen",
     "slot_date": "Datum",
     "slot_time": "Tijd (optioneel)",
     "slot_add": "Dag toevoegen",
@@ -716,7 +716,8 @@
     "created_body": "{{count}} werk aangemaakt in deze reeks.",
     "created_body_other": "{{count}} werken aangemaakt in deze reeks.",
     "created_open_list": "Naar de lijst",
-    "slot_none": "Kies minstens een dag voor deze reeks."
+    "slot_none": "Kies minstens een dag voor deze reeks.",
+    "editor_purpose": "Elke regel hieronder is een los werk uit deze reeks. Wijzig hier de naam, het tijdstip en het moment (voor, bij of na oplevering). Datum, uren en mensen wijzigt u met Plannen en Toewijzen."
   },
   "hours_panel.planned_label": "Gepland",
   "hours_panel.planned_undated": "(+{{hours}} zonder dag)",

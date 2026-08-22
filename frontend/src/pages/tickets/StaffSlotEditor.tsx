@@ -150,7 +150,10 @@ export function StaffSlotEditor({
   const [busy, setBusy] = useState(false);
 
   const [showAdd, setShowAdd] = useState(false);
-  const [addUserId, setAddUserId] = useState("");
+  // W13-FIX §6d — MULTI-SELECT. The owner and his father both asked for
+  // it: "checkboxes, assign several at once." One <select> meant opening
+  // the form once per person for a job that needs three.
+  const [addUserIds, setAddUserIds] = useState<number[]>([]);
   const [addForm, setAddForm] = useState<SlotFormState>(EMPTY_FORM);
 
   const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
@@ -241,10 +244,40 @@ export function StaffSlotEditor({
     };
   }, [ticketId]);
 
-  // Multi-slot per staff — the same staff member may be added again as
-  // another dated slot (Ahmet 09:00-11:00 AND 15:00-17:00), so we no
-  // longer grey out already-assigned staff in the add dropdown.
-  const candidates = assignable;
+  // W13-FIX §6c — THE SAME PERSON, TWICE, INDISTINGUISHABLY.
+  //
+  // Ahmet Yildiz sat on ticket 355 twice: two rows, both `sub_task`
+  // NULL, both with no dates, no window label -- nothing telling them
+  // apart. That is a duplicate, not a slot.
+  //
+  // The `(ticket, user)` uniqueness was dropped on purpose so one person
+  // CAN hold several DATED slots (Ahmet 09:00-11:00 and 15:00-17:00), so
+  // the rule cannot be "never twice". It is: a person may not be added
+  // again into a slot indistinguishable from one they already hold --
+  // same sub-task, and no start time to tell the two apart. Give the new
+  // slot a start time and they are offered again, because then the two
+  // rows mean different things.
+  //
+  // Prevented HERE, where the choice is made, and again in the API
+  // (`views_staff_assignments.create`) so a client that skipped the UI
+  // cannot write the row either.
+  const addPlacement =
+    subTasks.length > 0 && !isTerminal && addForm.subTask !== ""
+      ? Number(addForm.subTask)
+      : null;
+  const addIsFlat = addForm.start.trim() === "";
+  const blockedUserIds = new Set(
+    addIsFlat
+      ? slots
+          .filter(
+            (slot) => slot.sub_task === addPlacement && !slot.scheduled_start_at,
+          )
+          .map((slot) => slot.user_id)
+      : [],
+  );
+  const candidates = assignable.filter(
+    (staff) => !blockedUserIds.has(staff.id),
+  );
 
   // Slot grouping: with >=1 sub-task we render grouped; otherwise flat. A
   // slot whose sub_task points outside the list (shouldn't happen) falls
@@ -289,7 +322,7 @@ export function StaffSlotEditor({
   }
 
   async function handleAdd() {
-    if (addUserId === "") return;
+    if (addUserIds.length === 0) return;
     if (endBeforeStart(addForm)) {
       setError(t("editor.end_before_start"));
       return;
@@ -308,13 +341,21 @@ export function StaffSlotEditor({
       if (subTasks.length > 0 && !isTerminal) {
         payload.sub_task = addForm.subTask === "" ? null : Number(addForm.subTask);
       }
-      await addTicketStaffAssignment(ticketId, Number(addUserId), payload);
+      // W13-FIX §6d — everyone picked, in one press. Sequential rather
+      // than parallel so a refusal names the person it refused and the
+      // rows land in the order they were chosen.
+      for (const userId of addUserIds) {
+        await addTicketStaffAssignment(ticketId, userId, payload);
+      }
       setShowAdd(false);
-      setAddUserId("");
+      setAddUserIds([]);
       setAddForm(EMPTY_FORM);
       await reload();
       onChanged?.();
-      push({ variant: "success", title: t("editor.toast_added") });
+      push({
+        variant: "success",
+        title: t("editor.toast_added", { count: addUserIds.length }),
+      });
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -969,7 +1010,7 @@ export function StaffSlotEditor({
               aria-label={t("common:cancel")}
               onClick={() => {
                 setShowAdd(false);
-                setAddUserId("");
+                setAddUserIds([]);
                 setAddForm(EMPTY_FORM);
                 setError("");
               }}
@@ -978,28 +1019,52 @@ export function StaffSlotEditor({
             </button>
           </div>
           <div className="field" style={{ marginTop: 6 }}>
-            <label className="field-label" htmlFor="staff-slot-add-user">
+            {/* A group of checkboxes has no single control to label, so
+                this is a span with the group named by aria-labelledby
+                below rather than a <label for> pointing at nothing. */}
+            <span className="field-label" id="staff-slot-add-user-label">
               {t("editor.field_assignee")}
-            </label>
-            <select
-              id="staff-slot-add-user"
-              className="field-select"
-              value={addUserId}
-              onChange={(event) => setAddUserId(event.target.value)}
-              disabled={busy || candidates.length === 0}
-              data-testid="staff-slot-add-user"
-            >
-              <option value="">
-                {candidates.length === 0
-                  ? t("editor.no_eligible")
-                  : t("editor.select_assignee")}
-              </option>
-              {candidates.map((staff) => (
-                <option key={staff.id} value={String(staff.id)}>
-                  {staff.full_name || staff.email}
-                </option>
-              ))}
-            </select>
+            </span>
+            {/* W13-FIX §6d — checkboxes, so several people are dispatched
+                in one press. Same `.assign-picker` idiom the Managers
+                section uses, so the two assignment surfaces on this page
+                are chosen the same way.
+
+                W13-FIX §6c — anyone who already holds an indistinguishable
+                slot is simply NOT here. A person is kept out where the
+                choice is made rather than reported afterwards. */}
+            {candidates.length === 0 ? (
+              <p className="muted small" data-testid="staff-slot-add-none">
+                {t("editor.no_eligible")}
+              </p>
+            ) : (
+              <div
+                className="assign-picker"
+                role="group"
+                aria-labelledby="staff-slot-add-user-label"
+                data-testid="staff-slot-add-user"
+              >
+                {candidates.map((staff) => (
+                  <label key={staff.id} className="assign-picker-row">
+                    <input
+                      type="checkbox"
+                      className="checkbox-input"
+                      checked={addUserIds.includes(staff.id)}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setAddUserIds((current) =>
+                          event.target.checked
+                            ? [...current, staff.id]
+                            : current.filter((id) => id !== staff.id),
+                        )
+                      }
+                      data-testid="staff-slot-add-option"
+                    />
+                    <span>{staff.full_name || staff.email}</span>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
           <SlotFields
             form={addForm}
@@ -1014,7 +1079,7 @@ export function StaffSlotEditor({
               type="button"
               className="btn btn-primary btn-sm"
               onClick={handleAdd}
-              disabled={busy || addUserId === ""}
+              disabled={busy || addUserIds.length === 0}
               data-testid="staff-slot-add-submit"
             >
               {busy ? t("editor.adding") : t("editor.add_slot")}

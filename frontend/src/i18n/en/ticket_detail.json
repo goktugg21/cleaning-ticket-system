@@ -114,7 +114,7 @@
   "workflow_customer_rejection_required": "Please write the rejection reason in the status note field first.",
   "workflow_move_to": "Move to {{status}}",
   "workflow_action.OPEN": "Reopen it",
-  "workflow_action.ACKNOWLEDGED": "Take it on",
+  "workflow_action.ACKNOWLEDGED": "Mark as seen and planned",
   "workflow_action.IN_PROGRESS": "Start the work",
   "workflow_action.ON_HOLD": "Put it on hold",
   "workflow_action.WAITING_MANAGER_REVIEW": "Send it for checking",
@@ -306,5 +306,13 @@
   "workflow_corrections_show": "Show correction actions",
   "workflow_corrections_hide": "Hide correction actions",
   "workflow_move_back_to": "Move back to {{status}}",
-  "workflow_upcoming": "Upcoming - planned to start {{when}}."
+  "workflow_upcoming": "Upcoming - planned to start {{when}}.",
+  "transition.move": "From {{from}} to {{to}}.",
+  "transition.who_label": "Who is doing this work?",
+  "transition.who_hint": "Pick one or more people. Work cannot start with nobody on it.",
+  "transition.no_staff": "There is nobody available to assign here.",
+  "transition.when_label": "When does it start?",
+  "transition.when_hint": "The planned start date and time of the work.",
+  "transition.note_label": "Note (optional)",
+  "transition.note_hint": "What should somebody know about this step?"
 }

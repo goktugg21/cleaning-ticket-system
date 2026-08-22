@@ -470,8 +470,42 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         # Multi-slot per staff — every POST creates a NEW slot row, so the
         # same staff member can be added again as another dated slot
         # (Ahmet 09:00-11:00 AND Ahmet 15:00-17:00). There is no longer a
-        # (ticket, user) uniqueness constraint to dedupe against, so this
-        # always returns 201. A flat (no-schedule) add stays valid.
+        # (ticket, user) uniqueness constraint to dedupe against.
+        #
+        # W13-FIX §6c — BUT NOT AN INDISTINGUISHABLE ONE.
+        #
+        # "A flat (no-schedule) add stays valid" is what put Ahmet Yildiz
+        # on ticket 355 twice: two rows, same user, `sub_task` NULL on
+        # both, no dates and no window label on either -- nothing that
+        # tells them apart, on screen or in the data.
+        #
+        # The dated case is the one the dropped constraint exists for and
+        # it is untouched. What is refused is a second FLAT slot in the
+        # same placement: same ticket, same user, same sub_task, no start
+        # time on the new row and none on the row already there. Give it a
+        # start time and it is allowed again, because then the two rows
+        # mean different things.
+        placement = slot_ser.validated_data.get("sub_task")
+        if slot_ser.validated_data.get("scheduled_start_at") is None:
+            duplicate = TicketStaffAssignment.objects.filter(
+                ticket=ticket,
+                user=target,
+                sub_task=placement,
+                scheduled_start_at__isnull=True,
+            ).exists()
+            if duplicate:
+                return Response(
+                    {
+                        "detail": (
+                            "This person already holds an unscheduled slot "
+                            "here. Give the new slot a start time to add "
+                            "them again."
+                        ),
+                        "code": "duplicate_flat_assignment",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         assignment = TicketStaffAssignment.objects.create(
             ticket=ticket,
             user=target,

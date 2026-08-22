@@ -2626,6 +2626,7 @@
   "period.this_month": "This month",
   "period.last_3_months": "Last 3 months",
   "period.this_year": "This year",
+  "period.all_time": "All time",
   "period.custom": "A range I pick",
   "period.from": "From",
   "period.to": "To",

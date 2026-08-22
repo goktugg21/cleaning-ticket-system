@@ -30,6 +30,8 @@
   "editor.remove_dialog_title": "{{name}} van dit ticket verwijderen?",
   "editor.remove_dialog_body": "Het werkblok wordt verwijderd. U kunt het later opnieuw toevoegen.",
   "editor.toast_added": "Werkblok toegevoegd",
+  "editor.toast_added_one": "Werkblok toegevoegd",
+  "editor.toast_added_other": "{{count}} werkblokken toegevoegd",
   "editor.toast_saved": "Werkblok bijgewerkt",
   "editor.toast_removed": "Werkblok verwijderd",
   "agenda.page_title": "Werkplanning",

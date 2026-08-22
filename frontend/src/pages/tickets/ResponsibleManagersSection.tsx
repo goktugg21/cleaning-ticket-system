@@ -189,16 +189,27 @@ export function ResponsibleManagersSection({
             >
               <thead>
                 <tr>
-                  <th>{t("resp_mgr.col_person")}</th>
-                  <th>{t("resp_mgr.col_since")}</th>
+                  <th className="assign-table-person">
+                    {t("resp_mgr.col_person")}
+                  </th>
+                  <th className="assign-table-since">
+                    {t("resp_mgr.col_since")}
+                  </th>
                   <th className="assign-table-actions" />
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} data-testid="responsible-manager-row">
-                    <td>{row.user_full_name?.trim() || row.user_email}</td>
-                    <td>{row.assigned_at?.slice(0, 10) ?? "-"}</td>
+                    <td
+                      className="assign-table-person"
+                      title={row.user_full_name?.trim() || row.user_email}
+                    >
+                      {row.user_full_name?.trim() || row.user_email}
+                    </td>
+                    <td className="assign-table-since">
+                      {row.assigned_at?.slice(0, 10) ?? "-"}
+                    </td>
                     <td className="assign-table-actions">
                       <button
                         type="button"

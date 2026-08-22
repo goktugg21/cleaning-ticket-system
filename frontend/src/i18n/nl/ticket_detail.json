@@ -114,7 +114,7 @@
   "workflow_customer_rejection_required": "Schrijf eerst de afwijzingsreden in het statusnotitieveld.",
   "workflow_move_to": "Wijzig naar {{status}}",
   "workflow_action.OPEN": "Weer openzetten",
-  "workflow_action.ACKNOWLEDGED": "Ik pak dit op",
+  "workflow_action.ACKNOWLEDGED": "Markeer als gezien en ingepland",
   "workflow_action.IN_PROGRESS": "Begin met het werk",
   "workflow_action.ON_HOLD": "Zet het in de wacht",
   "workflow_action.WAITING_MANAGER_REVIEW": "Stuur het ter controle",
@@ -306,5 +306,13 @@
   "workflow_corrections_show": "Correctieacties tonen",
   "workflow_corrections_hide": "Correctieacties verbergen",
   "workflow_move_back_to": "Terugzetten naar {{status}}",
-  "workflow_upcoming": "Gepland - start op {{when}}."
+  "workflow_upcoming": "Gepland - start op {{when}}.",
+  "transition.move": "Van {{from}} naar {{to}}.",
+  "transition.who_label": "Wie doet dit werk?",
+  "transition.who_hint": "Kies een of meer medewerkers. Zonder iemand kan het werk niet starten.",
+  "transition.no_staff": "Er is hier niemand beschikbaar om toe te wijzen.",
+  "transition.when_label": "Wanneer begint het?",
+  "transition.when_hint": "De geplande startdatum en -tijd van het werk.",
+  "transition.note_label": "Toelichting (optioneel)",
+  "transition.note_hint": "Wat moet iemand weten over deze stap?"
 }

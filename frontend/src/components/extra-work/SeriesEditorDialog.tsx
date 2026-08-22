@@ -224,6 +224,18 @@ export function SeriesEditorDialog({
         <p className="muted small ew-plan-dialog-sub">
           {standardTitle}
         </p>
+        {/* W13-FIX §8 — WHAT THIS IS FOR, in one line.
+            The owner asked what this modal does three times across three
+            waves. The answer was in the code and in a footer about what
+            the dialog does NOT own; what was never on screen was the
+            plain statement of what it IS. It is here, first, before any
+            control. */}
+        <p
+          className="ew-plan-dialog-purpose"
+          data-testid="extra-work-series-purpose"
+        >
+          {t("series.editor_purpose")}
+        </p>
 
         {loadError && (
           <div

@@ -30,6 +30,8 @@
   "editor.remove_dialog_title": "Remove {{name}} from this ticket?",
   "editor.remove_dialog_body": "The staff slot is removed. You can add it again later.",
   "editor.toast_added": "Staff slot added",
+  "editor.toast_added_one": "Staff slot added",
+  "editor.toast_added_other": "{{count}} staff slots added",
   "editor.toast_saved": "Slot updated",
   "editor.toast_removed": "Slot removed",
   "agenda.page_title": "Work plan",

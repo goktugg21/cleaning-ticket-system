@@ -13675,7 +13675,24 @@ table.pva-table { min-width: 0; }
 /* W13 — the assignment area: a name, a table, one button.
    The owner's father: "You have put everything one under the other. Have
    you never used a form?" These four rules are the whole treatment. */
-.assign-table { min-width: 0; }
+/* W13-FIX 6b — the Managers/Assignment tables live in the ~320px right
+   column, not the full-width page body. `table.data-table` carries
+   `min-width: 860px` for the wide list pages; MEASURED on ticket 331 the
+   managers table rendered 860px inside a 322px track (538px of overflow),
+   which is the truncated "MANAGER | ASSIG..." header and the "2026-" date
+   the owner reported.
+
+   The previous override was written `.assign-table { min-width: 0 }` and
+   never applied: `table.data-table` is (0,1,1) and beats a bare class at
+   (0,1,0). Matching the element+class specificity is the whole fix. The
+   actions column stays sized to its button; the two text columns share
+   what is left, and the date is given room to print in full. */
+table.assign-table { min-width: 0; width: 100%; table-layout: fixed; }
+.assign-table .assign-table-person { width: auto; }
+.assign-table .assign-table-since { width: 92px; white-space: nowrap; }
+.assign-table th,
+.assign-table td { overflow: hidden; text-overflow: ellipsis; }
+.assign-table thead th { white-space: nowrap; }
 .assign-table .assign-table-actions { width: 1%; text-align: right; white-space: nowrap; }
 .assign-actions { display: flex; justify-content: flex-end; padding-top: 10px; }
 .assign-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 6px 0 4px; }
@@ -13725,10 +13742,9 @@ table.pva-table { min-width: 0; }
    vocabulary.
 
    `.ticket-category-chip` is the solid dot used where the label is
-   already beside it (the admin table, the report roll-up).
-   `.ticket-category-tag` is the outlined pill used in the meldingen
-   list, where the tag IS the label -- outlined and not filled so seven
-   coloured pills down a column stay readable as text.
+   already beside it (the admin table, the report roll-up). The meldingen
+   list uses the ordinary `.cell-tag` its other columns use -- see the
+   W13-FIX note below.
    ================================================================== */
 .ticket-category-chip {
   display: inline-block;
@@ -13741,9 +13757,38 @@ table.pva-table { min-width: 0; }
      never invisible-on-white. */
   background: var(--text-faint);
 }
-.ticket-category-tag {
-  border: 1px solid var(--border);
+/* W13-FIX §4 — `.ticket-category-tag` is GONE. It was the outlined pill
+   the owner asked to have reverted ("they look terrible"); the meldingen
+   list renders the category on the plain `.cell-tag` every other column
+   in that row uses, with the catalog colour on the standard dot. */
+
+/* W13-FIX §1 — the transition modal. It reuses the `.ew-plan-dialog`
+   overlay box the manager picker already uses, and adds only the
+   per-requirement field stack: a label, the one-line reason the step
+   asks for it, and the control. The dialog is a little wider than the
+   plain picker because the staff list and a datetime control can both
+   be on screen at once. */
+.transition-dialog { max-width: 520px; }
+.transition-dialog-move {
+  margin: 0 0 14px;
   color: var(--text-muted);
-  background: transparent;
-  white-space: nowrap;
+  font-size: var(--font-sm);
+}
+.transition-field { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; }
+.transition-field > .field-label { font-weight: 700; }
+.transition-field > .muted { margin: 0 0 4px; }
+.transition-field textarea.filter-control { height: auto; padding: 8px 10px; }
+
+/* W13-FIX §8 — the one line that says what the series editor is for.
+   Deliberately NOT `.muted`: the sentence a reader needs in order to
+   understand the dialog cannot be the quietest text in it. */
+.ew-plan-dialog-purpose {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--green);
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: var(--font-sm);
+  line-height: 1.5;
 }

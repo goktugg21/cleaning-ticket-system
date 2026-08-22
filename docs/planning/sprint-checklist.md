@@ -36,6 +36,61 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — W13-FIX: the eight things that were reported done and were not
+
+The owner, after the W13 deploy to crmtest: "FIX WHAT WAS CLAIMED AND
+NOT DONE." Every item below was reported shipped in a previous wave and
+was visibly broken on the live site.
+
+1. **The transition modal was never built.** W13 reordered the workflow
+   buttons and added i18n keys; every button still POSTed on the first
+   click. Now `pages/tickets/TicketTransitionModal.tsx` opens on the
+   press and the move does not happen until it is answered.
+   `backend/tickets/transition_requirements.py` is the ONE rule set —
+   the modal reads it through
+   `GET /tickets/<id>/transition-requirements/` and `apply_transition`
+   enforces it, so the form and the gate cannot drift. -> ACKNOWLEDGED
+   needs a date (its own docstring already said "seen and SCHEDULED");
+   the forward moves into IN_PROGRESS need who and when. System-driven
+   transitions (`user=None`) carry no requirements.
+
+2. **Three raw i18n keys on the live site**, and the reported cause was
+   wrong: the strings were present in BOTH bundles the whole time. The
+   real cause was a missing `react: { nsMode: "fallback" }` — without
+   it react-i18next binds `useTranslation(["page", "common"])` to
+   `page` ALONE (react-i18next/useTranslation.js), so every key living
+   in `common.json` rendered as its own name. One line in
+   `i18n/index.ts` fixed 35 keys. `frontend/scripts/i18n_audit.mjs`
+   (`npm run i18n:audit`) now checks every literal `t()` key in `src/`
+   against both bundles, plural suffixes and `{ ns: }` overrides
+   included, and fails on a missing one.
+
+3. **The category dropdown listed seven categories per company** and
+   rendered the English label on a Dutch page. The pickers now pass
+   `?company=`, and the label resolver reads `user.language` instead of
+   `Accept-Language` — a header the SPA has never sent, so the value
+   was the BROWSER's locale.
+
+4. **The ticket-list category chip is reverted** to the `.cell-tag`
+   every other column in that row uses.
+
+5. **Period gained "all time"**, added to the `PERIOD_KEYS` constant so
+   the `Record` type forces its label. Not the default.
+
+6. **Managers moved above Assignment**; the managers table stopped
+   overflowing (`table.data-table` carries `min-width: 860px` and the
+   intended `.assign-table` override lost on specificity — measured
+   860px inside a 322px track); the same person can no longer be added
+   twice into an indistinguishable slot (dated AM/PM slots still can);
+   and the staff picker is checkboxes, several at once.
+
+7. **"Take it on" is now "Mark as seen and planned"** — the action, in
+   the words of what it does, and now literally true of the step.
+
+8. **The series editor says what it is for** in one line above its
+   controls. It was NOT removed: it owns time-of-day and condition,
+   which have no other editor.
+
 ### Done — W5-B: day-by-day (multi-date) Extra Work
 
 The last feature from the reference system that had never been scheduled. An
