@@ -340,6 +340,33 @@ export interface TicketStatusChangePayload {
   note?: string;
   is_override?: boolean;
   override_reason?: string;
+  // W13-FIX §1 — the transition modal's answers, posted WITH the move so
+  // "start the work" stays one action. Mirrors the optional fields on
+  // `tickets/serializers.py::TicketStatusChangeSerializer`, which applies
+  // them inside the same transaction as the transition.
+  assigned_staff_ids?: number[];
+  scheduled_start_at?: string;
+}
+
+// W13-FIX §1 — what a step needs before it may be taken. Mirrors
+// `backend/tickets/transition_requirements.py`. The modal renders one
+// field per UNSATISFIED requirement; `apply_transition` refuses the move
+// while any is unmet, so the form and the gate read the same source.
+export type TransitionRequirementKey =
+  | "assignee"
+  | "schedule"
+  | "completion_evidence";
+
+export interface TransitionRequirement {
+  key: TransitionRequirementKey;
+  satisfied: boolean;
+}
+
+export interface TransitionRequirements {
+  from_status: TicketStatus;
+  to_status: TicketStatus;
+  requirements: TransitionRequirement[];
+  unmet: TransitionRequirementKey[];
 }
 
 // Sprint 7B (frontend) — request body for

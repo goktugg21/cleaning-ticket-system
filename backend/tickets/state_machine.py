@@ -7,6 +7,10 @@ from accounts.models import UserRole
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
 
+from .transition_requirements import (
+    ERR_TRANSITION_REQUIREMENTS,
+    unmet as transition_unmet,
+)
 from .completion_requirements import (
     ERR_COMPLETION_EVIDENCE,
     message_for,
@@ -411,6 +415,28 @@ def apply_transition(
         raise TransitionError(
             f"Transition {ticket.status} -> {to_status} not allowed for role {role_label}.",
             code="forbidden_transition",
+        )
+
+    # W13-FIX §1 — WHAT THE STEP NEEDS, BEFORE IT IS TAKEN.
+    #
+    # `transition_requirements` is the single owner of this rule set and
+    # the modal reads the SAME function through
+    # `GET /tickets/<id>/transition-requirements/`, so the screen cannot
+    # ask for one thing while the server demands another.
+    #
+    # This fires AFTER `can_transition` (may you) and BEFORE the write
+    # (can the ticket): an operator who is not allowed to make a move at
+    # all should be told that, not handed a form to fill in first.
+    #
+    # `override=True` deliberately does NOT bypass it. An override
+    # justifies a move the machine did not expect; it is not a licence
+    # to record work as started with nobody doing it. The two gates ask
+    # different questions and neither is the other's escape hatch.
+    missing = transition_unmet(ticket, to_status, user)
+    if missing:
+        raise TransitionError(
+            "This step still needs: " + ", ".join(missing) + ".",
+            code=ERR_TRANSITION_REQUIREMENTS,
         )
 
     # Sprint 27F-B1 + B1 (system-business-logic-and-workflows.md §4.3

@@ -1758,6 +1758,52 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["get"], url_path="transition-requirements")
+    def transition_requirements(self, request, pk=None):
+        """
+        W13-FIX §1 — WHAT THIS STEP NEEDS, asked before it is taken.
+
+        The workflow modal calls this the moment the operator presses a
+        move, and renders one field per unsatisfied requirement. It
+        returns the SAME `transition_requirements.requirements_for_transition`
+        that `apply_transition` enforces, so the form and the gate can
+        never disagree -- which is the whole reason the rule lives in a
+        module instead of in the page.
+
+        `?to_status=` is required. An unknown status is a 400 rather
+        than an empty list: silently answering "this step needs nothing"
+        for a typo would let the modal wave a bad move through.
+
+        Read-only, and scoped by `get_object` exactly like every other
+        detail action, so it cannot be used to probe tickets the caller
+        may not see.
+        """
+        from .transition_requirements import requirements_for_transition
+
+        ticket = self.get_object()
+        to_status = request.query_params.get("to_status")
+        if not to_status:
+            return Response(
+                {"detail": "to_status is required.", "code": "to_status_required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if to_status not in TicketStatus.values:
+            return Response(
+                {"detail": f"Unknown status '{to_status}'.", "code": "unknown_status"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reqs = requirements_for_transition(ticket, to_status, request.user)
+        return Response(
+            {
+                "from_status": ticket.status,
+                "to_status": to_status,
+                "requirements": [r.as_dict() for r in reqs],
+                "unmet": [r.key for r in reqs if not r.satisfied],
+            },
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=True, methods=["get"], url_path="staff-completion-route")
     def staff_completion_route(self, request, pk=None):
         """

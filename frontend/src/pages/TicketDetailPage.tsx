@@ -25,6 +25,8 @@ import {
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
   getStaffCompletionRoute,
+  getTransitionRequirements,
+  listAssignableStaff,
   listCustomerContacts,
   listStaffAssignmentRequests,
 } from "../api/admin";
@@ -35,7 +37,12 @@ import { formatDateTime } from "../lib/intl";
 import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
+import {
+  TicketTransitionModal,
+  type TransitionAnswers,
+} from "./tickets/TicketTransitionModal";
 import { TicketScheduleCard } from "./tickets/TicketScheduleCard";
+import type { AssignableStaff } from "../api/admin";
 import type {
   AssignableManager,
   AssignedStaffNamedEntry,
@@ -51,6 +58,7 @@ import type {
   TicketStatusChangePayload,
   TicketCategory,
   TicketTimelineRow,
+  TransitionRequirements,
   // W6 §3 — the SHARED upload-visibility wire types. This page carried
   // its own copies of all three until now; see the note above
   // `UPLOAD_SOURCE_LABEL_KEY`.
@@ -836,6 +844,18 @@ export function TicketDetailPage() {
     AssignableManager[]
   >([]);
 
+  // W13-FIX §1 — THE TRANSITION MODAL's state. `transitionTarget` is the
+  // status the operator pressed; while it is set the modal is open and
+  // NOTHING has been posted yet. The move only happens when the modal
+  // calls back with its answers.
+  const [transitionTarget, setTransitionTarget] =
+    useState<TicketStatus | null>(null);
+  const [transitionReqs, setTransitionReqs] =
+    useState<TransitionRequirements | null>(null);
+  const [transitionLoading, setTransitionLoading] = useState(false);
+  const [transitionStaff, setTransitionStaff] = useState<AssignableStaff[]>([]);
+  const [transitionError, setTransitionError] = useState("");
+
   // Phase B — the dated staff-slot CRUD (Sprint 25A's flat add/remove
   // superseded) now lives in <StaffSlotEditor>, which owns its own state.
 
@@ -1332,10 +1352,22 @@ export function TicketDetailPage() {
   // offering an archived category the melding already carries, so
   // narrowing happens in the `.filter()` at the picker rather than in
   // the request.
+  //
+  // W13-FIX §3 — SCOPED TO THIS MELDING'S COMPANY.
+  //
+  // The seven categories are seeded PER COMPANY, so an unfiltered read
+  // returns seven per tenant and the picker listed the owner's seven
+  // three times over. A melding belongs to exactly one company and can
+  // only ever carry that company's category, so the request says so.
+  // For a single-tenant operator this changes nothing; for a
+  // SUPER_ADMIN it is the difference between seven options and
+  // twenty-one.
   useEffect(() => {
     if (!isProviderManagementRole(me?.role)) return;
+    const companyId = ticket?.company;
+    if (!companyId) return;
     let cancelled = false;
-    listTicketCategories()
+    listTicketCategories({ company: companyId })
       .then((rows) => {
         if (!cancelled) setCategories(rows);
       })
@@ -1345,7 +1377,7 @@ export function TicketDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [me?.role]);
+  }, [me?.role, ticket?.company]);
 
   async function saveCategory(categoryId: number | null) {
     if (!id) return;
@@ -1426,7 +1458,59 @@ export function TicketDetailPage() {
     }
   }
 
-  async function changeStatus(toStatus: TicketStatus) {
+  /**
+   * W13-FIX §1 — the operator pressed a workflow move.
+   *
+   * This no longer posts. It asks the server what the step needs and
+   * opens the modal; `changeStatus` runs only when the modal calls back
+   * with the answers. The two customer-decision / override paths still
+   * arm the reason prompt as they did, because a reason is a different
+   * question from "what does this step need" and already has its own
+   * dedicated surface.
+   */
+  async function openTransition(toStatus: TicketStatus) {
+    if (!id || !ticket) return;
+    if (isCustomerDecisionOverride(toStatus)) {
+      // Unchanged Sprint 27F-F1 behaviour: arm the reason prompt.
+      setOverrideDecision(toStatus);
+      setOverrideReason("");
+      setOverrideError(null);
+      return;
+    }
+
+    setTransitionTarget(toStatus);
+    setTransitionReqs(null);
+    setTransitionError("");
+    setTransitionLoading(true);
+    try {
+      const reqs = await getTransitionRequirements(Number(id), toStatus);
+      setTransitionReqs(reqs);
+      // Only fetch the staff list when the step actually asks who is
+      // doing the work -- most moves do not, and an unused list is a
+      // request the operator waits on for nothing.
+      if (reqs.unmet.includes("assignee")) {
+        try {
+          setTransitionStaff(await listAssignableStaff(Number(id)));
+        } catch {
+          // A caller without the staff-assign permission still gets the
+          // modal; the picker simply reports nobody available rather
+          // than the whole step failing.
+          setTransitionStaff([]);
+        }
+      } else {
+        setTransitionStaff([]);
+      }
+    } catch (err) {
+      setTransitionError(getApiError(err));
+    } finally {
+      setTransitionLoading(false);
+    }
+  }
+
+  async function changeStatus(
+    toStatus: TicketStatus,
+    answers?: TransitionAnswers,
+  ) {
     if (!id || !ticket) return;
 
     setError("");
@@ -1480,13 +1564,20 @@ export function TicketDetailPage() {
       return;
     }
 
+    // W13-FIX §1 — read the EFFECTIVE note. A customer rejecting through
+    // the modal types their reason into the modal, not into the card's
+    // inline note, so checking `statusNote` alone would refuse a
+    // rejection that was in fact explained.
+    const effectiveNote = (answers?.note ?? statusNote).trim();
     if (
       me?.role === "CUSTOMER_USER" &&
       ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
       toStatus === "REJECTED" &&
-      !statusNote.trim()
+      !effectiveNote
     ) {
-      setError(t("workflow_customer_rejection_required"));
+      const message = t("workflow_customer_rejection_required");
+      setError(message);
+      setTransitionError(message);
       return;
     }
 
@@ -1495,7 +1586,16 @@ export function TicketDetailPage() {
     try {
       const payload: TicketStatusChangePayload = {
         to_status: toStatus,
-        note: statusNote.trim(),
+        // The modal's note wins when it collected one; the card's
+        // inline status note stays the fallback for the paths that do
+        // not go through the modal.
+        note: effectiveNote,
+        ...(answers?.assigned_staff_ids
+          ? { assigned_staff_ids: answers.assigned_staff_ids }
+          : {}),
+        ...(answers?.scheduled_start_at
+          ? { scheduled_start_at: answers.scheduled_start_at }
+          : {}),
       };
       const response = await api.post<TicketDetail>(
         `/tickets/${id}/status/`,
@@ -1509,6 +1609,8 @@ export function TicketDetailPage() {
       const said = describeTicketChange(ticket, response.data, t, tStatus);
       setTicket(response.data);
       setStatusNote("");
+      setTransitionTarget(null);
+      setTransitionReqs(null);
       if (said) toast.push({ variant: "success", ...said });
     } catch (err) {
       // W10 §4 — the backend asked for a reason, so give the operator
@@ -1517,6 +1619,12 @@ export function TicketDetailPage() {
       if (axios.isAxiosError(err)) {
         const data = err.response?.data as { code?: string } | undefined;
         if (data?.code === "override_reason_required") {
+          // W13-FIX §1 — hand off to the reason prompt and CLOSE this
+          // modal. Two overlapping surfaces asking for two different
+          // things is the confusion the modal exists to remove.
+          setTransitionTarget(null);
+          setTransitionReqs(null);
+          setTransitionError("");
           setOverrideDecision(toStatus);
           setOverrideReason("");
           setOverrideError(null);
@@ -1534,6 +1642,9 @@ export function TicketDetailPage() {
         title: t("change.failed"),
         description: getApiError(err),
       });
+      // Keep the modal open and name the refusal inside it, so the
+      // answers already typed are not thrown away by a fixable error.
+      setTransitionError(getApiError(err));
       setError(getApiError(err));
     } finally {
       setStatusBusy(null);
@@ -2757,8 +2868,12 @@ export function TicketDetailPage() {
             defaults (Assignment/Details collapsed, Workflow open). */}
         <div className="detail-side" key={`detail-side-${ticket.id}`}>
           {/* Sprint 191 §2 — the right column is five cards:
-              Workflow -> Assignment -> Responsible manager -> Scheduling
+              Workflow -> Managers -> Assignment -> Scheduling
               -> Ticket details.
+
+              W13-FIX 6a: Managers moved ABOVE Assignment on the owner's
+              instruction ("Managers goes above assignment"). Who is
+              responsible is read before who is dispatched.
 
               The Location & Customer CARD that stood here is deleted.
               It was built in Sprint 189 and reordered in Sprint 190; the
@@ -3157,7 +3272,7 @@ export function TicketDetailPage() {
                             }
                             data-testid={`workflow-move-${status}`}
                             aria-expanded={isArmed || undefined}
-                            onClick={() => changeStatus(status)}
+                            onClick={() => void openTransition(status)}
                           >
                             {statusBusy === status ? (
                               t("updating")
@@ -3356,6 +3471,21 @@ export function TicketDetailPage() {
               )}
             </div>
           </CollapsibleCard>
+
+          {/* #7 Part B — Responsible managers (M:N), distinct from the
+              primary "Assigned" field in the Assignment card BELOW.
+              Self-gates to provider-management roles and hides on a LIST
+              403. onChanged reloads the ticket so the activity timeline
+              picks up the audit row. */}
+          <ResponsibleManagersSection
+            key={ticket.id}
+            ticketId={ticket.id}
+            canManage={isStaff}
+            assignableManagers={assignableManagers}
+            onChanged={() => {
+              void loadTicket();
+            }}
+          />
 
           {/* Sprint 30 Batch 30.1.1 — consolidated Assignment card.
               ONE outer card with TWO clearly-labeled subsections:
@@ -3960,19 +4090,6 @@ export function TicketDetailPage() {
             </div>
           </CollapsibleCard>
 
-          {/* #7 Part B — Responsible managers (M:N), distinct from the
-              primary "Assigned" field above. Self-gates to provider-
-              management roles and hides on a LIST 403. onChanged reloads
-              the ticket so the activity timeline picks up the audit row. */}
-          <ResponsibleManagersSection
-            key={ticket.id}
-            ticketId={ticket.id}
-            canManage={isStaff}
-            assignableManagers={assignableManagers}
-            onChanged={() => {
-              void loadTicket();
-            }}
-          />
 
           {/* Sprint 1 (frontend) — operational "Scheduled date" control.
               Surfaces the existing POST/DELETE /tickets/<id>/schedule/
@@ -4505,6 +4622,41 @@ export function TicketDetailPage() {
           }}
         />
       )}
+      {/* W13-FIX §1 — the transition modal. Mounted only while a move is
+          armed; nothing has been posted at this point. `changeStatus`
+          runs from its onConfirm and closes it on success, and a
+          refusal keeps it open with the reason inside so the answers
+          already typed survive. */}
+      {transitionTarget !== null && (
+        <TicketTransitionModal
+          // Keyed by the step, so switching moves gives a fresh form
+          // instead of carrying one step's answers into another.
+          key={transitionTarget}
+          actionLabel={
+            isCorrection(ticket.status, transitionTarget)
+              ? t("workflow_move_back_to", {
+                  status: tStatus(transitionTarget),
+                })
+              : t(`workflow_action.${transitionTarget}`)
+          }
+          fromStatusLabel={tStatus(ticket.status)}
+          toStatusLabel={tStatus(transitionTarget)}
+          requirements={transitionReqs}
+          loading={transitionLoading}
+          staff={transitionStaff}
+          busy={statusBusy !== null}
+          error={transitionError}
+          onCancel={() => {
+            setTransitionTarget(null);
+            setTransitionReqs(null);
+            setTransitionError("");
+          }}
+          onConfirm={(answers) => {
+            void changeStatus(transitionTarget, answers);
+          }}
+        />
+      )}
+
       {convertOpen && (
         <ConvertToExtraWorkDialog
           ticketId={ticket.id}

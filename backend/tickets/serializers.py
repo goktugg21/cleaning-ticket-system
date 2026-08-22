@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from pathlib import Path as FilePath
@@ -2100,20 +2101,94 @@ class TicketStatusChangeSerializer(serializers.Serializer):
         required=False, allow_blank=True, default=""
     )
 
+    # W13-FIX §1 — THE MODAL'S ANSWERS TRAVEL WITH THE MOVE.
+    #
+    # `transition_requirements` refuses a step whose preconditions are
+    # unmet. These two optional fields are how the operator MEETS them
+    # in the same press: the modal renders a field per missing
+    # requirement and posts the answers here, so "start the work"
+    # stays one action rather than three (assign, then schedule, then
+    # transition) with two chances to walk away half-done.
+    #
+    # They are applied inside `save`'s transaction BEFORE the
+    # transition, so either the ticket is assigned AND scheduled AND
+    # moved, or none of it happened.
+    assigned_staff_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+        max_length=50,
+    )
+    scheduled_start_at = serializers.DateTimeField(required=False, allow_null=True)
+
     def save(self, **kwargs):
         ticket = self.context["ticket"]
         user = self.context["request"].user
         try:
-            return apply_transition(
-                ticket=ticket,
-                user=user,
-                to_status=self.validated_data["to_status"],
-                note=self.validated_data.get("note", ""),
-                is_override=self.validated_data.get("is_override", False),
-                override_reason=self.validated_data.get("override_reason", ""),
-            )
+            # One transaction for the whole answer: the requirements the
+            # modal collected are applied first, then the move is made
+            # against a ticket that already satisfies them. A failure
+            # anywhere rolls the assignment and the date back too, so a
+            # refused transition never leaves a half-assigned ticket
+            # behind.
+            with transaction.atomic():
+                self._apply_transition_answers(ticket, user)
+                return apply_transition(
+                    ticket=ticket,
+                    user=user,
+                    to_status=self.validated_data["to_status"],
+                    note=self.validated_data.get("note", ""),
+                    is_override=self.validated_data.get("is_override", False),
+                    override_reason=self.validated_data.get("override_reason", ""),
+                )
         except TransitionError as exc:
             raise serializers.ValidationError({"detail": str(exc), "code": exc.code})
+
+    def _apply_transition_answers(self, ticket, user):
+        """Write the modal's answers onto the ticket, if it sent any.
+
+        Staff ids are validated through the SAME gate the dedicated
+        assignment endpoint uses (`_validate_target_staff`), so this
+        cannot become a side door that assigns somebody the assignment
+        endpoint would refuse.
+        """
+        from .models import TicketStaffAssignment
+        from .views_staff_assignments import _validate_target_staff
+
+        staff_ids = self.validated_data.get("assigned_staff_ids")
+        scheduled_start_at = self.validated_data.get("scheduled_start_at")
+
+        if scheduled_start_at is not None:
+            ticket.scheduled_start_at = scheduled_start_at
+            ticket.save(update_fields=["scheduled_start_at"])
+
+        if staff_ids:
+            existing = set(
+                ticket.staff_assignments.values_list("user_id", flat=True)
+            )
+            for user_id in staff_ids:
+                if user_id in existing:
+                    # W13-FIX §6c — the same person is never added twice
+                    # by a flat add. Silently skipping keeps the modal
+                    # idempotent: re-pressing a step must not duplicate
+                    # a row.
+                    continue
+                target = User.objects.filter(
+                    pk=user_id, is_active=True, deleted_at__isnull=True
+                ).first()
+                if target is None:
+                    raise serializers.ValidationError(
+                        {"assigned_staff_ids": f"User {user_id} is not assignable."}
+                    )
+                if _validate_target_staff(target, ticket) is not None:
+                    raise serializers.ValidationError(
+                        {"assigned_staff_ids": f"User {user_id} is not assignable."}
+                    )
+                TicketStaffAssignment.objects.create(
+                    ticket=ticket, user=target, assigned_by=user
+                )
+                existing.add(user_id)
+            ticket.refresh_from_db()
 
 
 class TicketBulkStatusChangeSerializer(serializers.Serializer):

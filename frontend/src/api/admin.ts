@@ -69,6 +69,7 @@ import type {
   StaffCompletionRouteResponse,
   StaffProfileAdmin,
   TicketDetail,
+  TransitionRequirements,
   UserAdmin,
   UserAdminDetail,
 } from "./types";
@@ -1534,6 +1535,20 @@ export async function listAssignableStaff(
 ): Promise<AssignableStaff[]> {
   const response = await api.get<AssignableStaff[]>(
     `/tickets/${ticketId}/assignable-staff/`,
+  );
+  return response.data;
+}
+
+// W13-FIX §1 — what the step the operator just pressed still needs.
+// The modal asks the server rather than predicting the rule, so the form
+// and `apply_transition`'s gate cannot drift apart.
+export async function getTransitionRequirements(
+  ticketId: number,
+  toStatus: string,
+): Promise<TransitionRequirements> {
+  const response = await api.get<TransitionRequirements>(
+    `/tickets/${ticketId}/transition-requirements/`,
+    { params: { to_status: toStatus } },
   );
   return response.data;
 }

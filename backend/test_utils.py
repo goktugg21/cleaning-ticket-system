@@ -1,6 +1,7 @@
 import io
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 
@@ -160,6 +161,27 @@ class TenantFixtureMixin:
         }
         payload.update(overrides)
         return payload
+
+    def make_workable(self, ticket=None, *, assignee=None, when=None):
+        """W13-FIX §1 — satisfy what a forward move INTO WORK now needs.
+
+        `tickets/transition_requirements.py` refuses OPEN -> ACKNOWLEDGED
+        without a start time, and OPEN/ACKNOWLEDGED/ON_HOLD ->
+        IN_PROGRESS without both somebody doing it and a start time --
+        because those statuses already claimed to mean exactly that and
+        never checked.
+
+        A test whose subject is something else (scoping, audit rows, the
+        completion gate) states the precondition in one line here rather
+        than restating the rule, so the rule stays in one place.
+        """
+        ticket = ticket or self.ticket
+        ticket.assigned_to = assignee or self.manager
+        ticket.scheduled_start_at = when or timezone.now()
+        ticket.save(
+            update_fields=["assigned_to", "scheduled_start_at", "updated_at"]
+        )
+        return ticket
 
     def move_ticket_to_customer_approval(self, ticket=None):
         ticket = ticket or self.ticket
