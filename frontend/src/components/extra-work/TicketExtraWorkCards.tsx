@@ -198,10 +198,19 @@ export function TicketExtraWorkCards({
   // computed totals; a cart line's agreed amount is its contract unit
   // price × quantity, and a NEEDS_PROPOSAL cart line has no price yet
   // — an em dash, never a zero (zero is a legal price).
+  // W22.2 — a parsed amount is a finite number or null, decided HERE:
+  // a missing/blank/unparseable source value becomes null and the cell
+  // renders the em dash explicitly. The formatters are never handed
+  // null and asked to be graceful.
+  const finiteOrNull = (value: string | null | undefined): number | null => {
+    if (value === null || value === undefined || value === "") return null;
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
   const agreedRows: {
     id: number;
     label: string;
-    quantity: string;
+    quantity: string | null;
     amount: number | null;
   }[] = approvedProposal
     ? (approvedProposalDetail?.lines ?? [])
@@ -209,25 +218,26 @@ export function TicketExtraWorkCards({
         .map((line) => ({
           id: line.id,
           label: line.service_name ?? line.description,
-          quantity: line.quantity,
-          amount: Number.parseFloat(line.line_total),
+          quantity: line.quantity ?? null,
+          amount: finiteOrNull(line.line_total),
         }))
     : ew.routing_decision === "INSTANT"
       ? ew.line_items.map((line) => ({
           id: line.id,
           label: line.service_name || line.custom_description,
-          quantity: line.quantity,
+          quantity: line.quantity ?? null,
           amount:
-            line.contract_unit_price != null
-              ? Number.parseFloat(line.contract_unit_price) *
-                Number.parseFloat(line.quantity)
+            finiteOrNull(line.contract_unit_price) !== null &&
+            finiteOrNull(line.quantity) !== null
+              ? (finiteOrNull(line.contract_unit_price) as number) *
+                (finiteOrNull(line.quantity) as number)
               : null,
         }))
       : ew.pricing_line_items.map((line) => ({
           id: line.id,
           label: line.description,
-          quantity: line.quantity,
-          amount: Number.parseFloat(line.total),
+          quantity: line.quantity ?? null,
+          amount: finiteOrNull(line.total),
         }));
   // W22 §3b — nothing asks twice: the Requested table exists to show
   // what the customer asked BEFORE a proposal re-priced it. With no
@@ -493,26 +503,46 @@ export function TicketExtraWorkCards({
           {/* W22 §3b — Requested renders only when a proposal re-priced
               the ask; with no proposal, Agreed IS the requested cart
               and nothing asks twice (rule 8). */}
+          {/* W22.2 — NOT `.data-table`: that class carries a min-width
+              of 860px (index.css) for the wide list pages, and inside
+              this ~340px rail card it pushed the quantity and money
+              cells past the viewport's right edge, where `.workspace`
+              clipped them — the owner saw only the line's name (the
+              same clipping mode W18 fixed for the hours input). Fluid
+              flex rows: the name wraps, the numbers keep their spot. */}
           {showRequested && (
             <>
               <div className="detail-kv-label">
                 {t("ew_agreement_requested")}
               </div>
-              <table
-                className="data-table"
-                data-testid="ticket-ew-requested-lines"
-              >
-                <tbody>
-                  {ew.line_items.map((line) => (
-                    <tr key={line.id}>
-                      <td>{line.service_name || line.custom_description}</td>
-                      <td style={{ textAlign: "right" }}>
-                        {formatNumber(line.quantity)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div data-testid="ticket-ew-requested-lines">
+                {ew.line_items.map((line) => (
+                  <div
+                    key={line.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <span
+                      style={{
+                        flex: "1 1 auto",
+                        minWidth: 0,
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {line.service_name || line.custom_description}
+                    </span>
+                    <span style={{ whiteSpace: "nowrap" }}>
+                      {line.quantity != null && line.quantity !== ""
+                        ? formatNumber(line.quantity)
+                        : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </>
           )}
           {agreedRows.length > 0 && (
@@ -523,24 +553,37 @@ export function TicketExtraWorkCards({
               >
                 {t("ew_agreement_agreed")}
               </div>
-              <table
-                className="data-table"
-                data-testid="ticket-ew-agreed-lines"
-              >
-                <tbody>
-                  {agreedRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.label}</td>
-                      <td style={{ textAlign: "right" }}>
-                        {formatNumber(row.quantity)}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        {row.amount !== null ? formatMoney(row.amount) : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div data-testid="ticket-ew-agreed-lines">
+                {agreedRows.map((row) => (
+                  <div
+                    key={row.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                      padding: "4px 0",
+                    }}
+                  >
+                    <span
+                      style={{
+                        flex: "1 1 auto",
+                        minWidth: 0,
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {row.label}
+                    </span>
+                    <span style={{ whiteSpace: "nowrap" }}>
+                      {row.quantity !== null && row.quantity !== ""
+                        ? formatNumber(row.quantity)
+                        : "—"}
+                    </span>
+                    <span style={{ whiteSpace: "nowrap", fontWeight: 500 }}>
+                      {row.amount !== null ? formatMoney(row.amount) : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </>
           )}
           {approvedProposalId !== null && canViewProposalPdf && (
