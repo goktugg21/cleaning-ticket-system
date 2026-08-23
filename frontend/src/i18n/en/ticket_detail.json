@@ -317,5 +317,13 @@
   "transition.note_hint": "What should somebody know about this step? It appears on the Activity Timeline, against this step.",
   "transition.reason_label": "Reason (required)",
   "transition.reason_hint": "This step is not part of the normal workflow, so the reason is recorded on the ticket. The system refuses the step without one.",
-  "transition.reason_required": "Give a reason. This step is refused without one."
+  "transition.reason_required": "Give a reason. This step is refused without one.",
+  "ew_card_title": "Extra work",
+  "ew_card_subtotal": "Subtotal",
+  "ew_card_vat": "VAT",
+  "ew_card_total": "Total",
+  "ew_card_billing_month": "Billing month",
+  "ew_card_invoiced": "Invoiced",
+  "ew_card_open": "Open extra work",
+  "ew_open_work": "Open the work"
 }

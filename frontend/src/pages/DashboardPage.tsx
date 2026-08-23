@@ -417,47 +417,25 @@ export function DashboardPage({
   const { t } = useTranslation(["dashboard", "common"]);
   const userRole = me?.role ?? null;
 
-  /* W15 §1 — WHERE A CHARGEABLE ROW OPENS.
+  /* W17 §1 — A CHARGEABLE ROW OPENS THE TICKET, for every role.
    *
-   * The owner: "the problem is that there are two different pages for
-   * the same job. After Started work, opening it from Chargeable work
-   * should open the same extra work."
+   * W15 sent chargeable clicks to the extra work because the ticket was
+   * "the half of the job WITHOUT the money". That premise is gone: an
+   * EW-origin ticket now carries the Extra Work card group (money,
+   * actual hours, billing month — TicketDetailPage, W17 §2), so the
+   * ticket is the ONE page for the job and every list row opens it —
+   * this one exactly like the ordinary ticket list.
    *
-   * He is right, and his own system already works this way: in the
-   * reference, one record has ONE detail page reached by two route
-   * prefixes (`/meldings/{id}` and `/extra-works/{id}` — 01-extra-work
-   * §1.7, "Same table, same model, same controller"). Here the two
-   * doors are the ticket and the extra work, and Chargeable work — a
-   * list of the tickets born from an extra work — sent every click to
-   * the ticket, which is the half of the job WITHOUT the money.
-   *
-   * So a chargeable row opens the extra work: the one screen that
-   * carries the money (pricing, invoice, billing month) AND the
-   * operations (hours, people, schedule) behind its tabs.
-   *
-   * EXCEPT for a role that cannot open one. `scope_extra_work_for`
-   * returns `.none()` for STAFF (the P0 staff-privacy fix), so
-   * `GET /api/extra-work/<id>/` is a hard 404 for them — measured, not
-   * assumed. STAFF keep the ticket, which is the surface that was
-   * always theirs. `canAccessExtraWork` is the SAME predicate the nav
-   * uses, so the door and the sidebar cannot disagree.
-   */
-  const canOpenExtraWork = canAccessExtraWork(userRole);
-  const chargeableTarget = (ticket: TicketList): string => {
-    const ewId = ticket.extra_work_origin?.extra_work_request_id;
-    if (isChargeableWork && canOpenExtraWork && ewId != null) {
-      return `/extra-work/${ewId}`;
-    }
-    return `/tickets/${ticket.id}`;
-  };
-  /* The extra work detail's back link says "Back to Extra Work" and goes
-   * to the Extra Work LIST, which is the wrong list for somebody who
-   * arrived from here. The route this page is actually mounted on is the
-   * only thing that knows the answer — `/tickets/chargeable` and
-   * `/admin/customers/<id>/chargeable` both land on this component — so
-   * it travels with the navigation instead of being guessed at the other
-   * end. Absent for every non-chargeable row, which leaves that link
-   * exactly as it was. */
+   * The W15 STAFF exception dissolves with the redirect: STAFF land on
+   * the ticket like everyone else, and the ticket page never fetches
+   * the EW for them (`scope_extra_work_for` returns `.none()` — the
+   * card group's mount is gated on the same `canAccessExtraWork`
+   * predicate the nav uses). */
+  /* The route this page is mounted on travels with the navigation —
+   * `/tickets/chargeable` and `/admin/customers/<id>/chargeable` both
+   * land on this component, so the ticket page's back link can name the
+   * list the reader actually came from instead of guessing. Absent for
+   * every non-chargeable row, which leaves that link exactly as it was. */
   const chargeableBackState = isChargeableWork
     ? { chargeableFrom: `${routeLocation.pathname}${routeLocation.search}` }
     : undefined;
@@ -2957,14 +2935,14 @@ export function DashboardPage({
                             ) {
                               return;
                             }
-                            navigate(chargeableTarget(ticket), {
+                            navigate(`/tickets/${ticket.id}`, {
                               state: chargeableBackState,
                             });
                           }}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
-                              navigate(chargeableTarget(ticket), {
+                              navigate(`/tickets/${ticket.id}`, {
                                 state: chargeableBackState,
                               });
                             }
@@ -2989,6 +2967,7 @@ export function DashboardPage({
                           <td>
                             <Link
                               to={`/tickets/${ticket.id}`}
+                              state={chargeableBackState}
                               className="td-id"
                             >
                               {ticket.ticket_no}
@@ -3031,7 +3010,7 @@ export function DashboardPage({
                                 another. The ticket number beside it is
                                 the labelled door to the ticket. */}
                             <Link
-                              to={chargeableTarget(ticket)}
+                              to={`/tickets/${ticket.id}`}
                               state={chargeableBackState}
                             >
                               {ticket.title}
@@ -3094,14 +3073,15 @@ export function DashboardPage({
                           )}
                           {isChargeableWork ? (
                             <>
-                              {/* W15 §1 — the extra work is NAMED here,
-                                  not linked, and both halves of that are
-                                  deliberate.
+                              {/* W15 §1 (surviving W17 §1) — the extra
+                                  work is NAMED here, not linked, and
+                                  both halves of that are deliberate.
 
-                                  DO NOT DUPLICATE STATE (the owner's
-                                  rule 3): now that the row itself opens
-                                  the extra work, an anchor in this cell
-                                  is a second control to the same place
+                                  The row opens the ticket, which now
+                                  CARRIES the extra work's money and
+                                  keeps its own door to the EW page — so
+                                  an anchor in this cell is a duplicate
+                                  route to what the row already reaches
                                   — and this table has already been bitten
                                   by that exact shape (W14 §3: a link
                                   inside a clickable row logged

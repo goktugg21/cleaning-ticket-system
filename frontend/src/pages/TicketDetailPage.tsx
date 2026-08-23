@@ -1,6 +1,6 @@
 import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Activity,
   Archive,
@@ -74,12 +74,14 @@ import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
 import { useBackLink } from "../hooks/useBackLink";
 import {
+  canAccessExtraWork,
   composerTiersForRole,
   isCustomerUser,
   isProviderAdmin,
   isProviderManagementRole,
   isStaff as isStaffRoleFn,
 } from "../auth/permissions";
+import { TicketExtraWorkCards } from "../components/extra-work/TicketExtraWorkCards";
 import { AttachmentThumb } from "../components/AttachmentThumb";
 import { BillingCutoffNotice } from "../components/BillingCutoffNotice";
 import { BoundedList } from "../components/BoundedList";
@@ -586,9 +588,31 @@ export function TicketDetailPage() {
    * entry behind this one, so the list returns with its filters, its
    * page and its scroll rather than remounted from scratch.
    */
-  const backToTickets = useBackLink("/tickets");
+  /* W17 §1 — BACK GOES WHERE YOU CAME FROM (the W15 rule, moved here
+   * with the destination). A chargeable row opens the TICKET now, and
+   * Chargeable work mounts on two routes (`/tickets/chargeable` and
+   * `/admin/customers/<id>/chargeable`), so the row puts its own
+   * address in history state. Read, never trusted for navigation
+   * beyond a same-origin path: anything that is not a string beginning
+   * with a single `/` falls back to the tickets list. */
+  const routeLocation = useLocation();
+  const chargeableFrom = (() => {
+    const raw = (routeLocation.state as { chargeableFrom?: unknown } | null)
+      ?.chargeableFrom;
+    if (typeof raw !== "string") return null;
+    // `//host` is a protocol-relative URL, not an in-app path.
+    if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+    return raw;
+  })();
+  const backToTickets = useBackLink(chargeableFrom ?? "/tickets");
   const { me } = useAuth();
   const { t } = useTranslation(["ticket_detail", "common"]);
+  // The label never lies about the destination: it names the chargeable
+  // list exactly when the link goes there. Key reused from the bundle
+  // that already owns the phrase.
+  const backToTicketsLabel = chargeableFrom
+    ? t("extra_work:back_to_chargeable_work")
+    : t("back_to_tickets");
   // M2 P5 — type / customer-facing labels for the resolver-gated
   // credential summaries on assigned-staff entries (reuses the P4
   // namespace; keys are NOT duplicated here).
@@ -2138,7 +2162,7 @@ export function TicketDetailPage() {
       <div>
         <Link {...backToTickets} className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
-          {t("back_to_tickets")}
+          {backToTicketsLabel}
         </Link>
         <div className="loading-bar">
           <div className="loading-bar-fill" />
@@ -2153,7 +2177,7 @@ export function TicketDetailPage() {
       <div>
         <Link {...backToTickets} className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
-          {t("back_to_tickets")}
+          {backToTicketsLabel}
         </Link>
         <div className="alert-error">{error || t("ticket_not_found")}</div>
       </div>
@@ -2166,7 +2190,7 @@ export function TicketDetailPage() {
         <div className="detail-header-top">
           <Link {...backToTickets} className="link-back">
             <ChevronLeft size={14} strokeWidth={2.5} />
-            {t("back_to_tickets")}
+            {backToTicketsLabel}
           </Link>
           {/* Sprint 30 Batch 30.1.1 — the header-level "Delete accidental
               ticket" button has been demoted to a small text link in the
@@ -4323,6 +4347,27 @@ export function TicketDetailPage() {
               void loadTicket();
             }}
           />
+
+          {/* W17 §2 — the Extra Work card group, on a ticket born from
+              one. PROVIDER-ONLY and the gate sits on the MOUNT, not the
+              render: the component's first act is
+              `GET /api/extra-work/<id>/`, which is a hard 404 for STAFF
+              (`scope_extra_work_for` -> `.none()`), and customers keep
+              their existing surfaces (worked hours only on hourly-priced
+              work — not widened here). `canAccessExtraWork` is the same
+              predicate the nav and ExtraWorkRoute use, so the card and
+              the sidebar cannot disagree; the role check on top of it is
+              what keeps CUSTOMER_USER (who passes that predicate) out of
+              provider money. The origin pill in the header stays the
+              door to the full Extra Work page. */}
+          {ticket.extra_work_origin &&
+            isProviderManagementRole(me?.role) &&
+            canAccessExtraWork(me?.role) && (
+              <TicketExtraWorkCards
+                key={ticket.extra_work_origin.extra_work_request_id}
+                extraWorkId={ticket.extra_work_origin.extra_work_request_id}
+              />
+            )}
 
           {/* Sprint 30 Batch 30.1.1 — consolidated Details card. Merges
               the prior Ticket details, Customer Contacts, and SLA cards

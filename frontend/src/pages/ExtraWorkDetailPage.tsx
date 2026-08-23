@@ -35,7 +35,6 @@ import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
-  useLocation,
   useParams,
   useSearchParams,
 } from "react-router-dom";
@@ -73,11 +72,17 @@ import {
   relabelExtraWork,
   updateExtraWorkDates,
   retrySpawnTicketsForExtraWork,
-  submitActualHours,
   transitionExtraWork,
   updateExtraWorkBilling,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
+import { ActualHoursPanel } from "../components/extra-work/ActualHoursPanel";
+import {
+  actualHoursPanelKey,
+  deriveActiveHourlyLines,
+  selectApprovedProposal,
+  type ActualHoursLine,
+} from "../components/extra-work/activeHourlyLines";
 import { ExtraWorkAssignmentCard } from "../components/extra-work/ExtraWorkAssignmentCard";
 import { ExtraWorkHoursPanel } from "../components/extra-work/ExtraWorkHoursPanel";
 import { PlanSummary } from "../components/extra-work/PlanSummary";
@@ -357,202 +362,11 @@ function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
   return "spawn_generic";
 }
 
-// Sprint 8A — map the actual-hours endpoint's stable 4xx `code` to an
-// i18n key. Anything unrecognised falls back to the axios-derived
-// message via getApiError at the call site.
-const ACTUAL_HOURS_ERROR_I18N_KEY: Record<string, string> = {
-  final_amount_locked: "detail.actual_hours_error_locked",
-  actual_hours_invalid: "detail.actual_hours_error_invalid",
-  actual_hours_not_hourly: "detail.actual_hours_error_not_hourly",
-  actual_hours_forbidden: "detail.actual_hours_error_forbidden",
-};
+// W17 — ActualHoursPanel and its active-set derivation moved to
+// components/extra-work/ActualHoursPanel.tsx so the operational
+// ticket's Extra work card group mounts the SAME panel. One component,
+// two mounts.
 
-function actualHoursErrorCode(err: unknown): string | null {
-  if (axios.isAxiosError(err)) {
-    const data = err.response?.data;
-    if (data && typeof data === "object") {
-      const code = (data as Record<string, unknown>).code;
-      if (typeof code === "string" && code in ACTUAL_HOURS_ERROR_I18N_KEY) {
-        return code;
-      }
-    }
-  }
-  return null;
-}
-
-// Sprint 8A — provider-only actual-hours entry for the hourly cart lines
-// of an INSTANT-routed Extra Work request (the cart is the active priced
-// set exactly when routing_decision === "INSTANT"; proposal/legacy active
-// sets need serializer exposure of `actual_hours` = a backend change, so
-// they are deferred from this FE-only surface). The parent KEYS this panel
-// by `ew.updated_at`, so a successful save (which bumps updated_at on the
-// refreshed detail) remounts the panel and re-seeds the inputs from the
-// fresh `actual_hours` — no prop-derived resync effect.
-// Sprint 8A-fix — normalized hourly line shape the panel renders. Both
-// cart line items (label = service_name) and approved-proposal lines
-// (label = service_name ?? description) map into this; `id` is the
-// line_id the actual-hours endpoint accepts for whichever active set.
-type ActualHoursLine = {
-  id: number;
-  label: string;
-  actual_hours: string | null;
-};
-
-function ActualHoursPanel({
-  ewId,
-  hourlyLines,
-  finalTotalAmount,
-  locked,
-  onUpdated,
-}: {
-  ewId: number;
-  hourlyLines: ActualHoursLine[];
-  finalTotalAmount: string | null;
-  // True once a spawned operational ticket is APPROVED/CLOSED — the backend
-  // freezes the final amount then (code `final_amount_locked`). Derived from
-  // the spawned tickets already on the page so the locked state is shown up
-  // front, not only after a rejected Save.
-  locked: boolean;
-  onUpdated: (detail: ExtraWorkRequestDetail) => void;
-}) {
-  const { t } = useTranslation(["extra_work", "common"]);
-  const { push: pushToast } = useToast();
-  const [draft, setDraft] = useState<Record<number, string>>(() =>
-    Object.fromEntries(
-      hourlyLines.map((line) => [line.id, line.actual_hours ?? ""]),
-    ),
-  );
-  const [saving, setSaving] = useState(false);
-
-  async function handleSave() {
-    const lines = hourlyLines
-      .map((line) => ({
-        line_id: line.id,
-        actual_hours: (draft[line.id] ?? "").trim(),
-      }))
-      .filter((entry) => entry.actual_hours !== "");
-    if (lines.length === 0) {
-      pushToast({
-        variant: "info",
-        title: t("detail.actual_hours_none_entered"),
-      });
-      return;
-    }
-    setSaving(true);
-    try {
-      const detail = await submitActualHours(ewId, lines);
-      onUpdated(detail);
-      pushToast({
-        variant: "success",
-        title: t("detail.actual_hours_saved"),
-      });
-    } catch (err) {
-      const code = actualHoursErrorCode(err);
-      pushToast({
-        variant: "error",
-        title: code
-          ? t(ACTUAL_HOURS_ERROR_I18N_KEY[code])
-          : getApiError(err),
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div
-      className="card"
-      style={{ marginBottom: 16 }}
-      data-testid="extra-work-actual-hours"
-    >
-      <div className="form-section">
-        <div className="form-section-title">
-          {t("detail.actual_hours_section_title")}
-        </div>
-        <p className="muted small" style={{ marginTop: 0 }}>
-          {t("detail.actual_hours_helper")}
-        </p>
-        <p className="muted small" style={{ marginTop: 0 }}>
-          {t("detail.actual_hours_scope_note")}
-        </p>
-        {locked && (
-          <div
-            className="alert-warning"
-            style={{ marginBottom: 12 }}
-            data-testid="extra-work-actual-hours-locked"
-          >
-            {t("detail.actual_hours_error_locked")}
-          </div>
-        )}
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("detail.actual_hours_col_line")}</th>
-              <th style={{ width: 160 }}>
-                {t("detail.actual_hours_col_hours")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {hourlyLines.map((line) => (
-              <tr key={line.id} data-testid="extra-work-actual-hours-row">
-                <td>{line.label}</td>
-                <td>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.25"
-                    inputMode="decimal"
-                    className="form-control"
-                    aria-label={t("detail.actual_hours_input_aria", {
-                      line: line.label,
-                    })}
-                    value={draft[line.id] ?? ""}
-                    disabled={locked}
-                    onChange={(event) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        [line.id]: event.target.value,
-                      }))
-                    }
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-            marginTop: 12,
-          }}
-        >
-          <span className="muted small">
-            {t("detail.actual_hours_final_total")}{" "}
-            <strong data-testid="extra-work-actual-hours-final-total">
-              {finalTotalAmount ?? "—"}
-            </strong>
-          </span>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            data-testid="extra-work-actual-hours-save"
-            onClick={handleSave}
-            disabled={saving || locked}
-          >
-            {saving
-              ? t("detail.actual_hours_saving")
-              : t("detail.actual_hours_save")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // M1 B6 — Extra Work message-thread tier vocabulary (three tiers, NO staff).
 // Keys live under the `extra_work` i18n namespace (`messages.*`).
@@ -1147,27 +961,11 @@ export function ExtraWorkDetailPage() {
    * keeps this page out of the double-history trap the ticket table hit
    * in W14 §3.
    */
-  /* W15 §1 — BACK GOES WHERE YOU CAME FROM.
-   *
-   * This page is now reached two ways: from the Extra Work list, and
-   * from Chargeable work (either the main one or a customer's). A back
-   * link hardcoded to the Extra Work list is wrong for half of them, and
-   * it is wrong in the way that costs most — it looks like it worked.
-   *
-   * The route that navigated here puts its own address in history state
-   * (`chargeableTarget` in DashboardPage). Read, never trusted for
-   * navigation beyond a same-origin path: anything that is not a string
-   * beginning with a single `/` falls back to the Extra Work list.
-   */
-  const routeLocation = useLocation();
-  const chargeableFrom = (() => {
-    const raw = (routeLocation.state as { chargeableFrom?: unknown } | null)
-      ?.chargeableFrom;
-    if (typeof raw !== "string") return null;
-    // `//host` is a protocol-relative URL, not an in-app path.
-    if (!raw.startsWith("/") || raw.startsWith("//")) return null;
-    return raw;
-  })();
+  /* W17 §1 — the W15 `chargeableFrom` reader moved to TicketDetailPage.
+   * A chargeable row opens the TICKET now (one work, one page), so the
+   * page that has to know the way back to that list is the ticket, not
+   * this one. Arriving here from the ticket's origin pill, the Extra
+   * Work list is once again the only list "back" can mean. */
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
@@ -1309,18 +1107,10 @@ export function ExtraWorkDetailPage() {
   // Approved-proposal selection mirrors `final_amounts.active_priced_lines`:
   // the latest CUSTOMER_APPROVED proposal by customer_decided_at, then by
   // id (both descending).
-  const approvedProposal = useMemo(() => {
-    const approved = proposals.filter(
-      (p) => p.status === "CUSTOMER_APPROVED",
-    );
-    if (approved.length === 0) return null;
-    return [...approved].sort((a, b) => {
-      const ad = a.customer_decided_at ?? "";
-      const bd = b.customer_decided_at ?? "";
-      if (ad !== bd) return ad < bd ? 1 : -1;
-      return b.id - a.id;
-    })[0];
-  }, [proposals]);
+  const approvedProposal = useMemo(
+    () => selectApprovedProposal(proposals),
+    [proposals],
+  );
   const approvedProposalId = approvedProposal?.id ?? null;
 
   // The approved proposal's lines (with `actual_hours`) are NOT on the EW
@@ -1362,41 +1152,10 @@ export function ExtraWorkDetailPage() {
 
   // Normalized active hourly line set. Approved-proposal lines win;
   // otherwise the INSTANT cart lines; otherwise none.
-  const activeHourlyLines = useMemo<ActualHoursLine[]>(() => {
-    if (!ew) return [];
-    if (approvedProposal) {
-      if (!approvedProposalDetail) return []; // detail still loading
-      return approvedProposalDetail.lines
-        .filter(
-          (line) => line.is_approved_for_spawn && line.unit_type === "HOURS",
-        )
-        .map((line) => ({
-          id: line.id,
-          label: line.service_name ?? line.description,
-          actual_hours: line.actual_hours ?? null,
-        }));
-    }
-    if (ew.routing_decision === "INSTANT") {
-      return ew.line_items
-        .filter((line) => line.unit_type === "HOURS")
-        .map((line) => ({
-          id: line.id,
-          label: line.service_name,
-          actual_hours: line.actual_hours,
-        }));
-    }
-    return [];
-  }, [ew, approvedProposal, approvedProposalDetail]);
-
-  // Remount key: changes whenever the persisted actual_hours change, so
-  // the panel re-seeds its inputs after a save WITHOUT a resync effect.
-  // Cart case keys off the refreshed EW's updated_at; proposal case off
-  // the approved lines' (id, actual_hours) signature.
-  const actualHoursPanelKey = approvedProposal
-    ? `prop:${approvedProposalId ?? "load"}:${activeHourlyLines
-        .map((line) => `${line.id}=${line.actual_hours ?? ""}`)
-        .join(",")}`
-    : `cart:${ew?.updated_at ?? "none"}`;
+  const activeHourlyLines = useMemo<ActualHoursLine[]>(
+    () => deriveActiveHourlyLines(ew, approvedProposal, approvedProposalDetail),
+    [ew, approvedProposal, approvedProposalDetail],
+  );
 
   // Sprint 28 Batch 4 — fetch contacts when the request loads, but
   // only for admin viewers (mirrors backend gate). Failures collapse
@@ -2376,11 +2135,7 @@ export function ExtraWorkDetailPage() {
   return (
     <div data-testid="extra-work-detail-page">
       <PageHeader
-        backLink={
-          chargeableFrom
-            ? { to: chargeableFrom, label: t("back_to_chargeable_work") }
-            : { to: "/extra-work", label: t("back_to_extra_work") }
-        }
+        backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
         title={ew.title}
       />
 
@@ -3075,16 +2830,30 @@ export function ExtraWorkDetailPage() {
                       className="ew-spawned-ticket-row"
                       data-testid={`extra-work-spawned-ticket-row-${ticket.id}`}
                     >
-                      <Link
-                        to={`/tickets/${ticket.id}`}
-                        className="ew-spawned-ticket-link"
-                      >
+                      {/* W17 §3 — once the work exists, opening it IS
+                          the next step, so the row's one door is a
+                          button that says so. The title is a name, not
+                          a second door to the same place (the owner's
+                          rule 3; W14 §3 measured what duplicate doors
+                          do to Back). Key lives in ticket_detail (this
+                          sprint's bundle). */}
+                      {/* Not `.ew-spawned-ticket-link`: that class
+                          hover-underlines, which promises a click this
+                          span no longer answers. */}
+                      <span style={{ fontSize: 14, fontWeight: 500 }}>
                         #{ticket.id} {ticket.title}
-                      </Link>
+                      </span>
                       <StatusBadge
                         status={{ kind: "ticket", value: ticket.status }}
                         variant="cell"
                       />
+                      <Link
+                        to={`/tickets/${ticket.id}`}
+                        className="btn btn-primary btn-sm"
+                        data-testid={`extra-work-open-ticket-${ticket.id}`}
+                      >
+                        {t("ticket_detail:ew_open_work")}
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -3330,7 +3099,11 @@ export function ExtraWorkDetailPage() {
               the approved proposal's detail so entered hours surface. */}
           {isProvider && activeHourlyLines.length > 0 && (
             <ActualHoursPanel
-              key={actualHoursPanelKey}
+              key={actualHoursPanelKey(
+                approvedProposal,
+                activeHourlyLines,
+                ew.updated_at,
+              )}
               ewId={ew.id}
               hourlyLines={activeHourlyLines}
               finalTotalAmount={ew.final_total_amount}
