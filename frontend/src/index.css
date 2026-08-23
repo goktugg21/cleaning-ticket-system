@@ -8705,6 +8705,32 @@ a.attn-row:hover {
   width: 100%;
   justify-content: center;
 }
+
+/* W14 §2 — the secondary workflow moves, behind a closed door.
+   The toggle reuses `.workflow-corrections-toggle`, which is the same
+   control TicketDetailPage uses for exactly this job, so the two
+   detail pages do not grow two different ways of saying "there is
+   more here". The list inside inherits the card's full-width button
+   sizing rather than restating it. */
+.ew-workflow-other {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ew-workflow-other-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ew-workflow-other-list > .btn {
+  width: 100%;
+  justify-content: center;
+  height: auto;
+  min-height: 44px;
+  padding: 10px 16px;
+  white-space: normal;
+  line-height: 1.3;
+}
 /* PageHeader: optional meta strip rendered under the title row. */
 .page-header-meta {
   margin-top: 4px;

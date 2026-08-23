@@ -781,5 +781,16 @@
   "detail.ctx_ticket_kept_own_date_link": "Open the ticket to change it",
   "create.proof_question": "What do you want to see before we call this done?",
   "create.proof_photo": "A photo of the finished work",
-  "create.proof_note": "A written note describing what was done"
+  "create.proof_note": "A written note describing what was done",
+  "next.in_progress_ticket_decides": "Ticket {{ticket}} decides when this work is done. Finish the ticket; this extra work follows on its own.",
+  "next.in_progress_ticket_decides_unnumbered": "The operational ticket decides when this work is done. Finish the ticket; this extra work follows on its own.",
+  "next.move_not_available": "This step is not available right now. Reload the page, or pick an action below.",
+  "detail.other_actions_one": "Other action ({{count}})",
+  "detail.other_actions_other": "Other actions ({{count}})",
+  "detail.complete_dialog_title": "Complete this extra work?",
+  "detail.complete_dialog_body_no_ticket": "This extra work has no operational ticket. Completing it closes the request itself — no ticket is changed.",
+  "detail.complete_dialog_body_with_ticket": "This extra work has an operational ticket. Completing it here does not change that ticket: the ticket is what decides whether the work is done.",
+  "detail.complete_dialog_billing": "Completing it counts for reporting and invoicing.",
+  "detail.complete_dialog_confirm": "Complete",
+  "detail.complete_toast": "“{{title}}” is completed. No ticket was changed."
 }

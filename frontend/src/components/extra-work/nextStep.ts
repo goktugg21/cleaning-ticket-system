@@ -38,6 +38,8 @@ export type NextStepAction =
 export interface NextStep {
   /** The one sentence, as an i18n key in the `extra_work` namespace. */
   sentenceKey: string;
+  /** Interpolation values for `sentenceKey` (e.g. the ticket number). */
+  sentenceVars?: Record<string, string | number>;
   /** The one button, or null when the move is somebody else's. */
   buttonKey: string | null;
   action: NextStepAction;
@@ -53,6 +55,31 @@ export interface NextStepInput {
   hasSpawnedTickets: boolean;
   /** A live invoice covers this request. */
   isInvoiced: boolean;
+  /**
+   * W14 §2 — THE SERVER'S OWN LIST OF LEGAL MOVES, and the reason this
+   * resolver stopped being a pure function of `status`.
+   *
+   * `status` alone is not enough to know what may be done, because the
+   * state machine's guard is not only the (from, to) pair. Sprint 181
+   * §1 makes `IN_PROGRESS -> COMPLETED` SYSTEM-ONLY the moment the
+   * request has an operational ticket -- the ticket answers "is it
+   * done?", and nothing else does. `allowed_next_statuses` is where
+   * that answer arrives.
+   *
+   * MEASURED on the dev stack, extra work 6 (IN_PROGRESS, one ticket):
+   *   GET  /api/extra-work/6/   -> allowed_next_statuses: ["CANCELLED"]
+   *   POST /api/extra-work/6/transition/ {"to_status":"COMPLETED"}
+   *        -> HTTP 400 {"code":"operational_status_follows_ticket"}
+   * and this resolver, reading `status` alone, offered "Mark complete"
+   * as the page's ONE primary button. Pressing it was the owner's bug.
+   *
+   * So a transition this list does not contain is never offered. A
+   * button the server is certain to refuse is not a button.
+   */
+  allowedNextStatuses: ExtraWorkStatus[];
+  /** The operational ticket's number, for the sentence that hands the
+   *  move over to it. Null before a ticket exists. */
+  ticketNo?: string | null;
   /**
    * W12 §3 — the OPERATIONAL status, once a ticket exists.
    *
@@ -152,7 +179,53 @@ function customerNextStep(
   return { ...WAITING, sentenceKey: "next.customer.waiting_on_provider" };
 }
 
-export function resolveNextStep({
+export function resolveNextStep(input: NextStepInput): NextStep {
+  const step = resolveProposedStep(input);
+  return withheldIfServerRefuses(step, input);
+}
+
+/**
+ * W14 §2 — the last word, applied to whatever the resolver proposed.
+ *
+ * The resolver below reasons from the status, which is how it should
+ * read. This function then checks the proposal against the only
+ * authority on what is currently legal -- the server's
+ * `allowed_next_statuses` -- and withdraws the button when the two
+ * disagree.
+ *
+ * Withdrawing means NO BUTTON, plus a sentence naming who does own the
+ * move. It deliberately does not fall back to some other button: if the
+ * one move this record is waiting for belongs to a ticket, offering the
+ * operator a different move instead is how a page teaches somebody to
+ * press whatever is lit.
+ *
+ * Non-transition actions (open a tab, open the plan dialog, retry a
+ * failed spawn) are not status changes and are never withheld here --
+ * `allowed_next_statuses` has nothing to say about them.
+ */
+function withheldIfServerRefuses(
+  step: NextStep,
+  { status, allowedNextStatuses, hasSpawnedTickets, ticketNo }: NextStepInput,
+): NextStep {
+  if (step.action.kind !== "transition") return step;
+  if (allowedNextStatuses.includes(step.action.to)) return step;
+
+  // The one case with a real answer: the ticket owns "is it done?".
+  if (status === "IN_PROGRESS" && hasSpawnedTickets) {
+    return {
+      ...WAITING,
+      sentenceKey: ticketNo
+        ? "next.in_progress_ticket_decides"
+        : "next.in_progress_ticket_decides_unnumbered",
+      sentenceVars: ticketNo ? { ticket: ticketNo } : undefined,
+    };
+  }
+  // Anything else the server currently refuses: say so plainly rather
+  // than showing a button that 400s.
+  return { ...WAITING, sentenceKey: "next.move_not_available" };
+}
+
+function resolveProposedStep({
   status,
   isProvider,
   hasSpawnedTickets,

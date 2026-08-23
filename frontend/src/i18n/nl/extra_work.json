@@ -781,5 +781,16 @@
   "detail.ctx_ticket_kept_own_date_link": "Open het ticket om dit te wijzigen",
   "create.proof_question": "Wat wilt u zien voordat wij dit als klaar melden?",
   "create.proof_photo": "Een foto van het afgeronde werk",
-  "create.proof_note": "Een geschreven notitie over wat er is gedaan"
+  "create.proof_note": "Een geschreven notitie over wat er is gedaan",
+  "next.in_progress_ticket_decides": "Ticket {{ticket}} bepaalt wanneer dit werk klaar is. Rond het ticket af; dit meerwerk volgt vanzelf.",
+  "next.in_progress_ticket_decides_unnumbered": "Het operationele ticket bepaalt wanneer dit werk klaar is. Rond het ticket af; dit meerwerk volgt vanzelf.",
+  "next.move_not_available": "Deze stap kan nu niet gezet worden. Ververs de pagina of kies een actie hieronder.",
+  "detail.other_actions_one": "Andere actie ({{count}})",
+  "detail.other_actions_other": "Andere acties ({{count}})",
+  "detail.complete_dialog_title": "Dit meerwerk afronden?",
+  "detail.complete_dialog_body_no_ticket": "Er hoort geen operationeel ticket bij dit meerwerk. Afronden sluit alleen de aanvraag zelf — er wordt geen ticket gewijzigd.",
+  "detail.complete_dialog_body_with_ticket": "Er hoort een operationeel ticket bij dit meerwerk. Afronden hier verandert dat ticket niet: het ticket bepaalt of het werk gedaan is.",
+  "detail.complete_dialog_billing": "Afronden telt mee voor rapportage en facturatie.",
+  "detail.complete_dialog_confirm": "Afronden",
+  "detail.complete_toast": "“{{title}}” is afgerond. Er is geen ticket gewijzigd."
 }

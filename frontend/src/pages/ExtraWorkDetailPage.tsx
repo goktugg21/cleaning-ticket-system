@@ -37,6 +37,8 @@ import { Link, useParams } from "react-router-dom";
 import {
   CalendarClock,
   Check,
+  ChevronDown,
+  ChevronRight,
   FileSearch,
   FileText,
   Pencil,
@@ -1077,7 +1079,23 @@ export function ExtraWorkDetailPage() {
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState("");
   const [loading, setLoading] = useState(true);
+  // W14 §3 — TWO ERROR CHANNELS, AND THE REASON THERE ARE TWO.
+  //
+  // The owner completed an extra work and the page answered "Extra
+  // Work not found". The record was never missing. Every action
+  // handler on this page wrote its failure into the SAME `error` the
+  // initial fetch uses, and the render guard below was
+  // `if (error || !ew)` -> the not-found empty state. So one refused
+  // transition threw the whole loaded record off the screen, and the
+  // operator was left unable to see what he had just done.
+  //
+  // `error` now means ONE thing: the record could not be loaded. That
+  // is the only condition under which "not found" is a true sentence,
+  // and it is caught by `!ew` anyway.
   const [error, setError] = useState("");
+  // A failed ACTION on a record that is right here. Renders as an
+  // alert above the content; the record stays on screen.
+  const [actionError, setActionError] = useState("");
 
   // Sprint 28 Batch 4 — read-only Customer Contacts panel. Backend
   // `IsSuperAdminOrCompanyAdminForCompany` gate on the contacts list
@@ -1147,6 +1165,11 @@ export function ExtraWorkDetailPage() {
   // existing CANCELLED transition path so the warning about lingering
   // spawned tickets renders before the destructive action fires.
   const cancelDialogRef = useRef<ConfirmDialogHandle>(null);
+  // W14 §4 — completing asks first, and what it asks is not "are you
+  // sure": it is the one fact the owner could not get off this screen.
+  const completeDialogRef = useRef<ConfirmDialogHandle>(null);
+  // W14 §2 — the secondary moves start closed.
+  const [otherActionsOpen, setOtherActionsOpen] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
 
   // M1 B6 — Extra Work message thread + composer state.
@@ -1586,7 +1609,10 @@ export function ExtraWorkDetailPage() {
     );
   }
 
-  if (error || !ew) {
+  // W14 §3 — "not found" now means NOT FOUND. `ew` is null only when the
+  // fetch never produced a record; a failed action leaves it right where
+  // it was and renders `actionError` above the content instead.
+  if (!ew) {
     return (
       <div>
         <PageHeader
@@ -1669,6 +1695,36 @@ export function ExtraWorkDetailPage() {
     providerWorkflowTargetsUnordered,
   );
 
+  // W14 §2 — ONE PRIMARY ACTION, AND THE REST BEHIND A DOOR.
+  //
+  // The owner counted the card's row: Plan work | Revise pricing |
+  // Cancel request | Approve pricing | Reject pricing. Five, side by
+  // side, no sequence. His diagnosis was that there is no order to
+  // derive one from; the transition table says otherwise, and
+  // `PRIMARY_FORWARD_TRANSITIONS` has encoded which move is FORWARD
+  // since W2-B. What was missing was not the knowledge — it was
+  // acting on it. So the forward move is the only status button on the
+  // card, and everything else the server currently allows waits behind
+  // a closed disclosure, the same shape `TicketDetailPage` uses for its
+  // secondary moves (W11 §1).
+  //
+  // Collapsed, the list does not exist in the document — it is not
+  // hidden with CSS — so a stray tab never lands on a cancel.
+  const forwardTarget =
+    providerWorkflowTargets.find((target) =>
+      isForwardTarget(ew.status, target),
+    ) ?? null;
+  const otherWorkflowTargets = providerWorkflowTargets.filter(
+    (target) => target !== forwardTarget,
+  );
+  // Planning is the primary only when no status move is. At
+  // CUSTOMER_APPROVED with a ticket already spawned there IS no forward
+  // status button (Sprint 181 §1 hands that move to the ticket), and
+  // planning the crew is exactly what is left to do.
+  const planIsPrimary = isProvider && forwardTarget === null;
+  const otherActionCount =
+    otherWorkflowTargets.length + (isProvider && !planIsPrimary ? 1 : 0);
+
   // Sprint 31 — an AUTO_START request is pre-authorized by the customer,
   // so the workflow must NOT frame the pricing step as "propose to
   // customer". The labels/hints below switch accordingly.
@@ -1736,7 +1792,7 @@ export function ExtraWorkDetailPage() {
       const detail = await getExtraWork(id);
       setEw(detail);
     } catch (err) {
-      setError(getApiError(err));
+      setActionError(getApiError(err));
     }
   }
 
@@ -1818,7 +1874,7 @@ export function ExtraWorkDetailPage() {
 
   async function handleTransition(target: ExtraWorkStatus) {
     if (!id) return;
-    setError("");
+    setActionError("");
     setTransitionBusy(target);
     try {
       const updated = await transitionExtraWork(id, { to_status: target });
@@ -1827,19 +1883,30 @@ export function ExtraWorkDetailPage() {
       // spawns operational tickets — refresh the panel so they appear
       // without a page reload.
       void reloadSpawnedTickets();
+      // W14 §4 — the action answers, in a sentence, saying what changed.
+      // The owner's words after completing one: "what did I complete?"
+      // The answer names the record and states what it did NOT touch,
+      // because that was the other half of his question.
+      if (target === "COMPLETED") {
+        pushToast({
+          variant: "success",
+          title: t("detail.complete_toast", { title: updated.title }),
+        });
+      }
     } catch (err) {
-      setError(getApiError(err));
+      setActionError(getApiError(err));
     } finally {
       setTransitionBusy(null);
     }
   }
+
 
   async function handleCustomerDecision(
     target: "CUSTOMER_APPROVED" | "CUSTOMER_REJECTED",
     rejectReason?: string,
   ) {
     if (!id) return;
-    setError("");
+    setActionError("");
     setTransitionBusy(target);
     try {
       const updated = await transitionExtraWork(id, {
@@ -1865,7 +1932,7 @@ export function ExtraWorkDetailPage() {
         });
       }
     } catch (err) {
-      setError(getApiError(err));
+      setActionError(getApiError(err));
     } finally {
       setTransitionBusy(null);
     }
@@ -2050,7 +2117,7 @@ export function ExtraWorkDetailPage() {
       setEw(updated);
       cancelDialogRef.current?.close();
     } catch (err) {
-      setError(getApiError(err));
+      setActionError(getApiError(err));
       cancelDialogRef.current?.close();
     } finally {
       setCancelBusy(false);
@@ -2071,7 +2138,7 @@ export function ExtraWorkDetailPage() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(getApiError(err));
+      setActionError(getApiError(err));
     } finally {
       setPdfBusy(false);
     }
@@ -2138,6 +2205,11 @@ export function ExtraWorkDetailPage() {
     // header badge uses) and the day the crew is due.
     ticketStatus: ew.spawned_tickets[0]?.status ?? null,
     plannedDate: ew.provider_planned_date ?? null,
+    // W14 §2 — the server's own list of legal moves. Without it this
+    // resolver offered "Mark complete" on a request whose ticket owns
+    // that decision, and the press 400'd. See `withheldIfServerRefuses`.
+    allowedNextStatuses: allowed,
+    ticketNo: ew.spawned_tickets[0]?.ticket_no ?? null,
   });
   const nextStepBusy =
     proposalBusy ||
@@ -2145,10 +2217,80 @@ export function ExtraWorkDetailPage() {
     (nextStep.action.kind === "transition" &&
       transitionBusy === nextStep.action.to);
 
+  // ONE renderer for a workflow status button, used by the primary slot
+  // AND by the disclosure. CLAUDE.md records what a second,
+  // independently maintained render list costs: the two would drift and
+  // only one of them would get the next fix.
+  // A const arrow, not a `function` declaration: declarations hoist, so
+  // TypeScript analyses their body WITHOUT the `if (!ew)` narrowing
+  // above and `ew.status` reads as possibly-null. `providerActionLabel`
+  // next door is a const arrow for the same reason.
+  const renderWorkflowButton = (target: ExtraWorkStatus) => {
+    return (
+      <button
+        key={target}
+        type="button"
+        /* W2-B fix 4 — filled green for the forward move, soft red for
+           cancel, outlined for everything else. See
+           `workflowButtonClass`. */
+        className={workflowButtonClass(ew.status, target, {
+          hasRepair: canRetrySpawn,
+        })}
+        disabled={transitionBusy !== null}
+        onClick={() => {
+          // Sprint 29 Batch 29.8 — CANCELLED still routes through the
+          // confirmation dialog so the spawned-tickets warning renders
+          // before the destructive transition fires.
+          if (target === "CANCELLED") {
+            cancelDialogRef.current?.open();
+            return;
+          }
+          // W14 §4 — one door onto completing, wherever the press
+          // comes from. The ref is opened INLINE rather than through a
+          // helper: `react-hooks/refs` forbids handing a ref-reading
+          // function to a callback defined in render scope, and the
+          // cancel dialog two lines up is opened the same way.
+          if (target === "COMPLETED") {
+            setActionError("");
+            completeDialogRef.current?.open();
+            return;
+          }
+          void handleTransition(target);
+        }}
+        data-testid={
+          target === "CANCELLED" ? "extra-work-cancel-button" : undefined
+        }
+      >
+        {transitionBusy === target
+          ? t("detail.workflow_working")
+          : providerActionLabel(target)}
+      </button>
+    );
+  };
+
+  const renderPlanButton = () => (
+    <button
+      type="button"
+      className="btn btn-secondary btn-sm"
+      onClick={() => void openPlan()}
+      data-testid="extra-work-plan-button"
+    >
+      <CalendarClock size={14} strokeWidth={2.2} aria-hidden="true" />
+      {t("plan.open_button")}
+    </button>
+  );
+
   function runNextStep() {
     const action = nextStep.action;
     switch (action.kind) {
       case "transition":
+        // W14 §4 — the one transition that has something to say for
+        // itself asks first. Everything else moves on the press.
+        if (action.to === "COMPLETED") {
+          setActionError("");
+          completeDialogRef.current?.open();
+          return;
+        }
         void handleTransition(action.to);
         return;
       case "tab":
@@ -2172,9 +2314,14 @@ export function ExtraWorkDetailPage() {
         title={ew.title}
       />
 
-      {error && (
-        <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
-          {error}
+      {(actionError || error) && (
+        <div
+          className="alert-error"
+          role="alert"
+          style={{ marginBottom: 16 }}
+          data-testid="extra-work-action-error"
+        >
+          {actionError || error}
         </div>
       )}
 
@@ -2193,7 +2340,7 @@ export function ExtraWorkDetailPage() {
         nextStep={
           <div className="ew-next">
             <p className="ew-next-sentence" data-testid="extra-work-next-sentence">
-              {t(nextStep.sentenceKey)}
+              {t(nextStep.sentenceKey, nextStep.sentenceVars)}
             </p>
             {nextStep.buttonKey && (
               <button
@@ -2528,17 +2675,7 @@ export function ExtraWorkDetailPage() {
                     four planning fields are stripped from a customer's
                     response anyway. First in the list because on an
                     approved job planning IS the next thing to do. */}
-                {isProvider && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => void openPlan()}
-                    data-testid="extra-work-plan-button"
-                  >
-                    <CalendarClock size={14} strokeWidth={2.2} aria-hidden="true" />
-                    {t("plan.open_button")}
-                  </button>
-                )}
+                {planIsPrimary && renderPlanButton()}
                 {canAutoStart && (
                   <div
                     className="ew-auto-start"
@@ -2591,40 +2728,34 @@ export function ExtraWorkDetailPage() {
                       : t("detail.workflow_reject_button")}
                   </button>
                 )}
-                {isProvider &&
-                  providerWorkflowTargets.map((target) => (
+                {isProvider && forwardTarget && renderWorkflowButton(forwardTarget)}
+                {isProvider && otherActionCount > 0 && (
+                  <div className="ew-workflow-other">
                     <button
-                      key={target}
                       type="button"
-                      /* W2-B fix 4 — filled green for the forward move,
-                         soft red for cancel, outlined for everything
-                         else. See `workflowButtonClass`. */
-                      className={workflowButtonClass(ew.status, target, {
-                        hasRepair: canRetrySpawn,
-                      })}
-                      disabled={transitionBusy !== null}
-                      onClick={() => {
-                        // Sprint 29 Batch 29.8 — CANCELLED still
-                        // routes through the confirmation dialog so
-                        // the spawned-tickets warning renders before
-                        // the destructive transition fires.
-                        if (target === "CANCELLED") {
-                          cancelDialogRef.current?.open();
-                          return;
-                        }
-                        void handleTransition(target);
-                      }}
-                      data-testid={
-                        target === "CANCELLED"
-                          ? "extra-work-cancel-button"
-                          : undefined
-                      }
+                      className="workflow-corrections-toggle"
+                      aria-expanded={otherActionsOpen}
+                      onClick={() => setOtherActionsOpen((open) => !open)}
+                      data-testid="extra-work-other-actions-toggle"
                     >
-                      {transitionBusy === target
-                        ? t("detail.workflow_working")
-                        : providerActionLabel(target)}
+                      {otherActionsOpen ? (
+                        <ChevronDown size={13} strokeWidth={2.6} aria-hidden="true" />
+                      ) : (
+                        <ChevronRight size={13} strokeWidth={2.6} aria-hidden="true" />
+                      )}
+                      {t("detail.other_actions", { count: otherActionCount })}
                     </button>
-                  ))}
+                    {otherActionsOpen && (
+                      <div
+                        className="ew-workflow-other-list"
+                        data-testid="extra-work-other-actions-list"
+                      >
+                        {!planIsPrimary && renderPlanButton()}
+                        {otherWorkflowTargets.map(renderWorkflowButton)}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {providerOverrideAvailable &&
                   (["CUSTOMER_APPROVED", "CUSTOMER_REJECTED"] as const)
                     .filter((target) => allowed.includes(target))
@@ -3508,6 +3639,59 @@ export function ExtraWorkDetailPage() {
         onConfirm={handleConfirmCancel}
         busy={cancelBusy}
         destructive
+      />
+
+      {/* W14 §4 — WHAT COMPLETING AN EXTRA WORK MEANS FOR ITS TICKET.
+
+          The owner completed one and noticed the ticket was untouched:
+          "good that it does not touch the ticket, but also absurd --
+          what did I complete?" Both halves of that are fair, and the
+          rule the code already enforces answers them. It is written
+          here because until now it was written nowhere a person could
+          read.
+
+          COMPLETING AN EXTRA WORK NEVER COMPLETES A TICKET. It cannot,
+          because the two cases are exhaustive and neither leaves room
+          for it:
+
+            * The request HAS an operational ticket. Then the ticket is
+              the authority on whether the work is done (Sprint 181 §1),
+              this button is not offered at all, and the server refuses
+              the move with `operational_status_follows_ticket` if
+              anything asks for it anyway. The Extra Work's own status
+              FOLLOWS the ticket, automatically, when the ticket
+              finishes.
+            * The request has NO ticket. Then there is nothing to touch,
+              and completing it closes the REQUEST -- for reporting and
+              for billing -- and nothing else.
+
+          So the dialog says which of the two the operator is standing
+          in, and never asks a bare "are you sure".
+
+          Rendered unconditionally and driven by the ref (CLAUDE.md §3):
+          a `{cond && <ConfirmDialog/>}` mounts an INVISIBLE dialog and
+          the button that opens it looks dead. */}
+      <ConfirmDialog
+        ref={completeDialogRef}
+        title={t("detail.complete_dialog_title")}
+        body={
+          <div>
+            <p style={{ margin: "0 0 8px" }}>
+              {ew.spawned_tickets.length > 0
+                ? t("detail.complete_dialog_body_with_ticket")
+                : t("detail.complete_dialog_body_no_ticket")}
+            </p>
+            <p className="muted small" style={{ margin: 0 }}>
+              {t("detail.complete_dialog_billing")}
+            </p>
+          </div>
+        }
+        confirmLabel={t("detail.complete_dialog_confirm")}
+        onConfirm={async () => {
+          await handleTransition("COMPLETED");
+          completeDialogRef.current?.close();
+        }}
+        busy={transitionBusy === "COMPLETED"}
       />
     </div>
   );

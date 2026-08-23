@@ -36,6 +36,71 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — W14: the extra-work button that lied, and the page that threw the record away
+
+The owner, from an extra work whose header read **Open**, pressed one
+button and it went to COMPLETED with no steps in between; then the page
+said **"Extra Work not found"** and he could not tell what he had
+completed. The brief that came with it said Extra Work has no state
+machine and one must be built.
+
+**It already has one, and it is not the fault.**
+`backend/extra_work/state_machine.py` (643 lines) carries an explicit
+`ALLOWED_TRANSITIONS`, a per-transition role/scope resolver, entry
+timestamps, an `ExtraWorkStatusHistory` row inside the same
+`transaction.atomic()`, `select_for_update` against a concurrent racer,
+and reason-required override pairs. CLAUDE.md §3 has recorded it since
+Sprint 26B. Measured on the dev stack before touching anything:
+
+    POST /api/extra-work/262/transition/ {"to_status":"COMPLETED"}
+      -> 400 {"detail":"Transition REQUESTED -> COMPLETED is not allowed.",
+              "code":"invalid_transition"}
+    POST /api/extra-work/6/transition/   {"to_status":"COMPLETED"}
+      -> 400 {"detail":"This Extra Work already has an operational ticket,
+              so its operational status follows that ticket. Move the
+              ticket instead.","code":"operational_status_follows_ticket"}
+
+The server refuses. What went wrong was on the screen.
+
+1. **The primary button never asked the server what was legal.**
+   `resolveNextStep` derived the page's ONE primary action from `status`
+   alone. Extra work 6 is IN_PROGRESS with a ticket, so its
+   `allowed_next_statuses` is `["CANCELLED"]` — and the page rendered
+   "Mark complete" as the primary button anyway. It now takes
+   `allowedNextStatuses` and withdraws any transition the server does
+   not currently allow, naming the ticket that owns the move instead.
+2. **"Extra Work not found" was a lie about a record that was on
+   screen.** Every action handler wrote its failure into the same
+   `error` the initial fetch uses, and the render guard was
+   `if (error || !ew)` -> the not-found empty state. One refused
+   transition therefore deleted the whole loaded record from the page.
+   `error` now means only "could not load"; a failed action writes
+   `actionError`, which renders as an alert with the record still there.
+3. **One primary action, the rest behind a door.** The card showed
+   Plan work / Revise pricing / Cancel request / Approve pricing /
+   Reject pricing side by side. `PRIMARY_FORWARD_TRANSITIONS` has known
+   which move is forward since W2-B; the card now shows that one and
+   collapses the rest behind "Other actions (n)", the same disclosure
+   `TicketDetailPage` uses (W11 §1). Collapsed, they are not in the
+   document, so a stray tab cannot land on a cancel.
+4. **What completing an extra work means for its ticket, stated.**
+   THE RULE: completing an extra work never completes a ticket. Either
+   the request has an operational ticket — and then the ticket decides,
+   the button is not offered, and the server refuses it — or it has no
+   ticket, and completing it closes the request for reporting and
+   billing and nothing else. A confirmation now says which of the two
+   the operator is standing in, and the toast answers his question:
+   "'<title>' is completed. No ticket was changed."
+5. **The table is written down.** `test_w14_transition_table_is_closed`
+   asserts `ALLOWED_TRANSITIONS` is exactly its 15 pairs, that COMPLETED
+   has exactly one way in, and sweeps all 41 remaining ordered pairs of
+   the 8 statuses to prove each raises `invalid_transition`. The
+   PROPOSAL table has had that protection since Sprint 28; the work's
+   own table did not.
+
+Backend unchanged apart from the new test. Frontend `nl`/`en` in
+lockstep.
+
 ### Done — W14: one door onto "put people on this job"
 
 The owner, reading a ticket's assignment area top to bottom, counted
