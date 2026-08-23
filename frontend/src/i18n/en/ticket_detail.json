@@ -283,7 +283,7 @@
   "schedule.range": "{{from}} – {{to}}",
   "schedule.asked_heading": "What was asked for",
   "schedule.asked_wanted_label": "Customer wants it on",
-  "schedule.asked_window_label": "Customer's window",
+  "schedule.asked_window_label": "Requested period",
   "schedule.asked_deadline_label": "Must be finished by",
   "schedule.asked_committed_label": "Committed on the extra work",
   "schedule.clear_keep": "Keep the plan",
@@ -333,5 +333,12 @@
   "ew_agreement_title": "Agreement",
   "ew_agreement_requested": "Requested",
   "ew_agreement_agreed": "Agreed price",
-  "ew_agreement_days": "Days"
+  "ew_agreement_days": "Days",
+  "ew_billing_saved": "Bills in {{month}}.",
+  "ew_billing_cleared": "Follows the completion month again.",
+  "ew_cancel_action": "Cancel extra work",
+  "ew_cancel_reason_label": "Reason (required)",
+  "ew_cancel_done": "Extra work cancelled. This ticket stays as it is.",
+  "ew_hours_saved": "Saved {{hours}} h — new total {{total}}, bills in {{month}}.",
+  "ew_hours_saved_no_month": "Saved {{hours}} h — new total {{total}}, bills in its completion month."
 }

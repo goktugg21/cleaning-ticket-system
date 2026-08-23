@@ -37,6 +37,8 @@ import {
   getExtraWork,
   getProposalDetail,
   listProposalsForEw,
+  transitionExtraWork,
+  updateExtraWorkBilling,
 } from "../../api/extraWork";
 import type {
   ExtraWorkRequestDetail,
@@ -58,11 +60,16 @@ import {
 export function TicketExtraWorkCards({
   extraWorkId,
   currentTicketId,
+  onChanged,
 }: {
   extraWorkId: number;
   /** W21 — the job page this card group is mounted on, so the series
    *  day list can render THIS day as text instead of a self-link. */
   currentTicketId?: number;
+  /** W22 — called after a write that the ticket page may want to
+   *  re-read for (the cancel; the ticket itself is NOT auto-cancelled,
+   *  but its convert/origin affordances read the EW state). */
+  onChanged?: () => void;
 }) {
   const { t } = useTranslation(["ticket_detail", "extra_work"]);
   const { push: pushToast } = useToast();
@@ -71,6 +78,20 @@ export function TicketExtraWorkCards({
   const [approvedProposalDetail, setApprovedProposalDetail] =
     useState<ProposalDetail | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  // W22 §1 — the billing-month editor, rebuilt from the request page
+  // (the redirect closed that page for providers, and the month was
+  // one of the three facts that lived only there). `null` draft means
+  // "showing the stored value"; "" means the operator cleared it, which
+  // PATCHes invoice_date null = follows the completion month.
+  const [billingDraft, setBillingDraft] = useState<string | null>(null);
+  const [billingBusy, setBillingBusy] = useState(false);
+  // W22 §2 — cancel modal state. The server refuses IN_PROGRESS ->
+  // CANCELLED without an override_reason (400 override_reason_required),
+  // so the modal collects it and shows the server's refusal in place.
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -170,8 +191,48 @@ export function TicketExtraWorkCards({
   // the approved proposal's agreed lines, and the day-by-day spawned
   // tickets ordered the way the redirect orders them (scheduled date,
   // undated last, id as tiebreak).
-  const agreedLines =
-    approvedProposalDetail?.lines.filter((l) => l.is_approved_for_spawn) ?? [];
+  // W22 §3a — the Agreed table follows the SAME precedence walk the
+  // money totals follow (approved proposal > INSTANT cart > legacy
+  // pricing rows), so "Agreed" can never name a different set than the
+  // amounts under it. Proposal and legacy lines carry their own
+  // computed totals; a cart line's agreed amount is its contract unit
+  // price × quantity, and a NEEDS_PROPOSAL cart line has no price yet
+  // — an em dash, never a zero (zero is a legal price).
+  const agreedRows: {
+    id: number;
+    label: string;
+    quantity: string;
+    amount: number | null;
+  }[] = approvedProposal
+    ? (approvedProposalDetail?.lines ?? [])
+        .filter((line) => line.is_approved_for_spawn)
+        .map((line) => ({
+          id: line.id,
+          label: line.service_name ?? line.description,
+          quantity: line.quantity,
+          amount: Number.parseFloat(line.line_total),
+        }))
+    : ew.routing_decision === "INSTANT"
+      ? ew.line_items.map((line) => ({
+          id: line.id,
+          label: line.service_name || line.custom_description,
+          quantity: line.quantity,
+          amount:
+            line.contract_unit_price != null
+              ? Number.parseFloat(line.contract_unit_price) *
+                Number.parseFloat(line.quantity)
+              : null,
+        }))
+      : ew.pricing_line_items.map((line) => ({
+          id: line.id,
+          label: line.description,
+          quantity: line.quantity,
+          amount: Number.parseFloat(line.total),
+        }));
+  // W22 §3b — nothing asks twice: the Requested table exists to show
+  // what the customer asked BEFORE a proposal re-priced it. With no
+  // approved proposal, Agreed IS the requested cart — one table.
+  const showRequested = approvedProposal !== null && ew.line_items.length > 0;
   const sortedSpawned = [...ew.spawned_tickets].sort((a, b) => {
     const ad = a.scheduled_start_at ?? "9999-12-31T23:59:59Z";
     const bd = b.scheduled_start_at ?? "9999-12-31T23:59:59Z";
@@ -179,10 +240,15 @@ export function TicketExtraWorkCards({
     return a.id - b.id;
   });
   const hasAgreement =
-    ew.line_items.length > 0 ||
-    agreedLines.length > 0 ||
+    showRequested ||
+    agreedRows.length > 0 ||
     (approvedProposalId !== null && canViewProposalPdf) ||
     isSeries;
+  // W22 §2 — rule 6: the action renders only when the server's own list
+  // says this viewer may drive it. `allowed_next_statuses` is computed
+  // per-user through `_user_can_drive_transition`, so status, role and
+  // scope are one server-derived fact, not three client guesses.
+  const canCancel = ew.allowed_next_statuses.includes("CANCELLED");
 
   async function handleDownloadPdf() {
     if (approvedProposalId === null) return;
@@ -204,6 +270,62 @@ export function TicketExtraWorkCards({
     }
   }
 
+  const storedBillingMonth = ew.invoice_date ? ew.invoice_date.slice(0, 7) : "";
+  const billingValue = billingDraft ?? storedBillingMonth;
+
+  async function saveBillingMonth() {
+    if (!ew || billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const updated = await updateExtraWorkBilling(ew.id, {
+        invoice_date: billingValue === "" ? null : `${billingValue}-01`,
+      });
+      setEw(updated);
+      setBillingDraft(null);
+      // Rule 4 — the answer states the month the SERVER stored, not the
+      // one that was typed; a server that stored something else must
+      // not be reported as success.
+      pushToast({
+        variant: "success",
+        title: updated.invoice_date
+          ? t("ew_billing_saved", { month: updated.invoice_date.slice(0, 7) })
+          : t("ew_billing_cleared"),
+      });
+    } catch (err) {
+      pushToast({ variant: "error", title: getApiError(err) });
+    } finally {
+      setBillingBusy(false);
+    }
+  }
+
+  async function handleConfirmCancel() {
+    if (!ew || cancelBusy) return;
+    const reason = cancelReason.trim();
+    if (reason === "") return;
+    setCancelBusy(true);
+    setCancelError("");
+    try {
+      // `override_reason` satisfies the IN_PROGRESS gate (the server
+      // coerces is_override there); `note` lands the same words on the
+      // history row for the pre-spawn statuses where no override is in
+      // play — the reason is recorded whichever pair this is.
+      const updated = await transitionExtraWork(ew.id, {
+        to_status: "CANCELLED",
+        override_reason: reason,
+        note: reason,
+      });
+      setEw(updated);
+      setCancelOpen(false);
+      setCancelReason("");
+      pushToast({ variant: "success", title: t("ew_cancel_done") });
+      onChanged?.();
+    } catch (err) {
+      setCancelError(getApiError(err));
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+
   return (
     <>
     <div className="card" data-testid="ticket-extra-work-money">
@@ -220,6 +342,22 @@ export function TicketExtraWorkCards({
             ewId={ew.id}
             hourlyLines={activeHourlyLines}
             finalTotalAmount={ew.final_total_amount}
+            // W22 §4 — the save answers with the card's own facts: the
+            // hours just written, the total they produced (rowAmounts,
+            // the ONE rule, over the refreshed detail) and the month it
+            // bills in. No new fetch — everything is in the response.
+            successMessage={(detail, hoursSaved) =>
+              detail.invoice_date
+                ? t("ew_hours_saved", {
+                    hours: formatNumber(hoursSaved),
+                    total: formatMoney(rowAmounts(detail).total),
+                    month: detail.invoice_date.slice(0, 7),
+                  })
+                : t("ew_hours_saved_no_month", {
+                    hours: formatNumber(hoursSaved),
+                    total: formatMoney(rowAmounts(detail).total),
+                  })
+            }
             locked={finalAmountLocked}
             onUpdated={(detail) => {
               setEw(detail);
@@ -279,13 +417,33 @@ export function TicketExtraWorkCards({
             <span className="detail-kv-label">
               {t("ew_card_billing_month")}
             </span>
+            {/* W22 §1 — the value IS the control (the request page's
+                editor, rebuilt here since the redirect closed that page
+                for providers). Empty + save = follows the completion
+                month again (invoice_date null). */}
             <span
               className="detail-kv-val"
               data-testid="ticket-ew-billing-month"
+              style={{ display: "flex", gap: 8, alignItems: "center" }}
             >
-              {ew.invoice_date
-                ? ew.invoice_date.slice(0, 7)
-                : t("extra_work:detail.billing_follows_completion")}
+              <input
+                type="month"
+                className="field-input"
+                style={{ minWidth: 0, flex: 1 }}
+                value={billingValue}
+                onChange={(event) => setBillingDraft(event.target.value)}
+                aria-label={t("extra_work:detail.billing_month_input_label")}
+                data-testid="ticket-ew-billing-month-input"
+              />
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={billingBusy || billingValue === storedBillingMonth}
+                onClick={() => void saveBillingMonth()}
+                data-testid="ticket-ew-billing-save"
+              >
+                {t("extra_work:detail.billing_save")}
+              </button>
             </span>
           </div>
           <div className="detail-kv-row">
@@ -299,6 +457,23 @@ export function TicketExtraWorkCards({
             </span>
           </div>
         </div>
+        {/* W22 §2 — the cancel, home from the closed request page. A
+            secondary action, rendered only when `allowed_next_statuses`
+            offers CANCELLED to THIS viewer (rule 6). */}
+        {canCancel && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ alignSelf: "flex-start" }}
+            onClick={() => {
+              setCancelError("");
+              setCancelOpen(true);
+            }}
+            data-testid="ticket-ew-cancel-button"
+          >
+            {t("ew_cancel_action")}
+          </button>
+        )}
       </div>
     </div>
     {/* W21 — THE AGREEMENT CARD. What was asked, what was agreed, the
@@ -315,7 +490,10 @@ export function TicketExtraWorkCards({
         testId="side-card-agreement"
       >
         <div style={{ padding: "14px 18px 16px" }}>
-          {ew.line_items.length > 0 && (
+          {/* W22 §3b — Requested renders only when a proposal re-priced
+              the ask; with no proposal, Agreed IS the requested cart
+              and nothing asks twice (rule 8). */}
+          {showRequested && (
             <>
               <div className="detail-kv-label">
                 {t("ew_agreement_requested")}
@@ -337,9 +515,12 @@ export function TicketExtraWorkCards({
               </table>
             </>
           )}
-          {agreedLines.length > 0 && (
+          {agreedRows.length > 0 && (
             <>
-              <div className="detail-kv-label" style={{ marginTop: 12 }}>
+              <div
+                className="detail-kv-label"
+                style={showRequested ? { marginTop: 12 } : undefined}
+              >
                 {t("ew_agreement_agreed")}
               </div>
               <table
@@ -347,14 +528,14 @@ export function TicketExtraWorkCards({
                 data-testid="ticket-ew-agreed-lines"
               >
                 <tbody>
-                  {agreedLines.map((line) => (
-                    <tr key={line.id}>
-                      <td>{line.service_name ?? line.description}</td>
+                  {agreedRows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.label}</td>
                       <td style={{ textAlign: "right" }}>
-                        {formatNumber(line.quantity)}
+                        {formatNumber(row.quantity)}
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        {formatMoney(line.line_total)}
+                        {row.amount !== null ? formatMoney(row.amount) : "—"}
                       </td>
                     </tr>
                   ))}
@@ -420,6 +601,77 @@ export function TicketExtraWorkCards({
           )}
         </div>
       </CollapsibleCard>
+    )}
+    {/* W22 §2 — the cancel modal. The reason is the server's own
+        requirement (400 override_reason_required on in-flight work), so
+        the confirm stays disabled until one is written and the server's
+        refusal renders inside the modal. The warning states the one
+        thing the press does NOT do: this ticket is not auto-cancelled.
+        Same overlay classes as RejectReasonDialog — no new CSS. */}
+    {cancelOpen && (
+      <div
+        className="reject-modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        data-testid="ticket-ew-cancel-modal"
+      >
+        <div className="reject-modal">
+          <h3 className="reject-modal-title">
+            {t("extra_work:detail.cancel_dialog_title")}
+          </h3>
+          <p className="reject-modal-desc">
+            {t("extra_work:detail.cancel_dialog_spawned_warning_desc")}
+          </p>
+          {cancelError && (
+            <div
+              className="alert-error"
+              role="alert"
+              data-testid="ticket-ew-cancel-error"
+            >
+              {cancelError}
+            </div>
+          )}
+          <label
+            className="field-label"
+            htmlFor="ticket-ew-cancel-reason"
+          >
+            {t("ew_cancel_reason_label")}
+          </label>
+          <textarea
+            id="ticket-ew-cancel-reason"
+            className="field-textarea reject-modal-textarea"
+            rows={4}
+            value={cancelReason}
+            onChange={(event) => setCancelReason(event.target.value)}
+            data-testid="ticket-ew-cancel-reason"
+            autoFocus
+          />
+          <div className="reject-modal-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setCancelOpen(false);
+                setCancelReason("");
+                setCancelError("");
+              }}
+              disabled={cancelBusy}
+              data-testid="ticket-ew-cancel-keep"
+            >
+              {t("extra_work:detail.cancel_dialog_keep")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger btn-sm"
+              onClick={() => void handleConfirmCancel()}
+              disabled={cancelBusy || cancelReason.trim() === ""}
+              data-testid="ticket-ew-cancel-confirm"
+            >
+              {t("extra_work:detail.cancel_dialog_confirm")}
+            </button>
+          </div>
+        </div>
+      </div>
     )}
     </>
   );

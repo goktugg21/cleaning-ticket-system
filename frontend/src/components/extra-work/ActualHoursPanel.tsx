@@ -68,6 +68,7 @@ export function ActualHoursPanel({
   locked,
   onUpdated,
   variant = "card",
+  successMessage,
 }: {
   ewId: number;
   hourlyLines: ActualHoursLine[];
@@ -79,6 +80,14 @@ export function ActualHoursPanel({
   locked: boolean;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
   variant?: "card" | "embedded";
+  /** W22 §4 — rule 4: the save answers. When set, the success toast is
+   *  this sentence, composed by the caller from the REFRESHED detail
+   *  and the hours just written (their sum is handed over so no caller
+   *  re-derives it from stale props). Absent, the generic "saved". */
+  successMessage?: (
+    detail: ExtraWorkRequestDetail,
+    hoursSaved: number,
+  ) => string;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
@@ -107,9 +116,15 @@ export function ActualHoursPanel({
     try {
       const detail = await submitActualHours(ewId, lines);
       onUpdated(detail);
+      const hoursSaved = lines.reduce(
+        (sum, entry) => sum + (Number.parseFloat(entry.actual_hours) || 0),
+        0,
+      );
       pushToast({
         variant: "success",
-        title: t("detail.actual_hours_saved"),
+        title: successMessage
+          ? successMessage(detail, hoursSaved)
+          : t("detail.actual_hours_saved"),
       });
     } catch (err) {
       const code = actualHoursErrorCode(err);

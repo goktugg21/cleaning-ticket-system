@@ -333,5 +333,12 @@
   "ew_agreement_title": "Afspraken",
   "ew_agreement_requested": "Aangevraagd",
   "ew_agreement_agreed": "Afgesproken prijs",
-  "ew_agreement_days": "Dagen"
+  "ew_agreement_days": "Dagen",
+  "ew_billing_saved": "Wordt gefactureerd in {{month}}.",
+  "ew_billing_cleared": "Volgt weer de maand van afronden.",
+  "ew_cancel_action": "Extra werk annuleren",
+  "ew_cancel_reason_label": "Reden (verplicht)",
+  "ew_cancel_done": "Extra werk geannuleerd. Deze melding blijft zoals hij is.",
+  "ew_hours_saved": "{{hours}} uur opgeslagen — nieuw totaal {{total}}, gefactureerd in {{month}}.",
+  "ew_hours_saved_no_month": "{{hours}} uur opgeslagen — nieuw totaal {{total}}, gefactureerd in de maand van afronden."
 }

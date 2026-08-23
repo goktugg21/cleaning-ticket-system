@@ -2248,6 +2248,21 @@ export function TicketDetailPage() {
         : 0,
   );
 
+  // W22 §5 — the spawn paths append a raw per-line echo to the ticket
+  // description ("<label> × <qty>", `proposal_tickets._line_label`).
+  // The Agreement card owns the lines now (rule 7), so the header shows
+  // the human half of the description and drops the machine lines. The
+  // customer-visible explanations the spawn also appends do not match
+  // the pattern and stay. Non-EW tickets render their description
+  // untouched.
+  const headerDescription = ticket.extra_work_origin
+    ? ticket.description
+        .split("\n")
+        .filter((line) => !/^.+ × \d+([.,]\d+)?$/.test(line.trim()))
+        .join("\n")
+        .trim()
+    : ticket.description;
+
   return (
     <div>
       <div className="detail-header">
@@ -2353,7 +2368,9 @@ export function TicketDetailPage() {
           </span>
         </div>
         <h1 className="detail-header-title">{ticket.title}</h1>
-        <p className="detail-header-desc">{ticket.description}</p>
+        {headerDescription && (
+          <p className="detail-header-desc">{headerDescription}</p>
+        )}
         {/* Sprint 28 Batch 15.4 — spawned-from-EW anchor. Renders only
             when the backend includes `extra_work_origin` (non-null
             for tickets created by an ExtraWorkRequest line). Mirrors
@@ -2364,7 +2381,12 @@ export function TicketDetailPage() {
             provider the request page no longer exists once work is
             spawned, and everything it held lives in the Agreement and
             Extra work cards on THIS page. The origin is a fact, so it
-            stays — as text. */}
+            stays — as text.
+            W22 §5 — the title is gone too: a spawned ticket carries its
+            parent's title as its OWN heading two lines up, and a line
+            that repeats the h1 verbatim says nothing (rule 8). The
+            label and the route badge are the two facts the heading does
+            not already state. */}
         {ticket.extra_work_origin && (
           <div
             className="ticket-extra-work-origin"
@@ -2374,7 +2396,6 @@ export function TicketDetailPage() {
             <span className="muted small">
               {t("detail.spawned_from_label")}
             </span>{" "}
-            <span>{ticket.extra_work_origin.extra_work_request_title}</span>{" "}
             <RouteBadge value={ticket.extra_work_origin.origin} />
           </div>
         )}
@@ -4409,6 +4430,9 @@ export function TicketDetailPage() {
                 key={ticket.extra_work_origin.extra_work_request_id}
                 extraWorkId={ticket.extra_work_origin.extra_work_request_id}
                 currentTicketId={ticket.id}
+                onChanged={() => {
+                  void loadTicket();
+                }}
               />
             )}
 
