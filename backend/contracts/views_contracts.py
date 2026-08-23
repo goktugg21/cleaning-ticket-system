@@ -167,7 +167,7 @@ def contract_list_context(contracts, request):
             ContractRevision.objects.filter(id__in=list(resolved.values()))
         )
         .select_related("contract")
-        .prefetch_related("lines__building")
+        .prefetch_related("lines__building", "lines__department")
     )
     by_id = {revision.id: revision for revision in revisions}
     return {

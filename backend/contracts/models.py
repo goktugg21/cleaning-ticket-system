@@ -704,6 +704,45 @@ class ContractLine(models.Model):
         ),
     )
 
+    # W20 — the three planning fields the reference system's contract
+    # lines carry and ours lacked. All additive; none of them is money.
+    frequency_per_year = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "How many times per YEAR this line's work is performed "
+            "(the reference system's `frequency`). NULL means the line "
+            "is not planned by count. The 52-week planning grid of a "
+            "later sprint buckets on exactly this number — it is a "
+            "COUNT of performances, never a divisor or multiplier for "
+            "`amount`, which stays per billing period."
+        ),
+    )
+    norm = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text=(
+            "The operator's norm / spec note for this line, e.g. "
+            "'180 m2/uur'. Free text; nothing computes from it."
+        ),
+    )
+    department = models.ForeignKey(
+        "customers.Department",
+        on_delete=models.SET_NULL,
+        related_name="contract_lines",
+        null=True,
+        blank=True,
+        help_text=(
+            "Optional: which of the CUSTOMER'S department labels this "
+            "line serves (the per-customer list Extra Work already "
+            "uses). The serializer rejects a department of any other "
+            "customer — a cross-customer label on a contract line is a "
+            "tenant-scoping violation. SET_NULL: deleting a label must "
+            "not take agreed scope lines with it."
+        ),
+    )
+
     # Money shape MIRRORS `extra_work.ProposalLine` / `invoicing.
     # InvoiceLine` (amount + vat_pct at the same precision) so the
     # eventual contract invoice line is a COPY, not a conversion.

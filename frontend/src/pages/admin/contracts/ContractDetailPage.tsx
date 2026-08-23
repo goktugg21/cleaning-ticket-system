@@ -18,6 +18,8 @@ import type {
   ContractRevision,
   ContractStatus,
 } from "../../../api/contracts.types";
+import { listLabels } from "../../../api/customerLabels";
+import type { CustomerLabel } from "../../../api/types";
 import { BoundedList } from "../../../components/BoundedList";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
@@ -37,6 +39,19 @@ import {
 } from "./contractTables";
 
 type Tab = "general" | "projects" | "billing" | "revisions";
+
+/** W20 — `kind` and the three line planning fields are served by the
+ *  backend but `api/contracts.types.ts` belongs to another agent this
+ *  round, so the shapes are narrowed here (the Sprint 183 FacturenPage
+ *  precedent). Optional throughout: a server that predates them still
+ *  renders. */
+type ContractWithKind = Contract & { kind?: string };
+type PlannedLine = ContractLine & {
+  frequency_per_year?: number | null;
+  norm?: string;
+  department?: number | null;
+  department_name?: string | null;
+};
 
 const TABS: Tab[] = ["general", "projects", "billing", "revisions"];
 
@@ -75,7 +90,7 @@ export function ContractDetailPage() {
   // "who may change commercial terms" is the drift CLAUDE.md warns about.
   const canManage = canManageContracts(me?.role);
 
-  const [contract, setContract] = useState<Contract | null>(null);
+  const [contract, setContract] = useState<ContractWithKind | null>(null);
   const [revisions, setRevisions] = useState<ContractRevision[]>([]);
   const [tab, setTab] = useState<Tab>("general");
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
@@ -117,6 +132,33 @@ export function ContractDetailPage() {
   }, [id, requestKey]);
 
   const reload = () => setReloadToken((current) => current + 1);
+
+  // W20 — an EXTRA_WORK register's lines are PROJECTED from chargeable
+  // jobs by the server's sync; the planning fields are authored on
+  // STANDARD contracts only, so a register shows neither the columns
+  // nor the inputs.
+  const isRegister = contract?.kind === "EXTRA_WORK";
+
+  // W20 — the customer's OWN department labels, for the line editor's
+  // dropdown. Loaded per customer; on any failure the list stays empty
+  // and the dropdown is simply absent, which is also the deliberate
+  // rendering for a customer that has no departments at all.
+  const customerIdForLabels = contract?.customer;
+  const [departments, setDepartments] = useState<CustomerLabel[]>([]);
+  useEffect(() => {
+    if (customerIdForLabels === undefined || isRegister) return;
+    let cancelled = false;
+    listLabels(customerIdForLabels, "department", { is_active: true })
+      .then((rows) => {
+        if (!cancelled) setDepartments(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setDepartments([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerIdForLabels, isRegister]);
 
   /**
    * W16 — draft -> active, and the page SAYS SO.
@@ -521,6 +563,17 @@ export function ContractDetailPage() {
                 <tr>
                   <th>{t("projects.name")}</th>
                   <th>{t("projects.building")}</th>
+                  {/* W20 — the planning trio, absent on a register:
+                      register lines are projected, not authored. */}
+                  {!isRegister && (
+                    <>
+                      <th>{t("projects.department")}</th>
+                      <th className="contract-num">
+                        {t("projects.frequencyPerYear")}
+                      </th>
+                      <th>{t("projects.norm")}</th>
+                    </>
+                  )}
                   <th className="contract-num">{t("projects.hours")}</th>
                   <th className="contract-num">{t("projects.area")}</th>
                   <th className="contract-num">{t("projects.amount")}</th>
@@ -539,7 +592,10 @@ export function ContractDetailPage() {
                       className="contract-group-row"
                       data-testid={`contract-line-group-${group.key}`}
                     >
-                      <td colSpan={2}>
+                      {/* The label spans the planning columns too, so
+                          the group's hours stay under the hours
+                          column. */}
+                      <td colSpan={isRegister ? 2 : 5}>
                         <strong>{group.label}</strong>
                         <span className="muted small" style={{ marginLeft: 8 }}>
                           {t("projects.groupCount", { count: group.count })}
@@ -559,6 +615,15 @@ export function ContractDetailPage() {
                   <tr key={line.id}>
                     <td>{line.name}</td>
                     <td>{line.building_name ?? "—"}</td>
+                    {!isRegister && (
+                      <>
+                        <td>{(line as PlannedLine).department_name ?? "—"}</td>
+                        <td className="contract-num">
+                          {(line as PlannedLine).frequency_per_year ?? "—"}
+                        </td>
+                        <td>{(line as PlannedLine).norm || "—"}</td>
+                      </>
+                    )}
                     <td className="contract-num">{formatNumber(line.hours, locale)}</td>
                     <td className="contract-num">
                       {line.area_m2 ? formatNumber(line.area_m2, locale) : "—"}
@@ -586,7 +651,7 @@ export function ContractDetailPage() {
                 ))}
                 {lines.length === 0 && (
                   <tr data-testid="contract-projects-empty">
-                    <td colSpan={7} className="muted">
+                    <td colSpan={isRegister ? 7 : 10} className="muted">
                       {/* Sprint 172 §2 — a contract with no lines shows
                           zeros everywhere, and nothing said WHY. Every
                           figure on this contract is computed from these
@@ -603,7 +668,7 @@ export function ContractDetailPage() {
                     className="contract-grand-total"
                     data-testid="contract-lines-total"
                   >
-                    <td colSpan={2}>
+                    <td colSpan={isRegister ? 2 : 5}>
                       <strong>{t("projects.totalPerMonth")}</strong>
                     </td>
                     <td className="contract-num">
@@ -625,6 +690,8 @@ export function ContractDetailPage() {
             <AddLineForm
               revisionId={editableRevision.id}
               buildings={contract?.buildings ?? []}
+              departments={isRegister ? [] : departments}
+              showPlanning={!isRegister}
               onAdded={reload}
               onError={(message) => setError(message)}
             />
@@ -869,11 +936,19 @@ function Field({
 function AddLineForm({
   revisionId,
   buildings,
+  departments,
+  showPlanning,
   onAdded,
   onError,
 }: {
   revisionId: number;
   buildings: { id: number; name: string }[];
+  /** W20 — the contract's customer's OWN department labels. An empty
+   *  list renders NO dropdown at all (absent, not empty): a customer
+   *  without departments does not get an inapplicable control. */
+  departments: CustomerLabel[];
+  /** False on an EXTRA_WORK register, whose lines are projected. */
+  showPlanning: boolean;
   onAdded: () => void;
   onError: (message: string) => void;
 }) {
@@ -883,24 +958,45 @@ function AddLineForm({
   const [amount, setAmount] = useState("0.00");
   const [area, setArea] = useState("");
   const [building, setBuilding] = useState<number | "">("");
+  const [frequency, setFrequency] = useState("");
+  const [norm, setNorm] = useState("");
+  const [department, setDepartment] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      await createContractLine(revisionId, {
+      // W20 — the three planning fields. `frequency_per_year` is a
+      // COUNT per year (the later 52-week grid buckets on it), never
+      // money. The payload type lives in `api/contracts.types.ts`,
+      // another agent's file this round — hence the local widening.
+      const payload: Parameters<typeof createContractLine>[1] & {
+        frequency_per_year?: number | null;
+        norm?: string;
+        department?: number | null;
+      } = {
         name: name.trim(),
         hours,
         amount,
         area_m2: area || null,
         building: building === "" ? null : building,
-      });
+      };
+      if (showPlanning) {
+        payload.frequency_per_year =
+          frequency === "" ? null : Number(frequency);
+        payload.norm = norm.trim();
+        payload.department = department === "" ? null : department;
+      }
+      await createContractLine(revisionId, payload);
       setName("");
       setHours("0.00");
       setAmount("0.00");
       setArea("");
       setBuilding("");
+      setFrequency("");
+      setNorm("");
+      setDepartment("");
       onAdded();
     } catch (err) {
       onError(getApiError(err));
@@ -956,6 +1052,51 @@ function AddLineForm({
         onChange={(event) => setArea(event.target.value)}
         data-testid="contract-line-area"
       />
+      {showPlanning && (
+        <>
+          {departments.length > 0 && (
+            <select
+              className="field-input"
+              aria-label={t("projects.department")}
+              value={department}
+              onChange={(event) =>
+                setDepartment(
+                  event.target.value === ""
+                    ? ""
+                    : Number(event.target.value),
+                )
+              }
+              data-testid="contract-line-department"
+            >
+              <option value="">{t("projects.noDepartment")}</option>
+              {departments.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <input
+            className="field-input"
+            type="number"
+            min="0"
+            step="1"
+            aria-label={t("projects.frequencyPerYear")}
+            placeholder={t("projects.frequencyPerYear")}
+            value={frequency}
+            onChange={(event) => setFrequency(event.target.value)}
+            data-testid="contract-line-frequency"
+          />
+          <input
+            className="field-input"
+            aria-label={t("projects.norm")}
+            placeholder={t("projects.norm")}
+            value={norm}
+            onChange={(event) => setNorm(event.target.value)}
+            data-testid="contract-line-norm"
+          />
+        </>
+      )}
       <input
         className="field-input"
         type="number"

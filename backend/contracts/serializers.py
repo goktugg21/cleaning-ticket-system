@@ -54,6 +54,9 @@ from .scope import (
 # mapping; do not reword without changing both.
 ERR_CONTRACT_TYPE_NAME_NOT_UNIQUE = "contract_type_name_not_unique"
 ERR_BUILDING_CROSS_COMPANY = "building_cross_company"
+# W20 — a contract line naming a department of ANOTHER customer is a
+# tenant-scoping violation, not a validation nicety.
+ERR_DEPARTMENT_CROSS_CUSTOMER = "department_cross_customer"
 ERR_CUSTOMER_CROSS_COMPANY = "customer_cross_company"
 ERR_CONTRACT_TYPE_CROSS_COMPANY = "contract_type_cross_company"
 ERR_REVISION_LOCKED = "revision_locked"
@@ -131,6 +134,9 @@ class ContractLineSerializer(serializers.ModelSerializer):
     extra_work_no = serializers.IntegerField(
         source="extra_work.id", read_only=True, default=None
     )
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, default=None
+    )
 
     class Meta:
         model = ContractLine
@@ -143,6 +149,14 @@ class ContractLineSerializer(serializers.ModelSerializer):
             "sort_order",
             "hours",
             "area_m2",
+            # W20 — the three planning fields. `frequency_per_year` is a
+            # count of performances per year, never money; `norm` is the
+            # operator's spec note; `department` must belong to the
+            # contract's OWN customer (validate_department).
+            "frequency_per_year",
+            "norm",
+            "department",
+            "department_name",
             "amount",
             "vat_pct",
             # W16 — the chargeable job this line MIRRORS, on an extra
@@ -154,8 +168,10 @@ class ContractLineSerializer(serializers.ModelSerializer):
             "extra_work",
             "extra_work_no",
         ]
-        read_only_fields = ["extra_work"]
-        read_only_fields = ["id", "revision"]
+        # W20 — one list. This used to be TWO assignments, and the
+        # second silently replaced the first, which left `extra_work`
+        # writable despite the comment above saying it must not be.
+        read_only_fields = ["id", "revision", "extra_work"]
 
     def validate_name(self, value):
         cleaned = (value or "").strip()
@@ -188,6 +204,29 @@ class ContractLineSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_department(self, value):
+        """W20 — the department must be the contract's OWN customer's.
+
+        `Department` is a per-customer label list; a line naming
+        another customer's label would leak one tenant's vocabulary
+        into another's agreed scope (H-1/H-2 territory). Same
+        revision-resolution shape as `validate_building` above, so the
+        two guards cannot drift apart.
+        """
+        if value is None:
+            return value
+        revision = self.context.get("revision")
+        if revision is None and self.instance is not None:
+            revision = self.instance.revision
+        if revision is None:
+            return value
+        if value.customer_id != revision.contract.customer_id:
+            raise serializers.ValidationError(
+                "This department belongs to another customer.",
+                code=ERR_DEPARTMENT_CROSS_CUSTOMER,
+            )
+        return value
+
 
 class ContractLineNestedSerializer(serializers.ModelSerializer):
     """Read-only projection of a line for the contract list / detail
@@ -197,6 +236,9 @@ class ContractLineNestedSerializer(serializers.ModelSerializer):
 
     building_name = serializers.CharField(
         source="building.name", read_only=True, default=None
+    )
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, default=None
     )
 
     class Meta:
@@ -209,6 +251,12 @@ class ContractLineNestedSerializer(serializers.ModelSerializer):
             "sort_order",
             "hours",
             "area_m2",
+            # W20 — mirrored from the write serializer so the detail
+            # page's `projects` payload can render what was entered.
+            "frequency_per_year",
+            "norm",
+            "department",
+            "department_name",
             "amount",
             "vat_pct",
         ]
@@ -321,6 +369,15 @@ class ContractSerializer(serializers.ModelSerializer):
     )
     contract_no = serializers.CharField(read_only=True)
     status = serializers.SerializerMethodField()
+    # W20 — READ-ONLY, and a METHOD field rather than the model field:
+    # `Contract` carries a partial UniqueConstraint conditioned on
+    # `kind` (one EXTRA_WORK register per customer), and DRF
+    # auto-attaches a validator for any constraint whose fields all
+    # appear as serializer sources — a validator that then KeyErrors on
+    # every write because a read-only `kind` never reaches `attrs`. A
+    # method field's source is '*', so the constraint stays out of the
+    # write path exactly as it was before `kind` was exposed.
+    kind = serializers.SerializerMethodField()
 
     building_ids = serializers.PrimaryKeyRelatedField(
         many=True,
@@ -361,6 +418,13 @@ class ContractSerializer(serializers.ModelSerializer):
             "contract_type_name",
             "contract_type_standard_slot",
             "contract_no",
+            # W20 — the frontend needs to know an EXTRA_WORK register
+            # from a STANDARD contract to hide the planning fields on
+            # register lines (they are projected, not authored). Never
+            # client-writable: registers are created only by
+            # `extra_work_register.get_or_create_register`. See the
+            # method-field declaration for why it is one.
+            "kind",
             "start_date",
             "end_date",
             "lifecycle",
@@ -432,6 +496,9 @@ class ContractSerializer(serializers.ModelSerializer):
 
     def get_status(self, obj) -> str:
         return obj.status()
+
+    def get_kind(self, obj) -> str:
+        return obj.kind
 
     def get_buildings(self, obj):
         # `.all()` with NO further queryset methods on purpose: the view
