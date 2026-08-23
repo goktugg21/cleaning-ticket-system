@@ -150,6 +150,115 @@ separately with time slots?"**
 
 Backend unchanged. Frontend-only; `nl`/`en` in lockstep.
 
+### Done — W15: Chargeable work opens the extra work, and the tab is an address
+
+The owner's diagnosis, and he is right: "the problem is that there are
+two different pages for the same job. It would be easier if the Extra
+Work detail and the Chargeable Work page were the same. After Started
+work, opening it from Chargeable work should open the same extra work."
+
+**His own system already works this way, and that settled the design.**
+`docs/reference/osius-reference-system/01-extra-work.md` §1.7: Melding
+and Extra Work are "same table, same model, same controller, same status
+ladder" — ONE record with ONE detail page, reached through two route
+prefixes (`/meldings/{id}` vs `/extra-works/{id}`). That is precisely
+"one record, one page, two ways in". And the deep link his backend emits
+is `/extra-works/{id}?tab=info` — the tab lives IN THE URL.
+
+**1. A chargeable row opens the extra work.** `chargeableTarget()` in
+`DashboardPage` resolves the row's click, its keyboard handler and its
+subject link to `/extra-work/<ewId>`. It fixes BOTH chargeable routes at
+once, because `/tickets/chargeable` and
+`/admin/customers/<id>/chargeable` mount the same component with
+`variant="chargeable-work"`.
+
+Nothing new was built on the detail page: it already had the shape the
+owner asks for — four context blocks that never move (customer/building,
+status, money, what next) and then tabs. Measured after landing there
+from a row click: `["Overview","Money","Hours","People","Messages"]` —
+the money and the operations, on one screen.
+
+**2. STAFF keep the ticket, because they cannot open an extra work.**
+Measured on the dev API, not assumed:
+
+    STAFF GET /api/extra-work/6/
+      -> 404 {"detail":"No ExtraWorkRequest matches the given query."}
+    STAFF GET /api/tickets/?is_extra_work=true
+      -> 200, 5 rows, every one carrying extra_work_origin
+
+`scope_extra_work_for` returns `.none()` for STAFF (the P0
+staff-privacy fix), so the Extra work cell and the origin pill had been
+doors to a hard 404 for that role on every screen they appear on. Rule 6
+says a role that cannot use it does not see it. The pill is now a
+`<span>` for those roles — same words, same colour, no navigation — and
+the predicate is read inside `ExtraWorkOriginPill` rather than by each
+of its four consumers, so a fifth cannot forget it.
+
+**3. No duplicate doors.** The Extra work column was an anchor to the
+same record the row now opens, and the origin pill was a third. The
+column is the extra work's NAME now, and the pill is not rendered on
+Chargeable work at all — on a page where every row is chargeable by
+construction it was a chip with no contrast, and it had become a second
+control to one destination. That is the shape W14 §3 measured logging
+`PUSH /tickets/343` twice, so one press of Back went nowhere.
+
+**4. The tab is part of the address.** `ExtraWorkDetailPage` kept the
+tab in `useState`, so a link could only ever reach Overview, a refresh
+threw away which tab you were reading, and two people could not send
+each other "the same screen". It is `?tab=` now, the same query key the
+reference uses, with `replace: true` so four tabs do not become four
+history entries, and with Overview as the ABSENCE of the parameter so
+every existing `/extra-work/<id>` link stays the canonical address.
+
+**5. Back goes where you came from.** Arriving from Chargeable work, the
+header still said "Back to Extra Work" and went to the wrong list. The
+route that navigated puts its own address in history state; the detail
+reads it, and refuses anything that is not a single-leading-slash
+in-app path.
+
+MEASURED, one browser, one walk, on the built bundle:
+
+    A. SUPER_ADMIN, /tickets/chargeable
+       extra-work cell tag           SPAN   (was A)
+       anchors inside those cells    0
+       row click                     /tickets/chargeable -> /extra-work/6
+       tabs on landing               Overview, Money, Hours, People, Messages
+       header blocks                 "B Amsterdam" / "B1 Amsterdam"
+       back link                     "Back to Chargeable work" -> /tickets/chargeable
+       click Money                   /extra-work/6?tab=money
+       RELOAD                        active tab still Money
+       click Hours                   /extra-work/6?tab=hours
+
+    B. STAFF, /tickets/chargeable
+       origin pill tag               SPAN
+       anchors to /extra-work/       0 anywhere on the page
+       row click                     -> /tickets/12  (stays on the ticket)
+
+**Gate**, measured against a pristine `origin/feat/ew-gap-closing`
+worktree at 51c1184 in the same container: origin is **42 (41 errors, 1
+warning)**; CLAUDE.md still says 44. This branch: typecheck clean,
+`eslint .` **42 (41 errors, 1 warning)**, `npm run build` OK.
+
+**Found, NOT fixed, and outside this chat's file set.** The agenda's
+Work Plan links an undated EW row straight to `/extra-work/<id>`
+(`frontend/src/pages/AgendaPage.tsx:862-871`, the `UndatedRow` `<Link>`
+when `entry.ticket_id === null`). Measured as STAFF on `/agenda`:
+one `a[href="/extra-work/6"]` with the text "[DEMO] Lobby strip and seal
+(29.8.5)" — a hard 404 for that role, the same rule-6 defect as the two
+this sprint closed, in a third place. Left for whoever owns the agenda
+rather than edited across a wave boundary while other chats are in that
+file. My pill fix already removed the OTHER extra-work door on that same
+page.
+
+**Left undone, deliberately.** `nextStep.ts` types its tab action as a
+hand-written union `"overview" | "money" | "hours" | "people"` — a
+second, independently maintained copy of the tab keys, which is the
+drift CLAUDE.md has a rule about. It is assignable to `EwTab` so it is
+correct today. Unifying it means exporting `EW_TABS` out of the page
+file, which its own comment refuses on `react-refresh/only-export-
+components` grounds, so it is a move-the-constant refactor rather than a
+one-line fix. Named here rather than done.
+
 ### Done — W14: the status where the eye lands, and the note that had nowhere to land
 
 Two things the owner reported after reading the live site. One of them

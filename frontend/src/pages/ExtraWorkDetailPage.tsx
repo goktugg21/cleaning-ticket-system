@@ -33,7 +33,12 @@
 // backend's allowed_next_statuses field says.
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   CalendarClock,
   Check,
@@ -1122,7 +1127,68 @@ export function ExtraWorkDetailPage() {
   // M4 (3d) — per-EW billing-month override. billingDraft=null means
   // "show ew's current value"; the input is derived at render (never synced
   // via an effect, to avoid a setState-in-effect violation).
-  const [requestedTab, setTab] = useState<EwTab>("overview");
+  /* W15 §3 — THE TAB IS PART OF THE ADDRESS.
+   *
+   * The owner's rule for this sprint is "one record, one page, two ways
+   * in". A tab kept in component state cannot satisfy it: a link can
+   * only ever reach the default tab, a refresh throws away which tab you
+   * were reading, and Back walks out of the page instead of back one
+   * tab. Two people looking at "the same screen" were not, and neither
+   * could send the other to it.
+   *
+   * The reference system already does this and it is where the owner
+   * pointed: its detail deep link is `/extra-works/{id}?tab=info`
+   * (01-extra-work.md, `updateStatus` FCM payload). Same mechanism, same
+   * query key.
+   *
+   * `replace: true` because a tab is a VIEW of one record, not a
+   * separate destination: without it, reading four tabs would put four
+   * entries in the history and Back would crawl through them. It also
+   * keeps this page out of the double-history trap the ticket table hit
+   * in W14 §3.
+   */
+  /* W15 §1 — BACK GOES WHERE YOU CAME FROM.
+   *
+   * This page is now reached two ways: from the Extra Work list, and
+   * from Chargeable work (either the main one or a customer's). A back
+   * link hardcoded to the Extra Work list is wrong for half of them, and
+   * it is wrong in the way that costs most — it looks like it worked.
+   *
+   * The route that navigated here puts its own address in history state
+   * (`chargeableTarget` in DashboardPage). Read, never trusted for
+   * navigation beyond a same-origin path: anything that is not a string
+   * beginning with a single `/` falls back to the Extra Work list.
+   */
+  const routeLocation = useLocation();
+  const chargeableFrom = (() => {
+    const raw = (routeLocation.state as { chargeableFrom?: unknown } | null)
+      ?.chargeableFrom;
+    if (typeof raw !== "string") return null;
+    // `//host` is a protocol-relative URL, not an in-app path.
+    if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+    return raw;
+  })();
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const requestedTab: EwTab = EW_TABS.some((entry) => entry.key === tabParam)
+    ? (tabParam as EwTab)
+    : "overview";
+  const setTab = (next: EwTab) => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        // The default tab is the ABSENCE of the parameter, so the plain
+        // `/extra-work/<id>` that every existing link uses stays the
+        // canonical address of the page rather than becoming a second
+        // spelling of `?tab=overview`.
+        if (next === "overview") params.delete("tab");
+        else params.set("tab", next);
+        return params;
+      },
+      { replace: true },
+    );
+  };
   const [billingDraft, setBillingDraft] = useState<string | null>(null);
   const [billingSaving, setBillingSaving] = useState(false);
   const [billingError, setBillingError] = useState("");
@@ -2310,7 +2376,11 @@ export function ExtraWorkDetailPage() {
   return (
     <div data-testid="extra-work-detail-page">
       <PageHeader
-        backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
+        backLink={
+          chargeableFrom
+            ? { to: chargeableFrom, label: t("back_to_chargeable_work") }
+            : { to: "/extra-work", label: t("back_to_extra_work") }
+        }
         title={ew.title}
       />
 

@@ -1,6 +1,11 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 // Sprint 180 §3 — `CSSProperties` and `Layers` left with
 // `ExtraWorkOriginPill`; they were only ever used by it.
 import { Plus, RefreshCw } from "lucide-react";
@@ -403,10 +408,60 @@ export function DashboardPage({
   const isChargeableWork = variant === "chargeable-work";
   const isTicketsPage = variant === "tickets-page" || isChargeableWork;
   const navigate = useNavigate();
+  // The ROUTER's location, not the global one: this component is mounted
+  // on two different chargeable routes and the back link has to name the
+  // one the reader is actually on.
+  const routeLocation = useLocation();
   const { me } = useAuth();
   const { push } = useToast();
   const { t } = useTranslation(["dashboard", "common"]);
   const userRole = me?.role ?? null;
+
+  /* W15 §1 — WHERE A CHARGEABLE ROW OPENS.
+   *
+   * The owner: "the problem is that there are two different pages for
+   * the same job. After Started work, opening it from Chargeable work
+   * should open the same extra work."
+   *
+   * He is right, and his own system already works this way: in the
+   * reference, one record has ONE detail page reached by two route
+   * prefixes (`/meldings/{id}` and `/extra-works/{id}` — 01-extra-work
+   * §1.7, "Same table, same model, same controller"). Here the two
+   * doors are the ticket and the extra work, and Chargeable work — a
+   * list of the tickets born from an extra work — sent every click to
+   * the ticket, which is the half of the job WITHOUT the money.
+   *
+   * So a chargeable row opens the extra work: the one screen that
+   * carries the money (pricing, invoice, billing month) AND the
+   * operations (hours, people, schedule) behind its tabs.
+   *
+   * EXCEPT for a role that cannot open one. `scope_extra_work_for`
+   * returns `.none()` for STAFF (the P0 staff-privacy fix), so
+   * `GET /api/extra-work/<id>/` is a hard 404 for them — measured, not
+   * assumed. STAFF keep the ticket, which is the surface that was
+   * always theirs. `canAccessExtraWork` is the SAME predicate the nav
+   * uses, so the door and the sidebar cannot disagree.
+   */
+  const canOpenExtraWork = canAccessExtraWork(userRole);
+  const chargeableTarget = (ticket: TicketList): string => {
+    const ewId = ticket.extra_work_origin?.extra_work_request_id;
+    if (isChargeableWork && canOpenExtraWork && ewId != null) {
+      return `/extra-work/${ewId}`;
+    }
+    return `/tickets/${ticket.id}`;
+  };
+  /* The extra work detail's back link says "Back to Extra Work" and goes
+   * to the Extra Work LIST, which is the wrong list for somebody who
+   * arrived from here. The route this page is actually mounted on is the
+   * only thing that knows the answer — `/tickets/chargeable` and
+   * `/admin/customers/<id>/chargeable` both land on this component — so
+   * it travels with the navigation instead of being guessed at the other
+   * end. Absent for every non-chargeable row, which leaves that link
+   * exactly as it was. */
+  const chargeableBackState = isChargeableWork
+    ? { chargeableFrom: `${routeLocation.pathname}${routeLocation.search}` }
+    : undefined;
+
   // Sprint 182 §2 — ONE word per status, from the source every other
   // screen reads.
   //
@@ -2902,12 +2957,16 @@ export function DashboardPage({
                             ) {
                               return;
                             }
-                            navigate(`/tickets/${ticket.id}`);
+                            navigate(chargeableTarget(ticket), {
+                              state: chargeableBackState,
+                            });
                           }}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
-                              navigate(`/tickets/${ticket.id}`);
+                              navigate(chargeableTarget(ticket), {
+                                state: chargeableBackState,
+                              });
                             }
                           }}
                         >
@@ -2934,7 +2993,25 @@ export function DashboardPage({
                             >
                               {ticket.ticket_no}
                             </Link>
-                            {ticket.extra_work_origin && (
+                            {/* W15 §1 — NOT on Chargeable work, and for
+                                two reasons that point the same way.
+
+                                It SAYS NOTHING there: every row on that
+                                page is chargeable work by construction
+                                (`?is_extra_work=true` is pinned by the
+                                route), so a chip repeating it on all of
+                                them is a label with no contrast.
+
+                                And it is now a SECOND DOOR to where the
+                                row already goes — the exact duplication
+                                the owner's rule 3 forbids, and the shape
+                                that logged `PUSH /tickets/343` twice in
+                                W14 §3. On the ordinary ticket list, where
+                                the row opens the ticket and these rows
+                                are the minority, it stays: there it is
+                                the only way through to the extra work and
+                                it is genuinely telling you something. */}
+                            {!isChargeableWork && ticket.extra_work_origin && (
                               <ExtraWorkOriginPill
                                 ewId={
                                   ticket.extra_work_origin
@@ -2946,7 +3023,17 @@ export function DashboardPage({
                             )}
                           </td>
                           <td className="td-subject">
-                            <Link to={`/tickets/${ticket.id}`}>
+                            {/* W15 §1 — the subject goes WHERE THE ROW
+                                GOES. An anchor inside a clickable row
+                                that lands somewhere else is the row
+                                lying about itself: the pointer says one
+                                destination and the rest of the row does
+                                another. The ticket number beside it is
+                                the labelled door to the ticket. */}
+                            <Link
+                              to={chargeableTarget(ticket)}
+                              state={chargeableBackState}
+                            >
                               {ticket.title}
                             </Link>
                             {userRole === "STAFF" &&
@@ -3007,17 +3094,44 @@ export function DashboardPage({
                           )}
                           {isChargeableWork ? (
                             <>
+                              {/* W15 §1 — the extra work is NAMED here,
+                                  not linked, and both halves of that are
+                                  deliberate.
+
+                                  DO NOT DUPLICATE STATE (the owner's
+                                  rule 3): now that the row itself opens
+                                  the extra work, an anchor in this cell
+                                  is a second control to the same place
+                                  — and this table has already been bitten
+                                  by that exact shape (W14 §3: a link
+                                  inside a clickable row logged
+                                  `PUSH /tickets/343` twice, so one press
+                                  of Back went nowhere).
+
+                                  AND IT WAS A DOOR TO A 404 FOR STAFF.
+                                  Measured on the dev API: STAFF are
+                                  served all 5 chargeable rows, each
+                                  carrying `extra_work_origin`, while
+                                  `GET /api/extra-work/6/` answers them
+                                  `404 {"detail":"No ExtraWorkRequest
+                                  matches the given query."}` — because
+                                  `scope_extra_work_for` returns `.none()`
+                                  for STAFF. Rule 6 says a role that
+                                  cannot use it does not see it; a link
+                                  that always breaks is worse than no
+                                  link. The title stays, because "which
+                                  extra work did this come from" is a
+                                  fact they still need, and it is already
+                                  in the payload they already receive. */}
                               <td>
                                 {ticket.extra_work_origin ? (
-                                  <a
-                                    href={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
-                                    onClick={(event) => event.stopPropagation()}
+                                  <span
                                     data-testid={`chargeable-ew-${ticket.id}`}
                                   >
                                     {ticket.extra_work_origin
                                       .extra_work_request_title ||
                                       `#${ticket.extra_work_origin.extra_work_request_id}`}
-                                  </a>
+                                  </span>
                                 ) : (
                                   <span className="muted-empty">—</span>
                                 )}
@@ -3103,7 +3217,11 @@ export function DashboardPage({
                 >
                   {tickets.map((ticket) => (
                     <li key={ticket.id} className="ticket-card">
-                      {ticket.extra_work_origin && (
+                      {/* W15 §1 — same rule as the table above, and this
+                          mirror is "kept in DOM regardless of viewport",
+                          so leaving it unguarded would put the duplicate
+                          door back on the page invisibly. */}
+                      {!isChargeableWork && ticket.extra_work_origin && (
                         <ExtraWorkOriginPill
                           ewId={
                             ticket.extra_work_origin.extra_work_request_id
