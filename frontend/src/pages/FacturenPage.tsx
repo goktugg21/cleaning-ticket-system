@@ -34,14 +34,13 @@
 //     effect). Leaving it provider-wide would list OTHER customers on
 //     this customer's page, which is the cross-tenant surprise the
 //     customer chips shipped last week.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BadgeEuro } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
-  fetchInvoicePreviewPdf,
   generateInvoices,
   getInvoiceDueList,
   getInvoicePreview,
@@ -63,6 +62,10 @@ import type {
 import { BillingTargetFields } from "../components/BillingTargetFields";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
+import {
+  PdfPreviewDialog,
+  type PdfPreviewDialogHandle,
+} from "../components/PdfPreviewDialog";
 import { useToast } from "../components/ToastProvider";
 import { customerLabelName } from "../lib/customerLabelName";
 import {
@@ -299,6 +302,10 @@ export function FacturenPage({
   const [previewRow, setPreviewRow] = useState<InvoiceDueRow | null>(null);
   const [preview, setPreview] = useState<InvoicePreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  // W17 — the preview DOCUMENT opens in this in-app dialog, download-
+  // less. Rendered unconditionally and driven through the ref (the
+  // Sprint 118/128 native-<dialog> rule).
+  const previewPdfRef = useRef<PdfPreviewDialogHandle>(null);
 
   // Due panel. Sprint 186 §2 — loaded in BOTH modes and narrowed to the
   // pinned customer when there is one.
@@ -479,25 +486,25 @@ export function FacturenPage({
     }
   }
 
-  async function handleDownloadPreview() {
+  function handleViewPreviewPdf() {
+    // W17 — the owner's spec: the preview is something you LOOK AT, in
+    // the app, at that moment, and nothing else. It used to open in a
+    // new browser tab (a tab is a thing you keep) next to a download
+    // button (a file is a thing you file). Now it renders inside the
+    // in-app dialog with no download affordance; the dialog fetches
+    // the blob itself and revokes it on close, so leaving the page
+    // discards the document. Nothing is stored server-side either —
+    // the endpoint plans and renders, never saves.
     if (!previewRow) return;
-    try {
-      const blob = await fetchInvoicePreviewPdf({
-        customer: previewRow.customer,
-        year: previewRow.period_year,
-        month: previewRow.period_month,
-      });
-      // Opened in a tab rather than force-downloaded: the operator is
-      // checking numbers, not filing a document, and the PDF is stamped
-      // PREVIEW on every page so a stray tab cannot be mistaken for an
-      // invoice.
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener");
-      // Revoked on the next tick so the opened tab has taken the blob.
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (err) {
-      setError(getApiError(err));
-    }
+    previewPdfRef.current?.open({
+      url:
+        `/invoices/preview/?customer=${previewRow.customer}` +
+        `&year=${previewRow.period_year}&month=${previewRow.period_month}` +
+        `&download=pdf`,
+      filename: t("facturen.preview_doc_name", {
+        name: previewRow.customer_name,
+      }),
+    });
   }
 
   async function handleGenerate() {
@@ -810,11 +817,11 @@ export function FacturenPage({
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={handleDownloadPreview}
+                onClick={handleViewPreviewPdf}
                 disabled={previewBusy || !preview?.invoice_count}
-                data-testid="facturen-preview-download"
+                data-testid="facturen-preview-view"
               >
-                {t("facturen.preview_download")}
+                {t("facturen.preview_view_pdf")}
               </button>
             </div>
           </div>
@@ -1105,6 +1112,12 @@ export function FacturenPage({
           </table>
         </div>
       )}
+
+      {/* W17 — always mounted, opened through the ref only. A native
+          <dialog> wrapped in a condition is an invisible dialog and a
+          dead trigger button (Sprint 128). No download: the preview is
+          deliberately a document you can only look at. */}
+      <PdfPreviewDialog ref={previewPdfRef} withDownload={false} />
     </div>
   );
 }

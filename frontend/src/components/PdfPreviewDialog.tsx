@@ -21,8 +21,21 @@ export interface PdfPreviewDialogHandle {
   close: () => void;
 }
 
-export const PdfPreviewDialog = forwardRef<PdfPreviewDialogHandle, object>(
-  function PdfPreviewDialog(_props, ref) {
+export interface PdfPreviewDialogProps {
+  /** W17 — the invoice PREVIEW is something you look at, not a file
+   *  you keep: nothing about it is stored anywhere, so handing the
+   *  viewer a Download button would mint exactly the loose document
+   *  the stateless design exists to prevent. `false` drops the button
+   *  and asks the browser's PDF viewer to hide its toolbar too.
+   *  Defaults to true so every existing caller (staff credential
+   *  documents, the documents explorer) keeps its download. */
+  withDownload?: boolean;
+}
+
+export const PdfPreviewDialog = forwardRef<
+  PdfPreviewDialogHandle,
+  PdfPreviewDialogProps
+>(function PdfPreviewDialog({ withDownload = true }, ref) {
     const { t } = useTranslation("staff_credentials");
     const dialogRef = useRef<HTMLDialogElement>(null);
     const blobUrlRef = useRef<string | null>(null);
@@ -120,7 +133,7 @@ export const PdfPreviewDialog = forwardRef<PdfPreviewDialogHandle, object>(
             </span>
           </div>
           <div className="att-preview-head-actions">
-            {blobUrl && target && (
+            {withDownload && blobUrl && target && (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -151,7 +164,11 @@ export const PdfPreviewDialog = forwardRef<PdfPreviewDialogHandle, object>(
           ) : blobUrl ? (
             <iframe
               className="att-preview-frame"
-              src={blobUrl}
+              // `#toolbar=0` asks Chromium's PDF viewer to hide its own
+              // toolbar (which carries a download button); other engines
+              // ignore the fragment. Best-effort — the app-level button
+              // above is the affordance this flag actually removes.
+              src={withDownload ? blobUrl : `${blobUrl}#toolbar=0`}
               title={target?.filename ?? t("preview.title")}
               data-testid="pdf-preview-frame"
             />

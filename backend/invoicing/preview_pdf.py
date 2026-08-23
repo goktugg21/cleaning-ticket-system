@@ -54,10 +54,19 @@ tell whose document they are holding.
 
 WHAT IS STAMPED
 ---------------
-"PREVIEW" on every page, plus the date and time it was computed, plus a
-line saying it is not an invoice. And no number: `PlannedInvoice` has no
-number to render, so there is nothing here that could accidentally print
-one. Numbering happens at Send and must stay gapless.
+Three layers on EVERY page, so no crop or screenshot of any page can
+pass for an invoice (W17 — the owner's spec: the preview is something
+you look at in the app, and nothing else):
+
+  * a large diagonal VOORBEELD watermark behind the content;
+  * a banner across the top: CONCEPT / VOORBEELD — GEEN FACTUUR;
+  * the footer: PREVIEW, no invoice number, plus the moment it was
+    computed.
+
+Page 1 additionally carries the full disclaimer block above the
+numbers. And no number anywhere: `PlannedInvoice` has no number to
+render, so there is nothing here that could accidentally print one.
+Numbering happens at Send and must stay gapless.
 """
 from __future__ import annotations
 
@@ -89,15 +98,63 @@ def _safe(text) -> str:
 
 
 class _PreviewPDF(FPDF):
-    """Stamps PREVIEW on every page.
+    """Stamps every page as a preview, three ways.
 
-    In the footer rather than as a diagonal watermark: a watermark behind
-    the numbers makes them harder to read, and the point of this document
-    is that somebody checks the numbers before the invoice goes out.
+    Sprint 182 put the stamp in the footer INSTEAD of a diagonal
+    watermark, reasoning that a watermark behind the numbers makes them
+    harder to read. W17 re-decided this with the owner's new
+    requirement in hand: it must be IMPOSSIBLE to mistake a screenshot
+    of any part of this document for an invoice, and a footer is
+    exactly what a screenshot crops off. So both, plus a top banner:
+
+      * `header` paints a large diagonal VOORBEELD in a light tint
+        FIRST, so the content prints over it — the numbers stay black
+        on white and readable, the way a bank's own statement
+        watermarks do it;
+      * `header` then draws a solid banner across the top of every
+        page: CONCEPT / VOORBEELD — GEEN FACTUUR;
+      * `footer` keeps the PREVIEW line and the computed-at moment.
     """
 
     computed_at_label = ""
     accent = (0, 0, 0)
+    tint = (240, 240, 240)
+
+    #: The watermark word. One word, as large as the diagonal allows —
+    #: "CONCEPT / VOORBEELD" set this large would not fit, so the
+    #: banner carries the full phrase and the watermark carries the
+    #: unmissable one.
+    _WATERMARK = "VOORBEELD"
+
+    def header(self):
+        # 1 — the watermark, before anything else so everything else
+        # renders on top of it.
+        self.set_font(FONT_FAMILY, "B", 92)
+        self.set_text_color(*self.tint)
+        width = self.get_string_width(self._WATERMARK)
+        center_x, center_y = self.w / 2, self.h / 2
+        with self.rotation(45, center_x, center_y):
+            self.text(center_x - width / 2, center_y, self._WATERMARK)
+
+        # 2 — the banner. All-caps and filled so it survives a
+        # screenshot of just the top of the page.
+        self.set_xy(self.l_margin, 8)
+        self.set_fill_color(*self.tint)
+        self.set_text_color(*self.accent)
+        self.set_font(FONT_FAMILY, "B", 12)
+        self.cell(
+            0,
+            9,
+            _safe("CONCEPT / VOORBEELD — GEEN FACTUUR"),
+            align="C",
+            fill=True,
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+        self.set_text_color(0, 0, 0)
+        # Body content (also on auto-broken pages) starts below the
+        # banner, never under it.
+        self.set_y(self.get_y() + 3)
 
     def footer(self):
         self.set_y(-16)
@@ -137,11 +194,14 @@ def render_preview_pdf(
     register_fonts(pdf)
     pdf.computed_at_label = computed_label
     pdf.accent = accent
+    pdf.tint = tint
     pdf.set_auto_page_break(auto=True, margin=22)
     pdf.add_page()
 
-    y = draw_logo(pdf, company, y=10.0)
-    pdf.set_y(max(y, 26))
+    # W17 — the header banner owns the top of every page now, so the
+    # logo sits below it instead of at the old y=10.
+    y = draw_logo(pdf, company, y=21.0)
+    pdf.set_y(max(y, 37))
 
     pdf.set_font(FONT_FAMILY, "B", 16)
     pdf.set_text_color(*accent)
@@ -162,7 +222,9 @@ def render_preview_pdf(
 
     # The disclaimer sits ABOVE the numbers, not in small print below
     # them: a reader who only looks at the top of the page must still
-    # come away knowing this is not an invoice.
+    # come away knowing this is not an invoice. W17 — spelled out to
+    # the owner's full spec: concept only, computed-moment coverage,
+    # not an invoice, no legal number, cannot replace an invoice.
     pdf.set_fill_color(*tint)
     pdf.set_text_color(*accent)
     pdf.set_font(FONT_FAMILY, "B", 10)
@@ -170,9 +232,12 @@ def render_preview_pdf(
         0,
         6,
         _safe(
-            "Dit is een voorbeeld, geen factuur. Er is niets vastgelegd en "
-            "er is geen factuurnummer toegekend. De werkelijke factuur kan "
-            f"afwijken; berekend op {computed_label}."
+            "Dit is uitsluitend een concept (voorbeeld) — geen factuur. "
+            "Het toont alleen werk dat gereed was op het rekenmoment: "
+            f"{computed_label}. Er is geen wettelijk factuurnummer "
+            "toegekend en er wordt niets vastgelegd of bewaard. Dit "
+            "document kan een factuur niet vervangen; de werkelijke "
+            "factuur kan afwijken."
         ),
         border=0,
         align="L",
