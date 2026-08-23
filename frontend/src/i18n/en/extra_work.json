@@ -670,7 +670,6 @@
     "member_count": "{{count}} work",
     "member_count_other": "{{count}} works",
     "on_this_page": "{{shown}} of {{total}} on this page",
-    "title": "Series",
     "col_condition": "Moment",
     "condition_unset": "Not specified",
     "condition_at": "At handover",

@@ -4077,6 +4077,7 @@ export function TicketDetailPage() {
                   autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
                   canSetAutoCompleteFlag={isProviderAdmin(me?.role)}
                   ticketStatus={ticket.status}
+                  customerWantedDate={ticket.customer_wanted_date}
                 />
               )}
 

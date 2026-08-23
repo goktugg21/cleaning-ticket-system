@@ -39,7 +39,6 @@ import { useTranslation } from "react-i18next";
 
 import {
   addTicketStaffAssignment,
-  createSubTask,
   deleteSubTask,
   listAssignableStaff,
   listSubTasks,
@@ -87,6 +86,7 @@ export function StaffAssignmentSection({
   autoCompleteOnSubtasks,
   canSetAutoCompleteFlag,
   ticketStatus,
+  customerWantedDate,
 }: {
   ticketId: number;
   onChanged?: () => void;
@@ -94,6 +94,9 @@ export function StaffAssignmentSection({
   /** Provider admin (PA/SA) only; the backend is the hard gate (403). */
   canSetAutoCompleteFlag: boolean;
   ticketStatus: TicketStatus;
+  /** W19 -- `Ticket.customer_wanted_date`, forwarded to the assign/edit
+   *  dialog so the window is picked with the customer's wish in view. */
+  customerWantedDate?: string | null;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
   const { push } = useToast();
@@ -223,15 +226,6 @@ export function StaffAssignmentSection({
     setBusy(true);
     setDialogError("");
     try {
-      let targetPart = result.partId;
-      let createdPartTitle = "";
-      if (result.newPartTitle !== "") {
-        const created = await createSubTask(ticketId, {
-          title: result.newPartTitle,
-        });
-        targetPart = created.id;
-        createdPartTitle = created.title;
-      }
       const done: string[] = [];
       const refused: string[] = [];
       for (const userId of result.userIds) {
@@ -239,13 +233,16 @@ export function StaffAssignmentSection({
         const name =
           staff?.full_name?.trim() || staff?.email || String(userId);
         const times = result.timesByUser[userId];
+        // W19 -- the dialog edits people and times, so the write carries
+        // people and times. `assignment_note` / `sub_task` are OMITTED,
+        // not sent empty: a new slot starts without either (the server
+        // defaults), and the fields stay editable where they live (the
+        // per-slot editor and the Parts table).
         const payload: StaffSlotCreatePayload = {
           scheduled_start_at: localInputToIso(times.start),
           scheduled_end_at: localInputToIso(times.end),
           time_window_label: times.windowLabel.trim(),
-          assignment_note: result.note.trim(),
         };
-        if (!isTerminal) payload.sub_task = targetPart;
         try {
           await addTicketStaffAssignment(ticketId, userId, payload);
           done.push(name);
@@ -260,20 +257,12 @@ export function StaffAssignmentSection({
       await reload();
       onChanged?.();
       if (done.length > 0) {
-        const label = createdPartTitle || partTitle(targetPart) || "";
         push({
           variant: "success",
-          title:
-            label === ""
-              ? t("assign.toast_assigned", {
-                  count: done.length,
-                  names: done.join(", "),
-                })
-              : t("assign.toast_assigned_part", {
-                  count: done.length,
-                  names: done.join(", "),
-                  part: label,
-                }),
+          title: t("assign.toast_assigned", {
+            count: done.length,
+            names: done.join(", "),
+          }),
         });
       }
       // The dialog CLOSES either way. Leaving it open with the same
@@ -304,21 +293,17 @@ export function StaffAssignmentSection({
     setBusy(true);
     setDialogError("");
     try {
-      let targetPart = result.partId;
-      if (result.newPartTitle !== "") {
-        const created = await createSubTask(ticketId, {
-          title: result.newPartTitle,
-        });
-        targetPart = created.id;
-      }
       const times = result.timesByUser[editing.user_id];
+      // W19 -- a time edit PATCHes ONLY the time. `assignment_note` and
+      // `sub_task` are absent from the body, and a partial update never
+      // touches an absent field, so an existing slot note or part link
+      // survives every window change (the invariant the old echo fields
+      // existed to protect -- now protected by omission instead).
       const patch: StaffSlotPatch = {
         scheduled_start_at: localInputToIso(times.start),
         scheduled_end_at: localInputToIso(times.end),
         time_window_label: times.windowLabel.trim(),
-        assignment_note: result.note.trim(),
       };
-      if (!isTerminal) patch.sub_task = targetPart;
       await updateStaffSlot(ticketId, editing.id, patch);
       const name = personName(editing);
       setEditing(null);
@@ -763,8 +748,7 @@ export function StaffAssignmentSection({
         <AssignStaffDialog
           mode="assign"
           candidates={assignable}
-          parts={parts}
-          allowParts={!isTerminal}
+          customerWantedDate={customerWantedDate}
           busy={busy}
           error={dialogError}
           noCandidatesText={t("editor.no_eligible")}
@@ -790,10 +774,7 @@ export function StaffAssignmentSection({
             end: isoToLocalInput(editing.scheduled_end_at),
             windowLabel: editing.time_window_label,
           }}
-          initialNote={editing.assignment_note}
-          initialPartId={editing.sub_task}
-          parts={parts}
-          allowParts={!isTerminal}
+          customerWantedDate={customerWantedDate}
           busy={busy}
           error={dialogError}
           noCandidatesText={t("editor.no_eligible")}

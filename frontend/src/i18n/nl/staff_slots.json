@@ -174,8 +174,6 @@
   "assign.remove": "Verwijderen",
   "assign.toast_assigned_one": "{{names}} is toegewezen aan dit ticket.",
   "assign.toast_assigned_other": "{{count}} medewerkers toegewezen aan dit ticket: {{names}}.",
-  "assign.toast_assigned_part_one": "{{names}} is toegewezen aan “{{part}}” op dit ticket.",
-  "assign.toast_assigned_part_other": "{{count}} medewerkers toegewezen aan “{{part}}” op dit ticket: {{names}}.",
   "assign.toast_saved": "De toewijzing van {{name}} is bijgewerkt.",
   "assign.toast_removed": "{{name}} is van dit ticket gehaald.",
   "parts.title": "Onderdelen van deze klus",

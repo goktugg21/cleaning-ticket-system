@@ -20,9 +20,10 @@
 //
 // People plus an optional time is the WHOLE dialog. It briefly also carried
 // an instruction textarea and a part-of-the-job picker; neither was asked
-// for here and both are gone. Parts and per-slot notes still exist -- on
-// the ticket page's sub-task UI and the per-slot editor -- just not behind
-// this door.
+// for here and both are gone -- since W19 gone from the interface too,
+// not just the UI (no note/part echoes, no unused props). Parts and
+// per-slot notes still exist -- on the ticket page's sub-task UI and the
+// per-slot editor -- just not behind this door.
 //
 // Assigning three people to the same morning is one action. Giving each of
 // them a different window is the same modal, expanded. Both doors were
@@ -38,7 +39,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { AssignableStaff, SubTask } from "../../api/admin";
+import type { AssignableStaff } from "../../api/admin";
+import { formatDate } from "../../lib/intl";
 import { localInputToIso } from "../../lib/slotTime";
 
 export interface SlotTimeDraft {
@@ -59,17 +61,10 @@ export interface AssignStaffResult {
   userIds: number[];
   /** One entry per id in `userIds`, already resolved from same-for-all. */
   timesByUser: Record<number, SlotTimeDraft>;
-  /* The dialog no longer edits the note or the part -- those fields are
-     ECHOES so the caller's writes stay lossless: edit mode hands back
-     `initialNote` / `initialPartId` untouched (a time change must not wipe
-     an existing note), assign mode hands back the empty defaults. Dropping
-     them from this type altogether means rewriting the handlers in
-     StaffAssignmentSection.tsx, which is a separate change. */
-  note: string;
-  /** Echoed `initialPartId`, or null. Never a new value from this dialog. */
-  partId: number | null;
-  /** Always "" -- the dialog no longer creates parts. */
-  newPartTitle: string;
+  /* W19 -- the note/part echoes (`note` / `partId` / `newPartTitle`) are
+     gone: the dialog edits people and times, nothing else, and the
+     caller's writes now OMIT the fields it does not edit (a PATCH that
+     leaves `assignment_note` / `sub_task` out cannot wipe them). */
 }
 
 function endsBeforeStart(times: SlotTimeDraft): boolean {
@@ -84,8 +79,7 @@ export function AssignStaffDialog({
   editingPersonId,
   editingPersonName,
   initialTimes,
-  initialNote,
-  initialPartId,
+  customerWantedDate,
   busy,
   error,
   noCandidatesText,
@@ -100,15 +94,11 @@ export function AssignStaffDialog({
   editingPersonId?: number;
   editingPersonName?: string;
   initialTimes?: SlotTimeDraft;
-  /** Echoed back on confirm, never edited here (see AssignStaffResult). */
-  initialNote?: string;
-  /** Echoed back on confirm, never edited here (see AssignStaffResult). */
-  initialPartId?: number | null;
-  /* `parts` / `allowParts` are still supplied by the caller; the dialog
-     no longer reads them. They leave this type together with the echo
-     fields above, when StaffAssignmentSection.tsx is next touched. */
-  parts: SubTask[];
-  allowParts: boolean;
+  /** W19 -- `Ticket.customer_wanted_date`: the date the customer asked
+   *  for, informational only (it never feeds overdue). Shown beside the
+   *  time section label so the operator picks a window with the wish in
+   *  view. */
+  customerWantedDate?: string | null;
   busy?: boolean;
   error?: string;
   noCandidatesText: string;
@@ -168,13 +158,7 @@ export function AssignStaffDialog({
     if (nothingPicked || badWindow) return;
     const timesByUser: Record<number, SlotTimeDraft> = {};
     for (const id of userIds) timesByUser[id] = timesFor(id);
-    onConfirm({
-      userIds,
-      timesByUser,
-      note: initialNote ?? "",
-      partId: initialPartId ?? null,
-      newPartTitle: "",
-    });
+    onConfirm({ userIds, timesByUser });
   }
 
   const title =
@@ -266,6 +250,22 @@ export function AssignStaffDialog({
         <span className="field-label" id={`${testIdPrefix}-mode-label`}>
           {t("assign.time_label_optional")}
         </span>
+        {/* W19 -- the customer's wanted date, in view exactly where the
+            window is picked. A value, not a sentence; the label is the
+            SAME string the Scheduling card uses (`ticket_detail`
+            bundle), so the two surfaces cannot drift. Informational
+            only -- it never feeds overdue. */}
+        {customerWantedDate && (
+          <p
+            className="muted small"
+            style={{ marginTop: 2 }}
+            data-testid={`${testIdPrefix}-wanted-date`}
+          >
+            {t("ticket_detail:schedule.asked_wanted_label")}
+            {": "}
+            {formatDate(`${customerWantedDate}T00:00:00`)}
+          </p>
+        )}
         {perPersonAvailable && (
           <div className="field">
             <div

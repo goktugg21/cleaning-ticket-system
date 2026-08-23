@@ -174,8 +174,6 @@
   "assign.remove": "Remove",
   "assign.toast_assigned_one": "{{names}} is assigned to this ticket.",
   "assign.toast_assigned_other": "{{count}} staff members assigned to this ticket: {{names}}.",
-  "assign.toast_assigned_part_one": "{{names}} is assigned to “{{part}}” on this ticket.",
-  "assign.toast_assigned_part_other": "{{count}} staff members assigned to “{{part}}” on this ticket: {{names}}.",
   "assign.toast_saved": "{{name}}'s assignment is updated.",
   "assign.toast_removed": "{{name}} is taken off this ticket.",
   "parts.title": "Parts of this job",

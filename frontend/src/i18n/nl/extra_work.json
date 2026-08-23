@@ -670,7 +670,6 @@
     "member_count": "{{count}} werk",
     "member_count_other": "{{count}} werken",
     "on_this_page": "{{shown}} van {{total}} op deze pagina",
-    "title": "Reeks",
     "col_condition": "Moment",
     "condition_unset": "Niet opgegeven",
     "condition_at": "Bij oplevering",
