@@ -101,6 +101,7 @@
   "tabs": {
     "general": "General info",
     "projects": "Projects",
+    "planning": "Planning",
     "billing": "Billing",
     "revisions": "Revision history"
   },
@@ -309,5 +310,9 @@
   "actions.activating": "Activating…",
   "actions.activatedTitle": "Contract activated",
   "actions.activatedBody": "{{contract}} is active and will be invoiced from now on.",
-  "actions.activateFailed": "Could not activate"
+  "actions.activateFailed": "Could not activate",
+  "planning.title": "Planning",
+  "planning.prev_year": "Previous year",
+  "planning.next_year": "Next year",
+  "planning.tail_head": "Planned"
 }

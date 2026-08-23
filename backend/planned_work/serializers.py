@@ -110,6 +110,11 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
     price_folder_name = serializers.CharField(
         source="price_folder.name", read_only=True, allow_null=True
     )
+    # W23 — the linked contract line, same null-safe name shape as the
+    # classifier labels above.
+    contract_line_name = serializers.CharField(
+        source="contract_line.name", read_only=True, allow_null=True
+    )
     default_staff_ids = serializers.SerializerMethodField()
     default_manager_ids = serializers.SerializerMethodField()
     occurrences_count = serializers.SerializerMethodField()
@@ -135,6 +140,8 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
             "service_category_name",
             "price_folder",
             "price_folder_name",
+            "contract_line",
+            "contract_line_name",
             "title",
             "description",
             "frequency",
@@ -230,6 +237,8 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
             "work_type",
             "service_category",
             "price_folder",
+            # W23 — same discipline: optional, tenant-validated below.
+            "contract_line",
             "title",
             "description",
             "frequency",
@@ -294,6 +303,41 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
                         field: serializers.ErrorDetail(
                             "This label belongs to a different customer.",
                             code="label_customer_mismatch",
+                        )
+                    }
+                )
+
+        # W23 — the contract-line link (tenant law, P0 class). Validated
+        # on the EFFECTIVE line — the incoming value, or on PATCH the
+        # stored one — so changing the job's customer/building can never
+        # strand a foreign line either. The line's contract must belong
+        # to this job's customer, and a line pinned to a building must
+        # match the job's building.
+        if "contract_line" in attrs:
+            contract_line = attrs.get("contract_line")
+        else:
+            contract_line = getattr(instance, "contract_line", None)
+        if contract_line is not None:
+            if contract_line.revision.contract.customer_id != customer.id:
+                raise serializers.ValidationError(
+                    {
+                        "contract_line": serializers.ErrorDetail(
+                            "This contract line belongs to a different "
+                            "customer.",
+                            code="contract_line_customer_mismatch",
+                        )
+                    }
+                )
+            if (
+                contract_line.building_id is not None
+                and contract_line.building_id != building.id
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "contract_line": serializers.ErrorDetail(
+                            "This contract line is pinned to a different "
+                            "building.",
+                            code="contract_line_building_mismatch",
                         )
                     }
                 )

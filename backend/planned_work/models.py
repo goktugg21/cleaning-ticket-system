@@ -90,6 +90,28 @@ class RecurringJob(models.Model):
         related_name="recurring_jobs",
     )
 
+    # W23 — the CONTRACT LINE this recurring job performs. The reference
+    # system plans standing contract work through a year×week grid per
+    # contract line; this FK is what lets our grid read the SAME
+    # occurrence machinery instead of growing a second planner. NULLABLE
+    # with no backfill: every existing job predates the link and a job
+    # without a contract is a first-class thing.
+    #
+    # Tenant law (P0 class), enforced by the serializer — the sole write
+    # path, exactly as `department` / `work_type` above: the line's
+    # contract must belong to THIS job's customer, and a line pinned to
+    # a building must match the job's building. SET_NULL, not PROTECT:
+    # a contract line is an agreement about the work, not the work — a
+    # deleted line must unhook the job, never block the deletion or take
+    # the job (and its occurrence history) with it.
+    contract_line = models.ForeignKey(
+        "contracts.ContractLine",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="recurring_jobs",
+    )
+
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
 

@@ -13,6 +13,7 @@ import type {
   ContractLine,
   ContractLineWritePayload,
   ContractOptions,
+  ContractPlanning,
   ContractRevision,
   ContractRevisionWritePayload,
   ContractStats,
@@ -272,4 +273,16 @@ export async function syncExtraWorkRegister(
     {},
   );
   return data;
+}
+
+// W23 — the year×week planning grid for one contract.
+export async function getContractPlanning(
+  contractId: number,
+  year: number,
+): Promise<ContractPlanning> {
+  const response = await api.get<ContractPlanning>(
+    `/contracts/${contractId}/planning/`,
+    { params: { year } },
+  );
+  return response.data;
 }

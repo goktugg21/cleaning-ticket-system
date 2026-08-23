@@ -632,3 +632,148 @@ class ContractTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
                     ]
                 }
             )
+
+
+# ---------------------------------------------------------------------------
+# W23 — the year×week planning grid.
+#
+#     GET /api/contracts/<int:contract_id>/planning/?year=2026
+#
+# A READ, shaped like `ContractForecastView`: per active-revision
+# contract line, the linked RecurringJobs' PlannedOccurrences bucketed
+# by ISO week. Editing stays on the job's calendar (`planned_work`'s
+# idempotent per-date actions) — this endpoint computes and writes
+# nothing, which is what keeps the occurrence machinery the ONE
+# planner. Tenant-scoped by construction: `get_scoped_contract` gates
+# the contract, and only lines OF THIS CONTRACT's active revision are
+# walked, so no other tenant's jobs or occurrences are reachable
+# whatever ids are guessed.
+# ---------------------------------------------------------------------------
+
+
+# Dominance order for a week's cell colour when a week holds mixed
+# statuses: the most frequent wins, ties break on this list (done beats
+# pending beats abandoned).
+_PLANNING_STATUS_DOMINANCE = [
+    "COMPLETED",
+    "TICKET_CREATED",
+    "PLANNED",
+    "RESCHEDULED",
+    "MISSED",
+    "SKIPPED",
+    "CANCELLED",
+]
+
+# Dates that are not performances: they fill no cell tint priority and
+# do not count against `frequency_per_year`.
+_PLANNING_NON_PERFORMANCE = {"SKIPPED", "CANCELLED"}
+
+
+class ContractPlanningView(APIView):
+    """The planning grid for one contract and one ISO year."""
+
+    permission_classes = [IsContractReader]
+
+    def get(self, request, contract_id):
+        from datetime import date as date_cls
+
+        from planned_work.models import PlannedOccurrence
+
+        from .revisions import active_revision
+        from .serializers import ContractPlanningSerializer
+        from .views_revisions import get_scoped_contract
+
+        contract = get_scoped_contract(request.user, contract_id)
+        # W23 §3 — a register (kind=EXTRA_WORK) mirrors chargeable jobs;
+        # it has no standing lines to plan. The frontend never asks; a
+        # hand-rolled request gets the reason, not an empty grid that
+        # looks like an unplanned year.
+        if contract.kind == ContractKind.EXTRA_WORK:
+            return Response(
+                {
+                    "detail": "An extra-work register has no planning.",
+                    "code": "register_has_no_planning",
+                },
+                status=400,
+            )
+        year = parse_int_param(request.query_params.get("year"))
+        if year is None or not (1970 <= year <= 2999):
+            year = timezone.localdate().year
+
+        revision = active_revision(contract)
+        lines = (
+            list(revision.lines.order_by("sort_order", "id"))
+            if revision is not None
+            else []
+        )
+        line_ids = [line.id for line in lines]
+
+        # One query for the whole grid. The date window over-fetches the
+        # ISO-year boundary days (Dec 29 – Jan 3) and the isocalendar
+        # check keeps exactly the requested ISO year, so week 1 and week
+        # 52/53 bucket correctly at both edges.
+        rows = PlannedOccurrence.objects.filter(
+            recurring_job__contract_line_id__in=line_ids,
+            planned_date__gte=date_cls(year - 1, 12, 29),
+            planned_date__lte=date_cls(year + 1, 1, 3),
+        ).values_list(
+            "recurring_job__contract_line_id",
+            "recurring_job_id",
+            "planned_date",
+            "status",
+        )
+
+        per_line: dict[int, dict] = {
+            line.id: {"weeks": {}, "jobs": set(), "planned": 0}
+            for line in lines
+        }
+        for line_id, job_id, planned_date, status in rows:
+            iso = planned_date.isocalendar()
+            if iso[0] != year:
+                continue
+            bucket = per_line[line_id]
+            bucket["jobs"].add(job_id)
+            if status not in _PLANNING_NON_PERFORMANCE:
+                bucket["planned"] += 1
+            week = bucket["weeks"].setdefault(
+                iso[1], {"count": 0, "statuses": {}, "job_id": job_id}
+            )
+            week["count"] += 1
+            week["statuses"][status] = week["statuses"].get(status, 0) + 1
+
+        def dominant(statuses: dict) -> str:
+            return min(
+                statuses,
+                key=lambda s: (
+                    -statuses[s],
+                    _PLANNING_STATUS_DOMINANCE.index(s)
+                    if s in _PLANNING_STATUS_DOMINANCE
+                    else len(_PLANNING_STATUS_DOMINANCE),
+                ),
+            )
+
+        payload = {
+            "year": year,
+            "lines": [
+                {
+                    "line_id": line.id,
+                    "name": line.name,
+                    "frequency_per_year": line.frequency_per_year,
+                    "planned_count": per_line[line.id]["planned"],
+                    "job_ids": sorted(per_line[line.id]["jobs"]),
+                    "weeks": [
+                        {
+                            "week": week_no,
+                            "count": data["count"],
+                            "status": dominant(data["statuses"]),
+                            "job_id": data["job_id"],
+                        }
+                        for week_no, data in sorted(
+                            per_line[line.id]["weeks"].items()
+                        )
+                    ],
+                }
+                for line in lines
+            ],
+        }
+        return Response(ContractPlanningSerializer(payload).data)

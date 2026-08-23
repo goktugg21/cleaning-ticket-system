@@ -17,6 +17,7 @@ from .views_contracts import (
     ContractDetailView,
     ContractListCreateView,
     ContractOptionsView,
+    ContractPlanningView,
     ContractStatsView,
     ContractTypeDetailView,
     ContractTypeListCreateView,
@@ -95,6 +96,13 @@ urlpatterns = [
         "<int:contract_id>/forecast/",
         ContractForecastView.as_view(),
         name="contract-forecast",
+    ),
+    # W23 — the year×week planning grid (read-only; editing stays on
+    # the recurring job's calendar).
+    path(
+        "<int:contract_id>/planning/",
+        ContractPlanningView.as_view(),
+        name="contract-planning",
     ),
     path(
         "<int:contract_id>/",

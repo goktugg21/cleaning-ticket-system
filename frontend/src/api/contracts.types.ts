@@ -261,3 +261,30 @@ export interface ContractForecast {
   first_invoice_date: string | null;
   excluded_first_invoice: boolean;
 }
+
+// ---------------------------------------------------------------------
+// W23 — the year×week planning grid (GET /contracts/<id>/planning/).
+// Mirrors `contracts.serializers.ContractPlanningSerializer` verbatim.
+// ---------------------------------------------------------------------
+export interface ContractPlanningWeek {
+  week: number;
+  count: number;
+  /** Dominant `PlannedOccurrenceStatus` for the week's cell tint. */
+  status: string;
+  /** The recurring job to open when the cell is clicked. */
+  job_id: number;
+}
+
+export interface ContractPlanningLine {
+  line_id: number;
+  name: string;
+  frequency_per_year: number | null;
+  planned_count: number;
+  job_ids: number[];
+  weeks: ContractPlanningWeek[];
+}
+
+export interface ContractPlanning {
+  year: number;
+  lines: ContractPlanningLine[];
+}

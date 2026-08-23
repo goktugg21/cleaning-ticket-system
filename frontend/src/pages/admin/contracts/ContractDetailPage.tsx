@@ -21,6 +21,7 @@ import type {
 import { listLabels } from "../../../api/customerLabels";
 import type { CustomerLabel } from "../../../api/types";
 import { BoundedList } from "../../../components/BoundedList";
+import { ContractPlanningGrid } from "../../../components/contracts/ContractPlanningGrid";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { EditModeToggle } from "../../../components/EditModeToggle";
@@ -38,7 +39,7 @@ import {
   lineValue,
 } from "./contractTables";
 
-type Tab = "general" | "projects" | "billing" | "revisions";
+type Tab = "general" | "projects" | "planning" | "billing" | "revisions";
 
 /** W20 — `kind` and the three line planning fields are served by the
  *  backend but `api/contracts.types.ts` belongs to another agent this
@@ -53,7 +54,11 @@ type PlannedLine = ContractLine & {
   department_name?: string | null;
 };
 
-const TABS: Tab[] = ["general", "projects", "billing", "revisions"];
+// W23 — "planning" sits between the projects it plans and the billing
+// they earn. A register (kind=EXTRA_WORK) mirrors chargeable jobs and
+// has no standing lines to plan, so the tab is ABSENT there (filtered
+// at render), not empty.
+const TABS: Tab[] = ["general", "projects", "planning", "billing", "revisions"];
 
 // Contract statuses reuse the table's existing `cell-tag` vocabulary
 // rather than a badge palette of their own. Same mapping as
@@ -406,7 +411,7 @@ export function ContractDetailPage() {
       </div>
 
       <div className="status-tabs" role="tablist" data-testid="contract-tabs">
-        {TABS.map((key) => (
+        {(isRegister ? TABS.filter((key) => key !== "planning") : TABS).map((key) => (
           <button
             key={key}
             type="button"
@@ -696,6 +701,18 @@ export function ContractDetailPage() {
               onError={(message) => setError(message)}
             />
           )}
+        </section>
+      )}
+
+      {/* W23 — the year×week planning grid. Absent (not empty) on a
+          register: the tab itself is filtered out above. A name and
+          the grid; editing lives on the recurring job's calendar. */}
+      {tab === "planning" && contract && !isRegister && (
+        <section className="card card-detail-pad" data-testid="contract-planning">
+          <header className="section-head">
+            <span className="section-head-title">{t("planning.title")}</span>
+          </header>
+          <ContractPlanningGrid contractId={contract.id} />
         </section>
       )}
 

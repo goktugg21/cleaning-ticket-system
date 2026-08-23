@@ -101,6 +101,7 @@
   "tabs": {
     "general": "Algemeen",
     "projects": "Projecten",
+    "planning": "Planning",
     "billing": "Facturatie",
     "revisions": "Versiegeschiedenis"
   },
@@ -309,5 +310,9 @@
   "actions.activating": "Bezig…",
   "actions.activatedTitle": "Contract geactiveerd",
   "actions.activatedBody": "{{contract}} is actief en wordt vanaf nu gefactureerd.",
-  "actions.activateFailed": "Activeren mislukt"
+  "actions.activateFailed": "Activeren mislukt",
+  "planning.title": "Planning",
+  "planning.prev_year": "Vorig jaar",
+  "planning.next_year": "Volgend jaar",
+  "planning.tail_head": "Gepland"
 }

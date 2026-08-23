@@ -775,3 +775,44 @@ def default_effective_from(contract):
     if contract.start_date > today:
         return contract.start_date
     return today + timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# W23 — the year×week planning grid, read side.
+#
+# Plain Serializers over a computed dict (the shape
+# `ContractForecastSerializer` uses): the view buckets the linked
+# recurring jobs' PlannedOccurrences per contract line per ISO week, and
+# nothing here touches the database. The occurrence machinery in
+# `planned_work` stays the ONE planner; this is a projection of it onto
+# the contract, exactly as the register is a projection of extra work.
+# ---------------------------------------------------------------------------
+
+
+class ContractPlanningWeekSerializer(serializers.Serializer):
+    """One filled cell: ISO week number, how many occurrences land in
+    it, the dominant occurrence status, and the recurring job to open
+    when the cell is clicked (per-date editing lives on that job's
+    calendar — the grid never edits)."""
+
+    week = serializers.IntegerField()
+    count = serializers.IntegerField()
+    status = serializers.CharField()
+    job_id = serializers.IntegerField()
+
+
+class ContractPlanningLineSerializer(serializers.Serializer):
+    line_id = serializers.IntegerField()
+    name = serializers.CharField()
+    frequency_per_year = serializers.IntegerField(allow_null=True)
+    # Occurrences in the year that are (or became) real performances —
+    # SKIPPED and CANCELLED dates are not performances and do not count
+    # against `frequency_per_year`.
+    planned_count = serializers.IntegerField()
+    job_ids = serializers.ListField(child=serializers.IntegerField())
+    weeks = ContractPlanningWeekSerializer(many=True)
+
+
+class ContractPlanningSerializer(serializers.Serializer):
+    year = serializers.IntegerField()
+    lines = ContractPlanningLineSerializer(many=True)

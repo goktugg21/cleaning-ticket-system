@@ -1,0 +1,143 @@
+/* W23 — the contract year×week planning grid.
+ *
+ * Its own file because index.css belongs to another wave; imported by
+ * ContractPlanningGrid.tsx and nothing else.
+ *
+ * Horizontal space law: 52 week columns do not fit 1366px. The table
+ * scrolls inside `.contract-planning-scroll` — scrollbar always
+ * reserved (scrollbar-gutter) so the affordance is visible, and the
+ * PAGE never scrolls sideways. The name column and the tail stay
+ * sticky so a scrolled grid still says which line and how full.
+ */
+
+.contract-planning-yearbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.contract-planning-year {
+  font-family: var(--f-head);
+  font-weight: 800;
+  font-size: 14px;
+  min-width: 48px;
+  text-align: center;
+}
+
+.contract-planning-scroll {
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  /* The visible affordance: a fading right edge says "more to the
+     right" even before the scrollbar is noticed. */
+  background:
+    linear-gradient(to left, var(--surface-2), transparent 24px) right / 24px
+      100% no-repeat local,
+    var(--surface);
+}
+
+.contract-planning-table {
+  border-collapse: collapse;
+  /* Fixed-ish cells: 53 weeks x 18px + name + tail ≈ 1220px minimum,
+     which overflows the card at 1366px viewport — deliberately: the
+     scroll container owns the excess. */
+  min-width: 1200px;
+  width: max-content;
+}
+
+.contract-planning-week-head {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-faint);
+  padding: 2px 0 4px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.contract-planning-name-col {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 4px 10px 4px 8px;
+  max-width: 220px;
+  min-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 1;
+}
+
+.contract-planning-name-link {
+  cursor: pointer;
+}
+
+.contract-planning-name-link:hover {
+  text-decoration: underline;
+}
+
+.contract-planning-cell {
+  min-width: 18px;
+  height: 22px;
+  border: 1px solid var(--border-soft);
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-2);
+}
+
+.contract-planning-cell[data-status] {
+  cursor: pointer;
+  background: var(--surface-3);
+}
+
+/* Status tints from the shared token palette — the same green / red /
+ * amber vocabulary every badge already speaks. */
+.contract-planning-cell[data-status="COMPLETED"] {
+  background: var(--green-2);
+  color: #fff;
+}
+.contract-planning-cell[data-status="TICKET_CREATED"] {
+  background: var(--green-soft);
+}
+.contract-planning-cell[data-status="PLANNED"] {
+  background: var(--teal-soft);
+}
+.contract-planning-cell[data-status="RESCHEDULED"] {
+  background: var(--amber-soft);
+}
+.contract-planning-cell[data-status="MISSED"] {
+  background: var(--red-soft);
+  color: var(--red);
+}
+.contract-planning-cell[data-status="SKIPPED"],
+.contract-planning-cell[data-status="CANCELLED"] {
+  background: var(--surface-3);
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.contract-planning-tail-head,
+.contract-planning-tail {
+  position: sticky;
+  right: 0;
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-2);
+  padding: 2px 8px;
+  text-align: right;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.contract-planning-tail-head {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
