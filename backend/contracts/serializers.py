@@ -126,6 +126,11 @@ class ContractLineSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(
         source="building.name", read_only=True, default=None
     )
+    # The Extra Work has no human-facing number of its own (its list
+    # and detail address it by id), so the register links by id too.
+    extra_work_no = serializers.IntegerField(
+        source="extra_work.id", read_only=True, default=None
+    )
 
     class Meta:
         model = ContractLine
@@ -140,7 +145,16 @@ class ContractLineSerializer(serializers.ModelSerializer):
             "area_m2",
             "amount",
             "vat_pct",
+            # W16 — the chargeable job this line MIRRORS, on an extra
+            # work register; NULL on every ordinary contract line.
+            # READ-ONLY: the link is made by
+            # `extra_work_register.sync_extra_work_register`, and a
+            # client that could set it would be claiming one job's money
+            # for another's line.
+            "extra_work",
+            "extra_work_no",
         ]
+        read_only_fields = ["extra_work"]
         read_only_fields = ["id", "revision"]
 
     def validate_name(self, value):

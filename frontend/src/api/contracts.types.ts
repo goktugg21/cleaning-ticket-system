@@ -50,6 +50,50 @@ export interface ContractLine {
   area_m2: string | null;
   amount: string;
   vat_pct: string;
+  /** W16 — the chargeable job this line MIRRORS, on an extra work
+   *  register. NULL on every ordinary contract line. Read-only: the
+   *  link is made by the server's sync, and the amount comes with it. */
+  extra_work: number | null;
+  extra_work_no: number | null;
+}
+
+/** W16 — one building's slice of a customer's extra work register. */
+export interface ExtraWorkRegisterBuilding {
+  id: number;
+  name: string;
+  job_count: number;
+  total_amount: string;
+  lines: ContractLine[];
+}
+
+/**
+ * W16 — the per-customer register of chargeable work.
+ *
+ * THREE money figures, not one, and the difference between two of them
+ * is the number that matters: `earned_amount - invoiced_amount` is
+ * exactly what the Extra Work run still has to bill. A single "total"
+ * would be a lie whichever one it was — measured on the demo data the
+ * register held EUR 990.99 of finished work while only EUR 660.66 was
+ * still billable, the rest already invoiced.
+ */
+export interface ExtraWorkRegister {
+  contract: {
+    id: number;
+    contract_no: string;
+    kind: string;
+    customer: number;
+    customer_name: string;
+    revision: number;
+  };
+  buildings: ExtraWorkRegisterBuilding[];
+  summary: {
+    job_count: number;
+    building_count: number;
+    total_amount: string;
+    earned_amount: string;
+    invoiced_amount: string;
+  };
+  changed?: { added: number; updated: number; removed: number };
 }
 
 export interface ContractRevisionSummary {

@@ -22,6 +22,7 @@ from .views_contracts import (
     ContractTypeListCreateView,
 )
 from .views_forecast import ContractForecastView
+from .views_register import ExtraWorkRegisterSyncView, ExtraWorkRegisterView
 from .views_revisions import (
     ContractLineDetailView,
     ContractLineListCreateView,
@@ -32,6 +33,22 @@ from .views_revisions import (
 
 urlpatterns = [
     path("stats/", ContractStatsView.as_view(), name="contract-stats"),
+    # W16 — the per-customer extra work register. Keyed on the CUSTOMER
+    # and not on a contract id, exactly as the reference system's
+    # `/contracts/extra-works/{customerId}` is: the caller has a
+    # customer in hand and must not have to know whether a register has
+    # been made yet. Declared above the `<int:contract_id>` routes for
+    # the reason the module docstring gives.
+    path(
+        "extra-works/<int:customer_id>/",
+        ExtraWorkRegisterView.as_view(),
+        name="contract-extra-work-register",
+    ),
+    path(
+        "extra-works/<int:customer_id>/sync/",
+        ExtraWorkRegisterSyncView.as_view(),
+        name="contract-extra-work-register-sync",
+    ),
     path("options/", ContractOptionsView.as_view(), name="contract-options"),
     path(
         "types/standard-set/",

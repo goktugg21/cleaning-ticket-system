@@ -18,6 +18,7 @@ import type {
   ContractStats,
   ContractType,
   ContractWritePayload,
+  ExtraWorkRegister,
 } from "./contracts.types";
 
 /**
@@ -234,4 +235,41 @@ export async function updateContractType(
 
 export async function deleteContractType(id: number): Promise<void> {
   await api.delete(`/contracts/types/${id}/`);
+}
+
+// ---------------------------------------------------------------------------
+// W16 — the extra works register
+// ---------------------------------------------------------------------------
+
+/**
+ * The customer's register of chargeable work, created on first ask.
+ *
+ * Keyed on the CUSTOMER, not on a contract id — the caller has a
+ * customer in hand and must not have to know whether a register has
+ * been made yet. Same shape as the reference system's
+ * `/contracts/extra-works/{customerId}`.
+ *
+ * The GET syncs before it answers, so what comes back is current. It
+ * is idempotent, so calling it twice costs a query and changes
+ * nothing.
+ */
+export async function getExtraWorkRegister(
+  customerId: number,
+): Promise<ExtraWorkRegister> {
+  const { data } = await api.get<ExtraWorkRegister>(
+    `/contracts/extra-works/${customerId}/`,
+  );
+  return data;
+}
+
+/** Rebuild the register and report what moved, so the page can say
+ *  "3 jobs added" rather than "done". */
+export async function syncExtraWorkRegister(
+  customerId: number,
+): Promise<ExtraWorkRegister> {
+  const { data } = await api.post<ExtraWorkRegister>(
+    `/contracts/extra-works/${customerId}/sync/`,
+    {},
+  );
+  return data;
 }

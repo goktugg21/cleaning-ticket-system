@@ -41,6 +41,7 @@ from .billing import money
 from .models import (
     MONTHS_PER_PERIOD,
     Contract,
+    ContractKind,
     ContractLifecycle,
     ContractRevision,
     ContractStatus,
@@ -209,6 +210,17 @@ class ContractListCreateView(generics.ListCreateAPIView):
 
         qs = apply_contract_filters(qs, self.request.query_params, today)
         qs = filter_contracts_for(self.request.user, qs)
+        # W16 — the EXTRA WORK registers are not in this list, and not
+        # in these numbers. They are a different kind of object: one per
+        # customer, auto-created, mirroring work that is invoiced by the
+        # Extra Work run. Counting them here would put a "contract" a
+        # nobody signed in the list and add ad-hoc spend to a figure
+        # that means "recurring fees we have agreed". The reference
+        # system hides its own the same way, by excluding `status_id=4`
+        # from `index()` (`ContractController.php:37`) and summing only
+        # ACTIVE rows in `statistics()`.
+        qs = qs.exclude(kind=ContractKind.EXTRA_WORK)
+
 
         sort = (self.request.query_params.get("sort") or "").strip()
         descending = sort.startswith("-")
@@ -336,6 +348,9 @@ class ContractStatsView(APIView):
             qs = qs.filter(company_id=company_id)
         qs = apply_contract_filters(qs, request.query_params, today)
         qs = filter_contracts_for(request.user, qs)
+        # See `ContractListCreateView.get_queryset` — same exclusion, so
+        # the tiles count exactly the rows the list shows.
+        qs = qs.exclude(kind=ContractKind.EXTRA_WORK)
 
         def count_when(predicate):
             return Count(

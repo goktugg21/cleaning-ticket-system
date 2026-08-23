@@ -57,7 +57,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .billing import build_forecast, money
-from .models import Contract, ContractInvoice, ContractLifecycle
+from .models import Contract, ContractInvoice, ContractKind, ContractLifecycle
 from .revisions import active_revision
 
 
@@ -208,6 +208,23 @@ def generate_invoices_for_contract(
 
     today = on or timezone.localdate()
     result = GenerationResult(created=[])
+
+    # W16 — AN EXTRA WORK REGISTER NEVER BILLS. This is the guard that
+    # makes the register safe to exist.
+    #
+    # Its lines mirror `ExtraWorkRequest` rows that ALREADY reach an
+    # invoice through `invoicing/selectors.py`, whose unbilled pool is
+    # defined as "no live `InvoiceLine` claims this row". A register
+    # line is not an `InvoiceLine` and claims nothing, so if this
+    # function billed a register the pool would go on offering the same
+    # work and every customer would be billed twice for every job.
+    #
+    # Checked HERE, before the lifecycle test, because a register is
+    # deliberately ACTIVE — it is not a proposal awaiting approval —
+    # and would otherwise sail straight past it. `test_w16_register`
+    # pins this.
+    if contract.kind == ContractKind.EXTRA_WORK:
+        return result
 
     # A DRAFT or CANCELLED contract does not bill. The status is derived
     # (`Contract.status`), so this reads the same answer the UI shows

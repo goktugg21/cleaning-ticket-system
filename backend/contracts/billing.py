@@ -80,7 +80,12 @@ from typing import Optional
 
 from django.utils import timezone
 
-from .models import MONTHS_PER_PERIOD, PERIODS_PER_YEAR, BillingType
+from .models import (
+    MONTHS_PER_PERIOD,
+    PERIODS_PER_YEAR,
+    BillingType,
+    ContractKind,
+)
 from .revisions import revision_totals
 
 
@@ -243,6 +248,20 @@ def build_forecast(contract, year: int, *, on: Optional[date] = None) -> Forecas
     """
     today = on or timezone.localdate()
     months = _months_per_period(contract)
+
+    # W16 — an EXTRA WORK register has no forecast, because it raises no
+    # invoice (see `ContractKind` and the matching guard in
+    # `invoice_generation`). Returning an EMPTY forecast rather than
+    # computing one is the honest answer: a register's money is real,
+    # but it is billed by the Extra Work run, so "what will this
+    # contract invoice, and when" has no rows. Showing a forecast here
+    # would promise invoices that will never arrive under this
+    # contract's number.
+    if contract.kind == ContractKind.EXTRA_WORK:
+        return Forecast(
+            year=year,
+            invoices_per_year=PERIODS_PER_YEAR[contract.billing_period],
+        )
 
     # One query for the revisions, in resolution order; the lines come
     # with them so `revision_totals` does not go back to the database

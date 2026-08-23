@@ -13,6 +13,7 @@ import { canManageContracts } from "../../../auth/permissions";
 import { ContractFormDialog } from "../contracts/ContractFormDialog";
 import { formatDate, formatMoney } from "../contracts/contractTables";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
+import { ExtraWorkRegisterSection } from "./ExtraWorkRegisterSection";
 
 /**
  * Sprint 162 §4 — one customer's contracts, in the same place their
@@ -197,6 +198,15 @@ export function CustomerContractsPage() {
           </div>
         )}
       </div>
+      {/* W16 — the extra works register, under the recurring
+          agreements and not mixed into them. Two kinds of money live on
+          this page and they must not be added up: above is what this
+          customer pays every month by agreement, below is what they
+          have taken on job by job. The reference system keeps its own
+          register out of the contract list for the same reason
+          (`ContractController.php:37`). */}
+      <ExtraWorkRegisterSection customerId={id} canManage={canManage} />
+
       {/* The SAME create dialog the main contracts list opens, with
           the customer fixed. A second form here is how two screens end
           up disagreeing about what a contract needs. */}

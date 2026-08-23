@@ -10,6 +10,7 @@ import {
   deleteContractLine,
   getContract,
   listContractRevisions,
+  updateContract,
 } from "../../../api/contracts";
 import type {
   Contract,
@@ -21,6 +22,7 @@ import { BoundedList } from "../../../components/BoundedList";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { EditModeToggle } from "../../../components/EditModeToggle";
+import { useToast } from "../../../components/ToastProvider";
 import { useAuth } from "../../../auth/AuthContext";
 import { canManageContracts } from "../../../auth/permissions";
 import { useEditMode } from "../../../lib/useEditMode";
@@ -82,6 +84,8 @@ export function ContractDetailPage() {
   const [busy, setBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [revisionOpen, setRevisionOpen] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const toast = useToast();
   const deleteLineRef = useRef<ConfirmDialogHandle>(null);
   const [lineToDelete, setLineToDelete] = useState<ContractLine | null>(null);
 
@@ -113,6 +117,40 @@ export function ContractDetailPage() {
   }, [id, requestKey]);
 
   const reload = () => setReloadToken((current) => current + 1);
+
+  /**
+   * W16 — draft -> active, and the page SAYS SO.
+   *
+   * The reference system's `activate()` answers "Contract activated"
+   * whatever happened. This names the contract and what changed,
+   * because "which one, and is it billing now" is the question the
+   * operator has the moment they press it — a contract only starts
+   * raising invoices once it is ACTIVE, so this press is the one that
+   * turns the money on.
+   */
+  async function activate() {
+    if (!contract) return;
+    setActivating(true);
+    try {
+      await updateContract(contract.id, { lifecycle: "ACTIVE" });
+      reload();
+      toast.push({
+        variant: "success",
+        title: t("actions.activatedTitle"),
+        description: t("actions.activatedBody", {
+          contract: contract.contract_no,
+        }),
+      });
+    } catch (err) {
+      toast.push({
+        variant: "error",
+        title: t("actions.activateFailed"),
+        description: getApiError(err),
+      });
+    } finally {
+      setActivating(false);
+    }
+  }
 
   const locale = i18n.language;
   const activeRevision =
@@ -261,10 +299,35 @@ export function ContractDetailPage() {
             <RefreshCw size={16} strokeWidth={2} />
             {t("actions.refresh")}
           </button>
-          {canManage && contract && (
+          {/* W16 — ACTIVATE IS A BUTTON, because it is a verb.
+              The reference system has `POST /contracts/{id}/activate`
+              and one press; ours had only a `lifecycle` dropdown three
+              clicks inside the edit dialog, which is a state picker
+              pretending to be an action. It reuses the ordinary PATCH
+              rather than adding a second write path — the endpoint
+              already validates, scopes and audits, and a dedicated
+              verb would be a second door onto one change.
+              Shown only on a DRAFT: a role — or a state — that cannot
+              use it does not see it. */}
+          {canManage && contract && contract.lifecycle === "DRAFT" && (
             <button
               type="button"
               className="btn btn-primary btn-sm"
+              onClick={() => void activate()}
+              disabled={activating}
+              data-testid="contract-activate"
+            >
+              {activating ? t("actions.activating") : t("actions.activate")}
+            </button>
+          )}
+          {canManage && contract && (
+            <button
+              type="button"
+              className={
+                contract.lifecycle === "DRAFT"
+                  ? "btn btn-secondary btn-sm"
+                  : "btn btn-primary btn-sm"
+              }
               onClick={() => setEditOpen(true)}
               data-testid="contract-edit"
             >

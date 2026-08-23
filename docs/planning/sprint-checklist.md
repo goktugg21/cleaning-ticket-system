@@ -36,6 +36,75 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — W16: the extra works register, copied from his system with the billing left out
+
+The owner: **"make the contracts page exactly the same as my father's
+system. Establish those connections. Copy his system almost everywhere
+now."**
+
+Read first, in the clone at `/tmp/osius-ref`: `ContractController.php`
+(974 lines, 17 methods), `ContractLineController`,
+`ContractProjectController`, the eight Contract\* models, the routes and
+the two contract screens.
+
+**1. The extra works register — built.** His
+`getOrCreateExtraWorksContract($customerId)` gives every customer an
+auto-created contract carrying one line per ad-hoc job, grouped by
+building. Ours is `contracts/extra_work_register.py` +
+`GET|POST /api/contracts/extra-works/<customer_id>/`, rendered under the
+customer's contracts page. Measured on the seeded demo customer: 12 jobs
+across 3 buildings, EUR 990.99.
+
+Two deliberate differences, both because his shape does not survive
+contact with our invoicing:
+
+  * **His lines are hand-typed; ours are projected.** `ContractLine` in
+    his schema has no `extra_work_id` and no other link to a job — no
+    ExtraWork controller or service in his codebase touches
+    `ContractLine` at all. Ours carries `ContractLine.extra_work` and
+    rebuilds every amount from `reports.dimensions._amounts_for_state`,
+    the named server mirror of `rowAmounts()`. So there is no second
+    number to drift, and there is no Add/Edit/Delete on a register line:
+    the row links to the job, which is the one place its amount lives.
+  * **THE REGISTER NEVER RAISES AN INVOICE.** Our Extra Work already
+    reaches one through `invoicing/selectors.py`, whose unbilled pool
+    means "no live `InvoiceLine` claims this row". A register line is
+    not an `InvoiceLine`, so a register that billed would have the pool
+    offer the same work again — every customer billed twice for every
+    job. `invoice_generation.generate_invoices_for_contract` returns
+    empty for a register and `billing.build_forecast` gives it no rows;
+    `TheRegisterNeverBills` pins both, on a register that is ACTIVE and
+    has lines so the guard is what is being tested.
+
+**2. Three figures, because one would have been a lie.** The build
+measured the register at EUR 990.99 earned while the invoice run could
+only offer EUR 660.66 — and both were right: the third job carried the
+legacy `is_invoiced` flag, set without an `InvoiceLine`. A summary
+counting only live claims would have promised a third more revenue than
+existed. The strip now reads *taken on* / *finished* / *still to bill*,
+and `earned - invoiced` reconciles exactly: with EUR 660.66 outstanding
+the run billed EUR 660.66, after which the figure read EUR 0.00.
+
+**3. Activate is a button.** His `POST /contracts/{id}/activate` is one
+press; ours was a `lifecycle` dropdown three clicks inside the edit
+dialog. Now a primary button on a DRAFT, absent on every other state,
+reusing the ordinary PATCH rather than adding a second write path.
+
+**4-5. Revisions, projects and real totals were already working** — W11
+fixed them two days before this prompt was written, and the complaints
+in it are stale. Measured on the live site before changing anything:
+POST a line to revision 3 returned 201, and the contract then read
+`monthly_amount 1200.00 / yearly 14400.00 / hours 10.0 / lines 1`, with
+`/contracts/stats/` agreeing. Nothing was needed and nothing was done.
+
+**Where the prompt was wrong about his code** — three claims, all
+checked in the clone and all false; the corrections are in the report
+and in `extra_work_register.py`'s header. Briefly: billing does NOT flow
+through his contracts (`BillingService` and `ExtraWorkV2InvoiceService`
+contain zero contract references); his "Create revision" is
+`alert(comingSoon)` and `ContractRevision` has no routes and no writer
+anywhere; and his register is not why his totals are real.
+
 ### Done — W14: the extra-work button that lied, and the page that threw the record away
 
 The owner, from an extra work whose header read **Open**, pressed one
