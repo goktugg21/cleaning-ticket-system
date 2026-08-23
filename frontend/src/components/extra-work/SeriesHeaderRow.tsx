@@ -39,7 +39,6 @@ export function SeriesHeaderRow({
   columns,
   open,
   onToggle,
-  onEdit,
 }: {
   group: ExtraWorkGroupSummary;
   /** How many members the CURRENT page happens to contain. */
@@ -51,9 +50,6 @@ export function SeriesHeaderRow({
   columns: number;
   open: boolean;
   onToggle: () => void;
-  /** Undefined for a customer — the editor's endpoint refuses them at
-   *  the door, and a button that always 403s is worse than no button. */
-  onEdit?: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const partial = onThisPage < group.member_count;
@@ -96,17 +92,6 @@ export function SeriesHeaderRow({
                 total: group.member_count,
               })}
             </span>
-          )}
-
-          {onEdit && (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={onEdit}
-              data-testid="extra-work-series-edit"
-            >
-              {t("series.edit_button")}
-            </button>
           )}
 
           <span className="ew-series-statuses">

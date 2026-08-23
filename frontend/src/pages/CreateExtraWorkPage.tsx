@@ -576,8 +576,6 @@ export function CreateExtraWorkPage({
     chosenCustomer?.invoice_billing_target === "BUILDING"
       ? "BUILDING"
       : "CUSTOMER";
-  const customerSettingKnown =
-    chosenCustomer?.invoice_billing_target !== undefined;
   /** The radio that is on. Untouched shows the customer's own answer. */
   const selectedBilledTo: ExtraWorkBilledTo = billedTo ?? resolvedBilledTo;
   /** What is POSTED. Matching the customer stores NULL, so a customer
@@ -1948,91 +1946,91 @@ export function CreateExtraWorkPage({
                 (`invoicing/billing_target.py`).
 
                 Asked HERE, next to the building and the customer,
-                because those are the two names it chooses between. The
-                page IS both create surfaces — a CUSTOMER_USER with
-                their customer and building fixed, and a provider with
-                the pickers above — and both post the same field. */}
-            <fieldset
-              className="field"
-              style={{ border: 0, padding: 0, margin: 0 }}
-              data-testid="extra-work-create-billed-to"
-            >
-              <span className="field-label">
-                {t("create.billed_to_question")}
-              </span>
+                because those are the two names it chooses between.
 
-              {/* W12 — TWO options, and the one the customer's own
-                  setting produces is already on, and says so on itself.
-
-                  "Follow the customer's setting" was a third radio. It
-                  deferred the question instead of answering it: you
-                  could not tell what you had chosen without leaving the
-                  page to look the customer up. The marker below carries
-                  that fact ON the option it applies to, so choosing the
-                  other one is a visible disagreement with a visible
-                  default rather than a jump into the unknown.
-
-                  Leaving it alone posts NULL, not this value — see
-                  `billedToPayload`. */}
-              <label className="ew-billed-to-option">
-                <input
-                  type="radio"
-                  name="ew-billed-to"
-                  checked={selectedBilledTo === "BUILDING"}
-                  onChange={() => setBilledTo("BUILDING")}
-                  data-testid="extra-work-create-billed-to-building"
-                />
-                <span>
-                  <strong>
-                    {chosenBuilding
-                      ? t("create.billed_to_building_named", {
-                          building: chosenBuilding.name,
-                        })
-                      : t("create.billed_to_building_unnamed")}
-                  </strong>
-                  {resolvedBilledTo === "BUILDING" && (
-                    <span
-                      className="ew-billed-to-default"
-                      data-testid="extra-work-create-billed-to-default-marker"
-                    >
-                      {customerSettingKnown
-                        ? t("create.billed_to_customer_setting")
-                        : t("create.billed_to_setting_unknown")}
-                    </span>
-                  )}
+                Rendered only once a customer is resolved: the marker
+                below states THAT customer's own setting, so before one
+                is picked there is no setting to state and the question
+                would have to hedge. Every role resolves the customer
+                the same way — through the (scoped) customer select —
+                so this gate behaves identically for a CUSTOMER_USER. */}
+            {chosenCustomer && (
+              <fieldset
+                className="field"
+                style={{ border: 0, padding: 0, margin: 0 }}
+                data-testid="extra-work-create-billed-to"
+              >
+                <span className="field-label">
+                  {t("create.billed_to_question")}
                 </span>
-              </label>
 
-              <label className="ew-billed-to-option">
-                <input
-                  type="radio"
-                  name="ew-billed-to"
-                  checked={selectedBilledTo === "CUSTOMER"}
-                  onChange={() => setBilledTo("CUSTOMER")}
-                  data-testid="extra-work-create-billed-to-customer"
-                />
-                <span>
-                  <strong>
-                    {chosenCustomer
-                      ? t("create.billed_to_customer_named", {
-                          customer: chosenCustomer.name,
-                        })
-                      : t("create.billed_to_customer_unnamed")}
-                  </strong>
-                  {resolvedBilledTo === "CUSTOMER" && (
-                    <span
-                      className="ew-billed-to-default"
-                      data-testid="extra-work-create-billed-to-default-marker"
-                    >
-                      {customerSettingKnown
-                        ? t("create.billed_to_customer_setting")
-                        : t("create.billed_to_setting_unknown")}
-                    </span>
-                  )}
-                </span>
-              </label>
+                {/* W12 — TWO options, and the one the customer's own
+                    setting produces is already on, and says so on itself.
 
-            </fieldset>
+                    "Follow the customer's setting" was a third radio. It
+                    deferred the question instead of answering it: you
+                    could not tell what you had chosen without leaving the
+                    page to look the customer up. The marker below carries
+                    that fact ON the option it applies to, so choosing the
+                    other one is a visible disagreement with a visible
+                    default rather than a jump into the unknown.
+
+                    Leaving it alone posts NULL, not this value — see
+                    `billedToPayload`. */}
+                <label className="ew-billed-to-option">
+                  <input
+                    type="radio"
+                    name="ew-billed-to"
+                    checked={selectedBilledTo === "BUILDING"}
+                    onChange={() => setBilledTo("BUILDING")}
+                    data-testid="extra-work-create-billed-to-building"
+                  />
+                  <span>
+                    <strong>
+                      {chosenBuilding
+                        ? t("create.billed_to_building_named", {
+                            building: chosenBuilding.name,
+                          })
+                        : t("create.billed_to_building_unnamed")}
+                    </strong>
+                    {resolvedBilledTo === "BUILDING" && (
+                      <span
+                        className="ew-billed-to-default"
+                        data-testid="extra-work-create-billed-to-default-marker"
+                      >
+                        {t("create.billed_to_customer_setting")}
+                      </span>
+                    )}
+                  </span>
+                </label>
+
+                <label className="ew-billed-to-option">
+                  <input
+                    type="radio"
+                    name="ew-billed-to"
+                    checked={selectedBilledTo === "CUSTOMER"}
+                    onChange={() => setBilledTo("CUSTOMER")}
+                    data-testid="extra-work-create-billed-to-customer"
+                  />
+                  <span>
+                    <strong>
+                      {t("create.billed_to_customer_named", {
+                        customer: chosenCustomer.name,
+                      })}
+                    </strong>
+                    {resolvedBilledTo === "CUSTOMER" && (
+                      <span
+                        className="ew-billed-to-default"
+                        data-testid="extra-work-create-billed-to-default-marker"
+                      >
+                        {t("create.billed_to_customer_setting")}
+                      </span>
+                    )}
+                  </span>
+                </label>
+
+              </fieldset>
+            )}
 
             {/* W13 — WHAT THE CUSTOMER WANTS TO SEE BEFORE THIS IS DONE.
                 The owner's father's case: "the person says I will see

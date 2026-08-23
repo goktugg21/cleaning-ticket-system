@@ -16,8 +16,13 @@
 //   * tick the people (several, in one go);
 //   * optionally give them a time -- ONE time for everybody, or, one radio
 //     across, a separate window per person;
-//   * optionally file the work under a named part of the job;
 //   * one confirm.
+//
+// People plus an optional time is the WHOLE dialog. It briefly also carried
+// an instruction textarea and a part-of-the-job picker; neither was asked
+// for here and both are gone. Parts and per-slot notes still exist -- on
+// the ticket page's sub-task UI and the per-slot editor -- just not behind
+// this door.
 //
 // Assigning three people to the same morning is one action. Giving each of
 // them a different window is the same modal, expanded. Both doors were
@@ -54,15 +59,18 @@ export interface AssignStaffResult {
   userIds: number[];
   /** One entry per id in `userIds`, already resolved from same-for-all. */
   timesByUser: Record<number, SlotTimeDraft>;
+  /* The dialog no longer edits the note or the part -- those fields are
+     ECHOES so the caller's writes stay lossless: edit mode hands back
+     `initialNote` / `initialPartId` untouched (a time change must not wipe
+     an existing note), assign mode hands back the empty defaults. Dropping
+     them from this type altogether means rewriting the handlers in
+     StaffAssignmentSection.tsx, which is a separate change. */
   note: string;
-  /** An existing part of the job, or null for the general pool. */
+  /** Echoed `initialPartId`, or null. Never a new value from this dialog. */
   partId: number | null;
-  /** Non-empty means: create this part first, then file the work under it. */
+  /** Always "" -- the dialog no longer creates parts. */
   newPartTitle: string;
 }
-
-/** Sentinel `value` for the "a new part" option of the part select. */
-const NEW_PART = "__new__";
 
 function endsBeforeStart(times: SlotTimeDraft): boolean {
   const start = localInputToIso(times.start);
@@ -78,8 +86,6 @@ export function AssignStaffDialog({
   initialTimes,
   initialNote,
   initialPartId,
-  parts,
-  allowParts,
   busy,
   error,
   noCandidatesText,
@@ -94,10 +100,14 @@ export function AssignStaffDialog({
   editingPersonId?: number;
   editingPersonName?: string;
   initialTimes?: SlotTimeDraft;
+  /** Echoed back on confirm, never edited here (see AssignStaffResult). */
   initialNote?: string;
+  /** Echoed back on confirm, never edited here (see AssignStaffResult). */
   initialPartId?: number | null;
+  /* `parts` / `allowParts` are still supplied by the caller; the dialog
+     no longer reads them. They leave this type together with the echo
+     fields above, when StaffAssignmentSection.tsx is next touched. */
   parts: SubTask[];
-  /** False on a terminal ticket, where the backend refuses part placement. */
   allowParts: boolean;
   busy?: boolean;
   error?: string;
@@ -116,13 +126,6 @@ export function AssignStaffDialog({
     initialTimes ?? EMPTY_SLOT_TIME,
   );
   const [byUser, setByUser] = useState<Record<number, SlotTimeDraft>>({});
-  const [note, setNote] = useState(initialNote ?? "");
-  const [part, setPart] = useState<string>(
-    initialPartId === undefined || initialPartId === null
-      ? ""
-      : String(initialPartId),
-  );
-  const [newPartTitle, setNewPartTitle] = useState("");
 
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -155,7 +158,6 @@ export function AssignStaffDialog({
   const badWindow = effectivePerPerson
     ? userIds.some((id) => endsBeforeStart(timesFor(id)))
     : endsBeforeStart(shared);
-  const missingPartTitle = part === NEW_PART && newPartTitle.trim() === "";
   const nothingPicked = userIds.length === 0;
 
   function setPersonTimes(userId: number, next: SlotTimeDraft) {
@@ -163,16 +165,15 @@ export function AssignStaffDialog({
   }
 
   function submit() {
-    if (nothingPicked || badWindow || missingPartTitle) return;
+    if (nothingPicked || badWindow) return;
     const timesByUser: Record<number, SlotTimeDraft> = {};
     for (const id of userIds) timesByUser[id] = timesFor(id);
     onConfirm({
       userIds,
       timesByUser,
-      note,
-      partId:
-        !allowParts || part === "" || part === NEW_PART ? null : Number(part),
-      newPartTitle: allowParts && part === NEW_PART ? newPartTitle.trim() : "",
+      note: initialNote ?? "",
+      partId: initialPartId ?? null,
+      newPartTitle: "",
     });
   }
 
@@ -258,11 +259,15 @@ export function AssignStaffDialog({
           </div>
         )}
 
+        {/* The section says on itself that time is optional -- it always
+            was (this file's header says so), the UI just never admitted
+            it. The label renders whether or not the same-time /
+            per-person radios are offered. */}
+        <span className="field-label" id={`${testIdPrefix}-mode-label`}>
+          {t("assign.time_label_optional")}
+        </span>
         {perPersonAvailable && (
           <div className="field">
-            <span className="field-label" id={`${testIdPrefix}-mode-label`}>
-              {t("assign.time_label")}
-            </span>
             <div
               className="assign-time-modes"
               role="radiogroup"
@@ -324,58 +329,6 @@ export function AssignStaffDialog({
           />
         )}
 
-        <div className="field">
-          <label className="field-label" htmlFor={`${testIdPrefix}-note`}>
-            {t("assign.note_label")}
-          </label>
-          <textarea
-            id={`${testIdPrefix}-note`}
-            className="field-textarea"
-            value={note}
-            disabled={busy}
-            onChange={(event) => setNote(event.target.value)}
-            data-testid={`${testIdPrefix}-note`}
-          />
-        </div>
-
-        {allowParts && (
-          <div className="field">
-            <label className="field-label" htmlFor={`${testIdPrefix}-part`}>
-              {t("assign.part_label")}
-            </label>
-            <select
-              id={`${testIdPrefix}-part`}
-              className="field-select"
-              value={part}
-              disabled={busy}
-              onChange={(event) => setPart(event.target.value)}
-              data-testid={`${testIdPrefix}-part`}
-            >
-              <option value="">{t("assign.part_none")}</option>
-              {parts.map((p) => (
-                <option key={p.id} value={String(p.id)}>
-                  {p.title}
-                </option>
-              ))}
-              <option value={NEW_PART}>{t("assign.part_new")}</option>
-            </select>
-            {part === NEW_PART && (
-              <input
-                className="field-input"
-                type="text"
-                maxLength={200}
-                value={newPartTitle}
-                disabled={busy}
-                placeholder={t("assign.part_new_placeholder")}
-                aria-label={t("assign.part_new")}
-                onChange={(event) => setNewPartTitle(event.target.value)}
-                data-testid={`${testIdPrefix}-new-part-title`}
-                style={{ marginTop: 6 }}
-              />
-            )}
-          </div>
-        )}
-
         {badWindow && (
           <div
             className="alert-error"
@@ -400,7 +353,7 @@ export function AssignStaffDialog({
             type="button"
             className="btn btn-primary"
             onClick={submit}
-            disabled={busy || nothingPicked || badWindow || missingPartTitle}
+            disabled={busy || nothingPicked || badWindow}
             data-testid={`${testIdPrefix}-confirm`}
           >
             {mode === "assign"

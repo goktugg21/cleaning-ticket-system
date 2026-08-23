@@ -56,7 +56,6 @@ import { PageHeader } from "../components/PageHeader";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { SeriesHeaderRow } from "../components/extra-work/SeriesHeaderRow";
-import { SeriesEditorDialog } from "../components/extra-work/SeriesEditorDialog";
 import { foldSeries } from "../lib/extraWorkSeries";
 import { billedToKey } from "../lib/billedTo";
 import { isPriced, rowAmounts } from "../lib/billing";
@@ -1009,10 +1008,6 @@ export function ExtraWorkList({
   // what this replaces. State lives here rather than in the header row
   // so expansion survives a re-render of the table.
   const [expandedSeries, setExpandedSeries] = useState<number[]>([]);
-  // Which series is open in the editor, or null. Provider-only: the
-  // dialog's endpoint refuses a customer at the door, and offering a
-  // button that always 403s is worse than not offering it.
-  const [editingSeries, setEditingSeries] = useState<number | null>(null);
   // NOTE: the series header spans the table with a deliberately
   // over-large colSpan rather than a counted one. Four of this table's
   // columns are conditional (the select box, the ticket column, the
@@ -1250,19 +1245,6 @@ export function ExtraWorkList({
 
       {/* W3-F — bulk plan. Conditionally mounted like its two
           neighbours; a plain overlay, not a native `<dialog>`. */}
-      {/* W5-B — the series editor. Conditionally mounted like its
-          neighbours; a plain overlay, not a native <dialog>. */}
-      {editingSeries !== null && (
-        <SeriesEditorDialog
-          groupId={editingSeries}
-          onClose={() => setEditingSeries(null)}
-          onSaved={() => {
-            setEditingSeries(null);
-            setReloadKey((key) => key + 1);
-          }}
-        />
-      )}
-
       {planOpen && (
         <BulkPlanDialog
           rows={rows.filter((row) => edit.selection.includes(row.id))}
@@ -1891,11 +1873,6 @@ export function ExtraWorkList({
                               ? prev.filter((id) => id !== entry.group.id)
                               : [...prev, entry.group.id],
                           )
-                        }
-                        onEdit={
-                          isProvider
-                            ? () => setEditingSeries(entry.group.id)
-                            : undefined
                         }
                       />
                       {open && entry.rows.map((row) => renderRow(row, true))}
