@@ -38,7 +38,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CalendarClock, CalendarPlus, Pencil } from "lucide-react";
-import { Link } from "react-router-dom";
 import axios from "axios";
 
 import { getApiError } from "../../api/client";
@@ -283,13 +282,27 @@ export function TicketScheduleCard({
     wantedDate || askedStart || askedEnd || deadline || committedStart,
   );
 
+  // W21 §3 — every row STACKS: label on its own line, value on its own
+  // line, at every width. The kv grid puts label and value side by side
+  // above 1100px, and a date range in the rail's narrow value column
+  // wrapped mid-range (the owner's screenshot); an inline style wins
+  // over the media query without touching the shared class. The title
+  // link that shared the committed cell is DELETED, not restyled — the
+  // job page needs no door to the request page, and the work's title
+  // already heads this very page.
+  const stackedRow = {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+  } as const;
+
   const renderAsked = (testId: string) =>
     hasAsked ? (
       <div className="plan-asked" data-testid={testId}>
         <div className="plan-asked-head">{t("schedule.asked_heading")}</div>
         <div className="detail-kv-list">
           {wantedDate && (
-            <div className="detail-kv-row">
+            <div className="detail-kv-row" style={stackedRow}>
               <span className="detail-kv-label">
                 {t("schedule.asked_wanted_label")}
               </span>
@@ -299,7 +312,7 @@ export function TicketScheduleCard({
             </div>
           )}
           {askedStart && (
-            <div className="detail-kv-row">
+            <div className="detail-kv-row" style={stackedRow}>
               <span className="detail-kv-label">
                 {t("schedule.asked_window_label")}
               </span>
@@ -314,7 +327,7 @@ export function TicketScheduleCard({
             </div>
           )}
           {deadline && (
-            <div className="detail-kv-row">
+            <div className="detail-kv-row" style={stackedRow}>
               <span className="detail-kv-label">
                 {t("schedule.asked_deadline_label")}
               </span>
@@ -324,7 +337,7 @@ export function TicketScheduleCard({
             </div>
           )}
           {committedStart && origin && (
-            <div className="detail-kv-row">
+            <div className="detail-kv-row" style={stackedRow}>
               <span className="detail-kv-label">
                 {t("schedule.asked_committed_label")}
               </span>
@@ -338,13 +351,6 @@ export function TicketScheduleCard({
                       to: formatPlainDate(committedEnd),
                     })
                   : formatPlainDate(committedStart)}
-                <Link
-                  to={`/extra-work/${origin.extra_work_request_id}`}
-                  className="plan-asked-link"
-                  data-testid="ticket-schedule-committed-link"
-                >
-                  {origin.extra_work_request_title}
-                </Link>
               </span>
             </div>
           )}

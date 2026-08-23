@@ -1454,19 +1454,22 @@ export function ExtraWorkDetailPage() {
     );
   }
 
-  // W18 — THE AUTOMATIC LANDING. One work, one page: for a provider, a
-  // request with exactly one spawned operational ticket IS that ticket,
-  // so opening the request lands on the job page. `?full=1` is the
-  // escape back to this page (the ticket's origin link and the series
-  // link carry it). Customers are never redirected — their surfaces
-  // stay the request; a multi-ticket series keeps this page as its
-  // overview.
-  if (
-    isProvider &&
-    ew.spawned_tickets.length === 1 &&
-    searchParams.get("full") !== "1"
-  ) {
-    return <Navigate replace to={`/tickets/${ew.spawned_tickets[0].id}`} />;
+  // W21 — THE AUTOMATIC LANDING, without the escape. For a provider,
+  // a request that has spawned work IS that work: any spawned ticket
+  // (series included) redirects to the job page, landing on the
+  // EARLIEST day (scheduled date, undated last, id as tiebreak — the
+  // same order the Agreement card lists the days in). W18's `?full=1`
+  // back door is deleted with the links that carried it; the Agreement
+  // card on the job page holds what this page was reopened for.
+  // Customers are never redirected — their surfaces stay the request.
+  if (isProvider && ew.spawned_tickets.length >= 1) {
+    const earliest = [...ew.spawned_tickets].sort((a, b) => {
+      const ad = a.scheduled_start_at ?? "9999-12-31T23:59:59Z";
+      const bd = b.scheduled_start_at ?? "9999-12-31T23:59:59Z";
+      if (ad !== bd) return ad < bd ? -1 : 1;
+      return a.id - b.id;
+    })[0];
+    return <Navigate replace to={`/tickets/${earliest.id}`} />;
   }
 
   const allowed = ew.allowed_next_statuses;

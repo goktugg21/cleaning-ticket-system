@@ -2359,12 +2359,12 @@ export function TicketDetailPage() {
             for tickets created by an ExtraWorkRequest line). Mirrors
             the RouteBadge so operators can tell at a glance whether
             the parent EW skipped or went through the proposal phase.
-            W18 — THE ONE DOOR BACK to the request page. A provider
-            opening a single-ticket request is auto-landed on this
-            ticket, so the link carries `?full=1` (the redirect's
-            escape) and is named for its destination rather than by
-            the record's title — the title stands beside it as plain
-            text. */}
+            W21 — NO DOOR BACK. W18's "Request & proposal" link (and
+            its `?full=1` escape) is gone with the escape itself: for a
+            provider the request page no longer exists once work is
+            spawned, and everything it held lives in the Agreement and
+            Extra work cards on THIS page. The origin is a fact, so it
+            stays — as text. */}
         {ticket.extra_work_origin && (
           <div
             className="ticket-extra-work-origin"
@@ -2375,12 +2375,6 @@ export function TicketDetailPage() {
               {t("detail.spawned_from_label")}
             </span>{" "}
             <span>{ticket.extra_work_origin.extra_work_request_title}</span>{" "}
-            <Link
-              to={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}?full=1`}
-              data-testid="ticket-ew-origin-link"
-            >
-              {t("detail.origin_request_link")}
-            </Link>{" "}
             <RouteBadge value={ticket.extra_work_origin.origin} />
           </div>
         )}
@@ -4414,6 +4408,7 @@ export function TicketDetailPage() {
               <TicketExtraWorkCards
                 key={ticket.extra_work_origin.extra_work_request_id}
                 extraWorkId={ticket.extra_work_origin.extra_work_request_id}
+                currentTicketId={ticket.id}
               />
             )}
 

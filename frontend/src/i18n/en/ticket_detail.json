@@ -248,7 +248,8 @@
   "convert.submit_button": "Convert to Extra Work",
   "convert.submitting": "Converting…",
   "detail.spawned_from_label": "Spawned from extra work",
-  "detail.origin_request_link": "Request & proposal",
+  "change.note_recorded": "Your note is in the activity log.",
+  "change.failed": "Change failed — the status is unchanged",
   "schedule.card_title": "Scheduling",
   "schedule.not_scheduled": "Not planned yet",
   "schedule.window_label": "Time window",
@@ -326,7 +327,11 @@
   "ew_card_billing_month": "Billing month",
   "ew_card_invoiced": "Invoiced",
   "ew_card_awaiting_hours": "Awaiting worked hours",
-  "ew_card_series_link": "Series overview",
   "ew_thread_chip": "Extra work",
-  "ew_open_work": "Open the work"
+  "ew_open_work": "Open the work",
+  "ew_card_no_price": "No price agreed",
+  "ew_agreement_title": "Agreement",
+  "ew_agreement_requested": "Requested",
+  "ew_agreement_agreed": "Agreed price",
+  "ew_agreement_days": "Days"
 }

@@ -248,7 +248,8 @@
   "convert.submit_button": "Converteer naar Extra Werk",
   "convert.submitting": "Converteren…",
   "detail.spawned_from_label": "Voortgekomen uit extra werk",
-  "detail.origin_request_link": "Aanvraag en offerte",
+  "change.note_recorded": "Uw notitie staat in het activiteitenlog.",
+  "change.failed": "Wijziging mislukt — de status is ongewijzigd",
   "schedule.card_title": "Planning",
   "schedule.not_scheduled": "Nog niet ingepland",
   "schedule.window_label": "Tijdvak",
@@ -326,7 +327,11 @@
   "ew_card_billing_month": "Factuurmaand",
   "ew_card_invoiced": "Gefactureerd",
   "ew_card_awaiting_hours": "Wacht op gewerkte uren",
-  "ew_card_series_link": "Reeksoverzicht",
   "ew_thread_chip": "Extra werk",
-  "ew_open_work": "Open het werk"
+  "ew_open_work": "Open het werk",
+  "ew_card_no_price": "Geen prijs afgesproken",
+  "ew_agreement_title": "Afspraken",
+  "ew_agreement_requested": "Aangevraagd",
+  "ew_agreement_agreed": "Afgesproken prijs",
+  "ew_agreement_days": "Dagen"
 }
