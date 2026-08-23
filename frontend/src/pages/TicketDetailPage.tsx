@@ -48,6 +48,7 @@ import type {
   AssignableManager,
   AssignedStaffNamedEntry,
   Contact,
+  EwMessage,
   MessageRecipient,
   PaginatedResponse,
   StaffCompletionRoute,
@@ -66,6 +67,7 @@ import type {
   TicketUploadVisibility,
   UploadVisibilitySource,
 } from "../api/types";
+import { listEwMessages } from "../api/extraWork";
 import {
   getTicketUploadVisibility,
   setTicketUploadVisibility,
@@ -95,7 +97,6 @@ import { useToast } from "../components/ToastProvider";
 import { RouteBadge } from "../components/RouteBadge";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
-import { PlannedVsActualHours } from "../components/PlannedVsActualHours";
 import { describeTicketChange } from "../lib/describeTicketChange";
 import { ticketStatusLabelKey } from "../lib/enumLabels";
 
@@ -658,6 +659,12 @@ export function TicketDetailPage() {
   >(null);
   const [uploadGrantsNonce, setUploadGrantsNonce] = useState(0);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
+  // W18 — the Extra Work thread of the job this ticket was born from,
+  // shown read-only inside the ONE Messages card (merged by date). Both
+  // endpoints are server-filtered by the canonical visibility
+  // chokepoints; this is display only. A failed fetch collapses to the
+  // ticket thread alone.
+  const [ewMessages, setEwMessages] = useState<EwMessage[]>([]);
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   // Sprint 32 — unified audit timeline for provider-audit roles (SA / CA /
   // BM). STAFF + CUSTOMER_USER never fetch it (the endpoint 403s them); they
@@ -1072,6 +1079,36 @@ export function TicketDetailPage() {
       .then(() => notifyInboxUnreadChanged())
       .catch(() => {});
   }, [id]);
+
+  // W18 — the origin Extra Work's own thread, for the merged Messages
+  // card. Same gate as the Extra-work card mount (`canAccessExtraWork`:
+  // STAFF are hard-404'd by `scope_extra_work_for`, so the call must
+  // never fire for them; customers keep their surfaces). The endpoint
+  // is chokepoint-filtered server-side — display only. Failure or an
+  // ordinary ticket collapses to the ticket thread alone. State is set
+  // only in async callbacks / a microtask (no set-state-in-effect).
+  const ewOriginId = ticket?.extra_work_origin?.extra_work_request_id ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    if (ewOriginId === null || !canAccessExtraWork(me?.role)) {
+      queueMicrotask(() => {
+        if (!cancelled) setEwMessages([]);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    listEwMessages(ewOriginId)
+      .then((list) => {
+        if (!cancelled) setEwMessages(list);
+      })
+      .catch(() => {
+        if (!cancelled) setEwMessages([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewOriginId, me?.role]);
 
   // Sprint 32 — provider-audit roles (SA / CA / BM, mirroring the backend
   // IsTicketAuditConsumer) get the UNIFIED audit timeline. STAFF /
@@ -2184,6 +2221,33 @@ export function TicketDetailPage() {
     );
   }
 
+  // W18 — ONE Messages card for the job: the ticket thread plus the
+  // origin Extra Work's thread (read-only, chip-marked), merged by
+  // date. Both endpoints return ascending `created_at`, so the merge
+  // sorts the same way; ids collide across the two tables, hence the
+  // prefixed keys.
+  const jobThread: Array<
+    | { key: string; source: "ticket"; msg: TicketMessage }
+    | { key: string; source: "ew"; msg: EwMessage }
+  > = [
+    ...messages.map((msg) => ({
+      key: `t-${msg.id}`,
+      source: "ticket" as const,
+      msg,
+    })),
+    ...ewMessages.map((msg) => ({
+      key: `ew-${msg.id}`,
+      source: "ew" as const,
+      msg,
+    })),
+  ].sort((a, b) =>
+    a.msg.created_at < b.msg.created_at
+      ? -1
+      : a.msg.created_at > b.msg.created_at
+        ? 1
+        : 0,
+  );
+
   return (
     <div>
       <div className="detail-header">
@@ -2294,7 +2358,13 @@ export function TicketDetailPage() {
             when the backend includes `extra_work_origin` (non-null
             for tickets created by an ExtraWorkRequest line). Mirrors
             the RouteBadge so operators can tell at a glance whether
-            the parent EW skipped or went through the proposal phase. */}
+            the parent EW skipped or went through the proposal phase.
+            W18 — THE ONE DOOR BACK to the request page. A provider
+            opening a single-ticket request is auto-landed on this
+            ticket, so the link carries `?full=1` (the redirect's
+            escape) and is named for its destination rather than by
+            the record's title — the title stands beside it as plain
+            text. */}
         {ticket.extra_work_origin && (
           <div
             className="ticket-extra-work-origin"
@@ -2304,10 +2374,12 @@ export function TicketDetailPage() {
             <span className="muted small">
               {t("detail.spawned_from_label")}
             </span>{" "}
+            <span>{ticket.extra_work_origin.extra_work_request_title}</span>{" "}
             <Link
-              to={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
+              to={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}?full=1`}
+              data-testid="ticket-ew-origin-link"
             >
-              {ticket.extra_work_origin.extra_work_request_title}
+              {t("detail.origin_request_link")}
             </Link>{" "}
             <RouteBadge value={ticket.extra_work_origin.origin} />
           </div>
@@ -2457,39 +2529,6 @@ export function TicketDetailPage() {
 
       <div className="detail-grid">
         <div className="detail-main">
-          {/* W7 — the plan against the reality, on the screen where the
-              work actually happens.
-
-              The owner: "If I enter who is supposed to work how many
-              hours, I need to be able to see that information in the
-              operational ticket as well." Until now the plan lived only
-              on the Extra Work and the actual hours only in the hours
-              module, so answering "did Noah work the eight hours we
-              planned him" meant opening two other screens and holding
-              two numbers in your head.
-
-              FIRST in the column, above the messages: it is the state of
-              the job, and it is the reason somebody opened the ticket.
-
-              Only on a ticket that CAME FROM an extra work. An ordinary
-              melding has no plan to compare against, and rendering an
-              empty panel on every ticket in the system would teach
-              everybody to scroll past it.
-
-              This is the same component the chargeable-work view of the
-              job reaches (that view IS this page — a chargeable-work row
-              opens here) and the same one the Extra Work page should
-              mount; see the hand-off in the report. */}
-          {ticket.extra_work_origin && (
-            <PlannedVsActualHours
-              // Keyed by the job: the panel holds prop-derived loading
-              // state, and CLAUDE.md's rule for that is to key the
-              // component by id rather than to reset it in an effect.
-              key={ticket.extra_work_origin.extra_work_request_id}
-              extraWorkId={ticket.extra_work_origin.extra_work_request_id}
-              testId="ticket-planned-vs-actual"
-            />
-          )}
           <div className="card">
             <div className="card-head-icon">
               <span className="card-head-icon-glyph">
@@ -2604,7 +2643,7 @@ export function TicketDetailPage() {
               </p>
             </form>
 
-            {messages.length === 0 ? (
+            {jobThread.length === 0 ? (
               <p
                 style={{
                   padding: "0 22px 22px",
@@ -2615,9 +2654,9 @@ export function TicketDetailPage() {
                 {t("no_messages")}
               </p>
             ) : (
-              messages.map((item) => (
+              jobThread.map(({ key, source, msg: item }) => (
                 <div
-                  key={item.id}
+                  key={key}
                   className={`note-bubble ${NOTE_TIER_BUBBLE_CLASS[item.message_type] ?? ""}`}
                 >
                   <div className="note-bubble-avatar">
@@ -2636,6 +2675,14 @@ export function TicketDetailPage() {
                       >
                         {t(NOTE_TIER_BADGE_KEY[item.message_type] ?? "tag_public")}
                       </span>
+                      {source === "ew" && (
+                        <span
+                          className="note-bubble-tag"
+                          data-testid="note-ew-chip"
+                        >
+                          {t("ew_thread_chip")}
+                        </span>
+                      )}
                       {item.visibility_mode === "RESTRICTED" && (
                         <span
                           className="note-bubble-private"

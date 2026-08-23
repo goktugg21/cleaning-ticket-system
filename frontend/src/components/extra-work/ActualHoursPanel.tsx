@@ -52,12 +52,22 @@ function actualHoursErrorCode(err: unknown): string | null {
 // by `actualHoursPanelKey`, so a successful save (which bumps updated_at
 // on the refreshed detail) remounts the panel and re-seeds the inputs from
 // the fresh `actual_hours` — no prop-derived resync effect.
+//
+// W18 — TWO VARIANTS, ONE OWNER. "card" is the standalone card on the
+// Extra Work Hours tab; "embedded" is the same fields inside the
+// ticket's one Extra-work card, which carries its own amounts, so the
+// final-total line renders only in "card". The old two-column
+// data-table (th width:160) clipped the input out of view in the
+// ticket's narrow rail; every line is now a stacked label-over-input
+// `.field` (fluid, width:100%), and locked lines render as read-only
+// values with no dead controls.
 export function ActualHoursPanel({
   ewId,
   hourlyLines,
   finalTotalAmount,
   locked,
   onUpdated,
+  variant = "card",
 }: {
   ewId: number;
   hourlyLines: ActualHoursLine[];
@@ -68,6 +78,7 @@ export function ActualHoursPanel({
   // front, not only after a rejected Save.
   locked: boolean;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
+  variant?: "card" | "embedded";
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
@@ -113,6 +124,107 @@ export function ActualHoursPanel({
     }
   }
 
+  const body = (
+    <>
+      {locked && (
+        <div
+          className="alert-warning"
+          data-testid="extra-work-actual-hours-locked"
+        >
+          {t("detail.actual_hours_error_locked")}
+        </div>
+      )}
+      {locked ? (
+        <div className="detail-kv-list">
+          {hourlyLines.map((line) => (
+            <div
+              key={line.id}
+              className="detail-kv-row"
+              data-testid="extra-work-actual-hours-row"
+            >
+              <span className="detail-kv-label">{line.label}</span>
+              <span className="detail-kv-val">{line.actual_hours ?? "—"}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        hourlyLines.map((line) => (
+          <div
+            key={line.id}
+            className="field"
+            data-testid="extra-work-actual-hours-row"
+          >
+            <label
+              className="field-label"
+              htmlFor={`ew-actual-hours-${ewId}-${line.id}`}
+            >
+              {line.label}
+            </label>
+            <input
+              id={`ew-actual-hours-${ewId}-${line.id}`}
+              type="number"
+              min="0"
+              step="0.25"
+              inputMode="decimal"
+              className="field-input"
+              aria-label={t("detail.actual_hours_input_aria", {
+                line: line.label,
+              })}
+              value={draft[line.id] ?? ""}
+              onChange={(event) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  [line.id]: event.target.value,
+                }))
+              }
+            />
+          </div>
+        ))
+      )}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        {variant === "card" && (
+          <span className="muted small">
+            {t("detail.actual_hours_final_total")}{" "}
+            <strong data-testid="extra-work-actual-hours-final-total">
+              {finalTotalAmount ?? "—"}
+            </strong>
+          </span>
+        )}
+        {!locked && (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            data-testid="extra-work-actual-hours-save"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving
+              ? t("detail.actual_hours_saving")
+              : t("detail.actual_hours_save")}
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  if (variant === "embedded") {
+    return (
+      <div
+        style={{ display: "flex", flexDirection: "column", gap: 12 }}
+        data-testid="extra-work-actual-hours"
+      >
+        {body}
+      </div>
+    );
+  }
   return (
     <div
       className="card"
@@ -123,86 +235,7 @@ export function ActualHoursPanel({
         <div className="form-section-title">
           {t("detail.actual_hours_section_title")}
         </div>
-        <p className="muted small" style={{ marginTop: 0 }}>
-          {t("detail.actual_hours_helper")}
-        </p>
-        <p className="muted small" style={{ marginTop: 0 }}>
-          {t("detail.actual_hours_scope_note")}
-        </p>
-        {locked && (
-          <div
-            className="alert-warning"
-            style={{ marginBottom: 12 }}
-            data-testid="extra-work-actual-hours-locked"
-          >
-            {t("detail.actual_hours_error_locked")}
-          </div>
-        )}
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t("detail.actual_hours_col_line")}</th>
-              <th style={{ width: 160 }}>
-                {t("detail.actual_hours_col_hours")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {hourlyLines.map((line) => (
-              <tr key={line.id} data-testid="extra-work-actual-hours-row">
-                <td>{line.label}</td>
-                <td>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.25"
-                    inputMode="decimal"
-                    className="form-control"
-                    aria-label={t("detail.actual_hours_input_aria", {
-                      line: line.label,
-                    })}
-                    value={draft[line.id] ?? ""}
-                    disabled={locked}
-                    onChange={(event) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        [line.id]: event.target.value,
-                      }))
-                    }
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-            marginTop: 12,
-          }}
-        >
-          <span className="muted small">
-            {t("detail.actual_hours_final_total")}{" "}
-            <strong data-testid="extra-work-actual-hours-final-total">
-              {finalTotalAmount ?? "—"}
-            </strong>
-          </span>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            data-testid="extra-work-actual-hours-save"
-            onClick={handleSave}
-            disabled={saving || locked}
-          >
-            {saving
-              ? t("detail.actual_hours_saving")
-              : t("detail.actual_hours_save")}
-          </button>
-        </div>
+        {body}
       </div>
     </div>
   );

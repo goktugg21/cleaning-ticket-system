@@ -35,6 +35,7 @@ import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
+  Navigate,
   useParams,
   useSearchParams,
 } from "react-router-dom";
@@ -1451,6 +1452,21 @@ export function ExtraWorkDetailPage() {
         />
       </div>
     );
+  }
+
+  // W18 — THE AUTOMATIC LANDING. One work, one page: for a provider, a
+  // request with exactly one spawned operational ticket IS that ticket,
+  // so opening the request lands on the job page. `?full=1` is the
+  // escape back to this page (the ticket's origin link and the series
+  // link carry it). Customers are never redirected — their surfaces
+  // stay the request; a multi-ticket series keeps this page as its
+  // overview.
+  if (
+    isProvider &&
+    ew.spawned_tickets.length === 1 &&
+    searchParams.get("full") !== "1"
+  ) {
+    return <Navigate replace to={`/tickets/${ew.spawned_tickets[0].id}`} />;
   }
 
   const allowed = ew.allowed_next_statuses;

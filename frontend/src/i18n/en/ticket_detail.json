@@ -248,6 +248,7 @@
   "convert.submit_button": "Convert to Extra Work",
   "convert.submitting": "Converting…",
   "detail.spawned_from_label": "Spawned from extra work",
+  "detail.origin_request_link": "Request & proposal",
   "schedule.card_title": "Scheduling",
   "schedule.not_scheduled": "Not planned yet",
   "schedule.window_label": "Time window",
@@ -324,6 +325,8 @@
   "ew_card_total": "Total",
   "ew_card_billing_month": "Billing month",
   "ew_card_invoiced": "Invoiced",
-  "ew_card_open": "Open extra work",
+  "ew_card_awaiting_hours": "Awaiting worked hours",
+  "ew_card_series_link": "Series overview",
+  "ew_thread_chip": "Extra work",
   "ew_open_work": "Open the work"
 }
