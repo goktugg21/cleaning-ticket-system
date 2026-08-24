@@ -198,10 +198,6 @@
   font-weight: 600;
   color: var(--text-2);
   text-align: left;
-  /* Sticky-left like the name column: the message stays put when a
-     grid that DOES have rows is scrolled sideways. */
-  position: sticky;
-  left: 0;
 }
 
 .contract-planning-state-count {
@@ -210,4 +206,19 @@
   font-weight: 600;
   color: var(--text-faint);
   border-top: 1px solid var(--border-soft);
+}
+
+/* The sticky element is the TEXT, never the cell.
+ *
+ * Measured, not assumed: with `position: sticky` on the full-width
+ * `<td colSpan>` itself, the message scrolled clean off the left edge
+ * (-597px at 1366px, scrollport 979px). A sticky box cannot be pinned
+ * outside its own boundaries, and the cell's boundaries are the whole
+ * 1608px table — so it just travelled with it. Pinning a NARROW inline
+ * box inside that cell is what actually keeps the sentence on screen at
+ * every scroll position. */
+.contract-planning-state-text {
+  position: sticky;
+  left: 16px;
+  display: inline-block;
 }

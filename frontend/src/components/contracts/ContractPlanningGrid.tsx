@@ -193,7 +193,12 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
                 empty cells, which read as a broken row rather than as
                 an answer. Neither is drawn until the fetch has resolved
                 (`planning !== null`), so "nothing is linked yet" is
-                never shown for "nothing has arrived yet". */}
+                never shown for "nothing has arrived yet".
+
+                The sentence is wrapped in its own span because THAT is
+                what stays put when the grid is scrolled sideways — see
+                `.contract-planning-state-text`, where the measurement
+                that forced it is recorded. */}
             {planning !== null && linkedLines.length === 0 && (
               <tr>
                 <td
@@ -201,7 +206,9 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
                   colSpan={totalColumns}
                   data-testid="contract-planning-empty"
                 >
-                  {t("planning.none_linked")}
+                  <span className="contract-planning-state-text">
+                    {t("planning.none_linked")}
+                  </span>
                 </td>
               </tr>
             )}
@@ -214,7 +221,9 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
                     colSpan={totalColumns}
                     data-testid="contract-planning-unlinked-count"
                   >
-                    {t("planning.unlinked", { count: unlinkedCount })}
+                    <span className="contract-planning-state-text">
+                      {t("planning.unlinked", { count: unlinkedCount })}
+                    </span>
                   </td>
                 </tr>
               )}
