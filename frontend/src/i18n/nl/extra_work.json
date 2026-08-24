@@ -107,7 +107,6 @@
   "create.line_field_service": "Dienst",
   "create.line_field_service_placeholder": "Selecteer een dienst…",
   "create.line_field_quantity": "Aantal",
-  "create.line_field_requested_date": "Gewenste datum",
   "create.line_field_customer_note": "Opmerking (optioneel)",
   "create.line_field_customer_note_placeholder": "Wat de aanbieder over deze regel moet weten",
   "create.line_custom_option": "Aangepast…",
@@ -144,7 +143,6 @@
   "create.error_line_service_required": "Selecteer een dienst voor elke regel.",
   "create.error_line_custom_required": "Omschrijf de aangepaste dienst of kies er een uit de lijst.",
   "create.error_line_quantity_invalid": "Aantal moet groter zijn dan 0.",
-  "create.error_line_requested_date_required": "Gewenste datum is verplicht voor elke regel.",
   "create.preview.section_title": "Prijsoverzicht",
   "create.preview.helper": "Een live overzicht van uw winkelmandje. Regels met een vooraf afgesproken prijs tonen uw eigen contractprijs; andere regels worden door de provider geprijsd.",
   "create.preview.loading": "Prijzen berekenen…",
@@ -776,5 +774,13 @@
   "detail.complete_toast": "“{{title}}” is afgerond. Er is geen ticket gewijzigd.",
   "detail.agreement_col_service": "Dienst",
   "detail.agreement_col_qty": "Aantal",
-  "detail.agreement_col_amount": "Bedrag"
+  "detail.agreement_col_amount": "Bedrag",
+  "create.deadline_chip_left_one": "nog {{count}} dag",
+  "create.deadline_chip_left_other": "nog {{count}} dagen",
+  "create.deadline_chip_today": "vandaag gereed",
+  "create.deadline_chip_overdue_one": "{{count}} dag te laat",
+  "create.deadline_chip_overdue_other": "{{count}} dagen te laat",
+  "create.preview.col_actions": "Acties",
+  "create.preview.picker_label": "Diensten en afgesproken prijzen om toe te voegen",
+  "create.field_description_placeholder": "Beschrijf het werk: exacte locatie, ruimte, oppervlak, toegang, urgentie en alles wat de prijs beinvloedt. Wil je voor een dienst een eigen moment, zet dat hier."
 }

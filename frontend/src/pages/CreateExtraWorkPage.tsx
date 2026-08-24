@@ -13,7 +13,7 @@
 // (an add page is intentionally a form). After submission the
 // result panel is read-only.
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -55,6 +55,7 @@ import type {
   ServiceUnitType,
   ExtraWorkSlot,
 } from "../api/types";
+import { BoundedList } from "../components/BoundedList";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { formatMoney, formatNumber } from "../lib/intl";
@@ -85,7 +86,9 @@ interface CartLineState {
   // needs-provider-pricing and routes the request to a proposal.
   customDescription: string;
   quantity: string;
-  requestedDate: string;
+  // W-EW1 §2 — a line no longer carries a date. The request-level
+  // Preferred Date is the one date for the whole cart, and the server
+  // stamps every line from it.
   customerNote: string;
 }
 
@@ -179,13 +182,37 @@ function emptyCartLine(): CartLineState {
     serviceId: "",
     customDescription: "",
     quantity: "1",
-    requestedDate: todayISO(),
     customerNote: "",
   };
 }
 
 // Sprint 5 (frontend) — debounce window for the live preview re-fetch.
 const PREVIEW_DEBOUNCE_MS = 350;
+
+/**
+ * W-EW1 §1c — whole days from today to `iso`, or null when `iso` is
+ * empty or unparseable.
+ *
+ * Both ends are normalised to LOCAL midnight before subtracting, so the
+ * answer is a count of calendar days and never drifts by one because the
+ * page happened to be open in the evening. A deadline of tomorrow reads
+ * 1 whether it is computed at 09:00 or at 23:30.
+ */
+function daysUntil(iso: string): number | null {
+  if (!iso) return null;
+  const parts = iso.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
+    return null;
+  }
+  const [y, m, d] = parts;
+  const target = new Date(y, m - 1, d);
+  if (Number.isNaN(target.getTime())) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round(
+    (target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000),
+  );
+}
 
 // i18n keys for the intent options. The set of options actually shown
 // is driven ENTIRELY by the backend's `allowed_intents`; these maps
@@ -362,6 +389,25 @@ export function CreateExtraWorkPage({
   >("");
   const [form, setForm] = useState<ParentFormState>(EMPTY_PARENT);
   const [cartLines, setCartLines] = useState<CartLineState[]>([emptyCartLine()]);
+
+  // W-EW1 §3 — the tempId of the cart line whose inline service picker
+  // is open, or null when none is. ONE picker at a time: two open search
+  // boxes sharing `serviceSearch` would each show the other's results.
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+
+  // W-EW1 §1b — which of the two derived dates the user has taken over.
+  //
+  // Preferred Date fills Planned End and Deadline so the common case
+  // ("all on one day") costs one keystroke instead of three. The moment
+  // the user types in one of them it is THEIRS: a later change to
+  // Preferred Date must never silently overwrite a date somebody chose
+  // on purpose. One flag per field, set on that field's own onChange,
+  // never cleared — taking a field over is not something you undo by
+  // emptying it.
+  const [dateTakenOver, setDateTakenOver] = useState<{
+    plannedEnd: boolean;
+    deadline: boolean;
+  }>({ plannedEnd: false, deadline: false });
 
   // Post-submit result state — once present, the form is collapsed
   // into a read-only confirmation panel.
@@ -657,10 +703,16 @@ export function CreateExtraWorkPage({
         return false;
       }
       const q = Number(line.quantity);
-      if (!Number.isFinite(q) || q <= 0) return false;
-      return Boolean(line.requestedDate);
+      return Number.isFinite(q) && q > 0;
     });
   }, [effectiveBuilding, form.customer, cartLines]);
+
+  // W-EW1 §1c — the deadline chip's value. `null` (render nothing)
+  // whenever there is no deadline to count down to.
+  const deadlineDaysLeft = useMemo(
+    () => daysUntil(form.deadline),
+    [form.deadline],
+  );
 
   // Stable signature of ONLY the pricing-relevant fields (note text is
   // excluded so editing a note never re-fetches). `null` when the cart
@@ -672,6 +724,10 @@ export function CreateExtraWorkPage({
     return JSON.stringify({
       b: Number(effectiveBuilding),
       c: Number(form.customer),
+      // W-EW1 §2 — the cart's one date is pricing-relevant (it picks
+      // the agreed-price window), so it belongs in the signature:
+      // changing it must re-fetch.
+      pd: form.preferred_date || null,
       l: cartLines.map((line) => {
         const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
         const customPriceId = parseCustomPriceId(line.serviceId);
@@ -683,11 +739,10 @@ export function CreateExtraWorkPage({
           // ordered price re-fetches the preview.
           p: customPriceId,
           q: line.quantity,
-          d: line.requestedDate,
         };
       }),
     });
-  }, [previewable, effectiveBuilding, form.customer, cartLines]);
+  }, [previewable, effectiveBuilding, form.customer, form.preferred_date, cartLines]);
 
   // Debounced live preview. All state writes happen inside the timer's
   // async callback (deferred), never synchronously in the effect body.
@@ -696,12 +751,12 @@ export function CreateExtraWorkPage({
     const parsed = JSON.parse(previewKey) as {
       b: number;
       c: number;
+      pd: string | null;
       l: {
         s: number | null;
         c: string | null;
         p: number | null;
         q: string;
-        d: string;
       }[];
     };
     let cancelled = false;
@@ -712,29 +767,22 @@ export function CreateExtraWorkPage({
             building: parsed.b,
             customer: parsed.c,
             request_intent: selectedIntent ?? undefined,
+            // W-EW1 §2 — the cart's one date. The backend stamps every
+            // line from it and prices on it, so sending it here is what
+            // keeps the previewed amount equal to the amount create
+            // will store.
+            preferred_date: parsed.pd ?? undefined,
             // Catalog lines send `service`; free-text lines send
             // `custom_description`; Sprint 137 item 6 custom-price
             // lines send `custom_price`. Exactly one of the three per
             // line — the preview serializer enforces the same rule.
             line_items: parsed.l.map((line) => {
               if (line.p !== null) {
-                return {
-                  custom_price: line.p,
-                  quantity: line.q,
-                  requested_date: line.d,
-                };
+                return { custom_price: line.p, quantity: line.q };
               }
               return line.c !== null
-                ? {
-                    custom_description: line.c,
-                    quantity: line.q,
-                    requested_date: line.d,
-                  }
-                : {
-                    service: line.s ?? undefined,
-                    quantity: line.q,
-                    requested_date: line.d,
-                  };
+                ? { custom_description: line.c, quantity: line.q }
+                : { service: line.s ?? undefined, quantity: line.q };
             }),
           });
           if (cancelled) return;
@@ -1135,8 +1183,6 @@ export function CreateExtraWorkPage({
   // What the per-line pickers offer right now: search wins over the
   // category filter when one is typed.
   const offeredServices = searchMatches ?? categoryFilteredServices;
-  const narrowingActive = Boolean(categoryFilter) || Boolean(serviceSearchTerm);
-  const hiddenServiceCount = catalogForActor.length - offeredServices.length;
 
   // Sprint 145 — the agreed-prices browse panel obeys the SAME category
   // choice as the service pickers. Picking a category and still being
@@ -1182,11 +1228,6 @@ export function CreateExtraWorkPage({
     serviceIdsByFolder,
   ]);
 
-  function clearServiceNarrowing() {
-    setCategoryFilter("");
-    setServiceSearch("");
-  }
-
   /**
    * True when a cart line orders a custom price that is NOT on the
    * currently-selected customer's orderable list — the customer was
@@ -1199,25 +1240,6 @@ export function CreateExtraWorkPage({
     const customPriceId = parseCustomPriceId(line.serviceId);
     if (customPriceId === null) return false;
     return !orderableCustomPrices.some((p) => p.id === customPriceId);
-  }
-
-  /**
-   * The option list for ONE cart line. The line's currently-selected
-   * service is ALWAYS included even when the active filter/search
-   * excludes it — otherwise narrowing the catalog would blank out a
-   * `<select>` that already had a value, silently dropping a line the
-   * user had already added to the cart.
-   */
-  function optionsForLine(line: CartLineState): Service[] {
-    if (!line.serviceId || line.serviceId === CUSTOM_SERVICE_VALUE) {
-      return offeredServices;
-    }
-    const selectedId = Number(line.serviceId);
-    if (offeredServices.some((svc) => svc.id === selectedId)) {
-      return offeredServices;
-    }
-    const selected = services.find((svc) => svc.id === selectedId);
-    return selected ? [selected, ...offeredServices] : offeredServices;
   }
 
   /**
@@ -1256,10 +1278,6 @@ export function CreateExtraWorkPage({
     setForm((current) => ({ ...current, [name]: value }));
   }
 
-  function addCartLine() {
-    setCartLines((current) => [...current, emptyCartLine()]);
-  }
-
   // Add a service picked from the agreed-prices dropdown into the cart:
   // fill the first empty line if there is one, otherwise append a new
   // line. No-op when the service is already in the cart (the cart
@@ -1296,6 +1314,50 @@ export function CreateExtraWorkPage({
       }
       return [...current, { ...emptyCartLine(), serviceId: value }];
     });
+  }
+
+  /**
+   * W-EW1 §3 — "Add Service Line": append an empty line AND open its
+   * picker, so one click lands the user in the search box rather than
+   * on an empty row they then have to know to click.
+   */
+  function addLineAndOpenPicker() {
+    const line = emptyCartLine();
+    setCartLines((current) => [...current, line]);
+    setServiceSearch("");
+    setPickerFor(line.tempId);
+  }
+
+  /**
+   * Commit a pick from the inline picker onto ONE line and close it.
+   * Reuses `onLineServiceChange` so a service chosen from outside the
+   * active category filter still clears that filter — the picker is a
+   * second mount of the same machinery, not a second implementation.
+   */
+  function pickForLine(tempId: string, value: string) {
+    onLineServiceChange(tempId, value);
+    setServiceSearch("");
+    setPickerFor(null);
+  }
+
+  /** What a cart line's service cell reads as before it is priced. */
+  function cartLineLabel(line: CartLineState): string {
+    if (line.serviceId === CUSTOM_SERVICE_VALUE) {
+      return t("create.line_custom_option");
+    }
+    const customPriceId = parseCustomPriceId(line.serviceId);
+    if (customPriceId !== null) {
+      const price = orderableCustomPrices.find((p) => p.id === customPriceId);
+      return price
+        ? price.custom_name
+        : t("create.line_custom_price_unavailable");
+    }
+    if (!line.serviceId) return t("create.line_field_service_placeholder");
+    const svc = services.find((s) => s.id === Number(line.serviceId));
+    if (!svc) return t("create.line_field_service_placeholder");
+    return svc.category_name
+      ? `${svc.category_name} — ${svc.name}`
+      : svc.name;
   }
 
   function removeCartLine(tempId: string) {
@@ -1363,10 +1425,6 @@ export function CreateExtraWorkPage({
           setError(t("create.error_line_quantity_invalid"));
           return;
         }
-        if (!line.requestedDate) {
-          setError(t("create.error_line_requested_date_required"));
-          return;
-        }
         continue;
       }
       if (isCustom) {
@@ -1392,10 +1450,6 @@ export function CreateExtraWorkPage({
       const qtyNum = Number(line.quantity);
       if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
         setError(t("create.error_line_quantity_invalid"));
-        return;
-      }
-      if (!line.requestedDate) {
-        setError(t("create.error_line_requested_date_required"));
         return;
       }
       if (!isCustom) {
@@ -1528,7 +1582,6 @@ export function CreateExtraWorkPage({
             return {
               custom_price: customPriceId,
               quantity: line.quantity,
-              requested_date: line.requestedDate,
               customer_note: line.customerNote.trim() || undefined,
             };
           }
@@ -1536,13 +1589,11 @@ export function CreateExtraWorkPage({
             ? {
                 custom_description: line.customDescription.trim(),
                 quantity: line.quantity,
-                requested_date: line.requestedDate,
                 customer_note: line.customerNote.trim() || undefined,
               }
             : {
                 service: Number(line.serviceId),
                 quantity: line.quantity,
-                requested_date: line.requestedDate,
                 customer_note: line.customerNote.trim() || undefined,
               };
         }),
@@ -1781,17 +1832,6 @@ export function CreateExtraWorkPage({
                 ? "create.warning_no_agreed_services"
                 : "create.warning_catalog_empty",
           )}
-        </div>
-      )}
-
-      {error && (
-        <div
-          className="alert-error"
-          style={{ marginBottom: 16 }}
-          role="alert"
-          data-testid="extra-work-create-error"
-        >
-          {error}
         </div>
       )}
 
@@ -2225,7 +2265,7 @@ export function CreateExtraWorkPage({
                 id="ew-description"
                 data-testid="extra-work-create-description"
                 className="field-textarea"
-                placeholder={t("create.field_description_helper")}
+                placeholder={t("create.field_description_placeholder")}
                 value={form.description}
                 onChange={(event) => update("description", event.target.value)}
                 required
@@ -2246,10 +2286,24 @@ export function CreateExtraWorkPage({
                 id="ew-preferred-date"
                 className="field-input"
                 type="date"
+                data-testid="extra-work-create-preferred-date"
                 value={form.preferred_date}
-                onChange={(event) =>
-                  update("preferred_date", event.target.value)
-                }
+                onChange={(event) => {
+                  // W-EW1 §1b — one date, three fields. Fill the two
+                  // that the user has not taken over; leave the ones
+                  // they have. All three stay editable either way.
+                  const value = event.target.value;
+                  setForm((current) => ({
+                    ...current,
+                    preferred_date: value,
+                    planned_end_date: dateTakenOver.plannedEnd
+                      ? current.planned_end_date
+                      : value,
+                    deadline: dateTakenOver.deadline
+                      ? current.deadline
+                      : value,
+                  }));
+                }}
               />
             </div>
 
@@ -2265,10 +2319,12 @@ export function CreateExtraWorkPage({
                 id="ew-planned-end"
                 className="field-input"
                 type="date"
+                data-testid="extra-work-create-planned-end"
                 value={form.planned_end_date}
-                onChange={(event) =>
-                  update("planned_end_date", event.target.value)
-                }
+                onChange={(event) => {
+                  setDateTakenOver((c) => ({ ...c, plannedEnd: true }));
+                  update("planned_end_date", event.target.value);
+                }}
               />
               <p className="muted small" style={{ margin: "4px 0 0" }}>
                 {t("create.plannedEndHint")}
@@ -2279,48 +2335,63 @@ export function CreateExtraWorkPage({
               <label className="field-label" htmlFor="ew-deadline">
                 {t("detail.deadline")}
               </label>
-              <input
-                id="ew-deadline"
-                className="field-input"
-                type="date"
-                value={form.deadline}
-                onChange={(event) => update("deadline", event.target.value)}
-              />
-              <p className="muted small" style={{ margin: "4px 0 0" }}>
-                {t("create.deadlineHint")}
-              </p>
+              <div className="ew-deadline-row">
+                <input
+                  id="ew-deadline"
+                  className="field-input"
+                  type="date"
+                  data-testid="extra-work-create-deadline"
+                  value={form.deadline}
+                  onChange={(event) => {
+                    setDateTakenOver((c) => ({ ...c, deadline: true }));
+                    update("deadline", event.target.value);
+                  }}
+                />
+                {/* W-EW1 §1c — the time the deadline leaves, as a
+                    VALUE. No deadline, no chip: an absent deadline is
+                    not "unlimited time", it is a question nobody has
+                    answered, and inventing a number here would be the
+                    company-default-SLA feature that is deliberately
+                    NOT in this change. */}
+                {deadlineDaysLeft !== null && (
+                  <span
+                    className={`ew-deadline-chip${
+                      deadlineDaysLeft < 0 ? " ew-deadline-chip-late" : ""
+                    }`}
+                    data-testid="extra-work-create-deadline-chip"
+                  >
+                    {deadlineDaysLeft < 0
+                      ? t("create.deadline_chip_overdue", {
+                          count: Math.abs(deadlineDaysLeft),
+                        })
+                      : deadlineDaysLeft === 0
+                        ? t("create.deadline_chip_today")
+                        : t("create.deadline_chip_left", {
+                            count: deadlineDaysLeft,
+                          })}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* ----- Cart ----- */}
-          <div className="form-section" data-testid="extra-work-create-cart">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 8,
-              }}
-            >
-              <div className="form-section-title" style={{ margin: 0 }}>
-                {t("create.cart_section_title")}
-              </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={addCartLine}
-                data-testid="extra-work-create-add-line"
-              >
-                <Plus size={14} strokeWidth={2.2} />
-                <span style={{ marginLeft: 6 }}>
-                  {t("create.add_line_button")}
-                </span>
-              </button>
-            </div>
-            <div className="muted small" style={{ marginBottom: 12 }}>
-              {t("create.cart_section_helper")}
-            </div>
+          {/* ----- Agreed prices (browse) -----
 
+              W-EW1 §3 — what is LEFT of the old Cart section. The two
+              service pickers that used to live here (Search Services and
+              the Service Line Items rows) are gone: the pricing preview
+              below is now the one place a line is added, swapped, or
+              edited.
+
+              This card stays because it is the only place a
+              `CustomerCustomPrice` is BROWSABLE with its amount before it
+              is ordered — those rows have no `service` FK, so they appear
+              in no catalog list anywhere in the app — and because it
+              answers "which of my services already have an agreed price,
+              and what is it?" before any line exists to preview. The
+              preview shows the price of a line you already added; this
+              shows the price of one you have not. */}
+          <div className="form-section" data-testid="extra-work-create-cart">
             {/* Sprint 5 — agreed contract prices shown UPFRONT so the
                 customer knows which services have a pre-agreed price (and
                 what it is) before adding any line. Sourced from
@@ -2511,484 +2582,425 @@ export function CreateExtraWorkPage({
               </details>
             )}
 
-            {/* Sprint 137 item 5 — narrow the service pickers by REAL
-                catalog category, plus a catalog-wide search. Both are
-                opt-in: the default is "All categories" with no search,
-                which is byte-identical to the pre-137 picker. */}
-            {/* Sprint 144 §1 — the category half of this bar MOVED UP
-                into the single "Category" control under "What needs to
-                happen". Only the search box is left here, beside the
-                lines it searches. */}
-            {services.length > 0 && (
-              <div
-                className="form-2col"
-                data-testid="extra-work-create-catalog-filter"
-                style={{ marginBottom: 12 }}
-              >
-                <div className="field">
-                  <label className="field-label" htmlFor="ew-catalog-search">
-                    {t("create.catalog_filter.search_label")}
-                  </label>
-                  <input
-                    id="ew-catalog-search"
-                    className="field-input"
-                    type="search"
-                    data-testid="extra-work-create-catalog-search"
-                    placeholder={t("create.catalog_filter.search_placeholder")}
-                    value={serviceSearch}
-                    onChange={(event) => setServiceSearch(event.target.value)}
-                  />
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {t("create.catalog_filter.search_hint")}
-                  </div>
-                </div>
-                {/* Sprint 147 — say plainly what this list is, and
-                    where to go for anything else, so an absent service
-                    reads as "not agreed with you" rather than as a
-                    broken search. */}
-                {isCustomerActor && (
-                  <div className="field">
-                    <div className="muted small">
-                      {t("create.catalog_filter.customer_scope_note")}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+          </div>
 
-            {/* Never a bare empty list: name what is hiding the
-                results, give the count OUTSIDE the narrowing, and
-                offer one click back to the full catalog. */}
-            {narrowingActive && offeredServices.length === 0 && (
+          {/* ----- The pricing preview IS the service-line interface -----
+
+              W-EW1 §3. Until now this table was a read-only projection
+              of a cart built somewhere else on the page, which meant a
+              line's numbers and a line's controls were never in the same
+              place: you edited a quantity in one section and scrolled to
+              another to find out what it cost.
+
+              Now the table is the cart. Lines are added from its own
+              header, swapped and edited in its own rows, and priced in
+              the same row you are editing.
+
+              Rendered UNCONDITIONALLY, unlike the old block, which was
+              behind `previewable` — the one control that adds the first
+              line now lives inside it, so gating the section on the cart
+              already being valid would have made an empty cart
+              unfillable. The PRICED columns still wait for the server. */}
+          <div
+            className="form-section"
+            data-testid="extra-work-create-preview"
+          >
+            <div className="ew-preview-head">
+              <div className="form-section-title" style={{ margin: 0 }}>
+                {t("create.preview.section_title")}
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={addLineAndOpenPicker}
+                data-testid="extra-work-create-add-line"
+              >
+                <Plus size={14} strokeWidth={2.2} />
+                <span style={{ marginLeft: 6 }}>
+                  {t("create.add_line_button")}
+                </span>
+              </button>
+            </div>
+
+            {previewErrorMsg && (
               <div
                 className="alert-warning"
                 role="status"
                 style={{ marginBottom: 12 }}
-                data-testid="extra-work-create-catalog-filter-empty"
+                data-testid="extra-work-create-preview-unavailable"
               >
-                {serviceSearchTerm
-                  ? t("create.catalog_filter.no_search_match", {
-                      search: serviceSearch.trim(),
-                      total: services.length,
-                    })
-                  : t("create.catalog_filter.category_empty", {
-                      total: services.length,
-                    })}{" "}
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  data-testid="extra-work-create-catalog-filter-clear"
-                  onClick={clearServiceNarrowing}
-                >
-                  {t("create.catalog_filter.clear")}
-                </button>
+                {t("create.preview.unavailable")}
               </div>
             )}
 
-            {/* Narrowing is active but still showing something: say how
-                many services are hidden so the picker is never silently
-                partial. */}
-            {narrowingActive &&
-              offeredServices.length > 0 &&
-              hiddenServiceCount > 0 && (
-                <div
-                  className="muted small"
-                  style={{ marginBottom: 12 }}
-                  data-testid="extra-work-create-catalog-filter-note"
-                >
-                  {t("create.catalog_filter.hidden_note", {
-                    shown: offeredServices.length,
-                    total: services.length,
-                  })}{" "}
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={clearServiceNarrowing}
-                  >
-                    {t("create.catalog_filter.clear")}
-                  </button>
-                </div>
-              )}
+            <div className="table-wrap">
+              <table
+                className="data-table ew-pricing-table"
+                data-testid="extra-work-create-preview-table"
+              >
+                <thead>
+                  <tr>
+                    <th>{t("create.preview.col_service")}</th>
+                    <th>{t("create.preview.col_source")}</th>
+                    <th>{t("create.preview.col_quantity")}</th>
+                    <th>{t("create.preview.col_unit_price")}</th>
+                    <th>{t("create.preview.col_vat_pct")}</th>
+                    <th>{t("create.preview.col_line_total")}</th>
+                    <th aria-label={t("create.preview.col_actions")} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {cartLines.length === 0 && (
+                    <tr data-testid="extra-work-create-cart-empty">
+                      <td colSpan={7} className="muted small">
+                        {t("create.cart_empty")}
+                      </td>
+                    </tr>
+                  )}
+                  {cartLines.map((line, index) => {
+                    // The server's row for this cart line, matched by
+                    // POSITION: `previewData` is keyed to the exact cart
+                    // that produced it (`preview.key === previewKey`), so
+                    // index i here IS line i there. `null` while a fetch
+                    // is in flight or the cart is not yet previewable —
+                    // the row still renders, its priced columns do not.
+                    const priced = previewData?.lines[index] ?? null;
+                    const known = priced ? knownLinePrice(priced) : null;
+                    const qty = Number(line.quantity);
+                    const lineTotal =
+                      known && Number.isFinite(qty)
+                        ? qty * known.unit * (1 + known.vatPct / 100)
+                        : null;
+                    const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
+                    const customPriceId = parseCustomPriceId(line.serviceId);
+                    const stale = staleCustomPriceLine(line);
+                    return (
+                      <Fragment key={line.tempId}>
+                        <tr
+                          data-testid="extra-work-create-preview-row"
+                          data-price-source={priced?.price_source ?? ""}
+                        >
+                          <td>
+                            {/* The service cell IS the swap control:
+                                clicking it opens the same picker the
+                                header's Add Service Line opens, on this
+                                line. Picking re-resolves the price from
+                                the agreed price book server-side,
+                                exactly as adding it fresh would. */}
+                            <button
+                              type="button"
+                              className="ew-line-service-button"
+                              data-testid={`extra-work-create-line-service-${index}`}
+                              onClick={() =>
+                                setPickerFor((current) =>
+                                  current === line.tempId
+                                    ? null
+                                    : line.tempId,
+                                )
+                              }
+                            >
+                              {cartLineLabel(line)}
+                            </button>
+                            {isCustom && (
+                              <input
+                                data-testid={`extra-work-create-line-custom-${index}`}
+                                className="field-input"
+                                style={{ marginTop: 6 }}
+                                type="text"
+                                maxLength={255}
+                                placeholder={t(
+                                  "create.line_custom_placeholder",
+                                )}
+                                value={line.customDescription}
+                                onChange={(event) =>
+                                  updateCartLine(
+                                    line.tempId,
+                                    "customDescription",
+                                    event.target.value,
+                                  )
+                                }
+                                required
+                              />
+                            )}
+                            {customPriceId !== null &&
+                              (stale ? (
+                                <div
+                                  className="alert-warning"
+                                  role="status"
+                                  style={{ marginTop: 6 }}
+                                  data-testid={`extra-work-create-line-custom-price-stale-${index}`}
+                                >
+                                  {t("create.line_custom_price_stale")}
+                                </div>
+                              ) : (
+                                <div
+                                  className="muted small"
+                                  style={{ marginTop: 6 }}
+                                  data-testid={`extra-work-create-line-custom-price-${index}`}
+                                >
+                                  {t("create.line_custom_price_hint")}
+                                </div>
+                              ))}
+                            {/* The per-line note moved here with its
+                                line rather than being dropped when the
+                                Service Line Items section went. */}
+                            <input
+                              id={`ew-line-note-${index}`}
+                              data-testid={`extra-work-create-line-note-${index}`}
+                              className="field-input ew-line-note-input"
+                              type="text"
+                              maxLength={500}
+                              placeholder={t(
+                                "create.line_field_customer_note_placeholder",
+                              )}
+                              value={line.customerNote}
+                              onChange={(event) =>
+                                updateCartLine(
+                                  line.tempId,
+                                  "customerNote",
+                                  event.target.value,
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            {priced ? (
+                              <span
+                                className={`invoice-line-row-source-tag invoice-line-row-source-${PREVIEW_SOURCE_TAG[priced.price_source]}`}
+                                data-testid="extra-work-create-preview-source"
+                              >
+                                {t(PREVIEW_SOURCE_KEY[priced.price_source])}
+                              </span>
+                            ) : (
+                              <span className="muted small">—</span>
+                            )}
+                          </td>
+                          <td>
+                            <input
+                              id={`ew-line-quantity-${index}`}
+                              data-testid={`extra-work-create-line-quantity-${index}`}
+                              className="field-input ew-line-qty-input"
+                              type="number"
+                              /* W-EW1 §3 — one arrow press is one whole
+                                 unit. Typing a decimal is still allowed:
+                                 `step` constrains the STEPPER, and the
+                                 field carries no HTML validation that
+                                 would reject 1.5, because half an hour
+                                 is a real quantity. */
+                              step="1"
+                              min="0"
+                              value={line.quantity}
+                              onChange={(event) =>
+                                updateCartLine(
+                                  line.tempId,
+                                  "quantity",
+                                  event.target.value,
+                                )
+                              }
+                              required
+                            />
+                          </td>
+                          {/* Unit price and VAT are the AGREEMENT's
+                              numbers, resolved server-side. They are
+                              rendered, never typed — see §3. */}
+                          <td>{known ? formatMoney(known.unit) : "—"}</td>
+                          <td>
+                            {known
+                              ? `${formatNumber(known.vatPct, {
+                                  maximumFractionDigits: 2,
+                                })}%`
+                              : "—"}
+                          </td>
+                          <td>
+                            {known ? (
+                              formatMoney(lineTotal)
+                            ) : (
+                              <span className="muted small">
+                                {t("create.preview.to_be_priced")}
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => {
+                                setPickerFor((current) =>
+                                  current === line.tempId ? null : current,
+                                );
+                                removeCartLine(line.tempId);
+                              }}
+                              data-testid={`extra-work-create-remove-line-${index}`}
+                              aria-label={t("create.remove_line_button")}
+                            >
+                              <Trash2 size={14} strokeWidth={2.2} />
+                            </button>
+                          </td>
+                        </tr>
+                        {pickerFor === line.tempId && (
+                          <tr
+                            className="ew-line-picker-row"
+                            data-testid={`extra-work-create-line-picker-${index}`}
+                          >
+                            <td colSpan={7}>
+                              <input
+                                type="search"
+                                className="field-input"
+                                autoFocus
+                                data-testid="extra-work-create-catalog-search"
+                                placeholder={t(
+                                  "create.catalog_filter.search_placeholder",
+                                )}
+                                value={serviceSearch}
+                                onChange={(event) =>
+                                  setServiceSearch(event.target.value)
+                                }
+                              />
+                              {isCustomerActor && (
+                                <div
+                                  className="muted small"
+                                  style={{ marginTop: 4 }}
+                                >
+                                  {t(
+                                    "create.catalog_filter.customer_scope_note",
+                                  )}
+                                </div>
+                              )}
+                              <BoundedList
+                                size="md"
+                                count={
+                                  offeredServices.length +
+                                  orderableCustomPrices.length
+                                }
+                                ariaLabel={t("create.preview.picker_label")}
+                                testIdPrefix="extra-work-create-line-picker-list"
+                                emptyState={
+                                  <div className="muted small">
+                                    {t("create.prices.no_match")}
+                                  </div>
+                                }
+                              >
+                                <div className="ew-agreed-prices-list">
+                                  {offeredServices.map((svc) => (
+                                    <button
+                                      type="button"
+                                      key={`svc-${svc.id}`}
+                                      className="ew-agreed-price-item"
+                                      data-testid="extra-work-create-line-picker-service"
+                                      onClick={() =>
+                                        pickForLine(
+                                          line.tempId,
+                                          String(svc.id),
+                                        )
+                                      }
+                                    >
+                                      <span className="ew-agreed-price-item-label">
+                                        {svc.category_name
+                                          ? `${svc.category_name} — ${svc.name}`
+                                          : svc.name}
+                                        {agreedPriceSuffix(svc.id)}
+                                      </span>
+                                    </button>
+                                  ))}
+                                  {orderableCustomPrices.map((price) => (
+                                    <button
+                                      type="button"
+                                      key={`cp-${price.id}`}
+                                      className="ew-agreed-price-item"
+                                      data-testid="extra-work-create-line-picker-custom-price"
+                                      onClick={() =>
+                                        pickForLine(
+                                          line.tempId,
+                                          customPriceValue(price.id),
+                                        )
+                                      }
+                                    >
+                                      <span className="ew-agreed-price-item-label">
+                                        {price.custom_name}
+                                        <span className="muted small">
+                                          {" · "}
+                                          {customPriceUnitLabel(price)}
+                                        </span>
+                                      </span>
+                                      <span className="ew-agreed-price-item-price">
+                                        {formatMoney(price.unit_price)}
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </BoundedList>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                style={{ marginTop: 8 }}
+                                data-testid="extra-work-create-line-picker-custom"
+                                onClick={() =>
+                                  pickForLine(
+                                    line.tempId,
+                                    CUSTOM_SERVICE_VALUE,
+                                  )
+                                }
+                              >
+                                {t("create.line_custom_option")}
+                              </button>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-            {cartLines.length === 0 && (
+            {previewLoading && (
               <div
                 className="muted small"
-                data-testid="extra-work-create-cart-empty"
+                role="status"
+                style={{ marginTop: 8 }}
+                data-testid="extra-work-create-preview-loading"
               >
-                {t("create.cart_empty")}
+                {t("create.preview.loading")}
               </div>
             )}
 
-            {cartLines.map((line, index) => (
+            {previewData && previewTotals && (
               <div
-                key={line.tempId}
-                data-testid="extra-work-create-cart-line"
-                className="ew-line-row ew-line-row-card"
+                className="alert-info"
+                style={{ marginTop: 12 }}
+                data-testid="extra-work-create-preview-totals"
               >
-                <div
-                  className="field ew-line-field-grow"
-                  data-testid={`extra-work-create-cart-line-${index}`}
-                >
-                  <label
-                    className="field-label"
-                    htmlFor={`ew-line-service-${index}`}
-                  >
-                    {t("create.line_field_service")}
-                  </label>
-                  <select
-                    id={`ew-line-service-${index}`}
-                    data-testid={`extra-work-create-line-service-${index}`}
-                    className="field-select"
-                    value={line.serviceId}
-                    onChange={(event) =>
-                      onLineServiceChange(line.tempId, event.target.value)
-                    }
-                    required
-                  >
-                    <option value="" disabled>
-                      {t("create.line_field_service_placeholder")}
-                    </option>
-                    {optionsForLine(line).map((svc) => {
-                      const baseLabel = svc.category_name
-                        ? `${svc.category_name} — ${svc.name}`
-                        : svc.name;
-                      return (
-                        <option key={svc.id} value={svc.id}>
-                          {`${baseLabel}${agreedPriceSuffix(svc.id)}`}
-                        </option>
-                      );
+                <div className="form-section-title" style={{ margin: 0 }}>
+                  {t("create.preview.totals_title")}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  {t("create.preview.totals_subtotal")}:{" "}
+                  {formatMoney(previewTotals.subtotal)} ·{" "}
+                  {t("create.preview.totals_vat")}:{" "}
+                  {formatMoney(previewTotals.vat)} ·{" "}
+                  {t("create.preview.totals_total")}:{" "}
+                  <strong>{formatMoney(previewTotals.total)}</strong>
+                </div>
+                {previewTotals.unpricedCount > 0 && (
+                  <div className="muted small" style={{ marginTop: 6 }}>
+                    {t("create.preview.totals_unpriced", {
+                      count: previewTotals.unpricedCount,
                     })}
-                    {/* Sprint 137 item 6 — the customer's own custom
-                        price lines, orderable at last. Grouped so they
-                        read as a distinct kind of thing rather than
-                        blending into the catalog, and never filtered by
-                        the catalog-category filter: a custom price has
-                        no category to filter by. */}
-                    {orderableCustomPrices.length > 0 && (
-                      <optgroup
-                        label={t("create.line_custom_price_group")}
-                      >
-                        {orderableCustomPrices.map((price) => (
-                          <option
-                            key={price.id}
-                            value={customPriceValue(price.id)}
-                          >
-                            {`${price.custom_name} — ${formatMoney(
-                              price.unit_price,
-                            )} / ${customPriceUnitLabel(price)}`}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {/* A custom price belongs to ONE customer. Switching
-                        customer mid-compose can therefore strand a line
-                        whose price row is not on the new customer's list
-                        — the backend rejects it (tenant guard), but the
-                        <select> would first go blank and hide WHY. Keep
-                        the value visible and labelled instead of
-                        silently emptying the line. */}
-                    {staleCustomPriceLine(line) && (
-                      <option value={line.serviceId}>
-                        {t("create.line_custom_price_unavailable")}
-                      </option>
-                    )}
-                    {/* Custom line: no agreed-price suffix — it has no
-                        catalog service to price against. Re-picking a
-                        catalog service from this still-visible dropdown
-                        switches back. */}
-                    <option value={CUSTOM_SERVICE_VALUE}>
-                      {t("create.line_custom_option")}
-                    </option>
-                  </select>
-                  {/* A custom-price line is priced from an agreed
-                      per-customer row, but it still has no catalog
-                      service, so the provider confirms it in the
-                      pricing step. Say so on the line rather than
-                      letting the source pill be the only clue. */}
-                  {parseCustomPriceId(line.serviceId) !== null &&
-                    (staleCustomPriceLine(line) ? (
-                      <div
-                        className="alert-warning"
-                        role="status"
-                        style={{ marginTop: 6 }}
-                        data-testid={`extra-work-create-line-custom-price-stale-${index}`}
-                      >
-                        {t("create.line_custom_price_stale")}
-                      </div>
-                    ) : (
-                      <div
-                        className="muted small"
-                        style={{ marginTop: 6 }}
-                        data-testid={`extra-work-create-line-custom-price-${index}`}
-                      >
-                        {t("create.line_custom_price_hint")}
-                      </div>
-                    ))}
-                  {line.serviceId === CUSTOM_SERVICE_VALUE && (
-                    <input
-                      data-testid={`extra-work-create-line-custom-${index}`}
-                      className="field-input"
-                      style={{ marginTop: 8 }}
-                      type="text"
-                      maxLength={255}
-                      placeholder={t("create.line_custom_placeholder")}
-                      value={line.customDescription}
-                      onChange={(event) =>
-                        updateCartLine(
-                          line.tempId,
-                          "customDescription",
-                          event.target.value,
-                        )
-                      }
-                      required
-                    />
+                  </div>
+                )}
+                <div className="muted small" style={{ marginTop: 6 }}>
+                  {t(
+                    isCustomerActor
+                      ? "create.preview.totals_display_only_customer"
+                      : "create.preview.totals_display_only",
                   )}
                 </div>
-                <div className="field ew-line-field-compact">
-                  <label
-                    className="field-label"
-                    htmlFor={`ew-line-quantity-${index}`}
-                  >
-                    {t("create.line_field_quantity")}
-                  </label>
-                  <input
-                    id={`ew-line-quantity-${index}`}
-                    data-testid={`extra-work-create-line-quantity-${index}`}
-                    className="field-input"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={line.quantity}
-                    onChange={(event) =>
-                      updateCartLine(
-                        line.tempId,
-                        "quantity",
-                        event.target.value,
-                      )
-                    }
-                    required
-                  />
-                </div>
-                <div className="field ew-line-field-medium">
-                  <label
-                    className="field-label"
-                    htmlFor={`ew-line-date-${index}`}
-                  >
-                    {t("create.line_field_requested_date")}
-                  </label>
-                  <input
-                    id={`ew-line-date-${index}`}
-                    data-testid={`extra-work-create-line-date-${index}`}
-                    className="field-input"
-                    type="date"
-                    value={line.requestedDate}
-                    onChange={(event) =>
-                      updateCartLine(
-                        line.tempId,
-                        "requestedDate",
-                        event.target.value,
-                      )
-                    }
-                    required
-                  />
-                </div>
-                <div className="field ew-line-field-grow">
-                  <label
-                    className="field-label"
-                    htmlFor={`ew-line-note-${index}`}
-                  >
-                    {t("create.line_field_customer_note")}
-                  </label>
-                  <input
-                    id={`ew-line-note-${index}`}
-                    data-testid={`extra-work-create-line-note-${index}`}
-                    className="field-input"
-                    type="text"
-                    maxLength={500}
-                    placeholder={t(
-                      "create.line_field_customer_note_placeholder",
-                    )}
-                    value={line.customerNote}
-                    onChange={(event) =>
-                      updateCartLine(
-                        line.tempId,
-                        "customerNote",
-                        event.target.value,
-                      )
-                    }
-                  />
-                </div>
-                <div className="ew-line-row-actions">
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => removeCartLine(line.tempId)}
-                    data-testid={`extra-work-create-remove-line-${index}`}
-                  >
-                    <Trash2 size={14} strokeWidth={2.2} />
-                    <span style={{ marginLeft: 6 }}>
-                      {t("create.remove_line_button")}
-                    </span>
-                  </button>
-                </div>
               </div>
-            ))}
+            )}
           </div>
 
-          {/* ----- Pricing preview + intent (Sprint 5, SoT §5.1–5.4) ----- */}
           {previewable && (
             <>
-              <div
-                className="form-section"
-                data-testid="extra-work-create-preview"
-              >
-                <div className="form-section-title">
-                  {t("create.preview.section_title")}
-                </div>
-                <div className="muted small" style={{ marginBottom: 12 }}>
-                  {t("create.preview.helper")}
-                </div>
-
-                {previewLoading && (
-                  <div
-                    className="muted small"
-                    role="status"
-                    data-testid="extra-work-create-preview-loading"
-                  >
-                    {t("create.preview.loading")}
-                  </div>
-                )}
-
-                {previewErrorMsg && (
-                  <div
-                    className="alert-warning"
-                    role="status"
-                    data-testid="extra-work-create-preview-unavailable"
-                  >
-                    {t("create.preview.unavailable")}
-                  </div>
-                )}
-
-                {previewData && (
-                  <div className="table-wrap">
-                    <table
-                      className="data-table ew-pricing-table"
-                      data-testid="extra-work-create-preview-table"
-                    >
-                      <thead>
-                        <tr>
-                          <th>{t("create.preview.col_service")}</th>
-                          <th>{t("create.preview.col_source")}</th>
-                          <th>{t("create.preview.col_quantity")}</th>
-                          <th>{t("create.preview.col_unit_price")}</th>
-                          <th>{t("create.preview.col_vat_pct")}</th>
-                          <th>{t("create.preview.col_line_total")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {previewData.lines.map((line) => {
-                          // Sprint 137 item 6 — "priced" now covers an
-                          // agreed contract line AND a line ordered
-                          // from a custom price. Both numbers are
-                          // backend-provided; the source pill still
-                          // reflects the backend's `price_source`
-                          // verbatim (a custom price stays AD_HOC).
-                          const known = knownLinePrice(line);
-                          const unit = known ? known.unit : null;
-                          const pct = known ? known.vatPct : null;
-                          const qty = Number(line.quantity);
-                          const isAgreed = known !== null;
-                          const lineTotal =
-                            isAgreed && unit !== null && Number.isFinite(qty)
-                              ? qty * unit * (1 + (pct ?? 0) / 100)
-                              : null;
-                          const serviceLabel = line.service_category_name
-                            ? `${line.service_category_name} — ${line.service_name}`
-                            : line.service_name ||
-                              line.custom_description ||
-                              "—";
-                          return (
-                            <tr
-                              key={line.index}
-                              data-testid="extra-work-create-preview-row"
-                              data-price-source={line.price_source}
-                            >
-                              <td>{serviceLabel}</td>
-                              <td>
-                                <span
-                                  className={`invoice-line-row-source-tag invoice-line-row-source-${PREVIEW_SOURCE_TAG[line.price_source]}`}
-                                  data-testid="extra-work-create-preview-source"
-                                >
-                                  {t(PREVIEW_SOURCE_KEY[line.price_source])}
-                                </span>
-                              </td>
-                              <td>
-                                {formatNumber(line.quantity, {
-                                  maximumFractionDigits: 2,
-                                })}
-                              </td>
-                              <td>{isAgreed ? formatMoney(unit) : "—"}</td>
-                              <td>
-                                {isAgreed && pct !== null
-                                  ? `${formatNumber(pct, {
-                                      maximumFractionDigits: 2,
-                                    })}%`
-                                  : "—"}
-                              </td>
-                              <td>
-                                {isAgreed ? (
-                                  formatMoney(lineTotal)
-                                ) : (
-                                  <span className="muted small">
-                                    {t("create.preview.to_be_priced")}
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {previewData && previewTotals && (
-                  <div
-                    className="alert-info"
-                    style={{ marginTop: 12 }}
-                    data-testid="extra-work-create-preview-totals"
-                  >
-                    <div
-                      className="form-section-title"
-                      style={{ margin: 0 }}
-                    >
-                      {t("create.preview.totals_title")}
-                    </div>
-                    <div style={{ marginTop: 6 }}>
-                      {t("create.preview.totals_subtotal")}:{" "}
-                      {formatMoney(previewTotals.subtotal)} ·{" "}
-                      {t("create.preview.totals_vat")}:{" "}
-                      {formatMoney(previewTotals.vat)} ·{" "}
-                      {t("create.preview.totals_total")}:{" "}
-                      <strong>{formatMoney(previewTotals.total)}</strong>
-                    </div>
-                    {previewTotals.unpricedCount > 0 && (
-                      <div className="muted small" style={{ marginTop: 6 }}>
-                        {t("create.preview.totals_unpriced", {
-                          count: previewTotals.unpricedCount,
-                        })}
-                      </div>
-                    )}
-                    <div className="muted small" style={{ marginTop: 6 }}>
-                      {t(
-                        isCustomerActor
-                          ? "create.preview.totals_display_only_customer"
-                          : "create.preview.totals_display_only",
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
 
               {/* M3 — quote page: NO intent picker. A pinned-intent
                   info row when the quote is available; the inline
@@ -3112,6 +3124,23 @@ export function CreateExtraWorkPage({
                 </div>
               )}
             </>
+          )}
+
+          {/* W-EW1 — the submit error belongs AT the action.
+              Page-top was the wrong place for it on a form this tall:
+              the button that produced the message could be a screen and
+              a half below the message, so a refused submit looked like
+              a dead button. It sits above the actions row, in the same
+              field of view as the control that caused it. */}
+          {error && (
+            <div
+              className="alert-error"
+              style={{ marginTop: 16 }}
+              role="alert"
+              data-testid="extra-work-create-error"
+            >
+              {error}
+            </div>
           )}
 
           <div

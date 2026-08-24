@@ -111,10 +111,12 @@ class OrderableCustomPriceFixtureMixin(CartFixtureMixin):
         )
 
     def _custom_line(self, custom_price=None, **extra):
+        # W-EW1 §2 — no per-line date. The window a custom price is
+        # checked against comes from the cart's `preferred_date`, which
+        # `_base_payload` sets to 2026-06-15.
         line = {
             "custom_price": (custom_price or self.custom_price).id,
             "quantity": "1.00",
-            "requested_date": "2026-06-15",
         }
         line.update(extra)
         return line
@@ -181,7 +183,6 @@ class CustomPriceOrderingTests(OrderableCustomPriceFixtureMixin, TestCase):
             {
                 "service": self.service_priced.id,
                 "quantity": "2.00",
-                "requested_date": "2026-06-15",
             },
             self._custom_line(),
         ]
@@ -290,12 +291,11 @@ class CustomPriceOrderabilityTests(
     def test_in_window_price_is_orderable(self):
         """Same row as the expired case, inside its window this time —
         proves the rejection above is the window and not the row."""
-        payload = self._base_payload()
+        # W-EW1 §2 — the window is chosen by the CART's date now, so
+        # this is the same test with the date moved up one level.
+        payload = self._base_payload(preferred_date="2026-02-01")
         payload["line_items"] = [
-            self._custom_line(
-                custom_price=self.custom_price_expired,
-                requested_date="2026-02-01",
-            )
+            self._custom_line(custom_price=self.custom_price_expired)
         ]
         response = self._api(self.cust_basic_a).post(
             URL, payload, format="json"
@@ -337,9 +337,7 @@ class CustomPriceLineExclusivityTests(
     def test_empty_line_still_rejected(self):
         """Regression guard on the pre-existing none-supplied case."""
         payload = self._base_payload()
-        payload["line_items"] = [
-            {"quantity": "1.00", "requested_date": "2026-06-15"}
-        ]
+        payload["line_items"] = [{"quantity": "1.00"}]
         response = self._api(self.cust_basic_a).post(
             URL, payload, format="json"
         )
@@ -388,11 +386,11 @@ class CustomPricePreviewTests(OrderableCustomPriceFixtureMixin, TestCase):
             {
                 "customer": self.customer_a.id,
                 "building": self.building_a1.id,
+                "preferred_date": "2026-06-15",
                 "line_items": [
                     {
                         "service": self.service_priced.id,
                         "quantity": "2.00",
-                        "requested_date": "2026-06-15",
                     }
                 ],
             },

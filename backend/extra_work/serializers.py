@@ -11,10 +11,10 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.models import UserRole
-from accounts.permissions import is_customer_side
 from buildings.models import Building
 from companies.models import Company
 from customers.models import (
@@ -74,6 +74,17 @@ logger = logging.getLogger(__name__)
 # shared by the create serializer and the dates endpoint so the frontend has
 # a single string to map to a localized message.
 ERR_DEADLINE_PROVIDER_ONLY = "deadline_provider_only"
+
+# W-EW1 §2 — one date flow. A cart line no longer carries a date of
+# its own: the request-level `preferred_date` is the single date the
+# whole cart is wished for, and the server derives every line's
+# `requested_date` from it. The column stays (it is what resolves
+# which agreed-price window applies) and stays readable on every
+# detail payload; only the WRITE path closes. A stale client that
+# still sends a per-line date is told so explicitly rather than
+# having its date silently ignored — a silently-dropped date would
+# price the line against a window the caller never asked for.
+ERR_LINE_REQUESTED_DATE_NOT_ACCEPTED = "line_requested_date_not_accepted"
 
 
 def _is_customer(user) -> bool:
@@ -484,6 +495,16 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
         allow_null=True,
         default=None,
     )
+    # W-EW1 §2 — server-derived on WRITE, unchanged on READ.
+    #
+    # `required=False` because no client supplies it any more: the
+    # parent's `validate()` stamps every line from the request-level
+    # `preferred_date` before anything reads it. The field stays in
+    # `Meta.fields` so the detail payload keeps rendering the stored
+    # date exactly as before — this serializer is the READ path too
+    # (`ExtraWorkRequestDetailSerializer.line_items`), and dropping the
+    # field would have blanked it there as well.
+    requested_date = serializers.DateField(required=False)
     line_price_source = serializers.CharField(read_only=True)
     # Sprint 8B — actual hours worked (HOURS-unit lines). Read-only on
     # the cart-line read path; written only via the actual-hours
@@ -509,6 +530,20 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
     price_source = serializers.SerializerMethodField()
     contract_unit_price = serializers.SerializerMethodField()
     contract_vat_pct = serializers.SerializerMethodField()
+
+    def validate_requested_date(self, value):
+        # Only ever reached on the WRITE path: on the read path the
+        # serializer is `read_only=True` and field validators never run.
+        # So reaching this method at all means a client PUT a date on a
+        # line, which is exactly what W-EW1 §2 closes.
+        raise serializers.ValidationError(
+            serializers.ErrorDetail(
+                "A per-line requested date is no longer accepted. The "
+                "request-level `preferred_date` is the date for the "
+                "whole cart.",
+                code=ERR_LINE_REQUESTED_DATE_NOT_ACCEPTED,
+            )
+        )
 
     class Meta:
         model = ExtraWorkRequestItem
@@ -1788,6 +1823,20 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         building = attrs["building"]
         customer = attrs["customer"]
 
+        # W-EW1 §2 — one date flow. Stamp every line with the cart's one
+        # date BEFORE anything reads it: `_validate_custom_price_orderable`
+        # below and `create()` both index `line["requested_date"]`, and
+        # the agreed-price window a line resolves against is decided by
+        # exactly this value.
+        #
+        # `preferred_date` is optional, so a cart with no stated wish
+        # falls back to today — the same date the line would have
+        # resolved against back when the form made the operator type a
+        # date per line and every line defaulted to the day of entry.
+        cart_date = attrs.get("preferred_date") or timezone.localdate()
+        for line in attrs.get("line_items", []) or []:
+            line["requested_date"] = cart_date
+
         # Sprint 186 — no extra work is left untagged.
         #
         # An untagged row falls out of every report that groups by
@@ -1814,33 +1863,35 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
                 .first()
             )
 
-        # Sprint 176 §3 — the deadline is a PROVIDER commitment, so the
-        # create form refuses one from a customer-side actor.
+        # W-EW1 §1 — Sprint 176 §3's provider-only deadline gate is LIFTED
+        # on create, deliberately and only here.
         #
-        # Customers can and do create Extra Work here
-        # (`customer_users_can_create_extra_work`, default on), and they
-        # already have `preferred_date` — "I would like it around then".
-        # The `deadline` is different in kind: it is what turns a row red
-        # on the list and in the Work Plan, and what an operator is
-        # measured against. A customer who could set it could make the
-        # provider late by typing a date. So the customer states a wish;
-        # the provider decides what it commits to.
+        # §3 refused a customer-side deadline because "the deadline is
+        # what an operator is measured against". The model's own reading
+        # of the six date columns (models.py) is the answer to that: the
+        # deadline sits in the ASKED FOR / OWED pair beside
+        # `preferred_date` and `planned_end_date`, while the date the
+        # provider is measured against having COMMITTED to is
+        # `provider_planned_date` / `provider_planned_end_date`, which
+        # only the plan action writes and which nothing here touches. A
+        # customer stating a deadline is stating the date the work is
+        # owed by; it is not, and cannot become, the provider's own
+        # commitment.
         #
-        # Read from `attrs` (the parsed field) rather than `initial_data`,
-        # so this does not depend on how the serializer was constructed.
-        # An explicit `null` is a no-op, not an attempt to commit the
-        # provider to anything, so truthiness is the right test here.
-        if is_customer_side(user) and attrs.get("deadline"):
-            raise serializers.ValidationError(
-                {
-                    "deadline": (
-                        "Only provider staff can set a deadline. Use "
-                        "preferred_date to say when you would like this "
-                        "done."
-                    ),
-                    "code": ERR_DEADLINE_PROVIDER_ONLY,
-                }
-            )
+        # Scope is unchanged and still enforced. The membership and
+        # `customer.extra_work.create` checks live further down this same
+        # `validate()`, and any of them raising rejects the whole create,
+        # so lifting this gate widens WHICH FIELD a customer-side actor
+        # may fill, never WHICH REQUESTS it may create: a deadline can
+        # only ever land on a request that actor was already entitled to
+        # make (H-1/H-2 untouched).
+        #
+        # The two EDIT paths stay provider-only on purpose — a deadline
+        # may be stated when the work is asked for, but moving one
+        # afterwards is renegotiation: `PATCH /extra-work/<id>/dates/`
+        # (views.py) and `POST /extra-work/bulk-dates/` (views_dates.py)
+        # both still answer a customer-side caller with 403
+        # `deadline_provider_only`.
 
         # Single-company invariant: the customer's company is the
         # only valid `company` for this Extra Work request, and the
@@ -2235,7 +2286,13 @@ class ExtraWorkPreviewLineSerializer(serializers.Serializer):
         default=None,
     )
     quantity = serializers.DecimalField(max_digits=12, decimal_places=2)
-    requested_date = serializers.DateField()
+    # W-EW1 §2 — optional, and overwritten by the parent from the cart's
+    # one date. NOT refused the way the create path refuses it: preview
+    # is strictly non-mutating, so the only thing that matters here is
+    # that it prices against the SAME date create will store. A caller
+    # that still sends one gets the cart date applied instead, and its
+    # preview therefore keeps matching what create would write.
+    requested_date = serializers.DateField(required=False)
     customer_note = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
@@ -2288,6 +2345,15 @@ class ExtraWorkPreviewSerializer(serializers.Serializer):
         allow_null=True,
         default=None,
     )
+    # W-EW1 §2 — the cart's one date, mirroring the create payload. The
+    # preview resolves agreed prices `on=` a date; if it kept resolving
+    # on today while create resolved on the customer's stated date, the
+    # amount on screen and the amount stored would differ the moment a
+    # price window changes between the two. Optional, exactly as it is
+    # on create.
+    preferred_date = serializers.DateField(
+        required=False, allow_null=True, default=None
+    )
     line_items = ExtraWorkPreviewLineSerializer(many=True)
 
     def validate_line_items(self, value):
@@ -2303,6 +2369,16 @@ class ExtraWorkPreviewSerializer(serializers.Serializer):
 
         building = attrs["building"]
         customer = attrs["customer"]
+
+        # W-EW1 §2 — identical rule to
+        # `ExtraWorkRequestCreateSerializer.validate`, deliberately
+        # duplicated rather than shared: these two serializers already
+        # keep parallel copies of the scope, cross-company and
+        # custom-price guards, and the property that matters is that the
+        # preview prices on the same date create will store.
+        cart_date = attrs.get("preferred_date") or timezone.localdate()
+        for line in attrs.get("line_items", []) or []:
+            line["requested_date"] = cart_date
 
         if customer.company_id != building.company_id:
             raise serializers.ValidationError(

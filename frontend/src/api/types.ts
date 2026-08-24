@@ -2505,7 +2505,11 @@ export interface ExtraWorkRequestCartCreatePayload {
     custom_price?: number;
     // Decimal as string per DRF convention.
     quantity: string;
-    requested_date: string;
+    // W-EW1 §2 — REMOVED from the wire on purpose. The server stamps
+    // every line's `requested_date` from the request-level
+    // `preferred_date`, and a line that still carries one is refused
+    // with `line_requested_date_not_accepted`. The column and the READ
+    // type (`ExtraWorkRequestItem.requested_date`) are unchanged.
     customer_note?: string;
   }>;
 }
@@ -2594,7 +2598,10 @@ export interface ExtraWorkPreviewLinePayload {
   custom_price?: number | null;
   // Decimal as string per DRF convention.
   quantity: string;
-  requested_date: string;
+  // W-EW1 §2 — optional. The preview takes the cart's one date from
+  // the payload-level `preferred_date` and applies it to every line,
+  // so the previewed amount is priced on the same day create stores.
+  requested_date?: string;
   customer_note?: string;
 }
 
@@ -2605,6 +2612,8 @@ export interface ExtraWorkPreviewPayload {
   // Optional candidate intent. When present the response carries
   // `requested_intent_allowed` (+ `requested_intent_error` on rejection).
   request_intent?: ExtraWorkRequestIntent | null;
+  // W-EW1 §2 — the cart's one date, mirroring the create payload.
+  preferred_date?: string | null;
   line_items: ExtraWorkPreviewLinePayload[];
 }
 

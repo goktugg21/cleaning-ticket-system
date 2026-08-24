@@ -14255,3 +14255,96 @@ table.assign-table { min-width: 0; width: 100%; }
   font-size: var(--font-sm);
   line-height: 1.5;
 }
+
+/* ---------------------------------------------------------------------------
+   W-EW1 — the Extra Work create page: dates, and the pricing preview as the
+   service-line interface.
+
+   Appended as one block at the end of the file rather than filed next to the
+   other `.ew-` rules, because that region is being edited concurrently on this
+   branch and a second editor in the same hunk is how one of the two edits gets
+   lost.
+   --------------------------------------------------------------------------- */
+
+/* §1c — the deadline field and the time-remaining chip share one row, so the
+   value reads as belonging to the date rather than floating under it. */
+.ew-deadline-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ew-deadline-row .field-input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.ew-deadline-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border-soft);
+}
+
+/* Past its deadline is not a neutral fact, so it does not get the neutral
+   token. */
+.ew-deadline-chip-late {
+  background: var(--red-soft);
+  color: var(--red);
+  border-color: var(--red-border);
+}
+
+/* §3 — the preview's own header carries the one control that adds a line. */
+.ew-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* The service cell is a button, but it must read as the line's NAME, not as a
+   control competing with the row's real actions. Full strength, never faded:
+   a line already chosen is the most important text in its row. */
+.ew-line-service-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ew-line-service-button:hover,
+.ew-line-service-button:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.ew-line-qty-input {
+  width: 96px;
+  min-width: 0;
+}
+
+.ew-line-note-input {
+  margin-top: 6px;
+  font-size: var(--font-sm);
+}
+
+/* The inline picker is a row of the table it adds to, so it spans the whole
+   width and sits visually inside the line it belongs to. */
+.ew-line-picker-row > td {
+  background: var(--surface-2);
+}

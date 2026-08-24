@@ -107,7 +107,6 @@
   "create.line_field_service": "Service",
   "create.line_field_service_placeholder": "Select a service…",
   "create.line_field_quantity": "Quantity",
-  "create.line_field_requested_date": "Requested date",
   "create.line_field_customer_note": "Note (optional)",
   "create.line_field_customer_note_placeholder": "Anything the provider should know about this line",
   "create.line_custom_option": "Custom…",
@@ -144,7 +143,6 @@
   "create.error_line_service_required": "Pick a service for every cart line.",
   "create.error_line_custom_required": "Describe the custom service or pick one from the list.",
   "create.error_line_quantity_invalid": "Quantity must be greater than 0.",
-  "create.error_line_requested_date_required": "Requested date is required for every line.",
   "create.preview.section_title": "Pricing preview",
   "create.preview.helper": "A live overview of your cart. Lines with a pre-agreed price show your own contract price; other lines are priced by the provider.",
   "create.preview.loading": "Calculating prices…",
@@ -776,5 +774,13 @@
   "detail.complete_toast": "“{{title}}” is completed. No ticket was changed.",
   "detail.agreement_col_service": "Service",
   "detail.agreement_col_qty": "Qty",
-  "detail.agreement_col_amount": "Amount"
+  "detail.agreement_col_amount": "Amount",
+  "create.deadline_chip_left_one": "{{count}} day left",
+  "create.deadline_chip_left_other": "{{count}} days left",
+  "create.deadline_chip_today": "due today",
+  "create.deadline_chip_overdue_one": "{{count}} day overdue",
+  "create.deadline_chip_overdue_other": "{{count}} days overdue",
+  "create.preview.col_actions": "Actions",
+  "create.preview.picker_label": "Services and agreed prices to add",
+  "create.field_description_placeholder": "Describe the work: exact area, room, surface, access, urgency, and anything that affects pricing. If one service needs its own timing, say so here."
 }
