@@ -14,6 +14,7 @@ from rest_framework.test import APITestCase
 from test_utils import TenantFixtureMixin
 from tickets.models import TicketStaffAssignment, TicketStatus
 from tickets.transition_requirements import ERR_TRANSITION_REQUIREMENTS
+from tickets.views_staff_assignments import ERR_STAFF_ALREADY_ASSIGNED
 
 
 class TransitionRequirementsGateTests(TenantFixtureMixin, APITestCase):
@@ -173,7 +174,18 @@ class TransitionRequirementsEndpointTests(TenantFixtureMixin, APITestCase):
 
 
 class DuplicateFlatAssignmentTests(TenantFixtureMixin, APITestCase):
-    """§6c — Ahmet Yildiz, twice on ticket 355, both rows identical."""
+    """§6c — Ahmet Yildiz, twice on ticket 355, both rows identical.
+
+    W26 SUPERSEDED §6c's rule while keeping its subject. §6c refused only
+    an INDISTINGUISHABLE second row (`duplicate_flat_assignment`) and let
+    a second row through when it carried a start time or a different
+    window label. The owner's decision since is ONE PERSON, ONE SLOT: any
+    second slot for someone already on the ticket is refused
+    `staff_already_assigned`, and a second window is an EDIT of their
+    existing slot. The two tests that pinned the permissive half now pin
+    the refusal; the full W26 surface lives in
+    `test_w26_one_person_one_slot.py`.
+    """
 
     def setUp(self):
         super().setUp()
@@ -205,7 +217,7 @@ class DuplicateFlatAssignmentTests(TenantFixtureMixin, APITestCase):
 
         second = self.client.post(url, {"user_id": self.staff.id}, format="json")
         self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(second.data["code"], "duplicate_flat_assignment")
+        self.assertEqual(second.data["code"], ERR_STAFF_ALREADY_ASSIGNED)
         self.assertEqual(
             TicketStaffAssignment.objects.filter(
                 ticket=self.ticket, user=self.staff
@@ -213,9 +225,10 @@ class DuplicateFlatAssignmentTests(TenantFixtureMixin, APITestCase):
             1,
         )
 
-    def test_a_differently_labelled_flat_slot_is_still_allowed(self):
-        """Sprint 14E splits an undated day into "morning" / "afternoon"
-        with no clock times. Those two rows DO say different things."""
+    def test_a_differently_labelled_flat_slot_is_now_refused_too(self):
+        """W26 — §6c allowed this ("morning" then "afternoon" say
+        different things). One person, one slot: the afternoon is a
+        change to the same slot, not a second one."""
         self.authenticate(self.company_admin)
         url = f"/api/tickets/{self.ticket.id}/staff-assignments/"
         first = self.client.post(
@@ -229,12 +242,13 @@ class DuplicateFlatAssignmentTests(TenantFixtureMixin, APITestCase):
             {"user_id": self.staff.id, "time_window_label": "afternoon"},
             format="json",
         )
-        self.assertEqual(second.status_code, status.HTTP_201_CREATED, second.data)
+        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(second.data["code"], ERR_STAFF_ALREADY_ASSIGNED)
         self.assertEqual(
             TicketStaffAssignment.objects.filter(
                 ticket=self.ticket, user=self.staff
             ).count(),
-            2,
+            1,
         )
 
     def test_the_same_label_twice_is_still_refused(self):
@@ -251,10 +265,13 @@ class DuplicateFlatAssignmentTests(TenantFixtureMixin, APITestCase):
             format="json",
         )
         self.assertEqual(again.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(again.data["code"], "duplicate_flat_assignment")
+        self.assertEqual(again.data["code"], ERR_STAFF_ALREADY_ASSIGNED)
 
-    def test_a_dated_slot_for_the_same_person_is_still_allowed(self):
-        """The dropped uniqueness exists for the AM/PM split. It stays."""
+    def test_a_dated_slot_for_the_same_person_is_now_refused_too(self):
+        """W26 — §6c kept the AM/PM split as a second ROW. The owner's
+        decision replaces it: the person holds one slot and the dated
+        window is a PATCH on it, so this create is refused and the
+        original row is untouched."""
         self.authenticate(self.company_admin)
         url = f"/api/tickets/{self.ticket.id}/staff-assignments/"
         self.client.post(url, {"user_id": self.staff.id}, format="json")
@@ -266,10 +283,11 @@ class DuplicateFlatAssignmentTests(TenantFixtureMixin, APITestCase):
             },
             format="json",
         )
-        self.assertEqual(dated.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(dated.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(dated.data["code"], ERR_STAFF_ALREADY_ASSIGNED)
         self.assertEqual(
             TicketStaffAssignment.objects.filter(
                 ticket=self.ticket, user=self.staff
             ).count(),
-            2,
+            1,
         )

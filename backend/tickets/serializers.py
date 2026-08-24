@@ -2213,7 +2213,12 @@ class TicketStatusChangeSerializer(serializers.Serializer):
 
         from .models import TicketStaffAssignment
         from .views import _SCHEDULE_ALLOWED_ROLES
-        from .views_staff_assignments import _gate_actor, _validate_target_staff
+        from .views_staff_assignments import (
+            ERR_STAFF_ALREADY_ASSIGNED,
+            _gate_actor,
+            _validate_target_staff,
+            staff_already_assigned,
+        )
 
         staff_ids = self.validated_data.get("assigned_staff_ids")
         scheduled_start_at = self.validated_data.get("scheduled_start_at")
@@ -2253,16 +2258,7 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                         )
                     }
                 )
-            existing = set(
-                ticket.staff_assignments.values_list("user_id", flat=True)
-            )
             for user_id in staff_ids:
-                if user_id in existing:
-                    # W13-FIX §6c — the same person is never added twice
-                    # by a flat add. Silently skipping keeps the modal
-                    # idempotent: re-pressing a step must not duplicate
-                    # a row.
-                    continue
                 target = User.objects.filter(
                     pk=user_id, is_active=True, deleted_at__isnull=True
                 ).first()
@@ -2274,10 +2270,27 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                     raise serializers.ValidationError(
                         {"assigned_staff_ids": f"User {user_id} is not assignable."}
                     )
+                # W26 — ONE PERSON, ONE SLOT, decided by the SAME
+                # predicate the /staff-assignments/ create uses. This
+                # convenience path used to skip a person who was already
+                # on the ticket, which quietly hid a stale picker; the
+                # picker's source (`assignable-staff`) now omits them, so
+                # naming one here means the client is out of date and the
+                # honest answer is to say so rather than half-apply the
+                # step. Whole request refused — nothing half-written.
+                if staff_already_assigned(ticket, target):
+                    raise serializers.ValidationError(
+                        {
+                            "assigned_staff_ids": (
+                                "This person is already on this ticket. "
+                                "Edit their slot to change when they work."
+                            ),
+                            "code": ERR_STAFF_ALREADY_ASSIGNED,
+                        }
+                    )
                 TicketStaffAssignment.objects.create(
                     ticket=ticket, user=target, assigned_by=user
                 )
-                existing.add(user_id)
             ticket.refresh_from_db()
 
 

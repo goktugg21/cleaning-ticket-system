@@ -20,8 +20,10 @@ These tests pin the contract:
   - STAFF cannot assign (self or others) → 403.
   - CUSTOMER_USER cannot assign → 404 (queryset hides the ticket).
   - Target must be STAFF with active profile + BuildingStaffVisibility.
-  - Multi-slot per staff: each POST creates a NEW slot row (201); the
-    same staff member may hold several dated slots on one ticket.
+  - W26 — ONE PERSON, ONE SLOT: a POST for someone who already holds
+    any slot on the ticket is refused 400 `staff_already_assigned`, and
+    the `assignable-staff` picker omits them. Editing their slot stays
+    free; legacy duplicate rows keep working.
   - Delete is keyed by the slot id and 404s when no such slot exists.
   - Sprint 23B's approve flow remains functional alongside this path.
   - `ticket.assigned_staff` payload (used by the frontend) reflects
@@ -255,19 +257,12 @@ class DirectStaffAssignmentTests(TestCase):
         self.assertNotIn(self.admin_a.id, ids)
         self.assertNotIn(self.manager_a.id, ids)
 
-    def test_re_post_creates_another_slot_when_it_is_distinguishable(self):
-        # Multi-slot per staff — re-POSTing the same staff is NOT
-        # idempotent: a second slot that SAYS SOMETHING DIFFERENT is a
-        # new row (201), so one staff member can hold several dated
-        # slots on the ticket.
-        #
-        # W13-FIX §6c — this test used to post the same body twice and
-        # assert 201, which is the bug the owner reported: Ahmet Yildiz
-        # held two rows on ticket 355 with the same sub-task, no dates
-        # and no labels, and nothing on either row to tell them apart.
-        # The capability this test exists for is the AM/PM split, and
-        # that is what it exercises now: the second slot carries a start
-        # time. The indistinguishable case has its own test below.
+    def test_re_post_with_a_start_time_is_refused_as_well(self):
+        # W26 — ONE PERSON, ONE SLOT. Sprint 25A shipped this as a 201
+        # (multi-slot per staff), W13-FIX §6c narrowed it to "only if the
+        # second row says something different", and the owner's decision
+        # closes it entirely: a person appears on a job once, and the
+        # dated window is a PATCH on the slot they already hold.
         client = self._api(self.admin_a)
         first = client.post(
             self._list_url(self.ticket_a),
@@ -283,20 +278,21 @@ class DirectStaffAssignmentTests(TestCase):
             },
             format="json",
         )
-        self.assertEqual(second.status_code, 201, second.data)
-        self.assertNotEqual(first.data["id"], second.data["id"])
+        self.assertEqual(second.status_code, 400, second.data)
+        self.assertEqual(second.data["code"], "staff_already_assigned")
         self.assertEqual(
             TicketStaffAssignment.objects.filter(
                 ticket=self.ticket_a, user=self.staff_a
             ).count(),
-            2,
+            1,
         )
 
     def test_re_post_of_an_indistinguishable_slot_is_refused(self):
         # W13-FIX §6c — the owner's report, as a test. Same person, same
         # placement, no date and no label on either row: there is nothing
         # to tell the two apart on screen or in the data, so the second
-        # one is not a slot, it is a duplicate.
+        # one is not a slot, it is a duplicate. W26 widened the refusal
+        # to EVERY second slot; the code is now `staff_already_assigned`.
         client = self._api(self.admin_a)
         first = client.post(
             self._list_url(self.ticket_a),
@@ -310,7 +306,7 @@ class DirectStaffAssignmentTests(TestCase):
             format="json",
         )
         self.assertEqual(second.status_code, 400)
-        self.assertEqual(second.data["code"], "duplicate_flat_assignment")
+        self.assertEqual(second.data["code"], "staff_already_assigned")
         self.assertEqual(
             TicketStaffAssignment.objects.filter(
                 ticket=self.ticket_a, user=self.staff_a

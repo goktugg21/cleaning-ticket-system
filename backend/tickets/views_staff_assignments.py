@@ -35,10 +35,13 @@ Permission rules (preserved from Sprint 23B's approve flow):
         `osius.staff.request_assignment` resolver, which is the only
         existing gate that already encodes "may operate at this
         building".
-  - Multi-slot per staff: each POST creates a NEW slot row (`201`).
-    The same staff member may hold several dated slots on one ticket
-    (e.g. a 09:00-11:00 slot AND a 15:00-17:00 slot), so a re-POST is
-    no longer deduplicated by user — it adds another slot.
+  - W26 — ONE PERSON, ONE SLOT. A POST for someone who already holds
+    ANY slot on the ticket is refused 400 `staff_already_assigned`
+    (`reject_if_staff_already_assigned`, the single chokepoint below).
+    The DB constraint stays dropped — legacy tickets carrying duplicate
+    rows keep loading, rendering, completing and deleting unchanged —
+    and EDITING a slot stays free: a second window for the same person
+    is a PATCH on their existing row, not another row.
   - Audit logs are emitted by the existing
     `audit/signals.py::_on_membership_post_save` /
     `_on_membership_post_delete` handlers, which already track
@@ -374,6 +377,54 @@ def _gate_actor(request, ticket: Ticket):
     return None
 
 
+ERR_STAFF_ALREADY_ASSIGNED = "staff_already_assigned"
+
+
+def staff_already_assigned(ticket: Ticket, target: User) -> bool:
+    """ONE PERSON, ONE SLOT — the predicate, in one place.
+
+    W26. The `(ticket, user)` uniqueness on `TicketStaffAssignment` was
+    deliberately dropped at the DB layer (see `models.py`) and stays
+    dropped: legacy tickets already hold duplicate rows and they must keep
+    loading, rendering, completing and deleting exactly as they do today.
+    The rule is restored at the VALIDATION layer instead, so it governs
+    what is CREATED from now on and rewrites nothing that exists.
+
+    True iff `target` already holds ANY slot on `ticket` — dated,
+    undated, labelled, loose or filed under a part. This supersedes
+    W13-FIX §6c's narrower "indistinguishable slot" test
+    (`duplicate_flat_assignment`), which allowed a second row as long as
+    it carried a start time or a different window label; the owner's
+    decision is that a person appears on a job once, and a second window
+    is an EDIT of their slot, not another slot.
+    """
+    return TicketStaffAssignment.objects.filter(
+        ticket=ticket, user=target
+    ).exists()
+
+
+def reject_if_staff_already_assigned(ticket: Ticket, target: User):
+    """The chokepoint every user-driven slot CREATE goes through.
+
+    Returns a 400 `Response` carrying the stable
+    `staff_already_assigned` code, or None when the create may proceed.
+    EDITING an existing slot never comes here — changing someone's time
+    is a PATCH on their own row and stays free.
+    """
+    if not staff_already_assigned(ticket, target):
+        return None
+    return Response(
+        {
+            "detail": (
+                "This person is already on this ticket. Edit their slot "
+                "to change when they work."
+            ),
+            "code": ERR_STAFF_ALREADY_ASSIGNED,
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
 def _validate_target_staff(target: User, ticket: Ticket):
     """
     The user being assigned must hold role=STAFF, have an active
@@ -467,57 +518,16 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         )
         slot_ser.is_valid(raise_exception=True)
 
-        # Multi-slot per staff — every POST creates a NEW slot row, so the
-        # same staff member can be added again as another dated slot
-        # (Ahmet 09:00-11:00 AND Ahmet 15:00-17:00). There is no longer a
-        # (ticket, user) uniqueness constraint to dedupe against.
-        #
-        # W13-FIX §6c — BUT NOT AN INDISTINGUISHABLE ONE.
-        #
-        # "A flat (no-schedule) add stays valid" is what put Ahmet Yildiz
-        # on ticket 355 twice: two rows, same user, `sub_task` NULL on
-        # both, no dates and no window label on either -- nothing that
-        # tells them apart, on screen or in the data.
-        #
-        # INDISTINGUISHABLE means: same placement, and nothing on either
-        # row that tells them apart. This codebase already says what
-        # "tells them apart" means, and it is TWO things, not one:
-        #
-        #   * a start time -- Ahmet 09:00-11:00 vs 15:00-17:00, the case
-        #     the dropped constraint exists for; and
-        #   * a `time_window_label` -- Sprint 14E's own tests add two
-        #     UNDATED slots labelled "morning" and "afternoon" and expect
-        #     both, which is a legitimate split somebody has not put
-        #     clock times on yet.
-        #
-        # So a second row is refused only when it has neither: no start
-        # time, and the same (or equally empty) window label as one
-        # already there. Ticket 355's pair had `label=''` on both, which
-        # is exactly this case. Give the new row a start time OR a
-        # distinct label and it is allowed, because then the two rows say
-        # different things.
-        placement = slot_ser.validated_data.get("sub_task")
-        new_label = (slot_ser.validated_data.get("time_window_label") or "").strip()
-        if slot_ser.validated_data.get("scheduled_start_at") is None:
-            siblings = TicketStaffAssignment.objects.filter(
-                ticket=ticket,
-                user=target,
-                sub_task=placement,
-                scheduled_start_at__isnull=True,
-            ).values_list("time_window_label", flat=True)
-            if any((label or "").strip() == new_label for label in siblings):
-                return Response(
-                    {
-                        "detail": (
-                            "This person already holds an unscheduled slot "
-                            "here with the same label. Give the new slot a "
-                            "start time or a different time window to add "
-                            "them again."
-                        ),
-                        "code": "duplicate_flat_assignment",
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        # W26 — ONE PERSON, ONE SLOT. The chokepoint, not a second copy
+        # of the rule: `reject_if_staff_already_assigned` is the single
+        # place that decides it, shared with the transition modal's bulk
+        # add. A person who already holds ANY slot here is refused 400
+        # `staff_already_assigned`; their existing slot is edited to move
+        # them. This runs AFTER the write serializer validates so a
+        # malformed body still 400s on its own shape first.
+        duplicate = reject_if_staff_already_assigned(ticket, target)
+        if duplicate is not None:
+            return duplicate
 
         assignment = TicketStaffAssignment.objects.create(
             ticket=ticket,
@@ -793,6 +803,14 @@ def assignable_staff_view(request, ticket: Ticket):
             staff_profile__is_active=True,
             building_visibility__building_id=ticket.building_id,
         )
+        # W26 — ONE PERSON, ONE SLOT, said by the picker's own source.
+        # Someone who already holds a slot here is not offerable, because
+        # `reject_if_staff_already_assigned` would refuse the write: the
+        # picker lists them ABSENT rather than present-and-refused, so
+        # "offerable" and "acceptable" cannot disagree (the same rule the
+        # bulk-assign candidates view states about its own helper).
+        # Changing their time is done by editing their slot.
+        .exclude(ticket_staff_assignments__ticket=ticket)
         .select_related("staff_profile")
         .order_by("email")
         .distinct()

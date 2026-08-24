@@ -260,9 +260,15 @@ class StaffAssignmentRequestViewSet(viewsets.ModelViewSet):
                 # me work this ticket"; if the staff already holds ANY slot
                 # they are already on it, so approval is idempotent and
                 # creates nothing.
-                if not TicketStaffAssignment.objects.filter(
-                    ticket=locked.ticket, user=locked.staff
-                ).exists():
+                # W26 — the SAME one-person-one-slot predicate the
+                # /staff-assignments/ create uses. It is a predicate here,
+                # not a rejection: approving a request whose staff is
+                # already on the ticket creates NO row, so the rule is not
+                # broken, and 400-ing an approval that has nothing to do
+                # would strand the request PENDING for ever.
+                from .views_staff_assignments import staff_already_assigned
+
+                if not staff_already_assigned(locked.ticket, locked.staff):
                     TicketStaffAssignment.objects.create(
                         ticket=locked.ticket,
                         user=locked.staff,

@@ -204,9 +204,15 @@ class TicketBulkAssignView(APIView):
                 ).first()
                 if mode == "assign":
                     if existing is not None:
-                        # For staff this means "already has a slot here".
-                        # See the module docstring: this endpoint makes
-                        # one slot per pair, never a second.
+                        # For staff this means "already has a slot here" —
+                        # the W26 one-person-one-slot rule, reached by the
+                        # same `(ticket, user)` question
+                        # `staff_already_assigned` asks. It stays a COUNTER
+                        # here rather than a 400: this endpoint's contract
+                        # is a per-pair tally over a batch of tickets
+                        # (`already_assigned` is a documented response
+                        # field every caller reads), and it creates no
+                        # duplicate either way.
                         already += 1
                         continue
                     model.objects.create(
