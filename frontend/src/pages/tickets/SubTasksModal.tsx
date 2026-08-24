@@ -45,6 +45,7 @@ import { getApiError } from "../../api/client";
 import { BoundedList } from "../../components/BoundedList";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Toggle } from "../../components/Toggle";
+import { useToast } from "../../components/ToastProvider";
 
 export function SubTasksModal({
   ticketId,
@@ -70,6 +71,7 @@ export function SubTasksModal({
   onClose: () => void;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
+  const { push } = useToast();
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -83,15 +85,28 @@ export function SubTasksModal({
   const [autoFlag, setAutoFlag] = useState(autoCompleteOnSubtasks);
   const [flagBusy, setFlagBusy] = useState(false);
 
+  // TWO effects, not one. Focus belongs to opening the modal and must
+  // happen once; the Escape listener has to see the CURRENT `busy`, so it
+  // re-binds whenever that changes. Folded together, either the listener
+  // reads a stale `busy` or every write steals focus back to the card --
+  // and holding `busy` in a ref instead means writing a ref during render,
+  // which is its own rule.
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     cardRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      // Guarded on `busy` for the same reason the close button is disabled
+      // while one: Escape would unmount this overlay with a write still in
+      // flight, and the operator would be left looking at a list that had
+      // not been reloaded yet.
+      if (event.key === "Escape" && !busy) onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onClose, busy]);
 
   function partBadge(part: SubTask): {
     tone: "approved" | "progress" | "neutral";
@@ -131,6 +146,10 @@ export function SubTasksModal({
       await updateSubTask(ticketId, part.id, { title });
       setRenamingPartId(null);
       await onChanged();
+      push({
+        variant: "success",
+        title: t("parts.toast_renamed", { part: title }),
+      });
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -145,6 +164,10 @@ export function SubTasksModal({
       await deleteSubTask(ticketId, part.id);
       setConfirmRemoveId(null);
       await onChanged();
+      push({
+        variant: "success",
+        title: t("parts.toast_removed", { part: part.title }),
+      });
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -184,6 +207,12 @@ export function SubTasksModal({
       const updated = await setAutoCompleteFlag(ticketId, next);
       setAutoFlag(updated.auto_complete_on_subtasks);
       await onChanged();
+      push({
+        variant: "success",
+        title: updated.auto_complete_on_subtasks
+          ? t("parts.toast_auto_on")
+          : t("parts.toast_auto_off"),
+      });
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -233,6 +262,7 @@ export function SubTasksModal({
               <thead>
                 <tr>
                   <th className="assign-table-person">{t("parts.col_part")}</th>
+                  <th>{t("parts.col_state")}</th>
                   <th>{t("parts.col_people")}</th>
                   {!isTerminal && <th className="assign-table-actions" />}
                 </tr>
@@ -266,7 +296,7 @@ export function SubTasksModal({
                           part.title
                         )}
                       </td>
-                      <td data-testid="ticket-part-people">
+                      <td data-testid="ticket-part-state">
                         <StatusBadge
                           variant="cell"
                           status={{
@@ -275,6 +305,8 @@ export function SubTasksModal({
                             label: badge.label,
                           }}
                         />
+                      </td>
+                      <td data-testid="ticket-part-people">
                         {part.staff_assignments.length === 0 ? (
                           <span
                             className="assign-table-note"
