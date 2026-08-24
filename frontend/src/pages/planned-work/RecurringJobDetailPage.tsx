@@ -626,8 +626,15 @@ export function RecurringJobDetailPage() {
           <>
             <span className="pw-money-label">{t("money.billed_via")}</span>
             {linkedLine.contractId != null ? (
+              // The contract's route is `/admin/contracts/:contractId`,
+              // and its Planning tab is component state, not a URL
+              // segment — there is no deep link to the tab itself, and
+              // ContractDetailPage is not this wave's to change. So the
+              // link reaches the contract and Planning is one click
+              // away; a `?tab=planning` that silently did nothing would
+              // be worse than a link that admits where it lands.
               <Link
-                to={`/contracts/${linkedLine.contractId}?tab=planning`}
+                to={`/admin/contracts/${linkedLine.contractId}`}
                 data-testid="recurring-job-money-link"
               >
                 {linkedLine.label}
