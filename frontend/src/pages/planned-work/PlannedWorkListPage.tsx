@@ -15,7 +15,6 @@ import { ClickableRow } from "../../components/ClickableRow";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { StatusBadge } from "../../components/StatusBadge";
-import { formatMoney } from "../../lib/intl";
 
 type StatusFilter = "active" | "archived" | "all";
 
@@ -54,14 +53,6 @@ export function PlannedWorkListPage() {
       cancelled = true;
     };
   }, []);
-
-  function pricingSummary(job: RecurringJob): string {
-    if (job.pricing_mode === "FIXED" && job.fixed_price != null) {
-      return `${formatMoney(job.fixed_price)} ${t("pricing.ex_vat_suffix")}`;
-    }
-    if (job.pricing_mode === "HOURLY") return t("pricing_mode.HOURLY");
-    return t("pricing.included");
-  }
 
   const visibleRows = useMemo(() => {
     const needle = searchInput.trim().toLowerCase();
@@ -173,7 +164,6 @@ export function PlannedWorkListPage() {
                   <th>{t("list.col_customer")}</th>
                   <th>{t("list.col_frequency")}</th>
                   <th>{t("list.col_window")}</th>
-                  <th>{t("list.col_pricing")}</th>
                   <th>{t("list.col_status")}</th>
                   <th style={{ textAlign: "right" }}>
                     {t("list.col_occurrences")}
@@ -194,7 +184,6 @@ export function PlannedWorkListPage() {
                     <td>{job.customer_name}</td>
                     <td>{t(`frequency.${job.frequency}`)}</td>
                     <td>{windowSummary(job)}</td>
-                    <td>{pricingSummary(job)}</td>
                     <td>
                       <StatusBadge
                         variant="cell"
@@ -256,8 +245,6 @@ export function PlannedWorkListPage() {
                       <dd>{t(`frequency.${job.frequency}`)}</dd>
                     </div>
                     <div className="admin-card-meta-row">
-                      <dt>{t("list.col_pricing")}</dt>
-                      <dd>{pricingSummary(job)}</dd>
                     </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("list.col_occurrences")}</dt>

@@ -7,8 +7,18 @@
 //   * tick an empty off-rule date  -> add-date   (ad-hoc PLANNED occurrence)
 //   * untick an ad-hoc date        -> clear-date (removes it)
 // A date with a generated/completed ticket is LOCKED (not toggleable). Each
-// click toggles the WHOLE date (all active windows — the backend actions are
-// per-date). After each action the month's calendar is refetched.
+// action applies to the WHOLE date (all active windows — the backend actions
+// are per-date). After each action the month's calendar is refetched.
+//
+// W-PW1 — the calendar is the page's primary surface, so a click no longer
+// fires an action blind. It opens that date's ACTIONS WHERE THE CLICK
+// HAPPENED, and the action is chosen from the list. The state machine above
+// is untouched: the popover offers exactly the transitions that date allows,
+// and each one still calls the same per-date endpoint it always did. What
+// changed is that the operator now reads what is about to happen before it
+// happens, and that the actions the occurrence TABLE used to own (change the
+// time window, cancel the visit, open the spawned ticket) are reachable from
+// the date they belong to instead of from a second list of the same dates.
 //
 // Provider-only surface (the parent gates rendering on the recurring-job
 // detail page). Read-only when the job is archived.
@@ -25,6 +35,7 @@ import {
   skipRecurringJobDate,
 } from "../../api/plannedWork";
 import type {
+  PlannedOccurrence,
   PlannedOccurrenceStatus,
   RecurringJobCalendar,
   RecurringJobCalendarDate,
@@ -33,6 +44,15 @@ import { getApiError } from "../../api/client";
 import { useToast } from "../../components/ToastProvider";
 
 type DateTick = "rule" | "skipped" | "adhoc" | "locked" | "empty";
+
+/** One entry in a date's actions panel. Exactly one of `run` / `to`:
+ *  an action that writes, or a link that leaves the page. */
+interface DayAction {
+  key: string;
+  label: string;
+  run?: () => void;
+  to?: string;
+}
 
 // Statuses that mean the date has real, materialized/actioned work and so is
 // not toggleable from the calendar (cancel/override live in the table below).
@@ -76,9 +96,25 @@ function deriveTick(entry: RecurringJobCalendarDate | undefined): DateTick {
 export function RecurringJobCalendar({
   jobId,
   canManage,
+  occurrencesByDate,
+  onOverride,
+  onCancelVisit,
+  onChanged,
 }: {
   jobId: number;
   canManage: boolean;
+  /** The job's occurrences keyed by ISO date. The calendar endpoint says
+   *  what a date IS; the override and cancel actions need the occurrence
+   *  ROW, which only the occurrence list carries — so the parent, which
+   *  already loads it, hands it down rather than this component fetching
+   *  the same rows a second time. */
+  occurrencesByDate: Map<string, PlannedOccurrence[]>;
+  onOverride: (occ: PlannedOccurrence) => void;
+  onCancelVisit: (occ: PlannedOccurrence) => void;
+  /** Fired after any per-date write, so the parent can re-read the
+   *  occurrences it handed down. Without it the popover would keep
+   *  offering actions computed from rows the write just invalidated. */
+  onChanged: () => void;
 }) {
   const { t, i18n } = useTranslation(["planned_work", "common"]);
   const { push } = useToast();
@@ -88,6 +124,13 @@ export function RecurringJobCalendar({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyDate, setBusyDate] = useState<string | null>(null);
+  // W-PW1 — the open date-actions popover: which date, and the screen rect
+  // of the cell that was clicked, so the panel opens against that cell.
+  const [dayMenu, setDayMenu] = useState<{
+    iso: string;
+    tick: DateTick;
+    rect: { top: number; left: number; bottom: number; right: number };
+  } | null>(null);
   // Lazy-init to the current month; the parent keys this component by job id
   // so a job change remounts + re-seeds (no resync effect).
   const [monthCursor, setMonthCursor] = useState<Date>(() =>
@@ -115,6 +158,17 @@ export function RecurringJobCalendar({
     };
   }, [jobId]);
 
+  // Escape closes the panel. Registered only while one is open, so the
+  // page carries no listener when there is nothing to close.
+  useEffect(() => {
+    if (!dayMenu) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setDayMenu(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dayMenu]);
+
   async function reload() {
     const data = await getRecurringJobCalendar(jobId);
     setCalendar(data);
@@ -128,30 +182,54 @@ export function RecurringJobCalendar({
 
   const todayISO = toISODate(new Date());
 
-  async function handleDayClick(date: string, tick: DateTick) {
+  /** The three per-date writes, unchanged in behaviour — only now they
+   *  are chosen by name from the popover instead of inferred from the
+   *  date's current tick. */
+  async function runDateAction(
+    date: string,
+    action: "add" | "skip" | "clear",
+  ) {
     if (busyDate || !canManage) return;
+    setDayMenu(null);
     setBusyDate(date);
     try {
       let toastKey: string;
-      if (tick === "empty") {
+      if (action === "add") {
         await addRecurringJobDate(jobId, date);
         toastKey = "calendar.toast_added";
-      } else if (tick === "rule") {
+      } else if (action === "skip") {
         await skipRecurringJobDate(jobId, date);
         toastKey = "calendar.toast_skipped";
-      } else if (tick === "skipped" || tick === "adhoc") {
+      } else {
         await clearRecurringJobDate(jobId, date);
         toastKey = "calendar.toast_cleared";
-      } else {
-        return; // locked — not toggleable
       }
       await reload();
+      onChanged();
       push({ variant: "success", title: t(toastKey) });
     } catch (err) {
       push({ variant: "error", title: getApiError(err) });
     } finally {
       setBusyDate(null);
     }
+  }
+
+  function openDayMenu(iso: string, tick: DateTick, el: HTMLElement) {
+    const r = el.getBoundingClientRect();
+    setDayMenu((current) =>
+      current?.iso === iso
+        ? null
+        : {
+            iso,
+            tick,
+            rect: {
+              top: r.top,
+              left: r.left,
+              bottom: r.bottom,
+              right: r.right,
+            },
+          },
+    );
   }
 
   // Month-nav bounds: only months overlapping the fetched horizon.
@@ -173,6 +251,60 @@ export function RecurringJobCalendar({
       new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i),
     );
   }, [monthCursor]);
+
+  /** What this date can actually be asked to do, in the order an
+   *  operator reads them. Empty list => the cell is not clickable, so a
+   *  date with nothing to offer never opens an empty panel. */
+  function dayActions(iso: string, tick: DateTick): DayAction[] {
+    const isPast = iso < todayISO;
+    const occs = occurrencesByDate.get(iso) ?? [];
+    // The date's actions target ONE occurrence; with several windows on a
+    // date the first live one is the row those actions belong to.
+    const occ =
+      occs.find((o) => o.status !== "CANCELLED" && o.status !== "SKIPPED") ??
+      occs[0] ??
+      null;
+    const ticketId = occ?.ticket_id ?? null;
+    const out: DayAction[] = [];
+
+    if (ticketId != null) {
+      out.push({ key: "ticket", label: t("calendar.action_open_ticket"), to: `/tickets/${ticketId}` });
+    }
+    const writable = canManage && !isPast;
+    if (writable && tick === "empty") {
+      out.push({ key: "add", label: t("calendar.action_add"), run: () => runDateAction(iso, "add") });
+    }
+    if (writable && tick === "rule") {
+      out.push({ key: "skip", label: t("calendar.action_skip"), run: () => runDateAction(iso, "skip") });
+    }
+    if (writable && tick === "skipped") {
+      out.push({ key: "restore", label: t("calendar.action_restore"), run: () => runDateAction(iso, "clear") });
+    }
+    if (writable && tick === "adhoc") {
+      out.push({ key: "remove", label: t("calendar.action_remove"), run: () => runDateAction(iso, "clear") });
+    }
+    if (canManage && occ && occ.status !== "CANCELLED") {
+      out.push({
+        key: "override",
+        label: t("calendar.action_move"),
+        run: () => { setDayMenu(null); onOverride(occ); },
+      });
+    }
+    if (
+      canManage &&
+      occ &&
+      (occ.status === "PLANNED" ||
+        occ.status === "TICKET_CREATED" ||
+        occ.status === "RESCHEDULED")
+    ) {
+      out.push({
+        key: "cancel",
+        label: t("calendar.action_cancel"),
+        run: () => { setDayMenu(null); onCancelVisit(occ); },
+      });
+    }
+    return out;
+  }
 
   function windowsTitle(entry: RecurringJobCalendarDate | undefined): string {
     if (!entry) return "";
@@ -211,12 +343,7 @@ export function RecurringJobCalendar({
       data-testid="recurring-job-calendar"
     >
       <div className="section-head">
-        <div>
-          <div className="section-head-title">{t("calendar.title")}</div>
-          <p className="muted small" style={{ marginTop: 2 }}>
-            {t("calendar.desc")}
-          </p>
-        </div>
+        <div className="section-head-title">{t("calendar.title")}</div>
       </div>
 
       {!canManage && (
@@ -299,11 +426,13 @@ export function RecurringJobCalendar({
           const entry = dateMap.get(iso);
           const tick = deriveTick(entry);
           const isPast = iso < todayISO;
-          const interactive =
-            canManage && inMonth && !isPast && tick !== "locked";
           const windowCount = entry?.windows.length ?? 0;
-          const ticketId =
-            entry?.windows.find((w) => w.ticket_id != null)?.ticket_id ?? null;
+          // A cell is clickable when it has something to offer. That is a
+          // strictly wider set than the old `interactive`: a LOCKED date
+          // with a ticket, and a past date whose ticket still exists, were
+          // reachable before only as a bare link and are now reachable as
+          // the same panel every other date opens.
+          const interactive = inMonth && dayActions(iso, tick).length > 0;
 
           return (
             <CalendarCell
@@ -314,16 +443,37 @@ export function RecurringJobCalendar({
               isPast={isPast}
               tick={tick}
               interactive={interactive}
+              open={dayMenu?.iso === iso}
               busy={busyDate === iso}
               windowCount={windowCount}
-              ticketId={tick === "locked" ? ticketId : null}
               title={windowsTitle(entry)}
-              addLabel={t("calendar.add_aria", { date: iso })}
-              onClick={() => handleDayClick(iso, tick)}
+              menuLabel={t("calendar.open_actions_aria", { date: iso })}
+              onOpen={(el) => openDayMenu(iso, tick, el)}
             />
           );
         })}
       </div>
+
+      {/* W-PW1 — the clicked date's actions, opened against that date's
+          own cell. The backdrop is a real button so a click anywhere else
+          closes it and so the panel is dismissible from the keyboard. */}
+      {dayMenu && (
+        <>
+          <button
+            type="button"
+            className="pw-daypop-backdrop"
+            aria-label={t("calendar.close_actions")}
+            onClick={() => setDayMenu(null)}
+          />
+          <DayMenu
+            date={dayMenu.iso}
+            rect={dayMenu.rect}
+            actions={dayActions(dayMenu.iso, dayMenu.tick)}
+            label={formatDayMenuDate(dayMenu.iso, locale)}
+            onClose={() => setDayMenu(null)}
+          />
+        </>
+      )}
 
       {/* Legend */}
       <div
@@ -339,6 +489,81 @@ export function RecurringJobCalendar({
         <LegendDot tone="var(--text-faint, #9ca3af)" label={t("calendar.legend_skipped")} />
         <LegendDot tone="#16a34a" label={t("calendar.legend_done")} />
       </div>
+    </div>
+  );
+}
+
+function formatDayMenuDate(iso: string, locale: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+/** The per-date actions panel. Positioned against the CLICKED CELL's own
+ *  screen rect and then clamped into the viewport, so a date in the last
+ *  column or the bottom row opens inward instead of off-screen. */
+function DayMenu({
+  date,
+  rect,
+  actions,
+  label,
+  onClose,
+}: {
+  date: string;
+  rect: { top: number; left: number; bottom: number; right: number };
+  actions: DayAction[];
+  label: string;
+  onClose: () => void;
+}) {
+  const WIDTH = 210;
+  const GAP = 6;
+  const estHeight = 42 + actions.length * 34;
+  const left = Math.max(
+    8,
+    Math.min(rect.left, window.innerWidth - WIDTH - 8),
+  );
+  const opensUpward = rect.bottom + GAP + estHeight > window.innerHeight;
+  const top = opensUpward
+    ? Math.max(8, rect.top - GAP - estHeight)
+    : rect.bottom + GAP;
+
+  return (
+    <div
+      className="pw-daypop"
+      role="menu"
+      style={{ top, left, width: WIDTH }}
+      data-testid="calendar-day-menu"
+      data-date={date}
+    >
+      <div className="pw-daypop-date">{label}</div>
+      {actions.map((action) =>
+        action.to ? (
+          <Link
+            key={action.key}
+            to={action.to}
+            className="pw-daypop-action"
+            role="menuitem"
+            data-testid={`calendar-day-action-${action.key}`}
+            onClick={onClose}
+          >
+            {action.label}
+          </Link>
+        ) : (
+          <button
+            key={action.key}
+            type="button"
+            className="pw-daypop-action"
+            role="menuitem"
+            data-testid={`calendar-day-action-${action.key}`}
+            onClick={action.run}
+          >
+            {action.label}
+          </button>
+        ),
+      )}
     </div>
   );
 }
@@ -394,12 +619,12 @@ function CalendarCell({
   isPast,
   tick,
   interactive,
+  open,
   busy,
   windowCount,
-  ticketId,
   title,
-  addLabel,
-  onClick,
+  menuLabel,
+  onOpen,
 }: {
   iso: string;
   dayNumber: number;
@@ -407,12 +632,12 @@ function CalendarCell({
   isPast: boolean;
   tick: DateTick;
   interactive: boolean;
+  open: boolean;
   busy: boolean;
   windowCount: number;
-  ticketId: number | null;
   title: string;
-  addLabel: string;
-  onClick: () => void;
+  menuLabel: string;
+  onOpen: (el: HTMLElement) => void;
 }) {
   const style = TICK_STYLE[tick];
   const inner = (
@@ -454,22 +679,9 @@ function CalendarCell({
     return <div style={baseStyle} aria-hidden="true" />;
   }
 
-  // A locked, ticket-linked date deep-links to its operational ticket.
-  if (tick === "locked" && ticketId != null) {
-    return (
-      <Link
-        to={`/tickets/${ticketId}`}
-        style={{ ...baseStyle, textDecoration: "none" }}
-        title={title}
-        data-testid="calendar-day"
-        data-date={iso}
-        data-tick={tick}
-      >
-        {inner}
-      </Link>
-    );
-  }
-
+  // A date with nothing to offer stays inert — the same non-interactive
+  // cell it has always been, so an out-of-horizon or fully-past date does
+  // not invite a click that would open an empty panel.
   if (!interactive) {
     return (
       <div
@@ -488,10 +700,12 @@ function CalendarCell({
     <button
       type="button"
       style={{ ...baseStyle, cursor: busy ? "wait" : "pointer" }}
-      onClick={onClick}
+      onClick={(event) => onOpen(event.currentTarget)}
       disabled={busy}
-      title={tick === "empty" ? addLabel : title}
-      aria-label={tick === "empty" ? addLabel : undefined}
+      title={title || menuLabel}
+      aria-label={menuLabel}
+      aria-haspopup="menu"
+      aria-expanded={open}
       data-testid="calendar-day"
       data-date={iso}
       data-tick={tick}

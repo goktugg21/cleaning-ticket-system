@@ -55,13 +55,18 @@ import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { customerLabelName } from "../../lib/customerLabelName";
 
 const FREQUENCIES: RecurringJobFrequency[] = ["WEEKLY", "BIWEEKLY", "MONTHLY"];
-const PRICING_MODES: SelectablePricingMode[] = ["CONTRACT_INCLUDED", "FIXED"];
+// W-PW1 — a recurring job is billed as a MEMBERSHIP through its contract
+// line, so the form no longer asks how a job or a window is priced. The
+// write serializer still REQUIRES `pricing_mode`, so a newly created job
+// takes this value and nothing in the UI can change it. On edit the three
+// pricing keys are omitted from the PATCH entirely, which leaves whatever
+// the job already stores exactly as it is.
+const MEMBERSHIP_PRICING_MODE: SelectablePricingMode = "CONTRACT_INCLUDED";
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
 
 // Per-window pricing dropdown: "" means "inherit the job's pricing" (the
 // occurrence falls back to the job default); the two explicit modes
 // override it for that window only.
-type WindowPricingChoice = "" | SelectablePricingMode;
 
 interface WindowDraft {
   // Present for a window that already exists on the job (edit in place so
@@ -69,13 +74,10 @@ interface WindowDraft {
   id?: number;
   label: string;
   startTime: string; // HH:MM
-  pricingMode: WindowPricingChoice;
-  fixedPrice: string;
-  vatPct: string;
 }
 
 function emptyWindow(): WindowDraft {
-  return { label: "", startTime: "", pricingMode: "", fixedPrice: "", vatPct: "21" };
+  return { label: "", startTime: "" };
 }
 
 function customerMatchesBuilding(customer: Customer, buildingId: number): boolean {
@@ -156,10 +158,6 @@ export function RecurringJobFormPage() {
   // Recurring day-model: a weekday SET (WEEKLY/BIWEEKLY) + 1..N windows.
   const [weekdays, setWeekdays] = useState<number[]>([]);
   const [windows, setWindows] = useState<WindowDraft[]>([emptyWindow()]);
-  const [pricingMode, setPricingMode] =
-    useState<SelectablePricingMode>("CONTRACT_INCLUDED");
-  const [fixedPrice, setFixedPrice] = useState("");
-  const [vatPct, setVatPct] = useState("21");
   const [defaultStaffIds, setDefaultStaffIds] = useState<number[]>([]);
   const [defaultManagerIds, setDefaultManagerIds] = useState<number[]>([]);
 
@@ -278,23 +276,9 @@ export function RecurringJobFormPage() {
                   id: w.id,
                   label: w.label,
                   startTime: w.start_time?.slice(0, 5) ?? "",
-                  pricingMode:
-                    w.pricing_mode === "FIXED"
-                      ? "FIXED"
-                      : w.pricing_mode === "CONTRACT_INCLUDED"
-                        ? "CONTRACT_INCLUDED"
-                        : "",
-                  fixedPrice: w.fixed_price ?? "",
-                  vatPct: w.vat_pct ?? "21",
                 }))
               : [emptyWindow()],
           );
-          // HOURLY is not selectable; coerce any legacy value to CONTRACT_INCLUDED.
-          setPricingMode(
-            job.pricing_mode === "FIXED" ? "FIXED" : "CONTRACT_INCLUDED",
-          );
-          setFixedPrice(job.fixed_price ?? "");
-          setVatPct(job.vat_pct ?? "21");
           setDefaultStaffIds(job.default_staff_ids);
           setDefaultManagerIds(job.default_manager_ids);
           setFallbackBuilding({ id: job.building, name: job.building_name });
@@ -659,20 +643,12 @@ export function RecurringJobFormPage() {
     if (customer === "") errs.customer = t("form.error_customer_required");
     if (!title.trim()) errs.title = t("form.error_title_required");
     if (!startDate) errs.start_date = t("form.error_start_date_required");
-    if (pricingMode === "FIXED" && !fixedPrice.trim()) {
-      errs.fixed_price = t("form.error_fixed_price_required");
-    }
     if (showWeekdays && weekdays.length === 0) {
       errs.weekdays = t("form.error_weekdays_required");
     }
     if (windows.length === 0) {
       errs.windows = t("form.error_windows_required");
     }
-    windows.forEach((w, idx) => {
-      if (w.pricingMode === "FIXED" && !w.fixedPrice.trim()) {
-        errs[`window_${idx}`] = t("form.error_window_fixed_price_required");
-      }
-    });
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   }
@@ -701,7 +677,8 @@ export function RecurringJobFormPage() {
     );
   }
 
-  function buildPayload(): RecurringJobWritePayload & ContractLineLinkWrite {
+  function buildPayload(): Partial<RecurringJobWritePayload> &
+    ContractLineLinkWrite {
     const windowsPayload: RecurringJobWindowInput[] = windows.map((w, idx) => {
       const input: RecurringJobWindowInput = {
         label: w.label.trim(),
@@ -709,16 +686,8 @@ export function RecurringJobFormPage() {
         ordering: idx,
       };
       if (w.id != null) input.id = w.id;
-      if (w.pricingMode === "FIXED") {
-        input.pricing_mode = "FIXED";
-        input.fixed_price = w.fixedPrice.trim();
-        input.vat_pct = w.vatPct || "21";
-      } else if (w.pricingMode === "CONTRACT_INCLUDED") {
-        input.pricing_mode = "CONTRACT_INCLUDED";
-      } else {
-        // Inherit the job's pricing for this window.
-        input.pricing_mode = null;
-      }
+      // W-PW1 — no per-window pricing key is sent at all. An existing
+      // window keeps whatever it stores; a new one inherits the job.
       return input;
     });
 
@@ -727,7 +696,8 @@ export function RecurringJobFormPage() {
     // `createRecurringJob` / `updateRecurringJob` take the base type, and
     // a variable of an intersection type is assignable to it, so nothing
     // in the API layer has to change to carry the key.
-    const payload: RecurringJobWritePayload & ContractLineLinkWrite = {
+    const payload: Partial<RecurringJobWritePayload> &
+      ContractLineLinkWrite = {
       building: Number(building),
       customer: Number(customer),
       title: title.trim(),
@@ -739,9 +709,11 @@ export function RecurringJobFormPage() {
       // it). Windows supersede the legacy single time-window inputs.
       weekdays: showWeekdays ? weekdays : [],
       windows: windowsPayload,
-      pricing_mode: pricingMode,
-      vat_pct: vatPct || "21",
-      fixed_price: pricingMode === "FIXED" ? fixedPrice.trim() : null,
+      // W-PW1 — CREATE must carry one (the write serializer requires it);
+      // EDIT omits all three so a PATCH never rewrites what is stored.
+      ...(isCreate
+        ? { pricing_mode: MEMBERSHIP_PRICING_MODE }
+        : {}),
       // Sprint 144 §2 — all optional. `effective*` has already collapsed
       // any selection that belongs to a different customer, so a stale
       // one can never reach the wire. Explicit `null` (not omitted) so
@@ -777,7 +749,11 @@ export function RecurringJobFormPage() {
     try {
       const payload = buildPayload();
       if (isCreate) {
-        await createRecurringJob(payload);
+        // On CREATE every required key is present by construction (the
+        // fields validate() guards, plus `pricing_mode` from the branch in
+        // buildPayload); the cast is what tells TypeScript that the
+        // create-only branch has been taken.
+        await createRecurringJob(payload as RecurringJobWritePayload);
         push({
           variant: "success",
           title: t("form.created_toast_title"),
@@ -870,9 +846,6 @@ export function RecurringJobFormPage() {
             <div className="form-section-title">
               {t("form.section_basics_title")}
             </div>
-            <div className="form-section-helper">
-              {t("form.section_basics_desc")}
-            </div>
             {/* Sprint 6 — CUSTOMER left / BUILDING right (layout-only swap;
                 all bindings/handlers unchanged). */}
             <div className="form-2col">
@@ -912,11 +885,18 @@ export function RecurringJobFormPage() {
                 )}
               </div>
 
-              {/* Sprint 144 §2 — Department / Work type / Category, all
-                  bound to the SELECTED CUSTOMER and all optional. Each is
-                  disabled with a reason when the customer has none of
-                  that kind, the way the Extra Work form already does it —
-                  an empty enabled dropdown tells the operator nothing. */}
+              {/* Rule 11 — the optional classifiers open only when asked
+                  for. A job needs a customer, a building, a title and a
+                  schedule; department, work type, category and the
+                  contract line are all things SOME jobs carry, and four
+                  always-open dropdowns are what made this form read as
+                  long. Sprint 144 §2's own rule still holds inside: each
+                  is disabled with a reason when the customer has none of
+                  that kind. */}
+              <details className="pw-form-group" data-testid="rj-group-labels">
+                <summary className="pw-form-group-summary">
+                  {t("form.group_classification")}
+                </summary>
               <div className="field">
                 <label className="field-label" htmlFor="rj-department">
                   {t("form.field_department")}
@@ -1042,6 +1022,7 @@ export function RecurringJobFormPage() {
                   </div>
                 </div>
               )}
+              </details>
               <div className="field">
                 <label className="field-label" htmlFor="rj-building">
                   {t("form.field_building")} *
@@ -1107,9 +1088,6 @@ export function RecurringJobFormPage() {
           <div className="form-section">
             <div className="form-section-title">
               {t("form.section_schedule_title")}
-            </div>
-            <div className="form-section-helper">
-              {t("form.section_schedule_desc")}
             </div>
             <div className="form-2col">
               <div className="field">
@@ -1212,13 +1190,16 @@ export function RecurringJobFormPage() {
               </div>
             )}
 
-            {/* Time windows — one occurrence is materialized per (date x
-                window). Defaults to one window so a simple job stays simple. */}
+            {/* Rule 11 — one occurrence is materialized per (date x
+                window), and the default single window needs no attention
+                at all, so the time-of-day editor opens only when someone
+                actually wants a second window or a start time. */}
+            <details className="pw-form-group" data-testid="rj-group-windows">
+              <summary className="pw-form-group-summary">
+                {t("form.group_windows")}
+              </summary>
             <div className="field">
               <label className="field-label">{t("form.field_windows")} *</label>
-              <div className="form-section-helper">
-                {t("form.field_windows_hint")}
-              </div>
               <div
                 className="windows-editor"
                 style={{ display: "flex", flexDirection: "column", gap: 10 }}
@@ -1265,79 +1246,6 @@ export function RecurringJobFormPage() {
                         />
                       </div>
                     </div>
-                    <div className="field" style={{ marginBottom: 8 }}>
-                      <label className="field-label">
-                        {t("form.window_pricing_mode")}
-                      </label>
-                      <select
-                        className="field-select"
-                        value={win.pricingMode}
-                        onChange={(event) =>
-                          updateWindow(idx, {
-                            pricingMode: event.target
-                              .value as WindowPricingChoice,
-                          })
-                        }
-                      >
-                        <option value="">{t("form.window_pricing_inherit")}</option>
-                        {PRICING_MODES.map((m) => (
-                          <option key={m} value={m}>
-                            {t(`pricing_mode.${m}`)}
-                          </option>
-                        ))}
-                      </select>
-                      {win.pricingMode === "" && (
-                        <div className="form-section-helper">
-                          {t("form.window_pricing_inherit_hint")}
-                        </div>
-                      )}
-                    </div>
-                    {win.pricingMode === "FIXED" && (
-                      <div className="form-2col">
-                        <div className="field" style={{ marginBottom: 8 }}>
-                          <label className="field-label">
-                            {t("form.field_fixed_price")}
-                          </label>
-                          <input
-                            className="field-input"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={win.fixedPrice}
-                            onChange={(event) =>
-                              updateWindow(idx, {
-                                fixedPrice: event.target.value,
-                              })
-                            }
-                          />
-                          {fieldErrors[`window_${idx}`] && (
-                            <div
-                              className="alert-error login-error"
-                              role="alert"
-                            >
-                              {fieldErrors[`window_${idx}`]}
-                            </div>
-                          )}
-                        </div>
-                        <div className="field" style={{ marginBottom: 8 }}>
-                          <label className="field-label">
-                            {t("form.field_vat_pct")}
-                          </label>
-                          <input
-                            className="field-input"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={win.vatPct}
-                            onChange={(event) =>
-                              updateWindow(idx, { vatPct: event.target.value })
-                            }
-                          />
-                        </div>
-                      </div>
-                    )}
                     {windows.length > 1 && (
                       <button
                         type="button"
@@ -1366,97 +1274,16 @@ export function RecurringJobFormPage() {
                 {t("form.window_add")}
               </button>
             </div>
+            </details>
           </div>
 
-          {/* Pricing */}
+          {/* Rule 11 — default crew is an optional convenience, not part
+              of agreeing the work, so it opens on request. */}
           <div className="form-section">
-            <div className="form-section-title">
-              {t("form.section_pricing_title")}
-            </div>
-            <div className="form-section-helper">
-              {t("form.section_pricing_desc")}
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="rj-pricing-mode">
-                {t("form.field_pricing_mode")} *
-              </label>
-              <select
-                id="rj-pricing-mode"
-                className="field-select"
-                value={pricingMode}
-                onChange={(event) =>
-                  setPricingMode(event.target.value as SelectablePricingMode)
-                }
-              >
-                {PRICING_MODES.map((m) => (
-                  <option key={m} value={m}>
-                    {t(`pricing_mode.${m}`)}
-                  </option>
-                ))}
-              </select>
-              {fieldErrors.pricing_mode && (
-                <div className="alert-error login-error" role="alert">
-                  {fieldErrors.pricing_mode}
-                </div>
-              )}
-            </div>
-            {pricingMode === "FIXED" && (
-              <div className="form-2col">
-                <div className="field">
-                  <label className="field-label" htmlFor="rj-fixed-price">
-                    {t("form.field_fixed_price")} *
-                  </label>
-                  <input
-                    id="rj-fixed-price"
-                    className="field-input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={fixedPrice}
-                    onChange={(event) => setFixedPrice(event.target.value)}
-                  />
-                  <div className="form-section-helper">
-                    {t("form.field_fixed_price_hint")}
-                  </div>
-                  {fieldErrors.fixed_price && (
-                    <div className="alert-error login-error" role="alert">
-                      {fieldErrors.fixed_price}
-                    </div>
-                  )}
-                </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="rj-vat">
-                    {t("form.field_vat_pct")}
-                  </label>
-                  <input
-                    id="rj-vat"
-                    className="field-input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={vatPct}
-                    onChange={(event) => setVatPct(event.target.value)}
-                  />
-                  {fieldErrors.vat_pct && (
-                    <div className="alert-error login-error" role="alert">
-                      {fieldErrors.vat_pct}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Default crew */}
-          <div className="form-section">
-            <div className="form-section-title">
-              {t("form.section_crew_title")}
-            </div>
-            <div className="form-section-helper">
-              {t("form.section_crew_desc")}
-            </div>
+            <details className="pw-form-group" data-testid="rj-group-crew">
+              <summary className="pw-form-group-summary pw-form-group-section">
+                {t("form.section_crew_title")}
+              </summary>
             {building === "" ? (
               <p className="muted small">
                 {t("form.crew_select_building_first")}
@@ -1515,6 +1342,7 @@ export function RecurringJobFormPage() {
                 </div>
               </div>
             )}
+            </details>
           </div>
 
           <div className="form-actions">

@@ -1,10 +1,20 @@
-// Sprint 12 frontend — per-occurrence override modal.
+// Per-occurrence override modal — "move this visit".
 //
-// Edits the five snapshotted pricing/window fields the backend override
-// action accepts. Copy makes clear this changes the planned-work CALENDAR
-// only — it does NOT reschedule an already-created ticket. Mount with a
+// Edits WHEN the visit sits within its day: its start time and its window
+// label. Copy makes clear this changes the planned-work CALENDAR only — it
+// does NOT reschedule an already-created ticket. Mount with a
 // `key={occurrence.id}` so the state initializers re-read a fresh
 // occurrence (no reset effect needed).
+//
+// W-PW1 — the three pricing fields this dialog used to edit
+// (`pricing_mode`, `fixed_price`, `vat_pct`) are GONE from it. Per-visit
+// pricing is not a thing the owner wants expressible: a recurring job is
+// billed through its contract line as a membership, or it is a single job.
+// The override PAYLOAD leaves all three fields out entirely (every field on
+// `PlannedOccurrenceOverridePayload` is optional), so a visit's stored
+// pricing is neither shown nor rewritten by a move — the columns and the
+// endpoint are untouched, and nothing here can resurface CONTRACT_INCLUDED
+// as a control.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -15,10 +25,7 @@ import { getApiError } from "../../api/client";
 import type {
   PlannedOccurrence,
   PlannedOccurrenceOverridePayload,
-  SelectablePricingMode,
 } from "../../api/plannedWork.types";
-
-const PRICING_MODES: SelectablePricingMode[] = ["CONTRACT_INCLUDED", "FIXED"];
 
 export function OccurrenceOverrideDialog({
   occurrence,
@@ -31,11 +38,6 @@ export function OccurrenceOverrideDialog({
 }) {
   const { t } = useTranslation(["planned_work", "common"]);
 
-  const [pricingMode, setPricingMode] = useState<SelectablePricingMode>(
-    occurrence.pricing_mode === "FIXED" ? "FIXED" : "CONTRACT_INCLUDED",
-  );
-  const [fixedPrice, setFixedPrice] = useState(occurrence.fixed_price ?? "");
-  const [vatPct, setVatPct] = useState(occurrence.vat_pct ?? "21");
   const [preferredStartTime, setPreferredStartTime] = useState(
     occurrence.preferred_start_time?.slice(0, 5) ?? "",
   );
@@ -52,10 +54,9 @@ export function OccurrenceOverrideDialog({
     setFieldErrors({});
     setSaving(true);
     try {
+      // Only the two timing fields. Omitting the pricing keys leaves the
+      // occurrence's stored values exactly as they were.
       const payload: PlannedOccurrenceOverridePayload = {
-        pricing_mode: pricingMode,
-        fixed_price: pricingMode === "FIXED" ? fixedPrice.trim() : null,
-        vat_pct: vatPct || "21",
         preferred_start_time: preferredStartTime || null,
         time_window_label: timeWindowLabel.trim(),
       };
@@ -91,71 +92,6 @@ export function OccurrenceOverrideDialog({
           </div>
         )}
 
-        <div className="field">
-          <label className="field-label" htmlFor="ov-pricing-mode">
-            {t("override.field_pricing_mode")}
-          </label>
-          <select
-            id="ov-pricing-mode"
-            className="field-select"
-            value={pricingMode}
-            onChange={(event) =>
-              setPricingMode(event.target.value as SelectablePricingMode)
-            }
-          >
-            {PRICING_MODES.map((m) => (
-              <option key={m} value={m}>
-                {t(`pricing_mode.${m}`)}
-              </option>
-            ))}
-          </select>
-          {fieldErrors.pricing_mode && (
-            <div className="alert-error login-error" role="alert">
-              {fieldErrors.pricing_mode}
-            </div>
-          )}
-        </div>
-
-        {pricingMode === "FIXED" && (
-          <div className="form-2col">
-            <div className="field">
-              <label className="field-label" htmlFor="ov-fixed-price">
-                {t("override.field_fixed_price")}
-              </label>
-              <input
-                id="ov-fixed-price"
-                className="field-input"
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                value={fixedPrice}
-                onChange={(event) => setFixedPrice(event.target.value)}
-              />
-              {fieldErrors.fixed_price && (
-                <div className="alert-error login-error" role="alert">
-                  {fieldErrors.fixed_price}
-                </div>
-              )}
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="ov-vat">
-                {t("override.field_vat_pct")}
-              </label>
-              <input
-                id="ov-vat"
-                className="field-input"
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                value={vatPct}
-                onChange={(event) => setVatPct(event.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
         <div className="form-2col">
           <div className="field">
             <label className="field-label" htmlFor="ov-time">
@@ -168,6 +104,11 @@ export function OccurrenceOverrideDialog({
               value={preferredStartTime}
               onChange={(event) => setPreferredStartTime(event.target.value)}
             />
+            {fieldErrors.preferred_start_time && (
+              <div className="alert-error login-error" role="alert">
+                {fieldErrors.preferred_start_time}
+              </div>
+            )}
           </div>
           <div className="field">
             <label className="field-label" htmlFor="ov-window">
@@ -181,6 +122,11 @@ export function OccurrenceOverrideDialog({
               value={timeWindowLabel}
               onChange={(event) => setTimeWindowLabel(event.target.value)}
             />
+            {fieldErrors.time_window_label && (
+              <div className="alert-error login-error" role="alert">
+                {fieldErrors.time_window_label}
+              </div>
+            )}
           </div>
         </div>
 

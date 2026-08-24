@@ -1,0 +1,224 @@
+/* Planned work — the recurring-job detail page and its calendar.
+ *
+ * Scoped to the planned-work pages and imported from
+ * `pages/planned-work/RecurringJobDetailPage.tsx`, the same arrangement
+ * `styles/contract-planning.css` already uses. Nothing here is global:
+ * every selector starts at a `pw-` class this feature owns, so the file
+ * cannot reach a page that did not ask for it.
+ */
+
+/* ---- 1. THE AGREEMENT -------------------------------------------------
+ * One header, not a card of fifteen rows. The pattern and the window are
+ * the two facts an operator reads first, so they are the two that get
+ * type size; everything else is a chip beside them.
+ */
+.pw-agreement {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1, var(--surface, #fff));
+}
+
+.pw-agreement-pattern {
+  font-size: var(--font-lg, 1.05rem);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.pw-agreement-sep {
+  color: var(--text-faint, #9ca3af);
+}
+
+.pw-agreement-window {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pw-agreement-where {
+  color: var(--text-2);
+}
+
+/* The rest of the job's facts, behind one disclosure so the header keeps
+ * its promise of showing five things at first sight without the page
+ * quietly losing the other ten. */
+.pw-more {
+  margin-left: auto;
+}
+
+.pw-more > summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--font-sm);
+  list-style: none;
+}
+
+.pw-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pw-more-body {
+  flex-basis: 100%;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ---- 2. THE VISITS ----------------------------------------------------
+ * The per-date actions open WHERE THE CLICK HAPPENED. Fixed positioning
+ * against the clicked cell's own rect, because the grid scrolls with the
+ * page and an absolutely-positioned panel inside a cell would be clipped
+ * by the card's own overflow.
+ */
+.pw-daypop {
+  position: fixed;
+  z-index: 60;
+  min-width: 190px;
+  max-width: 260px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1, #fff);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pw-daypop-date {
+  padding: 4px 8px 6px;
+  font-size: var(--font-sm);
+  font-weight: 650;
+  color: var(--text);
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 4px;
+}
+
+.pw-daypop-action {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: var(--font-sm);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.pw-daypop-action:hover:not(:disabled),
+.pw-daypop-action:focus-visible {
+  background: var(--surface-2);
+}
+
+.pw-daypop-action:disabled {
+  color: var(--text-faint, #9ca3af);
+  cursor: default;
+}
+
+.pw-daypop-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: default;
+}
+
+/* The "next up" strip: five dates, each a date and a state. */
+.pw-nextup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.pw-nextup-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  font-size: var(--font-sm);
+  white-space: nowrap;
+}
+
+/* ---- 3. THE MONEY -----------------------------------------------------
+ * One line. It is a row, never a card.
+ */
+.pw-money {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1, #fff);
+}
+
+.pw-money-label {
+  color: var(--text-2);
+  font-size: var(--font-sm);
+}
+
+.pw-money select {
+  max-width: 420px;
+}
+
+/* ---- The recurring-job FORM ------------------------------------------
+ * Rule 11 — the form opens with Basics and Schedule. Everything a job may
+ * or may not carry sits behind its own header until someone opens it, so
+ * the first screen is the decision and not the inventory.
+ */
+.pw-form-group {
+  margin: 0 0 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 0 12px;
+}
+
+.pw-form-group[open] {
+  padding-bottom: 12px;
+}
+
+.pw-form-group-summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  font-size: var(--font-sm);
+  font-weight: 650;
+  color: var(--text-2);
+  list-style: none;
+}
+
+.pw-form-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.pw-form-group-summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  color: var(--text-faint, #9ca3af);
+}
+
+.pw-form-group[open] > .pw-form-group-summary::before {
+  content: "▾";
+}
+
+/* A group standing in for a whole section keeps the section's type. */
+.pw-form-group-section {
+  font-size: var(--font-md, 1rem);
+  color: var(--text);
+}
