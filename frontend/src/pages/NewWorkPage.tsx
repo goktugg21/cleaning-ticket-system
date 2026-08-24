@@ -240,12 +240,17 @@ export function NewWorkPage() {
             questions fill the row as two, the three-answer one fills it
             as three, and a narrow window drops to one without a media
             query. There is no number here to keep in step with the
-            number of options. */}
+            number of options.
+            `min(280px, 100%)` and not a bare `280px`: a bare minimum
+            still builds a 280px track when the column is NARROWER than
+            280, which measured as a card that overflowed its own box at
+            a 320px viewport. Capping the minimum at the column width
+            lets the single column shrink instead. */}
         <div
           className="new-work-answers"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))",
             gap: 14,
           }}
         >
