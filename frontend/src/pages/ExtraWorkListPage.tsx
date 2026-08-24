@@ -1081,7 +1081,12 @@ export function ExtraWorkList({
       <PageHeader
         backLink={{ to: "/", label: t("back_to_dashboard") }}
         eyebrow={t("common:ops")}
-        title={t("list.page_title")}
+        /* W-NAV2 — this page is reached from the top-level "Quotes"
+           entry now, so it says Quotes. It reads `nav.quotes` rather
+           than carrying a second copy of the word in extra_work.json:
+           the nav row and the page heading are the same label by
+           construction, and renaming it later is one edit, not two. */
+        title={t("nav.quotes", { ns: "common" })}
         subtitle={t("list.page_subtitle")}
         actions={
           /* Sprint 155 §1b — this button used to go straight to the
@@ -1479,9 +1484,9 @@ export function ExtraWorkList({
           (?status=COMPLETED) still lands here, where by definition
           almost nothing with that status lives, so rather than read as
           "there is nothing" the page says how many requests have
-          started work and offers the one click to Chargeable work.
+          started work and offers the one click to One-off work.
           Existing keys only: `list.track_switch_to` with the sidebar's
-          own `nav.chargeable_work` as the destination name. */}
+          own `nav.one_off_work` as the destination name. */}
       {!loading && visibleRows.length === 0 && !error && (
         <EmptyState
           icon={Sparkles}
@@ -1502,7 +1507,11 @@ export function ExtraWorkList({
               >
                 {t("list.track_switch_to", {
                   count: startedElsewhereCount,
-                  track: t("nav.chargeable_work", { ns: "common" }),
+                  // W-NAV2 — the sidebar row for /tickets/chargeable is
+                  // "One-off work" now, and this link goes to that exact
+                  // page. It reads the SAME key the nav row does so the
+                  // two can never drift apart.
+                  track: t("nav.one_off_work", { ns: "common" }),
                 })}
               </Link>
             ) : undefined
@@ -1684,7 +1693,7 @@ export function ExtraWorkList({
           <ul
             className="admin-card-list"
             data-testid="admin-card-list"
-            aria-label={t("list.page_title")}
+            aria-label={t("nav.quotes", { ns: "common" })}
           >
             {visibleRows.map((row) => (
               <li key={row.id} className="admin-card">

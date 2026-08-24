@@ -13,7 +13,6 @@ import {
   ChevronRight,
   ClipboardList,
   Contact,
-  FilePlus2,
   Files,
   FileText,
   LayoutGrid,
@@ -234,16 +233,29 @@ export function AppShell({ children }: AppShellProps) {
     open: boolean;
   } | null>(null);
 
-  // W-NAV1 — the parent is a pure disclosure control now (no route of
-  // its own), so `/extra-work` itself IS a child ("Extra Work Quote")
-  // and belongs in this test. Chargeable Work is a second door onto
-  // `/tickets/chargeable` (the existing Tickets-side route), so it is
-  // counted here too — the group must read as active from either door.
+  // W-NAV1 — the parent is a pure disclosure control (no route of its
+  // own), so this test names the routes its CHILDREN own.
+  //
+  // W-NAV2 — `/extra-work` dropped OUT of it. That route left the group
+  // to become the top-level "Quotes" entry, and a group that reads as
+  // current while a top-level sibling is the lit row is the two-rows-in-
+  // one-accent defect W-NAV1.4 removed. What is left is exactly the two
+  // children: `/tickets/chargeable` (One-off work) and `/planned-work`
+  // (Recurring work), each matched across its own subtree so the group
+  // stays current on a detail page, not just the list.
   const extraWorkChildActive =
-    location.pathname === "/extra-work" ||
-    location.pathname.startsWith("/extra-work/") ||
     location.pathname.startsWith("/planned-work") ||
     location.pathname.startsWith("/tickets/chargeable");
+
+  // W-NAV2 — NOT a gate; a dead-control guard. Both children carry the
+  // gates they always carried, and for a CUSTOMER_USER both are false
+  // (One-off work is `!isCustomerUser`, Recurring work is
+  // provider-management-only). Before W-NAV2 the group still held
+  // Quotes and the Forms links for that role; now it would render an
+  // opener that discloses an empty list. The role keeps the same one
+  // destination it had — /extra-work — as the top-level Quotes entry.
+  const extraWorkGroupHasChildren =
+    !isCustomerUser(me?.role) || canAccessPlannedWork(me?.role);
 
   const extraWorkOpen =
     extraWorkManual && extraWorkManual.path === location.pathname
@@ -660,7 +672,39 @@ export function AppShell({ children }: AppShellProps) {
                   reach today — the exact regression "role gating exactly
                   as today" rules out. No route changed and no new role
                   logic — IA only. */}
-              {canAccessExtraWork(me?.role) && (
+              {/* W-NAV2 — the owner's final Extra Work structure. The
+                  folder holds the two ways work actually happens:
+                  ONE-OFF (a single chargeable job) and RECURRING (a
+                  standing schedule). Everything else that used to hang
+                  here has moved out:
+
+                  - "Extra Work Quote" (/extra-work) is now the
+                    top-level "Quotes" entry above Reports. Quoting is
+                    its own activity, not a sub-item of extra work, and
+                    it is the one entry a CUSTOMER_USER has here.
+                  - The FORMS sub-group is gone entirely. All three
+                    create routes keep their own doors on the pages
+                    they belong to (verified before deleting):
+                    /extra-work/new and /extra-work/request-quote from
+                    ExtraWorkListPage's create chooser, /planned-work/new
+                    from PlannedWorkListPage's "New" button and the same
+                    chooser — plus all three from /new (NewWorkPage).
+                    No route changed; only nav rows went.
+
+                  GATES ARE UNCHANGED. The group keeps canAccessExtraWork
+                  and its children keep the gates they carried as rows:
+                  One-off work is `!isCustomerUser` (copied from the
+                  Tickets-side entry it doors onto, because
+                  canAccessExtraWork admits CUSTOMER_USER and that route
+                  does not) and Recurring work is canAccessPlannedWork.
+
+                  `extraWorkGroupHasChildren` is the one new thing, and
+                  it is not a gate: with Quotes and Forms gone, a
+                  CUSTOMER_USER's children both evaluate false, and
+                  rendering an opener that discloses nothing is a dead
+                  control. The role sees exactly what it saw before —
+                  /extra-work, now called Quotes and one click closer. */}
+              {canAccessExtraWork(me?.role) && extraWorkGroupHasChildren && (
                 <>
                   {/* W-NAV1.4 — the group row is a `nav-item` like every
                       other sidebar row, plus TWO modifiers, and no inline
@@ -710,32 +754,13 @@ export function AppShell({ children }: AppShellProps) {
                   </button>
                   {extraWorkOpen && (
                     <>
-                      {/* W-NAV1 — the list page itself, now named for
-                          what it is: the quotation side of the split
-                          this list already draws internally (Quote &
-                          price vs. Work started). `end` keeps this
-                          entry — not the Forms links below — lit when
-                          the operator is on /extra-work exactly. */}
-                      <NavLink
-                        to="/extra-work"
-                        end
-                        className={navChildClass}
-                        data-testid="sidebar-extra-work-quote"
-                      >
-                        <span className="nav-icon">
-                          <Receipt size={16} strokeWidth={2} />
-                        </span>
-                        {t("nav.extra_work_quote")}
-                      </NavLink>
-                      {/* W-NAV1 — the SAME route as the Tickets-side
-                          "Chargeable work" entry (nav.chargeable_work,
-                          reused verbatim). One page, two doors: this is
-                          not a copy of ExtraWorkListPage or a new
-                          component, just a second NavLink onto
-                          /tickets/chargeable — gated `!isCustomerUser`
-                          like that entry, since this dropdown's own
-                          canAccessExtraWork gate admits CUSTOMER_USER
-                          and the Tickets-side door does not. */}
+                      {/* W-NAV2 — the SAME route the Tickets-side
+                          "Chargeable work" entry used to own, renamed to
+                          what the owner calls it. One page, one door.
+                          No `end`: /tickets/chargeable has no nav
+                          sibling under it, and the Tickets entry above
+                          carries `end`, so this row is the only one that
+                          can light on this path. */}
                       {!isCustomerUser(me?.role) && (
                         <NavLink
                           to="/tickets/chargeable"
@@ -745,13 +770,21 @@ export function AppShell({ children }: AppShellProps) {
                           <span className="nav-icon">
                             <BadgeEuro size={16} strokeWidth={2} />
                           </span>
-                          {t("nav.chargeable_work")}
+                          {t("nav.one_off_work")}
                         </NavLink>
                       )}
+                      {/* W-NAV2 — `end` DROPPED with the Forms group.
+                          It was there to stop this row lighting while
+                          the operator sat on the /planned-work/new row
+                          below it; that row is gone, nothing else in the
+                          sidebar matches /planned-work/*, so the entry
+                          now stays lit across its own subtree (the
+                          create form and every job detail page) instead
+                          of leaving the sidebar dark. Still exactly one
+                          lit row. */}
                       {canAccessPlannedWork(me?.role) && (
                         <NavLink
                           to="/planned-work"
-                          end
                           className={navChildClass}
                           data-testid="sidebar-planned-work"
                         >
@@ -759,68 +792,6 @@ export function AppShell({ children }: AppShellProps) {
                             <CalendarClock size={16} strokeWidth={2} />
                           </span>
                           {t("nav.planned_work")}
-                        </NavLink>
-                      )}
-                      {/* W-NAV1 — Forms: a labelled sub-group of create
-                          routes, reusing the SAME two primitives the
-                          customer-scoped sidebar already uses for a
-                          labelled subsection (`nav-group-label` +
-                          `nav-item-child`) rather than adding a new
-                          indent level or a new CSS pattern.
-
-                          W-NAV1.4 — and now with the SAME rhythm too.
-                          The ad-hoc `marginTop: 4` made this the one
-                          section header in the sidebar spaced
-                          differently from OPERATIONS and ADMIN; that
-                          8px now lives in `.nav-group-label` itself, so
-                          no consumer sets it inline and none can drift.
-                          `-sub` is a MODIFIER that changes the indent
-                          and nothing else, so the header lines up with
-                          the children it heads while keeping every
-                          other section header's type treatment. */}
-                      <div className="nav-group-label nav-group-label-sub">
-                        {t("nav.forms_group")}
-                      </div>
-                      {/* Sprint 155 §1 — a nav entry for a route that
-                          already existed. /extra-work/new was only
-                          reachable from a button on the list page, so
-                          the direct-order form had no home in the
-                          menu. No new page and no new route. */}
-                      <NavLink
-                        to="/extra-work/new"
-                        className={navChildClass}
-                        data-testid="sidebar-extra-work-new"
-                      >
-                        <span className="nav-icon">
-                          <FilePlus2 size={16} strokeWidth={2} />
-                        </span>
-                        {t("nav.extra_work_request")}
-                      </NavLink>
-                      <NavLink
-                        to="/extra-work/request-quote"
-                        className={navChildClass}
-                        data-testid="sidebar-request-quote"
-                      >
-                        <span className="nav-icon">
-                          <BadgeEuro size={16} strokeWidth={2} />
-                        </span>
-                        {t("nav.request_quote")}
-                      </NavLink>
-                      {/* W-NAV1 — the recurring-job CREATE form. Same
-                          gate as the list entry above: /planned-work/new
-                          shares PlannedWorkRoute with /planned-work in
-                          App.tsx, so an actor who cannot see the list
-                          cannot see its create form either. */}
-                      {canAccessPlannedWork(me?.role) && (
-                        <NavLink
-                          to="/planned-work/new"
-                          className={navChildClass}
-                          data-testid="sidebar-recurring-work-new"
-                        >
-                          <span className="nav-icon">
-                            <CalendarClock size={16} strokeWidth={2} />
-                          </span>
-                          {t("nav.recurring_work_new")}
                         </NavLink>
                       )}
                     </>
@@ -837,7 +808,6 @@ export function AppShell({ children }: AppShellProps) {
                 canAccessPlannedWork(me?.role) && (
                   <NavLink
                     to="/planned-work"
-                    end
                     className={navClass}
                     data-testid="sidebar-planned-work"
                   >
@@ -860,6 +830,36 @@ export function AppShell({ children }: AppShellProps) {
                     <Timer size={16} strokeWidth={2} />
                   </span>
                   {t("nav.my_hours")}
+                </NavLink>
+              )}
+              {/* W-NAV2 — Quotes: the SAME page /extra-work always was
+                  (ExtraWorkListPage), promoted out of the Extra Work
+                  folder to a top-level entry directly above Reports,
+                  and named for what it does. No new route, no new page,
+                  no new gate: canAccessExtraWork is the gate the
+                  "Extra Work Quote" child carried and the same gate
+                  ExtraWorkRoute applies to the route itself.
+
+                  No `end`. The child it replaced had one, to stop it
+                  lighting while the operator sat on the Forms rows for
+                  /extra-work/new and /extra-work/request-quote. Those
+                  rows are gone and nothing else in the sidebar matches
+                  /extra-work/*, so Quotes now stays lit across its own
+                  subtree — the two create forms and every request
+                  detail page — which is where the operator actually is
+                  when they got there from this list. Still exactly one
+                  lit row: the Extra Work group no longer counts
+                  /extra-work as a child (see `extraWorkChildActive`). */}
+              {canAccessExtraWork(me?.role) && (
+                <NavLink
+                  to="/extra-work"
+                  className={navClass}
+                  data-testid="sidebar-quotes"
+                >
+                  <span className="nav-icon">
+                    <Receipt size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.quotes")}
                 </NavLink>
               )}
               {canAccessReports(me?.role) && (

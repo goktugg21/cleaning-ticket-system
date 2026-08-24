@@ -175,6 +175,36 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* W-NAV2 §2 — every native <dialog> in this app opened in the TOP-LEFT
+   corner, and the line directly above is why. A modal <dialog> is
+   centred by the UA stylesheet with `position: fixed; inset: 0;
+   margin: auto` — the centring IS the auto margin. The universal reset
+   above has specificity (0,0,0) but still beats the UA sheet, so it
+   replaced `margin: auto` with `margin: 0`, and `inset: 0` with no auto
+   margin pins the box to the top-left instead of centring it.
+
+   Nothing in this file ever put the margin back: no rule matches a bare
+   `dialog`, and neither of the two classed dialogs (`.att-preview-dialog`,
+   and ConfirmDialog's inline styles) sets a margin. So all three native
+   dialogs in the codebase — ConfirmDialog (the Generate Occurrences and
+   Archive modals on the recurring-job page, plus every other confirm in
+   the app), PdfPreviewDialog, and the ticket attachment preview — were
+   corner-pinned. The wide ones hid it: at `min(92vw, 900px)` the offset
+   only reads as "sitting too high". ConfirmDialog is narrow, so on the
+   recurring-job page it read as plainly broken, which is where the owner
+   saw it.
+
+   The fix is to restore what the UA already had, scoped to modal
+   dialogs, rather than to wrap a top-layer element in a flex overlay:
+   `.reject-modal-backdrop` / `.plan-modal-backdrop` are the app's
+   overlay pattern for elements that are NOT in the top layer and
+   therefore need one. A `showModal()` dialog centres itself; it just
+   needs its margin back. Scoped to `:modal` because a non-modal
+   `show()` dialog is `position: absolute` and is placed by its author —
+   there are none today, and this rule must not start moving one if a
+   later sprint adds it. */
+dialog:modal { margin: auto; }
 html, body, #root { height: 100%; }
 body {
   font-family: var(--f-body);
