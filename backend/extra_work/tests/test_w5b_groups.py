@@ -77,10 +77,13 @@ class GroupTestBase(TenantFixtureMixin, APITestCase):
             "billed_to": "CUSTOMER",
             "line_items": [
                 {
+                    # W-EW1 §2 — no per-line date. The batch writer sets
+                    # `preferred_date` per SLOT and hands the same shared
+                    # payload to the same create serializer, so every
+                    # member's lines are stamped with THAT member's date.
                     "service": None,
                     "custom_description": "Trappenhuis",
                     "quantity": "1.00",
-                    "requested_date": "2026-11-19",
                 }
             ],
         }
