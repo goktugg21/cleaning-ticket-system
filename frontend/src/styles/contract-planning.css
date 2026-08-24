@@ -8,6 +8,13 @@
  * reserved (scrollbar-gutter) so the affordance is visible, and the
  * PAGE never scrolls sideways. The name column and the tail stay
  * sticky so a scrolled grid still says which line and how full.
+ *
+ * W24 — the first cut was sized like a sparkline: 22px rows, 9px week
+ * numbers, a 140px name column and a tail in the same whisper as the
+ * week headers. At a real row count it read as a texture rather than a
+ * table. Every dimension below is now set for READING, and the extra
+ * width it costs is paid by the scroll container that already owned the
+ * overflow — the page still never scrolls sideways.
  */
 
 .contract-planning-yearbar {
@@ -40,20 +47,25 @@
 
 .contract-planning-table {
   border-collapse: collapse;
-  /* Fixed-ish cells: 53 weeks x 18px + name + tail ≈ 1220px minimum,
-     which overflows the card at 1366px viewport — deliberately: the
-     scroll container owns the excess. */
-  min-width: 1200px;
+  /* 53 weeks x 24px + a 240px name column + a 96px tail ≈ 1608px
+     minimum, which overflows the card at BOTH 1366px and 1920px —
+     deliberately, and unchanged in kind from the 18px version: the
+     scroll container owns the excess and the page never does. */
+  min-width: 1608px;
   width: max-content;
 }
 
 .contract-planning-week-head {
-  font-size: 9px;
+  /* 11px is the smallest size at which a two-digit week number is read
+     rather than decoded; 24px is the narrowest column that holds it
+     without the digits touching their neighbours' borders. */
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-faint);
-  padding: 2px 0 4px;
-  min-width: 18px;
+  color: var(--text-2);
+  padding: 6px 0 7px;
+  min-width: 24px;
   text-align: center;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .contract-planning-name-col {
@@ -61,16 +73,26 @@
   left: 0;
   background: var(--surface);
   text-align: left;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--text-2);
-  padding: 4px 10px 4px 8px;
-  max-width: 220px;
-  min-width: 140px;
+  color: var(--text-1);
+  padding: 8px 12px 8px 10px;
+  /* A contract line is named things like "Dagelijkse schoonmaak
+     kantoortuin 2e verdieping". 140px ellipsised it to three words. */
+  max-width: 320px;
+  min-width: 240px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  border-right: 1px solid var(--border-soft);
   z-index: 1;
+}
+
+.contract-planning-name-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .contract-planning-name-link {
@@ -82,10 +104,12 @@
 }
 
 .contract-planning-cell {
-  min-width: 18px;
-  height: 22px;
+  min-width: 24px;
+  /* A real row, not a 22px sliver: tall enough that a tinted week is a
+     block of colour and the count inside it is legible. */
+  height: 34px;
   border: 1px solid var(--border-soft);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   text-align: center;
   color: var(--text-2);
@@ -127,17 +151,63 @@
   position: sticky;
   right: 0;
   background: var(--surface);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-2);
-  padding: 2px 8px;
+  padding: 4px 12px;
   text-align: right;
   white-space: nowrap;
+  min-width: 96px;
+  border-left: 1px solid var(--border-soft);
   z-index: 1;
 }
 
 .contract-planning-tail-head {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-faint);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* The achieved count carries the row's weight; the agreed frequency is
+   the quieter thing it is measured against. */
+.contract-planning-tail-done {
+  font-family: var(--f-head);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-1);
+}
+
+.contract-planning-tail-sep {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-faint);
+  margin: 0 2px;
+}
+
+.contract-planning-tail-target {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+/* W24 — the two full-width state lines: "nothing is linked yet" and
+   "n more lines carry no linked work". A real line at the grid's own
+   reading size, spanning every column, so neither can be mistaken for a
+   broken row. */
+.contract-planning-state {
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-align: left;
+  /* Sticky-left like the name column: the message stays put when a
+     grid that DOES have rows is scrolled sideways. */
+  position: sticky;
+  left: 0;
+}
+
+.contract-planning-state-count {
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-faint);
+  border-top: 1px solid var(--border-soft);
 }

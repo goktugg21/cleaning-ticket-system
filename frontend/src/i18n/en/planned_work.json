@@ -228,6 +228,8 @@
   "form.field_work_type_none": "This customer has no work types yet.",
   "form.field_category_group_company": "Your company's categories",
   "form.field_category_group_folders": "This customer's categories",
+  "form.field_contract_line": "Contract line",
+  "form.field_contract_line_hint": "Link this recurring work to a contract line; the contract's planning then fills with the planned weeks.",
   "detail.field_department": "Department",
   "detail.field_work_type": "Work type",
   "detail.field_category": "Category",

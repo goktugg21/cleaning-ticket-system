@@ -228,6 +228,8 @@
   "form.field_work_type_none": "Deze klant heeft nog geen werksoorten.",
   "form.field_category_group_company": "Categorieen van uw bedrijf",
   "form.field_category_group_folders": "Categorieën van deze klant",
+  "form.field_contract_line": "Contractregel",
+  "form.field_contract_line_hint": "Koppel dit terugkerende werk aan een contractregel; de planning van het contract vult zich dan met de geplande weken.",
   "detail.field_department": "Afdeling",
   "detail.field_work_type": "Werksoort",
   "detail.field_category": "Categorie",

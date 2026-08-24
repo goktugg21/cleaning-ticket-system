@@ -314,5 +314,9 @@
   "planning.title": "Planning",
   "planning.prev_year": "Vorig jaar",
   "planning.next_year": "Volgend jaar",
-  "planning.tail_head": "Gepland"
+  "planning.tail_head": "Gepland",
+  "planning.line_head": "Contractregel",
+  "planning.none_linked": "Nog geen terugkerend werk gekoppeld.",
+  "planning.unlinked_one": "Nog {{count}} regel zonder gekoppeld werk.",
+  "planning.unlinked_other": "Nog {{count}} regels zonder gekoppeld werk."
 }

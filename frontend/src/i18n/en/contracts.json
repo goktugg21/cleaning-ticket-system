@@ -314,5 +314,9 @@
   "planning.title": "Planning",
   "planning.prev_year": "Previous year",
   "planning.next_year": "Next year",
-  "planning.tail_head": "Planned"
+  "planning.tail_head": "Planned",
+  "planning.line_head": "Contract line",
+  "planning.none_linked": "No recurring work linked yet.",
+  "planning.unlinked_one": "{{count}} more line with no linked work.",
+  "planning.unlinked_other": "{{count}} more lines with no linked work."
 }

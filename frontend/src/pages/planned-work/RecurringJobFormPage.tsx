@@ -41,6 +41,7 @@ import type {
   RecurringJobWritePayload,
   SelectablePricingMode,
 } from "../../api/plannedWork.types";
+import { listContracts } from "../../api/contracts";
 import { listLabels } from "../../api/customerLabels";
 import type {
   Building,
@@ -88,6 +89,40 @@ function customerMatchesBuilding(customer: Customer, buildingId: number): boolea
 // `offeredCategories` below does not hand a new reference to its
 // consumers on every render.
 const EMPTY_CATEGORIES: ServiceCategory[] = [];
+
+// W24 — the contract-line link, declared LOCALLY rather than on
+// `api/plannedWork.types.ts`.
+//
+// The backend already carries the field on both sides of the wire
+// (`RecurringJobSerializer.contract_line` + `contract_line_name` for
+// the read, `RecurringJobWriteSerializer.contract_line` for the write,
+// both landed in 18433e5). The canonical home for these two lines is
+// `RecurringJob` / `RecurringJobWritePayload` in
+// `api/plannedWork.types.ts` — that file belongs to another wave this
+// round, so the shape is narrowed here instead of being widened there.
+// NOT a permanent arrangement: fold both into plannedWork.types.ts and
+// delete these two aliases when that file is free.
+type ContractLineLinkRead = { contract_line: number | null };
+type ContractLineLinkWrite = { contract_line?: number | null };
+
+/** One offerable line: the line itself plus the contract it sits on,
+ *  because a line name ("Dagelijkse schoonmaak") repeats across a
+ *  customer's contracts and only the contract number separates them. */
+interface ContractLineOption {
+  id: number;
+  lineName: string;
+  contractNo: string;
+}
+
+/** The customer's offerable contract lines, tagged with the customer
+ *  they were fetched FOR. Same shape (and same reason) as
+ *  `customerFolders` below: an empty list that arrived is not the same
+ *  fact as a list that has not arrived, and the save path must be able
+ *  to tell them apart. */
+interface ContractLineLists {
+  customerId: number;
+  rows: ContractLineOption[];
+}
 
 export function RecurringJobFormPage() {
   const { id } = useParams();
@@ -158,6 +193,10 @@ export function RecurringJobFormPage() {
     customerId: number;
     rows: CustomerPriceFolder[];
   } | null>(null);
+  // W24 — the customer's contract lines, same customer-tagged shape.
+  const [contractLines, setContractLines] =
+    useState<ContractLineLists | null>(null);
+  const [contractLineId, setContractLineId] = useState("");
 
   // Fallback labels so a building/customer outside the fetched page still
   // renders a sensible option in edit mode.
@@ -169,6 +208,23 @@ export function RecurringJobFormPage() {
   const [fallbackCustomer, setFallbackCustomer] = useState<{
     id: number;
     name: string;
+  } | null>(null);
+  // W24 — the job's STORED contract line, kept even when the fetched
+  // options do not contain it. A line that has since been superseded by
+  // a newer contract revision is not on the active revision any more,
+  // so it is not in the option list — and without this the select would
+  // render blank and read as "no link", which is a lie about what is
+  // stored. Same job as `fallbackBuilding` / `fallbackCustomer` above.
+  // Tagged with the customer it belongs to, so switching the job's
+  // customer drops it: a line is a line of ONE customer's contract, and
+  // offering the old one against the new customer would be a
+  // cross-customer option (the backend rejects it as
+  // `contract_line_customer_mismatch` — the picker must not offer it in
+  // the first place).
+  const [fallbackContractLine, setFallbackContractLine] = useState<{
+    id: number;
+    name: string;
+    customerId: number;
   } | null>(null);
 
   const [loading, setLoading] = useState(!isCreate);
@@ -243,6 +299,23 @@ export function RecurringJobFormPage() {
           setDefaultManagerIds(job.default_manager_ids);
           setFallbackBuilding({ id: job.building, name: job.building_name });
           setFallbackCustomer({ id: job.customer, name: job.customer_name });
+          // W24 — hydrate the contract-line link. The read cast is the
+          // local-type arrangement documented at `ContractLineLinkRead`.
+          const storedLine = (job as unknown as ContractLineLinkRead)
+            .contract_line;
+          setContractLineId(storedLine ? String(storedLine) : "");
+          const storedLineName = (
+            job as unknown as { contract_line_name: string | null }
+          ).contract_line_name;
+          setFallbackContractLine(
+            storedLine
+              ? {
+                  id: storedLine,
+                  name: storedLineName ?? String(storedLine),
+                  customerId: job.customer,
+                }
+              : null,
+          );
         }
       } catch (err) {
         if (!cancelled) setGeneralError(getApiError(err));
@@ -389,6 +462,64 @@ export function RecurringJobFormPage() {
     };
   }, [customer]);
 
+  // W24 — ...and the customer's contract lines, for the optional
+  // "Contract line" picker.
+  //
+  // NO new endpoint. `GET /api/contracts/?customer=<id>` already
+  // carries what the picker needs: the contract number on the header
+  // and the ACTIVE revision's lines in `projects`. Its reader tier
+  // (`IsContractReader` — SA / CA / BM) is exactly the tier that can
+  // reach this form (`planned_work.permissions.IsProviderManager`), and
+  // it already excludes `kind=EXTRA_WORK`, so a register's projected
+  // lines can never be offered as something to plan.
+  //
+  // Paged EXHAUSTIVELY client-side (the Sprint 120 pattern) rather than
+  // by loosening the list's `pagination_class` — Sprint 134/135's
+  // lesson, that a shared list's pagination is a contract with the
+  // callers that DO have prev/next UI, and this picker has none.
+  useEffect(() => {
+    if (customer === "") return;
+    const customerId = Number(customer);
+    let cancelled = false;
+    async function loadLines(): Promise<ContractLineOption[]> {
+      const rows: ContractLineOption[] = [];
+      let page = 1;
+      for (let i = 0; i < 100; i++) {
+        const response = await listContracts({
+          customer: customerId,
+          page,
+          page_size: 200,
+        });
+        for (const contract of response.results) {
+          for (const line of contract.projects) {
+            rows.push({
+              id: line.id,
+              lineName: line.name,
+              contractNo: contract.contract_no,
+            });
+          }
+        }
+        if (!response.next) break;
+        page += 1;
+      }
+      return rows;
+    }
+    loadLines()
+      .then((rows) => {
+        if (!cancelled) setContractLines({ customerId, rows });
+      })
+      .catch(() => {
+        // Stays UNLOADED on failure, never an empty loaded list — the
+        // Sprint 187C rule. An empty loaded list would tell the save
+        // path "this customer genuinely has no contract lines", and a
+        // job's stored link would be written away on the next save.
+        if (!cancelled) setContractLines(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer]);
+
   // Guarded inline so TS narrows AND a list fetched for a previous
   // customer is never shown against the current one.
   const currentDepartments =
@@ -403,6 +534,28 @@ export function RecurringJobFormPage() {
     customerFolders && customerFolders.customerId === Number(customer)
       ? customerFolders.rows
       : [];
+  // W24 — the same guard for the contract lines, plus the stored line
+  // appended when the active revision no longer carries it (see
+  // `fallbackContractLine`). Appended, not substituted: the operator
+  // can still pick a live line, and the stored one stays visible until
+  // they do.
+  const fetchedContractLines =
+    contractLines && contractLines.customerId === Number(customer)
+      ? contractLines.rows
+      : [];
+  const currentContractLines: ContractLineOption[] =
+    fallbackContractLine !== null &&
+    fallbackContractLine.customerId === Number(customer) &&
+    !fetchedContractLines.some((line) => line.id === fallbackContractLine.id)
+      ? [
+          ...fetchedContractLines,
+          {
+            id: fallbackContractLine.id,
+            lineName: fallbackContractLine.name,
+            contractNo: "",
+          },
+        ]
+      : fetchedContractLines;
 
   // DERIVED, not resynced: an id that does not belong to the current
   // customer's list collapses to "" for both the dropdown value and the
@@ -455,6 +608,27 @@ export function RecurringJobFormPage() {
           : null,
       }
     : {};
+
+  // W24 — the contract line gets the same three-part discipline the
+  // classifiers above already have: DERIVED (never resynced), collapsed
+  // to "" when the id does not belong to the current customer's lines,
+  // and OMITTED from the payload until the list it is checked against
+  // has actually loaded for this customer.
+  const effectiveContractLineId = currentContractLines.some(
+    (line) => String(line.id) === contractLineId,
+  )
+    ? contractLineId
+    : "";
+  const contractLinesLoaded =
+    contractLines !== null && contractLines.customerId === Number(customer);
+  const contractLinePayload: ContractLineLinkWrite =
+    id === undefined || contractLinesLoaded
+      ? {
+          contract_line: effectiveContractLineId
+            ? Number(effectiveContractLineId)
+            : null,
+        }
+      : {};
 
   function toggleId(list: number[], value: number): number[] {
     return list.includes(value)
@@ -527,7 +701,7 @@ export function RecurringJobFormPage() {
     );
   }
 
-  function buildPayload(): RecurringJobWritePayload {
+  function buildPayload(): RecurringJobWritePayload & ContractLineLinkWrite {
     const windowsPayload: RecurringJobWindowInput[] = windows.map((w, idx) => {
       const input: RecurringJobWindowInput = {
         label: w.label.trim(),
@@ -548,7 +722,12 @@ export function RecurringJobFormPage() {
       return input;
     });
 
-    const payload: RecurringJobWritePayload = {
+    // W24 — the write shape is the generated payload PLUS the
+    // contract-line key, intersected locally (see `ContractLineLinkWrite`).
+    // `createRecurringJob` / `updateRecurringJob` take the base type, and
+    // a variable of an intersection type is assignable to it, so nothing
+    // in the API layer has to change to carry the key.
+    const payload: RecurringJobWritePayload & ContractLineLinkWrite = {
       building: Number(building),
       customer: Number(customer),
       title: title.trim(),
@@ -570,6 +749,7 @@ export function RecurringJobFormPage() {
       department: effectiveDepartmentId ? Number(effectiveDepartmentId) : null,
       work_type: effectiveWorkTypeId ? Number(effectiveWorkTypeId) : null,
       ...categoryPayload,
+      ...contractLinePayload,
     };
     // Only touch crew when eligible crew loaded for this building, so a
     // transient fetch error on edit does not wipe the job's existing crew
@@ -825,6 +1005,43 @@ export function RecurringJobFormPage() {
                   )}
                 </select>
               </div>
+
+              {/* W24 — the contract line this recurring work performs.
+                  Optional, and ABSENT (not disabled-with-a-reason like
+                  the two label pickers above) when the customer has no
+                  contract lines: a customer with no contract has nothing
+                  to say about it, and an explanatory line under a dead
+                  control is noise on a form that already has three
+                  optional classifiers. Setting it is what makes the
+                  contract's Planning tab fill. */}
+              {currentContractLines.length > 0 && (
+                <div className="field">
+                  <label className="field-label" htmlFor="rj-contract-line">
+                    {t("form.field_contract_line")}
+                  </label>
+                  <select
+                    id="rj-contract-line"
+                    className="field-select"
+                    data-testid="recurring-job-contract-line"
+                    value={effectiveContractLineId}
+                    onChange={(event) =>
+                      setContractLineId(event.target.value)
+                    }
+                  >
+                    <option value="">{t("form.field_label_none")}</option>
+                    {currentContractLines.map((line) => (
+                      <option key={line.id} value={String(line.id)}>
+                        {line.contractNo
+                          ? `${line.lineName} — ${line.contractNo}`
+                          : line.lineName}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {t("form.field_contract_line_hint")}
+                  </div>
+                </div>
+              )}
               <div className="field">
                 <label className="field-label" htmlFor="rj-building">
                   {t("form.field_building")} *

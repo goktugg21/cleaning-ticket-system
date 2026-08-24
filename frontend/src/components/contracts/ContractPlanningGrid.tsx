@@ -1,10 +1,12 @@
 /**
  * W23 — the year×week planning grid, read + navigate.
  *
- * One row per contract line of the active revision, one column per ISO
- * week of the year, a filled cell = the linked recurring job has
- * occurrences that week (tinted by the week's dominant status). The
- * row tail counts performances against `frequency_per_year` (W20).
+ * One row per LINKED contract line of the active revision (W24 — see
+ * `linkedLines` below for why the unlinked ones are a count line and
+ * not 53 blank cells each), one column per ISO week of the year, a
+ * filled cell = the linked recurring job has occurrences that week
+ * (tinted by the week's dominant status). The row tail counts
+ * performances against `frequency_per_year` (W20).
  *
  * THE GRID NEVER EDITS. A cell (or the row name) navigates to the
  * linked recurring job's page, where the calendar's idempotent
@@ -58,6 +60,21 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
 
   const weekCount = isoWeeksInYear(year);
   const weekNumbers = Array.from({ length: weekCount }, (_, i) => i + 1);
+  // Every column the state rows have to span: the name, the weeks, the tail.
+  const totalColumns = weekCount + 2;
+
+  // W24 — only the FILLABLE rows are drawn.
+  //
+  // The server returns every line of the active revision, linked or
+  // not, and drawing all of them made a wall of empty 53-week rows in
+  // which the two lines that actually carry work were impossible to
+  // find. A line with no linked recurring job cannot fill a cell in any
+  // year, so its row is not information — it is 53 blanks. The rest are
+  // reported as ONE count line: still visible, still countable, no
+  // longer 53 columns of nothing each.
+  const lines = planning?.lines ?? [];
+  const linkedLines = lines.filter((line) => line.job_ids.length > 0);
+  const unlinkedCount = lines.length - linkedLines.length;
 
   return (
     <div data-testid="contract-planning-grid">
@@ -91,7 +108,9 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
         <table className="contract-planning-table">
           <thead>
             <tr>
-              <th className="contract-planning-name-col" />
+              <th className="contract-planning-name-col contract-planning-name-head">
+                {t("planning.line_head")}
+              </th>
               {weekNumbers.map((week) => (
                 <th key={week} className="contract-planning-week-head">
                   {week}
@@ -103,7 +122,7 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
             </tr>
           </thead>
           <tbody>
-            {(planning?.lines ?? []).map((line) => {
+            {linkedLines.map((line) => {
               const byWeek = new Map(line.weeks.map((w) => [w.week, w]));
               const rowJob = line.job_ids[0];
               return (
@@ -147,26 +166,58 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
                       </td>
                     );
                   })}
+                  {/* The tail is the row's ANSWER — "8 of the 12 agreed
+                      performances are on the calendar" — so it is set
+                      at the row's own weight, not at the week-number
+                      whisper it used to share. The two numbers are
+                      separate elements so the achieved count reads
+                      first and the agreed frequency reads as what it is
+                      measured against. */}
                   <td
                     className="contract-planning-tail"
                     data-testid={`contract-planning-tail-${line.line_id}`}
                   >
-                    {line.planned_count}/{line.frequency_per_year ?? "—"}
+                    <span className="contract-planning-tail-done">
+                      {line.planned_count}
+                    </span>
+                    <span className="contract-planning-tail-sep">/</span>
+                    <span className="contract-planning-tail-target">
+                      {line.frequency_per_year ?? "—"}
+                    </span>
                   </td>
                 </tr>
               );
             })}
-            {(planning?.lines ?? []).length === 0 && (
+            {/* The two state rows. Both are FULL-WIDTH lines with their
+                own class — never a dash in the name column beside 53
+                empty cells, which read as a broken row rather than as
+                an answer. Neither is drawn until the fetch has resolved
+                (`planning !== null`), so "nothing is linked yet" is
+                never shown for "nothing has arrived yet". */}
+            {planning !== null && linkedLines.length === 0 && (
               <tr>
-                <th scope="row" className="contract-planning-name-col">
-                  —
-                </th>
                 <td
-                  className="contract-planning-cell"
-                  colSpan={weekCount + 1}
-                />
+                  className="contract-planning-state"
+                  colSpan={totalColumns}
+                  data-testid="contract-planning-empty"
+                >
+                  {t("planning.none_linked")}
+                </td>
               </tr>
             )}
+            {planning !== null &&
+              linkedLines.length > 0 &&
+              unlinkedCount > 0 && (
+                <tr>
+                  <td
+                    className="contract-planning-state contract-planning-state-count"
+                    colSpan={totalColumns}
+                    data-testid="contract-planning-unlinked-count"
+                  >
+                    {t("planning.unlinked", { count: unlinkedCount })}
+                  </td>
+                </tr>
+              )}
           </tbody>
         </table>
       </div>
