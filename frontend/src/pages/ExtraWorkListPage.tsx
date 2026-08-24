@@ -85,25 +85,58 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
 // the CSV taken from it. `extraWorkStatusLabelKey` is the one source now.
 
 /**
- * Sprint 181 §2 — nine chips became four, twice.
+ * Sprint 181 §2 — nine chips became four, twice.  W24-FX1 §2a — and
+ * four silently dropped rows, twice.
  *
  * The list used to show all nine Extra Work statuses as chips on both
  * tracks. The tracks already answer the biggest question, so the chips
- * were repeating it — and worse, most of them were STRUCTURALLY zero
- * wherever they sat. "In progress" and "Completed" cannot occur in a
- * track defined as "has no ticket"; "Awaiting pricing" cannot occur in
- * one defined as "the price is agreed and the work has begun". A chip
- * that can only ever read 0 costs attention and returns nothing.
+ * were repeating it. Each track was cut down to "only what can be
+ * non-zero within it", on this reasoning:
  *
- * So each track offers only what can be non-zero within it, and the two
- * sets are of DIFFERENT KINDS, which is the whole of §1:
+ *   "`IN_PROGRESS` and `COMPLETED` cannot occur in a track defined as
+ *    `has no ticket`."
  *
- *   Quote & price   commercial states, read off the EXTRA WORK.
- *   Work started    operational states, read off the TICKET.
+ * That is not true, and the function twenty lines below this one is the
+ * proof: `isSpawnAnomaly` exists precisely because a `CUSTOMER_APPROVED`
+ * request with no operational ticket is a thing that happens — the spawn
+ * is synchronous with approval, so zero tickets means the spawn FAILED.
+ * A request stranded that way can still be walked forward by hand into
+ * `IN_PROGRESS` and `COMPLETED`, and it is still on the Quote & price
+ * track, because nothing operational ever started.
  *
- * `REQUESTED` and `UNDER_REVIEW` collapse into one chip: they are two
- * spellings of "nobody has priced this yet", and which one a row is in
- * changes nothing anybody does next.
+ * `QUOTE_TRACK_CHIPS` named five of the eight Extra Work statuses, so
+ * those three rows matched no chip at all: the owner measured ALLE 34
+ * against a chip sum of 33. The Work started track had the same hole
+ * four times over — it named seven of eleven ticket statuses, missing
+ * `ACKNOWLEDGED`, `ON_HOLD`, `REJECTED` and `CONVERTED_TO_EXTRA_WORK`,
+ * all four added since. A row that matches no chip is not filtered out;
+ * it is simply uncounted, which is the one failure a count must not
+ * have.
+ *
+ * So the chips are no longer WRITTEN as a list. Each track declares a
+ * `Record` over its FULL status union, mapping every status to a chip,
+ * and the chip list is derived from it. The union is the compiler's, so
+ * the next status added to `ExtraWorkStatus` or `TicketStatus` fails the
+ * build here until somebody says which chip it belongs in — which is the
+ * check that was missing when `ACKNOWLEDGED` and `ON_HOLD` arrived.
+ * Chips sum to ALLE by construction, not by inspection.
+ *
+ * Groupings kept from Sprint 181, and the reasoning is still its own:
+ * `REQUESTED` + `UNDER_REVIEW` are two spellings of "nobody has priced
+ * this yet"; `WAITING_MANAGER_REVIEW` + `REOPENED_BY_ADMIN` are internal
+ * hops inside "in progress"; the terminal ticket states fold into one
+ * "Finished", because an operator scanning the list wants to know
+ * whether it is done, not which door it left by — which is also why
+ * `CONVERTED_TO_EXTRA_WORK`, a third such door, joins them.
+ * `ACKNOWLEDGED` ("seen and scheduled, work not begun") folds into Open
+ * for the same reason: on this list the question is whether the work has
+ * started, and it has not.
+ *
+ * Every label is an EXISTING key. The three Extra Work statuses and the
+ * two ticket statuses that had no chip reuse the StatusBadge vocabulary
+ * out of `common.json` (`extra_work_status.*` / `ticket_status.*`, the
+ * same strings `enumLabels.ts` resolves for the badges in the table
+ * below), so nothing new was added to any bundle.
  */
 interface ChipSpec<TStatus extends string> {
   /** Group key. A chip can stand for several statuses, so this is not
@@ -113,66 +146,143 @@ interface ChipSpec<TStatus extends string> {
   labelKey: string;
 }
 
-const QUOTE_TRACK_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkStatus>> = [
-  {
-    value: "AWAITING_PRICING",
-    statuses: ["REQUESTED", "UNDER_REVIEW"],
-    labelKey: "list.chip_awaiting_pricing",
-  },
-  {
-    value: "PRICING_PROPOSED",
-    statuses: ["PRICING_PROPOSED"],
-    labelKey: "list.chip_with_customer",
-  },
-  {
-    value: "CUSTOMER_REJECTED",
-    statuses: ["CUSTOMER_REJECTED"],
-    labelKey: "list.chip_rejected",
-  },
-  {
-    value: "CANCELLED",
-    statuses: ["CANCELLED"],
-    labelKey: "list.chip_cancelled",
-  },
-];
+/** Derives the rendered chip list from the two Records.
+ *
+ *  Order comes from `order`, which is also what `TChip` is derived FROM,
+ *  so `chipOf` cannot name a chip the list does not render and `labelOf`
+ *  cannot leave one unlabelled. Both directions are the compiler's, which
+ *  is the point: a hand-written array is checked by nobody. */
+function chipsFromMap<TStatus extends string, TChip extends string>(
+  order: ReadonlyArray<TChip>,
+  chipOf: Readonly<Record<TStatus, TChip>>,
+  labelOf: Readonly<Record<TChip, string>>,
+): ReadonlyArray<ChipSpec<TStatus>> {
+  const buckets = new Map<TChip, TStatus[]>();
+  for (const chip of order) buckets.set(chip, []);
+  for (const status of Object.keys(chipOf) as TStatus[]) {
+    buckets.get(chipOf[status])?.push(status);
+  }
+  return order.map((value) => ({
+    value,
+    statuses: buckets.get(value) ?? [],
+    labelKey: labelOf[value],
+  }));
+}
+
+const QUOTE_CHIP_ORDER = [
+  "AWAITING_PRICING",
+  "PRICING_PROPOSED",
+  "CUSTOMER_APPROVED",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "CUSTOMER_REJECTED",
+  "CANCELLED",
+] as const;
+type QuoteChipValue = (typeof QUOTE_CHIP_ORDER)[number];
+
+/** Every `ExtraWorkStatus`, exhaustively. Adding one to the union breaks
+ *  this line until it is placed. */
+const QUOTE_CHIP_OF: Readonly<Record<ExtraWorkStatus, QuoteChipValue>> = {
+  REQUESTED: "AWAITING_PRICING",
+  UNDER_REVIEW: "AWAITING_PRICING",
+  PRICING_PROPOSED: "PRICING_PROPOSED",
+  // The three that used to fall through. On a track defined as "no
+  // operational ticket" these are the stranded-spawn rows, and each
+  // keeps its own label rather than being lumped together: "approved",
+  // "underway" and "done" are different problems for whoever has to go
+  // and fix them.
+  CUSTOMER_APPROVED: "CUSTOMER_APPROVED",
+  IN_PROGRESS: "IN_PROGRESS",
+  COMPLETED: "COMPLETED",
+  CUSTOMER_REJECTED: "CUSTOMER_REJECTED",
+  CANCELLED: "CANCELLED",
+};
+
+const QUOTE_CHIP_LABEL: Readonly<Record<QuoteChipValue, string>> = {
+  AWAITING_PRICING: "list.chip_awaiting_pricing",
+  PRICING_PROPOSED: "list.chip_with_customer",
+  CUSTOMER_APPROVED: "common:extra_work_status.customer_approved",
+  IN_PROGRESS: "common:extra_work_status.in_progress",
+  COMPLETED: "common:extra_work_status.completed",
+  CUSTOMER_REJECTED: "list.chip_rejected",
+  CANCELLED: "list.chip_cancelled",
+};
+
+const QUOTE_TRACK_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkStatus>> =
+  chipsFromMap(QUOTE_CHIP_ORDER, QUOTE_CHIP_OF, QUOTE_CHIP_LABEL);
 
 /** Sprint 181 §1/§2 — the Work started chips are TICKET states, because
  *  on that track the ticket is the only authority for how the work is
- *  going. `WAITING_MANAGER_REVIEW` and `REOPENED_BY_ADMIN` fold into
- *  "In progress" (internal hops, not states this list needs a chip for),
- *  and both finished states fold into one "Finished" — an operator
- *  scanning the list wants to know whether it is done, not which of two
- *  doors it left by. */
-const STARTED_TRACK_CHIPS: ReadonlyArray<ChipSpec<TicketStatus>> = [
-  { value: "OPEN", statuses: ["OPEN"], labelKey: "list.chip_ticket_open" },
-  {
-    value: "IN_PROGRESS",
-    statuses: ["IN_PROGRESS", "WAITING_MANAGER_REVIEW", "REOPENED_BY_ADMIN"],
-    labelKey: "list.chip_ticket_in_progress",
-  },
-  {
-    value: "WAITING_CUSTOMER_APPROVAL",
-    statuses: ["WAITING_CUSTOMER_APPROVAL"],
-    labelKey: "list.chip_ticket_waiting_customer",
-  },
-  {
-    value: "FINISHED",
-    statuses: ["APPROVED", "CLOSED"],
-    labelKey: "list.chip_ticket_finished",
-  },
-];
+ *  going.
+ *
+ *  `NO_TICKET_STATUS` is the eleventh case that is not a `TicketStatus`:
+ *  a row on this track whose `spawned_tickets` came back empty. The
+ *  track is selected on the server's `has_operational_ticket`, which is
+ *  resolved through the `Ticket.extra_work_request` FK, while the status
+ *  is read off the serialized `spawned_tickets[0]` — two different
+ *  reads, so "on this track but no status to show" is representable and
+ *  therefore gets a bucket instead of vanishing from the counts. */
+const NO_TICKET_STATUS = "NO_TICKET_STATUS";
+type StartedStatus = TicketStatus | typeof NO_TICKET_STATUS;
+
+const STARTED_CHIP_ORDER = [
+  "OPEN",
+  "IN_PROGRESS",
+  "WAITING_CUSTOMER_APPROVAL",
+  "ON_HOLD",
+  "REJECTED",
+  "FINISHED",
+  "NO_TICKET",
+] as const;
+type StartedChipValue = (typeof STARTED_CHIP_ORDER)[number];
+
+const STARTED_CHIP_OF: Readonly<Record<StartedStatus, StartedChipValue>> = {
+  OPEN: "OPEN",
+  ACKNOWLEDGED: "OPEN",
+  IN_PROGRESS: "IN_PROGRESS",
+  WAITING_MANAGER_REVIEW: "IN_PROGRESS",
+  REOPENED_BY_ADMIN: "IN_PROGRESS",
+  WAITING_CUSTOMER_APPROVAL: "WAITING_CUSTOMER_APPROVAL",
+  ON_HOLD: "ON_HOLD",
+  REJECTED: "REJECTED",
+  APPROVED: "FINISHED",
+  CLOSED: "FINISHED",
+  CONVERTED_TO_EXTRA_WORK: "FINISHED",
+  [NO_TICKET_STATUS]: "NO_TICKET",
+};
+
+const STARTED_CHIP_LABEL: Readonly<Record<StartedChipValue, string>> = {
+  OPEN: "list.chip_ticket_open",
+  IN_PROGRESS: "list.chip_ticket_in_progress",
+  WAITING_CUSTOMER_APPROVAL: "list.chip_ticket_waiting_customer",
+  ON_HOLD: "common:ticket_status.on_hold",
+  REJECTED: "common:ticket_status.rejected",
+  FINISHED: "list.chip_ticket_finished",
+  NO_TICKET: "common:ticket_status.fallback",
+};
+
+const STARTED_TRACK_CHIPS: ReadonlyArray<ChipSpec<StartedStatus>> =
+  chipsFromMap(STARTED_CHIP_ORDER, STARTED_CHIP_OF, STARTED_CHIP_LABEL);
 
 /** "" = no chip selected (the All tile). A chip value is a GROUP key,
  *  not necessarily a raw enum member. */
 type StatusFilter = string;
 
+/** W24-FX1 §2a — the residual chip's value. Deliberately not a status
+ *  and not a chip key, so it can never collide with one. */
+const UNMATCHED_CHIP = "__UNMATCHED__";
+
 /** Sprint 181 §1 — the operational status of a row on the Work started
  *  track, read off its ticket. The lowest-id ticket is the spawned one
  *  (`build_ticket_map` picks the same row), and one ticket per Extra
  *  Work has been the rule since Sprint 6A, so this is a lookup rather
- *  than a reduction. */
-function operationalStatus(row: ExtraWorkRequestList): TicketStatus | null {
-  return row.spawned_tickets[0]?.status ?? null;
+ *  than a reduction.
+ *
+ *  W24-FX1 §2a — returns `NO_TICKET_STATUS` rather than `null` for the
+ *  empty case. `null` matched no chip and so was counted by ALLE and by
+ *  nothing else; a named case gets a bucket like every other. */
+function operationalStatus(row: ExtraWorkRequestList): StartedStatus {
+  return row.spawned_tickets[0]?.status ?? NO_TICKET_STATUS;
 }
 
 /** Sprint 180 §1(b) — a CUSTOMER_APPROVED request with zero operational
@@ -714,21 +824,47 @@ export function ExtraWorkList({
         chips as ReadonlyArray<ChipSpec<string>>
       ).find((c) => c.value === chipValue);
       if (!spec) return false;
+      // W24-FX1 §2a — no `!== null` guard any more: `operationalStatus`
+      // answers `NO_TICKET_STATUS` instead of `null`, so every row has a
+      // status string and every status string has a chip.
       const status = isWorkStarted ? operationalStatus(row) : row.status;
-      return status !== null && spec.statuses.includes(status);
+      return spec.statuses.includes(status);
     },
     [chips, isWorkStarted],
   );
 
-  const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const chip of chips) {
-      counts[chip.value] = activeTrackRows.filter((row) =>
+  // W24-FX1 §2a — counted by BUCKETING each row once, not by running a
+  // filter per chip. Same numbers when every row matches, but this shape
+  // can also answer "how many matched nothing", and the two Records
+  // above guarantee that answer is zero for every status the compiler
+  // knows about. `unmatched` covers only what the compiler cannot see:
+  // a status string the server invented that is not in the union yet.
+  // It is surfaced rather than absorbed — an uncounted row is the defect
+  // this whole block exists to remove, and hiding the residual would
+  // reintroduce it one level down.
+  /** The one chip a row belongs to, or `null` when it belongs to none.
+   *  With the two Records exhaustive over their unions, `null` is only
+   *  reachable if the server sends a status string the client's union
+   *  does not have yet. */
+  const rowChipValue = useCallback(
+    (row: ExtraWorkRequestList): string | null =>
+      (chips as ReadonlyArray<ChipSpec<string>>).find((chip) =>
         chipMatches(row, chip.value),
-      ).length;
+      )?.value ?? null,
+    [chips, chipMatches],
+  );
+
+  const { statusCounts, unmatchedCount } = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const chip of chips) counts[chip.value] = 0;
+    let unmatched = 0;
+    for (const row of activeTrackRows) {
+      const value = rowChipValue(row);
+      if (value === null) unmatched += 1;
+      else counts[value] += 1;
     }
-    return counts;
-  }, [activeTrackRows, chips, chipMatches]);
+    return { statusCounts: counts, unmatchedCount: unmatched };
+  }, [activeTrackRows, chips, rowChipValue]);
 
   // The list's own money total — computed from the full loaded set (not
   // the filtered view, and not the active track), which is what the
@@ -760,7 +896,11 @@ export function ExtraWorkList({
     const filtered = activeTrackRows.filter((r) => {
       // Sprint 181 §2 — a chip stands for a GROUP of statuses, and on
       // the Work started track for a group of TICKET statuses.
-      if (statusFilter && !chipMatches(r, statusFilter)) return false;
+      // W24-FX1 §2a — the residual chip selects exactly the rows no chip
+      // claimed, so clicking it shows them instead of emptying the table.
+      if (statusFilter === UNMATCHED_CHIP) {
+        if (rowChipValue(r) !== null) return false;
+      } else if (statusFilter && !chipMatches(r, statusFilter)) return false;
       if (needle) {
         const hay = `${r.title} ${r.building_name ?? ""} ${
           r.customer_name ?? ""
@@ -796,6 +936,7 @@ export function ExtraWorkList({
   }, [
     activeTrackRows,
     chipMatches,
+    rowChipValue,
     searchInput,
     statusFilter,
     deadlineSort,
@@ -1360,11 +1501,30 @@ export function ExtraWorkList({
 
         <div className="ew-list-scope-chips">
           <StatusTiles
-            tiles={chips.map((chip) => ({
-              value: chip.value,
-              label: t(chip.labelKey),
-              count: statusCounts[chip.value] ?? 0,
-            }))}
+            tiles={[
+              ...chips.map((chip) => ({
+                value: chip.value,
+                label: t(chip.labelKey),
+                count: statusCounts[chip.value] ?? 0,
+              })),
+              // W24-FX1 §2a — only ever rendered when the server sent a
+              // status this build has no chip for. It is a real filter,
+              // not a footnote: a count nobody can open is the same dead
+              // end as a row nobody counts.
+              ...(unmatchedCount > 0
+                ? [
+                    {
+                      value: UNMATCHED_CHIP,
+                      label: t(
+                        isWorkStarted
+                          ? "common:ticket_status.fallback"
+                          : "common:extra_work_status.fallback",
+                      ),
+                      count: unmatchedCount,
+                    },
+                  ]
+                : []),
+            ]}
             active={statusFilter}
             onChange={setStatusFilter}
             totalCount={activeTrackRows.length}
@@ -1787,7 +1947,15 @@ export function ExtraWorkList({
 
       {visibleRows.length > 0 && (
         <div className="responsive-table-wrap">
-          <div className="card" style={{ overflow: "hidden" }}>
+          {/* W24-FX1 §1d — was `overflow: "hidden"`. Nine columns do not
+              fit the 1110px this page gets at 1366, and `.responsive-
+              table-wrap` declares no overflow of its own, so this card
+              was the only thing deciding what happened to the rest — and
+              it decided to cut it off. Measured: the table ran 64px past
+              the card, taking the Deadline column with it, with no
+              scrollbar and nothing on screen to say so. `overflowX:
+              "auto"` is what the Facturen list card already does. */}
+          <div className="card" style={{ overflowX: "auto" }}>
             <table className="data-table">
               <thead>
                 <tr>

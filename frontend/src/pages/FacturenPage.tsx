@@ -992,6 +992,21 @@ export function FacturenPage({
             <thead>
               <tr>
                 <th>{t("facturen.col_number")}</th>
+                {/* W24-FX1 §3 — the money sits SECOND, not last.
+                    Nine columns need more than the 1110px this page gets
+                    at 1366, so the card scrolls sideways; the last column
+                    is the one that falls off the end, and the last column
+                    was Totaal. Measured at 1366: the Totaal header
+                    truncated to "TO…" and its cells sat past the
+                    container edge, reachable only by a scrollbar nobody
+                    looks for on a list they came to read amounts off.
+                    Position is the fix, not width: whatever the viewport,
+                    the number a reader opened this page for is on screen
+                    without scrolling, and the descriptive columns — which
+                    tolerate being scrolled to — take the overflow. Kept
+                    right-aligned, with its header, so it still reads as a
+                    money column. */}
+                <th style={{ textAlign: "right" }}>{t("facturen.col_total")}</th>
                 {/* Sprint 187 §6a — WHICH company issued it. Numbering
                     is gapless per company per YEAR, so two rows in this
                     list legitimately both read `2026-0001` and nothing
@@ -1007,7 +1022,6 @@ export function FacturenPage({
                 <th>{t("facturen.col_period")}</th>
                 <th>{t("invoices:created_by.label")}</th>
                 <th>{t("facturen.col_status")}</th>
-                <th style={{ textAlign: "right" }}>{t("facturen.col_total")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1052,6 +1066,9 @@ export function FacturenPage({
                         </span>
                       )}
                     </Link>
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    <strong>{formatMoney(inv.total_amount)}</strong>
                   </td>
                   <td className="muted small">{inv.company_name}</td>
                   {!customerScoped && <td>{inv.customer_name}</td>}
@@ -1102,9 +1119,6 @@ export function FacturenPage({
                         ? t("facturen.credit_note_unsent")
                         : t(STATUS_LABEL_KEY[inv.status])}
                     </span>
-                  </td>
-                  <td style={{ textAlign: "right" }}>
-                    <strong>{formatMoney(inv.total_amount)}</strong>
                   </td>
                 </tr>
               ))}

@@ -66,7 +66,11 @@ import { EmptyState } from "../components/EmptyState";
 // two the sprint rebuilds, and they are easier to reason about with a
 // file each than as two of six things in one.
 import { WorkPlanCard } from "../components/workplan/WorkPlanCard";
-import { detailPath, formatDay } from "../components/workplan/entryHelpers";
+import {
+  dedupeByJob,
+  detailPath,
+  formatDay,
+} from "../components/workplan/entryHelpers";
 import { matchesChip } from "../components/workplan/chips";
 import { WorkPlanDayColumn } from "../components/workplan/WorkPlanDayColumn";
 import { WorkPlanStrip } from "../components/workplan/WorkPlanStrip";
@@ -425,6 +429,25 @@ function WorkPlanWeek() {
     }
   }
 
+  /** W24-FX1 §2b — the undated lane, one row per JOB.
+   *
+   *  The server's ticket source is one row per ASSIGNED PERSON, so a
+   *  ticket with two staff on it arrives twice (see `dedupeByJob`). The
+   *  week grid below keeps both — each person has their own card. This
+   *  lane must not: its one action writes the ticket's schedule, so the
+   *  second row is the same button against the same record. */
+  const undatedJobs = useMemo(
+    () => (data ? dedupeByJob(data.undated_entries) : []),
+    [data],
+  );
+
+  /** What the overview line says. The deduped count once the lane holds
+   *  every row; the server's own count while the lane is bounded. */
+  const undatedShown =
+    data && !data.truncated.undated_entries
+      ? undatedJobs.length
+      : (data?.counts.undated ?? 0);
+
   /** Mon-Sun of the loaded week, ALWAYS all seven — a week with nothing
    *  on Thursday must show an empty Thursday, not silently close the
    *  gap and leave the reader counting columns.
@@ -544,8 +567,14 @@ function WorkPlanWeek() {
           style={{ marginTop: -4 }}
         >
           {t("agenda.overview_week", { count: counts.total })}
-          {counts.undated > 0 && (
-            <> · {t("agenda.overview_unplanned", { count: counts.undated })}</>
+          {/* W24-FX1 §2b — the same number the lane below renders, not a
+              second one. `counts.undated` is COUNT(*) over the server's
+              slot rows, which are per-person, so it says 2 where the lane
+              shows one two-person job. The server count stays the
+              authority when the lane is TRUNCATED, because then the lane
+              is a page and cannot answer "how many are there". */}
+          {undatedShown > 0 && (
+            <> · {t("agenda.overview_unplanned", { count: undatedShown })}</>
           )}
           {counts.overdue_all > 0 && (
             <> · {t("agenda.overview_overdue", { count: counts.overdue_all })}</>
@@ -683,7 +712,7 @@ function WorkPlanWeek() {
           It sits ABOVE the week, because unplanned work is what you deal
           with before you read a plan, and the action that moves a row
           out of here and into the week is on the row itself. */}
-      {data && data.undated_entries.length > 0 && (
+      {data && undatedJobs.length > 0 && (
         <section
           className="card"
           data-testid="agenda-undated-lane"
@@ -697,12 +726,12 @@ function WorkPlanWeek() {
           </p>
           <BoundedList
             size="lg"
-            count={data.undated_entries.length}
+            count={undatedJobs.length}
             ariaLabel={t("agenda.undated_title")}
             testIdPrefix="agenda-undated"
           >
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {data.undated_entries.map((entry) => (
+              {undatedJobs.map((entry) => (
                 <UndatedRow
                   key={entry.key}
                   entry={entry}

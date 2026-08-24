@@ -1320,6 +1320,30 @@ p { line-height: 1.6; }
   color: var(--text);
   letter-spacing: -0.05em;
   line-height: 1;
+  /* W24-FX1 §1c — `.kpi-card` carries `overflow: hidden`, and it carries
+     it for the decorative `::after` circle that hangs 8px off the bottom
+     right. A money value is not what that clip is for. Measured at 1366
+     (4-up hero, 253px cards, 213px of content): "EUR 1.234.567,89"
+     renders 211px wide — two pixels of headroom, after which the card
+     shears the last digits off with no ellipsis and no scrollbar, and a
+     sheared number still reads as a NUMBER. Ellipsis instead: a total
+     that no longer fits must look truncated, not look smaller.
+     `min-width: 0` is for the `.kpi-row-2` flex row, where the value
+     sits beside a second figure and would otherwise refuse to shrink. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* `line-height: 1` makes the content box exactly the font size, so
+     `overflow: hidden` then shears the glyphs' own descenders — measured
+     as a 4px vertical overflow on every value the moment the clip was
+     added, all of it at the BOTTOM (descenders; a symmetric 2px/2px
+     padding left 2px still clipped). The padding gives the line box the
+     4px it actually occupies and the negative margin hands it straight
+     back to the layout, so the card is the same 121px it was and only
+     the horizontal clip bites. */
+  padding-bottom: 4px;
+  margin-bottom: -4px;
 }
 .kpi-card.kpi-urgent .kpi-value { color: var(--red); }
 .kpi-meta { font-size: 12px; color: var(--text-faint); font-weight: 500; line-height: 1.4; position: relative; z-index: 1; }
@@ -4349,6 +4373,23 @@ a.attn-row:hover {
   /* W7 DESIGN 4 — same rule as `.attention-layout`: Billing and Latest
      tickets / extra work are one band and end on one line. */
   align-items: stretch;
+}
+/* W24-FX1 §1a — `1fr` is `minmax(auto, 1fr)`, and that `auto` minimum is
+   the item's MAX-CONTENT. A nowrap row title (`.attention-row-title`)
+   therefore sizes the TRACK, not the other way round: the band silently
+   stops being 50/50 and, once the longest title outgrows the band, walks
+   off the right of `.workspace`, whose `overflow-x: clip` (§8 below)
+   eats it without a scrollbar. Measured at 1366 with real tenant-length
+   titles: tracks `126px / 1085px`, the Latest-work card 143px past the
+   viewport, 18 elements clipped.
+
+   `min-width: 0` on the grid CHILDREN is the whole fix. The ellipsis was
+   always there — it just never got the chance to fire, because nothing
+   ever told the track it was allowed to be narrower than its content.
+   Same rule, same reason, for `.attention-layout`'s 2fr/1fr band. */
+.dashboard-bottom-band > *,
+.attention-layout > * {
+  min-width: 0;
 }
 @media (max-width: 1100px) {
   .dashboard-bottom-band {
@@ -11604,6 +11645,65 @@ details[open] > .ew-department-tree-summary::before {
   overflow-x: auto;
   overflow-y: visible;
   padding-bottom: 6px;
+}
+/* W24-FX1 §1b — the week needs 7 x 210px + 6 x 10px gap = 1530px and gets
+   1110px at 1366, so two of the seven days are off-screen. The scroller
+   above already made them REACHABLE; what was missing is any sign that
+   there is anything to reach. Chrome's overlay scrollbars are painted
+   over the content and fade out when idle, so the board renders as a
+   five-day week with a clean right edge — measured: scrollWidth 1558 vs
+   clientWidth 1110, and a scrollbar gutter of 0px.
+
+   Chosen over dropping the 210px floor below 1440px, and the reason is
+   already written above this block: Sprint 183 rejected squeezing seven
+   columns into what is left (1110 / 7 = 152px cards with six-line
+   titles) TWICE, on the owner's instruction. Re-introducing it to hide a
+   scrollbar would trade a fixable affordance for a layout that was
+   turned down on its merits. So the columns keep their size and the
+   scroll declares itself:
+
+   - a real, space-taking scrollbar (declaring ::-webkit-scrollbar opts
+     Chrome out of overlay mode, so the gutter is always there), and
+   - scroll shadows on whichever edge still has content behind it, via
+     the `background-attachment: local` pair — the covers scroll away
+     with the content, the shadows stay put, so each one is visible
+     exactly while there is more week in that direction. */
+.agenda-week-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: var(--border-strong, var(--border)) var(--surface-2);
+  background:
+    linear-gradient(to right, var(--bg) 20%, rgba(0, 0, 0, 0)) left center,
+    linear-gradient(to left, var(--bg) 20%, rgba(0, 0, 0, 0)) right center,
+    radial-gradient(farthest-side at 0 50%, rgba(15, 32, 25, 0.16), rgba(0, 0, 0, 0))
+      left center,
+    radial-gradient(farthest-side at 100% 50%, rgba(15, 32, 25, 0.16), rgba(0, 0, 0, 0))
+      right center;
+  background-repeat: no-repeat;
+  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+.agenda-week-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+.agenda-week-scroll::-webkit-scrollbar-track {
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+.agenda-week-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong, var(--border));
+  border-radius: 999px;
+}
+.agenda-week-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+/* The phone rule below turns the scroller off entirely (one day per
+   row); the shadows and the gutter must go with it or they paint over a
+   list that does not scroll. */
+@media (max-width: 700px) {
+  .agenda-week-scroll {
+    background: none;
+    scrollbar-width: auto;
+  }
 }
 .agenda-week-grid {
   display: grid;

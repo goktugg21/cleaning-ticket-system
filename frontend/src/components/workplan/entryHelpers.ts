@@ -33,3 +33,57 @@ export function detailPath(entry: WorkPlanEntry, role: Role | null): string | nu
 export function formatDay(iso: string): string {
   return formatDate(`${iso}T00:00:00`);
 }
+
+/**
+ * W24-FX1 §2b — one row per JOB, for the lists that are about jobs.
+ *
+ * The Work Plan's ticket source is `TicketStaffAssignment`
+ * (`backend/tickets/views_work_plan.py::_slot_source`), so it answers
+ * one entry PER ASSIGNED PERSON: a ticket with two staff on it arrives
+ * as two entries with the same `ticket_id` and the same `ticket_no`,
+ * differing only in `key`, `source_id` and `assignee_names`. In the week
+ * grid that is correct and deliberate — each person has their own card
+ * to complete, and `can_complete` is per slot.
+ *
+ * In the undated lane it is not. That lane is a list of work with no
+ * date, and its one action, "plan for today", writes the TICKET's
+ * schedule (`setTicketSchedule(entry.ticket_id, ...)`) — not the slot's.
+ * Two rows for one ticket therefore offer the identical action against
+ * the identical record, and after it runs both disappear together. The
+ * owner saw TCK-2026-000355 twice, on two consecutive rows.
+ *
+ * Note where the asymmetry comes from: the extra-work source next door
+ * already does this, filtering through an `id__in` subquery expressly so
+ * that "a person holding both roles on it" yields one row. The ticket
+ * source never got the equivalent. Fixing it server-side would change
+ * the week grid too, where the duplication is the feature — so the
+ * collapse belongs to the lane that wants it, here.
+ *
+ * Collapses on `ticket_id`, keeping the first entry and merging the
+ * assignee names of the ones it absorbs, so the surviving row still says
+ * who the work belongs to. Extra-work entries carry `ticket_id: null`
+ * and are keyed on their own `key`, so they are never merged with each
+ * other or with a ticket.
+ */
+export function dedupeByJob(entries: WorkPlanEntry[]): WorkPlanEntry[] {
+  const byJob = new Map<string, WorkPlanEntry>();
+  for (const entry of entries) {
+    const jobKey =
+      entry.ticket_id !== null ? `ticket-${entry.ticket_id}` : entry.key;
+    const seen = byJob.get(jobKey);
+    if (seen === undefined) {
+      byJob.set(jobKey, entry);
+      continue;
+    }
+    const names = [...seen.assignee_names];
+    for (const name of entry.assignee_names) {
+      if (!names.includes(name)) names.push(name);
+    }
+    byJob.set(jobKey, {
+      ...seen,
+      assignee_names: names,
+      assignee_count: names.length,
+    });
+  }
+  return [...byJob.values()];
+}
