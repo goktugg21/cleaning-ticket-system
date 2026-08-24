@@ -166,6 +166,16 @@ export function MyHoursPage() {
   const [formError, setFormError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
 
+  /** W-HR1 §4 — the day whose entries are expanded under the grid, as
+   *  an ISO date. `null` is the page's resting state: the footer opens
+   *  as seven chips and nothing else, and a day's detail is one click.
+   *
+   *  Deliberately NOT reset when the week changes. Clearing it there
+   *  would be a synchronous setState in an effect body, which CLAUDE.md
+   *  bans; instead `openDayIso` below only resolves a day that is
+   *  actually in the week on screen, so a stale date renders nothing. */
+  const [openDay, setOpenDay] = useState<string | null>(null);
+
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<TimeEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -393,6 +403,38 @@ export function MyHoursPage() {
       hours: sumDecimalStrings(bucket.hours),
     }));
   }, [entries, t]);
+
+  /**
+   * W-HR1 §4 — did any hour this week get WEIGHTED at all?
+   *
+   * `multiplier_snapshot` is the multiplier that actually produced
+   * `weighted_hours` (the type's CURRENT one can differ on an entry in
+   * a closed week), so it is the only field that answers this honestly.
+   * With every hour at x1.00 the weighted total is the plain total, and
+   * printing both taught the reader that one of the two labels is
+   * decoration.
+   */
+  const hasWeighting = useMemo(
+    () => entries.some((entry) => Number(entry.multiplier_snapshot) !== 1),
+    [entries],
+  );
+
+  /** The expanded day, but only if it belongs to the week on screen —
+   *  see `openDay`. */
+  const openDayIso = useMemo(() => {
+    if (openDay === null) return null;
+    return weekDays.some((day) => toDateString(day) === openDay)
+      ? openDay
+      : null;
+  }, [openDay, weekDays]);
+
+  const openDayEntries = useMemo(
+    () =>
+      openDayIso === null
+        ? []
+        : entries.filter((entry) => entry.date === openDayIso),
+    [entries, openDayIso],
+  );
 
   /**
    * W12 §5 — the days the grid prints quietly: the ones this person is
@@ -752,137 +794,219 @@ export function MyHoursPage() {
             onDirtyChange={setGridDirty}
             onSaved={refresh}
           />
-        </div>
-        )}
 
-        {/* W12 §2 — the record of what is already filed, and ONLY when
-            there is something filed.
-            An empty week used to show it anyway, as a second empty
-            state ("no hours yet — add your first entry") pointing at a
-            second way to do what the grid above was already offering.
-            A worker opening a blank week now has exactly one surface
-            and one verb. */}
-        {entries.length > 0 && (
-        <div className="card" data-testid="my-hours-list">
-          <BoundedList
-            size="lg"
-            count={entries.length}
-            ariaLabel={t("my_hours.list_aria")}
-            testIdPrefix="my-hours"
-            className="table-wrap"
-          >
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>{t("my_hours.col_date")}</th>
-                  <th>{t("my_hours.col_hour_type")}</th>
-                  <th>{t("my_hours.col_hours")}</th>
-                  <th>{t("my_hours.col_weighted")}</th>
-                  <th>{t("my_hours.col_building")}</th>
-                  {/* Sprint 179B §2 — the same column the week grid
-                      gained. A row that belongs to a ticket or an extra
-                      work said so nowhere on this page. */}
-                  <th>{t("my_hours.col_job")}</th>
-                  <th>{t("my_hours.col_note")}</th>
-                  <th>{t("my_hours.col_actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => (
-                  <tr
-                    key={entry.id}
-                    data-testid="my-hours-row"
-                    data-entry-id={entry.id}
-                  >
-                    <td>{formatDayLabel(entry.date, dateLocale)}</td>
-                    <td>
-                      {hourTypeLabelFrom(
-                        entry.hour_type_name,
-                        entry.hour_type_standard_slot,
-                        t,
-                      )}
-                    </td>
-                    <td>{entry.hours}</td>
-                    <td className="muted">{entry.weighted_hours}</td>
-                    <td className="muted small">{entry.building_name ?? "—"}</td>
-                    <td className="muted small" data-testid="my-hours-job">
-                      {hourSourceLabel(
-                        entry.source_type,
-                        entry.source_id,
-                        sourceOptions,
-                        t,
-                        "—",
-                      )}
-                    </td>
-                    <td className="muted small">{entry.note || "—"}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          data-testid="my-hours-edit-button"
-                          onClick={() => openEdit(entry)}
-                          disabled={entry.is_locked}
-                        >
-                          {t("my_hours.edit_button")}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          data-testid="my-hours-delete-button"
-                          onClick={() => openDeleteDialog(entry)}
-                          disabled={entry.is_locked}
-                        >
-                          {t("my_hours.delete_button")}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </BoundedList>
-        </div>
-        )}
-        </>
-      )}
+          {/* W-HR1 §4 — THE FOOTER OF THE ONE EDITOR.
 
-      {/* W12 §2 — totals of nothing are not a total. */}
-      {entries.length > 0 && (
-      <section
-        className="card"
-        style={{ marginTop: 16, padding: "18px 22px" }}
-        data-testid="my-hours-totals"
-      >
-        <div className="eyebrow" style={{ marginBottom: 8 }}>
-          {t("my_hours.totals_title")}
-        </div>
-        <div className="detail-kv-list">
-          <div className="detail-kv-row">
-            <span className="detail-kv-label">{t("my_hours.total_hours")}</span>
-            <span className="detail-kv-val" data-testid="my-hours-total-raw">
-              {totalHours}
-            </span>
-          </div>
-          <div className="detail-kv-row">
-            <span className="detail-kv-label">
-              {t("my_hours.total_weighted")}
-            </span>
-            <span
-              className="detail-kv-val"
-              data-testid="my-hours-total-weighted"
+              The totals used to be a card of their own BELOW a second
+              table that listed the same hours the grid above was
+              already showing and editing. Two surfaces for one week,
+              and the numbers describing them floated free of both. They
+              are the grid's footer now, in the grid's own card, the way
+              a table's totals row belongs to its table.
+
+              Nothing the deleted list could do is gone: its per-entry
+              Edit and Delete live in the day panel below, one click
+              from the day they belong to. */}
+          {entries.length > 0 && (
+            <div
+              style={{
+                marginTop: 14,
+                paddingTop: 12,
+                borderTop: "1px solid var(--border)",
+              }}
+              data-testid="my-hours-totals"
             >
-              {totalWeighted}
-            </span>
-          </div>
-          {perTypeTotals.map((bucket) => (
-            <div className="detail-kv-row" key={bucket.id}>
-              <span className="detail-kv-label">{bucket.name}</span>
-              <span className="detail-kv-val">{bucket.hours}</span>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "baseline",
+                  gap: "6px 20px",
+                }}
+              >
+                <span className="detail-kv-label">
+                  {t("my_hours.total_hours")}
+                </span>
+                <strong data-testid="my-hours-total-raw">{totalHours}</strong>
+
+                {/* W-HR1 §4 — the weighted total, ONLY when weighting
+                    happened. Every hour type in this deployment sits at
+                    x1.00 unless somebody set otherwise, and on such a
+                    week "8,00" and "8,00" stood side by side under two
+                    different labels — a number that teaches the reader
+                    the label means nothing. Read off
+                    `multiplier_snapshot`, the multiplier that actually
+                    produced `weighted_hours`, not the type's current
+                    one. */}
+                {hasWeighting && (
+                  <>
+                    <span className="detail-kv-label">
+                      {t("my_hours.total_weighted")}
+                    </span>
+                    <strong data-testid="my-hours-total-weighted">
+                      {totalWeighted}
+                    </strong>
+                  </>
+                )}
+
+                {/* The per-type split, ONLY when there is a split. With
+                    one hour type in the week its single row repeated
+                    the total a third time. */}
+                {perTypeTotals.length > 1 &&
+                  perTypeTotals.map((bucket) => (
+                    <span key={bucket.id} className="muted small">
+                      {bucket.name} {bucket.hours}
+                    </span>
+                  ))}
+              </div>
+
+              {/* W-HR1 §4 — DEPTH ON CLICK, per day.
+                  One chip per weekday carrying that day's hours; the
+                  chip opens the day's own entries, with the Edit and
+                  Delete the deleted list used to carry. The chip is the
+                  click target rather than a grid cell: a cell is a text
+                  input, and a click there has to keep meaning "put the
+                  caret here and type". */}
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 6,
+                  marginTop: 10,
+                }}
+                data-testid="my-hours-day-strip"
+              >
+                {weekDays.map((dayDate) => {
+                  const iso = toDateString(dayDate);
+                  const dayEntries = entries.filter((e) => e.date === iso);
+                  const label = formatDayLabel(iso, dateLocale);
+                  const isOpen = openDay === iso;
+                  return (
+                    <button
+                      key={iso}
+                      type="button"
+                      className={`btn btn-sm ${isOpen ? "btn-secondary" : "btn-ghost"}`}
+                      onClick={() => setOpenDay(isOpen ? null : iso)}
+                      aria-expanded={isOpen}
+                      data-testid={`my-hours-day-${iso}`}
+                      data-day-count={dayEntries.length}
+                    >
+                      {label}
+                      {dayEntries.length > 0 && (
+                        <>
+                          {" · "}
+                          <strong>
+                            {sumDecimalStrings(dayEntries.map((e) => e.hours))}
+                          </strong>
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {openDayIso !== null && (
+                <div style={{ marginTop: 10 }} data-testid="my-hours-day-panel">
+                  {/* Bounded, like every list over a server collection
+                      (CLAUDE.md #8). `sm` because this is ONE day of
+                      ONE person — the 260px step is the right size for
+                      it, and a day that somehow holds twenty rows
+                      scrolls rather than pushing the grid off screen. */}
+                  <BoundedList
+                    size="sm"
+                    count={openDayEntries.length}
+                    ariaLabel={t("my_hours.list_aria")}
+                    testIdPrefix="my-hours-day"
+                    className="table-wrap"
+                    emptyState={
+                      <p className="muted small" style={{ margin: "8px 0 0" }}>
+                        {t("my_hours.day_empty")}
+                      </p>
+                    }
+                  >
+                    <table className="data-table data-table-dense">
+                      <thead>
+                        <tr>
+                          <th>{t("my_hours.col_hour_type")}</th>
+                          <th>{t("my_hours.col_hours")}</th>
+                          {hasWeighting && (
+                            <th>{t("my_hours.col_weighted")}</th>
+                          )}
+                          <th>{t("my_hours.col_building")}</th>
+                          <th>{t("my_hours.col_job")}</th>
+                          <th>{t("my_hours.col_note")}</th>
+                          <th>{t("my_hours.col_actions")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {openDayEntries.map((entry) => (
+                          <tr
+                            key={entry.id}
+                            data-testid="my-hours-row"
+                            data-entry-id={entry.id}
+                          >
+                            <td>
+                              {hourTypeLabelFrom(
+                                entry.hour_type_name,
+                                entry.hour_type_standard_slot,
+                                t,
+                              )}
+                            </td>
+                            <td>{entry.hours}</td>
+                            {hasWeighting && (
+                              <td className="muted">{entry.weighted_hours}</td>
+                            )}
+                            <td className="muted small">
+                              {entry.building_name ?? "—"}
+                            </td>
+                            <td
+                              className="muted small"
+                              data-testid="my-hours-job"
+                            >
+                              {hourSourceLabel(
+                                entry.source_type,
+                                entry.source_id,
+                                sourceOptions,
+                                t,
+                                "—",
+                              )}
+                            </td>
+                            <td className="muted small">{entry.note || "—"}</td>
+                            <td>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  data-testid="my-hours-edit-button"
+                                  onClick={() => openEdit(entry)}
+                                  disabled={entry.is_locked}
+                                >
+                                  {t("my_hours.edit_button")}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  data-testid="my-hours-delete-button"
+                                  onClick={() => openDeleteDialog(entry)}
+                                  disabled={entry.is_locked}
+                                >
+                                  {t("my_hours.delete_button")}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </BoundedList>
+                </div>
+              )}
             </div>
-          ))}
+          )}
         </div>
-      </section>
+        )}
+
+        </>
       )}
 
       {mode !== null && (
