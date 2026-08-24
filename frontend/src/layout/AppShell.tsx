@@ -234,13 +234,16 @@ export function AppShell({ children }: AppShellProps) {
     open: boolean;
   } | null>(null);
 
-  // A CHILD route, not the parent: `/extra-work` itself is the group's
-  // own destination and `end`-matched in the nav, so it is deliberately
-  // not in this test — otherwise the parent could never be visited with
-  // the group shut.
+  // W-NAV1 — the parent is a pure disclosure control now (no route of
+  // its own), so `/extra-work` itself IS a child ("Extra Work Quote")
+  // and belongs in this test. Chargeable Work is a second door onto
+  // `/tickets/chargeable` (the existing Tickets-side route), so it is
+  // counted here too — the group must read as active from either door.
   const extraWorkChildActive =
+    location.pathname === "/extra-work" ||
     location.pathname.startsWith("/extra-work/") ||
-    location.pathname.startsWith("/planned-work");
+    location.pathname.startsWith("/planned-work") ||
+    location.pathname.startsWith("/tickets/chargeable");
 
   const extraWorkOpen =
     extraWorkManual && extraWorkManual.path === location.pathname
@@ -596,80 +599,129 @@ export function AppShell({ children }: AppShellProps) {
                 {t("nav.inbox")}
                 <InboxNavBadge />
               </NavLink>
-              {/* Sprint 155 §1 — Extra Work is a GROUP again, but the
-                  parent is a LINK, not a disclosure button.
+              {/* W-NAV1 — Extra Work becomes a PURE disclosure opener:
+                  clicking it only expands/collapses, it navigates
+                  nowhere. Sprint 155 §1 made the parent a link (label
+                  navigates to /extra-work, a separate chevron folds the
+                  children) specifically to avoid a click costing an
+                  extra step to reach the list; that trade-off is gone
+                  now that the list itself — "Extra Work Quote" — is a
+                  child of the group, one click away the moment it opens
+                  the group. A single control does both jobs a
+                  `nav-parent-row` used to split across two elements.
 
-                  Sprint 154 flattened the M3 group into three sibling
-                  entries because the parent was a button that only
-                  expanded: reaching the list took two clicks. The owner
-                  wants the grouping back without paying that price, so
-                  the label navigates to /extra-work and a separate
-                  chevron folds the children away. Both readings of
-                  "click the parent" now do something useful, and the
-                  children are visible by default rather than hidden
-                  behind a disclosure.
+                  Gates are UNCHANGED: the group and its Extra-Work
+                  children share canAccessExtraWork (the same gate
+                  ExtraWorkRoute applies to /extra-work/new and
+                  /extra-work/request-quote); the two Recurring Work
+                  entries (list + create form) keep canAccessPlannedWork,
+                  because /planned-work and /planned-work/new share the
+                  same PlannedWorkRoute guard in App.tsx.
 
-                  Gates are UNCHANGED from Sprint 154 and from M3 before
-                  it: the group and its two extra-work children share
-                  canAccessExtraWork (the same gate ExtraWorkRoute
-                  applies to /extra-work/new), Recurring Work keeps
-                  canAccessPlannedWork. No route changed and no new role
-                  logic — IA only.
-
-                  `end` on the parent is the active-state carve-out: an
-                  exact match, so being on /extra-work/new or
-                  /extra-work/request-quote lights up THAT child and not
-                  the parent. Extending the existing rule rather than
-                  adding a second pathname test that could disagree with
-                  it. */}
+                  Chargeable Work carries `!isCustomerUser`, copied from
+                  the Tickets-side entry it doors onto — NOT because this
+                  new entry needs a gate of its own, but because
+                  `canAccessExtraWork` returns true for CUSTOMER_USER
+                  (the melding-request surface) while the Tickets-side
+                  entry is explicitly `!isCustomerUser`-gated. Nesting
+                  this door under Extra Work without repeating that check
+                  would have handed a CUSTOMER_USER a route they cannot
+                  reach today — the exact regression "role gating exactly
+                  as today" rules out. No route changed and no new role
+                  logic — IA only. */}
               {canAccessExtraWork(me?.role) && (
                 <>
-                  <div className="nav-parent-row">
-                    <NavLink
-                      to="/extra-work"
-                      end
-                      className={navClass}
-                      // Sprint 156 §2 — the label navigates AND opens the
-                      // group. With the group closed by default this is
-                      // what stops the three children being genuinely
-                      // hidden: the natural gesture reveals them.
-                      // The label navigates AND opens the group. The
-                      // override is stamped with the DESTINATION path,
-                      // because /extra-work is the parent and so is not
-                      // "child active" — without this the group would
-                      // shut itself the moment the click landed.
-                      onClick={() =>
-                        setExtraWorkManual({ path: "/extra-work", open: true })
-                      }
-                      data-testid="sidebar-extra-work-request"
-                    >
-                      <span className="nav-icon">
-                        <Receipt size={16} strokeWidth={2} />
-                      </span>
+                  <button
+                    type="button"
+                    className={
+                      extraWorkChildActive ? "nav-item active" : "nav-item"
+                    }
+                    aria-expanded={extraWorkOpen}
+                    aria-label={t(
+                      extraWorkOpen
+                        ? "nav.collapse_group"
+                        : "nav.expand_group",
+                      { group: t("nav.extra_work") },
+                    )}
+                    onClick={toggleExtraWork}
+                    data-testid="sidebar-extra-work-toggle"
+                  >
+                    <span className="nav-icon">
+                      <Receipt size={16} strokeWidth={2} />
+                    </span>
+                    <span style={{ flex: 1, textAlign: "left" }}>
                       {t("nav.extra_work")}
-                    </NavLink>
-                    <button
-                      type="button"
-                      className="nav-parent-toggle"
-                      aria-expanded={extraWorkOpen}
-                      aria-label={t(
-                        extraWorkOpen
-                          ? "nav.collapse_group"
-                          : "nav.expand_group",
-                        { group: t("nav.extra_work") },
-                      )}
-                      onClick={toggleExtraWork}
-                      data-testid="sidebar-extra-work-toggle"
-                    >
-                      {extraWorkOpen ? (
-                        <ChevronDown size={14} strokeWidth={2.4} />
-                      ) : (
-                        <ChevronRight size={14} strokeWidth={2.4} />
-                      )}
-                    </button>
-                  </div>
+                    </span>
+                    {extraWorkOpen ? (
+                      <ChevronDown size={14} strokeWidth={2.4} />
+                    ) : (
+                      <ChevronRight size={14} strokeWidth={2.4} />
+                    )}
+                  </button>
                   {extraWorkOpen && (
                     <>
+                      {/* W-NAV1 — the list page itself, now named for
+                          what it is: the quotation side of the split
+                          this list already draws internally (Quote &
+                          price vs. Work started). `end` keeps this
+                          entry — not the Forms links below — lit when
+                          the operator is on /extra-work exactly. */}
+                      <NavLink
+                        to="/extra-work"
+                        end
+                        className={navChildClass}
+                        data-testid="sidebar-extra-work-quote"
+                      >
+                        <span className="nav-icon">
+                          <Receipt size={15} strokeWidth={2} />
+                        </span>
+                        {t("nav.extra_work_quote")}
+                      </NavLink>
+                      {/* W-NAV1 — the SAME route as the Tickets-side
+                          "Chargeable work" entry (nav.chargeable_work,
+                          reused verbatim). One page, two doors: this is
+                          not a copy of ExtraWorkListPage or a new
+                          component, just a second NavLink onto
+                          /tickets/chargeable — gated `!isCustomerUser`
+                          like that entry, since this dropdown's own
+                          canAccessExtraWork gate admits CUSTOMER_USER
+                          and the Tickets-side door does not. */}
+                      {!isCustomerUser(me?.role) && (
+                        <NavLink
+                          to="/tickets/chargeable"
+                          className={navChildClass}
+                          data-testid="sidebar-extra-work-chargeable"
+                        >
+                          <span className="nav-icon">
+                            <BadgeEuro size={15} strokeWidth={2} />
+                          </span>
+                          {t("nav.chargeable_work")}
+                        </NavLink>
+                      )}
+                      {canAccessPlannedWork(me?.role) && (
+                        <NavLink
+                          to="/planned-work"
+                          className={navChildClass}
+                          data-testid="sidebar-planned-work"
+                        >
+                          <span className="nav-icon">
+                            <CalendarClock size={15} strokeWidth={2} />
+                          </span>
+                          {t("nav.planned_work")}
+                        </NavLink>
+                      )}
+                      {/* W-NAV1 — Forms: a labelled sub-group of create
+                          routes, reusing the SAME two primitives the
+                          customer-scoped sidebar already uses for a
+                          labelled subsection (`nav-group-label` +
+                          `nav-item-child`) rather than adding a new
+                          indent level or a new CSS pattern. */}
+                      <div
+                        className="nav-group-label"
+                        style={{ marginTop: 4 }}
+                      >
+                        {t("nav.forms_group")}
+                      </div>
                       {/* Sprint 155 §1 — a nav entry for a route that
                           already existed. /extra-work/new was only
                           reachable from a button on the list page, so
@@ -695,16 +747,21 @@ export function AppShell({ children }: AppShellProps) {
                         </span>
                         {t("nav.request_quote")}
                       </NavLink>
+                      {/* W-NAV1 — the recurring-job CREATE form. Same
+                          gate as the list entry above: /planned-work/new
+                          shares PlannedWorkRoute with /planned-work in
+                          App.tsx, so an actor who cannot see the list
+                          cannot see its create form either. */}
                       {canAccessPlannedWork(me?.role) && (
                         <NavLink
-                          to="/planned-work"
+                          to="/planned-work/new"
                           className={navChildClass}
-                          data-testid="sidebar-planned-work"
+                          data-testid="sidebar-recurring-work-new"
                         >
                           <span className="nav-icon">
                             <CalendarClock size={15} strokeWidth={2} />
                           </span>
-                          {t("nav.planned_work")}
+                          {t("nav.recurring_work_new")}
                         </NavLink>
                       )}
                     </>
