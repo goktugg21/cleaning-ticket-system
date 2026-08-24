@@ -2691,6 +2691,7 @@ export function CreateExtraWorkPage({
                               type="button"
                               className="ew-line-service-button"
                               data-testid={`extra-work-create-line-service-${index}`}
+                              aria-label={`${t("create.line_field_service")}: ${cartLineLabel(line)}`}
                               onClick={() =>
                                 setPickerFor((current) =>
                                   current === line.tempId
@@ -2748,6 +2749,7 @@ export function CreateExtraWorkPage({
                               id={`ew-line-note-${index}`}
                               data-testid={`extra-work-create-line-note-${index}`}
                               className="field-input ew-line-note-input"
+                              aria-label={t("create.line_field_customer_note")}
                               type="text"
                               maxLength={500}
                               placeholder={t(
@@ -2780,6 +2782,7 @@ export function CreateExtraWorkPage({
                               id={`ew-line-quantity-${index}`}
                               data-testid={`extra-work-create-line-quantity-${index}`}
                               className="field-input ew-line-qty-input"
+                              aria-label={t("create.line_field_quantity")}
                               type="number"
                               /* W-EW1 §3 — one arrow press is one whole
                                  unit. Typing a decimal is still allowed:
