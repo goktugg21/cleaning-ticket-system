@@ -31,6 +31,19 @@
  * CUSTOMERS NEVER REACH THIS. The route is gated on the same SA/CA rule
  * the backend enforces, and the backend 403s rather than returning an
  * empty list, so a customer cannot even learn the endpoint's shape.
+ *
+ * W-P4 §1 — THE WORDS, AND ONLY THE WORDS. Every label and state line
+ * on this screen was rewritten in plain language; not one line of
+ * behaviour below moved. Three things the old copy left the reader to
+ * work out: "SLA" named nothing (the title now says what the page
+ * sends), the group headings named a SITUATION rather than the moment
+ * a message goes out ("When work has not started on time"), and the
+ * second threshold in each pair read "Then warn again after", which
+ * only makes sense while you are looking at its sibling — each field
+ * now says "First warning" / "Second warning" and stands on its own.
+ * The strings live in `common.json` under `sla_warnings.*`; nothing
+ * here reads them by any route other than the `t()` calls already
+ * present.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -160,7 +173,8 @@ export function SlaWarningsAdminPage() {
   // settled branch — the starts-true idiom the project uses, because a
   // synchronous `setLoading(true)` reached from an effect body trips
   // `react-hooks/set-state-in-effect` and the lint baseline is frozen
-  // at exactly 44.
+  // at exactly 42 (41 errors, 1 warning) — the 44 this comment used to
+  // name was the stale figure CLAUDE.md corrected.
   useEffect(() => {
     let cancelled = false;
     listSlaWarningThresholds()

@@ -203,7 +203,21 @@ export function NewWorkPage() {
         </div>
       </div>
 
-      <div className="card new-work-card" data-testid="new-work">
+      {/* W-P4 §2 — THE SHAPE, NOT THE WORDS.
+          Measured at 1366: the column is 1054 wide and this card was
+          720, so a third of the page was blank and each option was a
+          wide thin strip 670x71. Nothing here is a new component or a
+          new style: the same card, the same icon chip, the same label
+          and description classes, laid out so an option looks like an
+          option. The rules are inline rather than in `index.css`
+          because that file is being changed on another branch right
+          now; fold them into `.new-work-card` / `.new-work-answers` /
+          `.new-work-answer` when it is free. */}
+      <div
+        className="card new-work-card"
+        style={{ maxWidth: 1000 }}
+        data-testid="new-work"
+      >
         {answered.map((step) => (
           <div className="new-work-answered" key={step.key}>
             <span className="new-work-answered-q">{step.question}</span>
@@ -222,7 +236,19 @@ export function NewWorkPage() {
         <h3 className="new-work-question" data-testid="new-work-question">
           {question}
         </h3>
-        <div className="new-work-answers">
+        {/* `auto-fit` and NOT a written-down column count: the two-answer
+            questions fill the row as two, the three-answer one fills it
+            as three, and a narrow window drops to one without a media
+            query. There is no number here to keep in step with the
+            number of options. */}
+        <div
+          className="new-work-answers"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 14,
+          }}
+        >
           {answers.map((answer) => {
             const Icon = answer.icon;
             return (
@@ -231,10 +257,22 @@ export function NewWorkPage() {
                 key={answer.key}
                 className="new-work-answer"
                 onClick={answer.onPick}
+                /* Icon above the words instead of beside them. Side by
+                   side, a card this wide is mostly empty to the right of
+                   the description; stacked, the option gets its size
+                   back and the row still reads left to right. */
+                style={{
+                  flexDirection: "column",
+                  alignItems: "stretch",
+                  padding: "18px 18px 20px",
+                }}
                 data-testid={`new-work-answer-${answer.key}`}
               >
-                <span className="new-work-answer-icon">
-                  <Icon size={18} strokeWidth={2} aria-hidden="true" />
+                <span
+                  className="new-work-answer-icon"
+                  style={{ width: 40, height: 40 }}
+                >
+                  <Icon size={20} strokeWidth={2} aria-hidden="true" />
                 </span>
                 <span className="new-work-answer-text">
                   <span className="new-work-answer-label">{answer.label}</span>
