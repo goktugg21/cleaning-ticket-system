@@ -54,8 +54,37 @@ import { ActualHoursPanel } from "./ActualHoursPanel";
 import {
   actualHoursPanelKey,
   deriveActiveHourlyLines,
+  finiteOrNull,
   selectApprovedProposal,
 } from "./activeHourlyLines";
+
+// W25 — ONE column geometry for the Agreement card's tables, shared by
+// the header row and the data rows so the words sit over the numbers
+// they name. The name cell takes the slack and wraps; the two number
+// cells keep a fixed basis, which is what makes a header meaningful at
+// all (a header over an elastic column names nothing). Sized for the
+// ~340px ticket rail at 1366 — measured, not guessed.
+const CELL_NAME = {
+  flex: "1 1 auto",
+  minWidth: 0,
+  overflowWrap: "anywhere",
+} as const;
+const CELL_QTY = {
+  flex: "0 0 54px",
+  textAlign: "right",
+  whiteSpace: "nowrap",
+} as const;
+const CELL_AMOUNT = {
+  flex: "0 0 86px",
+  textAlign: "right",
+  whiteSpace: "nowrap",
+} as const;
+const ROW_STYLE = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: 8,
+  padding: "4px 0",
+} as const;
 
 export function TicketExtraWorkCards({
   extraWorkId,
@@ -198,15 +227,12 @@ export function TicketExtraWorkCards({
   // computed totals; a cart line's agreed amount is its contract unit
   // price × quantity, and a NEEDS_PROPOSAL cart line has no price yet
   // — an em dash, never a zero (zero is a legal price).
-  // W22.2 — a parsed amount is a finite number or null, decided HERE:
-  // a missing/blank/unparseable source value becomes null and the cell
-  // renders the em dash explicitly. The formatters are never handed
-  // null and asked to be graceful.
-  const finiteOrNull = (value: string | null | undefined): number | null => {
-    if (value === null || value === undefined || value === "") return null;
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
+  // W22.2 — a parsed amount is a finite number or null: a missing/
+  // blank/unparseable source value becomes null and the cell renders
+  // the em dash explicitly. The formatters are never handed null and
+  // asked to be graceful. W25 moved `finiteOrNull` into
+  // `activeHourlyLines` so the hours panel's arithmetic and these
+  // tables read a source string exactly one way.
   const agreedRows: {
     id: number;
     label: string;
@@ -369,6 +395,16 @@ export function TicketExtraWorkCards({
                   })
             }
             locked={finalAmountLocked}
+            // W25 — the client-side math per line is a PREVIEW. The
+            // saved subtotal comparison is only offered when these
+            // hourly lines ARE the whole active priced set, because the
+            // PATCH response carries no per-line amounts and a partial
+            // sum cannot be compared to a whole one.
+            previewCoversTotal={
+              activePricedCount !== null &&
+              activeHourlyLines.length === activePricedCount
+            }
+            finalSubtotalAmount={ew.final_subtotal_amount}
             onUpdated={(detail) => {
               setEw(detail);
               if (approvedProposalId !== null) {
@@ -516,26 +552,30 @@ export function TicketExtraWorkCards({
                 {t("ew_agreement_requested")}
               </div>
               <div data-testid="ticket-ew-requested-lines">
+                {/* W25 — the column words. Without them a number in the
+                    rail is just a number; the owner could not tell an
+                    amount from a count. The requested cart has NO money
+                    column (it is what was asked, before anything was
+                    priced), so it gets the two headers it actually has
+                    — an "Amount" over an absent column would be the
+                    lie the header exists to prevent. */}
+                <div
+                  style={ROW_STYLE}
+                  data-testid="ticket-ew-requested-head"
+                >
+                  <span className="detail-kv-label" style={CELL_NAME}>
+                    {t("extra_work:detail.agreement_col_service")}
+                  </span>
+                  <span className="detail-kv-label" style={CELL_QTY}>
+                    {t("extra_work:detail.agreement_col_qty")}
+                  </span>
+                </div>
                 {ew.line_items.map((line) => (
-                  <div
-                    key={line.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      gap: 8,
-                      padding: "4px 0",
-                    }}
-                  >
-                    <span
-                      style={{
-                        flex: "1 1 auto",
-                        minWidth: 0,
-                        overflowWrap: "anywhere",
-                      }}
-                    >
+                  <div key={line.id} style={ROW_STYLE}>
+                    <span style={CELL_NAME}>
                       {line.service_name || line.custom_description}
                     </span>
-                    <span style={{ whiteSpace: "nowrap" }}>
+                    <span style={CELL_QTY}>
                       {line.quantity != null && line.quantity !== ""
                         ? formatNumber(line.quantity)
                         : "—"}
@@ -554,31 +594,26 @@ export function TicketExtraWorkCards({
                 {t("ew_agreement_agreed")}
               </div>
               <div data-testid="ticket-ew-agreed-lines">
+                <div style={ROW_STYLE} data-testid="ticket-ew-agreed-head">
+                  <span className="detail-kv-label" style={CELL_NAME}>
+                    {t("extra_work:detail.agreement_col_service")}
+                  </span>
+                  <span className="detail-kv-label" style={CELL_QTY}>
+                    {t("extra_work:detail.agreement_col_qty")}
+                  </span>
+                  <span className="detail-kv-label" style={CELL_AMOUNT}>
+                    {t("extra_work:detail.agreement_col_amount")}
+                  </span>
+                </div>
                 {agreedRows.map((row) => (
-                  <div
-                    key={row.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      gap: 8,
-                      padding: "4px 0",
-                    }}
-                  >
-                    <span
-                      style={{
-                        flex: "1 1 auto",
-                        minWidth: 0,
-                        overflowWrap: "anywhere",
-                      }}
-                    >
-                      {row.label}
-                    </span>
-                    <span style={{ whiteSpace: "nowrap" }}>
+                  <div key={row.id} style={ROW_STYLE}>
+                    <span style={CELL_NAME}>{row.label}</span>
+                    <span style={CELL_QTY}>
                       {row.quantity !== null && row.quantity !== ""
                         ? formatNumber(row.quantity)
                         : "—"}
                     </span>
-                    <span style={{ whiteSpace: "nowrap", fontWeight: 500 }}>
+                    <span style={{ ...CELL_AMOUNT, fontWeight: 500 }}>
                       {row.amount !== null ? formatMoney(row.amount) : "—"}
                     </span>
                   </div>

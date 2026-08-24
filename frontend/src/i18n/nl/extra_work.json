@@ -325,6 +325,9 @@
   "detail.actual_hours_error_invalid": "Voer voor elke regel een geldig getal groter dan nul in.",
   "detail.actual_hours_error_not_hourly": "Uren om te factureren kunnen alleen voor uurregels worden ingevoerd.",
   "detail.actual_hours_error_forbidden": "U heeft geen rechten om uren om te factureren voor deze aanvraag in te voeren.",
+  "detail.actual_hours_unit": "u",
+  "detail.actual_hours_math_note": "Regelbedragen zijn excl. btw.",
+  "detail.actual_hours_server_subtotal": "Opgeslagen subtotaal (server): {{server}}. Dit scherm rekende {{preview}}.",
   "detail.step_hint_requested": "Nieuwe aanvraag. Start de beoordeling en stel daarna een prijsvoorstel op.",
   "detail.step_hint_under_review": "Stel hieronder het prijsvoorstel op en stuur het ter goedkeuring naar de klant.",
   "detail.step_hint_under_review_auto_start": "Stel hieronder het prijsvoorstel op. De klant heeft dit vooraf goedgekeurd — het versturen van het voorstel start het werk direct, zonder aparte goedkeuring.",
@@ -773,5 +776,8 @@
   "detail.complete_dialog_body_with_ticket": "Er hoort een operationeel ticket bij dit meerwerk. Afronden hier verandert dat ticket niet: het ticket bepaalt of het werk gedaan is.",
   "detail.complete_dialog_billing": "Afronden telt mee voor rapportage en facturatie.",
   "detail.complete_dialog_confirm": "Afronden",
-  "detail.complete_toast": "“{{title}}” is afgerond. Er is geen ticket gewijzigd."
+  "detail.complete_toast": "“{{title}}” is afgerond. Er is geen ticket gewijzigd.",
+  "detail.agreement_col_service": "Dienst",
+  "detail.agreement_col_qty": "Aantal",
+  "detail.agreement_col_amount": "Bedrag"
 }

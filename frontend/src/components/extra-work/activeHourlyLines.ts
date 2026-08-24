@@ -21,7 +21,27 @@ export type ActualHoursLine = {
   id: number;
   label: string;
   actual_hours: string | null;
+  /** W25 — the per-unit rate the line bills at, so the hours field can
+   *  show its own arithmetic instead of a bare number. `null` when the
+   *  source carries no per-unit rate (see the per-source note on
+   *  `deriveActiveHourlyLines`) — such a row keeps a plain input and
+   *  claims no math. */
+  rate: number | null;
+  /** W25 — the ORDERED quantity, which is what the backend bills when
+   *  no actual hours are entered (`final_amounts.billable_quantity`
+   *  substitutes `actual_hours` only when it is set). The panel needs
+   *  it to preview the WHOLE set, not just the rows being typed in. */
+  quantity: number | null;
 };
+
+// W25 — a source string is a finite number or it is nothing. Exported
+// because both this module and TicketExtraWorkCards decide it the same
+// way, and a second copy is a second answer waiting to drift.
+export function finiteOrNull(value: string | null | undefined): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 // Sprint 8A-fix — the active hourly line set a provider can enter
 // actual hours for, following the backend `active_priced_lines`
@@ -46,6 +66,19 @@ export function selectApprovedProposal(
   })[0];
 }
 
+// W25 — WHERE THE PER-HOUR RATE LIVES, per source, measured against
+// backend/extra_work/final_amounts.py::_line_unit_price:
+//   * approved-proposal lines -> `unit_price` (the operator-typed
+//     snapshot; the backend bills exactly this). Always present.
+//   * INSTANT cart lines -> no persisted unit price exists on the row;
+//     `contract_unit_price` is the serializer's live resolve of the
+//     customer's contract, and is null for a NEEDS_PROPOSAL line.
+//   * legacy `pricing_line_items` -> these NEVER reach this function
+//     (the branch below returns []), so no hourly row is ever rendered
+//     for them and the question of their rate does not arise here.
+// A line whose rate resolves to null keeps a plain input: no invented
+// rate, no invented arithmetic.
+//
 // Normalized active hourly line set. Approved-proposal lines win;
 // otherwise the INSTANT cart lines; otherwise none. The approved
 // proposal's lines (with `actual_hours`) are NOT on the EW detail
@@ -67,6 +100,11 @@ export function deriveActiveHourlyLines(
         id: line.id,
         label: line.service_name ?? line.description,
         actual_hours: line.actual_hours ?? null,
+        // A proposal line carries the operator-typed `unit_price`
+        // snapshot, and that IS what the backend bills it at
+        // (`final_amounts._line_unit_price` -> `line.unit_price`).
+        rate: finiteOrNull(line.unit_price),
+        quantity: finiteOrNull(line.quantity),
       }));
   }
   if (ew.routing_decision === "INSTANT") {
@@ -76,6 +114,13 @@ export function deriveActiveHourlyLines(
         id: line.id,
         label: line.service_name,
         actual_hours: line.actual_hours,
+        // A cart line has no persisted unit price of its own; the
+        // serializer live-resolves the customer's contract row at read
+        // time, and that is the only per-unit rate on this payload.
+        // The Agreed table in TicketExtraWorkCards prices cart lines
+        // the same way, so the two never name different rates.
+        rate: finiteOrNull(line.contract_unit_price),
+        quantity: finiteOrNull(line.quantity),
       }));
   }
   return [];

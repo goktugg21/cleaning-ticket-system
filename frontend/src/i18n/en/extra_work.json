@@ -325,6 +325,9 @@
   "detail.actual_hours_error_invalid": "Enter a valid number greater than zero for each line.",
   "detail.actual_hours_error_not_hourly": "Hours to bill can only be entered for hourly lines.",
   "detail.actual_hours_error_forbidden": "You do not have permission to enter hours to bill for this request.",
+  "detail.actual_hours_unit": "h",
+  "detail.actual_hours_math_note": "Line amounts exclude VAT.",
+  "detail.actual_hours_server_subtotal": "Saved subtotal (server): {{server}}. This screen calculated {{preview}}.",
   "detail.step_hint_requested": "New request. Start the review, then prepare a pricing proposal.",
   "detail.step_hint_under_review": "Prepare the pricing proposal below, then send it to the customer for approval.",
   "detail.step_hint_under_review_auto_start": "Prepare the pricing proposal below. The customer pre-authorized this — sending the proposal starts the work immediately, no separate approval needed.",
@@ -773,5 +776,8 @@
   "detail.complete_dialog_body_with_ticket": "This extra work has an operational ticket. Completing it here does not change that ticket: the ticket is what decides whether the work is done.",
   "detail.complete_dialog_billing": "Completing it counts for reporting and invoicing.",
   "detail.complete_dialog_confirm": "Complete",
-  "detail.complete_toast": "“{{title}}” is completed. No ticket was changed."
+  "detail.complete_toast": "“{{title}}” is completed. No ticket was changed.",
+  "detail.agreement_col_service": "Service",
+  "detail.agreement_col_qty": "Qty",
+  "detail.agreement_col_amount": "Amount"
 }
