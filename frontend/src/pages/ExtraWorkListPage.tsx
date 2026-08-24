@@ -30,7 +30,6 @@ import type {
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
-  TicketStatus,
 } from "../api/types";
 import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -38,13 +37,6 @@ import { isProviderManagementRole } from "../auth/permissions";
 import { ChoiceDialog } from "../components/ChoiceDialog";
 import { StatusTiles } from "../components/StatusTiles";
 import { FinancialStrip } from "../components/extra-work/FinancialStrip";
-import { TrackTabs } from "../components/extra-work/TrackTabs";
-import type { ExtraWorkTrack } from "../components/extra-work/TrackTabs";
-import { SpawnedTicketLinks } from "../components/extra-work/SpawnedTicketLinks";
-import {
-  extraWorkStatusLabelKey,
-  ticketStatusLabelKey,
-} from "../lib/enumLabels";
 import { EditModeToggle } from "../components/EditModeToggle";
 import { BulkPlanDialog } from "../components/extra-work/BulkPlanDialog";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
@@ -57,7 +49,6 @@ import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { SeriesHeaderRow } from "../components/extra-work/SeriesHeaderRow";
 import { foldSeries } from "../lib/extraWorkSeries";
-import { billedToKey } from "../lib/billedTo";
 import { isPriced, rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
@@ -211,59 +202,6 @@ const QUOTE_CHIP_LABEL: Readonly<Record<QuoteChipValue, string>> = {
 const QUOTE_TRACK_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkStatus>> =
   chipsFromMap(QUOTE_CHIP_ORDER, QUOTE_CHIP_OF, QUOTE_CHIP_LABEL);
 
-/** Sprint 181 §1/§2 — the Work started chips are TICKET states, because
- *  on that track the ticket is the only authority for how the work is
- *  going.
- *
- *  `NO_TICKET_STATUS` is the eleventh case that is not a `TicketStatus`:
- *  a row on this track whose `spawned_tickets` came back empty. The
- *  track is selected on the server's `has_operational_ticket`, which is
- *  resolved through the `Ticket.extra_work_request` FK, while the status
- *  is read off the serialized `spawned_tickets[0]` — two different
- *  reads, so "on this track but no status to show" is representable and
- *  therefore gets a bucket instead of vanishing from the counts. */
-const NO_TICKET_STATUS = "NO_TICKET_STATUS";
-type StartedStatus = TicketStatus | typeof NO_TICKET_STATUS;
-
-const STARTED_CHIP_ORDER = [
-  "OPEN",
-  "IN_PROGRESS",
-  "WAITING_CUSTOMER_APPROVAL",
-  "ON_HOLD",
-  "REJECTED",
-  "FINISHED",
-  "NO_TICKET",
-] as const;
-type StartedChipValue = (typeof STARTED_CHIP_ORDER)[number];
-
-const STARTED_CHIP_OF: Readonly<Record<StartedStatus, StartedChipValue>> = {
-  OPEN: "OPEN",
-  ACKNOWLEDGED: "OPEN",
-  IN_PROGRESS: "IN_PROGRESS",
-  WAITING_MANAGER_REVIEW: "IN_PROGRESS",
-  REOPENED_BY_ADMIN: "IN_PROGRESS",
-  WAITING_CUSTOMER_APPROVAL: "WAITING_CUSTOMER_APPROVAL",
-  ON_HOLD: "ON_HOLD",
-  REJECTED: "REJECTED",
-  APPROVED: "FINISHED",
-  CLOSED: "FINISHED",
-  CONVERTED_TO_EXTRA_WORK: "FINISHED",
-  [NO_TICKET_STATUS]: "NO_TICKET",
-};
-
-const STARTED_CHIP_LABEL: Readonly<Record<StartedChipValue, string>> = {
-  OPEN: "list.chip_ticket_open",
-  IN_PROGRESS: "list.chip_ticket_in_progress",
-  WAITING_CUSTOMER_APPROVAL: "list.chip_ticket_waiting_customer",
-  ON_HOLD: "common:ticket_status.on_hold",
-  REJECTED: "common:ticket_status.rejected",
-  FINISHED: "list.chip_ticket_finished",
-  NO_TICKET: "common:ticket_status.fallback",
-};
-
-const STARTED_TRACK_CHIPS: ReadonlyArray<ChipSpec<StartedStatus>> =
-  chipsFromMap(STARTED_CHIP_ORDER, STARTED_CHIP_OF, STARTED_CHIP_LABEL);
-
 /** "" = no chip selected (the All tile). A chip value is a GROUP key,
  *  not necessarily a raw enum member. */
 type StatusFilter = string;
@@ -271,19 +209,6 @@ type StatusFilter = string;
 /** W24-FX1 §2a — the residual chip's value. Deliberately not a status
  *  and not a chip key, so it can never collide with one. */
 const UNMATCHED_CHIP = "__UNMATCHED__";
-
-/** Sprint 181 §1 — the operational status of a row on the Work started
- *  track, read off its ticket. The lowest-id ticket is the spawned one
- *  (`build_ticket_map` picks the same row), and one ticket per Extra
- *  Work has been the rule since Sprint 6A, so this is a lookup rather
- *  than a reduction.
- *
- *  W24-FX1 §2a — returns `NO_TICKET_STATUS` rather than `null` for the
- *  empty case. `null` matched no chip and so was counted by ALLE and by
- *  nothing else; a named case gets a bucket like every other. */
-function operationalStatus(row: ExtraWorkRequestList): StartedStatus {
-  return row.spawned_tickets[0]?.status ?? NO_TICKET_STATUS;
-}
 
 /** Sprint 180 §1(b) — a CUSTOMER_APPROVED request with zero operational
  *  tickets. It stays on the Quote & price track (operationally nothing
@@ -549,13 +474,10 @@ export function ExtraWorkList({
   // so `rows` below is the FULL matching set regardless of how many pages
   // that takes, and filtering happens over the complete set, not one page.
   const [searchInput, setSearchInput] = useState("");
-  // Sprint 180 §1 — which of the two tracks is on screen. A VIEW, not a
-  // filter: one of the two is always selected, and each carries its own
-  // columns. Quote & price opens first because that is where work
-  // arrives and where somebody has to act on it. A deep link that lands
-  // on the wrong track is not left stranded — the empty state names the
-  // other one and offers the click (see the EmptyState `action` below).
-  const [track, setTrack] = useState<ExtraWorkTrack>("QUOTE");
+  // W-NAV1.2 — the Work started track (and its toggle) is gone from this
+  // page: started work lives on the Chargeable work list
+  // (/tickets/chargeable) now. This list only ever shows the Quote &
+  // price track, so there is no view state to hold here any more.
   // RF-18 (#107) — dashboard widgets deep-link with ?status=<EW status>;
   // read once at mount (validated), the chips own the state after.
   //
@@ -581,14 +503,6 @@ export function ExtraWorkList({
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
   const [categoryOptions, setCategoryOptions] =
     useState<ExtraWorkCategoryOptions>({ live: [], historical: [] });
-
-  // Server-side filters (M4): these drive the 2d list endpoint
-  // (?billing_period / ?invoice_status). Search / status / category stay
-  // client-side. "" = no billing-month filter.
-  const [billingMonth, setBillingMonth] = useState("");
-  const [invoiceStatus, setInvoiceStatus] = useState<
-    "ALL" | "completed" | "invoiced"
-  >("ALL");
 
   // Sprint 128 — provider label-cascade filters (Customer -> Building ->
   // Department -> Work Type), all four server-side (they compose in the
@@ -624,18 +538,12 @@ export function ExtraWorkList({
     workTypes: CustomerLabel[];
   } | null>(null);
 
-  // #108 Part F — the mark/clear-invoiced run moved to the Facturen
-  // page (owner decision); this list keeps the billing-month +
-  // invoice-status FILTERS and a pointer link to /invoices.
-
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setError("");
       try {
         const allRows = await listAllExtraWork({
-          billing_period: billingMonth || undefined,
-          invoice_status: invoiceStatus === "ALL" ? undefined : invoiceStatus,
           created_by:
             searchParams.get("mine") === "1" && me?.id ? me.id : undefined,
           request_intent:
@@ -664,8 +572,6 @@ export function ExtraWorkList({
       cancelled = true;
     };
   }, [
-    billingMonth,
-    invoiceStatus,
     searchParams,
     me?.id,
     customerFilter,
@@ -755,116 +661,71 @@ export function ExtraWorkList({
     };
   }, [customerFilter]);
 
-  // Sprint 180 §1 — the two tracks, split on the ONE question: has an
-  // operational ticket been born from this extra work? The answer comes
-  // from the server (`has_operational_ticket`, resolved through the
-  // canonical `Ticket.extra_work_request` FK — the same definition the
-  // invoice run uses), so this list cannot drift from the money.
-  const trackRows = useMemo(() => {
-    const quote: ExtraWorkRequestList[] = [];
-    const started: ExtraWorkRequestList[] = [];
-    for (const row of rows) {
-      (row.has_operational_ticket ? started : quote).push(row);
-    }
-    return { QUOTE: quote, STARTED: started };
-  }, [rows]);
-
-  const activeTrackRows = trackRows[track];
-  const isWorkStarted = track === "STARTED";
-  const otherTrack: ExtraWorkTrack = isWorkStarted ? "QUOTE" : "STARTED";
-
-  // Switching track is a VIEW change with two pieces of clean-up, and
-  // both belong in the event handler rather than an effect (syncing
-  // state through an effect body is the pattern CLAUDE.md bans).
-  const switchTrack = useCallback((value: ExtraWorkTrack) => {
-    setTrack(value);
-    // The two tracks hold different statuses almost by definition, so
-    // carrying "REQUESTED" onto Work started would show an empty table
-    // and read as "there is nothing here" rather than "you are still
-    // filtered".
-    //
-    // W1-C — this said `"ALL"`, and the All tile is `""`. `StatusFilter`
-    // is a bare `string`, so nothing caught it: picking either track set
-    // a filter value no chip owns, `chipMatches` matched nothing, the
-    // table emptied and NO tile lit up. Picking a track now selects All,
-    // which is the owner's "All has to stay lit" and also the only
-    // reading of this line that was ever intended — the comment above it
-    // already describes clearing the filter.
-    setStatusFilter("");
-    if (value === "QUOTE") {
-      // The two invoice filters have no control on this track, so they
-      // must not stay applied behind its back.
-      setBillingMonth("");
-      setInvoiceStatus("ALL");
-    }
-  }, []);
-
-  // §1(b) — approved-but-never-spawned rows, counted for the Quote &
-  // price tab's marker. They stay on this track (nothing operational has
-  // started) but they are a failure, not a state.
-  const spawnAnomalyCount = useMemo(
-    () => trackRows.QUOTE.filter(isSpawnAnomaly).length,
-    [trackRows],
+  // W-NAV1.2 — this list only shows the Quote & price side any more:
+  // requests with no operational ticket yet. The answer comes from the
+  // server (`has_operational_ticket`, resolved through the canonical
+  // `Ticket.extra_work_request` FK — the same definition the invoice run
+  // uses), so it cannot drift from the money. Started work (an
+  // operational ticket exists) lives on the Chargeable work list
+  // (/tickets/chargeable) instead.
+  const quoteRows = useMemo(
+    () => rows.filter((row) => !row.has_operational_ticket),
+    [rows],
   );
 
-  // Sprint 181 §1/§2 — the chips for the ACTIVE track, with their real
-  // counts. Which set is on screen is the same question as which status
-  // the rows are judged by, so both come from one place: on Quote &
-  // price the Extra Work's own status, on Work started the ticket's.
-  //
-  // Counts come from the track's rows, not from `visibleRows` — every
-  // chip but the active one would otherwise read zero — and not from
-  // the whole set, or a chip would promise rows that live on the other
-  // track (Sprint 180).
-  const chips = isWorkStarted ? STARTED_TRACK_CHIPS : QUOTE_TRACK_CHIPS;
+  /** How many of the loaded requests are NOT on this page because work
+   *  has started on them. Only used to offer the Chargeable work link
+   *  from the empty state — see the EmptyState `action` below. */
+  const startedElsewhereCount = rows.length - quoteRows.length;
+
+  // §1(b) — approved-but-never-spawned rows, counted for the marker
+  // beside the list. They stay on this track (nothing operational has
+  // started) but they are a failure, not a state.
+  const spawnAnomalyCount = useMemo(
+    () => quoteRows.filter(isSpawnAnomaly).length,
+    [quoteRows],
+  );
 
   const chipMatches = useCallback(
     (row: ExtraWorkRequestList, chipValue: string): boolean => {
-      const spec = (
-        chips as ReadonlyArray<ChipSpec<string>>
-      ).find((c) => c.value === chipValue);
+      const spec = QUOTE_TRACK_CHIPS.find((c) => c.value === chipValue);
       if (!spec) return false;
-      // W24-FX1 §2a — no `!== null` guard any more: `operationalStatus`
-      // answers `NO_TICKET_STATUS` instead of `null`, so every row has a
-      // status string and every status string has a chip.
-      const status = isWorkStarted ? operationalStatus(row) : row.status;
-      return spec.statuses.includes(status);
+      return (spec.statuses as readonly string[]).includes(row.status);
     },
-    [chips, isWorkStarted],
+    [],
   );
 
   // W24-FX1 §2a — counted by BUCKETING each row once, not by running a
   // filter per chip. Same numbers when every row matches, but this shape
-  // can also answer "how many matched nothing", and the two Records
-  // above guarantee that answer is zero for every status the compiler
-  // knows about. `unmatched` covers only what the compiler cannot see:
-  // a status string the server invented that is not in the union yet.
-  // It is surfaced rather than absorbed — an uncounted row is the defect
+  // can also answer "how many matched nothing", and the Record above
+  // guarantees that answer is zero for every status the compiler knows
+  // about. `unmatched` covers only what the compiler cannot see: a
+  // status string the server invented that is not in the union yet. It
+  // is surfaced rather than absorbed — an uncounted row is the defect
   // this whole block exists to remove, and hiding the residual would
   // reintroduce it one level down.
   /** The one chip a row belongs to, or `null` when it belongs to none.
-   *  With the two Records exhaustive over their unions, `null` is only
-   *  reachable if the server sends a status string the client's union
-   *  does not have yet. */
+   *  With the Record exhaustive over its union, `null` is only reachable
+   *  if the server sends a status string the client's union does not
+   *  have yet. */
   const rowChipValue = useCallback(
     (row: ExtraWorkRequestList): string | null =>
-      (chips as ReadonlyArray<ChipSpec<string>>).find((chip) =>
-        chipMatches(row, chip.value),
-      )?.value ?? null,
-    [chips, chipMatches],
+      QUOTE_TRACK_CHIPS.find((chip) => chipMatches(row, chip.value))
+        ?.value ?? null,
+    [chipMatches],
   );
 
   const { statusCounts, unmatchedCount } = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const chip of chips) counts[chip.value] = 0;
+    for (const chip of QUOTE_TRACK_CHIPS) counts[chip.value] = 0;
     let unmatched = 0;
-    for (const row of activeTrackRows) {
+    for (const row of quoteRows) {
       const value = rowChipValue(row);
       if (value === null) unmatched += 1;
       else counts[value] += 1;
     }
     return { statusCounts: counts, unmatchedCount: unmatched };
-  }, [activeTrackRows, chips, rowChipValue]);
+  }, [quoteRows, rowChipValue]);
 
   // The list's own money total — computed from the full loaded set (not
   // the filtered view, and not the active track), which is what the
@@ -893,9 +754,8 @@ export function ExtraWorkList({
 
   const visibleRows = useMemo(() => {
     const needle = searchInput.trim().toLowerCase();
-    const filtered = activeTrackRows.filter((r) => {
-      // Sprint 181 §2 — a chip stands for a GROUP of statuses, and on
-      // the Work started track for a group of TICKET statuses.
+    const filtered = quoteRows.filter((r) => {
+      // Sprint 181 §2 — a chip stands for a GROUP of statuses.
       // W24-FX1 §2a — the residual chip selects exactly the rows no chip
       // claimed, so clicking it shows them instead of emptying the table.
       if (statusFilter === UNMATCHED_CHIP) {
@@ -934,7 +794,7 @@ export function ExtraWorkList({
       return deadlineSort === "asc" ? order : -order;
     });
   }, [
-    activeTrackRows,
+    quoteRows,
     chipMatches,
     rowChipValue,
     searchInput,
@@ -1067,66 +927,6 @@ export function ExtraWorkList({
     }
   }
 
-  // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
-  // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
-  // BOM so Excel reads Dutch characters, CRLF line endings, quoted fields.
-  function exportCsv() {
-    const esc = (v: string | null | undefined) =>
-      `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const headers = [
-      t("list.column_title"),
-      t("list.column_customer"),
-      t("list.column_building"),
-      t("list.column_status"),
-      t("list.export_col_subtotal"),
-      t("list.export_col_vat"),
-      t("list.column_total"),
-      t("list.column_billing"),
-      t("list.export_col_invoice_date"),
-      t("list.column_requested"),
-    ];
-    const lines = [headers.map(esc).join(",")];
-    for (const row of visibleRows) {
-      // Earned (final-with-quoted-fallback) so the export matches the on-screen
-      // Total; the three columns stay coherent (subtotal + vat == total).
-      const amounts = rowAmounts(row);
-      lines.push(
-        [
-          row.title,
-          row.customer_name,
-          row.building_name,
-          // Sprint 181 §1 — the export carries the SAME status the
-          // screen does. An export that disagreed with the list it was
-          // taken from would be the drift this sprint removes, in a
-          // spreadsheet.
-          isWorkStarted
-            ? t(ticketStatusLabelKey(operationalStatus(row) ?? "OPEN"), {
-                ns: "common",
-              })
-            : t(extraWorkStatusLabelKey(row.status), { ns: "common" }),
-          amounts.subtotal.toFixed(2),
-          amounts.vat.toFixed(2),
-          amounts.total.toFixed(2),
-          row.is_invoiced
-            ? t("list.billing_invoiced")
-            : t("list.billing_to_invoice"),
-          row.invoice_date ? formatDate(row.invoice_date) : "",
-          formatDate(row.requested_at),
-        ]
-          .map(esc)
-          .join(","),
-      );
-    }
-    const csv = "\uFEFF" + lines.join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `extra-work_${billingMonth}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   // Sprint 128 — the child options to OFFER right now, guarded inline so a set
   // fetched for a previously chosen customer is never shown against the
   // current one (and TS narrows `customerScoped`).
@@ -1191,32 +991,14 @@ export function ExtraWorkList({
                       <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
                     </td>
                     <td>
-                      {/* Sprint 181 §1 — ONE status per row, and on the
-                          Work started track it is the TICKET's.
-                          The owner clicked an Extra Work reading
-                          "Completed", scrolled down, and its ticket read
-                          "Open". Both were "true"; they were two copies
-                          of one fact. Once a ticket exists it is the
-                          only authority for how the work is going, so
-                          the pricing-stage status does not appear here
-                          at all — not as a column, not as a smaller
-                          second line. That is also what fixes the row
-                          that read "Customer approved" in a track full
-                          of started work: it now reads the ticket's
-                          "Open", i.e. approved, not started. */}
-                      {isWorkStarted ? (
-                        <StatusBadge
-                          status={{
-                            kind: "ticket",
-                            value: operationalStatus(row) ?? "OPEN",
-                          }}
-                          testId={`ew-operational-status-${row.id}`}
-                        />
-                      ) : (
-                        <StatusBadge
-                          status={{ kind: "extra-work", value: row.status }}
-                        />
-                      )}
+                      {/* W-NAV1.2 — ONE status per row, the Extra Work's
+                          own. This list is the quote track only now, so
+                          there is no ticket to read a status off: a row
+                          with an operational ticket is not on this page
+                          at all, it is on Chargeable work. */}
+                      <StatusBadge
+                        status={{ kind: "extra-work", value: row.status }}
+                      />
                       {/* Sprint 180 §1(b) — approved, but the spawn that
                           is supposed to be synchronous with approval
                           produced no ticket. The row belongs on this
@@ -1256,45 +1038,11 @@ export function ExtraWorkList({
                         </span>
                       )}
                     </td>
-                    {isWorkStarted && (
-                      <td data-testid={`ew-ticket-cell-${row.id}`}>
-                        {/* Sprint 181 §1b — one renderer for the ticket
-                            numbers, with a real separator. Sprint 180
-                            leaned on a margin here and joined with ", "
-                            in the mobile card below; two tickets rendered
-                            as `TCK-...207TCK-...208`. */}
-                        <SpawnedTicketLinks tickets={row.spawned_tickets} />
-                      </td>
-                    )}
-                    {isWorkStarted && isProvider && (
-                      <td>
-                        {row.is_invoiced ? (
-                          <span className="badge badge-approved">
-                            {t("list.billing_invoiced")}
-                          </span>
-                        ) : (
-                          <span className="badge badge-normal">
-                            {t("list.billing_to_invoice")}
-                          </span>
-                        )}
-                        {row.invoice_date && (
-                          <div
-                            style={{
-                              fontSize: "0.8em",
-                              marginTop: 2,
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            {formatDate(row.invoice_date)}
-                          </div>
-                        )}
-                      </td>
-                    )}
-                    {isWorkStarted && (
-                      <td data-testid={`ew-billed-to-cell-${row.id}`}>
-                        {t(billedToKey(row.billed_to))}
-                      </td>
-                    )}
+                    {/* W-NAV1.2 — the ticket / billing / billed-to
+                        columns are gone with the Work started track that
+                        was the only place they rendered. A row on this
+                        page has no operational ticket by definition, so
+                        none of the three has anything to say here. */}
                     <td>{formatDate(row.requested_at)}</td>
                     <td className="td-date">
                       {row.deadline ? formatDate(row.deadline) : (
@@ -1447,62 +1195,44 @@ export function ExtraWorkList({
       <FinancialStrip customerId={customerId} />
 
       {/* W2-C — ONE band, not three stacked rows.
-          The track control, the sentence explaining the track, and the
-          status chips were three separate blocks of chrome doing one
-          job: "which slice of the list am I looking at". Measured at
-          1440x1000 they cost 58 + 19 + 55px plus the gaps between them,
-          and read as two competing rows of identical tiles. Same three
-          controls, same counts, same filtering — one bordered band, the
-          coarse question (which track) as a segmented control on the
-          left with its sentence beside it, and the fine one (which
-          status) as chips underneath.
+          W-NAV1.2 — and now one band with ONE control in it. The track
+          toggle is gone: this page is the quote track, full stop, and
+          started work is the Chargeable work list's job. The sentence
+          that explained which track you were on stays, because it still
+          says what this list holds; it is no longer a choice, so it is
+          no longer beside a control.
 
-          Sprint 180 §1 — the two tracks. An extra work has a commercial
-          life and an operational one; this is which of the two you are
-          looking at, and it decides the columns below. Above the chips
-          because it is the coarser question: first WHICH life, then
-          which step within it.
+          The spawn-anomaly count rode on the removed QUOTE tab as a
+          marker. It is NOT dropped with the tab — an approved request
+          whose ticket never spawned is a failure somebody has to go and
+          fix, and per-row markers alone mean scrolling to find them. It
+          sits beside the sentence now, same styling, same title, same
+          two existing keys.
 
           Sprint 159 §3 / 180 / 181 §2 — the chips: the chip IS the
           filter, it carries its own count, the active one is visibly
-          selected; counts are per TRACK so a chip never promises rows
-          that live on the other one; and the set changes meaning with
-          the track (commercial states on Quote & price, TICKET states
-          on Chargeable work). */}
+          selected. */}
       <div className="ew-list-scope" data-testid="extra-work-scope-band">
         <div className="ew-list-scope-top">
-          <div className="ew-list-scope-tracks">
-            <TrackTabs
-              tabs={[
-                {
-                  value: "QUOTE",
-                  label: t("list.track_quote"),
-                  count: trackRows.QUOTE.length,
-                  anomalyCount: spawnAnomalyCount,
-                  anomalyTitle: t("list.track_anomaly_title"),
-                },
-                {
-                  value: "STARTED",
-                  label: t("list.track_started"),
-                  count: trackRows.STARTED.length,
-                },
-              ]}
-              active={track}
-              onChange={switchTrack}
-              testIdPrefix="extra-work-track"
-            />
-          </div>
           <p className="ew-list-scope-hint muted small">
-            {track === "QUOTE"
-              ? t("list.track_quote_hint")
-              : t("list.track_started_hint")}
+            {t("list.track_quote_hint")}
+            {spawnAnomalyCount > 0 && (
+              <span
+                className="cell-tag cell-tag-rejected"
+                style={{ marginLeft: 6 }}
+                title={t("list.track_anomaly_title")}
+                data-testid="extra-work-spawn-anomaly-count"
+              >
+                {t("list.track_anomaly_marker")} {spawnAnomalyCount}
+              </span>
+            )}
           </p>
         </div>
 
         <div className="ew-list-scope-chips">
           <StatusTiles
             tiles={[
-              ...chips.map((chip) => ({
+              ...QUOTE_TRACK_CHIPS.map((chip) => ({
                 value: chip.value,
                 label: t(chip.labelKey),
                 count: statusCounts[chip.value] ?? 0,
@@ -1515,11 +1245,7 @@ export function ExtraWorkList({
                 ? [
                     {
                       value: UNMATCHED_CHIP,
-                      label: t(
-                        isWorkStarted
-                          ? "common:ticket_status.fallback"
-                          : "common:extra_work_status.fallback",
-                      ),
+                      label: t("common:extra_work_status.fallback"),
                       count: unmatchedCount,
                     },
                   ]
@@ -1527,7 +1253,7 @@ export function ExtraWorkList({
             ]}
             active={statusFilter}
             onChange={setStatusFilter}
-            totalCount={activeTrackRows.length}
+            totalCount={quoteRows.length}
             testIdPrefix="extra-work-status"
           />
         </div>
@@ -1710,70 +1436,12 @@ export function ExtraWorkList({
                 ))}
               </select>
             </div>
-            {/* Sprint 180 §1 — the two INVOICE filters belong to the
-                Work started track for the same reason the invoice
-                column does: a request with no operational ticket cannot
-                be invoiceable yet, so offering to filter it by billing
-                month invites a question the data cannot answer. Both
-                are CLEARED when the operator switches back (see the
-                TrackTabs handler) — a hidden filter that is still
-                applied is worse than no filter. */}
-            {isWorkStarted && (
-            <div className="filter-field">
-              <span className="filter-label">
-                {t("list.filter_billing_month")}
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  gap: 6,
-                  alignItems: "center",
-                }}
-              >
-                <input
-                  className="filter-control"
-                  type="month"
-                  value={billingMonth}
-                  onChange={(event) => setBillingMonth(event.target.value)}
-                  data-testid="extra-work-list-billing-month"
-                />
-                {billingMonth && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setBillingMonth("")}
-                  >
-                    {t("list.filter_billing_month_clear")}
-                  </button>
-                )}
-              </span>
-            </div>
-            )}
-            {isWorkStarted && (
-            <div className="filter-field">
-              <span className="filter-label">
-                {t("list.filter_invoice_status")}
-              </span>
-              <select
-                className="filter-control"
-                value={invoiceStatus}
-                onChange={(event) =>
-                  setInvoiceStatus(
-                    event.target.value as "ALL" | "completed" | "invoiced",
-                  )
-                }
-                data-testid="extra-work-list-invoice-status"
-              >
-                <option value="ALL">{t("list.invoice_status_all")}</option>
-                <option value="completed">
-                  {t("list.invoice_status_completed")}
-                </option>
-                <option value="invoiced">
-                  {t("list.invoice_status_invoiced")}
-                </option>
-              </select>
-            </div>
-            )}
+            {/* W-NAV1.2 — the two INVOICE filters are gone with the
+                Work started track that was the only place they
+                rendered. A request with no operational ticket cannot be
+                invoiceable yet, so on this page they could only ever
+                ask a question the data cannot answer. They live on the
+                Chargeable work list and on /invoices. */}
           </>
         )}
         {/* Sprint 138 §6 — the cascade hint used to be its own
@@ -1791,83 +1459,44 @@ export function ExtraWorkList({
         )}
       </div>
 
-      {/* M4 toolbar, reduced by #108 Part F — the mark/clear-invoiced
-          run lives on the Facturen page now; a muted pointer replaces
-          the buttons. The month label + CSV export stay. */}
-      {isProvider && billingMonth && (
-        <div
-          className="card"
-          data-testid="extra-work-list-invoice-run"
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            gap: 12,
-            marginBottom: 16,
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>
-            {t("list.invoice_run_label", { month: billingMonth })}
-          </span>
-          <span className="muted small">
-            {t("list.invoice_run_pointer_prefix")}{" "}
-            <Link to="/invoices" className="link">
-              {t("list.invoice_run_pointer_link")}
-            </Link>
-          </span>
-          <div style={{ marginLeft: "auto" }}>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={visibleRows.length === 0}
-              onClick={exportCsv}
-              data-testid="extra-work-list-export-csv"
-            >
-              {t("list.export_csv")}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* W-NAV1.2 — the M4 invoice-run toolbar is gone. It only ever
+          rendered while a billing-month filter was set, and that filter
+          left with the Work started track; the CSV export it carried
+          went with it, since it exported the invoice columns this page
+          no longer has. The Facturen page (/invoices) owns that run. */}
 
       {/* Empty / list.
-          Sprint 180 §1 — the TRACK is a narrowing an operator did not
-          necessarily choose: a dashboard deep link (?status=COMPLETED)
-          lands on Quote & price, where by definition almost nothing
-          with that status lives. Rather than let the page read as
-          "there is nothing", the action below says how many rows are on
-          the other track and offers the one click. */}
+          W-NAV1.2 — the rescue the old track-switch button provided is
+          kept, pointed at its new home. A dashboard deep link
+          (?status=COMPLETED) still lands here, where by definition
+          almost nothing with that status lives, so rather than read as
+          "there is nothing" the page says how many requests have
+          started work and offers the one click to Chargeable work.
+          Existing keys only: `list.track_switch_to` with the sidebar's
+          own `nav.chargeable_work` as the destination name. */}
       {!loading && visibleRows.length === 0 && !error && (
         <EmptyState
           icon={Sparkles}
           title={
-            billingMonth
-              ? t("list.empty_billing_month")
-              : rows.length === 0
-                ? t("list.empty_state")
-                : t("list.empty_filtered_title")
+            quoteRows.length === 0
+              ? t("list.empty_state")
+              : t("list.empty_filtered_title")
           }
           description={
-            billingMonth || rows.length === 0
-              ? undefined
-              : t("list.empty_filtered_desc")
+            quoteRows.length === 0 ? undefined : t("list.empty_filtered_desc")
           }
           action={
-            trackRows[otherTrack].length > 0 ? (
-              <button
-                type="button"
+            startedElsewhereCount > 0 ? (
+              <Link
+                to="/tickets/chargeable"
                 className="btn btn-secondary btn-sm"
-                onClick={() => switchTrack(otherTrack)}
                 data-testid="extra-work-track-switch"
               >
                 {t("list.track_switch_to", {
-                  count: trackRows[otherTrack].length,
-                  track: t(
-                    otherTrack === "QUOTE"
-                      ? "list.track_quote"
-                      : "list.track_started",
-                  ),
+                  count: startedElsewhereCount,
+                  track: t("nav.chargeable_work", { ns: "common" }),
                 })}
-              </button>
+              </Link>
             ) : undefined
           }
           testId="extra-work-list-empty"
@@ -1982,18 +1611,10 @@ export function ExtraWorkList({
                   <th style={{ textAlign: "right" }}>
                     {t("list.column_total")}
                   </th>
-                  {/* Sprint 180 §1/§2/§3 — the three columns that only
-                      make sense once work has actually started. The
-                      invoice column in particular: a row with no ticket
-                      CANNOT be invoiceable yet, so showing invoice state
-                      on the Quote & price track is exactly what confused
-                      people. It is not hidden there, it does not apply
-                      there. */}
-                  {isWorkStarted && <th>{t("list.column_ticket")}</th>}
-                  {isWorkStarted && isProvider && (
-                    <th>{t("list.column_billing")}</th>
-                  )}
-                  {isWorkStarted && <th>{t("list.column_billed_to")}</th>}
+                  {/* W-NAV1.2 — the ticket / billing / billed-to columns
+                      are gone with the Work started track. They only
+                      make sense once work has actually started, and a
+                      row with started work is not on this page. */}
                   <th>{t("list.column_requested")}</th>
                   {/* Sprint 174 §1 — the DEADLINE, sortable. Sprint 173
                       added the field and the API filter; nothing on any
@@ -2077,18 +1698,9 @@ export function ExtraWorkList({
                       {/* Sprint 181 §1 — the card carries the same one
                           status the table row does, from the same
                           authority. */}
-                      {isWorkStarted ? (
-                        <StatusBadge
-                          status={{
-                            kind: "ticket",
-                            value: operationalStatus(row) ?? "OPEN",
-                          }}
-                        />
-                      ) : (
-                        <StatusBadge
-                          status={{ kind: "extra-work", value: row.status }}
-                        />
-                      )}
+                      <StatusBadge
+                        status={{ kind: "extra-work", value: row.status }}
+                      />
                       <RouteBadge value={row.routing_decision} />
                       {isSpawnAnomaly(row) && (
                         <span
@@ -2134,41 +1746,9 @@ export function ExtraWorkList({
                         )}
                       </dd>
                     </div>
-                    {/* Sprint 180 — the mobile card carries exactly the
-                        columns the table on this track carries. */}
-                    {isWorkStarted && (
-                      <div className="admin-card-meta-row">
-                        <dt>{t("list.column_ticket")}</dt>
-                        <dd>
-                          <SpawnedTicketLinks tickets={row.spawned_tickets} />
-                        </dd>
-                      </div>
-                    )}
-                    {isWorkStarted && (
-                      <div className="admin-card-meta-row">
-                        <dt>{t("list.column_billed_to")}</dt>
-                        <dd>{t(billedToKey(row.billed_to))}</dd>
-                      </div>
-                    )}
-                    {isWorkStarted && isProvider && (
-                      <div className="admin-card-meta-row">
-                        <dt>{t("list.column_billing")}</dt>
-                        <dd>
-                          {row.is_invoiced ? (
-                            <span className="badge badge-approved">
-                              {t("list.billing_invoiced")}
-                            </span>
-                          ) : (
-                            <span className="badge badge-normal">
-                              {t("list.billing_to_invoice")}
-                            </span>
-                          )}
-                          {row.invoice_date
-                            ? ` · ${formatDate(row.invoice_date)}`
-                            : ""}
-                        </dd>
-                      </div>
-                    )}
+                    {/* W-NAV1.2 — the mobile card carries exactly the
+                        columns the table carries; the ticket / billed-to
+                        / billing rows left with the Work started track. */}
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_requested")}</dt>
                       <dd>{formatDate(row.requested_at)}</dd>

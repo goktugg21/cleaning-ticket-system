@@ -314,7 +314,7 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.customer_submenu.back")}
               </NavLink>
-              <div className="nav-group-label" style={{ marginTop: 8 }}>
+              <div className="nav-group-label">
                 {t("nav.customers")}
               </div>
               <NavLink
@@ -546,6 +546,7 @@ export function AppShell({ children }: AppShellProps) {
               ) : (
                 <NavLink
                   to="/tickets"
+                  end
                   className={navClass}
                   data-testid="sidebar-tickets"
                 >
@@ -555,23 +556,17 @@ export function AppShell({ children }: AppShellProps) {
                   {t("nav.tickets")}
                 </NavLink>
               )}
-              {/* Sprint 181 §5 — chargeable work, as its own entry under
-                  Tickets. A CHILD row, because that is what it is: the
-                  same tickets, narrowed to the ones born from an Extra
-                  Work. Provider-side only — a customer's meldingen list
-                  is not the place to slice our billing pipeline. */}
-              {!isCustomerUser(me?.role) && (
-                <NavLink
-                  to="/tickets/chargeable"
-                  className={navChildClass}
-                  data-testid="sidebar-chargeable-work"
-                >
-                  <span className="nav-icon">
-                    <BadgeEuro size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.chargeable_work")}
-                </NavLink>
-              )}
+              {/* W-NAV1.1 — the Chargeable work entry that stood here as
+                  a child of Tickets is GONE. Sprint 181 §5 put it here;
+                  W-NAV1 then gave the Extra Work folder a second door
+                  onto the same route, and two entries for one page in
+                  one sidebar is one too many. The Extra Work folder's
+                  entry is the one door now.
+
+                  The ROUTE is untouched — /tickets/chargeable still
+                  resolves, the folder entry points at it, and so does
+                  the customer-scoped submenu's own Chargeable work
+                  entry. Only this nav row went. */}
               {canAccessAgenda(me?.role) && (
                 <NavLink
                   to="/agenda"
@@ -631,10 +626,27 @@ export function AppShell({ children }: AppShellProps) {
                   logic — IA only. */}
               {canAccessExtraWork(me?.role) && (
                 <>
+                  {/* W-NAV1.4 — the group row is a `nav-item` like every
+                      other sidebar row, plus TWO modifiers, and no inline
+                      styles: `nav-item-group` carries what a <button>
+                      needs that an <a> does not (full width, left-aligned
+                      text), and `nav-item-group-current` is the
+                      "the page you are on lives in here" state.
+
+                      That second state is deliberately NOT `.active`.
+                      `.active` is what a lit nav ENTRY looks like, and
+                      while the group is open its own child carries it —
+                      two rows in the same accent, one of which is not a
+                      destination, is the thing that read wrong. The
+                      group modifier tints the label only: it says
+                      "in here" without competing with the one row that
+                      says "here". */}
                   <button
                     type="button"
                     className={
-                      extraWorkChildActive ? "nav-item active" : "nav-item"
+                      extraWorkChildActive
+                        ? "nav-item nav-item-group nav-item-group-current"
+                        : "nav-item nav-item-group"
                     }
                     aria-expanded={extraWorkOpen}
                     aria-label={t(
@@ -649,14 +661,16 @@ export function AppShell({ children }: AppShellProps) {
                     <span className="nav-icon">
                       <Receipt size={16} strokeWidth={2} />
                     </span>
-                    <span style={{ flex: 1, textAlign: "left" }}>
+                    <span className="nav-item-group-label">
                       {t("nav.extra_work")}
                     </span>
-                    {extraWorkOpen ? (
-                      <ChevronDown size={14} strokeWidth={2.4} />
-                    ) : (
-                      <ChevronRight size={14} strokeWidth={2.4} />
-                    )}
+                    <span className="nav-item-group-chevron">
+                      {extraWorkOpen ? (
+                        <ChevronDown size={14} strokeWidth={2.4} />
+                      ) : (
+                        <ChevronRight size={14} strokeWidth={2.4} />
+                      )}
+                    </span>
                   </button>
                   {extraWorkOpen && (
                     <>
@@ -673,7 +687,7 @@ export function AppShell({ children }: AppShellProps) {
                         data-testid="sidebar-extra-work-quote"
                       >
                         <span className="nav-icon">
-                          <Receipt size={15} strokeWidth={2} />
+                          <Receipt size={16} strokeWidth={2} />
                         </span>
                         {t("nav.extra_work_quote")}
                       </NavLink>
@@ -693,7 +707,7 @@ export function AppShell({ children }: AppShellProps) {
                           data-testid="sidebar-extra-work-chargeable"
                         >
                           <span className="nav-icon">
-                            <BadgeEuro size={15} strokeWidth={2} />
+                            <BadgeEuro size={16} strokeWidth={2} />
                           </span>
                           {t("nav.chargeable_work")}
                         </NavLink>
@@ -701,11 +715,12 @@ export function AppShell({ children }: AppShellProps) {
                       {canAccessPlannedWork(me?.role) && (
                         <NavLink
                           to="/planned-work"
+                          end
                           className={navChildClass}
                           data-testid="sidebar-planned-work"
                         >
                           <span className="nav-icon">
-                            <CalendarClock size={15} strokeWidth={2} />
+                            <CalendarClock size={16} strokeWidth={2} />
                           </span>
                           {t("nav.planned_work")}
                         </NavLink>
@@ -715,11 +730,19 @@ export function AppShell({ children }: AppShellProps) {
                           customer-scoped sidebar already uses for a
                           labelled subsection (`nav-group-label` +
                           `nav-item-child`) rather than adding a new
-                          indent level or a new CSS pattern. */}
-                      <div
-                        className="nav-group-label"
-                        style={{ marginTop: 4 }}
-                      >
+                          indent level or a new CSS pattern.
+
+                          W-NAV1.4 — and now with the SAME rhythm too.
+                          The ad-hoc `marginTop: 4` made this the one
+                          section header in the sidebar spaced
+                          differently from OPERATIONS and ADMIN; that
+                          8px now lives in `.nav-group-label` itself, so
+                          no consumer sets it inline and none can drift.
+                          `-sub` is a MODIFIER that changes the indent
+                          and nothing else, so the header lines up with
+                          the children it heads while keeping every
+                          other section header's type treatment. */}
+                      <div className="nav-group-label nav-group-label-sub">
                         {t("nav.forms_group")}
                       </div>
                       {/* Sprint 155 §1 — a nav entry for a route that
@@ -733,7 +756,7 @@ export function AppShell({ children }: AppShellProps) {
                         data-testid="sidebar-extra-work-new"
                       >
                         <span className="nav-icon">
-                          <FilePlus2 size={15} strokeWidth={2} />
+                          <FilePlus2 size={16} strokeWidth={2} />
                         </span>
                         {t("nav.extra_work_request")}
                       </NavLink>
@@ -743,7 +766,7 @@ export function AppShell({ children }: AppShellProps) {
                         data-testid="sidebar-request-quote"
                       >
                         <span className="nav-icon">
-                          <BadgeEuro size={15} strokeWidth={2} />
+                          <BadgeEuro size={16} strokeWidth={2} />
                         </span>
                         {t("nav.request_quote")}
                       </NavLink>
@@ -759,7 +782,7 @@ export function AppShell({ children }: AppShellProps) {
                           data-testid="sidebar-recurring-work-new"
                         >
                           <span className="nav-icon">
-                            <CalendarClock size={15} strokeWidth={2} />
+                            <CalendarClock size={16} strokeWidth={2} />
                           </span>
                           {t("nav.recurring_work_new")}
                         </NavLink>
@@ -778,6 +801,7 @@ export function AppShell({ children }: AppShellProps) {
                 canAccessPlannedWork(me?.role) && (
                   <NavLink
                     to="/planned-work"
+                    end
                     className={navClass}
                     data-testid="sidebar-planned-work"
                   >
@@ -833,7 +857,7 @@ export function AppShell({ children }: AppShellProps) {
 
               {canAccessAdminArea(me?.role) && (
                 <>
-                  <div className="nav-group-label" style={{ marginTop: 8 }}>
+                  <div className="nav-group-label">
                     {t("nav.admin_group")}
                   </div>
                   <NavLink to="/admin/companies" className={navClass}>

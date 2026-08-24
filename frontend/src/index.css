@@ -659,7 +659,21 @@ p { line-height: 1.6; }
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--shell-faint);
+  /* W-NAV1.4 — the rhythm that used to be an inline `marginTop` on each
+     consumer. Three headers set it by hand (OPERATIONS not at all, ADMIN
+     and the customer submenu 8, FORMS 4), so the one section header
+     inside the Extra Work folder sat tighter than every other. One rule,
+     no inline overrides, nothing left to drift. */
+  margin-top: 8px;
 }
+/* The first header in a nav already has the list's own 12px top padding
+   above it; 8 more would push the whole menu down for nothing. */
+.sidebar-nav > .nav-group-label:first-child { margin-top: 0; }
+/* A MODIFIER, like `.nav-item-child`: same type treatment as every other
+   section header, indented to line up with the child rows it heads. The
+   38px matches `.nav-item-child` exactly — one indent in this sidebar,
+   not two. */
+.nav-group-label-sub { padding-left: 38px; }
 .nav-item {
   position: relative;
   display: flex;
@@ -719,6 +733,40 @@ p { line-height: 1.6; }
   font-size: 12.5px;
   height: 36px;
 }
+
+/* W-NAV1.4 — the disclosure row that opens a nav group.
+   Also a MODIFIER on `.nav-item`, for the same reason: the group row is
+   a <button> where every neighbour is an <a>, and these are exactly the
+   properties a button needs to sit in the row like one — nothing about
+   colour, spacing or state is restated here. */
+.nav-item-group {
+  width: 100%;
+  text-align: left;
+}
+.nav-item-group-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-item-group-chevron {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--shell-faint);
+}
+/* "The page you are on lives in this group" — NOT `.active`.
+   `.active` is the filled background plus the accent left border, and
+   while the group is open its own child row is already carrying it. Two
+   rows in that treatment, one of which is not a destination, is what
+   read as a broken highlight. This tints the label instead: present
+   enough to find a collapsed group, quiet enough that the lit child is
+   unambiguously the one you are on. */
+.nav-item-group-current {
+  color: #fff;
+}
+.nav-item-group-current .nav-item-group-chevron { color: var(--shell-accent); }
 .nav-icon {
   width: 16px; height: 16px;
   flex-shrink: 0;
