@@ -31,10 +31,23 @@ interface WorkerHoursRow {
   place: string | null;
   action: string | null;
   debtor: string | null;
-  is_authorised: boolean;
+  // W-HR1 §5 — `is_authorised` (MACHT) and `travel_costs` are NOT
+  // declared here, and the two columns that printed them are gone.
+  //
+  // They were WRITE-ORPHANS: no screen, no import and no job in this
+  // system ever sets either one, so both could only ever render as
+  // "no" and an em dash — a column of nothing, in a report an
+  // accountant reads as data. `worker_hours.missing_columns` under the
+  // table already listed authorisation and travel costs among the
+  // things the reference report has and this one does not, so the
+  // table and its own footnote contradicted each other.
+  //
+  // The BACKEND fields are untouched: the serializer may keep sending
+  // them, and the day somebody actually writes an authorisation is the
+  // day the column comes back. (The MACHT question itself is parked
+  // with the owner's father.)
   hour_type_code: string | null;
   contracted_hours: string | null;
-  travel_costs: string | null;
   building_id: number | null;
   building_name: string | null;
   hour_type_id: number;
@@ -297,13 +310,11 @@ export function WorkerHoursView() {
               <th>{t("worker_hours.col_place")}</th>
               <th>{t("worker_hours.col_action")}</th>
               <th>{t("worker_hours.col_debtor")}</th>
-              <th>{t("worker_hours.col_authorised")}</th>
               <th>{t("worker_hours.col_hour_code")}</th>
               <th>{t("worker_hours.col_hour_type")}</th>
               <th className="contract-num">
                 {t("worker_hours.col_contracted")}
               </th>
-              <th className="contract-num">{t("worker_hours.col_travel")}</th>
               {DAYS.map((day) => (
                 <th key={day} className="contract-num">
                   {t(`common:contract_hours.day_${day}`)}
@@ -332,13 +343,6 @@ export function WorkerHoursView() {
                 <td>{dash(row.place)}</td>
                 <td>{dash(row.action)}</td>
                 <td>{dash(row.debtor)}</td>
-                <td>
-                  {row.is_authorised ? (
-                    t("worker_hours.yes")
-                  ) : (
-                    <span className="muted-empty">—</span>
-                  )}
-                </td>
                 <td>{dash(row.hour_type_code)}</td>
                 <td>
                   {hourTypeLabelFrom(
@@ -348,7 +352,6 @@ export function WorkerHoursView() {
                   )}
                 </td>
                 <td className="contract-num">{dash(row.contracted_hours)}</td>
-                <td className="contract-num">{dash(row.travel_costs)}</td>
                 {DAYS.map((day) => (
                   <td key={day} className="contract-num">
                     {row[day]}
@@ -361,7 +364,7 @@ export function WorkerHoursView() {
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={23} className="muted">
+                <td colSpan={21} className="muted">
                   {t("worker_hours.empty")}
                 </td>
               </tr>
