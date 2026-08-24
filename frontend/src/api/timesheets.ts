@@ -227,17 +227,6 @@ export async function saveWeekGrid(payload: {
 // Week locks
 // ---------------------------------------------------------------------------
 
-export async function listWeekLocks(params: {
-  company?: number | "";
-  iso_year?: number;
-}): Promise<WeekLock[]> {
-  const response = await api.get<PaginatedResponse<WeekLock>>(
-    "/timesheets/weeks/",
-    { params: cleanParams(params) },
-  );
-  return response.data.results;
-}
-
 /**
  * Ask about ONE week. The list cannot answer this: absence of a lock
  * row means OPEN, so an empty week appears in neither collection and a

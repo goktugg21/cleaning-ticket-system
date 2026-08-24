@@ -104,23 +104,23 @@ import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
 // from its main entry, so route-level splitting is the lever available
 // for keeping it out of the initial bundle.
 //
-// Sprint 152.2 — two claims this comment used to make are no longer
-// true, and are corrected rather than left to mislead:
+// Sprint 152.2 recorded TWO corrections here. One of them has since
+// expired and is removed rather than left to mislead in its turn:
+// `HoursCharts` (the Uren Overview tab) was named as a second recharts
+// consumer, and it no longer exists — every `recharts` import in the
+// tree is now under `pages/reports/charts/`, reached only through
+// ReportsPage. "ReportsPage is the only consumer" is true again.
 //
-//   1. "ReportsPage is the only consumer of recharts" — `HoursCharts`
-//      (the Uren Overview tab) is a second one, and it is reached
-//      through the eagerly-imported `HoursAdminPage`.
-//   2. "the charting library lands in a separate chunk" — it does not,
-//      and did not before this sprint either. The build emits no
-//      recharts chunk: `ReportsPage-*.js` is ~22 kB, far too small to
-//      contain it, and `index-*.js` was already ~2,178 kB before the
-//      Uren charts were added (they cost +21 kB, i.e. their own code).
-//      recharts is in the entry bundle whatever this lazy import does.
+// The other correction still stands, and was re-measured at W-PW1:
+// the charting library does NOT land in a separate chunk. The build
+// emits no recharts chunk — `ReportsPage-*.js` is ~51 kB, far too
+// small to contain it, while `index-*.js` is ~2,754 kB. recharts is in
+// the entry bundle whatever this lazy import does.
 //
 // Splitting it out for real would mean a deliberate `manualChunks`
-// change measured against both consumers — its own piece of work, not a
-// side effect of adding a second chart page. The lazy import stays
-// because it still splits ReportsPage's OWN code.
+// change measured against the real consumer set — its own piece of
+// work. The lazy import stays because it still splits ReportsPage's
+// OWN code.
 const ReportsPage = lazy(() =>
   import("./pages/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 );

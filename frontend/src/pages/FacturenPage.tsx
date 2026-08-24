@@ -632,12 +632,30 @@ export function FacturenPage({
                         </span>
                       )}
                     </td>
+                    {/* W-HK1 §2 — a customer billed on a fixed day
+                        showed "—" here, i.e. "no schedule", while the
+                        Due-now column next to it correctly treated them
+                        as due. This cell read `invoice_day_rule` only
+                        and ignored `invoice_day_of_month`.
+
+                        The order below is the backend's, not a new one:
+                        `invoicing/schedule.py::effective_billing_day`
+                        returns `invoice_day_of_month` when set and only
+                        then falls back to FIRST/LAST — the model calls
+                        the day "takes precedence over invoice_day_rule".
+                        Reading the rule first would have kept the two
+                        columns disagreeing for any customer that has
+                        both set. */}
                     <td className="muted small">
-                      {row.invoice_day_rule === "FIRST_OF_MONTH"
-                        ? t("facturatie.day_first")
-                        : row.invoice_day_rule === "LAST_OF_MONTH"
-                          ? t("facturatie.day_last")
-                          : "—"}
+                      {row.invoice_day_of_month != null
+                        ? t("facturatie.day_of_month", {
+                            day: row.invoice_day_of_month,
+                          })
+                        : row.invoice_day_rule === "FIRST_OF_MONTH"
+                          ? t("facturatie.day_first")
+                          : row.invoice_day_rule === "LAST_OF_MONTH"
+                            ? t("facturatie.day_last")
+                            : "—"}
                     </td>
                     <td style={{ textAlign: "right" }}>
                       {row.unbilled_count}

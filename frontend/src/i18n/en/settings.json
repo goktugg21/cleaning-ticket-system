@@ -35,8 +35,8 @@
   "event_ticket_status_changed": "Ticket status changed",
   "event_ticket_assigned": "Ticket assigned",
   "event_ticket_unassigned": "Ticket unassigned",
-  "event_ticket_message_feed": "Also show ticket messages in Notifications (off by default)",
-  "event_extra_work_message_feed": "Also show extra-work messages in Notifications (off by default)",
+  "event_ticket_message_feed": "Also show ticket messages in Notifications",
+  "event_extra_work_message_feed": "Also show extra-work messages in Notifications",
   "notifications_saved": "Notification preferences saved.",
   "notifications_save": "Save preferences",
   "notifications_saving": "Saving…"

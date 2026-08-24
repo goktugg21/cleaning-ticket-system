@@ -1938,8 +1938,16 @@ export function DashboardPage({
               className="dashboard-bottom-band"
               data-testid="dashboard-bottom-band"
             >
+              {/* W-HK1 §3 — the billing panel sizes to ITS OWN content.
+                  `.dashboard-bottom-band` sets `align-items: stretch` so
+                  the two cards end on one line (W7 DESIGN 4); with a
+                  handful of buildings on the left and a long activity
+                  list on the right, that rule was spending the bottom
+                  two-thirds of this card on nothing. `align-self: start`
+                  opts THIS card out and leaves the band rule — and the
+                  card beside it — untouched. Content is unchanged. */}
               <div
-                className="card attention-card"
+                className="card attention-card dashboard-billing-card"
                 data-testid="dashboard-billing-panel"
               >
                 <div className="attention-card-head">

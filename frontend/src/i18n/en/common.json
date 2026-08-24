@@ -1530,6 +1530,7 @@
   "facturatie.day_unset": "Not set",
   "facturatie.day_first": "1st of the month",
   "facturatie.day_last": "Last of the month",
+  "facturatie.day_of_month": "Day {{day}} of the month",
   "facturatie.day_of_month_option": "Day {{day}}",
   "facturatie.day_rule_helper": "The day of the month this customer is invoiced. A daily job checks whether today is a customer's billing day and, if it is, creates draft invoices from their completed extra work and notifies the admin. The drafts are not sent automatically — you still review and send them on the Invoices page.",
   "facturatie.billing_target_label": "Invoice addressed to",

@@ -1530,6 +1530,7 @@
   "facturatie.day_unset": "Niet ingesteld",
   "facturatie.day_first": "1e van de maand",
   "facturatie.day_last": "Laatste van de maand",
+  "facturatie.day_of_month": "Dag {{day}} van de maand",
   "facturatie.day_of_month_option": "Dag {{day}}",
   "facturatie.day_rule_helper": "De dag in de maand waarop deze klant gefactureerd wordt. Een dagelijkse taak controleert of vandaag de factuurdag van een klant is en maakt dan conceptfacturen aan van het afgeronde extra werk, met een melding aan de beheerder. De concepten worden niet automatisch verstuurd — u controleert en verstuurt ze zelf op de pagina Facturen.",
   "facturatie.billing_target_label": "Factuur gericht aan",
