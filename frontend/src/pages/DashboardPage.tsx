@@ -1574,10 +1574,18 @@ export function DashboardPage({
             <RefreshCw size={14} strokeWidth={2.5} />
             {t("common:refresh")}
           </button>
-          <Link className="btn btn-primary btn-sm" to="/tickets/new">
-            <Plus size={14} strokeWidth={2.5} />
-            {t("new_ticket")}
-          </Link>
+          {/* W-NAV1.5 — no New ticket button on Chargeable work.
+              A chargeable ticket is not something you create here: it
+              is SPAWNED when a customer approves an Extra Work quote.
+              The button offered a blank melding form, which produces a
+              ticket that would never appear on this list — an action
+              whose result vanishes. The Tickets page keeps it. */}
+          {!isChargeableWork && (
+            <Link className="btn btn-primary btn-sm" to="/tickets/new">
+              <Plus size={14} strokeWidth={2.5} />
+              {t("new_ticket")}
+            </Link>
+          )}
         </div>
       </div>
       )}
@@ -2256,13 +2264,21 @@ export function DashboardPage({
 
         {/* W1-C §2.4 — the money strip, on the Chargeable work page.
 
-            Only there, and not on the ordinary Tickets page: the four
+            Only there, and not on the ordinary Tickets page: the
             figures are Extra Work money, and a page about meldingen has
             no money on it to explain. `isChargeableWork` rather than
             `isTicketsPage` is the whole difference. Provider management
             only — the component returns null for anybody else, and the
-            endpoint refuses them as well. */}
-        {isChargeableWork && <FinancialStrip customerId={customerId} />}
+            endpoint refuses them as well.
+
+            W-NAV1.2b — the THREE execution figures, not four. Work has
+            started on everything this page lists, so "Quoted, not yet
+            started" is about rows that are NOT here; it belongs to the
+            Extra Work Quote list and renders there. Selection only —
+            none of the three is computed differently. */}
+        {isChargeableWork && (
+          <FinancialStrip variant="execution" customerId={customerId} />
+        )}
 
         {isTicketsPage && (
           <>

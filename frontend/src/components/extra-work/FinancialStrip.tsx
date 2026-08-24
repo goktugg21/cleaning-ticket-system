@@ -15,6 +15,29 @@
  * loud ("of that, invoiced") because a strip whose numbers look like
  * four independent totals invites somebody to add them up.
  *
+ * ## W-NAV1.2b — four figures, but never four on one page
+ *
+ * The strip rendered all four on BOTH pages, so each page showed half
+ * its money and half somebody else's. The owner's rule is that a page
+ * shows only its own. The split follows the split W-NAV1.2 already made
+ * in the pages themselves:
+ *
+ *   Extra Work Quote   (1) alone. The page holds requests with no
+ *                      operational ticket, so (2), (3) and (4) are by
+ *                      definition about rows that are NOT on it.
+ *   Chargeable work    (2), (3), (4). Work has started on everything
+ *                      this page lists, so (1) is about rows that are
+ *                      NOT on it.
+ *
+ * `figures` is a REQUIRED prop, not a variant name with a default: a
+ * default is how a third caller silently gets somebody else's money
+ * again. Naming the keys also keeps the choice in the page that owns
+ * the money, where it can be read next to the rows it describes.
+ *
+ * No figure is COMPUTED differently — this is display selection and
+ * nothing else. The endpoint still returns all four; each page renders
+ * the ones that are its own.
+ *
  * ## W2-C — the same four figures, half the height
  *
  * The owner: "there are a lot of chips and cards. it looks confusing
@@ -95,6 +118,11 @@ import { formatMoney } from "../../lib/intl";
  * W2-C — the value was a `LucideIcon` until the icons came out. It is
  * `true` now: the Record is carried for the exhaustiveness check alone,
  * which is the only reason it ever existed.
+ *
+ * W-NAV1.2b — it earns that keep twice over now. Each variant below
+ * renders a FILTER over this one order, not a second hand-written list:
+ * a fifth figure still has to be placed here, and each page still shows
+ * its own figures in the one canonical reading order.
  */
 const FIGURE_KEYS: Record<ExtraWorkFinancialFigureKey, true> = {
   quoted_not_started: true,
@@ -106,6 +134,34 @@ const FIGURE_KEYS: Record<ExtraWorkFinancialFigureKey, true> = {
 const FIGURE_ORDER = Object.keys(
   FIGURE_KEYS,
 ) as ExtraWorkFinancialFigureKey[];
+
+/**
+ * Which figures each page owns.
+ *
+ * A `variant` rather than two exported key arrays: exporting a non
+ * component from a component file trips `react-refresh/only-export-
+ * components`, and the baseline admits no new violations. It is the
+ * better shape anyway — the two pages name WHICH VIEW they are, and the
+ * mapping from view to figures stays here next to the figures, so the
+ * split can never be half-changed in one page and not the other.
+ *
+ *   quote      price agreed, nobody has begun. What the Extra Work
+ *              Quote list holds, and the only figure about it.
+ *   execution  begun, finished this month, and the billed part of that.
+ *              What the Chargeable work view holds.
+ *
+ * Between them they name all four exactly once — the strip has no
+ * figure that belongs to neither page and none that belongs to both.
+ */
+export type FinancialStripVariant = "quote" | "execution";
+
+const VARIANT_FIGURES: Record<
+  FinancialStripVariant,
+  ReadonlyArray<ExtraWorkFinancialFigureKey>
+> = {
+  quote: ["quoted_not_started"],
+  execution: ["in_progress", "done_this_period", "invoiced_this_period"],
+};
 
 function FigureCard({
   figureKey,
@@ -176,10 +232,15 @@ function FigureCard({
 }
 
 export function FinancialStrip({
+  variant,
   customerId,
   buildingId,
   testIdPrefix = "ew-money-strip",
 }: {
+  /** Which view this is, and so which figures are its own. Required —
+   *  see the W-NAV1.2b note at the top of the file. A default is how a
+   *  third caller silently gets somebody else's money again. */
+  variant: FinancialStripVariant;
   /** Narrow to one customer — the customer-scoped mounts of the two
    *  pages. A convenience only: the server scopes first, so naming a
    *  customer the actor cannot see returns nothing, not their money. */
@@ -187,7 +248,6 @@ export function FinancialStrip({
   buildingId?: number;
   testIdPrefix?: string;
 }) {
-  const { t } = useTranslation("extra_work");
   const { me } = useAuth();
   const isProvider = isProviderManagementRole(me?.role);
   const [summary, setSummary] = useState<ExtraWorkFinancialSummary | null>(null);
@@ -234,14 +294,17 @@ export function FinancialStrip({
       data-testid={testIdPrefix}
       aria-busy={loading}
     >
-      <header className="ew-money-strip-head">
-        <h2 className="ew-money-strip-title">{t("financial_strip.title")}</h2>
-        <p className="ew-money-strip-sub">
-          {period
-            ? t("financial_strip.subtitle", { period })
-            : t("financial_strip.subtitle_unknown")}
-        </p>
-      </header>
+      {/* W-NAV1.2b — the heading block is gone, both variants.
+          It read "Money — where it stands now" over "Two figures for
+          today, and two for billing month X", and after the split that
+          sentence is false on BOTH pages: the quote list shows one
+          figure and the chargeable view shows one for today and two for
+          the month. Rewriting it would be new prose on two pages that
+          did not ask for any, and keeping it would be a counted claim
+          that no longer counts. The tile labels already name every
+          figure, and the billing month it applies to is still spelled
+          out in `done_this_period_meta`, so nothing that was on screen
+          has gone missing with it. */}
       {error ? (
         <p
           className="muted small"
@@ -252,7 +315,12 @@ export function FinancialStrip({
         </p>
       ) : (
         <div className="ew-money-strip-row">
-          {FIGURE_ORDER.map((key) => (
+          {/* Filtered out of the ONE canonical order, so each page
+              renders its own figures in the same reading order the
+              strip has always used. */}
+          {FIGURE_ORDER.filter((key) =>
+            VARIANT_FIGURES[variant].includes(key),
+          ).map((key) => (
             <FigureCard
               key={key}
               figureKey={key}

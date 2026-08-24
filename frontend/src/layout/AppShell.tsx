@@ -257,6 +257,42 @@ export function AppShell({ children }: AppShellProps) {
       open: !extraWorkOpen,
     });
 
+  // W-NAV1.5 — ADMIN folds, exactly the way Extra Work does.
+  //
+  // Twelve admin entries were the longest run in the sidebar and every
+  // one of them is a setup screen an operator visits occasionally, while
+  // the operations entries above are the daily ones — so the list a
+  // person needs least was taking the most room. Same three rules as
+  // Extra Work: CLOSED on load, OPEN while the current route is inside
+  // it, and the operator's own toggle winning over both until they
+  // navigate away. Same one derived value, same reason (an override
+  // carrying the path it was made on simply stops applying when the
+  // pathname changes, so no effect has to reset it — a resync effect
+  // here would be a synchronous setState in an effect body, which
+  // CLAUDE.md forbids).
+  //
+  // Nothing is hidden by this: the group opens itself whenever the
+  // current page is one of its own, so an operator can never be on an
+  // admin screen with the group shut and no idea where they are.
+  const [adminManual, setAdminManual] = useState<{
+    path: string;
+    open: boolean;
+  } | null>(null);
+
+  // Every route the group's entries point at. `/admin/` as a prefix
+  // would also catch `/admin/customers/:id`, which swaps the sidebar
+  // into customer-scoped mode entirely — this branch does not render
+  // then, so the broad prefix is the honest test of "inside ADMIN".
+  const adminChildActive = location.pathname.startsWith("/admin");
+
+  const adminOpen =
+    adminManual && adminManual.path === location.pathname
+      ? adminManual.open
+      : adminChildActive;
+
+  const toggleAdmin = () =>
+    setAdminManual({ path: location.pathname, open: !adminOpen });
+
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
   // Role label resolves through the central role/key map in
@@ -857,9 +893,50 @@ export function AppShell({ children }: AppShellProps) {
 
               {canAccessAdminArea(me?.role) && (
                 <>
-                  <div className="nav-group-label">
-                    {t("nav.admin_group")}
-                  </div>
+                  {/* W-NAV1.5 — ADMIN is a disclosure now, and the row
+                      that opens it replaces the plain `nav-group-label`
+                      that used to head this run. It reuses the SAME
+                      primitives the Extra Work group uses — `nav-item`
+                      plus the two group modifiers, the same chevron
+                      pair, the same aria-expanded and the same two
+                      existing expand/collapse labels — rather than
+                      inventing a second kind of foldable section.
+
+                      The gate is UNCHANGED: `canAccessAdminArea` still
+                      decides whether any of this exists, and every
+                      entry inside keeps whatever gate it already had.
+                      Folding is not a gate. */}
+                  <button
+                    type="button"
+                    className={
+                      adminChildActive
+                        ? "nav-item nav-item-group nav-item-group-current"
+                        : "nav-item nav-item-group"
+                    }
+                    aria-expanded={adminOpen}
+                    aria-label={t(
+                      adminOpen ? "nav.collapse_group" : "nav.expand_group",
+                      { group: t("nav.admin_group") },
+                    )}
+                    onClick={toggleAdmin}
+                    data-testid="sidebar-admin-toggle"
+                  >
+                    <span className="nav-icon">
+                      <ShieldCheck size={16} strokeWidth={2} />
+                    </span>
+                    <span className="nav-item-group-label">
+                      {t("nav.admin_group")}
+                    </span>
+                    <span className="nav-item-group-chevron">
+                      {adminOpen ? (
+                        <ChevronDown size={14} strokeWidth={2.4} />
+                      ) : (
+                        <ChevronRight size={14} strokeWidth={2.4} />
+                      )}
+                    </span>
+                  </button>
+                  {adminOpen && (
+                    <>
                   <NavLink to="/admin/companies" className={navClass}>
                     <span className="nav-icon">
                       <Building2 size={16} strokeWidth={2} />
@@ -996,6 +1073,8 @@ export function AppShell({ children }: AppShellProps) {
                       </span>
                       {t("nav.sla_warnings")}
                     </NavLink>
+                  )}
+                    </>
                   )}
                 </>
               )}

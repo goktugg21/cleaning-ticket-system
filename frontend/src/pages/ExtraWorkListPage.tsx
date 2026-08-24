@@ -1191,8 +1191,16 @@ export function ExtraWorkList({
       )}
 
       {/* W1-C §2.4 — the money strip. Provider management only; the
-          component returns null for anybody else. */}
-      <FinancialStrip customerId={customerId} />
+          component returns null for anybody else.
+
+          W-NAV1.2b — ONE figure, because this page holds one kind of
+          money. Every row on it is a request with no operational
+          ticket, so "In progress", "Done in this billing month" and
+          "Of that, invoiced" are all about work that is NOT listed
+          here — they belong to Chargeable work, and that is where they
+          render now. Selection only: the figure itself is the same
+          server aggregate it always was. */}
+      <FinancialStrip variant="quote" customerId={customerId} />
 
       {/* W2-C — ONE band, not three stacked rows.
           W-NAV1.2 — and now one band with ONE control in it. The track

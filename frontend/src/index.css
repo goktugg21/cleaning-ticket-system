@@ -672,8 +672,20 @@ p { line-height: 1.6; }
 /* A MODIFIER, like `.nav-item-child`: same type treatment as every other
    section header, indented to line up with the child rows it heads. The
    38px matches `.nav-item-child` exactly — one indent in this sidebar,
-   not two. */
-.nav-group-label-sub { padding-left: 38px; }
+   not two.
+
+   W-NAV1.5 — and tighter above than a TOP-level section header, which is
+   the one way it should differ. OPERATIONS and ADMIN separate whole
+   regions of the sidebar and earn 22px (8 margin + 14 padding) to do it;
+   FORMS separates two runs of rows INSIDE one open folder, and at the
+   same 22px the folder read as two unrelated groups that happened to be
+   indented the same amount. 10px still reads as a break without opening
+   a hole in the middle of the folder. */
+.nav-group-label-sub {
+  padding-left: 38px;
+  padding-top: 8px;
+  margin-top: 2px;
+}
 .nav-item {
   position: relative;
   display: flex;
