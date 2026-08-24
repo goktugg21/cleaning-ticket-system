@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ClipboardList, Euro, FileSignature } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import { getApiError } from "../../api/client";
@@ -13,12 +12,15 @@ import {
 import { listHourSources } from "../../api/reports";
 import type { HourSourceOption } from "../../api/reports";
 import {
+  closeWeek,
   deleteTimeEntry,
   downloadTimesheetSummaryCsv,
   fetchTimesheetSummary,
+  fetchWeekStatus,
   listHourTypes,
   listTimeEntries,
   listTimesheetEmployees,
+  reopenWeek,
   updateTimeEntry,
 } from "../../api/timesheets";
 import type {
@@ -27,141 +29,85 @@ import type {
   TimeEntryFilters,
   TimesheetEmployee,
   TimesheetSummary,
+  WeekStatus,
 } from "../../api/timesheets.types";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
-import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
-import { currentIsoWeek, fromDateString } from "../../lib/isoWeek";
+import {
+  currentIsoWeek,
+  formatIsoWeek,
+  fromDateString,
+  isoWeekDays,
+  shiftIsoWeek,
+  toDateString,
+} from "../../lib/isoWeek";
+import type { IsoWeek } from "../../lib/isoWeek";
 import { WeekEntryDialog } from "../../components/timesheets/WeekEntryDialog";
 import { hourTypeLabel, hourTypeLabelFrom } from "../../lib/hourTypeLabel";
-import { HourTypesTab } from "./HourTypesTab";
 import { HoursFilterRow } from "./HoursFilterRow";
-import { ContractHoursApprovalTab } from "./ContractHoursApprovalTab";
 import { ContractHoursTab } from "./ContractHoursTab";
-import { WorkTypesTab } from "./WorkTypesTab";
-import { HoursOverviewTab } from "./HoursOverviewTab";
-// W4-R — the per-person hourly rate. The rate is stored and applied
-// in `reports`, never in `timesheets` (that module computes no
-// money), and the tab leads with a sentence saying so. It sits here
-// because the person who sets a rate is the person who manages
-// hours; the route already admits SA / CA only, which is exactly the
-// endpoint's admit set.
-import { LabourRatesTab } from "./LabourRatesTab";
-
-// Sprint 152.2 — "weeks" became the OVERVIEW tab: the read-only
-// analytical surface (period selector, graphs, breakdowns), which
-// still owns week close/reopen because a lock acts on a PERIOD, not
-// on an entry. The tab KEY is unchanged so the stored value stays
-// stable; only the label and the content moved.
-type Tab =
-  | "entries"
-  | "hour_types"
-  | "weeks"
-  | "contract_hours"
-  | "contract_approval"
-  | "work_types"
-  | "labour_rates";
 
 /**
- * W7 §1 — the seven tabs, in THREE named groups.
+ * W-HR1 §2 — TWO tabs. There were seven, in three named groups.
  *
- * Seven equal pills in one row said nothing about what any of them was
- * for, and the owner could not name a single one. The tabs did not
- * change; what they belong to is now on the screen. Each group answers
- * one question, and every tab under it answers it a different way:
+ * The owner's complaint was that the Overview tab "shows everything and
+ * explains nothing", and the audit agreed with him about more than that
+ * one tab: seven surfaces over one subject, four of which were the same
+ * numbers a fourth way round. What is left is the two questions an
+ * operator actually arrives with:
  *
- *   worked   what was ACTUALLY worked        Entries, Overview
- *   agreed   what was AGREED in a contract   Contract hours, Approval,
- *                                            Contract work types
- *   cost     what an hour COSTS              Hour types, Hourly rates
+ *   worked    what was worked this week, and is the week final
+ *   schedule  what each person is scheduled to work, per week
  *
- * The grouping is also the answer to "hour types vs work types", which
- * no label on a flat row could give: an hour TYPE carries a multiplier,
- * that multiplier weights the hours, and the weighted hours are what an
- * hourly rate is applied to (`reports/labour_cost.py`) — so it sits in
- * the money group, next to the rates. A contract work type carries no
- * weight and is only ever read off a ContractHours row
- * (`timesheets.WorkType` is that FK's ONLY consumer), so it sits with
- * contract hours. Two catalogs that look alike, in the two places they
- * actually belong.
+ * ## What was deleted and where it went
  *
- * ONE constant, iterated by the renderer. CLAUDE.md records what a
- * second hand-maintained render list costs (Sprint 126's headerless
- * permission column, invisible for three sprints); a new tab added to
- * `Tab` and not to a group here is a compile-time hole, not a silent
- * one, because `key` is typed `Tab`.
+ * **Overview** — deleted outright. Every figure on it restated one
+ * number the entries table already carried; period charts and
+ * breakdowns are Reports' job, and Reports does it properly. What it
+ * uniquely OWNED was week close/reopen, and that moved onto Worked,
+ * where the week it acts on is the week on screen.
  *
- * NOT exported, and that is the `react-refresh/only-export-components`
- * rule rather than a preference: a non-component export from a file
- * that exports a component is a lint error, and the baseline is frozen
- * at exactly 44. `CatalogsAdminPage`'s own `TABS` is module-local for
- * the same reason.
+ * **Approval** — deleted. Approving a standing agreement is one row
+ * changing state, so it is a ROW ACTION on Schedule now, next to the
+ * row it approves, instead of a screen that reproduced the same table
+ * three times under three status headings.
+ *
+ * **Contract work types** and **Hour types** — deleted from here. Both
+ * are per-company CATALOGS and both already render, from the same
+ * components, on /admin/catalogs. Two entry points to one catalog is
+ * how they drift; the catalog page is the one owner now.
+ *
+ * **Cost per hour** — moved to /admin/employees, onto the employee's
+ * own row (`EmployeeRatePanel`). A rate belongs to a person, and the
+ * person is already there.
+ *
+ * ## One constant, iterated by the renderer
+ *
+ * Renamed from `HOURS_TAB_GROUPS`, because there are no groups any
+ * more and a name that says otherwise is the drift CLAUDE.md warns
+ * about. A new tab added to `Tab` and not to this list is a
+ * compile-time hole, not a silent one, because `key` is typed `Tab`.
+ *
+ * NOT exported, and that is `react-refresh/only-export-components`
+ * rather than a preference: a non-component export from a file that
+ * exports a component is a lint error, and the baseline is frozen.
  */
-const HOURS_TAB_GROUPS: {
-  key: "worked" | "agreed" | "cost";
-  labelKey: string;
-  Icon: LucideIcon;
-  tabs: { key: Tab; labelKey: string; testId: string }[];
-}[] = [
+type Tab = "worked" | "schedule";
+
+const HOURS_TABS: { key: Tab; labelKey: string; testId: string }[] = [
   {
     key: "worked",
-    labelKey: "hours_admin.group_worked",
-    Icon: ClipboardList,
-    tabs: [
-      {
-        key: "entries",
-        labelKey: "hours_admin.tab_entries",
-        testId: "hours-tab-entries",
-      },
-      {
-        key: "weeks",
-        labelKey: "hours_admin.tab_overview",
-        testId: "hours-tab-weeks",
-      },
-    ],
+    labelKey: "hours_admin.tab_entries",
+    testId: "hours-tab-worked",
   },
   {
-    key: "agreed",
-    labelKey: "hours_admin.group_agreed",
-    Icon: FileSignature,
-    tabs: [
-      {
-        key: "contract_hours",
-        labelKey: "contract_hours.tab",
-        testId: "hours-tab-contract-hours",
-      },
-      {
-        key: "contract_approval",
-        labelKey: "contract_hours.tab_approval",
-        testId: "hours-tab-contract-approval",
-      },
-      {
-        key: "work_types",
-        labelKey: "work_types.tab",
-        testId: "hours-tab-work-types",
-      },
-    ],
-  },
-  {
-    key: "cost",
-    labelKey: "hours_admin.group_cost",
-    Icon: Euro,
-    tabs: [
-      {
-        key: "hour_types",
-        labelKey: "hours_admin.tab_hour_types",
-        testId: "hours-tab-hour-types",
-      },
-      {
-        key: "labour_rates",
-        labelKey: "labour_rates.tab",
-        testId: "hours-tab-labour-rates",
-      },
-    ],
+    key: "schedule",
+    labelKey: "contract_hours.tab",
+    testId: "hours-tab-schedule",
   },
 ];
 
@@ -181,14 +127,29 @@ interface EntryFilterState {
   date_to: string;
 }
 
-const EMPTY_FILTERS: EntryFilterState = {
-  employee: "",
-  hour_type: "",
-  building: "",
-  source_type: "",
-  date_from: "",
-  date_to: "",
-};
+/**
+ * W-HR1 §2 — the page opens on THIS WEEK, not on "everything ever".
+ *
+ * The Worked tab now carries a week bar that owns the lock chip and the
+ * close/reopen button, and the table under it has to describe the same
+ * week or the two disagree. So the week writes `date_from`/`date_to`,
+ * and those two inputs stay hand-editable for the odd wider range —
+ * which is the only thing the deleted Overview tab's range mode was
+ * ever used for.
+ *
+ * A function, not a constant: the current week is not a constant.
+ */
+function weekFilters(week: IsoWeek): EntryFilterState {
+  const days = isoWeekDays(week);
+  return {
+    employee: "",
+    hour_type: "",
+    building: "",
+    source_type: "",
+    date_from: toDateString(days[0]),
+    date_to: toDateString(days[6]),
+  };
+}
 
 /** One row's pending inline edit. Every field is a STRING: a `<select>`
  *  / `<input>` value is a string, and keeping numbers here means a parse
@@ -239,29 +200,32 @@ function formatDate(value: string, locale: string): string {
 }
 
 /**
- * Sprint 159 §1 — the "Uren" admin area, rebuilt to the shape of the
- * reference system the owner sent.
+ * The "Uren" admin area. W-HR1 §2 cut it from seven tabs to two — see
+ * `HOURS_TABS` above for what went where.
  *
- * ## What the entries tab is now
+ * ## What the Worked tab is
  *
  *   title + ONE primary button (enter a week)
- *   one line of filters
- *   a row of stat tiles
+ *   a WEEK BAR: which week, one status chip, one state-dependent
+ *     button (Week afsluiten / Heropenen)
+ *   one WRAPPING row of filters
  *   ONE table, with an Edit toggle that makes its cells editable and
- *   saves every change at once
+ *     saves every change at once, and the week's totals as its FOOTER
+ *   real prev/next off the endpoint's own pagination
  *
- * ## What was REMOVED
+ * No stat tiles, no 420px scroll window over the table, no second copy
+ * of the same numbers anywhere on the page.
  *
- * The in-page week grid and its "Set up week" / "Close grid" panel: the
- * grid now lives ONLY in the modal, and having one on the page as well
- * is the duplication the owner called confusing. The per-row "Add
- * entry" / "Edit entry" modal: a modal per row is exactly what the
- * inline Edit toggle exists to replace, and a week — including a single
- * day of it — is entered in the one modal. The per-hour-type and
- * per-week report tables: the Overview tab has rendered both, over the
- * same summary payload, since Sprint 152.2, so they were a second copy
- * of an existing surface sitting under the list. The CSV export they
- * carried is kept, next to the tiles it describes.
+ * ## The week is the period
+ *
+ * The bar owns the week; `date_from`/`date_to` are what it resolves to
+ * and stay hand-editable for a wider range (the one thing the deleted
+ * Overview tab's range mode was for). Clearing the filters returns to
+ * the bar's week rather than to "every hour ever filed".
+ *
+ * The lock chip and the one button therefore always have a week to act
+ * on — which is why closing a week moved here from a tab two clicks
+ * away, where the hours it governs were not on screen.
  *
  * ## Company resolution
  *
@@ -272,13 +236,12 @@ function formatDate(value: string, locale: string): string {
  * fetch's `.then()`, never in an effect body — CLAUDE.md bans a
  * synchronous setState there.
  *
- * Sprint 159 adds the gate that was missing: for a SUPER_ADMIN the
- * reads WAIT until the company is known. Measured on the built Sprint
- * 158 page, the first render fired `/timesheets/employees/` and
- * `/timesheets/summary/` with no company and took two 400s
- * (`company is required when more than one provider Company exists`)
- * before the retry, which put a red error banner on screen for as long
- * as it took the company list to resolve.
+ * Sprint 159's gate holds: for a SUPER_ADMIN the reads WAIT until the
+ * company is known. Measured on the built Sprint 158 page, the first
+ * render fired `/timesheets/employees/` and `/timesheets/summary/` with
+ * no company and took two 400s (`company is required when more than one
+ * provider Company exists`) before the retry, which put a red error
+ * banner on screen for as long as the company list took to resolve.
  *
  * A COMPANY_ADMIN sees no selector at all: they have one company and
  * `""` means "let the backend resolve it", which is what every write
@@ -291,7 +254,17 @@ export function HoursAdminPage() {
   const { push: pushToast } = useToast();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [tab, setTab] = useState<Tab>("entries");
+  const [tab, setTab] = useState<Tab>("worked");
+
+  /** W-HR1 §2 — the week the lock chip and the one button act on, and
+   *  the week the table opens on. Its own state rather than derived
+   *  from `date_from`: a lock is a fact about a WEEK, and a hand-typed
+   *  range of three months has no lock state to show. */
+  const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
+  const [weekStatus, setWeekStatus] = useState<WeekStatus | null>(null);
+  const [lockBusy, setLockBusy] = useState(false);
+  const closeWeekRef = useRef<ConfirmDialogHandle>(null);
+  const reopenWeekRef = useRef<ConfirmDialogHandle>(null);
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesResolved, setCompaniesResolved] = useState(!isSuperAdmin);
@@ -309,7 +282,9 @@ export function HoursAdminPage() {
   const [loadError, setLoadError] = useState("");
   const [exportBusy, setExportBusy] = useState(false);
 
-  const [filters, setFilters] = useState<EntryFilterState>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<EntryFilterState>(() =>
+    weekFilters(currentIsoWeek()),
+  );
   const [employees, setEmployees] = useState<TimesheetEmployee[]>([]);
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
@@ -424,6 +399,30 @@ export function HoursAdminPage() {
     setDrafts({});
   }, []);
 
+  /**
+   * W-HR1 §2 — moving to another week moves the table with it.
+   *
+   * The week bar is the period control; `date_from`/`date_to` are what
+   * it resolves to and stay hand-editable. Done in the HANDLER, never
+   * an effect watching `week`: a synchronous setState in an effect body
+   * is banned (CLAUDE.md §3, `react-hooks/set-state-in-effect`).
+   */
+  const goToWeek = useCallback(
+    (next: IsoWeek) => {
+      const days = isoWeekDays(next);
+      setWeek(next);
+      setFilters((prev) => ({
+        ...prev,
+        date_from: toDateString(days[0]),
+        date_to: toDateString(days[6]),
+      }));
+      setPage(1);
+      setEditing(false);
+      setDrafts({});
+    },
+    [],
+  );
+
   const queryFilters: TimeEntryFilters = useMemo(
     () => ({
       company,
@@ -442,13 +441,13 @@ export function HoursAdminPage() {
   const fetchKey = `${tab}|${JSON.stringify(queryFilters)}|${page}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const loading =
-    tab === "entries" && (companyPending || loadedKey !== fetchKey);
+    tab === "worked" && (companyPending || loadedKey !== fetchKey);
 
   useEffect(() => {
-    if (tab !== "entries" || companyPending) return;
+    if (tab !== "worked" || companyPending) return;
     let cancelled = false;
-    // The table and its tiles come from the SAME filter object, so the
-    // numbers always describe the rows on screen.
+    // The table and its footer totals come from the SAME filter object,
+    // so the numbers always describe the rows on screen.
     Promise.all([
       listTimeEntries({ ...queryFilters, page }),
       fetchTimesheetSummary(queryFilters),
@@ -471,6 +470,61 @@ export function HoursAdminPage() {
       cancelled = true;
     };
   }, [tab, queryFilters, page, fetchKey, companyPending]);
+
+  /**
+   * W-HR1 §2 — is the week on screen closed?
+   *
+   * Its own read, on its own key: it depends on the WEEK and the
+   * company, not on the entry filters, so narrowing to one employee
+   * must not re-ask whether the week is locked. Non-fatal — the chip
+   * falls back to "loading" and the entries table is unaffected.
+   */
+  const weekStatusKey = `${week.isoYear}-${week.isoWeek}|${company}`;
+  const [weekStatusLoadedKey, setWeekStatusLoadedKey] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    if (tab !== "worked" || companyPending) return;
+    let cancelled = false;
+    fetchWeekStatus({
+      iso_year: week.isoYear,
+      iso_week: week.isoWeek,
+      company,
+    })
+      .then((status) => {
+        if (cancelled) return;
+        setWeekStatus(status);
+        setWeekStatusLoadedKey(weekStatusKey);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setWeekStatus(null);
+        setWeekStatusLoadedKey(weekStatusKey);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, companyPending, week, company, weekStatusKey]);
+
+  const weekStatusLoading = weekStatusLoadedKey !== weekStatusKey;
+  const weekClosed = weekStatus?.is_closed ?? false;
+
+  /** Re-read the lock after acting on it. Never throws: the write has
+   *  already committed, and a failed re-read must not turn a closed
+   *  week into a form error. */
+  const refreshWeekStatus = useCallback(async () => {
+    try {
+      setWeekStatus(
+        await fetchWeekStatus({
+          iso_year: week.isoYear,
+          iso_week: week.isoWeek,
+          company,
+        }),
+      );
+    } catch {
+      setWeekStatus(null);
+    }
+  }, [week, company]);
 
   // Only ACTIVE hour types are offerable for a write — an archived one
   // is rejected server-side (`hour_type_archived`). The unfiltered list
@@ -661,6 +715,52 @@ export function HoursAdminPage() {
     }
   }
 
+  // ---- the week lock ------------------------------------------------
+
+  async function handleConfirmCloseWeek() {
+    setLockBusy(true);
+    try {
+      await closeWeek({
+        iso_year: week.isoYear,
+        iso_week: week.isoWeek,
+        company,
+      });
+      await refreshWeekStatus();
+      await refreshEntries();
+      pushToast({
+        variant: "success",
+        title: t("weeks.close_done", { week: formatIsoWeek(week) }),
+      });
+    } catch (err) {
+      setLoadError(getApiError(err));
+    } finally {
+      closeWeekRef.current?.close();
+      setLockBusy(false);
+    }
+  }
+
+  async function handleConfirmReopenWeek() {
+    setLockBusy(true);
+    try {
+      await reopenWeek({
+        iso_year: week.isoYear,
+        iso_week: week.isoWeek,
+        company,
+      });
+      await refreshWeekStatus();
+      await refreshEntries();
+      pushToast({
+        variant: "success",
+        title: t("weeks.reopen_done", { week: formatIsoWeek(week) }),
+      });
+    } catch (err) {
+      setLoadError(getApiError(err));
+    } finally {
+      reopenWeekRef.current?.close();
+      setLockBusy(false);
+    }
+  }
+
   const handleExport = useCallback(async () => {
     setExportBusy(true);
     try {
@@ -673,37 +773,13 @@ export function HoursAdminPage() {
     }
   }, [queryFilters, pushToast, t]);
 
-  // The four tiles. Every number comes off the SAME summary the table
-  // was filtered with; `by_employee` / `by_building` are the buckets the
-  // endpoint has returned since Sprint 152.2.
-  const tiles = summary
-    ? [
-        {
-          key: "hours",
-          label: t("hours_admin.tile_hours"),
-          value: summary.total_hours,
-        },
-        {
-          key: "workers",
-          label: t("hours_admin.tile_workers"),
-          value: String(summary.by_employee.length),
-        },
-        {
-          key: "buildings",
-          label: t("hours_admin.tile_buildings"),
-          // The "no building" bucket is a real bucket but not a
-          // building, so it does not count as one.
-          value: String(
-            summary.by_building.filter((b) => b.building !== null).length,
-          ),
-        },
-        {
-          key: "entries",
-          label: t("hours_admin.tile_entries"),
-          value: String(summary.total_entries),
-        },
-      ]
-    : [];
+  /** W-HR1 §2 — the week's totals, as the TABLE'S FOOTER.
+   *
+   *  They were four tiles above the table. Tiles are for figures that
+   *  are ABOUT something else on the page; these are the sum of the
+   *  column they sat above, which is a totals row. Same summary
+   *  payload, same filter object as the rows, so they always describe
+   *  what is on screen. */
 
   // Sprint 164 — the wrapper used to carry a class with no rule behind
   // it, the same hole the gate found on MyHoursPage last sprint. A JS
@@ -717,7 +793,7 @@ export function HoursAdminPage() {
         title={t("hours_admin.title")}
         subtitle={t("hours_admin.subtitle")}
         actions={
-          tab === "entries" ? (
+          tab === "worked" ? (
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -737,60 +813,34 @@ export function HoursAdminPage() {
         </div>
       )}
 
-      {/* W7 §1 — the tab bar is GROUPED. `role="tablist"` stays on the
-          outer element and every button stays `role="tab"`, so the
-          accessibility tree is the flat list it always was; the three
-          `hours-tab-group` boxes are presentational and are marked so.
-          Iterated from `HOURS_TAB_GROUPS`, never a second local array. */}
+      {/* W-HR1 §2 — two tabs, the house `composer-toggle` shape every
+          other tabbed admin page uses (CatalogsAdminPage's is the same
+          markup). The grouped bar with its captions and its dividers
+          existed to make seven pills legible; two pills do not need a
+          taxonomy above them.
+          Iterated from `HOURS_TABS`, never a second local array. */}
       <div
-        className="hours-tab-bar"
+        className="composer-toggle"
         role="tablist"
         aria-label={t("hours_admin.tabs_aria")}
+        style={{ marginBottom: 16 }}
       >
-        {HOURS_TAB_GROUPS.map((group) => (
-          <div
-            className="hours-tab-group"
-            key={group.key}
-            data-testid={`hours-tab-group-${group.key}`}
+        {HOURS_TABS.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === entry.key}
+            className={`composer-toggle-btn ${tab === entry.key ? "active" : ""}`}
+            data-testid={entry.testId}
+            onClick={() => setTab(entry.key)}
           >
-            <span className="hours-tab-group-label" aria-hidden="true">
-              <group.Icon size={13} strokeWidth={2.2} />
-              {t(group.labelKey)}
-            </span>
-            <div className="composer-toggle" role="presentation">
-              {group.tabs.map((entry) => (
-                <button
-                  key={entry.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === entry.key}
-                  className={`composer-toggle-btn ${tab === entry.key ? "active" : ""}`}
-                  data-testid={entry.testId}
-                  onClick={() => setTab(entry.key)}
-                >
-                  {t(entry.labelKey)}
-                </button>
-              ))}
-            </div>
-          </div>
+            {t(entry.labelKey)}
+          </button>
         ))}
       </div>
 
-      {tab === "work_types" && <WorkTypesTab />}
-
-      {tab === "contract_approval" && (
-        <ContractHoursApprovalTab
-          onGoToContractHours={() => setTab("contract_hours")}
-          companyId={company}
-          buildings={buildings.map((b) => ({ id: b.id, name: b.name }))}
-          employees={employees.map((e) => ({
-            id: e.id,
-            name: e.full_name || e.email,
-          }))}
-        />
-      )}
-
-      {tab === "contract_hours" && (
+      {tab === "schedule" && (
         <ContractHoursTab
           companyId={company}
           buildings={buildings}
@@ -799,24 +849,145 @@ export function HoursAdminPage() {
         />
       )}
 
-      {tab === "entries" && (
+      {tab === "worked" && (
         <>
-          {/* ONE line of filters — the company (when there is a choice),
-              the three shared pickers and the period. Sprint 156 §6a's
-              rule, and the reason the company selector is no longer a
-              card of its own above them. */}
+          {/* W-HR1 §2 — THE WEEK BAR: which week, is it final, and the
+              one button that changes that.
+
+              Everything about a week lock used to live on the deleted
+              Overview tab, two clicks from the hours it governs. The
+              chip and the button are here, above the rows they act on,
+              and the arrows move the table with them (`goToWeek`).
+
+              ONE state-dependent button, never two: a week is open or
+              closed, and offering both verbs at once asks the operator
+              to work out which one is live. */}
           <div
-            className="card hours-filter-line"
+            className="card"
+            data-testid="hours-week-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 10,
+              padding: "12px 16px",
+              marginBottom: 16,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm icon-only"
+                data-testid="hours-week-prev"
+                aria-label={t("contract_hours.prev_week")}
+                title={t("contract_hours.prev_week")}
+                onClick={() => goToWeek(shiftIsoWeek(week, -1))}
+              >
+                <ChevronLeft size={15} strokeWidth={2.2} />
+              </button>
+              <strong data-testid="hours-week-label">
+                {formatIsoWeek(week)}
+              </strong>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm icon-only"
+                data-testid="hours-week-next"
+                aria-label={t("contract_hours.next_week")}
+                title={t("contract_hours.next_week")}
+                onClick={() => goToWeek(shiftIsoWeek(week, 1))}
+              >
+                <ChevronRight size={15} strokeWidth={2.2} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                data-testid="hours-week-this"
+                onClick={() => goToWeek(currentIsoWeek())}
+              >
+                {t("my_hours.this_week")}
+              </button>
+            </div>
+
+            {/* ONE chip. The state, said once. */}
+            <span
+              className={
+                weekClosed ? "badge badge-closed" : "badge badge-approved"
+              }
+              data-testid="hours-week-status"
+              data-closed={weekClosed ? "true" : "false"}
+            >
+              {weekStatusLoading
+                ? t("weeks.status_loading")
+                : weekClosed
+                  ? t("weeks.status_closed")
+                  : t("weeks.status_open")}
+            </span>
+            {weekClosed && weekStatus?.lock && (
+              <span className="muted small" data-testid="hours-week-closed-by">
+                {t("weeks.closed_by", {
+                  name: weekStatus.lock.closed_by_name,
+                  when: new Date(weekStatus.lock.closed_at).toLocaleString(
+                    dateLocale,
+                    {
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    },
+                  ),
+                })}
+              </span>
+            )}
+
+            <div style={{ marginLeft: "auto" }}>
+              {weekClosed ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  data-testid="hours-week-reopen"
+                  onClick={() => reopenWeekRef.current?.open()}
+                  disabled={weekStatusLoading || lockBusy || companyPending}
+                >
+                  {t("weeks.reopen_button")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  data-testid="hours-week-close"
+                  onClick={() => closeWeekRef.current?.open()}
+                  disabled={weekStatusLoading || lockBusy || companyPending}
+                >
+                  {t("weeks.close_button")}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* W-HR1 §2 — the filter row WRAPS instead of clipping.
+
+              It was `.hours-filter-line`: `flex-wrap: nowrap` with
+              `overflow-x: auto`, so at 1366 the "Tot" field ended 121px
+              past the card's right edge and "Filters wissen" 223px past
+              it — both reachable only by scrolling a bar nothing said
+              was scrollable. This is `.filter-bar`, the house filter
+              shape every other admin list uses (and the Schedule tab
+              beside this one): it wraps to a second line and every
+              control is on screen at every width. */}
+          <div
+            className="card filter-bar"
             data-testid="hours-filters"
+            style={{ marginBottom: 16, borderBottom: "1px solid var(--border)" }}
           >
             {showCompanySelector && (
-              <div className="field" style={{ margin: 0 }}>
-                <label className="field-label" htmlFor="hours-company-selector">
+              <div className="filter-field">
+                <span className="filter-label">
                   {t("catalog.company_selector_label")}
-                </label>
+                </span>
                 <select
                   id="hours-company-selector"
-                  className="field-select"
+                  className="filter-control"
                   value={company === "" ? "" : String(company)}
                   onChange={(event) => {
                     const value = event.target.value;
@@ -847,11 +1018,10 @@ export function HoursAdminPage() {
               </div>
             )}
 
-            {/* Sprint 152.2 — the SHARED filter row. The Overview tab
-                filters the same collection with the same three
-                controls; a second hand-maintained copy is the "written
-                once, omitted elsewhere" defect this project keeps
-                paying for. */}
+            {/* The four shared pickers. `HoursFilterRow` is now this
+                page's only caller (the Overview tab that shared it is
+                gone), and it moved to the `.filter-field` shape with
+                the row around it. */}
             <HoursFilterRow
               values={{
                 employee: filters.employee,
@@ -866,13 +1036,15 @@ export function HoursAdminPage() {
               idPrefix="hours"
             />
 
-            <div className="field" style={{ margin: 0 }}>
-              <label className="field-label" htmlFor="hours-filter-from">
+            {/* Van / Tot: what the week bar resolved to, and the only
+                way to ask for a range that is not one week. */}
+            <div className="filter-field">
+              <span className="filter-label">
                 {t("hours_admin.filter_date_from")}
-              </label>
+              </span>
               <input
                 id="hours-filter-from"
-                className="field-input"
+                className="filter-control"
                 type="date"
                 value={filters.date_from}
                 onChange={(event) =>
@@ -882,13 +1054,13 @@ export function HoursAdminPage() {
               />
             </div>
 
-            <div className="field" style={{ margin: 0 }}>
-              <label className="field-label" htmlFor="hours-filter-to">
+            <div className="filter-field">
+              <span className="filter-label">
                 {t("hours_admin.filter_date_to")}
-              </label>
+              </span>
               <input
                 id="hours-filter-to"
-                className="field-input"
+                className="filter-control"
                 type="date"
                 value={filters.date_to}
                 onChange={(event) =>
@@ -898,65 +1070,24 @@ export function HoursAdminPage() {
               />
             </div>
 
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm hours-filter-reset"
-              data-testid="hours-filters-reset"
-              onClick={() => {
-                setFilters(EMPTY_FILTERS);
-                setPage(1);
-                cancelEditing();
-              }}
-            >
-              {t("hours_admin.filter_reset")}
-            </button>
-          </div>
-
-          {/* The tiles. They describe the filtered set, because they are
-              computed from the same filter object as the table. */}
-          {/* Sprint 165 §1 — Export is an ACTION, not a tile. It used to
-              be a child of the tile grid, so it took a column and skewed
-              the division; four tiles across five tracks is why they
-              read as bunched. It belongs beside the section title. */}
-          <div className="hours-tiles-head">
-            <span className="hours-tiles-title">
-              {t("hours_admin.summary_title")}
-            </span>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              data-testid="hours-export-csv"
-              onClick={() => void handleExport()}
-              disabled={exportBusy || loading}
-            >
-              {exportBusy
-                ? t("hours_admin.export_busy")
-                : t("hours_admin.export_csv")}
-            </button>
-          </div>
-          {/* `repeat(N, 1fr)` with N the tile count, set inline because
-              only the component knows N. `auto-fit` + `minmax` was
-              width-dependent: it packed as many 150px tracks as fitted
-              and left the remainder empty, which is exactly the bunching
-              the owner reported three times. This is the Sprint 163 §2
-              solution, not a third one. */}
-          <div
-            className="hours-tile-row"
-            data-testid="hours-tiles"
-            style={{
-              gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`,
-            }}
-          >
-            {tiles.map((tile) => (
-              <div
-                key={tile.key}
-                className="hours-tile"
-                data-testid={`hours-tile-${tile.key}`}
+            <div className="filter-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                data-testid="hours-filters-reset"
+                onClick={() => {
+                  // Back to the week on the bar, not to "everything
+                  // ever": the bar is the period control, and clearing
+                  // the filters must not silently widen the table to
+                  // every hour the company has ever filed.
+                  setFilters(weekFilters(week));
+                  setPage(1);
+                  cancelEditing();
+                }}
               >
-                <span className="hours-tile-label">{tile.label}</span>
-                <span className="hours-tile-value">{tile.value}</span>
-              </div>
-            ))}
+                {t("hours_admin.filter_reset")}
+              </button>
+            </div>
           </div>
 
           {loadError && (
@@ -1052,15 +1183,31 @@ export function HoursAdminPage() {
                       </button>
                     </>
                   ) : (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => setEditing(true)}
-                      disabled={entries.length === 0}
-                      data-testid="hours-edit-toggle"
-                    >
-                      {t("hours_admin.edit_button")}
-                    </button>
+                    <>
+                      {/* Export describes exactly the rows below it, so
+                          it sits with them. It used to head the tile
+                          strip that is now this table's footer. */}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        data-testid="hours-export-csv"
+                        onClick={() => void handleExport()}
+                        disabled={exportBusy || loading}
+                      >
+                        {exportBusy
+                          ? t("hours_admin.export_busy")
+                          : t("hours_admin.export_csv")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setEditing(true)}
+                        disabled={entries.length === 0}
+                        data-testid="hours-edit-toggle"
+                      >
+                        {t("hours_admin.edit_button")}
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -1076,26 +1223,26 @@ export function HoursAdminPage() {
                 </div>
               )}
 
-              <BoundedList
-                size="lg"
-                count={entries.length}
-                ariaLabel={t("hours_admin.list_aria")}
-                testIdPrefix="hours-entries"
-                className="table-wrap"
-                emptyState={
-                  <div
-                    style={{ padding: "32px 24px", textAlign: "center" }}
-                    data-testid="hours-entries-empty"
-                  >
-                    <h3 className="empty-title" style={{ marginBottom: 8 }}>
-                      {t("hours_admin.empty_title")}
-                    </h3>
-                    <p className="muted" style={{ margin: 0 }}>
-                      {t("hours_admin.empty_description")}
-                    </p>
-                  </div>
-                }
-              >
+              {/* W-HR1 §2 — THE 420px CAP IS GONE.
+
+                  The table was wrapped in `BoundedList size="lg"`,
+                  which put a 420px scroll window over a 25-row page and
+                  sliced whichever row happened to land on the boundary
+                  in half — a page inside a page, with a half-row at the
+                  seam that reads as a rendering fault.
+
+                  It still respects CLAUDE.md #8: that rule asks a
+                  server-collection list to be "scrollable, PAGINATED,
+                  or explicitly capped", and this one is paginated for
+                  real, off the endpoint's own `next`/`previous`
+                  (`StandardResultsSetPagination`, 25 a page) with the
+                  prev/next buttons below. A page of 25 rows is the
+                  bound. Nesting a second, smaller bound inside it was
+                  belt and braces that cut the belt.
+
+                  The empty state moves out of the wrapper and under the
+                  table, where the same copy renders. */}
+              <div className="table-wrap">
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1387,8 +1534,60 @@ export function HoursAdminPage() {
                       );
                     })}
                   </tbody>
+
+                  {/* W-HR1 §2 — THE WEEK'S TOTALS, AS THE FOOTER.
+                      Four tiles above the table said "Totaal uren",
+                      "Medewerkers", "Gebouwen", "Regels" — three of
+                      which were counts of the very columns underneath.
+                      A totals ROW belongs to its table, aligns with the
+                      columns it sums, and does not compete with the
+                      week bar for the top of the page.
+
+                      Hours and Weighted sit under their own columns.
+                      Every figure is the SAME summary payload the rows
+                      were filtered with, so the footer can never
+                      describe a different set from the body. */}
+                  {summary && entries.length > 0 && (
+                    <tfoot data-testid="hours-entries-totals">
+                      <tr>
+                        <td colSpan={5}>
+                          <strong>{t("hours_admin.summary_title")}</strong>{" "}
+                          <span className="muted small">
+                            {t("hours_admin.pagination_summary", {
+                              shown: entries.length,
+                              total: entryCount,
+                            })}
+                          </span>
+                        </td>
+                        <td data-testid="hours-total-hours">
+                          <strong>{summary.total_hours}</strong>
+                        </td>
+                        <td className="muted" data-testid="hours-total-weighted">
+                          {summary.total_weighted_hours}
+                        </td>
+                        <td colSpan={editing ? 3 : 2} className="muted small">
+                          {t("hours_admin.tile_entries")}{" "}
+                          {summary.total_entries}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
-              </BoundedList>
+              </div>
+
+              {entries.length === 0 && (
+                <div
+                  style={{ padding: "32px 24px", textAlign: "center" }}
+                  data-testid="hours-entries-empty"
+                >
+                  <h3 className="empty-title" style={{ marginBottom: 8 }}>
+                    {t("hours_admin.empty_title")}
+                  </h3>
+                  <p className="muted" style={{ margin: 0 }}>
+                    {t("hours_admin.empty_description")}
+                  </p>
+                </div>
+              )}
 
               {/* Real prev/next off the endpoint's own pagination — the
                   list is `StandardResultsSetPagination`, so a company's
@@ -1433,29 +1632,6 @@ export function HoursAdminPage() {
         </>
       )}
 
-      {tab === "hour_types" && (
-        <HourTypesTab
-          companyRequired={showCompanySelector}
-          selectedCompany={company}
-        />
-      )}
-
-      {tab === "labour_rates" && (
-        <LabourRatesTab
-          companyRequired={showCompanySelector}
-          selectedCompany={company}
-        />
-      )}
-
-      {tab === "weeks" && (
-        <HoursOverviewTab
-          selectedCompany={company}
-          employees={employees}
-          hourTypes={hourTypes}
-          buildings={buildings}
-        />
-      )}
-
       {/* Conditionally mounted overlay, like every other editing modal
           here. `ConfirmDialog` below stays native and ref-driven; the
           two are deliberately different things (CLAUDE.md §3). */}
@@ -1465,7 +1641,10 @@ export function HoursAdminPage() {
           buildings={buildings}
           hourTypes={activeHourTypes}
           companyId={company === "" ? undefined : company}
-          initialWeek={currentIsoWeek()}
+          /* The week the bar is on, not always the current one: the
+             operator who paged back to week 33 to enter a missing day
+             means week 33. */
+          initialWeek={week}
           onClose={() => setWeekModalOpen(false)}
           onSaved={async (changed) => {
             setWeekModalOpen(false);
@@ -1486,6 +1665,38 @@ export function HoursAdminPage() {
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
         busy={deleteBusy}
+        destructive
+      />
+
+      {/* W-HR1 §2 — THE TWO GREEN PARAGRAPHS, AS THE CONFIRM BODIES.
+
+          The deleted Overview tab opened with an `alert-info` box
+          holding two paragraphs explaining what closing and reopening a
+          week do. They were permanent prose above a control most
+          visits never touched — read once, then furniture. Their
+          content is here, in the modal that appears at the moment the
+          operator is about to do the thing, which is the only moment it
+          means anything.
+
+          Rendered UNCONDITIONALLY and driven through the ref, both of
+          them (CLAUDE.md §3): a native <dialog> behind a condition is
+          invisible, and its trigger looks dead. */}
+      <ConfirmDialog
+        ref={closeWeekRef}
+        title={t("weeks.close_confirm_title", { week: formatIsoWeek(week) })}
+        body={t("weeks.close_confirm_body")}
+        confirmLabel={t("weeks.close_button")}
+        onConfirm={handleConfirmCloseWeek}
+        busy={lockBusy}
+      />
+
+      <ConfirmDialog
+        ref={reopenWeekRef}
+        title={t("weeks.reopen_confirm_title", { week: formatIsoWeek(week) })}
+        body={t("weeks.reopen_confirm_body")}
+        confirmLabel={t("weeks.reopen_button")}
+        onConfirm={handleConfirmReopenWeek}
+        busy={lockBusy}
         destructive
       />
     </div>

@@ -24,6 +24,44 @@ const DAYS = [
 ] as const;
 
 type Day = (typeof DAYS)[number];
+type Status = "DRAFT" | "SAVED" | "APPROVED";
+
+/**
+ * W-HR1 §2 — the moves the server accepts, per current state.
+ *
+ * The rules live in `timesheets.models.ContractHours` and are enforced
+ * by `POST /timesheets/contract-hours/<id>/status/`; this table only
+ * OFFERS what will be accepted:
+ *
+ *   DRAFT    -> SAVED     submit for review
+ *   SAVED    -> APPROVED  agreed
+ *   SAVED    -> DRAFT     send back for a correction
+ *   APPROVED -> SAVED     reopen (clears the approval)
+ *
+ * They were a whole tab — the deleted Goedkeuring screen, which
+ * reproduced this same table three times under three status headings so
+ * the operator could act on a row that was already in front of them
+ * here. A state change is a ROW ACTION, next to the row.
+ */
+const STATUS_ACTIONS: Record<
+  Status,
+  { to: Status; labelKey: string; primary: boolean }[]
+> = {
+  DRAFT: [
+    { to: "SAVED", labelKey: "contract_hours.action_submit", primary: true },
+  ],
+  SAVED: [
+    { to: "APPROVED", labelKey: "contract_hours.action_approve", primary: true },
+    {
+      to: "DRAFT",
+      labelKey: "contract_hours.action_send_back",
+      primary: false,
+    },
+  ],
+  APPROVED: [
+    { to: "SAVED", labelKey: "contract_hours.action_reopen", primary: false },
+  ],
+};
 
 interface ContractHoursRow {
   id: number;
@@ -38,8 +76,12 @@ interface ContractHoursRow {
   work_type_standard_slot: string | null;
   valid_from: string;
   valid_to: string | null;
-  status: "DRAFT" | "SAVED" | "APPROVED";
+  status: Status;
   is_locked: boolean;
+  /** W12 — fill this person's weekly sheet from this agreement, every
+   *  week inside the validity window. Writable on the row's own PATCH;
+   *  refused on an APPROVED row, like every other field. */
+  auto_fill: boolean;
   weekly_total: string;
   monday: string;
   tuesday: string;
@@ -51,21 +93,44 @@ interface ContractHoursRow {
 }
 
 /**
- * Sprint 167 §3 — the Contract hours tab.
+ * W-HR1 §2 — "Rooster", the weekly schedule.
  *
- * The counterpart to Entries: Entries records hours WORKED, this
- * records the standing agreement — this worker is contracted for N
- * hours at this building, per weekday, from a date.
+ * The counterpart to Worked: Worked records hours that HAPPENED, this
+ * records the standing agreement — this person works N hours at this
+ * building, per weekday, from a date. It is deliberately no longer
+ * called "contract hours" anywhere the operator can see: a contract in
+ * this system is a CUSTOMER contract, and calling an employee's roster
+ * one made two unrelated things share a word.
+ *
+ * ## One row per agreement, and everything about it on that row
+ *
+ * Employee, building, validity, hour type, the seven-day pattern, its
+ * total, the work type, the state, and whether it fills weekly sheets
+ * automatically. Three of those arrived here from tabs that are gone:
+ *
+ *  - **the state change** (was the Goedkeuring tab, which listed these
+ *    same rows a second time under three status headings so you could
+ *    press a button on a row you were already looking at here);
+ *  - **the work type**, now a plain column (was the Contractwerksoorten
+ *    tab; the CATALOG behind it lives on /admin/catalogs, with every
+ *    other per-company catalog);
+ *  - **the auto-fill flag**, which could be set once in the bulk dialog
+ *    and then never seen or changed again.
+ *
+ * ONE primary button: bulk assignment, which is how rows are created.
+ *
+ * ## What does not bend
  *
  * The whole table is inline-editable behind ONE Edit gate with ONE
- * Save, the pattern the Entries tab already uses, rather than a row of
- * per-row save buttons.
+ * Save, the pattern the Worked tab uses.
  *
- * **An APPROVED row is not editable**, and the UI says so rather than
- * letting the operator type into a cell the server will refuse: the
- * inputs are disabled and the status chip explains why. Changing an
- * approved agreement is a NEW row from a new valid-from — the same
- * discipline the contract revisions use.
+ * **An APPROVED row is not editable** — `perform_update` refuses it
+ * with `contract_hours_approved_immutable` — and the UI says so rather
+ * than offering a control the server will refuse: the day cells and the
+ * auto-fill toggle are disabled, and the row reads "Akkoord". Changing
+ * an approved agreement is a NEW row from a new valid-from. The one
+ * move it still has is Reopen, which goes through the dedicated status
+ * endpoint and not through PATCH.
  */
 export function ContractHoursTab({
   companyId,
@@ -188,28 +253,51 @@ export function ContractHoursTab({
   const rowTotal = (row: ContractHoursRow) =>
     DAYS.reduce((sum, day) => sum + (Number(value(row, day)) || 0), 0);
 
-  const tiles = [
-    {
-      key: "hours",
-      label: t("contract_hours.tile_weekly"),
-      value: rows.reduce((sum, row) => sum + rowTotal(row), 0).toFixed(2),
-    },
-    {
-      key: "workers",
-      label: t("contract_hours.tile_workers"),
-      value: String(new Set(rows.map((r) => r.employee)).size),
-    },
-    {
-      key: "buildings",
-      label: t("contract_hours.tile_buildings"),
-      value: String(new Set(rows.map((r) => r.building)).size),
-    },
-    {
-      key: "rows",
-      label: t("contract_hours.tile_rows"),
-      value: String(rows.length),
-    },
-  ];
+  /**
+   * W-HR1 §2 — move ONE row between the three states.
+   *
+   * The dedicated status endpoint, not a PATCH: the transition rules
+   * live there, and it is also how an APPROVED row can be reopened
+   * while staying immutable in every other respect.
+   */
+  async function moveStatus(row: ContractHoursRow, to: Status) {
+    setBusy(true);
+    setError("");
+    try {
+      await api.post(`/timesheets/contract-hours/${row.id}/status/`, {
+        status: to,
+      });
+      setReloadKey((n) => n + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * W-HR1 §2 — the auto-fill flag, on the row that owns it.
+   *
+   * Written on its own, immediately, and NOT through the Edit gate: it
+   * is a switch, not a typed value, so there is nothing to review
+   * before saving and nothing to lose by leaving edit mode. The day
+   * cells keep the gate because a mistyped 8 that saves on blur is a
+   * different kind of accident.
+   */
+  async function toggleAutoFill(row: ContractHoursRow) {
+    setBusy(true);
+    setError("");
+    try {
+      await api.patch(`/timesheets/contract-hours/${row.id}/`, {
+        auto_fill: !row.auto_fill,
+      });
+      setReloadKey((n) => n + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -288,21 +376,6 @@ export function ContractHoursTab({
             {t("contract_hours.bulk_open")}
           </button>
         </div>
-      </div>
-
-      <div
-        className="hours-tile-row"
-        data-testid="contract-hours-tiles"
-        style={{
-          gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))`,
-        }}
-      >
-        {tiles.map((tile) => (
-          <div key={tile.key} className="hours-tile">
-            <span className="hours-tile-label">{tile.label}</span>
-            <span className="hours-tile-value">{tile.value}</span>
-          </div>
-        ))}
       </div>
 
       {/* Sprint 169 §2 — said, not left blank. */}
@@ -408,25 +481,33 @@ export function ContractHoursTab({
       <div className="table-wrap admin-list-wrap">
         <table className="data-table data-table-dense hours-week-grid-table">
           <thead>
+            {/* W-HR1 §2 — the row the audit asked for, in its order:
+                employee, building, the seven-day pattern, work type,
+                state, auto-fill. Validity and hour type stay between
+                building and the pattern: two rows for the same person
+                differ only by their dates, and the hour type is what
+                the pattern's numbers are hours OF. */}
             <tr>
-              <th>{t("building")}</th>
               <th>{t("contract_hours.employee")}</th>
+              <th>{t("building")}</th>
               <th>{t("contract_hours.validity")}</th>
               <th>{t("contract_hours.hour_type")}</th>
-              <th>{t("contract_hours.work_type")}</th>
               {DAYS.map((day) => (
                 <th key={day} className="contract-num">
                   {t(`contract_hours.day_${day}`)}
                 </th>
               ))}
               <th className="contract-num">{t("contract_hours.total")}</th>
+              <th>{t("contract_hours.work_type")}</th>
               <th>{t("status")}</th>
+              <th>{t("contract_hours.auto_fill_column")}</th>
               <th>{t("contract_hours.actions")}</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} data-testid={`contract-hours-row-${row.id}`}>
+                <td className="td-subject">{row.employee_name}</td>
                 <td>
                   {row.building_name ?? (
                     <span className="muted-empty">
@@ -434,7 +515,6 @@ export function ContractHoursTab({
                     </span>
                   )}
                 </td>
-                <td className="td-subject">{row.employee_name}</td>
                 <td className="td-date">
                   {row.valid_from} → {row.valid_to ?? "…"}
                 </td>
@@ -442,19 +522,6 @@ export function ContractHoursTab({
                   <span className="cell-tag cell-tag-normal">
                     {row.hour_type_name}
                   </span>
-                </td>
-                <td>
-                  {row.work_type_name ? (
-                    workTypeLabel(
-                      row.work_type_name,
-                      row.work_type_standard_slot,
-                      t,
-                    )
-                  ) : (
-                    <span className="muted-empty">
-                      {t("contract_hours.no_work_type")}
-                    </span>
-                  )}
                 </td>
                 {DAYS.map((day) => (
                   <td key={day} className="contract-num">
@@ -476,40 +543,89 @@ export function ContractHoursTab({
                 <td className="contract-num">
                   <strong>{rowTotal(row).toFixed(2)}</strong>
                 </td>
+                {/* A plain column. It was a whole tab's worth of
+                    ceremony for a value that is read off this row and
+                    nowhere else. */}
                 <td>
-                  <span className={`cell-tag ${statusTag(row)}`}>
+                  {row.work_type_name ? (
+                    workTypeLabel(
+                      row.work_type_name,
+                      row.work_type_standard_slot,
+                      t,
+                    )
+                  ) : (
+                    <span className="muted-empty">
+                      {t("contract_hours.no_work_type")}
+                    </span>
+                  )}
+                </td>
+                <td>
+                  <span
+                    className={`cell-tag ${statusTag(row)}`}
+                    data-testid={`contract-hours-status-${row.id}`}
+                  >
                     {t(`contract_hours.status_${row.status}`)}
                   </span>
                 </td>
+                {/* W-HR1 §2 — does this agreement write weekly sheets
+                    by itself? Set once in the bulk dialog and invisible
+                    ever after, until now. Disabled on an APPROVED row:
+                    the whole row is immutable server-side, and a
+                    checkbox that always 400s is a control that lies. */}
                 <td>
-                  {/* An APPROVED agreement is not deleted from here.
-                      Correcting one writes a NEW row from a date — the
-                      validity-window rule — because deleting it would
-                      rewrite what last month's comparison said. */}
-                  {row.is_locked ? (
-                    <span className="muted-empty">
-                      {t("contract_hours.locked_hint")}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        setRowToDelete(row);
-                        deleteRef.current?.open();
-                      }}
-                      disabled={busy}
-                      data-testid={`contract-hours-delete-${row.id}`}
-                    >
-                      {t("contract_hours.delete")}
-                    </button>
-                  )}
+                  <input
+                    type="checkbox"
+                    checked={row.auto_fill}
+                    disabled={row.is_locked || busy}
+                    onChange={() => void toggleAutoFill(row)}
+                    aria-label={t("contract_hours.auto_fill_label")}
+                    title={t("contract_hours.auto_fill_label")}
+                    data-testid={`contract-hours-auto-fill-${row.id}`}
+                  />
+                </td>
+                <td>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {/* W-HR1 §2 — approval, WHERE THE ROW IS. Only the
+                        moves the server accepts from this state are
+                        offered (`STATUS_ACTIONS`). */}
+                    {STATUS_ACTIONS[row.status].map((action) => (
+                      <button
+                        key={action.to}
+                        type="button"
+                        className={`btn btn-sm ${action.primary ? "btn-secondary" : "btn-ghost"}`}
+                        onClick={() => void moveStatus(row, action.to)}
+                        disabled={busy}
+                        data-testid={`contract-hours-move-${row.id}-${action.to}`}
+                      >
+                        {t(action.labelKey)}
+                      </button>
+                    ))}
+                    {/* An APPROVED agreement is not deleted from here.
+                        Correcting one writes a NEW row from a date —
+                        the validity-window rule — because deleting it
+                        would rewrite what last month's comparison
+                        said. Reopen above is the way back. */}
+                    {!row.is_locked && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          setRowToDelete(row);
+                          deleteRef.current?.open();
+                        }}
+                        disabled={busy}
+                        data-testid={`contract-hours-delete-${row.id}`}
+                      >
+                        {t("contract_hours.delete")}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={15} className="muted">
+                <td colSpan={16} className="muted">
                   {t("contract_hours.empty")}
                 </td>
               </tr>
