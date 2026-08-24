@@ -112,6 +112,19 @@ const CUSTOM_SERVICE_VALUE = "__custom__";
  */
 const CUSTOM_PRICE_PREFIX = "custom-price:";
 
+/**
+ * W-EW2 §1 — one row of the combobox popover.
+ *
+ * A discriminated union rather than three parallel arrays: the
+ * keyboard walks ONE list, so the thing Enter commits and the thing
+ * the confirm button commits are the same value, and a new row kind
+ * added here is a compile error at `commitAddRow` until it is handled.
+ */
+type AddRow =
+  | { kind: "service"; id: number; key: string }
+  | { kind: "custom_price"; id: number; key: string }
+  | { kind: "custom_text"; key: string };
+
 function customPriceValue(id: number): string {
   return `${CUSTOM_PRICE_PREFIX}${id}`;
 }
@@ -184,6 +197,23 @@ function emptyCartLine(): CartLineState {
     quantity: "1",
     customerNote: "",
   };
+}
+
+/**
+ * W-EW2 §3 — can this ONE line be sent to the preview endpoint?
+ *
+ * Module scope on purpose: it is a pure function of its argument, and
+ * a function re-created each render would have to be a dependency of
+ * the memo that calls it.
+ */
+function isPreviewableLine(line: CartLineState): boolean {
+  if (line.serviceId === CUSTOM_SERVICE_VALUE) {
+    if (!line.customDescription.trim()) return false;
+  } else if (!line.serviceId) {
+    return false;
+  }
+  const q = Number(line.quantity);
+  return Number.isFinite(q) && q > 0;
 }
 
 // Sprint 5 (frontend) — debounce window for the live preview re-fetch.
@@ -388,12 +418,20 @@ export function CreateExtraWorkPage({
     "" | "empty" | "unavailable"
   >("");
   const [form, setForm] = useState<ParentFormState>(EMPTY_PARENT);
-  const [cartLines, setCartLines] = useState<CartLineState[]>([emptyCartLine()]);
-
-  // W-EW1 §3 — the tempId of the cart line whose inline service picker
-  // is open, or null when none is. ONE picker at a time: two open search
-  // boxes sharing `serviceSearch` would each show the other's results.
-  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  /**
+   * W-EW2 §1 — THE CART STARTS EMPTY.
+   *
+   * It used to start with one BLANK line, and the "Add service line"
+   * button appended more of them. A blank line is a line with no
+   * service and no text, which is exactly what `previewable` below
+   * refuses — and `previewable` is a whole-cart gate, so one blank row
+   * used to silence the prices of every finished row beside it. That
+   * is the dash-instead-of-€31.48 the owner photographed.
+   *
+   * Nothing appends a blank line any more: the combobox below the
+   * table adds a line that is already complete, or adds nothing.
+   */
+  const [cartLines, setCartLines] = useState<CartLineState[]>([]);
 
   // W-EW1 §1b — which of the two derived dates the user has taken over.
   //
@@ -503,10 +541,26 @@ export function CreateExtraWorkPage({
     customerId: number;
     rows: CustomerPriceFolder[];
   } | null>(null);
-  // Free-text service search. Deliberately searches the WHOLE catalog,
-  // never the filtered subset, so a category filter can never hide a
-  // service the operator is explicitly looking for.
-  const [serviceSearch, setServiceSearch] = useState("");
+  /**
+   * W-EW2 §1 — THE ONE CONTROL THAT ADDS A LINE.
+   *
+   * `addQuery` is what is typed in the combobox that sits as the last
+   * row of the pricing table. It filters the customer's agreed-price
+   * services live, and when it matches nothing it becomes the text of
+   * a custom line.
+   *
+   * `addOpen` is whether the popover is showing. It is a popover
+   * ATTACHED to the input, not a block under the table: the block was
+   * the clutter the owner asked us to remove.
+   *
+   * `addHighlight` is the index into `addRows` that Enter and the
+   * confirm button commit. Clamped on every render against the current
+   * row count, so a shrinking result list can never leave it pointing
+   * past the end.
+   */
+  const [addQuery, setAddQuery] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [addHighlight, setAddHighlight] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -686,26 +740,37 @@ export function CreateExtraWorkPage({
       ? String(currentWorkTypes[0].id)
       : "";
 
-  // The cart is "previewable" once a building + customer are chosen and
-  // every line carries a service, a positive quantity, and a date —
-  // exactly what the preview serializer requires.
-  const previewable = useMemo(() => {
-    if (!effectiveBuilding || !form.customer) return false;
-    if (cartLines.length === 0) return false;
-    return cartLines.every((line) => {
-      // A line is previewable when it is a catalog service (a chosen
-      // numeric serviceId), an ordered custom price, OR a custom line
-      // with non-empty text. An empty line, or a custom line with blank
-      // text, is not.
-      if (line.serviceId === CUSTOM_SERVICE_VALUE) {
-        if (!line.customDescription.trim()) return false;
-      } else if (!line.serviceId) {
-        return false;
-      }
-      const q = Number(line.quantity);
-      return Number.isFinite(q) && q > 0;
-    });
-  }, [effectiveBuilding, form.customer, cartLines]);
+  /**
+   * W-EW2 §3 — ONE LINE'S PRICE IS ONE LINE'S BUSINESS.
+   *
+   * A line can be sent to the preview endpoint when it names a catalog
+   * service, orders a custom price, or is a custom line with non-empty
+   * text — and carries a quantity above zero. That is exactly what the
+   * preview serializer requires of it.
+   *
+   * This USED to be folded into a whole-cart `cartLines.every(...)`
+   * gate. It was the bug: `previewData` went null the moment ANY row
+   * failed, and the render below reads the priced columns off
+   * `previewData`, so one unfinished row printed "—" and "to be priced
+   * by the provider" across every finished row in the table — agreed
+   * prices included. Two ordinary actions reached it: adding a second
+   * line (the old button appended a BLANK one), and clearing a
+   * quantity field to retype it.
+   *
+   * Now the incomplete rows are simply left out of the request, and
+   * the complete ones are priced regardless of what sits beside them.
+   */
+  /** The cart lines worth pricing, IN CART ORDER. The server answers
+   *  positionally, so position i of this array is position i of
+   *  `previewData.lines` — which is what lets the render below match a
+   *  row to its price by tempId instead of by raw cart index. */
+  const previewableLines = useMemo(
+    () => cartLines.filter(isPreviewableLine),
+    [cartLines],
+  );
+
+  const previewable =
+    !!effectiveBuilding && !!form.customer && previewableLines.length > 0;
 
   // W-EW1 §1c — the deadline chip's value. `null` (render nothing)
   // whenever there is no deadline to count down to.
@@ -728,10 +793,15 @@ export function CreateExtraWorkPage({
       // the agreed-price window), so it belongs in the signature:
       // changing it must re-fetch.
       pd: form.preferred_date || null,
-      l: cartLines.map((line) => {
+      // W-EW2 §3 — only the lines that can be priced, and each one
+      // carries its `tempId` so the answer can be matched back to the
+      // row it belongs to rather than to a cart position that the
+      // skipped rows have already shifted.
+      l: previewableLines.map((line) => {
         const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
         const customPriceId = parseCustomPriceId(line.serviceId);
         return {
+          t: line.tempId,
           s: isCustom || customPriceId !== null ? null : Number(line.serviceId),
           c: isCustom ? line.customDescription.trim() : null,
           // Sprint 137 item 6 — a custom-price line's identity is the
@@ -742,7 +812,13 @@ export function CreateExtraWorkPage({
         };
       }),
     });
-  }, [previewable, effectiveBuilding, form.customer, form.preferred_date, cartLines]);
+  }, [
+    previewable,
+    effectiveBuilding,
+    form.customer,
+    form.preferred_date,
+    previewableLines,
+  ]);
 
   // Debounced live preview. All state writes happen inside the timer's
   // async callback (deferred), never synchronously in the effect body.
@@ -753,6 +829,7 @@ export function CreateExtraWorkPage({
       c: number;
       pd: string | null;
       l: {
+        t: string;
         s: number | null;
         c: string | null;
         p: number | null;
@@ -951,6 +1028,30 @@ export function CreateExtraWorkPage({
   const previewLoading =
     previewable && (preview === null || preview.key !== previewKey);
 
+  /**
+   * W-EW2 §3 — each cart row's own priced answer, BY IDENTITY.
+   *
+   * The render used to read `previewData.lines[index]` with `index`
+   * taken from the cart. That was only ever correct while every cart
+   * row was sent; now the unfinished ones are skipped, so a raw cart
+   * index would point at another row's money.
+   *
+   * `previewData` is non-null only while `preview.key === previewKey`,
+   * and `previewKey` is built from THIS `previewableLines` array, so
+   * position i here is position i there. That invariant is what makes
+   * the pairing below safe — and it is stated in one place instead of
+   * being assumed at the call site.
+   */
+  const previewByTempId = useMemo(() => {
+    const map = new Map<string, ExtraWorkPreviewLine>();
+    if (!previewData) return map;
+    previewableLines.forEach((line, i) => {
+      const row = previewData.lines[i];
+      if (row) map.set(line.tempId, row);
+    });
+    return map;
+  }, [previewData, previewableLines]);
+
   // Stable backend code -> localized text, falling back to the backend
   // detail string for any code we don't have copy for yet.
   const intentErrorText = (err: { code: string; detail: string }): string => {
@@ -1116,12 +1217,6 @@ export function CreateExtraWorkPage({
     return map;
   }, [customerPrices, form.customer]);
 
-  const serviceSearchTerm = serviceSearch.trim().toLowerCase();
-
-  // Search results span the ENTIRE catalog — the category filter is
-  // deliberately ignored while searching. Every option label already
-  // carries its category name, so a match from outside the current
-  // filter is self-describing.
   // Sprint 147 — what a CUSTOMER may pick from.
   //
   // Owner's rule: a customer sees ONLY the services a price has been
@@ -1156,33 +1251,59 @@ export function CreateExtraWorkPage({
     return services.filter((svc) => agreedPriceByServiceId.has(svc.id));
   }, [services, agreedPriceByServiceId]);
 
-  const searchMatches = useMemo(() => {
-    if (!serviceSearchTerm) return null;
-    return catalogForActor.filter((svc) =>
-      `${svc.category_name} ${svc.name}`
-        .toLowerCase()
-        .includes(serviceSearchTerm),
-    );
-  }, [catalogForActor, serviceSearchTerm]);
-
-  const categoryFilteredServices = useMemo(() => {
-    if (!categoryFilter) return catalogForActor;
-    if (categoryFilter.startsWith("cat:")) {
-      const id = Number(categoryFilter.slice(4));
-      return catalogForActor.filter((svc) => svc.category === id);
+  /**
+   * W-EW2 §1 — WHAT THE COMBOBOX OFFERS RIGHT NOW.
+   *
+   * One list, in the order it is read: the customer's agreed-price
+   * services, then their orderable custom prices, then — only when
+   * something has been typed — the row that turns that text into a
+   * custom line.
+   *
+   * Matching is a substring of "<category> <name>", the same rule the
+   * old search row used, so typing "e" finds every service with an e
+   * in its name OR its category and typing "win" finds Window
+   * cleaning. Empty box: everything is offered, because the box is
+   * permanently visible and opening it must show what there is.
+   *
+   * Lines already in the cart are still listed but marked, rather than
+   * hidden: a list that silently shrinks as you use it is harder to
+   * search than one that does not.
+   */
+  const addRows = useMemo((): AddRow[] => {
+    const q = addQuery.trim().toLowerCase();
+    const matches = (haystack: string) =>
+      !q || haystack.toLowerCase().includes(q);
+    const rows: AddRow[] = [];
+    for (const svc of catalogForActor) {
+      if (!matches(`${svc.category_name ?? ""} ${svc.name}`)) continue;
+      rows.push({ kind: "service", id: svc.id, key: `svc-${svc.id}` });
     }
-    if (categoryFilter.startsWith("fol:")) {
-      const id = Number(categoryFilter.slice(4));
-      const ids = serviceIdsByFolder.get(id);
-      if (!ids) return [];
-      return catalogForActor.filter((svc) => ids.has(svc.id));
+    for (const price of orderableCustomPrices) {
+      if (!matches(price.custom_name)) continue;
+      rows.push({
+        kind: "custom_price",
+        id: price.id,
+        key: `cp-${price.id}`,
+      });
     }
-    return catalogForActor;
-  }, [catalogForActor, categoryFilter, serviceIdsByFolder]);
+    if (q) rows.push({ kind: "custom_text", key: "custom-text" });
+    return rows;
+  }, [addQuery, catalogForActor, orderableCustomPrices]);
 
-  // What the per-line pickers offer right now: search wins over the
-  // category filter when one is typed.
-  const offeredServices = searchMatches ?? categoryFilteredServices;
+  /* A shrinking result list must not leave the highlight pointing past
+     the end — Enter would then commit nothing and read as a dead key.
+     Clamped at render rather than in an effect: it is derived state,
+     and `setState` from an effect body is what the lint baseline
+     forbids. */
+  const addIndex = addRows.length === 0
+    ? -1
+    : Math.min(addHighlight, addRows.length - 1);
+  const addRowInCart = (row: AddRow): boolean =>
+    row.kind === "service"
+      ? cartLines.some((l) => Number(l.serviceId) === row.id)
+      : row.kind === "custom_price"
+        ? cartLines.some((l) => l.serviceId === customPriceValue(row.id))
+        : false;
 
   // Sprint 145 — the agreed-prices browse panel obeys the SAME category
   // choice as the service pickers. Picking a category and still being
@@ -1242,35 +1363,6 @@ export function CreateExtraWorkPage({
     return !orderableCustomPrices.some((p) => p.id === customPriceId);
   }
 
-  /**
-   * Picking a service from OUTSIDE the active category filter clears
-   * that filter (per the "selecting a match outside the current
-   * category clears the filter" rule) — leaving it on would show the
-   * operator a cart line whose service is not in the list they are
-   * looking at.
-   */
-  function onLineServiceChange(tempId: string, value: string) {
-    updateCartLine(tempId, "serviceId", value);
-    // A custom price has no catalog category, so it can neither match
-    // nor contradict the active filter — leave the filter alone.
-    if (parseCustomPriceId(value) !== null) return;
-    if (!categoryFilter || value === CUSTOM_SERVICE_VALUE || !value) return;
-    const picked = services.find((svc) => svc.id === Number(value));
-    if (!picked) return;
-    // Sprint 143 §4 — the same guard, taught the two key shapes. A
-    // service picked from OUTSIDE the active filter clears that filter,
-    // so the list the operator is looking at never contradicts the line
-    // they just built.
-    const stillMatches = categoryFilter.startsWith("cat:")
-      ? picked.category === Number(categoryFilter.slice(4))
-      : categoryFilter.startsWith("fol:")
-        ? (serviceIdsByFolder.get(Number(categoryFilter.slice(4))) ?? new Set()).has(picked.id)
-        : true;
-    if (!stillMatches) {
-      setCategoryFilter("");
-    }
-  }
-
   function update<K extends keyof ParentFormState>(
     name: K,
     value: ParentFormState[K],
@@ -1317,27 +1409,66 @@ export function CreateExtraWorkPage({
   }
 
   /**
-   * W-EW1 §3 — "Add Service Line": append an empty line AND open its
-   * picker, so one click lands the user in the search box rather than
-   * on an empty row they then have to know to click.
+   * W-EW2 §1 — COMMITTING THE COMBOBOX.
+   *
+   * Every one of these appends a line that is ALREADY COMPLETE. That
+   * is the whole discipline: there is no longer any way for this page
+   * to put a half-finished row in the cart, which is what used to take
+   * the prices off every other row (see §3 on `previewableLines`).
+   *
+   * The box is then cleared and left focused, so the next line is
+   * typed without reaching for anything.
    */
-  function addLineAndOpenPicker() {
-    const line = emptyCartLine();
-    setCartLines((current) => [...current, line]);
-    setServiceSearch("");
-    setPickerFor(line.tempId);
+  function resetAddBox() {
+    setAddQuery("");
+    setAddHighlight(0);
+    setAddOpen(false);
   }
 
-  /**
-   * Commit a pick from the inline picker onto ONE line and close it.
-   * Reuses `onLineServiceChange` so a service chosen from outside the
-   * active category filter still clears that filter — the picker is a
-   * second mount of the same machinery, not a second implementation.
-   */
-  function pickForLine(tempId: string, value: string) {
-    onLineServiceChange(tempId, value);
-    setServiceSearch("");
-    setPickerFor(null);
+  function addServiceLine(serviceId: number) {
+    setCartLines((current) =>
+      current.some((l) => Number(l.serviceId) === serviceId)
+        ? current
+        : [...current, { ...emptyCartLine(), serviceId: String(serviceId) }],
+    );
+    resetAddBox();
+  }
+
+  function addCustomPriceLine(customPriceId: number) {
+    const value = customPriceValue(customPriceId);
+    setCartLines((current) =>
+      current.some((l) => l.serviceId === value)
+        ? current
+        : [...current, { ...emptyCartLine(), serviceId: value }],
+    );
+    resetAddBox();
+  }
+
+  /** The typed text becomes a custom line. Trimmed here, so a line can
+   *  never enter the cart holding only spaces — which would be an
+   *  unpreviewable row, the very thing §3 is about. */
+  function addCustomTextLine(text: string) {
+    const description = text.trim();
+    if (!description) return;
+    setCartLines((current) => [
+      ...current,
+      {
+        ...emptyCartLine(),
+        serviceId: CUSTOM_SERVICE_VALUE,
+        customDescription: description,
+      },
+    ]);
+    resetAddBox();
+  }
+
+  /** Commit whichever popover row is highlighted. Shared by Enter, by
+   *  a click, and by the confirm button, so the three can never mean
+   *  three different things. */
+  function commitAddRow(row: AddRow | undefined) {
+    if (!row) return;
+    if (row.kind === "service") addServiceLine(row.id);
+    else if (row.kind === "custom_price") addCustomPriceLine(row.id);
+    else addCustomTextLine(addQuery);
   }
 
   /** What a cart line's service cell reads as before it is priced. */
@@ -1629,8 +1760,12 @@ export function CreateExtraWorkPage({
   // many REAL works were created, because that is the fact somebody
   // needs to check against what they expected to pick.
   if (batchResult) {
+    // `.page-wrap` was on this div and is defined in no stylesheet in
+    // the app — the css gate flags it and it contributes nothing.
+    // Dropped rather than invented: adding the rule would be designing
+    // a layout nobody asked for.
     return (
-      <div className="page-wrap" data-testid="extra-work-batch-result">
+      <div data-testid="extra-work-batch-result">
         <div className="card">
           <h2 className="section-title">{t("series.created_title")}</h2>
           <p>{batchResult.group.standard_title}</p>
@@ -2605,21 +2740,15 @@ export function CreateExtraWorkPage({
             className="form-section"
             data-testid="extra-work-create-preview"
           >
+            {/* W-EW2 §1 — the header carries the title and NOTHING
+                else. The "Add service line" button that used to sit
+                here appended a blank row and unfolded a search block
+                under the table; the one control that adds a line is
+                now the combobox in the table's own last row. */}
             <div className="ew-preview-head">
               <div className="form-section-title" style={{ margin: 0 }}>
                 {t("create.preview.section_title")}
               </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={addLineAndOpenPicker}
-                data-testid="extra-work-create-add-line"
-              >
-                <Plus size={14} strokeWidth={2.2} />
-                <span style={{ marginLeft: 6 }}>
-                  {t("create.add_line_button")}
-                </span>
-              </button>
             </div>
 
             {previewErrorMsg && (
@@ -2658,13 +2787,13 @@ export function CreateExtraWorkPage({
                     </tr>
                   )}
                   {cartLines.map((line, index) => {
-                    // The server's row for this cart line, matched by
-                    // POSITION: `previewData` is keyed to the exact cart
-                    // that produced it (`preview.key === previewKey`), so
-                    // index i here IS line i there. `null` while a fetch
-                    // is in flight or the cart is not yet previewable —
-                    // the row still renders, its priced columns do not.
-                    const priced = previewData?.lines[index] ?? null;
+                    // W-EW2 §3 — the server's row for THIS cart line,
+                    // matched by identity (see `previewByTempId`).
+                    // `null` while a fetch is in flight, or for a row
+                    // that is not finished enough to price — and now
+                    // ONLY for that row: an unfinished neighbour no
+                    // longer takes this row's price down with it.
+                    const priced = previewByTempId.get(line.tempId) ?? null;
                     const known = priced ? knownLinePrice(priced) : null;
                     const qty = Number(line.quantity);
                     const lineTotal =
@@ -2681,27 +2810,19 @@ export function CreateExtraWorkPage({
                           data-price-source={priced?.price_source ?? ""}
                         >
                           <td>
-                            {/* The service cell IS the swap control:
-                                clicking it opens the same picker the
-                                header's Add Service Line opens, on this
-                                line. Picking re-resolves the price from
-                                the agreed price book server-side,
-                                exactly as adding it fresh would. */}
-                            <button
-                              type="button"
+                            {/* W-EW2 §1 — the service cell STATES the
+                                line; it no longer opens a picker under
+                                the table. Changing a line's service is
+                                removing it and typing the other one
+                                into the box below, which with one
+                                control is fewer actions than the swap
+                                it replaces. */}
+                            <div
                               className="ew-line-service-button"
                               data-testid={`extra-work-create-line-service-${index}`}
-                              aria-label={`${t("create.line_field_service")}: ${cartLineLabel(line)}`}
-                              onClick={() =>
-                                setPickerFor((current) =>
-                                  current === line.tempId
-                                    ? null
-                                    : line.tempId,
-                                )
-                              }
                             >
                               {cartLineLabel(line)}
-                            </button>
+                            </div>
                             {isCustom && (
                               <input
                                 data-testid={`extra-work-create-line-custom-${index}`}
@@ -2827,12 +2948,7 @@ export function CreateExtraWorkPage({
                             <button
                               type="button"
                               className="btn btn-ghost btn-sm"
-                              onClick={() => {
-                                setPickerFor((current) =>
-                                  current === line.tempId ? null : current,
-                                );
-                                removeCartLine(line.tempId);
-                              }}
+                              onClick={() => removeCartLine(line.tempId)}
                               data-testid={`extra-work-create-remove-line-${index}`}
                               aria-label={t("create.remove_line_button")}
                             >
@@ -2840,120 +2956,224 @@ export function CreateExtraWorkPage({
                             </button>
                           </td>
                         </tr>
-                        {pickerFor === line.tempId && (
-                          <tr
-                            className="ew-line-picker-row"
-                            data-testid={`extra-work-create-line-picker-${index}`}
-                          >
-                            <td colSpan={7}>
-                              <input
-                                type="search"
-                                className="field-input"
-                                autoFocus
-                                data-testid="extra-work-create-catalog-search"
-                                placeholder={t(
-                                  "create.catalog_filter.search_placeholder",
-                                )}
-                                value={serviceSearch}
-                                onChange={(event) =>
-                                  setServiceSearch(event.target.value)
-                                }
-                              />
-                              {isCustomerActor && (
-                                <div
-                                  className="muted small"
-                                  style={{ marginTop: 4 }}
-                                >
-                                  {t(
-                                    "create.catalog_filter.customer_scope_note",
-                                  )}
-                                </div>
-                              )}
-                              <BoundedList
-                                size="md"
-                                count={
-                                  offeredServices.length +
-                                  orderableCustomPrices.length
-                                }
-                                ariaLabel={t("create.preview.picker_label")}
-                                testIdPrefix="extra-work-create-line-picker-list"
-                                emptyState={
-                                  <div className="muted small">
-                                    {t("create.prices.no_match")}
-                                  </div>
-                                }
-                              >
-                                <div className="ew-agreed-prices-list">
-                                  {offeredServices.map((svc) => (
-                                    <button
-                                      type="button"
-                                      key={`svc-${svc.id}`}
-                                      className="ew-agreed-price-item"
-                                      data-testid="extra-work-create-line-picker-service"
-                                      onClick={() =>
-                                        pickForLine(
-                                          line.tempId,
-                                          String(svc.id),
-                                        )
-                                      }
-                                    >
-                                      <span className="ew-agreed-price-item-label">
-                                        {svc.category_name
-                                          ? `${svc.category_name} — ${svc.name}`
-                                          : svc.name}
-                                        {agreedPriceSuffix(svc.id)}
-                                      </span>
-                                    </button>
-                                  ))}
-                                  {orderableCustomPrices.map((price) => (
-                                    <button
-                                      type="button"
-                                      key={`cp-${price.id}`}
-                                      className="ew-agreed-price-item"
-                                      data-testid="extra-work-create-line-picker-custom-price"
-                                      onClick={() =>
-                                        pickForLine(
-                                          line.tempId,
-                                          customPriceValue(price.id),
-                                        )
-                                      }
-                                    >
-                                      <span className="ew-agreed-price-item-label">
-                                        {price.custom_name}
-                                        <span className="muted small">
-                                          {" · "}
-                                          {customPriceUnitLabel(price)}
-                                        </span>
-                                      </span>
-                                      <span className="ew-agreed-price-item-price">
-                                        {formatMoney(price.unit_price)}
-                                      </span>
-                                    </button>
-                                  ))}
-                                </div>
-                              </BoundedList>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                style={{ marginTop: 8 }}
-                                data-testid="extra-work-create-line-picker-custom"
-                                onClick={() =>
-                                  pickForLine(
-                                    line.tempId,
-                                    CUSTOM_SERVICE_VALUE,
-                                  )
-                                }
-                              >
-                                {t("create.line_custom_option")}
-                              </button>
-                            </td>
-                          </tr>
-                        )}
                       </Fragment>
                     );
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* ----- W-EW2 §1 — THE ONE CONTROL -----
+
+                The table's add row. It sits flush under the last line,
+                reads as the next row of the table, and is the only way
+                this page puts a line in the cart.
+
+                It is OUTSIDE `.table-wrap` on purpose. That wrapper is
+                `overflow-x: auto`, and a CSS box with `overflow-x: auto`
+                and `overflow-y: visible` computes to `overflow-y: auto`
+                — so a popover rendered from inside the table would be
+                clipped by the wrapper, or would put a scrollbar on it.
+                The requirement is a popover attached to the input, and
+                an attached popover is what this placement buys.
+
+                The list is BOUNDED (`BoundedList`): it renders a server
+                collection, and this customer may have hundreds of
+                agreed prices. */}
+            <div
+              className="ew-agreed-prices"
+              style={{ position: "relative", marginTop: 0, marginBottom: 12 }}
+              data-testid="extra-work-create-add-box"
+            >
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="text"
+                  role="combobox"
+                  aria-expanded={addOpen}
+                  aria-controls="ew-add-popover"
+                  aria-autocomplete="list"
+                  className="field-input"
+                  style={{ flex: "1 1 auto", minWidth: 0 }}
+                  placeholder={t("create.add_box.placeholder")}
+                  aria-label={t("create.add_box.placeholder")}
+                  data-testid="extra-work-create-add-input"
+                  value={addQuery}
+                  onFocus={() => setAddOpen(true)}
+                  onChange={(event) => {
+                    setAddQuery(event.target.value);
+                    setAddHighlight(0);
+                    setAddOpen(true);
+                  }}
+                  /* Blur closes the popover, but only after the click
+                     that caused it has landed — a `mousedown` on a
+                     suggestion blurs the input before its `click`
+                     fires, and closing synchronously would unmount the
+                     row being clicked. The popover rows use
+                     `onMouseDown preventDefault` instead, so the input
+                     never loses focus and this only runs on a real
+                     move away. */
+                  onBlur={() => setAddOpen(false)}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setAddOpen(true);
+                      setAddHighlight((current) =>
+                        addRows.length === 0
+                          ? 0
+                          : Math.min(current + 1, addRows.length - 1),
+                      );
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setAddHighlight((current) => Math.max(current - 1, 0));
+                    } else if (event.key === "Enter") {
+                      // The box lives inside the create <form>; without
+                      // this, Enter submits the request instead of
+                      // adding the line.
+                      event.preventDefault();
+                      commitAddRow(addRows[addIndex]);
+                    } else if (event.key === "Escape") {
+                      setAddOpen(false);
+                    }
+                  }}
+                />
+                {/* The explicit act. Finishing a custom line by
+                    pressing Enter and hoping is what this replaces.
+
+                    Enabled only while something is TYPED. With an empty
+                    box there is nothing to confirm — the highlight is
+                    then just the first suggestion, and a button that
+                    silently added it would be a trap. Pick from the
+                    list in that case; confirm what you wrote in this
+                    one. */}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={!addQuery.trim() || addIndex < 0}
+                  onClick={() => commitAddRow(addRows[addIndex])}
+                  data-testid="extra-work-create-add-confirm"
+                >
+                  <Plus size={14} strokeWidth={2.2} />
+                  <span style={{ marginLeft: 6 }}>
+                    {t("create.add_box.confirm")}
+                  </span>
+                </button>
+              </div>
+
+              {addOpen && (
+                <div
+                  id="ew-add-popover"
+                  role="listbox"
+                  aria-label={t("create.preview.picker_label")}
+                  data-testid="extra-work-create-add-popover"
+                  style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 12,
+                    right: 12,
+                    zIndex: 30,
+                    marginTop: 4,
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                  }}
+                >
+                  <BoundedList
+                    size="md"
+                    count={addRows.length}
+                    ariaLabel={t("create.preview.picker_label")}
+                    testIdPrefix="extra-work-create-add-list"
+                    emptyState={
+                      <div className="muted small" style={{ padding: 8 }}>
+                        {t("create.prices.no_match")}
+                      </div>
+                    }
+                  >
+                    <div
+                      className="ew-agreed-prices-list"
+                      style={{ marginTop: 0, border: "none" }}
+                    >
+                      {addRows.map((row, rowIndex) => {
+                        const active = rowIndex === addIndex;
+                        const inCart = addRowInCart(row);
+                        const svc =
+                          row.kind === "service"
+                            ? serviceById.get(row.id)
+                            : undefined;
+                        const price =
+                          row.kind === "custom_price"
+                            ? orderableCustomPrices.find(
+                                (p) => p.id === row.id,
+                              )
+                            : undefined;
+                        return (
+                          <button
+                            key={row.key}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            className="ew-agreed-price-item"
+                            style={
+                              active
+                                ? {
+                                    background: "rgba(11, 107, 66, 0.10)",
+                                    borderColor: "var(--border)",
+                                  }
+                                : undefined
+                            }
+                            data-testid={
+                              row.kind === "custom_text"
+                                ? "extra-work-create-add-option-custom"
+                                : "extra-work-create-add-option"
+                            }
+                            /* Keeps focus in the input so the blur
+                               above cannot unmount this row mid-click. */
+                            onMouseDown={(event) => event.preventDefault()}
+                            onMouseEnter={() => setAddHighlight(rowIndex)}
+                            onClick={() => commitAddRow(row)}
+                          >
+                            {row.kind === "custom_text" ? (
+                              <span className="ew-agreed-price-item-label">
+                                {t("create.add_box.add_custom", {
+                                  text: addQuery.trim(),
+                                })}
+                              </span>
+                            ) : (
+                              <>
+                                <span className="ew-agreed-price-item-label">
+                                  {row.kind === "service"
+                                    ? svc && svc.category_name
+                                      ? `${svc.category_name} — ${svc.name}`
+                                      : (svc?.name ?? "")
+                                    : (price?.custom_name ?? "")}
+                                  {inCart && (
+                                    <Check
+                                      size={14}
+                                      strokeWidth={2.5}
+                                      aria-hidden
+                                      style={{ marginLeft: 6 }}
+                                    />
+                                  )}
+                                </span>
+                                <span className="ew-agreed-price-item-price">
+                                  {row.kind === "service"
+                                    ? agreedPriceSuffix(row.id).replace(
+                                        /^ — /,
+                                        "",
+                                      )
+                                    : price
+                                      ? `${formatMoney(price.unit_price)} / ${customPriceUnitLabel(price)}`
+                                      : ""}
+                                </span>
+                              </>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </BoundedList>
+                </div>
+              )}
             </div>
 
             {previewLoading && (
