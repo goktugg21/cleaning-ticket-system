@@ -193,6 +193,15 @@
   "parts.toast_auto_off": "This ticket no longer goes to manager review automatically.",
   "assign.error_duplicate_one": "{{names}} is already on this ticket without a time. Give this assignment a start time or a different time window to add them again.",
   "assign.error_duplicate_other": "{{names}} are already on this ticket without a time. Give this assignment a start time or a different time window to add them again.",
-  "parts.remove_dialog_title": "Remove part “{{title}}”?",
-  "parts.remove_dialog_body": "Its assignments go back to the job itself — nothing is lost. No assignment and no completion evidence is deleted."
+  "parts.open": "Parts ({{n}})",
+  "parts.close": "Close",
+  "parts.empty": "No parts yet.",
+  "parts.none_assigned": "—",
+  "parts.add_label": "Add part",
+  "parts.add_placeholder": "e.g. Clean 3rd-floor windows",
+  "parts.add_button": "Add",
+  "parts.assign_label": "Assign someone to this part",
+  "parts.assign_choose": "Choose someone",
+  "parts.assign_button": "Assign",
+  "parts.confirm_yes": "Yes, remove"
 }

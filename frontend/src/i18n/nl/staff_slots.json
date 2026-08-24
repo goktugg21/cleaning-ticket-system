@@ -193,6 +193,15 @@
   "parts.toast_auto_off": "Dit ticket gaat niet meer automatisch naar managerbeoordeling.",
   "assign.error_duplicate_one": "{{names}} staat al zonder tijd op dit ticket. Geef deze toewijzing een starttijd of een ander dagdeel om deze persoon opnieuw toe te voegen.",
   "assign.error_duplicate_other": "{{names}} staan al zonder tijd op dit ticket. Geef deze toewijzing een starttijd of een ander dagdeel om deze personen opnieuw toe te voegen.",
-  "parts.remove_dialog_title": "Onderdeel “{{title}}” verwijderen?",
-  "parts.remove_dialog_body": "De toewijzingen keren terug naar de klus zelf — er gaat niets verloren. Geen toewijzing en geen afrondingsbewijs wordt verwijderd."
+  "parts.open": "Onderdelen ({{n}})",
+  "parts.close": "Sluiten",
+  "parts.empty": "Nog geen onderdelen.",
+  "parts.none_assigned": "—",
+  "parts.add_label": "Onderdeel toevoegen",
+  "parts.add_placeholder": "bijv. Ramen 3e verdieping schoonmaken",
+  "parts.add_button": "Toevoegen",
+  "parts.assign_label": "Iemand aan dit onderdeel toewijzen",
+  "parts.assign_choose": "Kies iemand",
+  "parts.assign_button": "Toewijzen",
+  "parts.confirm_yes": "Ja, verwijderen"
 }

@@ -19,16 +19,26 @@
 // The two near-identical buttons are resolved to one. `Add slot` and
 // `Add sub-task` were not the same operation (one attaches a PERSON, one
 // names a PART of the job) but they sat side by side under one heading
-// looking like a choice between two ways to do the same thing. Creating a
-// part now happens INSIDE the assign dialog -- "file this under a new part,
-// called ..." -- so there is exactly one button here and one door onto
-// staffing, whichever of the two you meant.
+// looking like a choice between two ways to do the same thing. So there is
+// exactly one primary button here and one door onto staffing, whichever of
+// the two you meant.
 //
-// PARTS get their own named section, with its own table and its own single
-// button, and ONLY once parts exist. On a ticket with none -- the owner's
-// ticket, and most tickets -- nothing about parts is on the page at all,
-// which is the "if a role cannot use it, that role does not see it" rule
-// applied to a feature nobody has reached for yet.
+// W26.2 -- PARTS are the second door, and it is a door, not a section.
+// They used to be an inline table that appeared only once parts existed,
+// with the auto-complete switch underneath it; the control that CREATED a
+// part had gone with the assign dialog's part picker (W19), which left the
+// whole surface reachable only for parts nobody could make. Now a
+// secondary `Parts (N)` button sits next to the assign action and opens
+// `SubTasksModal`, which owns every part operation. Nothing about parts is
+// rendered on this card any more, including on a ticket that has none --
+// the count on the button is the whole statement.
+//
+// The button carries the same predicate as the assign action because it is
+// inside this card, and `TicketDetailPage` renders this card only for
+// provider MANAGEMENT roles (`isProviderManagementRole`). The one control
+// with a NARROWER gate is the auto-complete switch inside the modal --
+// PA/SA only, via `canSetAutoCompleteFlag`, because that is what
+// `auto-complete-flag/` enforces (403 `auto_complete_flag_forbidden`).
 //
 // Shape copied from `ResponsibleManagersSection` (W13), which is the same
 // shape the owner's reference system uses for its two assignment blocks:
@@ -39,14 +49,11 @@ import { useTranslation } from "react-i18next";
 
 import {
   addTicketStaffAssignment,
-  deleteSubTask,
   listAssignableStaff,
   listSubTasks,
   listTicketStaffAssignments,
   removeTicketStaffAssignment,
-  setAutoCompleteFlag,
   updateStaffSlot,
-  updateSubTask,
 } from "../../api/admin";
 import type {
   AssignableStaff,
@@ -61,13 +68,12 @@ import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { SlotStatusBadge } from "../../components/SlotStatusBadge";
-import { StatusBadge } from "../../components/StatusBadge";
-import { Toggle } from "../../components/Toggle";
 import { useToast } from "../../components/ToastProvider";
 import { formatDateTime } from "../../lib/intl";
 import { isoToLocalInput, localInputToIso } from "../../lib/slotTime";
 import { AssignStaffDialog } from "./AssignStaffDialog";
 import type { AssignStaffResult } from "./AssignStaffDialog";
+import { SubTasksModal } from "./SubTasksModal";
 
 // Frontend mirror of the backend TERMINAL_TICKET_STATUSES. Part CRUD, part
 // placement and the auto-complete flag all 400/403 on these, so the controls
@@ -119,18 +125,10 @@ export function StaffAssignmentSection({
   const removeRef = useRef<ConfirmDialogHandle>(null);
   const [removeTarget, setRemoveTarget] =
     useState<TicketStaffAssignmentAdmin | null>(null);
-  const removePartRef = useRef<ConfirmDialogHandle>(null);
-  const [removePartTarget, setRemovePartTarget] = useState<SubTask | null>(
-    null,
-  );
-
-  // Inline rename of one part -- a row that becomes a form, so renaming a
-  // part never needs a heading, a paragraph or a dialog of its own.
-  const [renamingPartId, setRenamingPartId] = useState<number | null>(null);
-  const [renameTitle, setRenameTitle] = useState("");
-
-  const [autoFlag, setAutoFlag] = useState(autoCompleteOnSubtasks);
-  const [flagBusy, setFlagBusy] = useState(false);
+  // W26.2 -- parts live behind one door now (`SubTasksModal`), so the
+  // rename draft, the remove confirm and the auto-complete flag are that
+  // modal's state, not this card's.
+  const [partsOpen, setPartsOpen] = useState(false);
 
   async function reload() {
     const [slotResp, staffResp, partResp] = await Promise.all([
@@ -194,24 +192,13 @@ export function StaffAssignmentSection({
     return parts.find((p) => p.id === partId)?.title ?? null;
   }
 
-  function partBadge(part: SubTask): {
-    tone: "approved" | "progress" | "neutral";
-    label: string;
-  } {
-    if (part.is_done) {
-      return { tone: "approved", label: t("subtasks.status_done") };
-    }
-    if (part.staff_assignments.length > 0) {
-      return { tone: "progress", label: t("subtasks.status_in_progress") };
-    }
-    return { tone: "neutral", label: t("subtasks.status_pending") };
-  }
-
   // ONE confirm, however many people and however many windows.
   //
   // The people are written one at a time on purpose. The server refuses a
-  // second slot for someone who already holds an indistinguishable one
-  // (`duplicate_flat_assignment`, W13-FIX §6c), and a refusal has to be
+  // second slot for someone who already holds ANY slot here
+  // (`staff_already_assigned`, W26 -- one person, one slot; it superseded
+  // W13-FIX §6c's narrower `duplicate_flat_assignment`, which this branch
+  // was still testing for and so never matched), and a refusal has to be
   // able to NAME the person it refused. So each write is caught on its
   // own: the ones that landed are kept and announced, the ones that were
   // refused are listed by name with what to change, and the table behind
@@ -250,7 +237,7 @@ export function StaffAssignmentSection({
           const code = (
             err as { response?: { data?: { code?: string } } }
           )?.response?.data?.code;
-          if (code === "duplicate_flat_assignment") refused.push(name);
+          if (code === "staff_already_assigned") refused.push(name);
           else throw err;
         }
       }
@@ -337,68 +324,6 @@ export function StaffAssignmentSection({
     }
   }
 
-  async function handleRenamePart(part: SubTask) {
-    const title = renameTitle.trim();
-    if (title === "") return;
-    setBusy(true);
-    setError("");
-    try {
-      await updateSubTask(ticketId, part.id, { title });
-      setRenamingPartId(null);
-      await reload();
-      onChanged?.();
-      push({
-        variant: "success",
-        title: t("parts.toast_renamed", { part: title }),
-      });
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleConfirmRemovePart() {
-    if (!removePartTarget) return;
-    const title = removePartTarget.title;
-    setBusy(true);
-    setError("");
-    try {
-      await deleteSubTask(ticketId, removePartTarget.id);
-      removePartRef.current?.close();
-      setRemovePartTarget(null);
-      await reload();
-      onChanged?.();
-      push({ variant: "success", title: t("parts.toast_removed", { part: title }) });
-    } catch (err) {
-      setError(getApiError(err));
-      removePartRef.current?.close();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleToggleAutoComplete(next: boolean) {
-    setFlagBusy(true);
-    setError("");
-    try {
-      const updated = await setAutoCompleteFlag(ticketId, next);
-      setAutoFlag(updated.auto_complete_on_subtasks);
-      onChanged?.();
-      push({
-        variant: "success",
-        title: updated.auto_complete_on_subtasks
-          ? t("parts.toast_auto_on")
-          : t("parts.toast_auto_off"),
-      });
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setFlagBusy(false);
-    }
-  }
-
-  const hasParts = parts.length > 0;
   // NOT gated on the roster. A person may legitimately hold a second
   // window on the same ticket, and a dead primary button is the failure
   // mode CLAUDE.md calls out -- so the button always opens, and the
@@ -433,6 +358,15 @@ export function StaffAssignmentSection({
             data-testid="staff-assignment-assign"
           >
             {t("assign.title")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setPartsOpen(true)}
+            disabled={busy}
+            data-testid="ticket-parts-open"
+          >
+            {t("parts.open", { n: parts.length })}
           </button>
         </div>
       ) : (
@@ -577,171 +511,33 @@ export function StaffAssignmentSection({
             >
               {t("assign.title")}
             </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setPartsOpen(true)}
+              disabled={busy}
+              data-testid="ticket-parts-open"
+            >
+              {t("parts.open", { n: parts.length })}
+            </button>
           </div>
         </>
       )}
 
-      {/* PARTS -- its own name, its own table, and only once parts exist.
-          They are created inside the assign dialog, so this section never
-          needs an "add" button of its own. */}
-      {!loading && hasParts && (
-        <div className="assign-parts" data-testid="ticket-parts-section">
-          <div className="assign-parts-head">
-            <span className="assign-parts-title">{t("parts.title")}</span>
-            <span className="muted small" data-testid="ticket-parts-count">
-              {t("parts.count", { count: parts.length })}
-            </span>
-          </div>
-          <BoundedList
-            size="sm"
-            count={parts.length}
-            ariaLabel={t("parts.title")}
-            testIdPrefix="ticket-parts-list"
-            className="table-wrap"
-          >
-            <table
-              className="data-table data-table-dense assign-table"
-              data-testid="ticket-parts-table"
-            >
-              <thead>
-                <tr>
-                  <th className="assign-table-person">{t("parts.col_part")}</th>
-                  <th>{t("parts.col_state")}</th>
-                  {!isTerminal && <th className="assign-table-actions" />}
-                </tr>
-              </thead>
-              <tbody>
-                {parts.map((part) => {
-                  const badge = partBadge(part);
-                  const renaming = renamingPartId === part.id;
-                  return (
-                    <tr
-                      key={part.id}
-                      data-testid="ticket-part-row"
-                      data-part-id={part.id}
-                    >
-                      <td className="assign-table-person">
-                        {renaming ? (
-                          <input
-                            className="field-input"
-                            type="text"
-                            maxLength={200}
-                            value={renameTitle}
-                            disabled={busy}
-                            aria-label={t("parts.rename")}
-                            onChange={(event) =>
-                              setRenameTitle(event.target.value)
-                            }
-                            data-testid="ticket-part-rename-input"
-                          />
-                        ) : (
-                          part.title
-                        )}
-                      </td>
-                      <td>
-                        <StatusBadge
-                          variant="cell"
-                          status={{
-                            kind: "generic",
-                            tone: badge.tone,
-                            label: badge.label,
-                          }}
-                        />
-                        <span className="assign-table-note">
-                          {t("parts.people_count", {
-                            count: part.staff_assignments.length,
-                          })}
-                        </span>
-                      </td>
-                      {!isTerminal && (
-                        <td className="assign-table-actions">
-                          {renaming ? (
-                            <>
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-sm"
-                                onClick={() => void handleRenamePart(part)}
-                                disabled={busy || renameTitle.trim() === ""}
-                                data-testid="ticket-part-rename-save"
-                              >
-                                {t("common:save")}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => setRenamingPartId(null)}
-                                disabled={busy}
-                                data-testid="ticket-part-rename-cancel"
-                              >
-                                {t("common:cancel")}
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => {
-                                  setRenamingPartId(part.id);
-                                  setRenameTitle(part.title);
-                                }}
-                                disabled={busy}
-                                data-testid="ticket-part-rename"
-                              >
-                                <Pencil
-                                  size={13}
-                                  strokeWidth={2.2}
-                                  aria-hidden="true"
-                                />
-                                {t("parts.rename")}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => {
-                                  setRemovePartTarget(part);
-                                  removePartRef.current?.open();
-                                }}
-                                disabled={busy}
-                                data-testid="ticket-part-remove"
-                              >
-                                <X
-                                  size={13}
-                                  strokeWidth={2.5}
-                                  aria-hidden="true"
-                                />
-                                {t("parts.remove")}
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </BoundedList>
-
-          {/* One line, one verb-less state sentence, no explaining
-              paragraph. Absent for anyone who cannot write it. */}
-          {canSetAutoCompleteFlag && !isTerminal && (
-            <label
-              className="assign-parts-auto"
-              data-testid="ticket-parts-auto-complete"
-            >
-              <Toggle
-                checked={autoFlag}
-                disabled={flagBusy}
-                onChange={(event) =>
-                  void handleToggleAutoComplete(event.target.checked)
-                }
-                data-testid="ticket-parts-auto-complete-toggle"
-              />
-              <span className="small">{t("parts.auto_complete_label")}</span>
-            </label>
-          )}
-        </div>
+      {partsOpen && (
+        <SubTasksModal
+          ticketId={ticketId}
+          parts={parts}
+          candidates={assignable}
+          isTerminal={isTerminal}
+          canSetAutoCompleteFlag={canSetAutoCompleteFlag}
+          autoCompleteOnSubtasks={autoCompleteOnSubtasks}
+          onChanged={async () => {
+            await reload();
+            onChanged?.();
+          }}
+          onClose={() => setPartsOpen(false)}
+        />
       )}
 
       {assignOpen && (
@@ -799,18 +595,6 @@ export function StaffAssignmentSection({
         destructive
       />
 
-      <ConfirmDialog
-        ref={removePartRef}
-        title={t("parts.remove_dialog_title", {
-          title: removePartTarget ? removePartTarget.title : "",
-        })}
-        body={t("parts.remove_dialog_body")}
-        confirmLabel={t("parts.remove")}
-        onConfirm={handleConfirmRemovePart}
-        onCancel={() => setRemovePartTarget(null)}
-        busy={busy}
-        destructive
-      />
     </div>
   );
 }
