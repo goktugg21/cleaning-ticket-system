@@ -79,6 +79,25 @@ class NotificationEventType(models.TextChoices):
         "Planned work has not started",
     )
 
+    # ------------------------------------------------------------------
+    # W-N1 — two more machine-sent types, spelled identically in the
+    # in-app enum below for the same reason the SLA three are: the
+    # cooldown query keys BOTH tables off one `event_type` string, so a
+    # divergence here silently unthrottles one channel.
+    # ------------------------------------------------------------------
+    #: A ticket's deadline is inside the warning window and the work is
+    #: not finished. Sent ONCE per ticket per person, not daily.
+    TICKET_DEADLINE_APPROACHING = (
+        "TICKET_DEADLINE_APPROACHING",
+        "Ticket deadline approaching",
+    )
+    #: Somebody was put on a PART of a ticket. Not sent when they put
+    #: themselves there.
+    TICKET_PART_ASSIGNED = (
+        "TICKET_PART_ASSIGNED",
+        "Ticket part assigned",
+    )
+
 
 class NotificationStatus(models.TextChoices):
     QUEUED = "QUEUED", "Queued"
@@ -235,6 +254,15 @@ class NotificationType(models.TextChoices):
     SLA_WORK_NOT_STARTED = (
         "SLA_WORK_NOT_STARTED",
         "Planned work has not started",
+    )
+    # W-N1 — spelled exactly as in `NotificationEventType` above.
+    TICKET_DEADLINE_APPROACHING = (
+        "TICKET_DEADLINE_APPROACHING",
+        "Ticket deadline approaching",
+    )
+    TICKET_PART_ASSIGNED = (
+        "TICKET_PART_ASSIGNED",
+        "Ticket part assigned",
     )
 
 

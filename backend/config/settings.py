@@ -499,6 +499,15 @@ CELERY_BEAT_SCHEDULE = {
         "task": "invoicing.tasks.run_daily_invoice_run",
         "schedule": 24 * 60 * 60,
     },
+    # W-N1 §1 — the deadline reminder. DAILY, not every five minutes:
+    # the window it watches is 48 hours wide and the reminder fires ONCE
+    # per ticket per person ever, so a tighter beat would buy nothing
+    # and only widen the blast radius of a bad row. See
+    # `tickets/deadline_reminders.py` for why it does not repeat.
+    "sweep-deadline-reminders": {
+        "task": "tickets.tasks.sweep_deadline_reminders",
+        "schedule": 24 * 60 * 60,
+    },
     # Sprint W1-B §2.7 — the time-driven warning sweep. Same 5-minute
     # cadence as the SLA reconciler above, and for the same reason: it
     # answers "has a threshold been crossed since I last looked?", which

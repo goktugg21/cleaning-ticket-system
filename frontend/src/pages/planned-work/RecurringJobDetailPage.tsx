@@ -747,7 +747,16 @@ export function RecurringJobDetailPage() {
                 {t("money.none_available")}
                 {canAccessContracts(me?.role ?? null) && (
                   <>
-                    {" "}
+                    {/* T5b — a real separator, not a word space. The
+                        sentence ends in a word and the link starts with
+                        one, so at 13.5px a single space read as the two
+                        touching. The middot is the same divider the
+                        agreement line above already uses, and it is
+                        aria-hidden because it is punctuation, not a
+                        word a screen reader should announce. */}
+                    <span className="pw-agreement-sep" aria-hidden="true">
+                      {" · "}
+                    </span>
                     <Link to="/admin/contracts">
                       {t("money.none_available_link")}
                     </Link>

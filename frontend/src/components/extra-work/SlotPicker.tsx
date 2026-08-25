@@ -326,7 +326,13 @@ export function SlotPicker({
 
       {slots.length >= RECURRING_HINT_AT && (
         <p
-          className="muted small"
+          className="muted"
+          /* T5a — one step up the shared scale, 12px -> 13.5px. Not
+             `.muted` alone: that inherits 15px base and the line starts
+             reading as body copy rather than as the state line it is.
+             Inline because the rung has no utility class and this wave
+             owns no stylesheet to add one to. */
+          style={{ fontSize: "var(--font-sm)" }}
           role="status"
           data-testid="extra-work-slot-recurring-hint"
         >

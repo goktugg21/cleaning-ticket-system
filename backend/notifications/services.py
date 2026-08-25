@@ -1007,6 +1007,39 @@ def emit_sla_warning_inapp(
     return rows
 
 
+def emit_ticket_part_assigned_inapp(*, recipient, actor, summary, ticket):
+    """W-N1 §2 — the BELL half of "you were put on a part of this ticket".
+
+    Its own function rather than a reuse of `emit_sla_warning_inapp`,
+    which writes `actor=None, is_directed=False` and says in its own
+    docstring that this is by construction: it exists for the
+    notifications that fire because NOBODY did anything. A part
+    assignment is the opposite — a named manager did it to a named
+    person — and dropping the actor would lose the one fact the
+    recipient wants, which is who put them there.
+
+    `is_directed=True` because somebody addressed this user
+    specifically. Today that flag only changes the feed's treatment of
+    MESSAGE types (`_feed_queryset`), so this is not load-bearing for
+    visibility; it is recorded because it is TRUE, and the day another
+    reader keys off it this row should not be lying.
+
+    No roster logic: the recipient is the slot's own user, which is not
+    a decision this function is making.
+    """
+    if recipient is None or not recipient.id:
+        return None
+    return Notification.objects.create(
+        recipient=recipient,
+        actor=actor,
+        event_type=NotificationType.TICKET_PART_ASSIGNED,
+        ticket=ticket,
+        is_directed=True,
+        summary=(summary or "").strip()[:500],
+        read_at=None,
+    )
+
+
 def extra_work_provider_recipients(ew):
     """Provider management for an Extra Work — its company's admins plus
     the building managers of its building. The EW analogue of
