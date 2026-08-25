@@ -57,6 +57,11 @@ STATUS_I18N_KEY = {
     TicketStatus.CLOSED: "ticket_status.closed",
     TicketStatus.REOPENED_BY_ADMIN: "ticket_status.reopened_by_admin",
     TicketStatus.CONVERTED_TO_EXTRA_WORK: "ticket_status.converted_to_extra_work",
+    # W-N1 — both maps grow together. The sibling test asserts their key
+    # sets are equal precisely so one growing alone cannot make the
+    # byte-identity check silently skip a status instead of failing.
+    TicketStatus.ACKNOWLEDGED: "ticket_status.acknowledged",
+    TicketStatus.ON_HOLD: "ticket_status.on_hold",
 }
 
 # The strings themselves, copied from `frontend/src/i18n/nl/common.json`.
@@ -70,6 +75,14 @@ TICKET_STATUS_LABEL_NL = {
     TicketStatus.CLOSED: "Gesloten",
     TicketStatus.REOPENED_BY_ADMIN: "Heropend",
     TicketStatus.CONVERTED_TO_EXTRA_WORK: "Geconverteerd naar meerwerk",
+    # W-N1 — ACKNOWLEDGED and ON_HOLD reached `TicketStatus` without
+    # reaching this map, so `_status_label` fell back to `str(value)`
+    # and a customer whose ticket was put on hold could be emailed the
+    # literal text `ON_HOLD`. Byte-identical to `ticket_status.*` in
+    # `frontend/src/i18n/nl/common.json`, which is what the sibling test
+    # asserts wherever the repo is checked out whole.
+    TicketStatus.ACKNOWLEDGED: "Ingepland, nog niet gestart",
+    TicketStatus.ON_HOLD: "In wacht",
 }
 
 # What a status nobody has a word for renders as. NOT the raw code: a
