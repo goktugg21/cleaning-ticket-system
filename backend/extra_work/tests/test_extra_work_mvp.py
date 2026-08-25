@@ -406,11 +406,14 @@ class CreateTests(ExtraWorkFixtureMixin, TestCase):
             # the resolver returns None and routing_decision lands
             # on PROPOSAL — that's fine, the Batch-6-specific tests
             # cover INSTANT separately.
+            # W-EW1 §2 — the cart's ONE date (per-line dates were
+            # retired in 181708a; `validate()` stamps this onto every
+            # line).
+            "preferred_date": "2026-06-01",
             "line_items": [
                 {
                     "service": self.service.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-01",
                     "customer_note": "",
                 }
             ],
@@ -785,6 +788,8 @@ class ProviderOverrideTests(ExtraWorkFixtureMixin, TestCase):
             unit_price=Decimal("100"),
             vat_rate=Decimal("21"),
         )
+        # W-PLAN — pricing is gated on a complete plan.
+        make_plan_complete(ew)
         resp = self._api(self.admin_a).post(
             f"/api/extra-work/{ew.id}/transition/",
             {"to_status": ExtraWorkStatus.PRICING_PROPOSED},
@@ -867,6 +872,9 @@ class PricingProposedRequirementTests(ExtraWorkFixtureMixin, TestCase):
             created_by=self.cust_basic_a,
             status_value=ExtraWorkStatus.UNDER_REVIEW,
         )
+        # W-PLAN — plan first, so the refusal this test asserts stays
+        # the LINE-ITEMS rule rather than the (earlier) plan gate.
+        make_plan_complete(ew)
         response = self._api(self.admin_a).post(
             f"/api/extra-work/{ew.id}/transition/",
             {"to_status": ExtraWorkStatus.PRICING_PROPOSED},

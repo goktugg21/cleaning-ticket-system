@@ -242,6 +242,18 @@ class D3WorkflowLegTests(_Base):
 
     def test_direct_pricing_transition_passes_once_planned(self):
         ew = make_plan_complete(self._ew())
+        # The leg's OWN precondition (Sprint MVP): at least one pricing
+        # line item. Satisfied so the assertion isolates the plan gate.
+        from extra_work.models import ExtraWorkPricingLineItem
+
+        ExtraWorkPricingLineItem.objects.create(
+            extra_work=ew,
+            description="Crew",
+            unit_type="FIXED",
+            quantity=Decimal("1"),
+            unit_price=Decimal("100"),
+            vat_rate=Decimal("21"),
+        )
         resp = self._api(self.admin).post(
             f"/api/extra-work/{ew.id}/transition/",
             {"to_status": ExtraWorkStatus.PRICING_PROPOSED},

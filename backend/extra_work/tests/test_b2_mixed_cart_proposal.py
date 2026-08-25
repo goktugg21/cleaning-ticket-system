@@ -215,6 +215,13 @@ class _B2Fixture(TestCase):
             "building": self.building.id,
             "customer": self.customer.id,
             "category": ExtraWorkCategory.DEEP_CLEANING,
+            # W-EW1 §2 — ONE DATE FOR THE WHOLE CART. Per-line
+            # `requested_date` stopped being client-supplied in
+            # 181708a (`line_requested_date_not_accepted`); the
+            # request-level `preferred_date` is stamped onto every
+            # line by `validate()`. Date unchanged, so each line
+            # resolves against the same contract window as before.
+            "preferred_date": "2026-06-01",
             "line_items": line_specs,
         }
         response = self._api(self.cust_user).post(
@@ -247,12 +254,10 @@ class RoutingAllContractTests(_B2Fixture):
                 {
                     "service": self.svc_window.id,
                     "quantity": "50",
-                    "requested_date": "2026-06-01",
                 },
                 {
                     "service": self.svc_polish.id,
                     "quantity": "3",
-                    "requested_date": "2026-06-01",
                 },
             ]
         )
@@ -274,14 +279,12 @@ class RoutingMixedCartTests(_B2Fixture):
                 {
                     "service": self.svc_window.id,
                     "quantity": "50",
-                    "requested_date": "2026-06-01",
                 },
                 # Non-contract line (no CustomerServicePrice for this
                 # customer / svc_grass pair).
                 {
                     "service": self.svc_grass.id,
                     "quantity": "100",
-                    "requested_date": "2026-06-01",
                 },
             ]
         )
@@ -309,12 +312,10 @@ class ProposalAutoSeedTests(_B2Fixture):
                 {
                     "service": self.svc_window.id,
                     "quantity": "50",
-                    "requested_date": "2026-06-01",
                 },
                 {
                     "service": self.svc_grass.id,
                     "quantity": "100",
-                    "requested_date": "2026-06-01",
                 },
             ]
         )
@@ -329,7 +330,6 @@ class ProposalAutoSeedTests(_B2Fixture):
                 {
                     "service": self.svc_grass.id,
                     "quantity": "100",
-                    "requested_date": "2026-06-01",
                 },
             ]
         )
@@ -411,12 +411,10 @@ class ProposalExplicitLinesCoveringCartTests(_B2Fixture):
                 {
                     "service": self.svc_window.id,
                     "quantity": "50",
-                    "requested_date": "2026-06-01",
                 },
                 {
                     "service": self.svc_grass.id,
                     "quantity": "100",
-                    "requested_date": "2026-06-01",
                 },
             ]
         )
@@ -485,12 +483,10 @@ class ProposalFreeFormLinesSendTests(_B2Fixture):
                 {
                     "service": self.svc_window.id,
                     "quantity": "50",
-                    "requested_date": "2026-06-01",
                 },
                 {
                     "service": self.svc_grass.id,
                     "quantity": "100",
-                    "requested_date": "2026-06-01",
                 },
             ]
         )
@@ -552,12 +548,10 @@ class ProposalApprovalSpawnTests(_B2Fixture):
                 {
                     "service": self.svc_window.id,
                     "quantity": "50",
-                    "requested_date": "2026-06-01",
                 },
                 {
                     "service": self.svc_grass.id,
                     "quantity": "100",
-                    "requested_date": "2026-06-01",
                 },
             ]
         )
@@ -618,7 +612,6 @@ class StaffStillBlockedFromProposalsTests(_B2Fixture):
                 {
                     "service": self.svc_grass.id,
                     "quantity": "100",
-                    "requested_date": "2026-06-01",
                 },
             ]
         )

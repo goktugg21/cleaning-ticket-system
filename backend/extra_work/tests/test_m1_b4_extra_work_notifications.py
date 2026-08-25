@@ -284,11 +284,17 @@ class B4FixtureMixin:
             "title": "Cart submission",
             "description": "shopping cart",
             "category": ExtraWorkCategory.DEEP_CLEANING,
+            # W-EW1 §2 — ONE DATE FOR THE WHOLE CART. Per-line
+            # `requested_date` stopped being client-supplied in
+            # 181708a (`line_requested_date_not_accepted`); the
+            # request-level `preferred_date` is stamped onto every
+            # line by `validate()`. Date unchanged, so each line
+            # resolves against the same contract window as before.
+            "preferred_date": "2026-06-15",
             "line_items": [
                 {
                     "service": self.service_priced.id,
                     "quantity": "2.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "Top floor",
                 }
             ],

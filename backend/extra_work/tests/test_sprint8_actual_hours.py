@@ -202,6 +202,13 @@ class ActualHoursFixtureMixin:
             "description": "actual hours cart",
             "category": ExtraWorkCategory.DEEP_CLEANING,
             "request_intent": intent,
+            # W-EW1 §2 — ONE DATE FOR THE WHOLE CART. Per-line
+            # `requested_date` stopped being client-supplied in
+            # 181708a (`line_requested_date_not_accepted`); the
+            # request-level `preferred_date` is stamped onto every
+            # line by `validate()`. Date unchanged, so each line
+            # resolves against the same contract window as before.
+            "preferred_date": "2026-06-15",
             "line_items": lines,
         }
         return self._api(actor).post(EW_URL, payload, format="json")
@@ -210,7 +217,6 @@ class ActualHoursFixtureMixin:
         return {
             "service": service.id,
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
