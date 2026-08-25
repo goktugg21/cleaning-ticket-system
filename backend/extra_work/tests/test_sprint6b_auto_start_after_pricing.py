@@ -166,6 +166,15 @@ class AutoStartFixtureMixin:
             "description": "auto-start cart",
             "category": ExtraWorkCategory.DEEP_CLEANING,
             "request_intent": intent,
+            # W-EW1 §2 — ONE DATE FOR THE WHOLE CART. The per-line
+            # `requested_date` stopped being client-supplied in 181708a
+            # (`line_requested_date_not_accepted`); the request-level
+            # `preferred_date` is stamped onto every line by `validate()`
+            # instead. Kept at 2026-06-15 so each line still resolves
+            # against exactly the date these tests were written for — the
+            # fixture contract is `valid_from=2026-01-01, valid_to=None`,
+            # so the agreed-price window is unchanged.
+            "preferred_date": "2026-06-15",
             "line_items": lines,
         }
         return self._api(actor).post(EW_URL, payload, format="json")
@@ -174,7 +183,6 @@ class AutoStartFixtureMixin:
         return {
             "service": service.id,
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
@@ -182,7 +190,6 @@ class AutoStartFixtureMixin:
         return {
             "custom_description": "Free-text special task",
             "quantity": qty,
-            "requested_date": "2026-06-15",
             "customer_note": "",
         }
 
