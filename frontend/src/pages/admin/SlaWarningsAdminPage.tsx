@@ -168,6 +168,7 @@ export function SlaWarningsAdminPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
 
   // Loads once. `loading` STARTS true and is only ever cleared in the
   // settled branch — the starts-true idiom the project uses, because a
@@ -263,10 +264,15 @@ export function SlaWarningsAdminPage() {
     setDraft(draftFrom(updated));
   }, []);
 
+  // W-T3 §1 — Save and Reset had been reporting into the SAME banner as
+  // the page LOAD. Conflated, a refused save read as "this page is
+  // broken" rather than "that button did not work"; separated, the
+  // message sits directly under the two buttons that fired it and the
+  // load keeps its own.
   const handleSave = useCallback(async () => {
     if (!selected) return;
     setSaving(true);
-    setError("");
+    setActionError("");
     try {
       const patch: Record<string, number | null> = {};
       let anySet = false;
@@ -298,7 +304,7 @@ export function SlaWarningsAdminPage() {
         title: t("sla_warnings.saved"),
       });
     } catch (err) {
-      setError(getApiError(err));
+      setActionError(getApiError(err));
     } finally {
       setSaving(false);
     }
@@ -307,12 +313,12 @@ export function SlaWarningsAdminPage() {
   const handleReset = useCallback(async () => {
     if (!selected) return;
     setSaving(true);
-    setError("");
+    setActionError("");
     try {
       applyResult(await resetSlaWarningThresholds(selected.company));
       pushToast({ variant: "success", title: t("sla_warnings.reset_done") });
     } catch (err) {
-      setError(getApiError(err));
+      setActionError(getApiError(err));
     } finally {
       setSaving(false);
     }
@@ -360,6 +366,18 @@ export function SlaWarningsAdminPage() {
           ) : undefined
         }
       />
+
+      {/* The ACTION's failure, directly under the buttons that fired
+          it. Separate from the load banner below. */}
+      {actionError && (
+        <div
+          className="alert alert-error"
+          role="alert"
+          data-testid="sla-warnings-action-error"
+        >
+          {actionError}
+        </div>
+      )}
 
       {error && (
         <div className="alert alert-error" role="alert">

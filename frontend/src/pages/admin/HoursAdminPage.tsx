@@ -300,6 +300,18 @@ export function HoursAdminPage() {
   const [saveError, setSaveError] = useState("");
 
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
+  // W-T3 §1 — ERRORS AT THE ACTION. All four mutations here reported
+  // into `loadError`, the banner that also carries "this page could not
+  // load", and the three confirms CLOSED their dialog on the way. The
+  // operator watched the dialog vanish and the row stay, with the
+  // reason in a banner that reads like a page-level fault.
+  //
+  // Now each confirm keeps its dialog OPEN and names the refusal inside
+  // it (`ConfirmDialog.body` is a ReactNode, so this needs no change to
+  // that shared component), and the export names its failure at the
+  // toolbar. `loadError` keeps the loads.
+  const [confirmError, setConfirmError] = useState("");
+  const [exportError, setExportError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<TimeEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
@@ -691,6 +703,7 @@ export function HoursAdminPage() {
 
   function openDeleteEntry(entry: TimeEntry) {
     setDeleteTarget(entry);
+    setConfirmError("");
     deleteDialogRef.current?.open();
   }
 
@@ -708,8 +721,7 @@ export function HoursAdminPage() {
       deleteDialogRef.current?.close();
       setDeleteTarget(null);
     } catch (err) {
-      setLoadError(getApiError(err));
-      deleteDialogRef.current?.close();
+      setConfirmError(getApiError(err));
     } finally {
       setDeleteBusy(false);
     }
@@ -731,10 +743,12 @@ export function HoursAdminPage() {
         variant: "success",
         title: t("weeks.close_done", { week: formatIsoWeek(week) }),
       });
-    } catch (err) {
-      setLoadError(getApiError(err));
-    } finally {
+      // Closed on SUCCESS only. In `finally` it closed on failure too,
+      // taking the reason off screen with it.
       closeWeekRef.current?.close();
+    } catch (err) {
+      setConfirmError(getApiError(err));
+    } finally {
       setLockBusy(false);
     }
   }
@@ -753,10 +767,12 @@ export function HoursAdminPage() {
         variant: "success",
         title: t("weeks.reopen_done", { week: formatIsoWeek(week) }),
       });
-    } catch (err) {
-      setLoadError(getApiError(err));
-    } finally {
+      // Closed on SUCCESS only. In `finally` it closed on failure too,
+      // taking the reason off screen with it.
       reopenWeekRef.current?.close();
+    } catch (err) {
+      setConfirmError(getApiError(err));
+    } finally {
       setLockBusy(false);
     }
   }
@@ -766,7 +782,7 @@ export function HoursAdminPage() {
     try {
       await downloadTimesheetSummaryCsv(queryFilters);
     } catch (err) {
-      setLoadError(getApiError(err));
+      setExportError(getApiError(err));
       pushToast({ variant: "error", title: t("hours_admin.export_failed") });
     } finally {
       setExportBusy(false);
@@ -946,7 +962,10 @@ export function HoursAdminPage() {
                   type="button"
                   className="btn btn-secondary btn-sm"
                   data-testid="hours-week-reopen"
-                  onClick={() => reopenWeekRef.current?.open()}
+                  onClick={() => {
+                    setConfirmError("");
+                    reopenWeekRef.current?.open();
+                  }}
                   disabled={weekStatusLoading || lockBusy || companyPending}
                 >
                   {t("weeks.reopen_button")}
@@ -956,7 +975,10 @@ export function HoursAdminPage() {
                   type="button"
                   className="btn btn-primary btn-sm"
                   data-testid="hours-week-close"
-                  onClick={() => closeWeekRef.current?.open()}
+                  onClick={() => {
+                    setConfirmError("");
+                    closeWeekRef.current?.open();
+                  }}
                   disabled={weekStatusLoading || lockBusy || companyPending}
                 >
                   {t("weeks.close_button")}
@@ -1198,6 +1220,15 @@ export function HoursAdminPage() {
                           ? t("hours_admin.export_busy")
                           : t("hours_admin.export_csv")}
                       </button>
+                      {exportError && (
+                        <span
+                          className="alert-error"
+                          role="alert"
+                          data-testid="hours-export-error"
+                        >
+                          {exportError}
+                        </span>
+                      )}
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
@@ -1660,7 +1691,20 @@ export function HoursAdminPage() {
       <ConfirmDialog
         ref={deleteDialogRef}
         title={t("hours_admin.delete_confirm_title")}
-        body={t("hours_admin.delete_confirm_body")}
+        body={
+          <>
+            {t("hours_admin.delete_confirm_body")}
+            {confirmError && (
+              <div
+                className="alert-error"
+                role="alert"
+                data-testid="hours-confirm-error"
+              >
+                {confirmError}
+              </div>
+            )}
+          </>
+        }
         confirmLabel={t("hours_admin.delete_button")}
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
@@ -1684,7 +1728,20 @@ export function HoursAdminPage() {
       <ConfirmDialog
         ref={closeWeekRef}
         title={t("weeks.close_confirm_title", { week: formatIsoWeek(week) })}
-        body={t("weeks.close_confirm_body")}
+        body={
+          <>
+            {t("weeks.close_confirm_body")}
+            {confirmError && (
+              <div
+                className="alert-error"
+                role="alert"
+                data-testid="hours-confirm-error"
+              >
+                {confirmError}
+              </div>
+            )}
+          </>
+        }
         confirmLabel={t("weeks.close_button")}
         onConfirm={handleConfirmCloseWeek}
         busy={lockBusy}
@@ -1693,7 +1750,20 @@ export function HoursAdminPage() {
       <ConfirmDialog
         ref={reopenWeekRef}
         title={t("weeks.reopen_confirm_title", { week: formatIsoWeek(week) })}
-        body={t("weeks.reopen_confirm_body")}
+        body={
+          <>
+            {t("weeks.reopen_confirm_body")}
+            {confirmError && (
+              <div
+                className="alert-error"
+                role="alert"
+                data-testid="hours-confirm-error"
+              >
+                {confirmError}
+              </div>
+            )}
+          </>
+        }
         confirmLabel={t("weeks.reopen_button")}
         onConfirm={handleConfirmReopenWeek}
         busy={lockBusy}

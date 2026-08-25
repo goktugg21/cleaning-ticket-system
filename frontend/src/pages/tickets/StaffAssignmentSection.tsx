@@ -178,6 +178,8 @@ export function StaffAssignmentSection({
   const removeRef = useRef<ConfirmDialogHandle>(null);
   const [removeTarget, setRemoveTarget] =
     useState<TicketStaffAssignmentAdmin | null>(null);
+  // W-T3 §1 — the remove confirm's own failure, rendered in the dialog.
+  const [removeError, setRemoveError] = useState("");
   // W26.2 -- parts live behind one door now (`SubTasksModal`), so the
   // rename draft, the remove confirm and the auto-complete flag are that
   // modal's state, not this card's.
@@ -361,7 +363,7 @@ export function StaffAssignmentSection({
     if (!removeTarget) return;
     const name = personName(removeTarget);
     setBusy(true);
-    setError("");
+    setRemoveError("");
     try {
       await removeTicketStaffAssignment(ticketId, removeTarget.id);
       removeRef.current?.close();
@@ -370,8 +372,11 @@ export function StaffAssignmentSection({
       onChanged?.();
       push({ variant: "success", title: t("assign.toast_removed", { name }) });
     } catch (err) {
-      setError(getApiError(err));
-      removeRef.current?.close();
+      // W-T3 §1 — the dialog STAYS OPEN and names the refusal inside
+      // itself. It used to close and drop the message into the card's
+      // banner, which read as "the remove happened" while the row was
+      // still there.
+      setRemoveError(getApiError(err));
     } finally {
       setBusy(false);
     }
@@ -588,6 +593,7 @@ export function StaffAssignmentSection({
                           className="btn btn-ghost btn-sm"
                           onClick={() => {
                             setRemoveTarget(slot);
+                            setRemoveError("");
                             removeRef.current?.open();
                           }}
                           disabled={busy}
@@ -693,15 +699,29 @@ export function StaffAssignmentSection({
           name: removeTarget ? personName(removeTarget) : "",
         })}
         body={
-          removeTargetParts.length > 0
-            ? t("editor.remove_dialog_body_with_parts", {
-                parts: removeTargetParts.join(" \u00b7 "),
-              })
-            : t("editor.remove_dialog_body")
+          <>
+            {removeTargetParts.length > 0
+              ? t("editor.remove_dialog_body_with_parts", {
+                  parts: removeTargetParts.join(" \u00b7 "),
+                })
+              : t("editor.remove_dialog_body")}
+            {removeError && (
+              <div
+                className="alert-error"
+                role="alert"
+                data-testid="staff-assignment-remove-error"
+              >
+                {removeError}
+              </div>
+            )}
+          </>
         }
         confirmLabel={t("assign.remove")}
         onConfirm={handleConfirmRemove}
-        onCancel={() => setRemoveTarget(null)}
+        onCancel={() => {
+          setRemoveTarget(null);
+          setRemoveError("");
+        }}
         busy={busy}
         destructive
       />
