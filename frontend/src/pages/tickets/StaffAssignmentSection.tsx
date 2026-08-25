@@ -146,6 +146,8 @@ export function StaffAssignmentSection({
   canSetAutoCompleteFlag,
   ticketStatus,
   customerWantedDate,
+  credentialsByUserId,
+  onPreviewDocument,
 }: {
   ticketId: number;
   onChanged?: () => void;
@@ -156,6 +158,18 @@ export function StaffAssignmentSection({
   /** W19 -- `Ticket.customer_wanted_date`, forwarded to the assign/edit
    *  dialog so the window is picked with the customer's wish in view. */
   customerWantedDate?: string | null;
+  /** W-FIX3 — each assigned person's credentials, ALREADY filtered by
+   *  `accounts.visibility` for this viewer's role. Display only: this
+   *  component makes no visibility decision and must not, or there would
+   *  be two ladders. Keyed by user id because the roster and this table
+   *  are two different reads of the same people. */
+  credentialsByUserId?: Record<
+    number,
+    { type: string; expiry_date?: string | null; document_url?: string | null }[]
+  >;
+  /** Opens the page's in-app viewer. The dialog lives on the page so one
+   *  instance serves every row. */
+  onPreviewDocument?: (url: string, filename: string) => void;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
   const { push } = useToast();
@@ -534,6 +548,54 @@ export function StaffAssignmentSection({
                                 {title}
                               </span>
                             ))}
+                          </span>
+                        )}
+                        {/* W-FIX3 — the credentials the server already
+                            decided this viewer may see. Type and expiry,
+                            the same two facts the customer view shows,
+                            in the chip vocabulary this row already uses.
+                            A credential with a document is a button to
+                            the in-app viewer; one without is a plain
+                            chip, because a control that opens nothing is
+                            worse than no control. */}
+                        {(credentialsByUserId?.[slot.user_id] ?? []).length >
+                          0 && (
+                          <span
+                            className="parts-chip-row parts-chip-row-stacked"
+                            data-testid="staff-assignment-row-credentials"
+                          >
+                            {(credentialsByUserId?.[slot.user_id] ?? []).map(
+                              (credential, index) => {
+                                const label = credential.expiry_date
+                                  ? `${credential.type} · ${credential.expiry_date}`
+                                  : credential.type;
+                                const url = credential.document_url;
+                                return url && onPreviewDocument ? (
+                                  <button
+                                    key={`${credential.type}-${index}`}
+                                    type="button"
+                                    className="parts-chip"
+                                    onClick={() =>
+                                      onPreviewDocument(
+                                        url,
+                                        `${credential.type.toLowerCase()}.pdf`,
+                                      )
+                                    }
+                                    data-testid="staff-assignment-credential"
+                                  >
+                                    {label}
+                                  </button>
+                                ) : (
+                                  <span
+                                    key={`${credential.type}-${index}`}
+                                    className="parts-chip"
+                                    data-testid="staff-assignment-credential"
+                                  >
+                                    {label}
+                                  </span>
+                                );
+                              },
+                            )}
                           </span>
                         )}
                       </td>

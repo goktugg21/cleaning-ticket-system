@@ -1726,14 +1726,29 @@ export function ExtraWorkDetailPage() {
   const isDirectOrder =
     ew.request_intent === "DIRECT_AGREED_PRICE_ORDER";
 
+  /** W-FIX4 — THE DECIDING FACT IS WHETHER A CUSTOMER APPROVAL STEP
+   *  EXISTS, not which of the three intents this is.
+   *
+   *  DIRECT_AGREED_PRICE_ORDER (the customer already agreed the price)
+   *  and AUTO_START_AFTER_PRICING (the customer pre-authorised starting
+   *  once priced) both END at the provider: entering prices starts the
+   *  work. Only REQUEST_QUOTE puts the customer in the loop, and only
+   *  it may say "proposal" or "send to customer".
+   *
+   *  The pricing MECHANICS are untouched on every route — the lifecycle
+   *  has one pricing step and all three pass through PRICING_PROPOSED.
+   *  What changes is every word around it. */
+  const noCustomerApproval = isDirectOrder || isAutoStart;
+
   // Sprint 31 — meaningful, step-aware label for each provider workflow
   // button (falls back to the generic "Move to <status>").
   const providerActionLabel = (target: ExtraWorkStatus): string => {
     if (target === "CANCELLED") return t("detail.action_cancel");
     // W-UX1 §3 — the one step whose name depends on the route.
     if (ew.status === "UNDER_REVIEW" && target === "PRICING_PROPOSED") {
-      if (isDirectOrder) return t("detail.action_start_the_work");
-      if (!isAutoStart) return t("detail.action_send_proposal_for_review");
+      return noCustomerApproval
+        ? t("detail.action_start_the_work")
+        : t("detail.action_send_proposal_for_review");
     }
     const key = PROVIDER_ACTION_I18N[`${ew.status}->${target}`];
     return key
@@ -1741,10 +1756,14 @@ export function ExtraWorkDetailPage() {
       : t("detail.workflow_move_to", { label: tStatusLabel(t, target) });
   };
   // One-line provider guidance for the current step (early steps only).
-  const stepHintKey =
-    isAutoStart && ew.status === "UNDER_REVIEW"
-      ? "detail.step_hint_under_review_auto_start"
-      : PROVIDER_STEP_HINT_I18N[ew.status];
+  // W-FIX4 — the WHAT-NEXT card speaks the same route as the button.
+  const stepHintKey = noCustomerApproval
+    ? ew.status === "UNDER_REVIEW"
+      ? "detail.step_hint_under_review_start"
+      : ew.status === "REQUESTED"
+        ? "detail.step_hint_requested_start"
+        : PROVIDER_STEP_HINT_I18N[ew.status]
+    : PROVIDER_STEP_HINT_I18N[ew.status];
 
   // Sprint 29 Batch 29.8 — non-terminal spawned tickets that will
   // outlive a CANCELLED transition (the EW cancel does not propagate
@@ -2660,7 +2679,7 @@ export function ExtraWorkDetailPage() {
                         <div className="ew-fact-value" data-testid="extra-work-detail-routing-decision">
                           {ew.routing_decision === "INSTANT"
                             ? t("detail.routing_decision_instant")
-                            : t("detail.routing_decision_proposal")}
+                            : t(noCustomerApproval ? "detail.routing_decision_start" : "detail.routing_decision_proposal")}
                         </div>
                       </div>
                       <div>
@@ -3163,7 +3182,7 @@ export function ExtraWorkDetailPage() {
                 >
                   {pdfBusy
                     ? t("detail.proposal_pdf_busy")
-                    : t("detail.proposal_pdf")}
+                    : t(noCustomerApproval ? "detail.proposal_pdf_start" : "detail.proposal_pdf")}
                 </button>
               </div>
             </div>
@@ -3210,10 +3229,10 @@ export function ExtraWorkDetailPage() {
               >
                 <div className="form-section">
                   <div className="form-section-title">
-                    {t("detail.proposal_builder_title")}
+                    {t(noCustomerApproval ? "detail.proposal_builder_title_start" : "detail.proposal_builder_title")}
                   </div>
                   <p className="muted small" style={{ marginTop: 0 }}>
-                    {t("detail.proposal_prepare_helper")}
+                    {t(noCustomerApproval ? "detail.proposal_prepare_helper_start" : "detail.proposal_prepare_helper")}
                   </p>
                   {proposalError && (
                     <div
@@ -3232,8 +3251,8 @@ export function ExtraWorkDetailPage() {
                     data-testid="extra-work-prepare-proposal-button"
                   >
                     {proposalBusy
-                      ? t("detail.proposal_preparing")
-                      : t("detail.proposal_prepare")}
+                      ? t(noCustomerApproval ? "detail.proposal_preparing_start" : "detail.proposal_preparing")
+                      : t(noCustomerApproval ? "detail.proposal_prepare_start" : "detail.proposal_prepare")}
                   </button>
                 </div>
               </div>

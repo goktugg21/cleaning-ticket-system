@@ -217,7 +217,6 @@
   "detail.proposal_add_line": "Add line",
   "detail.proposal_send": "Send proposal to customer",
   "detail.proposal_sending": "Sending…",
-  "detail.proposal_send_hint": "The customer reviews the whole proposal and approves or rejects it. (For an auto-start request the work begins on send, with no separate approval.)",
   "detail.proposal_send_blocked_reason": "This proposal cannot be sent yet: the extra work must be under review first. Start the review on the request above, then send.",
   "detail.proposal_send_blocked_parent": "This quote cannot be sent yet: the request is still New and could not be moved to Under review automatically. Use “Start review” in the workflow card above, then send it.",
   "detail.proposal_discard": "Discard draft",
@@ -312,7 +311,6 @@
   "detail.actual_hours_server_subtotal": "Saved subtotal (server): {{server}}. This screen calculated {{preview}}.",
   "detail.step_hint_requested": "New request. Start the review, then prepare a pricing proposal.",
   "detail.step_hint_under_review": "Prepare the pricing proposal below, then send it to the customer for approval.",
-  "detail.step_hint_under_review_auto_start": "Prepare the pricing proposal below. The customer pre-authorized this — sending the proposal starts the work immediately, no separate approval needed.",
   "detail.action_confirm_pricing": "Confirm pricing & continue",
   "detail.override_section_title": "Provider override",
   "detail.override_warning_title": "Override the customer decision.",
@@ -774,5 +772,13 @@
   "thread_continues_on_job": "This conversation continues on the job.",
   "plan.add_people_label": "Add people to this job",
   "plan.add_people": "Add to crew",
-  "plan.adding_people": "Adding…"
+  "plan.adding_people": "Adding…",
+  "detail.step_hint_under_review_start": "Price the work and start it.",
+  "detail.step_hint_requested_start": "New request. Start the review, then price the work.",
+  "detail.proposal_builder_title_start": "Pricing",
+  "detail.proposal_pdf_start": "Work order PDF",
+  "detail.proposal_prepare_start": "Price the work",
+  "detail.proposal_prepare_helper_start": "The cart lines are copied in automatically, with contract prices pre-filled. Price the custom lines and start the work.",
+  "detail.proposal_preparing_start": "Opening…",
+  "detail.routing_decision_start": "Awaiting pricing"
 }

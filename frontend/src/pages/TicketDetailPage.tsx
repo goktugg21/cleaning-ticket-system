@@ -66,11 +66,11 @@ import type {
   TicketCategory,
   TicketTimelineRow,
   TransitionRequirements,
-  // W6 §3 — the SHARED upload-visibility wire types. This page carried
-  // its own copies of all three until now; see the note above
-  // `UPLOAD_SOURCE_LABEL_KEY`.
+  // W6 §3 — the SHARED upload-visibility wire type. W-FIX5 deleted the
+  // per-person explanation sentences and with them
+  // `UPLOAD_SOURCE_LABEL_KEY`, which was this page's only reader of
+  // `UploadVisibilitySource`.
   TicketUploadVisibility,
-  UploadVisibilitySource,
 } from "../api/types";
 import { listEwMessages } from "../api/extraWork";
 import {
@@ -457,26 +457,6 @@ function grantChoiceValue(choice: UploadGrantChoice): boolean | null {
   if (choice === "INHERIT") return null;
   return choice === "GRANT";
 }
-
-// Which rung is deciding, in words. Keyed off the source the resolver
-// reports rather than re-deriving the ladder here — a second copy of the
-// precedence rule in the frontend is exactly how the two drift.
-//
-// `null` for the four sources the ladder cannot produce for an assigned
-// worker's next upload (an uploader's own stated value, a customer's own
-// file, a hand edit afterwards, and the blank pre-W4-P marker). They are
-// in the union because the wire type carries them; rendering nothing is
-// better than inventing an explanation for a case that cannot occur.
-const UPLOAD_SOURCE_LABEL_KEY: Record<UploadVisibilitySource, string | null> = {
-  "": null,
-  UPLOADER_CHOICE: null,
-  CUSTOMER_UPLOAD: null,
-  TICKET_GRANT: "upload_grant_source_ticket",
-  STANDING_GRANT: "upload_grant_source_standing",
-  WORK_SETTING: "upload_grant_source_work",
-  DEFAULT_INTERNAL: "upload_grant_source_default",
-  MANUAL: null,
-};
 
 const ACCEPTED_ATTACHMENT_TYPES =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
@@ -885,14 +865,54 @@ export function TicketDetailPage() {
    *  UNCONDITIONALLY at the end of the page and driven entirely through
    *  this ref — a native <dialog> mounted behind a condition is an
    *  invisible dialog and a dead-looking button. */
-  /** R2 — the ticket's current crew, as ids, for the transition modal's
-   *  prefilled default. Anonymous rows carry no id and cannot be a
-   *  default, so they are dropped; a CUSTOMER never opens this modal. */
-  const assignedStaffIds = useMemo(
+  const credentialPreviewRef = useRef<PdfPreviewDialogHandle>(null);
+
+  /** W-FIX3 — each assigned person's credentials, keyed by user id.
+   *  Straight off `ticket.assigned_staff`, which the SERVER has already
+   *  filtered through `accounts.visibility` for this viewer's role
+   *  (W-UX1-A widened that to every viewer). No filtering happens here:
+   *  a second ladder on the client is how the two drift apart. */
+  const credentialsByUserId = useMemo(() => {
+    const out: Record<
+      number,
+      { type: string; expiry_date?: string | null; document_url?: string | null }[]
+    > = {};
+    for (const entry of ticket?.assigned_staff ?? []) {
+      if ("anonymous" in entry && entry.anonymous) continue;
+      const named = entry as {
+        id: number;
+        credentials?: {
+          type: string;
+          expiry_date?: string | null;
+          document_url?: string | null;
+        }[];
+      };
+      if (named.credentials?.length) out[named.id] = named.credentials;
+    }
+    return out;
+  }, [ticket?.assigned_staff]);
+
+  /** W-FIX1 — the crew already on this ticket, as {id, label}. The modal
+   *  shows them as the settled default and NEVER posts them back: the
+   *  assignable-staff endpoint already excludes anyone holding a base
+   *  slot here (`views_staff_assignments.py:952`), so re-sending them is
+   *  a duplicate the server refuses with `staff_already_assigned`. */
+  const currentAssignees = useMemo(
     () =>
       (ticket?.assigned_staff ?? [])
         .filter((entry) => !("anonymous" in entry && entry.anonymous))
-        .map((entry) => (entry as { id: number }).id),
+        .map((entry) => {
+          const named = entry as {
+            id: number;
+            full_name?: string;
+            email?: string;
+          };
+          return {
+            id: named.id,
+            label:
+              named.full_name?.trim() || named.email || String(named.id),
+          };
+        }),
     [ticket?.assigned_staff],
   );
 
@@ -914,7 +934,6 @@ export function TicketDetailPage() {
     );
   }, [ticket?.scheduled_start_at]);
 
-  const credentialPreviewRef = useRef<PdfPreviewDialogHandle>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
   // RF-5 (Ramazan 2026-06-23) — in-app attachment preview. Clicking a tile
@@ -1661,7 +1680,12 @@ export function TicketDetailPage() {
       // Only fetch the staff list when the step actually asks who is
       // doing the work -- most moves do not, and an unused list is a
       // request the operator waits on for nothing.
-      if (reqs.unmet.includes("assignee")) {
+      // W-FIX1 — WHENEVER THE BLOCK RENDERS, not only when the
+      // requirement is unmet. R2 made the assignee block render on a
+      // step that already has a crew, and this condition did not follow:
+      // the list stayed empty, so a modal on a fully-assigned ticket
+      // said "nobody available to assign" about a job with people on it.
+      if (reqs.requirements.some((r) => r.key === "assignee")) {
         try {
           setTransitionStaff(await listAssignableStaff(Number(id)));
         } catch {
@@ -1864,14 +1888,19 @@ export function TicketDetailPage() {
       // to be dismissed rather than vanishing unread, and it says the
       // ticket did NOT move — the thing an operator has to know before
       // pressing anything again.
-      toast.push({
-        variant: "error",
-        title: t("change.failed"),
-        description: getApiError(err),
-      });
-      // Keep the modal open and name the refusal inside it, so the
-      // answers already typed are not thrown away by a fixable error.
+      // W-FIX1 — ONCE, and where the press happened. This used to do
+      // both: a sticky error toast AND the inline line, so one refusal
+      // arrived twice and the toast covered the modal it was about.
+      // The modal is the surface the operator is looking at, so when one
+      // is open it gets the refusal and the toast stays quiet.
       setTransitionError(getApiError(err));
+      if (transitionTarget === null) {
+        toast.push({
+          variant: "error",
+          title: t("change.failed"),
+          description: getApiError(err),
+        });
+      }
     } finally {
       setStatusBusy(null);
     }
@@ -4217,6 +4246,10 @@ export function TicketDetailPage() {
                   canSetAutoCompleteFlag={isProviderAdmin(me?.role)}
                   ticketStatus={ticket.status}
                   customerWantedDate={ticket.customer_wanted_date}
+                  credentialsByUserId={credentialsByUserId}
+                  onPreviewDocument={(url, filename) =>
+                    credentialPreviewRef.current?.open({ url, filename })
+                  }
                 />
               )}
 
@@ -4268,13 +4301,25 @@ export function TicketDetailPage() {
                           person.user_email.split("@")[0];
                         const visible =
                           person.effective_visibility === "CUSTOMER";
-                        const sourceKey =
-                          UPLOAD_SOURCE_LABEL_KEY[person.effective_source] ??
-                          null;
                         return (
                           <li
                             key={person.user_id}
                             className="upload-grants-row"
+                            /* W-FIX5 — ONE COMPACT ROW: name, then a
+                               short select, side by side. The class in
+                               index.css stacks them in a column and
+                               stretches the select to 100%, which is
+                               what made a long label truncate; that file
+                               is not this wave's, so the row is turned
+                               horizontal here. Inline beats the class on
+                               specificity and touches nothing else that
+                               uses it. */
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                              gap: 10,
+                            }}
                             data-testid="ticket-upload-grant-row"
                             data-user-id={person.user_id}
                             data-effective={person.effective_visibility}
@@ -4292,6 +4337,10 @@ export function TicketDetailPage() {
                             )}
                             <select
                               className="field-input upload-grants-select"
+                              /* Auto width, capped. With the labels
+                                 shortened it no longer needs the full
+                                 row to show its longest option. */
+                              style={{ width: "auto", maxWidth: 260 }}
                               aria-label={t("upload_grant_select_aria", {
                                 name: displayName,
                               })}
@@ -4319,19 +4368,24 @@ export function TicketDetailPage() {
                                 {t("upload_grant_choice_refuse")}
                               </option>
                             </select>
-                            <span
-                              className="upload-grants-effect"
-                              data-testid="ticket-upload-grant-effect"
-                            >
-                              {visible
-                                ? t("upload_grant_effect_customer")
-                                : t("upload_grant_effect_internal")}{" "}
-                              {sourceKey !== null && (
-                                <span className="upload-grants-effect-why">
-                                  {t(sourceKey)}
-                                </span>
-                              )}
-                            </span>
+                            {/* W-FIX5 — AT MOST ONE LINE, and only when
+                                there is something to say. The row used
+                                to carry two sentences on every person:
+                                what happens next, and which rule decided
+                                it. The default is internal, so "Next
+                                photo: internal. Nobody has decided, so
+                                it stays internal." was two sentences
+                                announcing that nothing had happened.
+                                The line now appears only when the
+                                outcome DIFFERS from that default. */}
+                            {visible && (
+                              <span
+                                className="upload-grants-effect"
+                                data-testid="ticket-upload-grant-effect"
+                              >
+                                {t("upload_grant_state_customer")}
+                              </span>
+                            )}
                           </li>
                         );
                       })}
@@ -5132,10 +5186,26 @@ export function TicketDetailPage() {
           // (`extra_work/assignment_carryover.py::carry_workers_to_ticket`
           // writes `TicketStaffAssignment` rows) — so carried people
           // arrive prefilled without the modal knowing they were carried.
-          currentAssigneeIds={assignedStaffIds}
+          currentAssignees={currentAssignees}
           currentScheduledStartAt={currentScheduledStartLocal}
           busy={statusBusy !== null}
           error={transitionError}
+          // W-FIX2 — the proof photo, through the ticket's own attachment
+          // endpoint. The gate reads non-hidden `TicketAttachment` rows
+          // (`_ticket_has_visible_attachment`), so an ordinary upload
+          // satisfies it and the transition endpoint needed no change.
+          // `is_hidden` false explicitly: a hidden file is not evidence.
+          onUploadProof={async (file: File) => {
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("is_hidden", "false");
+            await api.post(`/tickets/${id}/attachments/`, formData, {
+              headers: { "Content-Type": "multipart/form-data" },
+            });
+            // The requirements are re-read so the server, not the modal,
+            // decides the gate is satisfied.
+            await loadTicket();
+          }}
           onCancel={() => {
             setTransitionTarget(null);
             setTransitionReqs(null);

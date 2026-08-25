@@ -217,7 +217,6 @@
   "detail.proposal_add_line": "Regel toevoegen",
   "detail.proposal_send": "Voorstel naar klant sturen",
   "detail.proposal_sending": "Versturen…",
-  "detail.proposal_send_hint": "De klant beoordeelt het hele voorstel en keurt het goed of af. (Bij een auto-start-aanvraag begint het werk bij verzending, zonder aparte goedkeuring.)",
   "detail.proposal_send_blocked_reason": "Dit voorstel kan nog niet worden verstuurd: het extra werk moet eerst in behandeling zijn. Start de beoordeling op de aanvraag hierboven en verstuur daarna.",
   "detail.proposal_send_blocked_parent": "Deze offerte kan nog niet worden verzonden: de aanvraag staat nog op Nieuw en kon niet automatisch naar In beoordeling worden gezet. Gebruik “Beoordeling starten” in de werkstroomkaart hierboven en verstuur hem daarna.",
   "detail.proposal_discard": "Concept verwijderen",
@@ -312,7 +311,6 @@
   "detail.actual_hours_server_subtotal": "Opgeslagen subtotaal (server): {{server}}. Dit scherm rekende {{preview}}.",
   "detail.step_hint_requested": "Nieuwe aanvraag. Start de beoordeling en stel daarna een prijsvoorstel op.",
   "detail.step_hint_under_review": "Stel hieronder het prijsvoorstel op en stuur het ter goedkeuring naar de klant.",
-  "detail.step_hint_under_review_auto_start": "Stel hieronder het prijsvoorstel op. De klant heeft dit vooraf goedgekeurd — het versturen van het voorstel start het werk direct, zonder aparte goedkeuring.",
   "detail.action_confirm_pricing": "Prijs bevestigen en doorgaan",
   "detail.override_section_title": "Aanbieder-override",
   "detail.override_warning_title": "Override de klantbeslissing.",
@@ -774,5 +772,13 @@
   "thread_continues_on_job": "Dit gesprek gaat verder bij de klus.",
   "plan.add_people_label": "Mensen aan deze klus toevoegen",
   "plan.add_people": "Aan team toevoegen",
-  "plan.adding_people": "Toevoegen…"
+  "plan.adding_people": "Toevoegen…",
+  "detail.step_hint_under_review_start": "Prijs het werk en start het.",
+  "detail.step_hint_requested_start": "Nieuwe aanvraag. Start de beoordeling en prijs daarna het werk.",
+  "detail.proposal_builder_title_start": "Prijsstelling",
+  "detail.proposal_pdf_start": "Werkbon-PDF",
+  "detail.proposal_prepare_start": "Werk prijzen",
+  "detail.proposal_prepare_helper_start": "De regels worden automatisch overgenomen, met contractprijzen vooraf ingevuld. Prijs de losse regels en start het werk.",
+  "detail.proposal_preparing_start": "Openen…",
+  "detail.routing_decision_start": "Wacht op prijsstelling"
 }

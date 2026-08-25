@@ -1062,9 +1062,7 @@ export function ProposalBuilder({
             >
               {busy ? t("detail.proposal_sending") : t("detail.proposal_send")}
             </button>
-            <p className="muted small" style={{ margin: "6px 0 0" }}>
-              {t("detail.proposal_send_hint")}
-            </p>
+            
           </div>
         ) : (
           canEdit && (

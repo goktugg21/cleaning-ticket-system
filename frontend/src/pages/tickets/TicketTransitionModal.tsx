@@ -75,12 +75,13 @@ export interface TicketTransitionModalProps {
   requirements: TransitionRequirements | null;
   loading: boolean;
   staff: AssignableStaff[];
-  /** R2 — who is ALREADY on this ticket, so the modal can show them as
-   *  the default instead of asking again. Carried assignments (an EW
-   *  spawn hands its workers to the ticket) arrive through exactly this
-   *  list, which is why the modal never has to know where they came
-   *  from. */
-  currentAssigneeIds: number[];
+  /** R2 — who is ALREADY on this ticket. Shown as the settled default
+   *  and NEVER posted back: `staff` below is the server's addable list,
+   *  which already excludes them, so re-sending one is the duplicate
+   *  that answers `staff_already_assigned`. Carried assignments (an EW
+   *  spawn hands its workers to the ticket) arrive through this list,
+   *  which is why the modal never has to know they were carried. */
+  currentAssignees: { id: number; label: string }[];
   /** R2 — the date the ticket already carries, "YYYY-MM-DDTHH:mm" in
    *  LOCAL time, ready for `<input type="datetime-local">`, or "". */
   currentScheduledStartAt: string;
@@ -88,6 +89,12 @@ export interface TicketTransitionModalProps {
   error?: string;
   onCancel: () => void;
   onConfirm: (answers: TransitionAnswers) => void;
+  /** W-FIX2 — upload one file as completion proof, through the ticket's
+   *  EXISTING attachment endpoint. The gate reads
+   *  `_ticket_has_visible_attachment`, i.e. ordinary non-hidden
+   *  `TicketAttachment` rows, so an ordinary upload satisfies it and no
+   *  backend change is needed. Resolves when the row exists. */
+  onUploadProof?: (file: File) => Promise<void>;
 }
 
 export function TicketTransitionModal({
@@ -97,12 +104,13 @@ export function TicketTransitionModal({
   requirements,
   loading,
   staff,
-  currentAssigneeIds,
+  currentAssignees,
   currentScheduledStartAt,
   busy,
   error,
   onCancel,
   onConfirm,
+  onUploadProof,
 }: TicketTransitionModalProps) {
   const { t } = useTranslation(["ticket_detail", "common"]);
 
@@ -114,18 +122,21 @@ export function TicketTransitionModal({
   // `key={transitionTarget}`, so a different move is a different
   // component instance and these three start empty by construction.
   const [note, setNote] = useState("");
-  // R2 — SEEDED, not empty. The people already on the job are the
-  // default answer; the operator edits that default rather than
-  // rebuilding it. `useState`'s initialiser runs once per mount and
-  // the parent mounts this per step, so a change of step re-seeds
-  // without a reset effect (CLAUDE.md: no synchronous setState in an
-  // effect body).
-  const [picked, setPicked] = useState<number[]>(currentAssigneeIds);
+  // W-FIX1 — the people being ADDED, and only them. It was seeded with
+  // the existing crew, which read well and posted a duplicate: the
+  // picker's own source excludes anyone already holding a base slot
+  // here, so every seeded id was one the server would refuse. The crew
+  // is rendered above as settled fact instead.
+  const [picked, setPicked] = useState<number[]>([]);
   const [startsAt, setStartsAt] = useState(currentScheduledStartAt);
   const [reason, setReason] = useState("");
   /** W-UX1 §4 — the two-press bypass: pressing it once reveals the
    *  reason, and only a reason arms the move. */
   const [overriding, setOverriding] = useState(false);
+  // W-FIX2 — the modal said "a photo or a note" and offered only a note.
+  const [proofUploading, setProofUploading] = useState(false);
+  const [proofUploaded, setProofUploaded] = useState(false);
+  const [proofError, setProofError] = useState("");
 
   const unmet = useMemo(() => requirements?.unmet ?? [], [requirements]);
   const needsAssignee = unmet.includes("assignee");
@@ -165,12 +176,15 @@ export function TicketTransitionModal({
   // half that lives on the screen; the backend enforces the same thing
   // independently, so a client that skipped this still cannot move it.
   const answered =
-    (!needsAssignee || picked.length > 0) &&
+    (!needsAssignee || picked.length > 0 || currentAssignees.length > 0) &&
     (!needsSchedule || startsAt !== "") &&
     (!needsReason || reason.trim() !== "") &&
     // Proof is answered by writing the note this step asks for, or by
     // explicitly overriding WITH a reason. Nothing else.
-    (!needsProof || note.trim() !== "" || (overriding && reason.trim() !== ""));
+    (!needsProof ||
+      note.trim() !== "" ||
+      proofUploaded ||
+      (overriding && reason.trim() !== ""));
 
   function confirm() {
     const answers: TransitionAnswers = { note: note.trim() };
@@ -232,9 +246,59 @@ export function TicketTransitionModal({
                 className="transition-field"
                 data-testid="transition-field-proof"
               >
-                <p className="alert-error" role="status">
-                  {t("transition.proof_required")}
-                </p>
+                {/* R3 — and it CLEARS LIVE. The warning is about a
+                    missing thing, so the moment either kind of proof is
+                    present it has nothing to say. */}
+                {note.trim() === "" && !proofUploaded && (
+                  <p className="alert-error" role="status">
+                    {t("transition.proof_required")}
+                  </p>
+                )}
+                {onUploadProof && (
+                  <div className="transition-proof-upload">
+                    <label className="field-label" htmlFor="transition-proof-file">
+                      {t("transition.proof_photo_label")}
+                    </label>
+                    <input
+                      id="transition-proof-file"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf"
+                      disabled={proofUploading}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        setProofError("");
+                        setProofUploading(true);
+                        void onUploadProof(file)
+                          .then(() => setProofUploaded(true))
+                          .catch((err: unknown) =>
+                            setProofError(
+                              err instanceof Error
+                                ? err.message
+                                : String(err),
+                            ),
+                          )
+                          .finally(() => setProofUploading(false));
+                      }}
+                      data-testid="transition-proof-file"
+                    />
+                    {proofUploading && (
+                      <span className="muted small">
+                        {t("transition.proof_photo_uploading")}
+                      </span>
+                    )}
+                    {proofUploaded && (
+                      <span className="muted small" data-testid="transition-proof-done">
+                        {t("transition.proof_photo_done")}
+                      </span>
+                    )}
+                    {proofError && (
+                      <p className="alert-error" role="alert">
+                        {proofError}
+                      </p>
+                    )}
+                  </div>
+                )}
                 {!overriding ? (
                   <button
                     type="button"
@@ -266,17 +330,37 @@ export function TicketTransitionModal({
                 <span className="field-label" id="transition-who-label">
                   {t("transition.who_label")}
                 </span>
+                {/* R2 — who is on it already, as settled fact. Not
+                    checkboxes: taking somebody OFF a job is the
+                    assignment section's own action, and a control that
+                    looks like it removes them but does not would be
+                    worse than no control. */}
+                {currentAssignees.length > 0 && (
+                  <div
+                    className="parts-chip-row"
+                    data-testid="transition-current-assignees"
+                  >
+                    {currentAssignees.map((person) => (
+                      <span key={person.id} className="parts-chip">
+                        {person.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {/* W-FIX1 — NO ADD CONTROL WHEN THERE IS NOBODY TO ADD,
+                    and no apology line either. The old empty state said
+                    "nobody available to assign" on a ticket whose whole
+                    crew was standing right above it, because `staff` is
+                    the ADDABLE list and a fully-staffed job empties it. */}
+                {staff.length > 0 && (
+                  <>
                 <p className="muted small">{t("transition.who_hint")}</p>
                 <div
                   className="assign-picker"
                   role="group"
                   aria-labelledby="transition-who-label"
                 >
-                  {staff.length === 0 ? (
-                    <p className="muted small" data-testid="transition-no-staff">
-                      {t("transition.no_staff")}
-                    </p>
-                  ) : (
+                  {(
                     staff.map((person) => (
                       <label key={person.id} className="assign-picker-row">
                         <input
@@ -297,6 +381,8 @@ export function TicketTransitionModal({
                     ))
                   )}
                 </div>
+                  </>
+                )}
               </div>
             )}
 
