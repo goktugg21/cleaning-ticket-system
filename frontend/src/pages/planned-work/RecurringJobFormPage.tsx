@@ -1237,6 +1237,12 @@ export function RecurringJobFormPage() {
               </summary>
             <div className="field">
               <label className="field-label">{t("form.field_windows")} *</label>
+              {/* One line of state, not an explanation: the count of
+                  times IS the count of visits per chosen day, which is
+                  the single thing a reader gets wrong here. */}
+              <div className="form-section-helper">
+                {t("form.windows_state")}
+              </div>
               <div className="pw-windows-editor" data-testid="rj-windows-editor">
                 {windows.map((win, idx) => (
                   <div

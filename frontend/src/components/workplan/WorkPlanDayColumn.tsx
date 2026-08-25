@@ -3,6 +3,7 @@ import { CalendarOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useLocaleCode } from "../../lib/intl";
+import "./workplan-day.css";
 
 /**
  * Sprint 183 §2 — one day of the week, as a boxed column.
@@ -29,6 +30,7 @@ export function WorkPlanDayColumn({
   iso,
   isToday,
   count,
+  onOpen,
   children,
 }: {
   /** "YYYY-MM-DD" — the day this column stands for. */
@@ -36,6 +38,10 @@ export function WorkPlanDayColumn({
   isToday: boolean;
   /** How many cards are in it, AFTER filtering. */
   count: number;
+  /** T2-3 — open this day full-width. Absent on a day with nothing in
+   *  it: a modal listing nothing is a click that answers nothing, and a
+   *  header that looks pressable but is not is worse than a plain one. */
+  onOpen?: () => void;
   children: ReactNode;
 }) {
   const { t } = useTranslation("staff_slots");
@@ -45,26 +51,42 @@ export function WorkPlanDayColumn({
   const date = new Date(`${iso}T00:00:00`);
   const weekday = date.toLocaleDateString(locale, { weekday: "short" });
   const dayNumber = date.toLocaleDateString(locale, { day: "numeric" });
+  const fullDate = date.toLocaleDateString(locale, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
 
   return (
     <section
       className={isToday ? "wp-day wp-day-today" : "wp-day"}
       data-testid={isToday ? "agenda-day-today" : "agenda-day"}
-      aria-label={date.toLocaleDateString(locale, {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-      })}
+      aria-label={fullDate}
     >
-      <div className="wp-day-head" data-testid="agenda-group-heading">
-        <span className="wp-day-name">{weekday}</span>
-        <span className="wp-day-number">{dayNumber}</span>
-        {count > 0 && (
+      {/* T2-3 — the header is the door to the day. A <button> rather
+          than a click handler on the div, so it is reachable by keyboard
+          and announces itself; `aria-label` repeats the full date
+          because "Mon 3" is not a sentence a screen reader can use. */}
+      {onOpen ? (
+        <button
+          type="button"
+          className="wp-day-head wp-day-head-button"
+          data-testid="agenda-group-heading"
+          onClick={onOpen}
+          aria-label={fullDate}
+        >
+          <span className="wp-day-name">{weekday}</span>
+          <span className="wp-day-number">{dayNumber}</span>
           <span className="wp-day-count">
             {t("agenda.day_count", { count })}
           </span>
-        )}
-      </div>
+        </button>
+      ) : (
+        <div className="wp-day-head" data-testid="agenda-group-heading">
+          <span className="wp-day-name">{weekday}</span>
+          <span className="wp-day-number">{dayNumber}</span>
+        </div>
+      )}
       <div className="wp-day-body">
         {count === 0 ? (
           <div

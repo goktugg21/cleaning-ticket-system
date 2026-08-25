@@ -225,6 +225,27 @@
   max-width: 420px;
 }
 
+/* Treatment 1 — a failure renders where the control that caused it is.
+ * `.pw-money-error` takes the money row's full width so it sits UNDER
+ * the picker rather than squeezing it; `.pw-action-error` is inline,
+ * because it lives among the header buttons. */
+.pw-money-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.pw-action-error {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: var(--font-sm);
+}
+
+/* The no-contract answer reads as text, not as a disabled control. */
+.pw-money-empty {
+  color: var(--text-2);
+  font-size: var(--font-sm);
+}
+
 /* ---- The recurring-job FORM ------------------------------------------
  * Rule 11 — the form opens with Basics and Schedule. Everything a job may
  * or may not carry sits behind its own header until someone opens it, so

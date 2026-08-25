@@ -330,6 +330,11 @@ function WorkPlanWeek() {
    *  moved the chip numbers would be the defect Sprint 179A removed. */
   const [search, setSearch] = useState("");
   const [overdueOpen, setOverdueOpen] = useState(false);
+  /** T2-3 — the "YYYY-MM-DD" whose day is open full-width, or null. The
+   *  DAY KEY rather than the group object: `groups` is rebuilt whenever a
+   *  filter or the week changes, and holding the object would pin a
+   *  stale row set open behind the user's own filtering. */
+  const [dayModal, setDayModal] = useState<string | null>(null);
   const [upcomingOpen, setUpcomingOpen] = useState(false);
   const [completionTarget, setCompletionTarget] = useState<WorkPlanEntry | null>(
     null,
@@ -501,6 +506,15 @@ function WorkPlanWeek() {
         items: filtered.filter((entry) => entry.day === key),
       })),
     [dayKeys, filtered],
+  );
+
+  /** The open day's CURRENT rows. Derived from `groups` rather than
+   *  captured when the header was clicked, so a filter changed behind
+   *  the modal is reflected in it — and a day filtered down to nothing
+   *  closes it rather than showing rows that are no longer in scope. */
+  const dayGroup = useMemo(
+    () => (dayModal === null ? undefined : groups.find((g) => g.key === dayModal)),
+    [dayModal, groups],
   );
 
   /** Nothing anywhere — not "nothing this week". The week's own
@@ -784,6 +798,11 @@ function WorkPlanWeek() {
               iso={group.key}
               isToday={group.key === todayKey}
               count={group.items.length}
+              onOpen={
+                group.items.length > 0
+                  ? () => setDayModal(group.key)
+                  : undefined
+              }
             >
               {group.items.map((entry) => (
                 <WorkPlanCard
@@ -799,6 +818,29 @@ function WorkPlanWeek() {
           ))}
           </div>
         </div>
+      )}
+
+      {/* T2-3 — the day, full-width. Deliberately the SAME
+          `EntryTableModal` the Overdue button already opens: the owner
+          asked for the same rows, roomier, and a second modal
+          implementation would be a second set of columns to keep in step
+          with this one. Its date column is "Planned for" rather than
+          "Deadline", and it never shows an overdue-by column, because
+          within one day that number is the same for every row. */}
+      {dayModal !== null && dayGroup !== undefined && (
+        <EntryTableModal
+          title={formatDay(dayModal)}
+          description={t("agenda.day_count", { count: dayGroup.items.length })}
+          rows={dayGroup.items}
+          truncated={false}
+          limit={0}
+          emptyLabel={t("agenda.day_empty")}
+          dateColumnLabel={t("agenda.col_planned")}
+          showOverdueBy={false}
+          role={role}
+          onClose={() => setDayModal(null)}
+          testId="agenda-day"
+        />
       )}
 
       {overdueOpen && data && (

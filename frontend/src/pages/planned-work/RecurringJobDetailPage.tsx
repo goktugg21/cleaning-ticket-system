@@ -46,6 +46,8 @@ import type {
   RecurringJobWritePayload,
 } from "../../api/plannedWork.types";
 import { getApiError } from "../../api/client";
+import { useAuth } from "../../auth/AuthContext";
+import { canAccessContracts } from "../../auth/permissions";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
@@ -96,6 +98,7 @@ function formatWindow(window: RecurringJobWindow): string {
 export function RecurringJobDetailPage() {
   const { id } = useParams();
   const { push } = useToast();
+  const { me } = useAuth();
   const { t } = useTranslation(["planned_work", "common"]);
 
   const [job, setJob] = useState<RecurringJob | null>(null);
@@ -108,6 +111,9 @@ export function RecurringJobDetailPage() {
   // Generate dialog state.
   const generateRef = useRef<ConfirmDialogHandle>(null);
   const archiveRef = useRef<ConfirmDialogHandle>(null);
+  // Treatment 1 — each dialog carries its own failure in its own body.
+  const [generateError, setGenerateError] = useState("");
+  const [archiveError, setArchiveError] = useState("");
   const [daysAhead, setDaysAhead] = useState("14");
 
   // Occurrence action dialogs.
@@ -118,6 +124,10 @@ export function RecurringJobDetailPage() {
   const [overrideTarget, setOverrideTarget] = useState<PlannedOccurrence | null>(
     null,
   );
+  // Treatment 1 — the skip/cancel failure, shown in the dialog itself.
+  const [reasonError, setReasonError] = useState("");
+  // Treatment 1 — Unarchive has no dialog, so its failure sits beside it.
+  const [unarchiveError, setUnarchiveError] = useState("");
 
   // W-PW1 THE MONEY — the customer's offerable contract lines, and the
   // pending pick while a link is being saved. `null` means NOT LOADED,
@@ -127,6 +137,8 @@ export function RecurringJobDetailPage() {
     ContractLineOption[] | null
   >(null);
   const [linkBusy, setLinkBusy] = useState(false);
+  // Treatment 1 — this renders inside `.pw-money`, never as a toast.
+  const [linkError, setLinkError] = useState("");
 
   // NO new endpoint: `GET /api/contracts/?customer=<id>` already carries
   // the contract number and the ACTIVE revision's lines in `projects`.
@@ -215,6 +227,7 @@ export function RecurringJobDetailPage() {
 
   async function handleLinkContractLine(value: string) {
     if (!job) return;
+    setLinkError("");
     setLinkBusy(true);
     try {
       const payload: ContractLineLinkWrite = {
@@ -230,7 +243,11 @@ export function RecurringJobDetailPage() {
         title: value === "" ? t("money.toast_unlinked") : t("money.toast_linked"),
       });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
+      // Treatment 1 — the failure belongs BESIDE the picker that fired
+      // it. A toast for this was wrong twice over: it leaves the money
+      // line looking untouched, and it is gone before the operator has
+      // finished reading the row it was about.
+      setLinkError(getApiError(err));
     } finally {
       setLinkBusy(false);
     }
@@ -244,6 +261,7 @@ export function RecurringJobDetailPage() {
 
   async function handleArchive() {
     if (!job) return;
+    setArchiveError("");
     setActionBusy(true);
     try {
       const updated = await archiveRecurringJob(job.id);
@@ -251,8 +269,8 @@ export function RecurringJobDetailPage() {
       archiveRef.current?.close();
       push({ variant: "success", title: t("archive.toast_archived") });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
-      archiveRef.current?.close();
+      // Treatment 1 — stays open, reports in place.
+      setArchiveError(getApiError(err));
     } finally {
       setActionBusy(false);
     }
@@ -260,13 +278,17 @@ export function RecurringJobDetailPage() {
 
   async function handleUnarchive() {
     if (!job) return;
+    setUnarchiveError("");
     setActionBusy(true);
     try {
       const updated = await unarchiveRecurringJob(job.id);
       setJob(updated);
       push({ variant: "success", title: t("archive.toast_unarchived") });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
+      // Treatment 1 — the only action here with no modal to fall back
+      // on, so its failure renders in the header's actions node, beside
+      // the button that fired it.
+      setUnarchiveError(getApiError(err));
     } finally {
       setActionBusy(false);
     }
@@ -276,6 +298,7 @@ export function RecurringJobDetailPage() {
     if (!job) return;
     const trimmed = daysAhead.trim();
     const value = trimmed === "" ? undefined : Number(trimmed);
+    setGenerateError("");
     setActionBusy(true);
     try {
       const result = await generateOccurrences(job.id, value);
@@ -295,8 +318,11 @@ export function RecurringJobDetailPage() {
       ]);
       setJob(jobData);
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
-      generateRef.current?.close();
+      // Treatment 1 — the dialog STAYS OPEN and carries its own failure.
+      // Closing it and firing a toast threw away the one surface the
+      // operator was looking at, along with the days-ahead value they
+      // had just typed; they could not retry without re-entering it.
+      setGenerateError(getApiError(err));
     } finally {
       setActionBusy(false);
     }
@@ -305,20 +331,29 @@ export function RecurringJobDetailPage() {
   async function handleReasonConfirm(reason: string) {
     if (!reasonDialog) return;
     const { mode, occ } = reasonDialog;
-    setReasonDialog(null);
+    // Treatment 1 — the dialog is NOT dismissed before the write is
+    // known to have landed. It used to close on the first line of this
+    // function, so a rejected skip took the operator's typed reason with
+    // it and answered from a toast on a page that looked unchanged.
+    setReasonError("");
     try {
       const updated =
         mode === "skip"
           ? await skipOccurrence(occ.id, reason)
           : await cancelOccurrence(occ.id, reason);
       replaceOccurrence(updated);
+      setReasonDialog(null);
       push({
         variant: "success",
         title:
           mode === "skip" ? t("skip.toast_title") : t("cancel.toast_title"),
       });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
+      // `RejectReasonDialog` is shared and has no error slot of its own,
+      // so the failure rides its `description` — which IS the open
+      // modal, where Treatment 1 wants it. A real slot on that component
+      // belongs to whoever owns it.
+      setReasonError(getApiError(err));
     }
   }
 
@@ -462,7 +497,10 @@ export function RecurringJobDetailPage() {
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  onClick={() => archiveRef.current?.open()}
+                  onClick={() => {
+                    setArchiveError("");
+                    archiveRef.current?.open();
+                  }}
                   disabled={actionBusy}
                   data-testid="recurring-job-archive"
                 >
@@ -475,7 +513,10 @@ export function RecurringJobDetailPage() {
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
-                  onClick={() => generateRef.current?.open()}
+                  onClick={() => {
+                    setGenerateError("");
+                    generateRef.current?.open();
+                  }}
                   disabled={actionBusy}
                   data-testid="recurring-job-generate"
                 >
@@ -483,15 +524,26 @@ export function RecurringJobDetailPage() {
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={handleUnarchive}
-                disabled={actionBusy}
-                data-testid="recurring-job-unarchive"
-              >
-                {t("detail.unarchive")}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={handleUnarchive}
+                  disabled={actionBusy}
+                  data-testid="recurring-job-unarchive"
+                >
+                  {t("detail.unarchive")}
+                </button>
+                {unarchiveError && (
+                  <span
+                    className="alert-error pw-action-error"
+                    role="alert"
+                    data-testid="recurring-job-unarchive-error"
+                  >
+                    {unarchiveError}
+                  </span>
+                )}
+              </>
             )}
           </>
         }
@@ -679,35 +731,67 @@ export function RecurringJobDetailPage() {
             <label className="pw-money-label" htmlFor="pw-contract-line">
               {t("money.not_linked")}
             </label>
-            <select
-              id="pw-contract-line"
-              className="field-select"
-              disabled={linkBusy || !job.is_active || contractLines === null}
-              value=""
-              onChange={(event) =>
-                void handleLinkContractLine(event.target.value)
-              }
-              data-testid="recurring-job-money-picker"
-            >
-              <option value="">
-                {contractLines === null
-                  ? t("money.loading")
-                  : contractLines.length === 0
-                    ? t("money.none_available")
+            {/* A customer with NO contract at all cannot be helped by a
+                picker — the answer is a contract, not a choice. It says
+                so, and points at Contracts only for a viewer who may
+                open it: `ContractsRoute` bounces everyone else to "/",
+                and a link that silently lands you on the dashboard is a
+                door painted on a wall. `contractLines === null` is NOT
+                LOADED, which is a different fact from loaded-and-empty
+                — only the second may conclude anything. */}
+            {contractLines !== null && contractLines.length === 0 ? (
+              <span
+                className="pw-money-empty"
+                data-testid="recurring-job-money-none"
+              >
+                {t("money.none_available")}
+                {canAccessContracts(me?.role ?? null) && (
+                  <>
+                    {" "}
+                    <Link to="/admin/contracts">
+                      {t("money.none_available_link")}
+                    </Link>
+                  </>
+                )}
+              </span>
+            ) : (
+              <select
+                id="pw-contract-line"
+                className="field-select"
+                disabled={linkBusy || !job.is_active || contractLines === null}
+                value=""
+                onChange={(event) =>
+                  void handleLinkContractLine(event.target.value)
+                }
+                data-testid="recurring-job-money-picker"
+              >
+                <option value="">
+                  {contractLines === null
+                    ? t("money.loading")
                     : t("money.pick")}
-              </option>
-              {(contractLines ?? []).map((line) => (
-                <option key={line.id} value={String(line.id)}>
-                  {line.contractNo
-                    ? `${line.lineName} — ${line.contractNo}`
-                    : line.lineName}
                 </option>
-              ))}
-            </select>
+                {(contractLines ?? []).map((line) => (
+                  <option key={line.id} value={String(line.id)}>
+                    {line.contractNo
+                      ? `${line.lineName} — ${line.contractNo}`
+                      : line.lineName}
+                  </option>
+                ))}
+              </select>
+            )}
           </>
         )}
+        {linkError && (
+          <div
+            className="alert-error pw-money-error"
+            role="alert"
+            data-testid="recurring-job-money-error"
+          >
+            {linkError}
+          </div>
+        )}
       </div>
-      {/* Generate occurrences dialog */}
+      {/* Plan-further-ahead dialog */}
       <ConfirmDialog
         ref={generateRef}
         title={t("generate.dialog_title")}
@@ -731,6 +815,11 @@ export function RecurringJobDetailPage() {
                 {t("generate.field_days_ahead_hint")}
               </div>
             </div>
+            {generateError && (
+              <div className="alert-error" role="alert" data-testid="rj-generate-error">
+                {generateError}
+              </div>
+            )}
           </div>
         }
         confirmLabel={t("generate.confirm")}
@@ -744,7 +833,20 @@ export function RecurringJobDetailPage() {
       <ConfirmDialog
         ref={archiveRef}
         title={t("archive.dialog_title")}
-        body={t("archive.dialog_body")}
+        body={
+          <>
+            {t("archive.dialog_body")}
+            {archiveError && (
+              <div
+                className="alert-error"
+                role="alert"
+                data-testid="rj-archive-error"
+              >
+                {archiveError}
+              </div>
+            )}
+          </>
+        }
         confirmLabel={t("archive.confirm")}
         cancelLabel={t("form.cancel")}
         onConfirm={handleArchive}
@@ -760,9 +862,10 @@ export function RecurringJobDetailPage() {
             : t("skip.dialog_title")
         }
         description={
-          reasonDialog?.mode === "cancel"
+          reasonError ||
+          (reasonDialog?.mode === "cancel"
             ? t("cancel.dialog_desc")
-            : t("skip.dialog_desc")
+            : t("skip.dialog_desc"))
         }
         placeholder={
           reasonDialog?.mode === "cancel"
@@ -775,7 +878,10 @@ export function RecurringJobDetailPage() {
             : t("skip.dialog_confirm")
         }
         cancelLabel={t("form.cancel")}
-        onCancel={() => setReasonDialog(null)}
+        onCancel={() => {
+          setReasonError("");
+          setReasonDialog(null);
+        }}
         onConfirm={handleReasonConfirm}
       />
 
