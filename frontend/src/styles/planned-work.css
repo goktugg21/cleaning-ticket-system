@@ -8,20 +8,26 @@
  */
 
 /* ---- 1. THE AGREEMENT -------------------------------------------------
- * One header, not a card of fifteen rows. The pattern and the window are
- * the two facts an operator reads first, so they are the two that get
- * type size; everything else is a chip beside them.
+ * ONE card, two parts: the agreement sentence, then the facts grid.
+ * The pattern and the window are the two facts an operator reads first,
+ * so they are the two that get type size.
  */
 .pw-agreement {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 14px;
-  padding: 14px 18px;
+  padding: 14px 18px 16px;
   margin-bottom: 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-1, var(--surface, #fff));
+}
+
+/* The sentence. A flex row so the separators sit on the same baseline as
+ * the words they divide, and it wraps as one line of prose would. */
+.pw-agreement-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
 }
 
 .pw-agreement-pattern {
@@ -43,29 +49,71 @@
   color: var(--text-2);
 }
 
-/* The rest of the job's facts, behind one disclosure so the header keeps
- * its promise of showing five things at first sight without the page
- * quietly losing the other ten. */
-.pw-more {
-  margin-left: auto;
-}
-
-.pw-more > summary {
-  cursor: pointer;
-  color: var(--text-2);
-  font-size: var(--font-sm);
-  list-style: none;
-}
-
-.pw-more > summary::-webkit-details-marker {
-  display: none;
-}
-
-.pw-more-body {
-  flex-basis: 100%;
-  margin-top: 12px;
-  padding-top: 12px;
+/* The facts, as a label-over-value grid filling the card's own width.
+ *
+ * The column count is PINNED (3 / 2 / 1), not `auto-fit`. W9 §1 already
+ * paid for that lesson on `.ew-facts-grid`: a track count derived from
+ * how many items a block happens to hold gives two blocks two different
+ * grids, and nothing lines up down the page. Here the item count is
+ * genuinely variable — a fact with no value renders nothing — so a
+ * derived count would also make the same card three columns wide on one
+ * job and five on the next.
+ *
+ * Label and value sit on the shared type scale, the same way
+ * `.ew-fact-label` / `.ew-fact-value` do: the value at reading size, the
+ * label one step down. Not uppercase — the labels are plain words, and
+ * shouting them does not make them plainer.
+ */
+.pw-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4) var(--space-6);
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-3);
   border-top: 1px solid var(--border-soft);
+}
+
+@media (max-width: 1100px) {
+  .pw-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .pw-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pw-fact {
+  min-width: 0;
+}
+
+/* Prose gets the whole row; a description in a third of a card is a
+ * ribbon. It is also the only fact that may be missing entirely, which
+ * is why it is last: a wide item in the middle would split the grid. */
+.pw-fact-wide {
+  grid-column: 1 / -1;
+}
+
+.pw-fact-label {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.pw-fact-value {
+  margin: 0;
+  font-size: var(--font-base);
+  color: var(--text);
+  /* An email is longer than a third of the card at 1366; it wraps inside
+   * its own column instead of pushing the grid past the card. */
+  overflow-wrap: anywhere;
+}
+
+.pw-fact-wide .pw-fact-value {
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 /* ---- 2. THE VISITS ----------------------------------------------------

@@ -3,11 +3,15 @@
 // W-PW1 — a recurring job is a MEMBERSHIP, and this page says three things
 // in this order and nothing else at first sight:
 //
-//   1. THE AGREEMENT  one header line: what was agreed, how often, between
-//                     which dates, for whom. The old fifteen-row Summary
-//                     card folded into it; the facts it carried that are
-//                     not part of that sentence sit behind one disclosure
-//                     rather than being dropped.
+//   1. THE AGREEMENT  ONE header card: the agreement sentence on top —
+//                     what was agreed, how often, for whom — and the
+//                     job's facts under it as a label-over-value grid.
+//                     W-P5.1 folded away the "All details" disclosure
+//                     that used to hold those facts: pinned to the
+//                     card's right edge it left the middle of the top
+//                     line empty and, opened, made a 472px card whose
+//                     ink covered 3.8% of it. Facts with no value are
+//                     absent rather than rendered as a dash.
 //   2. THE VISITS     the calendar, the page's primary surface. Every date
 //                     is an occurrence and every date's actions open where
 //                     it was clicked. The occurrence TABLE is gone: it was
@@ -76,11 +80,17 @@ interface ContractLineOption {
 
 type ReasonMode = "skip" | "cancel";
 
+/** A window as words, or "" when it carries neither a time nor a label.
+ *  It used to answer "—" for that case, which put a dash in the facts
+ *  grid where the reader wanted a fact: a job CAN hold a window row that
+ *  says nothing, and "—" does not tell an operator whether the window is
+ *  missing or merely blank. The caller turns an all-empty set into "no
+ *  fixed window", which is the actual answer. */
 function formatWindow(window: RecurringJobWindow): string {
   const parts: string[] = [];
   if (window.start_time) parts.push(window.start_time.slice(0, 5));
   if (window.label) parts.push(window.label);
-  return parts.length > 0 ? parts.join(" ") : "—";
+  return parts.join(" ");
 }
 
 export function RecurringJobDetailPage() {
@@ -488,93 +498,101 @@ export function RecurringJobDetailPage() {
       />
 
       {/* ---- 1. THE AGREEMENT ------------------------------------------
-          What was agreed, how often, between which dates, for whom. One
-          header, five facts. The other ten the old Summary card listed
-          are still here — behind one disclosure, because dropping them
-          would have been a silent loss, and showing them would have made
-          this a card of rows again. */}
+          ONE header card, two parts. The top line is the agreement
+          sentence — what was agreed, how often, for whom. Under it the
+          job's facts as a label-over-value grid.
+
+          Until now those facts sat behind an "All details" disclosure
+          pinned to the card's right edge by `margin-left: auto`. That
+          left a 892-953px hole across the middle of the top line at
+          1920, and opening it produced a 472px card whose ink covered
+          3.8% of its own area — a void with a narrow list floating in
+          it. A grid fills the card it is given instead of hanging off
+          one corner of it.
+
+          Facts that are NOT set are ABSENT, not rendered as a dash or a
+          "No description." placeholder: an empty row still costs a line
+          of reading and says nothing. Company, the windows and the
+          counts are always true of a job, so they always show. */}
       <div className="pw-agreement" data-testid="recurring-job-agreement">
-        <span className="pw-agreement-pattern" data-testid="pw-agreement-pattern">
-          {patternInWords}
-        </span>
-        <span className="pw-agreement-sep" aria-hidden="true">
-          ·
-        </span>
-        <span className="pw-agreement-window" data-testid="pw-agreement-window">
-          {periodText}
-        </span>
-        <span className="pw-agreement-sep" aria-hidden="true">
-          ·
-        </span>
-        <span className="pw-agreement-where">
-          {job.building_name} · {job.customer_name}
-        </span>
-        <details className="pw-more" data-testid="recurring-job-more">
-          <summary>{t("detail.more_toggle")}</summary>
-          <div className="pw-more-body">
-            <div className="preview-list">
-              <SummaryRow label={t("detail.field_company")} value={job.company_name} />
-              <SummaryRow
-                label={t("detail.field_department")}
-                value={
-                  customerLabelName(job.department_name, t) ||
-                  t("detail.field_none")
-                }
-              />
-              <SummaryRow
-                label={t("detail.field_work_type")}
-                value={
-                  customerLabelName(job.work_type_name, t) ||
-                  t("detail.field_none")
-                }
-              />
-              <SummaryRow
-                label={t("detail.field_category")}
-                value={
-                  job.service_category_name ??
-                  job.price_folder_name ??
-                  t("detail.field_none")
-                }
-              />
-              <SummaryRow
-                label={t("detail.field_windows")}
-                value={
-                  job.windows.length > 0
-                    ? job.windows.map((w) => formatWindow(w)).join(" · ")
-                    : t("detail.no_window")
-                }
-              />
-              <SummaryRow
-                label={t("detail.field_default_staff")}
-                value={String(job.default_staff_ids.length)}
-              />
-              <SummaryRow
-                label={t("detail.field_default_managers")}
-                value={String(job.default_manager_ids.length)}
-              />
-              <SummaryRow
-                label={t("detail.field_occurrences_count")}
-                value={String(job.occurrences_count)}
-              />
-              <SummaryRow
-                label={t("detail.field_created_by")}
-                value={job.created_by_email}
-              />
-              <SummaryRow
-                label={t("detail.field_created_at")}
-                value={formatDateTime(job.created_at)}
-              />
-              <SummaryRow
-                label={t("detail.field_description")}
-                value={
-                  job.description?.trim()
-                    ? job.description
-                    : t("detail.no_description")
-                }
-              />
+        <p className="pw-agreement-line">
+          <span
+            className="pw-agreement-pattern"
+            data-testid="pw-agreement-pattern"
+          >
+            {patternInWords}
+          </span>
+          <span className="pw-agreement-sep" aria-hidden="true">
+            ·
+          </span>
+          <span className="pw-agreement-window" data-testid="pw-agreement-window">
+            {periodText}
+          </span>
+          <span className="pw-agreement-sep" aria-hidden="true">
+            ·
+          </span>
+          <span className="pw-agreement-where">
+            {job.building_name} · {job.customer_name}
+          </span>
+        </p>
+
+        <dl className="pw-facts" data-testid="recurring-job-facts">
+          <Fact label={t("detail.field_company")} value={job.company_name} />
+          <Fact
+            label={t("detail.field_department")}
+            value={customerLabelName(job.department_name, t)}
+          />
+          <Fact
+            label={t("detail.field_work_type")}
+            value={customerLabelName(job.work_type_name, t)}
+          />
+          <Fact
+            label={t("detail.field_category")}
+            value={job.service_category_name ?? job.price_folder_name}
+          />
+          <Fact
+            label={t("detail.field_windows")}
+            value={
+              job.windows.map((w) => formatWindow(w)).filter(Boolean).join(" · ") ||
+              t("detail.no_window")
+            }
+          />
+          <Fact
+            label={t("detail.field_default_staff")}
+            value={String(job.default_staff_ids.length)}
+          />
+          <Fact
+            label={t("detail.field_default_managers")}
+            value={String(job.default_manager_ids.length)}
+          />
+          <Fact
+            label={t("detail.field_occurrences_count")}
+            value={String(job.occurrences_count)}
+          />
+          {/* Who made it and when, as ONE fact. Two made seven facts on
+              a three-column grid, so the last row carried a single item
+              and ~1000px of nothing beside it at 1920. Six fills two
+              rows exactly, and nine (a job that uses all three
+              classifiers) fills three. */}
+          <Fact
+            label={t("detail.field_created")}
+            value={`${job.created_by_email} · ${formatDateTime(job.created_at)}`}
+          />
+          {/* The description is prose, so it gets the grid's whole width
+              rather than one narrow column — and only when there is one.
+              Written out rather than passed as a `wide` prop so both
+              class names are STRING LITERALS: `check-css-classes.mjs`
+              skips a computed className, and a class the gate cannot
+              read is a class it cannot tell you is undefined. */}
+          {job.description?.trim() ? (
+            <div className="pw-fact pw-fact-wide">
+              <dt className="pw-fact-label">
+                {t("detail.field_description")}
+              </dt>
+              <dd className="pw-fact-value">{job.description.trim()}</dd>
             </div>
-          </div>
-        </details>
+          ) : null}
+        </dl>
       </div>
 
       {/* ---- 2. THE VISITS ---------------------------------------------
@@ -778,11 +796,23 @@ export function RecurringJobDetailPage() {
   );
 }
 
-function SummaryRow({ label, value }: { label: string; value: string }) {
+/** One fact in the agreement card's grid: the plain word above, the
+ *  value below. A fact with nothing to say RENDERS NOTHING — an empty
+ *  row still costs a line of reading, and a dash is not an answer. The
+ *  description is the one fact this does not render; it is prose and
+ *  spans the grid, so it is written out at the call site. */
+function Fact({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  if (!value) return null;
   return (
-    <div className="preview-row">
-      <span className="preview-key">{label}</span>
-      <span className="preview-val">{value}</span>
+    <div className="pw-fact">
+      <dt className="pw-fact-label">{label}</dt>
+      <dd className="pw-fact-value">{value}</dd>
     </div>
   );
 }

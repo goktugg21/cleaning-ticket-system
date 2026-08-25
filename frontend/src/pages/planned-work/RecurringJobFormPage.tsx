@@ -885,144 +885,6 @@ export function RecurringJobFormPage() {
                 )}
               </div>
 
-              {/* Rule 11 — the optional classifiers open only when asked
-                  for. A job needs a customer, a building, a title and a
-                  schedule; department, work type, category and the
-                  contract line are all things SOME jobs carry, and four
-                  always-open dropdowns are what made this form read as
-                  long. Sprint 144 §2's own rule still holds inside: each
-                  is disabled with a reason when the customer has none of
-                  that kind. */}
-              <details className="pw-form-group" data-testid="rj-group-labels">
-                <summary className="pw-form-group-summary">
-                  {t("form.group_classification")}
-                </summary>
-              <div className="field">
-                <label className="field-label" htmlFor="rj-department">
-                  {t("form.field_department")}
-                </label>
-                <select
-                  id="rj-department"
-                  className="field-select"
-                  data-testid="recurring-job-department"
-                  value={effectiveDepartmentId}
-                  onChange={(event) => setDepartmentId(event.target.value)}
-                  disabled={customer === "" || currentDepartments.length === 0}
-                >
-                  <option value="">{t("form.field_label_none")}</option>
-                  {currentDepartments.map((d) => (
-                    <option key={d.id} value={String(d.id)}>
-                      {customerLabelName(d.name, t)}
-                    </option>
-                  ))}
-                </select>
-                {customer !== "" && currentDepartments.length === 0 && (
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {t("form.field_department_none")}
-                  </div>
-                )}
-              </div>
-
-              <div className="field">
-                <label className="field-label" htmlFor="rj-work-type">
-                  {t("form.field_work_type")}
-                </label>
-                <select
-                  id="rj-work-type"
-                  className="field-select"
-                  data-testid="recurring-job-work-type"
-                  value={effectiveWorkTypeId}
-                  onChange={(event) => setWorkTypeId(event.target.value)}
-                  disabled={customer === "" || currentWorkTypes.length === 0}
-                >
-                  <option value="">{t("form.field_label_none")}</option>
-                  {currentWorkTypes.map((w) => (
-                    <option key={w.id} value={String(w.id)}>
-                      {customerLabelName(w.name, t)}
-                    </option>
-                  ))}
-                </select>
-                {customer !== "" && currentWorkTypes.length === 0 && (
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {t("form.field_work_type_none")}
-                  </div>
-                )}
-              </div>
-
-              <div className="field">
-                <label className="field-label" htmlFor="rj-category">
-                  {t("form.field_category")}
-                </label>
-                <select
-                  id="rj-category"
-                  className="field-select"
-                  data-testid="recurring-job-category"
-                  value={effectiveCategoryChoice}
-                  onChange={(event) => setCategoryChoice(event.target.value)}
-                >
-                  <option value="">{t("form.field_label_none")}</option>
-                  {/* Same two groups as the Extra Work form: the
-                      company's categories, plus this customer's folders
-                      once a customer is chosen. ACTIVE only on both
-                      sides. */}
-                  {offeredCategories.length > 0 && (
-                    <optgroup label={t("form.field_category_group_company")}>
-                      {offeredCategories.map((c) => (
-                        <option key={`cat-${c.id}`} value={`cat:${c.id}`}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {currentFolders.length > 0 && (
-                    <optgroup label={t("form.field_category_group_folders")}>
-                      {currentFolders.map((f) => (
-                        <option key={`fol-${f.id}`} value={`fol:${f.id}`}>
-                          {f.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-              </div>
-
-              {/* W24 — the contract line this recurring work performs.
-                  Optional, and ABSENT (not disabled-with-a-reason like
-                  the two label pickers above) when the customer has no
-                  contract lines: a customer with no contract has nothing
-                  to say about it, and an explanatory line under a dead
-                  control is noise on a form that already has three
-                  optional classifiers. Setting it is what makes the
-                  contract's Planning tab fill. */}
-              {currentContractLines.length > 0 && (
-                <div className="field">
-                  <label className="field-label" htmlFor="rj-contract-line">
-                    {t("form.field_contract_line")}
-                  </label>
-                  <select
-                    id="rj-contract-line"
-                    className="field-select"
-                    data-testid="recurring-job-contract-line"
-                    value={effectiveContractLineId}
-                    onChange={(event) =>
-                      setContractLineId(event.target.value)
-                    }
-                  >
-                    <option value="">{t("form.field_label_none")}</option>
-                    {currentContractLines.map((line) => (
-                      <option key={line.id} value={String(line.id)}>
-                        {line.contractNo
-                          ? `${line.lineName} — ${line.contractNo}`
-                          : line.lineName}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {t("form.field_contract_line_hint")}
-                  </div>
-                </div>
-              )}
-              </details>
               <div className="field">
                 <label className="field-label" htmlFor="rj-building">
                   {t("form.field_building")} *
@@ -1082,6 +944,155 @@ export function RecurringJobFormPage() {
                 onChange={(event) => setDescription(event.target.value)}
               />
             </div>
+          </div>
+
+          {/* Rule 11 — the optional classifiers are a SECTION of the
+              form's own flow, not a card parked in the right-hand
+              column of Basics. They lived inside the `.form-2col`
+              grid until now, which made the collapsed header sit
+              21px above the Customer select beside it and, once
+              opened, stretched that grid cell to 329px and pushed
+              Building 284px down the LEFT column behind a hole.
+              A job needs a customer, a building, a title and a
+              schedule; department, work type, category and the
+              contract line are all things SOME jobs carry, so the
+              section stays closed until someone asks for it — the
+              same shape `rj-group-crew` already has. Sprint 144 §2's
+              own rule still holds inside: each is disabled with a
+              reason when the customer has none of that kind. */}
+          <div className="form-section">
+            <details className="pw-form-group" data-testid="rj-group-labels">
+              <summary className="pw-form-group-summary pw-form-group-section">
+                {t("form.section_labels_title")}
+              </summary>
+              <div className="form-2col">
+                <div className="field">
+                  <label className="field-label" htmlFor="rj-department">
+                    {t("form.field_department")}
+                  </label>
+                  <select
+                    id="rj-department"
+                    className="field-select"
+                    data-testid="recurring-job-department"
+                    value={effectiveDepartmentId}
+                    onChange={(event) => setDepartmentId(event.target.value)}
+                    disabled={customer === "" || currentDepartments.length === 0}
+                  >
+                    <option value="">{t("form.field_label_none")}</option>
+                    {currentDepartments.map((d) => (
+                      <option key={d.id} value={String(d.id)}>
+                        {customerLabelName(d.name, t)}
+                      </option>
+                    ))}
+                  </select>
+                  {customer !== "" && currentDepartments.length === 0 && (
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("form.field_department_none")}
+                    </div>
+                  )}
+                </div>
+
+                <div className="field">
+                  <label className="field-label" htmlFor="rj-work-type">
+                    {t("form.field_work_type")}
+                  </label>
+                  <select
+                    id="rj-work-type"
+                    className="field-select"
+                    data-testid="recurring-job-work-type"
+                    value={effectiveWorkTypeId}
+                    onChange={(event) => setWorkTypeId(event.target.value)}
+                    disabled={customer === "" || currentWorkTypes.length === 0}
+                  >
+                    <option value="">{t("form.field_label_none")}</option>
+                    {currentWorkTypes.map((w) => (
+                      <option key={w.id} value={String(w.id)}>
+                        {customerLabelName(w.name, t)}
+                      </option>
+                    ))}
+                  </select>
+                  {customer !== "" && currentWorkTypes.length === 0 && (
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("form.field_work_type_none")}
+                    </div>
+                  )}
+                </div>
+
+                <div className="field">
+                  <label className="field-label" htmlFor="rj-category">
+                    {t("form.field_category")}
+                  </label>
+                  <select
+                    id="rj-category"
+                    className="field-select"
+                    data-testid="recurring-job-category"
+                    value={effectiveCategoryChoice}
+                    onChange={(event) => setCategoryChoice(event.target.value)}
+                  >
+                    <option value="">{t("form.field_label_none")}</option>
+                    {/* Same two groups as the Extra Work form: the
+                        company's categories, plus this customer's folders
+                        once a customer is chosen. ACTIVE only on both
+                        sides. */}
+                    {offeredCategories.length > 0 && (
+                      <optgroup label={t("form.field_category_group_company")}>
+                        {offeredCategories.map((c) => (
+                          <option key={`cat-${c.id}`} value={`cat:${c.id}`}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {currentFolders.length > 0 && (
+                      <optgroup label={t("form.field_category_group_folders")}>
+                        {currentFolders.map((f) => (
+                          <option key={`fol-${f.id}`} value={`fol:${f.id}`}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+
+                {/* W24 — the contract line this recurring work performs.
+                    Optional, and ABSENT (not disabled-with-a-reason like
+                    the two label pickers above) when the customer has no
+                    contract lines: a customer with no contract has nothing
+                    to say about it, and an explanatory line under a dead
+                    control is noise on a form that already has three
+                    optional classifiers. Setting it is what makes the
+                    contract's Planning tab fill. */}
+                {currentContractLines.length > 0 && (
+                  <div className="field">
+                    <label className="field-label" htmlFor="rj-contract-line">
+                      {t("form.field_contract_line")}
+                    </label>
+                    <select
+                      id="rj-contract-line"
+                      className="field-select"
+                      data-testid="recurring-job-contract-line"
+                      value={effectiveContractLineId}
+                      onChange={(event) =>
+                        setContractLineId(event.target.value)
+                      }
+                    >
+                      <option value="">{t("form.field_label_none")}</option>
+                      {currentContractLines.map((line) => (
+                        <option key={line.id} value={String(line.id)}>
+                          {line.contractNo
+                            ? `${line.lineName} — ${line.contractNo}`
+                            : line.lineName}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("form.field_contract_line_hint")}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </details>
           </div>
 
           {/* Schedule */}
