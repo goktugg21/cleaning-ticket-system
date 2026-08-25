@@ -557,11 +557,23 @@ class ManagerAssignmentCustomerRedactionTests(_Sprint10BFixture):
         client = self._api(self.cust_user_a)
         detail = client.get(f"/api/tickets/{self.ticket_a.id}/")
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(
-            detail.data["assigned_managers"],
-            detail.data["assigned_staff"],
-        )
-        self.assertTrue(detail.data["assigned_managers"][0]["anonymous"])
+        # W-N1 §4 — these two payloads are no longer BYTE-IDENTICAL and
+        # that is deliberate: the staff roster now carries each member's
+        # resolver-gated credentials, and the manager roster does not,
+        # because `StaffCredential` hangs off `StaffProfile` and a
+        # manager need not have one.
+        #
+        # Byte-equality was only ever a proxy for the thing this test is
+        # named after. The invariant IS redaction, so redaction is what
+        # it asserts now: both sides anonymous, neither leaking an
+        # identity.
+        for side in ("assigned_managers", "assigned_staff"):
+            rows = detail.data[side]
+            self.assertTrue(rows, side)
+            for row in rows:
+                self.assertTrue(row["anonymous"], side)
+                for forbidden in ("full_name", "email", "phone"):
+                    self.assertNotIn(forbidden, row, side)
 
     def test_provider_always_sees_full_manager_record(self):
         self.customer_a.show_assigned_staff_name = False

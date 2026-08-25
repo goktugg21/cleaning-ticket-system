@@ -450,6 +450,11 @@ ENTRY_KEYS = {
     "overdue_days",
     "assignee_names",
     "assignee_count",
+    # W-N1 §3 — the parts of this ticket the entry's person holds. This
+    # constant is shared by both kinds on purpose ("a field cannot exist
+    # on one and be forgotten on the other"), which is why extra work
+    # emits `"parts": []` rather than omitting the key.
+    "parts",
     "can_complete",
 }
 

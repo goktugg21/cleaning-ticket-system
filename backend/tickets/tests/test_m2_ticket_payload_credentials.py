@@ -201,7 +201,25 @@ class TicketPayloadCredentialTests(TenantFixtureMixin, APITestCase):
                     set(entry.keys()), {"id", "full_name", "email", "phone"}
                 )
 
-    def test_anonymous_collapse_unchanged(self):
+    def test_anonymous_collapse_is_now_per_member(self):
+        """W-N1 §4 CHANGED THIS DELIBERATELY, so the old assertion is
+        recorded here rather than quietly deleted.
+
+        It used to read:
+
+            [{"anonymous": True,
+              "label_key": "tickets.assigned_team_anonymous"}]
+
+        one row for the whole team, carrying no credentials — the
+        serializer's own comment said a fully redacted roster therefore
+        exposed none. The owner-approved design is one row PER MEMBER,
+        each carrying the resolver-gated credentials, because a customer
+        is entitled to know the people in their building are qualified
+        and a certificate says nothing about WHO holds it.
+
+        What must NOT change is the redaction, so that is what this now
+        pins: still anonymous, and still no name, email, phone or id.
+        """
         self.customer.show_assigned_staff_name = False
         self.customer.show_assigned_staff_email = False
         self.customer.show_assigned_staff_phone = False
@@ -209,10 +227,15 @@ class TicketPayloadCredentialTests(TenantFixtureMixin, APITestCase):
         self.authenticate(self.customer_user)
         response = self.client.get(f"/api/tickets/{self.ticket.id}/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(
-            response.data["assigned_staff"],
-            [{"anonymous": True, "label_key": "tickets.assigned_team_anonymous"}],
-        )
+        roster = response.data["assigned_staff"]
+        self.assertTrue(roster)
+        for row in roster:
+            self.assertTrue(row["anonymous"])
+            self.assertEqual(
+                row["label_key"], "tickets.assigned_team_member_anonymous"
+            )
+            for forbidden in ("id", "full_name", "email", "phone"):
+                self.assertNotIn(forbidden, row)
 
     def test_other_customer_viewer_cannot_reach_ticket_at_all(self):
         self.authenticate(self.other_customer_user)
