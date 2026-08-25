@@ -59,6 +59,10 @@ export const MAX_SLOTS = 60;
  *  as "a couple of visits this month". */
 const RECURRING_HINT_AT = 4;
 
+/** Seven ~40px columns plus their gaps. Keeps the grid reading as a
+ *  month instead of stretching to whatever the form is wide. */
+const CALENDAR_WIDTH = 308;
+
 function toISODate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -180,6 +184,13 @@ export function SlotPicker({
 
   return (
     <div className="ew-slot-picker" data-testid="extra-work-slot-picker">
+      {/* T1 §1 — A MINI MONTH, not a banner.
+          Left to itself the grid takes the whole form width, and seven
+          columns of a 970px form are 135px wide and 30px tall: bars,
+          not days. A month is recognisable because it is roughly square,
+          so the nav, the weekday header and the grid share one capped
+          box and the cells come out about 40px across. */}
+      <div style={{ maxWidth: CALENDAR_WIDTH }}>
       {/* Month nav */}
       <div
         style={{
@@ -278,6 +289,7 @@ export function SlotPicker({
           );
         })}
       </div>
+      </div>
 
       {/* ONE time for every picked day. */}
       <label className="field" style={{ marginTop: 12, maxWidth: 220 }}>
@@ -346,6 +358,10 @@ export function SlotPicker({
               <input
                 type="date"
                 className="field-input"
+                /* A date input needs room for its own placeholder
+                   (dd/mm/yyyy plus the picker glyph); the row's default
+                   width clipped it to "3/01/2026". */
+                style={{ minWidth: 150 }}
                 aria-label={t("series.slot_date")}
                 value={slot.date}
                 onChange={(e) => editRowDate(slot.date, e.target.value)}
@@ -354,6 +370,7 @@ export function SlotPicker({
               <input
                 type="time"
                 className="field-input"
+                style={{ minWidth: 120 }}
                 aria-label={t("series.slot_time")}
                 value={slot.time ?? ""}
                 onChange={(e) => editRowTime(slot.date, e.target.value)}
