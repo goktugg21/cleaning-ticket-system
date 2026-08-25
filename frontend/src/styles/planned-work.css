@@ -265,6 +265,36 @@
   content: "▾";
 }
 
+/* ---- The time-window editor ------------------------------------------
+ * W-P5.2 — these two class names were already on the markup and defined
+ * in NO stylesheet; the layout came from inline `style` objects beside
+ * them, which is why `check-css-classes.mjs` listed `.windows-editor`
+ * and `.window-row` as undefined and the page still looked right. The
+ * rules live here now and the inline styles are gone, so the gate can
+ * see what it is checking. Renamed to the `pw-` prefix this file owns —
+ * an unprefixed `.window-row` in a shared stylesheet would be reachable
+ * by any page that happened to use the same word.
+ */
+.pw-windows-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pw-window-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.pw-window-field {
+  margin-bottom: 8px;
+}
+
+.pw-window-add {
+  margin-top: 10px;
+}
+
 /* A group standing in for a whole section keeps the section's type. */
 .pw-form-group-section {
   font-size: var(--font-md, 1rem);

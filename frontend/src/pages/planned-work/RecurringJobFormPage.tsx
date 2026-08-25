@@ -953,15 +953,19 @@ export function RecurringJobFormPage() {
               21px above the Customer select beside it and, once
               opened, stretched that grid cell to 329px and pushed
               Building 284px down the LEFT column behind a hole.
-              A job needs a customer, a building, a title and a
-              schedule; department, work type, category and the
-              contract line are all things SOME jobs carry, so the
-              section stays closed until someone asks for it — the
-              same shape `rj-group-crew` already has. Sprint 144 §2's
-              own rule still holds inside: each is disabled with a
-              reason when the customer has none of that kind. */}
+              It is OPEN on arrival: the owner works in this section,
+              and progressive disclosure is for what a reader does not
+              need, not for what they came to edit. Still a `<details>`,
+              so one click collapses it like every other group here.
+              Sprint 144 §2's own rule holds inside: each control is
+              disabled with a reason when the customer has none of that
+              kind. */}
           <div className="form-section">
-            <details className="pw-form-group" data-testid="rj-group-labels">
+            <details
+              className="pw-form-group"
+              data-testid="rj-group-labels"
+              open
+            >
               <summary className="pw-form-group-summary pw-form-group-section">
                 {t("form.section_labels_title")}
               </summary>
@@ -1204,31 +1208,36 @@ export function RecurringJobFormPage() {
             {/* Rule 11 — one occurrence is materialized per (date x
                 window), and the default single window needs no attention
                 at all, so the time-of-day editor opens only when someone
-                actually wants a second window or a start time. */}
+                actually wants a second window or a start time.
+
+                W-P5.2 — the block now says what it IS. Its title carries
+                "when on each day" because "Times of day" named the
+                contents without naming the job they do, and a window is
+                the thing that decides how many visits a due date turns
+                into. Each row is a name and the time it starts.
+
+                NOTE — there is no "to" time to show. `RecurringJobWindow`
+                carries `label` + `start_time` and nothing else (the
+                model's own docstring says so, and `end_time` appears
+                nowhere in planned_work, front or back). A second time
+                input here would be a control that silently discards what
+                is typed into it, so the row is label + from until a
+                column exists to hold an end. */}
             <details className="pw-form-group" data-testid="rj-group-windows">
               <summary className="pw-form-group-summary">
                 {t("form.group_windows")}
               </summary>
             <div className="field">
               <label className="field-label">{t("form.field_windows")} *</label>
-              <div
-                className="windows-editor"
-                style={{ display: "flex", flexDirection: "column", gap: 10 }}
-                data-testid="rj-windows-editor"
-              >
+              <div className="pw-windows-editor" data-testid="rj-windows-editor">
                 {windows.map((win, idx) => (
                   <div
                     key={idx}
-                    className="window-row"
+                    className="pw-window-row"
                     data-testid="rj-window-row"
-                    style={{
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      padding: 12,
-                    }}
                   >
                     <div className="form-2col">
-                      <div className="field" style={{ marginBottom: 8 }}>
+                      <div className="field pw-window-field">
                         <label className="field-label">
                           {t("form.window_label")}
                         </label>
@@ -1243,7 +1252,7 @@ export function RecurringJobFormPage() {
                           }
                         />
                       </div>
-                      <div className="field" style={{ marginBottom: 8 }}>
+                      <div className="field pw-window-field">
                         <label className="field-label">
                           {t("form.window_start_time")}
                         </label>
@@ -1277,10 +1286,9 @@ export function RecurringJobFormPage() {
               )}
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
+                className="btn btn-secondary btn-sm pw-window-add"
                 onClick={addWindow}
                 data-testid="rj-window-add"
-                style={{ marginTop: 10 }}
               >
                 {t("form.window_add")}
               </button>

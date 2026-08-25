@@ -88,8 +88,8 @@
   "form.field_weekdays_hint_biweekly": "Kies de dag(en) van de week. Tweewekelijks draait ze om de week, verankerd op de week van de startdatum.",
   "form.field_windows": "Tijdvensters",
   "form.window_label": "Label",
-  "form.window_label_placeholder": "bijv. Ochtend, Avond",
-  "form.window_start_time": "Starttijd",
+  "form.window_label_placeholder": "bijv. ochtend",
+  "form.window_start_time": "Vanaf",
   "form.window_add": "Venster toevoegen",
   "form.window_remove": "Venster verwijderen",
   "form.error_weekdays_required": "Kies ten minste één weekdag.",
@@ -201,5 +201,5 @@
   "calendar.action_move": "Dit bezoek verplaatsen…",
   "calendar.action_cancel": "Dit bezoek annuleren…",
   "form.section_labels_title": "Labels en contractregel",
-  "form.group_windows": "Tijdstippen"
+  "form.group_windows": "Tijdvensters — wanneer op elke dag"
 }

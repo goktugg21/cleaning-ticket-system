@@ -88,8 +88,8 @@
   "form.field_weekdays_hint_biweekly": "Pick the day(s) of the week. Biweekly runs them every other week, anchored on the start date's week.",
   "form.field_windows": "Time windows",
   "form.window_label": "Label",
-  "form.window_label_placeholder": "e.g. Morning, Evening",
-  "form.window_start_time": "Start time",
+  "form.window_label_placeholder": "e.g. morning",
+  "form.window_start_time": "From",
   "form.window_add": "Add window",
   "form.window_remove": "Remove window",
   "form.error_weekdays_required": "Pick at least one weekday.",
@@ -201,5 +201,5 @@
   "calendar.action_move": "Move this visit…",
   "calendar.action_cancel": "Cancel this visit…",
   "form.section_labels_title": "Labels and contract line",
-  "form.group_windows": "Times of day"
+  "form.group_windows": "Time windows — when on each day"
 }
