@@ -44,6 +44,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 
 
 User = get_user_model()
@@ -688,6 +689,8 @@ class CustomerApprovalTests(ExtraWorkFixtureMixin, TestCase):
             unit_price=Decimal("100"),
             vat_rate=Decimal("21"),
         )
+        # W-PLAN — pricing is gated on a complete plan.
+        make_plan_complete(ew)
         # Drive into PRICING_PROPOSED via the API as admin.
         response = self._api(self.admin_a).post(
             f"/api/extra-work/{ew.id}/transition/",

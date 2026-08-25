@@ -199,6 +199,19 @@ class ProposalListCreateView(views.APIView):
         guard = _require_provider_in_scope(request, extra_work)
         if guard is not None:
             return guard
+        # W-PLAN — THE LAW: planning gates pricing. Creating a proposal
+        # IS entering pricing (both routes: the quote's "Prepare the
+        # proposal" and auto-start's "Price the work" both land here),
+        # so the four plan requirements are asked at this door. The one
+        # bypass is the recorded override with a mandatory reason —
+        # `check_pricing_plan_gate` writes its history row.
+        from .planning import check_pricing_plan_gate
+
+        gate = check_pricing_plan_gate(
+            extra_work, request.data, actor=request.user
+        )
+        if gate is not None:
+            return Response(gate, status=status.HTTP_400_BAD_REQUEST)
         serializer = ProposalCreateSerializer(
             data=request.data,
             context={"request": request, "extra_work_request": extra_work},
@@ -276,6 +289,21 @@ class ProposalTransitionView(views.APIView):
         payload = ProposalTransitionSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
+        # W-PLAN — the send/start action keeps the same plan gate the
+        # create door asked (cheap: by then the plan is complete, and a
+        # plan un-made between create and send is exactly what this
+        # catches). A DRAFT written before the gate existed is also
+        # caught here. Same bypass: `override_reason` in the body.
+        if data["to_status"] == ProposalStatus.SENT:
+            from .planning import check_pricing_plan_gate
+
+            gate = check_pricing_plan_gate(
+                proposal.extra_work_request,
+                request.data,
+                actor=request.user,
+            )
+            if gate is not None:
+                return Response(gate, status=status.HTTP_400_BAD_REQUEST)
         try:
             updated = apply_proposal_transition(
                 proposal,

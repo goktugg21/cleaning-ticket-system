@@ -101,6 +101,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.utils import timezone
+
 from .dates import apply_extra_work_dates
 from .models import (
     ExtraWorkAssignment,
@@ -191,6 +193,107 @@ NOTHING_TO_PLAN_IN_BATCH_MESSAGE = (
     "start was asked for. Nothing was changed, on any of the selected "
     "works."
 )
+
+#: W-PLAN — THE LAW: planning gates pricing. The four named
+#: requirements a plan must satisfy BEFORE pricing may be entered
+#: (proposal composing on the quote route, the pricing step on
+#: auto-start). Bound at the pricing DOORS (proposal create, proposal
+#: SEND, the direct UNDER_REVIEW -> PRICING_PROPOSED workflow leg) —
+#: at the views, never inside `apply_transition`, for the reason the
+#: ticket module's W13-FIX records: the state machine is also the
+#: programmatic primitive that seeders and tests use to WALK a record
+#: into a state, and a form-completeness rule on the primitive fails
+#: everything that is not a person filling in a form.
+PLAN_REQ_STAFF = "plan_staff"
+PLAN_REQ_MANAGER = "plan_manager"
+PLAN_REQ_START_DATE = "plan_start_date"
+PLAN_REQ_HOURS = "plan_hours"
+ERR_PLAN_REQUIREMENTS_UNMET = "plan_requirements_unmet"
+#: Task 3 — a past day is history; worked hours own it. Editing one
+#: takes the recorded override with a mandatory reason.
+ERR_PLAN_PAST_DAY_LOCKED = "plan_past_day_locked"
+
+
+def plan_requirements(extra_work) -> list[dict]:
+    """The four plan-completeness facts, satisfied ones included.
+
+    Same contract as `tickets.transition_requirements`: the caller
+    renders the full checklist, so an operator can see that the date is
+    already set rather than wondering whether it was asked for.
+
+    Plan-complete = >=1 WORKER assignment, >=1 MANAGER assignment, a
+    committed delivery start date, and planned hours > 0. "Planned
+    hours" is satisfied by EITHER a positive budget or a positive
+    distributed total — a budget nobody distributed and a distribution
+    nobody budgeted are both real plans (this module's own docstring),
+    and the law asks that hours exist, not which shape they took.
+    """
+    roles = set(
+        ExtraWorkAssignment.objects.filter(
+            extra_work_request=extra_work
+        ).values_list("role", flat=True)
+    )
+    budget = extra_work.budget_hours
+    has_hours = (budget is not None and budget > 0) or (
+        distributed_hours(extra_work) > 0
+    )
+    return [
+        {"key": PLAN_REQ_STAFF, "satisfied": "WORKER" in roles},
+        {"key": PLAN_REQ_MANAGER, "satisfied": "MANAGER" in roles},
+        {
+            "key": PLAN_REQ_START_DATE,
+            "satisfied": extra_work.provider_planned_date is not None,
+        },
+        {"key": PLAN_REQ_HOURS, "satisfied": has_hours},
+    ]
+
+
+def plan_requirements_unmet(extra_work) -> list[str]:
+    return [
+        r["key"] for r in plan_requirements(extra_work) if not r["satisfied"]
+    ]
+
+
+def check_pricing_plan_gate(extra_work, request_data, *, actor):
+    """The W-PLAN gate, asked at every pricing door.
+
+    Returns None when pricing may proceed, or a ready-to-return 400
+    body. The ONLY bypass is the existing recorded override: a
+    non-blank `override_reason` in the request body lets pricing open
+    and writes the annotation history row (`is_override=True`, reason
+    in the note — the history row IS the audit trail, H-11). The
+    direct-publish quote-bypass endpoint already REQUIRES an
+    `override_reason`, so it passes this gate by the same reason it
+    always carried — one override vocabulary, not two.
+    """
+    unmet = plan_requirements_unmet(extra_work)
+    if not unmet:
+        return None
+    reason = str(request_data.get("override_reason") or "").strip()
+    if reason:
+        ExtraWorkStatusHistory.objects.create(
+            extra_work=extra_work,
+            old_status=extra_work.status,
+            new_status=extra_work.status,
+            changed_by=actor,
+            note=(
+                "Pricing opened with an incomplete plan (override): "
+                f"{reason}. Missing: {', '.join(unmet)}."
+            ),
+            is_override=True,
+        )
+        return None
+    return {
+        "detail": (
+            "The plan is not complete. Before pricing, this work needs: "
+            + ", ".join(unmet)
+            + "."
+        ),
+        "code": ERR_PLAN_REQUIREMENTS_UNMET,
+        "requirements": plan_requirements(extra_work),
+        "unmet": unmet,
+    }
+
 
 #: The one warning this module raises. See the module docstring for why
 #: it is a warning and not a refusal.
@@ -562,6 +665,68 @@ def apply_plan(
         )
 
     note_parts: list[str] = []
+    plan_is_override = False
+
+    # ---- Task 3 — PAST DAYS ARE HISTORY; worked hours own them --------
+    #
+    # A change to a row dated strictly before today (create, edit, or
+    # delete — the payload REPLACES the distribution, so an omitted past
+    # row is a deletion) is refused unless the recorded override reason
+    # rides with it. Resubmitting a past row UNCHANGED is free: the
+    # dialog always sends the full distribution, and punishing an
+    # identical resubmit would lock every plan that has ever run a day.
+    # Undated rows (date NULL) are never "past".
+    if resolved_hours is not None:
+        today = timezone.localdate()
+        stored = {
+            (row.user_id, row.date, row.hour_type_id): row.hours
+            for row in extra_work.planned_hours.all()
+        }
+        wanted_map = {
+            (user_id, on_date, hour_type_id): hours
+            for user_id, on_date, hour_type_id, hours in resolved_hours
+        }
+        past_changed: set = set()
+        for key, hours in wanted_map.items():
+            on_date = key[1]
+            if (
+                on_date is not None
+                and on_date < today
+                and stored.get(key) != hours
+            ):
+                past_changed.add(on_date)
+        for key in stored:
+            on_date = key[1]
+            if (
+                on_date is not None
+                and on_date < today
+                and key not in wanted_map
+            ):
+                past_changed.add(on_date)
+        if past_changed:
+            reason = str(
+                data.get("past_days_override_reason") or ""
+            ).strip()
+            if not reason:
+                body = {
+                    "detail": (
+                        "Past days are history — worked hours own "
+                        "them. Editing a past day needs the recorded "
+                        "override with a reason."
+                    ),
+                    "code": ERR_PLAN_PAST_DAY_LOCKED,
+                    "days": sorted(str(d) for d in past_changed),
+                }
+                if name_the_work:
+                    body["extra_work"] = extra_work.id
+                    body["extra_work_title"] = extra_work.title
+                raise PlanRejected(body)
+            plan_is_override = True
+            note_parts.append(
+                "past day(s) "
+                + ", ".join(sorted(str(d) for d in past_changed))
+                + f" edited (override): {reason}"
+            )
 
     # ---- the committed window, through the ONE date writer ------------
     date_fields = {
@@ -624,18 +789,44 @@ def apply_plan(
 
     # ---- one history row describing what a person changed -------------
     if note_parts:
+        plan_note = (
+            f"Planned by {getattr(actor, 'email', 'system')}: "
+            + "; ".join(note_parts)
+            + "."
+        )
         ExtraWorkStatusHistory.objects.create(
             extra_work=extra_work,
             old_status=extra_work.status,
             new_status=extra_work.status,
             changed_by=actor,
-            note=(
-                f"Planned by {getattr(actor, 'email', 'system')}: "
-                + "; ".join(note_parts)
-                + "."
-            ),
-            is_override=False,
+            note=plan_note,
+            # Task 3 — True exactly when a past day was edited through
+            # the recorded override; the reason is in the note, and the
+            # history row IS the audit trail (H-11).
+            is_override=plan_is_override,
         )
+        # Task 2 — AFTER SPAWN, THE PLAN CHANGE LANDS ON THE TICKET'S
+        # ACTIVITY TIMELINE TOO. The plan lives on the EW (one store,
+        # pre- and post-spawn); the operator working a spawned ticket
+        # looks at the TICKET's timeline, so each spawned ticket gets
+        # the same annotation row (same status in and out — the shape
+        # the actual-hours entry uses). Display annotation only: the
+        # EW row above is the audit record, so `is_override` stays
+        # False here even for a past-day override — two override rows
+        # for one act would be the double-audit H-11 forbids.
+        from tickets.models import Ticket, TicketStatusHistory
+
+        for spawned in Ticket.objects.filter(
+            extra_work_request=extra_work
+        ):
+            TicketStatusHistory.objects.create(
+                ticket=spawned,
+                old_status=spawned.status,
+                new_status=spawned.status,
+                changed_by=actor,
+                note="Plan changed: " + "; ".join(note_parts) + ".",
+                is_override=False,
+            )
 
     ticket_result = getattr(extra_work, "planned_date_ticket_result", None) or {}
 

@@ -13,3 +13,40 @@
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-soft);
 }
+
+/* W-PLAN Task 3 — the past-day freeze. A frozen cell shows the value
+ * (the plan's history stays visible) and withholds only the input;
+ * the bar above the grid is where the recorded override is asked for.
+ * Component-scoped: every class is new and used only by this dialog. */
+.ew-plan-past-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ew-plan-past-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.ew-plan-past-prompt .field-textarea {
+  flex: 1;
+  min-height: 38px;
+}
+.ew-plan-cell-frozen {
+  display: inline-block;
+  min-width: 44px;
+  padding: 4px 6px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  text-align: right;
+  cursor: not-allowed;
+}
+.ew-plan-past-lock {
+  color: var(--text-faint);
+  margin-right: 3px;
+  vertical-align: -1px;
+}

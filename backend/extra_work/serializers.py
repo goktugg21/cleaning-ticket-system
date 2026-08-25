@@ -2675,6 +2675,12 @@ class ExtraWorkPlanSerializer(serializers.Serializer):
     # default lives in `planning.apply_plan` (absent -> start), so key
     # presence keeps meaning what it means everywhere else here.
     start = serializers.BooleanField(required=False)
+    # Task 3 — the recorded override for editing PAST days in the hours
+    # grid. Not a plan field (it sets nothing); `apply_plan` demands it
+    # when, and only when, a row dated before today actually changes.
+    past_days_override_reason = serializers.CharField(
+        required=False, allow_blank=True
+    )
 
 
 # ---------------------------------------------------------------------------

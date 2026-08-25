@@ -88,6 +88,7 @@ import {
   CalendarPlus,
   ChevronLeft,
   ChevronRight,
+  Lock,
   Users,
   X,
 } from "lucide-react";
@@ -157,6 +158,7 @@ export function PlanWorkDialog({
   assignBusy,
   assignError,
   onAssign,
+  postSpawn = false,
 }: {
   ew: ExtraWorkRequestDetail;
   assignments: ExtraWorkAssignment[];
@@ -174,6 +176,12 @@ export function PlanWorkDialog({
   assignBusy: boolean;
   assignError: string;
   onAssign: (userIds: number[]) => void;
+  /** W-PLAN Task 2 — mounted from an operational (spawned) ticket page.
+   *  SAME dialog, SAME store (the plan lives on the EW pre- and
+   *  post-spawn); what changes is the words: the submit says "Save the
+   *  plan", because starting is the ticket's business now. The page
+   *  passes `start: false` with the payload for the same reason. */
+  postSpawn?: boolean;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
 
@@ -331,6 +339,31 @@ export function PlanWorkDialog({
   // controls can be understood as one decision.
   const days = useMemo(() => dayRange(start, end), [start, end]);
 
+  // Task 3 — PAST DAYS ARE HISTORY; WORKED HOURS OWN THEM.
+  //
+  // Columns strictly before today render FROZEN: value visible, cell
+  // read-only. This is data safety, not permission — hiding the past
+  // would hide the plan's history, so the numbers stay on screen and
+  // only the INPUT is withheld. The one way in is the recorded
+  // override: "Unlock past days" demands a reason first, the unlock
+  // holds for this dialog session, and the reason rides with the save
+  // (`past_days_override_reason`), which the server requires whenever
+  // a past row actually changes and writes onto the timeline. Today
+  // and the future stay free. LOCAL wall date, not toISOString() — the
+  // UTC date is yesterday's or tomorrow's for half the world.
+  const todayStr = (() => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+      now.getDate(),
+    )}`;
+  })();
+  const [pastUnlocked, setPastUnlocked] = useState(false);
+  const [pastReason, setPastReason] = useState("");
+  const [pastPromptOpen, setPastPromptOpen] = useState(false);
+  const hasPastDays = days.some((day) => day < todayStr);
+  const isPastDay = (day: string) => day !== "" && day < todayStr;
+
   // W7 — THE VISIBLE WEEK. Display only; `days` above stays the whole
   // window and is what every total and the submit read.
   const [dayPage, setDayPage] = useState(0);
@@ -470,6 +503,16 @@ export function PlanWorkDialog({
     }
     if (photoTouched) payload.file_upload_required = photoRequired;
     if (notesTouched) payload.completion_notes_required = notesRequired;
+    // Task 3 — the unlock's reason travels with the save. The server
+    // demands it exactly when a past row actually changed, so sending
+    // it on an unlock that touched nothing is inert.
+    if (pastUnlocked && pastReason.trim() !== "") {
+      (
+        payload as ExtraWorkPlanPayload & {
+          past_days_override_reason?: string;
+        }
+      ).past_days_override_reason = pastReason.trim();
+    }
     onSubmit(payload);
   }
 
@@ -672,6 +715,57 @@ export function PlanWorkDialog({
                   </button>
                 </div>
               )}
+              {hasPastDays && (
+                <div
+                  className="ew-plan-past-bar"
+                  data-testid="extra-work-plan-past-bar"
+                >
+                  {pastUnlocked ? (
+                    <span
+                      className="muted small"
+                      data-testid="extra-work-plan-past-unlocked"
+                    >
+                      {t("plan.unlock_past_active")}
+                    </span>
+                  ) : pastPromptOpen ? (
+                    <div className="ew-plan-past-prompt">
+                      <textarea
+                        className="field-textarea"
+                        rows={2}
+                        value={pastReason}
+                        onChange={(e) => setPastReason(e.target.value)}
+                        placeholder={t("plan.unlock_past_reason_placeholder")}
+                        aria-label={t(
+                          "plan.unlock_past_reason_placeholder",
+                        )}
+                        data-testid="extra-work-plan-past-reason"
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={pastReason.trim() === ""}
+                        onClick={() => setPastUnlocked(true)}
+                        data-testid="extra-work-plan-past-unlock-confirm"
+                      >
+                        {t("plan.unlock_past_confirm")}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setPastPromptOpen(true)}
+                      title={t("plan.past_locked_tooltip")}
+                      data-testid="extra-work-plan-past-unlock"
+                    >
+                      <Lock size={13} aria-hidden="true" />
+                      <span style={{ marginLeft: 6 }}>
+                        {t("plan.unlock_past")}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="ew-plan-grid-scroll">
                 <table className="data-table ew-plan-grid">
                   <thead>
@@ -686,7 +780,22 @@ export function PlanWorkDialog({
                         {t("plan.grid_no_day")}
                       </th>
                       {visibleDays.map((day) => (
-                        <th key={day} className="ew-plan-grid-cell">
+                        <th
+                          key={day}
+                          className="ew-plan-grid-cell"
+                          title={
+                            isPastDay(day)
+                              ? t("plan.past_locked_tooltip")
+                              : undefined
+                          }
+                        >
+                          {isPastDay(day) && !pastUnlocked && (
+                            <Lock
+                              size={10}
+                              aria-hidden="true"
+                              className="ew-plan-past-lock"
+                            />
+                          )}
                           {formatDayHeader(day)}
                         </th>
                       ))}
@@ -784,7 +893,26 @@ export function PlanWorkDialog({
                             <td
                               key={day || "none"}
                               className="ew-plan-grid-cell"
+                              title={
+                                isPastDay(day) && !pastUnlocked
+                                  ? t("plan.past_locked_tooltip")
+                                  : undefined
+                              }
                             >
+                              {isPastDay(day) && !pastUnlocked ? (
+                                /* FROZEN, not absent: the value stays
+                                   on screen — hiding it would hide the
+                                   plan's history. */
+                                <span
+                                  className="ew-plan-cell-frozen"
+                                  data-testid="extra-work-plan-frozen-cell"
+                                  data-day={day}
+                                >
+                                  {hours[
+                                    cellKey(a.user_id, day, line.hourType)
+                                  ] ?? "\u2014"}
+                                </span>
+                              ) : (
                               <input
                                 type="number"
                                 min="0"
@@ -815,6 +943,7 @@ export function PlanWorkDialog({
                                 data-day={day}
                                 data-hour-type={line.hourType ?? ""}
                               />
+                              )}
                             </td>
                           ))}
                           {index === 0 && (
@@ -964,7 +1093,9 @@ export function PlanWorkDialog({
             onClick={submit}
             data-testid="extra-work-plan-submit"
           >
-            {busy ? t("plan.submitting") : t("plan.submit")}
+            {busy
+              ? t("plan.submitting")
+              : t(postSpawn ? "plan.submit_save" : "plan.submit")}
           </button>
         </div>
       </div>

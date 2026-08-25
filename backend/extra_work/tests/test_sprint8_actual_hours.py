@@ -50,6 +50,8 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+
+from .plan_gate_fixture import make_plan_complete
 from tickets.models import Ticket, TicketStatus
 
 
@@ -232,6 +234,9 @@ class ActualHoursFixtureMixin:
         """
         actor = actor or self.admin
         api = self._api(actor)
+        # W-PLAN — pricing is gated on a complete plan now; this
+        # module tests PRICING, so the fixture satisfies the gate.
+        make_plan_complete(ew)
 
         resp = api.post(
             f"/api/extra-work/{ew.id}/transition/",

@@ -52,6 +52,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 from notifications.models import Notification, NotificationType
 
 
@@ -245,6 +246,9 @@ class B4FixtureMixin:
             status=status,
             request_intent=intent,
         )
+        # W-PLAN — pricing is gated on a complete plan; this
+        # module tests pricing surfaces, not the gate.
+        make_plan_complete(ew)
         ExtraWorkRequestItem.objects.create(
             extra_work_request=ew,
             service=self.service_priced,

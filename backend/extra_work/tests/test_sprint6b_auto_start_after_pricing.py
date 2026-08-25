@@ -50,6 +50,8 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+
+from .plan_gate_fixture import make_plan_complete
 from tickets.models import Ticket
 
 
@@ -207,6 +209,9 @@ class AutoStartFixtureMixin:
         """
         actor = actor or self.admin
         api = self._api(actor)
+        # W-PLAN — pricing is gated on a complete plan now; this
+        # module tests PRICING, so the fixture satisfies the gate.
+        make_plan_complete(ew)
 
         # REQUESTED -> UNDER_REVIEW.
         resp = api.post(

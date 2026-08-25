@@ -72,7 +72,18 @@ import type {
   // `UploadVisibilitySource`.
   TicketUploadVisibility,
 } from "../api/types";
-import { listEwMessages } from "../api/extraWork";
+import {
+  getExtraWork,
+  listEwMessages,
+  listExtraWorkAssignments,
+  planExtraWork,
+} from "../api/extraWork";
+import type {
+  ExtraWorkAssignment,
+  ExtraWorkPlanPayload,
+  ExtraWorkRequestDetail,
+} from "../api/types";
+import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import {
   getTicketUploadVisibility,
   setTicketUploadVisibility,
@@ -1232,6 +1243,69 @@ export function TicketDetailPage() {
   // ordinary ticket collapses to the ticket thread alone. State is set
   // only in async callbacks / a microtask (no set-state-in-effect).
   const ewOriginId = ticket?.extra_work_origin?.extra_work_request_id ?? null;
+
+  /* W-PLAN Task 2 — THE PLAN LIVES ON THE OPERATIONAL PAGE TOO.
+     One component, two mounts: this is the SAME PlanWorkDialog the
+     Extra Work page opens, bound to the SAME store — the plan has one
+     home (the EW: `provider_planned_*`, `ExtraWorkPlannedHours`,
+     `budget_hours`, the two proof toggles the ticket's own completion
+     gate already reads via `tickets/completion_requirements.py`), so
+     there is nothing to copy and nothing to fork. Delivery dates write
+     through the one date writer, which moves this ticket's schedule
+     (`extra_work/dates.py` -> `planned_date.py`). Crew changes stay in
+     the Assignment section: candidates are handed over EMPTY, so the
+     dialog's picker renders nothing and adds nobody. */
+  const [ewPlanOpen, setEwPlanOpen] = useState(false);
+  const [ewPlanDetail, setEwPlanDetail] = useState<
+    ExtraWorkRequestDetail | null
+  >(null);
+  const [ewPlanAssignments, setEwPlanAssignments] = useState<
+    ExtraWorkAssignment[]
+  >([]);
+  const [ewPlanLoading, setEwPlanLoading] = useState(false);
+  const [ewPlanBusy, setEwPlanBusy] = useState(false);
+  const [ewPlanError, setEwPlanError] = useState("");
+
+  async function openEwPlan() {
+    if (ewOriginId === null) return;
+    setEwPlanError("");
+    setEwPlanLoading(true);
+    setEwPlanOpen(true);
+    try {
+      const [detail, assignments] = await Promise.all([
+        getExtraWork(ewOriginId),
+        listExtraWorkAssignments(ewOriginId),
+      ]);
+      setEwPlanDetail(detail);
+      setEwPlanAssignments(assignments);
+    } catch (err) {
+      setEwPlanOpen(false);
+      toast.push({ variant: "error", title: getApiError(err) });
+    } finally {
+      setEwPlanLoading(false);
+    }
+  }
+
+  async function submitEwPlan(payload: ExtraWorkPlanPayload) {
+    if (ewOriginId === null) return;
+    setEwPlanBusy(true);
+    setEwPlanError("");
+    try {
+      // `start: false` — starting is the TICKET's business after spawn
+      // (the EW's status follows the ticket); this save is a plan
+      // change, and it answers in one sentence via the toast while the
+      // timeline gains its "Plan changed: ..." row server-side.
+      await planExtraWork(ewOriginId, { ...payload, start: false });
+      setEwPlanOpen(false);
+      setEwPlanDetail(null);
+      toast.push({ variant: "success", title: t("ew_plan_saved") });
+      await loadTicket();
+    } catch (err) {
+      setEwPlanError(getApiError(err));
+    } finally {
+      setEwPlanBusy(false);
+    }
+  }
   useEffect(() => {
     let cancelled = false;
     if (ewOriginId === null || !canAccessExtraWork(me?.role)) {
@@ -4674,6 +4748,27 @@ export function TicketDetailPage() {
               what keeps CUSTOMER_USER (who passes that predicate) out of
               provider money. The origin pill in the header stays the
               door to the full Extra Work page. */}
+          {/* W-PLAN Task 2 — the Plan action for One-off work. Same
+              viewer gate as the card group below: provider management
+              with extra-work access; the dialog itself is mounted at
+              the end of the page. */}
+          {ticket.extra_work_origin &&
+            isProviderManagementRole(me?.role) &&
+            canAccessExtraWork(me?.role) && (
+              <div style={{ marginBottom: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => void openEwPlan()}
+                  disabled={ewPlanLoading}
+                  data-testid="ticket-ew-plan-open"
+                >
+                  {ewPlanLoading
+                    ? t("ew_plan_loading")
+                    : t("ew_plan_button")}
+                </button>
+              </div>
+            )}
           {ticket.extra_work_origin &&
             isProviderManagementRole(me?.role) &&
             canAccessExtraWork(me?.role) && (
@@ -5421,6 +5516,33 @@ export function TicketDetailPage() {
           the button AND asks the browser's PDF viewer to hide its own
           toolbar. */}
       <PdfPreviewDialog ref={credentialPreviewRef} withDownload={false} />
+      {/* W-PLAN Task 2 — the SAME plan dialog the Extra Work page
+          mounts, keyed by the stored plan so a save re-seeds it. A
+          non-native overlay, conditionally mounted — the
+          render-it-unconditionally rule is about native <dialog>. */}
+      {ewPlanOpen && ewPlanDetail && (
+        <PlanWorkDialog
+          key={`ticket-plan-${ewPlanDetail.id}-${
+            ewPlanDetail.planned_hours_total ?? ""
+          }`}
+          ew={ewPlanDetail}
+          assignments={ewPlanAssignments}
+          assignmentsLoading={ewPlanLoading}
+          candidates={[]}
+          candidatesLoading={false}
+          assignBusy={false}
+          assignError=""
+          onAssign={() => undefined}
+          busy={ewPlanBusy}
+          error={ewPlanError}
+          onCancel={() => {
+            setEwPlanOpen(false);
+            setEwPlanDetail(null);
+          }}
+          onSubmit={(payload) => void submitEwPlan(payload)}
+          postSpawn
+        />
+      )}
     </div>
   );
 }

@@ -71,6 +71,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 from tickets.models import Ticket
 
 
@@ -223,7 +224,11 @@ class _B2Fixture(TestCase):
             raise AssertionError(
                 f"cart create failed: {response.status_code} {response.data}"
             )
-        return ExtraWorkRequest.objects.get(pk=response.data["id"])
+        ew = ExtraWorkRequest.objects.get(pk=response.data["id"])
+        # W-PLAN — pricing is gated on a complete plan; this module
+        # tests the mixed-cart proposal mechanics, not the gate.
+        make_plan_complete(ew)
+        return ew
 
     def _move_ew_to_under_review(self, ew: ExtraWorkRequest) -> None:
         ew.status = ExtraWorkStatus.UNDER_REVIEW

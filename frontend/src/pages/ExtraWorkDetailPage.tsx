@@ -898,6 +898,16 @@ export function ExtraWorkDetailPage() {
   // has to be the crew as of the moment somebody plans, not as of the
   // last page load.
   const [planOpen, setPlanOpen] = useState(false);
+  /* W-PLAN — the pricing entry point states the plan, so the page has
+     to KNOW the plan before the dialog is ever opened. Loaded for
+     provider viewers on mount and re-read when the status moves (a
+     plan write moves nothing, but the dialog's own save path refreshes
+     `ew`, and the assign path below re-reads explicitly). */
+  const [managerCandidates, setManagerCandidates] = useState<
+    AssignmentCandidate[]
+  >([]);
+  const [managerPick, setManagerPick] = useState("");
+  const [managerBusy, setManagerBusy] = useState(false);
   const [planAssignments, setPlanAssignments] = useState<
     ExtraWorkAssignment[]
   >([]);
@@ -1143,6 +1153,41 @@ export function ExtraWorkDetailPage() {
   // Approved-proposal selection mirrors `final_amounts.active_priced_lines`:
   // the latest CUSTOMER_APPROVED proposal by customer_decided_at, then by
   // id (both descending).
+  /* W-PLAN — the gate's facts, loaded whenever a provider looks at
+     the record. Same state the plan dialog uses, so the entry point's
+     summary and the dialog can never disagree about who is on the
+     plan. ABOVE the loading/error returns — hooks must run on every
+     render. */
+  useEffect(() => {
+    if (!isProvider || ewId === null) return;
+    let cancelled = false;
+    listExtraWorkAssignments(ewId)
+      .then((rows) => {
+        if (!cancelled) setPlanAssignments(rows);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isProvider, ewId, ew?.status]);
+
+  /* The one plan fact the dialog cannot fix (its picker is WORKER-only
+     by design): the responsible manager. Offered inline at the pricing
+     entry point, from the same server eligibility helper the write
+     validates against. */
+  useEffect(() => {
+    if (!isProvider || ewId === null) return;
+    let cancelled = false;
+    listExtraWorkAssignmentCandidates(ewId, "MANAGER")
+      .then((rows) => {
+        if (!cancelled) setManagerCandidates(rows);
+      })
+      .catch(() => setManagerCandidates([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [isProvider, ewId]);
+
   const approvedProposal = useMemo(
     () => selectApprovedProposal(proposals),
     [proposals],
@@ -1740,6 +1785,49 @@ export function ExtraWorkDetailPage() {
    *  What changes is every word around it. */
   const noCustomerApproval = isDirectOrder || isAutoStart;
 
+  /* W-PLAN — THE LAW: planning gates pricing. The same four facts the
+     server's gate reads (`planning.plan_requirements`), derived from
+     the rows the page already holds so the entry point can SAY the
+     plan (complete: the one-line summary; incomplete: only the missing
+     pieces). The server stays the authority — these lines predict its
+     answer, the 400 code `plan_requirements_unmet` is still handled. */
+  const planWorkerCount = planAssignments.filter(
+    (a) => a.role === "WORKER",
+  ).length;
+  const planManagerCount = planAssignments.filter(
+    (a) => a.role === "MANAGER",
+  ).length;
+  const planHoursValue = (() => {
+    const budget = Number.parseFloat(ew.budget_hours ?? "");
+    if (Number.isFinite(budget) && budget > 0) return budget;
+    const distributed = Number.parseFloat(ew.planned_hours_total ?? "");
+    return Number.isFinite(distributed) && distributed > 0
+      ? distributed
+      : 0;
+  })();
+  const planGateMissing: string[] = [
+    ...(planWorkerCount === 0 ? ["plan_staff"] : []),
+    ...(planManagerCount === 0 ? ["plan_manager"] : []),
+    ...(ew.provider_planned_date ? [] : ["plan_start_date"]),
+    ...(planHoursValue > 0 ? [] : ["plan_hours"]),
+  ];
+  const planGateComplete = planGateMissing.length === 0;
+  const planGateSummary = planGateComplete
+    ? [
+        t("plan_gate.summary_people", { count: planWorkerCount }),
+        t("plan_gate.summary_managers", { count: planManagerCount }),
+        ew.provider_planned_end_date &&
+        ew.provider_planned_end_date !== ew.provider_planned_date
+          ? `${formatDate(ew.provider_planned_date ?? "")} \u2013 ${formatDate(
+              ew.provider_planned_end_date,
+            )}`
+          : formatDate(ew.provider_planned_date ?? ""),
+        t("plan_gate.summary_hours", {
+          hours: planHoursValue.toFixed(planHoursValue % 1 === 0 ? 0 : 2),
+        }),
+      ].join(" \u00b7 ")
+    : "";
+
   // Sprint 31 — meaningful, step-aware label for each provider workflow
   // button (falls back to the generic "Move to <status>").
   const providerActionLabel = (target: ExtraWorkStatus): string => {
@@ -1892,7 +1980,17 @@ export function ExtraWorkDetailPage() {
       setParentAdvanceBlocked(Boolean(created.parent_advance_blocked));
       await reloadProposals();
     } catch (err) {
-      setProposalError(getApiError(err));
+      // W-PLAN — the server said the plan is not complete. The missing
+      // pieces are already ON the card (the inline requirement lines),
+      // so the error says where to look instead of repeating them in
+      // backend English.
+      const code = (err as { response?: { data?: { code?: string } } })
+        ?.response?.data?.code;
+      setProposalError(
+        code === "plan_requirements_unmet"
+          ? t("plan_gate.blocked")
+          : getApiError(err),
+      );
     } finally {
       setProposalBusy(false);
     }
@@ -1920,7 +2018,13 @@ export function ExtraWorkDetailPage() {
         });
       }
     } catch (err) {
-      setActionError(getApiError(err));
+      const code = (err as { response?: { data?: { code?: string } } })
+        ?.response?.data?.code;
+      setActionError(
+        code === "plan_requirements_unmet"
+          ? t("plan_gate.blocked")
+          : getApiError(err),
+      );
     } finally {
       setTransitionBusy(null);
     }
@@ -1980,6 +2084,25 @@ export function ExtraWorkDetailPage() {
    *  which renders the "assign somebody first" state rather than a
    *  half-built grid.
    */
+  async function addPlanManager() {
+    const userId = Number(managerPick);
+    if (!userId || ewId === null) return;
+    setManagerBusy(true);
+    try {
+      await bulkAssignExtraWork({
+        requests: [ewId],
+        managers: [userId],
+        mode: "assign",
+      });
+      setManagerPick("");
+      setPlanAssignments(await listExtraWorkAssignments(ewId));
+    } catch (err) {
+      setProposalError(getApiError(err));
+    } finally {
+      setManagerBusy(false);
+    }
+  }
+
   async function openPlan() {
     setPlanError("");
     setPlanAssignments([]);
@@ -3287,6 +3410,85 @@ export function ExtraWorkDetailPage() {
                   <p className="muted small" style={{ marginTop: 0 }}>
                     {t(noCustomerApproval ? "detail.proposal_prepare_helper_start" : "detail.proposal_prepare_helper")}
                   </p>
+                  {/* W-PLAN — the pricing entry point states the
+                      plan. Complete: one line ("3 people · 1 manager ·
+                      Aug 29\u201331 · 12h"). Incomplete: ONLY the
+                      missing pieces (R2 — never re-ask for what the
+                      record already has), each with its nearest fix —
+                      the manager inline (the one fact the plan dialog
+                      cannot set), everything else through "Plan the
+                      work". */}
+                  {planGateComplete ? (
+                    <p
+                      className="muted small"
+                      style={{ marginTop: 0 }}
+                      data-testid="extra-work-plan-gate-summary"
+                    >
+                      {planGateSummary}
+                    </p>
+                  ) : (
+                    <div
+                      className="ew-plan-gate"
+                      data-testid="extra-work-plan-gate-missing"
+                    >
+                      <div className="muted small" style={{ fontWeight: 600 }}>
+                        {t("plan_gate.title")}
+                      </div>
+                      <ul className="muted small" style={{ margin: "4px 0 8px", paddingLeft: 18 }}>
+                        {planGateMissing.map((key) => (
+                          <li key={key} data-testid={`plan-gate-${key}`}>
+                            {t(`plan_gate.missing_${key.replace("plan_", "")}`)}
+                          </li>
+                        ))}
+                      </ul>
+                      {planGateMissing.includes("plan_manager") &&
+                        managerCandidates.length > 0 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                              marginBottom: 8,
+                            }}
+                            data-testid="extra-work-plan-gate-manager"
+                          >
+                            <select
+                              className="field-input"
+                              style={{ maxWidth: 260 }}
+                              value={managerPick}
+                              onChange={(e) => setManagerPick(e.target.value)}
+                              aria-label={t("plan_gate.add_manager_label")}
+                            >
+                              <option value="">
+                                {t("plan_gate.add_manager_label")}
+                              </option>
+                              {managerCandidates.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.full_name || c.email}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={managerBusy || managerPick === ""}
+                              onClick={() => void addPlanManager()}
+                              data-testid="extra-work-plan-gate-manager-add"
+                            >
+                              {t("plan_gate.add_manager_button")}
+                            </button>
+                          </div>
+                        )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => void openPlan()}
+                        data-testid="extra-work-plan-gate-open-plan"
+                      >
+                        {t("plan_gate.open_plan")}
+                      </button>
+                    </div>
+                  )}
                   {proposalError && (
                     <div
                       className="alert-error"

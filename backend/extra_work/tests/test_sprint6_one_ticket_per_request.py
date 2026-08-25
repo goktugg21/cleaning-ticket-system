@@ -56,6 +56,7 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from .plan_gate_fixture import make_plan_complete
 from tickets.models import Ticket, TicketStatus
 
 
@@ -346,6 +347,8 @@ class ProposalOneTicketTests(OneTicketFixtureMixin, TestCase):
         return ew
 
     def _build_sent_proposal(self, ew):
+        # W-PLAN — pricing is gated on a complete plan.
+        make_plan_complete(ew)
         # Create a DRAFT proposal with two lines.
         resp = self._api(self.admin).post(
             f"/api/extra-work/{ew.id}/proposals/",

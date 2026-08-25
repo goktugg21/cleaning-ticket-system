@@ -419,6 +419,23 @@ class ExtraWorkRequestViewSet(
         to_status = data["to_status"]
         is_override = data.get("is_override", False)
         note = data.get("note", "")
+
+        # W-PLAN — the workflow card's direct UNDER_REVIEW ->
+        # PRICING_PROPOSED leg is a pricing door too (the proposal
+        # views are the other two). Same gate, same bypass. At the
+        # VIEW, not in `apply_transition` — the primitive walks states
+        # for seeders and tests, and W13-FIX's lesson stands: a
+        # form-completeness rule on the primitive is the wrong layer.
+        if to_status == ExtraWorkStatus.PRICING_PROPOSED:
+            from .planning import check_pricing_plan_gate
+
+            gate = check_pricing_plan_gate(
+                extra_work, request.data, actor=request.user
+            )
+            if gate is not None:
+                return Response(
+                    gate, status=status.HTTP_400_BAD_REQUEST
+                )
         customer_reject_reason = data.get(
             "customer_reject_reason", ""
         ).strip()
