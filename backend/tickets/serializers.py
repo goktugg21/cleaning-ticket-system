@@ -2218,7 +2218,19 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                 # answers the modal collected count towards satisfying
                 # it, and inside the same transaction so a refusal
                 # leaves neither the date nor the assignment behind.
-                missing = transition_unmet(ticket, self.validated_data["to_status"], user)
+                # W-UX1 §4 — the override travels with the check. The
+                # proof gate binds every role now, and the ONE way past
+                # it is the explicit two-press override, whose reason
+                # `apply_transition` records below. Passing the flag here
+                # is what makes "override" mean something at this door
+                # rather than only at the next one.
+                missing = transition_unmet(
+                    ticket,
+                    self.validated_data["to_status"],
+                    user,
+                    is_override=self.validated_data.get("is_override", False),
+                    note=self.validated_data.get("note", ""),
+                )
                 if missing:
                     raise TransitionError(
                         "This step still needs: " + ", ".join(missing) + ".",

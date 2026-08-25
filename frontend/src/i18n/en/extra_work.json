@@ -288,6 +288,8 @@
   "detail.auto_start_hint": "The customer pre-authorized this. Starting skips customer approval and creates the tickets right away.",
   "detail.action_start_review": "Start review",
   "detail.action_propose_price": "Propose price to customer",
+  "detail.action_send_proposal_for_review": "Send proposal to customer for review",
+  "detail.action_start_the_work": "Start the work",
   "detail.action_revise_pricing": "Revise pricing",
   "detail.action_revise_after_reject": "Revise & re-propose",
   "detail.action_mark_in_progress": "Mark in progress",

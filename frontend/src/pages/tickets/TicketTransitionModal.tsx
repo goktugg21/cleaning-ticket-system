@@ -50,6 +50,20 @@ export interface TransitionAnswers {
    *  reason is what the audit row records, and collapsing them would
    *  put one value in two meanings. */
   override_reason?: string;
+  /** W-UX1 §4 — TRUE only when the operator explicitly chose to move
+   *  without the proof this step requires.
+   *
+   *  This is a deliberate departure from W10 §4's "is_override is the
+   *  BACKEND's call". That rule exists so an ORDINARY move is not
+   *  stamped as an override in the audit trail — and it is right for
+   *  every other path. Skipping a required photo or note is not an
+   *  ordinary move; it IS the override, and the machine cannot infer
+   *  that from the status pair because the pair is a perfectly normal
+   *  completion. Sending it is also what makes the reason survive:
+   *  `state_machine` writes `override_reason if is_override else ""`
+   *  (state_machine.py:727), so a reason sent without the flag is
+   *  discarded and the bypass would cost nothing. */
+  is_override?: boolean;
 }
 
 export interface TicketTransitionModalProps {
@@ -92,6 +106,9 @@ export function TicketTransitionModal({
   const [picked, setPicked] = useState<number[]>([]);
   const [startsAt, setStartsAt] = useState("");
   const [reason, setReason] = useState("");
+  /** W-UX1 §4 — the two-press bypass: pressing it once reveals the
+   *  reason, and only a reason arms the move. */
+  const [overriding, setOverriding] = useState(false);
 
   const unmet = useMemo(() => requirements?.unmet ?? [], [requirements]);
   const needsAssignee = unmet.includes("assignee");
@@ -111,6 +128,10 @@ export function TicketTransitionModal({
    * not seem to work. I could not get them to work."
    */
   const needsReason = unmet.includes("override_reason");
+  /** W-UX1 §4 — this step wants proof the work happened, and the ticket
+   *  does not carry it yet. R3: it says so INLINE, here, the moment it
+   *  is unmet, rather than being met as a 400 after the press. */
+  const needsProof = unmet.includes("completion_evidence");
 
   // Every unmet requirement must have an answer before the move is
   // offered. This is the "DOES NOT TRANSITION until it is answered"
@@ -119,13 +140,20 @@ export function TicketTransitionModal({
   const answered =
     (!needsAssignee || picked.length > 0) &&
     (!needsSchedule || startsAt !== "") &&
-    (!needsReason || reason.trim() !== "");
+    (!needsReason || reason.trim() !== "") &&
+    // Proof is answered by writing the note this step asks for, or by
+    // explicitly overriding WITH a reason. Nothing else.
+    (!needsProof || note.trim() !== "" || (overriding && reason.trim() !== ""));
 
   function confirm() {
     const answers: TransitionAnswers = { note: note.trim() };
     if (needsAssignee && picked.length > 0) answers.assigned_staff_ids = picked;
     if (needsReason && reason.trim() !== "") {
       answers.override_reason = reason.trim();
+    }
+    if (needsProof && overriding && reason.trim() !== "") {
+      answers.override_reason = reason.trim();
+      answers.is_override = true;
     }
     if (needsSchedule && startsAt !== "") {
       // <input type="datetime-local"> has no zone; the browser's own
@@ -164,6 +192,44 @@ export function TicketTransitionModal({
           </p>
         ) : (
           <>
+            {/* W-UX1 §4 / R3 — the requirement warning, inline, as a
+                state line. The note field below IS the answer, so the
+                warning points at it rather than at a 400 the operator
+                would otherwise meet after pressing. */}
+            {needsProof && (
+              <div
+                className="transition-field"
+                data-testid="transition-field-proof"
+              >
+                <p className="alert-error" role="status">
+                  {t("transition.proof_required")}
+                </p>
+                {!overriding ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setOverriding(true)}
+                    data-testid="transition-proof-override"
+                  >
+                    {t("transition.proof_override")}
+                  </button>
+                ) : (
+                  <>
+                    <label className="field-label" htmlFor="transition-proof-reason">
+                      {t("transition.proof_override_reason")}
+                    </label>
+                    <textarea
+                      id="transition-proof-reason"
+                      className="field-textarea"
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                      data-testid="transition-proof-reason"
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
             {needsAssignee && (
               <div className="transition-field" data-testid="transition-field-assignee">
                 <span className="field-label" id="transition-who-label">

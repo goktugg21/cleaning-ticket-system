@@ -10,6 +10,7 @@
   "loading_data": "Operationele tickets laden…",
   "subtitle_counts": "{{count}} totaal · {{visible}} zichtbaar · pagina {{page}} van {{pages}}",
   "new_ticket": "Nieuw ticket",
+  "new_extra_work": "Nieuw extra werk",
   "admin_required_banner": "Dit gedeelte is alleen voor beheerders.",
   "section_recent_title": "Tickets",
   "section_recent_sub": "Alles wat u mag zien, nieuwste eerst",
@@ -120,5 +121,8 @@
   "bottom.billing_open_count": "{{count}} open",
   "bottom.recent_title": "Laatste tickets / extra werk",
   "chargeable.col_extra_work": "Extra werk",
-  "chargeable.col_route": "Route"
+  "chargeable.col_route": "Route",
+  "period.label": "Welke tickets",
+  "archive.show_working": "Actueel",
+  "archive.show": "Archief"
 }

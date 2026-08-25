@@ -335,5 +335,8 @@
   "ew_cancel_reason_label": "Reason (required)",
   "ew_cancel_done": "Extra work cancelled. This ticket stays as it is.",
   "ew_hours_saved": "Saved {{hours}} h — new total {{total}}, bills in {{month}}.",
-  "ew_hours_saved_no_month": "Saved {{hours}} h — new total {{total}}, bills in its completion month."
+  "ew_hours_saved_no_month": "Saved {{hours}} h — new total {{total}}, bills in its completion month.",
+  "transition.proof_required": "This step needs a photo or a note showing the work is done.",
+  "transition.proof_override": "Move without proof",
+  "transition.proof_override_reason": "Why is there no proof?"
 }

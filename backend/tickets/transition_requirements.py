@@ -104,6 +104,14 @@ _INTO_ACKNOWLEDGED = {
     (TicketStatus.OPEN, TicketStatus.ACKNOWLEDGED),
 }
 
+#: The completion moves, as strings. Read from `state_machine` rather
+#: than re-listed, so the two gates can never disagree about WHICH moves
+#: are completions -- only about who they bind.
+def _completion_pairs() -> set[tuple[str, str]]:
+    from .state_machine import COMPLETION_EVIDENCE_TRANSITIONS
+
+    return {(str(a), str(b)) for (a, b) in COMPLETION_EVIDENCE_TRANSITIONS}
+
 
 @dataclass(frozen=True)
 class Requirement:
@@ -138,6 +146,46 @@ def _has_schedule(ticket) -> bool:
     return getattr(ticket, "scheduled_start_at", None) is not None
 
 
+def _is_staff(user) -> bool:
+    from accounts.models import UserRole
+
+    return getattr(user, "role", None) == UserRole.STAFF
+
+
+def _has_completion_evidence(ticket, note: str = "") -> bool:
+    """Does this ticket already carry what its completion rule wants?
+
+    The RULE is not restated here. `completion_requirements` owns which
+    evidence a ticket needs (W2-D's `file_upload_required` /
+    `completion_notes_required` off its extra work, falling back to
+    Sprint 25C's note-OR-attachment), and `state_machine` owns the same
+    two readers for the pool. Both are imported rather than mirrored,
+    because a second copy of this rule is how the modal starts asking
+    for a photo the server does not want, or staying silent about one it
+    does.
+
+    The note pool is the ticket's stored completion note OR the note
+    travelling with THIS press. Both count, and the second is the one
+    that matters: the modal collects a note and posts it with the move,
+    so a gate that read only the stored column would refuse the very
+    answer the operator just gave it. (Measured: it did — the first run
+    of `test_a_provider_passes_with_proof` got
+    `transition_requirements_unmet` while sending a perfectly good
+    note.)
+    """
+    from .completion_requirements import missing_evidence, requirements_for_ticket
+    from .state_machine import _ticket_has_visible_attachment
+
+    return not missing_evidence(
+        requirements_for_ticket(ticket),
+        has_note=bool(
+            (getattr(ticket, "completion_note", "") or "").strip()
+            or (note or "").strip()
+        ),
+        has_file=_ticket_has_visible_attachment(ticket),
+    )
+
+
 #: A move nobody pressed. `auto_close`, the sub-task rollup and the
 #: extra-work sync hook all drive transitions with `user=None`; there is
 #: no operator standing there to answer a question, so these carry no
@@ -147,7 +195,9 @@ def _is_system_actor(user) -> bool:
     return user is None
 
 
-def requirements_for_transition(ticket, to_status, user=None) -> list[Requirement]:
+def requirements_for_transition(
+    ticket, to_status, user=None, *, is_override: bool = False, note: str = ""
+) -> list[Requirement]:
     """Every requirement this move carries, satisfied ones included.
 
     Returning the satisfied ones too is deliberate: the modal shows the
@@ -166,6 +216,53 @@ def requirements_for_transition(ticket, to_status, user=None) -> list[Requiremen
     if pair in {(str(a), str(b)) for a, b in _FORWARD_INTO_WORK}:
         reqs.append(Requirement(REQ_ASSIGNEE, _has_assignee(ticket)))
         reqs.append(Requirement(REQ_SCHEDULE, _has_schedule(ticket)))
+
+    # W-UX1 §4 — THE PROOF GATE LOSES ITS VIPs.
+    #
+    # RECON, because the brief named the wrong file and the difference
+    # decides the design. `REQ_COMPLETION_EVIDENCE` has been DEFINED in
+    # this module since W13-FIX and never once appended: the docstring
+    # above promises "-> WAITING_* needs the completion evidence ...
+    # surfaced here so the MODAL can show it", and the code never
+    # surfaced it. The live rule is `state_machine.py:653`, which fires
+    # `if getattr(user, "role", None) == UserRole.STAFF and ...`, with a
+    # comment stating the scoping is deliberate and that "a manager can
+    # still complete a job that requires a photo without one".
+    #
+    # The owner has now ruled the other way. Rather than widen the
+    # state-machine gate -- which is also the primitive `auto_close`,
+    # the sub-task rollup and a great deal of test setup use to WALK
+    # tickets into states -- the requirement is added HERE, where the
+    # module docstring always said it belonged and where the layering
+    # argument in `TicketStatusChangeSerializer.save` puts form
+    # completeness: at the door a person came through.
+    #
+    # That one placement buys both halves the reference model asks for:
+    # `requirements_for_transition` feeds the MODAL (R3 -- the warning
+    # renders inline before the press) and `unmet` feeds the SERIALIZER
+    # (R4 -- the 400 is law, and a client that skips the modal still
+    # cannot get past it).
+    #
+    # NOT FOR STAFF, and that is not an exemption -- it is the opposite.
+    # STAFF already meet the older, narrower gate one layer down, which
+    # raises the established `completion_evidence` code that the page
+    # branches on and several tests assert. Reporting it here too would
+    # replace that precise refusal with a generic one for the only role
+    # that was never exempt. So: STAFF keep their gate, everyone else
+    # gains one, and the union is "every role".
+    # THE ONLY BYPASS IS THE EXPLICIT OVERRIDE. Not a role, not a
+    # setting: the operator has to press twice and say why, and
+    # `apply_transition` writes that reason onto the
+    # `TicketStatusHistory` row, which IS the audit trail (H-11). An
+    # override with no reason never reaches here -- `apply_transition`
+    # refuses it with `override_reason_required` -- so bypassing the
+    # proof gate always costs a recorded sentence.
+    if pair in _completion_pairs() and not _is_staff(user) and not is_override:
+        reqs.append(
+            Requirement(
+                REQ_COMPLETION_EVIDENCE, _has_completion_evidence(ticket, note)
+            )
+        )
 
     # W14 §4 — AND THE REASON, WHEN THE MOVE IS AN OVERRIDE.
     #
@@ -198,7 +295,9 @@ def requirements_for_transition(ticket, to_status, user=None) -> list[Requiremen
     return reqs
 
 
-def unmet(ticket, to_status, user=None) -> list[str]:
+def unmet(
+    ticket, to_status, user=None, *, is_override: bool = False, note: str = ""
+) -> list[str]:
     """The keys that block this move right now, FOR THE GATE.
 
     W14 §4 — `REQ_OVERRIDE_REASON` is deliberately excluded here, and
@@ -221,6 +320,8 @@ def unmet(ticket, to_status, user=None) -> list[str]:
     """
     return [
         r.key
-        for r in requirements_for_transition(ticket, to_status, user)
+        for r in requirements_for_transition(
+            ticket, to_status, user, is_override=is_override, note=note
+        )
         if not r.satisfied and r.key != REQ_OVERRIDE_REASON
     ]

@@ -1701,10 +1701,31 @@ export function ExtraWorkDetailPage() {
   const isAutoStart =
     ew.request_intent === "AUTO_START_AFTER_PRICING";
 
+  // W-UX1 §3 — THE PRIMARY ACTION SPEAKS ITS ROUTE.
+  //
+  // The intake route is `request_intent` (`ExtraWorkRequest
+  // .request_intent`, `backend/extra_work/models.py:791`), one of
+  // DIRECT_AGREED_PRICE_ORDER / AUTO_START_AFTER_PRICING /
+  // REQUEST_QUOTE. Only the last is a quote.
+  //
+  // FINDING, reported rather than engineered around: a direct order
+  // still travels the PRICING_PROPOSED status mechanically — the
+  // lifecycle has one pricing step and every route passes through it.
+  // The mechanics are untouched. What changes is every LABEL on that
+  // step, because "Propose price to customer" is a lie on a route where
+  // the customer already agreed the price and authorised the work.
+  const isDirectOrder =
+    ew.request_intent === "DIRECT_AGREED_PRICE_ORDER";
+
   // Sprint 31 — meaningful, step-aware label for each provider workflow
   // button (falls back to the generic "Move to <status>").
   const providerActionLabel = (target: ExtraWorkStatus): string => {
     if (target === "CANCELLED") return t("detail.action_cancel");
+    // W-UX1 §3 — the one step whose name depends on the route.
+    if (ew.status === "UNDER_REVIEW" && target === "PRICING_PROPOSED") {
+      if (isDirectOrder) return t("detail.action_start_the_work");
+      if (!isAutoStart) return t("detail.action_send_proposal_for_review");
+    }
     const key = PROVIDER_ACTION_I18N[`${ew.status}->${target}`];
     return key
       ? t(key)

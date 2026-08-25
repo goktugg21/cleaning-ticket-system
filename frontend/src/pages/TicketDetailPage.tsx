@@ -1740,6 +1740,16 @@ export function TicketDetailPage() {
         ...(answers?.override_reason
           ? { override_reason: answers.override_reason }
           : {}),
+        // W-UX1 §4 — and the FLAG, on the one path that must send it.
+        // The comment above is still the rule everywhere else: whether a
+        // move is an override is the backend's call. The proof bypass is
+        // the exception, because the machine cannot infer it — the
+        // status pair is an ordinary completion, and what makes it an
+        // override is that the operator chose to skip required evidence.
+        // Without the flag `state_machine` writes
+        // `override_reason if is_override else ""` and the reason is
+        // dropped, so the bypass would cost nothing and record nothing.
+        ...(answers?.is_override ? { is_override: true } : {}),
       };
       const response = await api.post<TicketDetail>(
         `/tickets/${id}/status/`,

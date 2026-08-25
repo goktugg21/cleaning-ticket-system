@@ -1586,6 +1586,26 @@ export function DashboardPage({
               {t("new_ticket")}
             </Link>
           )}
+          {/* W-UX1 §1 — One-off work gets its own create button back.
+              The note above explains why "New ticket" does NOT belong
+              here (a chargeable ticket is SPAWNED, never typed), and
+              that argument leaves this page with no way to start the
+              thing it lists. "New extra work" is that way.
+
+              Provider management only. `canAccessExtraWork` is the
+              WRONG gate here — it admits CUSTOMER_USER, who reaches
+              extra work through the quote-request page and would land
+              on a provider create form. STAFF are excluded by both. */}
+          {isChargeableWork && isProviderManagementRole(userRole) && (
+            <Link
+              className="btn btn-primary btn-sm"
+              to="/extra-work/new"
+              data-testid="chargeable-new-extra-work"
+            >
+              <Plus size={14} strokeWidth={2.5} />
+              {t("new_extra_work")}
+            </Link>
+          )}
         </div>
       </div>
       )}

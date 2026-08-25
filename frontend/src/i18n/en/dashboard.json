@@ -10,6 +10,7 @@
   "loading_data": "Loading operational ticket data…",
   "subtitle_counts": "{{count}} total tickets · {{visible}} visible · page {{page}} of {{pages}}",
   "new_ticket": "New ticket",
+  "new_extra_work": "New extra work",
   "admin_required_banner": "This area is for admins only.",
   "section_recent_title": "Tickets",
   "section_recent_sub": "Everything you are allowed to see, newest first",
@@ -120,5 +121,8 @@
   "bottom.billing_open_count": "{{count}} open",
   "bottom.recent_title": "Latest tickets / extra work",
   "chargeable.col_extra_work": "Extra work",
-  "chargeable.col_route": "Route"
+  "chargeable.col_route": "Route",
+  "period.label": "Which tickets",
+  "archive.show_working": "Working",
+  "archive.show": "Archive"
 }

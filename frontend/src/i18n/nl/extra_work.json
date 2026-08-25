@@ -288,6 +288,8 @@
   "detail.auto_start_hint": "De klant heeft dit vooraf goedgekeurd. Starten slaat de klantgoedkeuring over en maakt de tickets direct aan.",
   "detail.action_start_review": "Beoordeling starten",
   "detail.action_propose_price": "Prijs voorstellen aan klant",
+  "detail.action_send_proposal_for_review": "Voorstel ter beoordeling naar klant sturen",
+  "detail.action_start_the_work": "Werk starten",
   "detail.action_revise_pricing": "Prijs herzien",
   "detail.action_revise_after_reject": "Herzien en opnieuw voorstellen",
   "detail.action_mark_in_progress": "Markeren als in uitvoering",
