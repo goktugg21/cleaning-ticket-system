@@ -362,8 +362,14 @@ function lineAmounts(
   money: LineMoney,
   quantity: string,
 ): { subtotal: number; vat: number; total: number } | null {
+  // `Number("")` is 0, not NaN — so an emptied field would price the
+  // line at EUR 0.00 and put a number on screen that nobody typed.
+  // "No quantity yet" is the same answer as "not a usable quantity",
+  // and both mean there is no line total to show. The bar is the same
+  // one `isPreviewableLine` uses to decide what the server may price.
+  if (!quantity.trim()) return null;
   const qty = Number(quantity);
-  if (!Number.isFinite(qty)) return null;
+  if (!Number.isFinite(qty) || qty <= 0) return null;
   const cents = (n: number) => Math.round(n * 100) / 100;
   const subtotal = cents(qty * money.unit);
   const vat = cents(subtotal * (money.vatPct / 100));
