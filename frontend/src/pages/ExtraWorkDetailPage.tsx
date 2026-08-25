@@ -1751,8 +1751,15 @@ export function ExtraWorkDetailPage() {
         : t("detail.action_send_proposal_for_review");
     }
     const key = PROVIDER_ACTION_I18N[`${ew.status}->${target}`];
-    return key
-      ? t(key)
+    // W-FIX4 §2 — "Revise & re-propose" names a proposal; on a
+    // no-approval route the same move is just revising the price, and
+    // the neutral label for that already exists.
+    const gatedKey =
+      noCustomerApproval && key === "detail.action_revise_after_reject"
+        ? "detail.action_revise_pricing"
+        : key;
+    return gatedKey
+      ? t(gatedKey)
       : t("detail.workflow_move_to", { label: tStatusLabel(t, target) });
   };
   // One-line provider guidance for the current step (early steps only).
@@ -2260,7 +2267,7 @@ export function ExtraWorkDetailPage() {
      handler that performs it. Derived from the status by a pure
      resolver so the sentence and the button can never describe
      different moves. */
-  const nextStep = resolveNextStep({
+  const resolvedNextStep = resolveNextStep({
     status: ew.status,
     isProvider,
     hasSpawnedTickets: ew.spawned_tickets.length > 0,
@@ -2276,6 +2283,33 @@ export function ExtraWorkDetailPage() {
     allowedNextStatuses: allowed,
     ticketNo: ew.spawned_tickets[0]?.ticket_no ?? null,
   });
+  /* W-FIX4 §2 — the resolver stays route-unaware (it reasons from the
+     status, and keeping the route out of it is what keeps it a pure
+     status map); the PAGE owns `noCustomerApproval`, so the page swaps
+     the proposal-worded keys for their `_start` variants. Only the
+     WORDS change: `action` passes through untouched, so the button
+     does exactly what it did. */
+  const NEXT_STEP_START_KEYS: Record<string, string> = {
+    "next.under_review": "next.under_review_start",
+    "next.button.prepare_proposal": "next.button.prepare_proposal_start",
+    "next.pricing_proposed": "next.pricing_proposed_start",
+    "next.customer.pricing_proposed": "next.customer.pricing_proposed_start",
+    "next.button.open_proposal": "next.button.open_proposal_start",
+    "next.rejected": "next.rejected_start",
+    "next.customer.rejected": "next.customer.rejected_start",
+  };
+  const nextStep = noCustomerApproval
+    ? {
+        ...resolvedNextStep,
+        sentenceKey:
+          NEXT_STEP_START_KEYS[resolvedNextStep.sentenceKey] ??
+          resolvedNextStep.sentenceKey,
+        buttonKey: resolvedNextStep.buttonKey
+          ? (NEXT_STEP_START_KEYS[resolvedNextStep.buttonKey] ??
+            resolvedNextStep.buttonKey)
+          : null,
+      }
+    : resolvedNextStep;
   const nextStepBusy =
     proposalBusy ||
     retrySpawnBusy ||
@@ -3011,7 +3045,11 @@ export function ExtraWorkDetailPage() {
                   style={{ margin: "10px 0 0" }}
                   data-testid="extra-work-workflow-decision-on-proposal"
                 >
-                  {t("detail.workflow_decision_on_proposal")}
+                  {t(
+                    noCustomerApproval
+                      ? "detail.workflow_decision_on_proposal_start"
+                      : "detail.workflow_decision_on_proposal",
+                  )}
                 </p>
               )}
               {/* W5 fix 4 — where the job IS, in place of the apology.
@@ -3227,6 +3265,7 @@ export function ExtraWorkDetailPage() {
                 proposal={draftProposalDetail}
                 onChanged={reloadProposals}
                 parentAdvanceBlocked={parentAdvanceBlocked}
+                noCustomerApproval={noCustomerApproval}
               />
             )}
 

@@ -14379,3 +14379,63 @@ table.assign-table { min-width: 0; width: 100%; }
    by the card's existing class, so this block names nothing outside
    itself. */
 .parts-chip-row-stacked { margin-top: 3px; }
+
+/* W-FIX4 §3 — credential badges under a person's name in
+   `StaffAssignmentSection`. APPENDED INSIDE THIS W26.3 BLOCK, NEW
+   CLASSES ONLY — nothing above is edited.
+
+   NOT a smaller `.parts-chip`. A part chip is a filled grey pill naming
+   a piece of the job; a credential is a certificate mark, and it gets a
+   certificate's design: a green shield, the TYPE in quiet small caps,
+   the expiry in faint tabular figures beside it — one badge, one line —
+   inside a soft-cornered outline with no fill. The clickable variant
+   (it opens the in-app document viewer) says so on hover with the green
+   the rest of the app already uses for "go". */
+.cred-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: transparent;
+  line-height: 1.45;
+}
+.cred-badge-icon {
+  color: var(--green-2);
+  flex: none;
+}
+.cred-badge-type {
+  font-size: 9.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.cred-badge-expiry {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The document-backed badge is a real <button>; strip the UA button
+   face so it sits flush with its plain sibling, and let hover say
+   "this one opens". */
+.cred-badge-btn {
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.cred-badge-btn:hover {
+  border-color: var(--green-2);
+  background: var(--green-faint);
+}
+.cred-badge-btn:hover .cred-badge-type {
+  color: var(--green);
+}

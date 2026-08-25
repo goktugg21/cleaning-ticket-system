@@ -683,6 +683,7 @@ export function ProposalBuilder({
   proposal,
   onChanged,
   parentAdvanceBlocked = false,
+  noCustomerApproval = false,
 }: {
   ewId: number | string;
   proposal: ProposalDetail;
@@ -692,6 +693,15 @@ export function ProposalBuilder({
   // available yet" line, which is true but useless: the operator cannot
   // tell that ONE click on the workflow card above fixes it.
   parentAdvanceBlocked?: boolean;
+  /** W-FIX4 §2 — the parent request has NO customer-approval step
+   *  (DIRECT_AGREED_PRICE_ORDER / AUTO_START_AFTER_PRICING). On those
+   *  routes every visible string loses "proposal" / "send to customer":
+   *  the SAME send action reads "Start the work", because for this
+   *  request that is literally what SEND does (DRAFT→SENT
+   *  auto-approves and spawns — `proposal_state_machine.py:667`).
+   *  MECHANICS UNTOUCHED: same handler, same endpoint, same statuses.
+   *  The page owns the predicate; this component only words itself. */
+  noCustomerApproval?: boolean;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [busy, setBusy] = useState(false);
@@ -875,7 +885,11 @@ export function ProposalBuilder({
 
   return (
     <CollapsibleCard
-      title={t("detail.proposal_builder_title")}
+      title={t(
+        noCustomerApproval
+          ? "detail.proposal_builder_title_start"
+          : "detail.proposal_builder_title",
+      )}
       meta={
         <>
           {t("detail.card_lines_count", { count: proposal.lines.length })}
@@ -913,7 +927,11 @@ export function ProposalBuilder({
           </div>
         )}
         <p className="muted small" style={{ marginTop: 0 }}>
-          {t("detail.proposal_builder_helper")}
+          {t(
+            noCustomerApproval
+              ? "detail.proposal_builder_helper_start"
+              : "detail.proposal_builder_helper",
+          )}
         </p>
         {error && (
           <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
@@ -927,7 +945,13 @@ export function ProposalBuilder({
             inline edit; a line is changed by removing it and re-adding it
             through the composer below (legacy composer behavior). */}
         {proposal.lines.length === 0 ? (
-          <p className="muted small">{t("detail.proposal_builder_empty")}</p>
+          <p className="muted small">
+            {t(
+              noCustomerApproval
+                ? "detail.proposal_builder_empty_start"
+                : "detail.proposal_builder_empty",
+            )}
+          </p>
         ) : (
           <div className="ew-table-scroll">
             <table className="data-table ew-pricing-table">
@@ -1060,7 +1084,17 @@ export function ProposalBuilder({
               onClick={send}
               data-testid="extra-work-proposal-send"
             >
-              {busy ? t("detail.proposal_sending") : t("detail.proposal_send")}
+              {busy
+                ? t(
+                    noCustomerApproval
+                      ? "detail.proposal_sending_start"
+                      : "detail.proposal_sending",
+                  )
+                : t(
+                    noCustomerApproval
+                      ? "detail.proposal_send_start"
+                      : "detail.proposal_send",
+                  )}
             </button>
             
           </div>
@@ -1073,7 +1107,11 @@ export function ProposalBuilder({
                 disabled
                 data-testid="extra-work-proposal-send-blocked"
               >
-                {t("detail.proposal_send")}
+                {t(
+                  noCustomerApproval
+                    ? "detail.proposal_send_start"
+                    : "detail.proposal_send",
+                )}
               </button>
               <p
                 className="muted small"
@@ -1081,8 +1119,16 @@ export function ProposalBuilder({
                 data-testid="extra-work-proposal-send-blocked-reason"
               >
                 {parentAdvanceBlocked
-                  ? t("detail.proposal_send_blocked_parent")
-                  : t("detail.proposal_send_blocked_reason")}
+                  ? t(
+                      noCustomerApproval
+                        ? "detail.proposal_send_blocked_parent_start"
+                        : "detail.proposal_send_blocked_parent",
+                    )
+                  : t(
+                      noCustomerApproval
+                        ? "detail.proposal_send_blocked_reason_start"
+                        : "detail.proposal_send_blocked_reason",
+                    )}
               </p>
             </div>
           )
@@ -1101,7 +1147,11 @@ export function ProposalBuilder({
                 onClick={approve}
                 data-testid="extra-work-proposal-approve"
               >
-                {t("detail.proposal_approve")}
+                {t(
+                  noCustomerApproval
+                    ? "detail.proposal_approve_start"
+                    : "detail.proposal_approve",
+                )}
               </button>
             )}
             {canReject && (
@@ -1112,7 +1162,11 @@ export function ProposalBuilder({
                 onClick={reject}
                 data-testid="extra-work-proposal-reject"
               >
-                {t("detail.proposal_reject")}
+                {t(
+                  noCustomerApproval
+                    ? "detail.proposal_reject_start"
+                    : "detail.proposal_reject",
+                )}
               </button>
             )}
           </div>
@@ -1140,7 +1194,11 @@ export function ProposalBuilder({
               data-testid="extra-work-proposal-cancel"
             >
               {cancelNeedsReason
-                ? t("detail.proposal_withdraw")
+                ? t(
+                    noCustomerApproval
+                      ? "detail.proposal_withdraw_start"
+                      : "detail.proposal_withdraw",
+                  )
                 : t("detail.proposal_discard")}
             </button>
           </div>
@@ -1210,15 +1268,31 @@ export function ProposalBuilder({
           ref={cancelDialogRef}
           title={
             cancelNeedsReason
-              ? t("detail.proposal_withdraw_confirm_title")
-              : t("detail.proposal_discard_confirm_title")
+              ? t(
+                  noCustomerApproval
+                    ? "detail.proposal_withdraw_confirm_title_start"
+                    : "detail.proposal_withdraw_confirm_title",
+                )
+              : t(
+                  noCustomerApproval
+                    ? "detail.proposal_discard_confirm_title_start"
+                    : "detail.proposal_discard_confirm_title",
+                )
           }
           body={
             <>
               <p style={{ marginTop: 0 }}>
                 {cancelNeedsReason
-                  ? t("detail.proposal_withdraw_confirm_body")
-                  : t("detail.proposal_discard_confirm_body")}
+                  ? t(
+                      noCustomerApproval
+                        ? "detail.proposal_withdraw_confirm_body_start"
+                        : "detail.proposal_withdraw_confirm_body",
+                    )
+                  : t(
+                      noCustomerApproval
+                        ? "detail.proposal_discard_confirm_body_start"
+                        : "detail.proposal_discard_confirm_body",
+                    )}
               </p>
               {cancelNeedsReason && (
                 <textarea
@@ -1227,11 +1301,15 @@ export function ProposalBuilder({
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
                   placeholder={t(
-                    "detail.proposal_withdraw_reason_placeholder",
+                    noCustomerApproval
+                      ? "detail.proposal_withdraw_reason_placeholder_start"
+                      : "detail.proposal_withdraw_reason_placeholder",
                   )}
                   rows={3}
                   aria-label={t(
-                    "detail.proposal_withdraw_reason_placeholder",
+                    noCustomerApproval
+                      ? "detail.proposal_withdraw_reason_placeholder_start"
+                      : "detail.proposal_withdraw_reason_placeholder",
                   )}
                 />
               )}
@@ -1239,7 +1317,11 @@ export function ProposalBuilder({
           }
           confirmLabel={
             cancelNeedsReason
-              ? t("detail.proposal_withdraw")
+              ? t(
+                  noCustomerApproval
+                    ? "detail.proposal_withdraw_start"
+                    : "detail.proposal_withdraw",
+                )
               : t("detail.proposal_discard")
           }
           onConfirm={confirmCancel}

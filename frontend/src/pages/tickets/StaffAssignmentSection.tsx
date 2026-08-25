@@ -44,7 +44,7 @@
 // shape the owner's reference system uses for its two assignment blocks:
 // a NAME, a count, a table, an empty state, and one button.
 import { useEffect, useRef, useState } from "react";
-import { Pencil, X } from "lucide-react";
+import { Pencil, ShieldCheck, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -570,12 +570,18 @@ export function StaffAssignmentSection({
                         )}
                         {/* W-FIX3 — the credentials the server already
                             decided this viewer may see. Type and expiry,
-                            the same two facts the customer view shows,
-                            in the chip vocabulary this row already uses.
+                            the same two facts the customer view shows.
                             A credential with a document is a button to
                             the in-app viewer; one without is a plain
-                            chip, because a control that opens nothing is
-                            worse than no control. */}
+                            badge, because a control that opens nothing
+                            is worse than no control.
+                            W-FIX4 §3 — its OWN look. Borrowing
+                            `.parts-chip` made a certificate read as a
+                            piece of the job, at the job's size. The
+                            `.cred-badge` classes are quieter: smaller
+                            type, muted outline, no fill. The row keeps
+                            `.parts-chip-row` for LAYOUT only (wrap +
+                            gap); the chip look itself is gone. */}
                         {(credentialsByUserId?.[slot.user_id] ?? []).length >
                           0 && (
                           <span
@@ -584,15 +590,36 @@ export function StaffAssignmentSection({
                           >
                             {(credentialsByUserId?.[slot.user_id] ?? []).map(
                               (credential, index) => {
-                                const label = credential.expiry_date
-                                  ? `${credential.type} · ${credential.expiry_date}`
-                                  : credential.type;
                                 const url = credential.document_url;
+                                // One badge, three quiet parts: a green
+                                // shield (this is a certificate), the
+                                // type in small caps (underscores read
+                                // as spaces), the expiry in faint
+                                // figures beside it — never a second
+                                // line.
+                                const inner = (
+                                  <>
+                                    <ShieldCheck
+                                      size={11}
+                                      strokeWidth={2.4}
+                                      className="cred-badge-icon"
+                                      aria-hidden="true"
+                                    />
+                                    <span className="cred-badge-type">
+                                      {credential.type.replace(/_/g, " ")}
+                                    </span>
+                                    {credential.expiry_date && (
+                                      <span className="cred-badge-expiry">
+                                        {credential.expiry_date}
+                                      </span>
+                                    )}
+                                  </>
+                                );
                                 return url && onPreviewDocument ? (
                                   <button
                                     key={`${credential.type}-${index}`}
                                     type="button"
-                                    className="parts-chip"
+                                    className="cred-badge cred-badge-btn"
                                     onClick={() =>
                                       onPreviewDocument(
                                         url,
@@ -601,15 +628,15 @@ export function StaffAssignmentSection({
                                     }
                                     data-testid="staff-assignment-credential"
                                   >
-                                    {label}
+                                    {inner}
                                   </button>
                                 ) : (
                                   <span
                                     key={`${credential.type}-${index}`}
-                                    className="parts-chip"
+                                    className="cred-badge"
                                     data-testid="staff-assignment-credential"
                                   >
-                                    {label}
+                                    {inner}
                                   </span>
                                 );
                               },

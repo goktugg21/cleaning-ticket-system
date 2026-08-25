@@ -1978,7 +1978,11 @@ export function CreateExtraWorkPage({
             >
               {isInstant
                 ? t("result.instant_processing")
-                : t("result.proposal_pending")}
+                : t(
+                    result.request_intent === "AUTO_START_AFTER_PRICING"
+                      ? "result.auto_start_pending"
+                      : "result.proposal_pending",
+                  )}
               {cartLineList.length > 0 && (
                 <div
                   className="muted small"
@@ -2390,6 +2394,99 @@ export function CreateExtraWorkPage({
               </label>
             </fieldset>
           </div>
+
+          {/* W-FIX4 §1 — the intent question, asked NEAR THE TOP.
+              This is the SAME picker M3 built (backend-driven
+              options, REQUEST_QUOTE filtered out of the standard
+              page, reconcile keeps the selection inside
+              `allowed_intents`) — only its PLACE changed. It sat
+              under the price preview at the very bottom, after the
+              cart; the owner asks the question before the details,
+              so it renders right after location and customer. It
+              still needs a preview to know what is offerable, so it
+              appears as soon as the cart has its first line. */}
+          {previewable && (
+            <>
+          {/* M3 — standard page: the picker renders the FILTERED
+              intent set (REQUEST_QUOTE removed). When the backend
+              would only allow a quote, nothing is offerable here
+              and the mirrored notice links to the quote page. */}
+          {!isQuoteMode && standardOnlyQuote && (
+            <div
+              className="form-section"
+              data-testid="extra-work-standard-quote-only"
+            >
+              <div className="alert-info" role="status">
+                {t("create.quote_only_notice")}{" "}
+                <Link to="/extra-work/request-quote">
+                  {t("create.quote_only_link")}
+                </Link>
+              </div>
+            </div>
+          )}
+          {!isQuoteMode && previewData && offeredIntents.length > 0 && (
+            <div
+              className="form-section"
+              data-testid="extra-work-create-intent"
+            >
+              <div className="form-section-title">
+                {t("create.intent.section_title")}
+              </div>
+              <div
+                role="radiogroup"
+                aria-label={t("create.intent.section_title")}
+              >
+                {offeredIntents.map((intent) => (
+                  <label
+                    key={intent}
+                    className="ew-intent-option"
+                    data-testid={`extra-work-create-intent-${intent}`}
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "flex-start",
+                      marginBottom: 10,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="ew-request-intent"
+                      value={intent}
+                      checked={selectedIntent === intent}
+                      onChange={() => setSelectedIntent(intent)}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      <span
+                        className="field-label"
+                        style={{ display: "block", marginBottom: 2 }}
+                      >
+                        {t(INTENT_LABEL_KEY[intent])}
+                      </span>
+                      <span className="muted small">
+                        {t(INTENT_DESC_KEY[intent])}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {previewData.requested_intent === selectedIntent &&
+                previewData.requested_intent_allowed === false &&
+                previewData.requested_intent_error && (
+                  <div
+                    className="alert-warning"
+                    style={{ marginTop: 8 }}
+                    role="status"
+                    data-testid="extra-work-create-intent-error"
+                  >
+                    {intentErrorText(previewData.requested_intent_error)}
+                  </div>
+                )}
+            </div>
+          )}
+            </>
+          )}
 
           <div className="form-section">
             <div className="form-section-title">
@@ -3295,84 +3392,6 @@ export function CreateExtraWorkPage({
                 </div>
               )}
 
-              {/* M3 — standard page: the picker renders the FILTERED
-                  intent set (REQUEST_QUOTE removed). When the backend
-                  would only allow a quote, nothing is offerable here
-                  and the mirrored notice links to the quote page. */}
-              {!isQuoteMode && standardOnlyQuote && (
-                <div
-                  className="form-section"
-                  data-testid="extra-work-standard-quote-only"
-                >
-                  <div className="alert-info" role="status">
-                    {t("create.quote_only_notice")}{" "}
-                    <Link to="/extra-work/request-quote">
-                      {t("create.quote_only_link")}
-                    </Link>
-                  </div>
-                </div>
-              )}
-              {!isQuoteMode && previewData && offeredIntents.length > 0 && (
-                <div
-                  className="form-section"
-                  data-testid="extra-work-create-intent"
-                >
-                  <div className="form-section-title">
-                    {t("create.intent.section_title")}
-                  </div>
-                  <div
-                    role="radiogroup"
-                    aria-label={t("create.intent.section_title")}
-                  >
-                    {offeredIntents.map((intent) => (
-                      <label
-                        key={intent}
-                        className="ew-intent-option"
-                        data-testid={`extra-work-create-intent-${intent}`}
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "flex-start",
-                          marginBottom: 10,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <input
-                          type="radio"
-                          name="ew-request-intent"
-                          value={intent}
-                          checked={selectedIntent === intent}
-                          onChange={() => setSelectedIntent(intent)}
-                          style={{ marginTop: 3 }}
-                        />
-                        <span>
-                          <span
-                            className="field-label"
-                            style={{ display: "block", marginBottom: 2 }}
-                          >
-                            {t(INTENT_LABEL_KEY[intent])}
-                          </span>
-                          <span className="muted small">
-                            {t(INTENT_DESC_KEY[intent])}
-                          </span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                  {previewData.requested_intent === selectedIntent &&
-                    previewData.requested_intent_allowed === false &&
-                    previewData.requested_intent_error && (
-                      <div
-                        className="alert-warning"
-                        style={{ marginTop: 8 }}
-                        role="status"
-                        data-testid="extra-work-create-intent-error"
-                      >
-                        {intentErrorText(previewData.requested_intent_error)}
-                      </div>
-                    )}
-                </div>
-              )}
             </>
           )}
 
