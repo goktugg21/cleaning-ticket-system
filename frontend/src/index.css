@@ -13490,6 +13490,28 @@ a.wp-card-title:hover { text-decoration: underline; }
   background: var(--bg);
   padding-top: 4px;
 }
+/* W-HOURS3 Task 1 — THE SELECTED TAB CARRIES THE LINE.
+
+   The owner reads "selected" as the long green active line the Extra
+   Work list draws under its selected track (`.ew-list-scope-tracks
+   .status-tile-active`, `inset 0 -2px 0 var(--green)`), and reported it
+   missing under Plan on the ticket page. MEASURED on the deployed head
+   at 1440 and 1366: every active pill on this bar — Plan included —
+   computed to the same fill (rgb 224,245,235), the same faint border and
+   NO box-shadow; nothing in the code singles a tab out (one map, one
+   class), and no rule ever gave these pills a line at all. The short
+   word "Plan" makes a 49px pill whose soft fill is easy to miss beside
+   an 81px "Messages".
+
+   So the line the owner expects is drawn here, for EVERY tab on BOTH
+   detail pages (this bar is the ticket page's and the Extra Work
+   page's), with the app's own selected-tab treatment rather than a new
+   one — which is what makes Plan highlight exactly like its siblings.
+   Scoped to `.ew-detail-tabs`: the composer's tier toggle shares the
+   pill class and is a mode switch, not a tab. */
+.ew-detail-tabs .composer-toggle-btn.active {
+  box-shadow: inset 0 -2px 0 var(--green);
+}
 /* W7-D — the billing month: one line, one control. */
 .ew-billing-line {
   min-width: 0;

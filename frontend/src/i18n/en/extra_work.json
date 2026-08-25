@@ -561,7 +561,7 @@
   "detail.header_total_hint": "Final amount when the work is priced; the quoted estimate until then. Same figure as the list.",
   "create.field_label_pick_customer": "Select a customer first",
   "plan": {
-    "open_button": "Plan work",
+    "open_button": "Plan the work",
     "edit_button": "Edit plan",
     "dialog_title": "Plan and start work",
     "dialog_subtitle": "Set how many hours this work may take, when we carry it out and who works on it.",
@@ -634,7 +634,7 @@
     "grid_waiting_hint": "The day columns are the window you commit to in step 1. Until it is set you can still plan a total per person under No day.",
     "grid_waiting_action": "Set the delivery dates",
     "grid_day_total": "Per day",
-    "bulk_hours_no_days": "Here you set a total per person, with no day. To spread hours across days, open the work itself and use Plan work."
+    "bulk_hours_no_days": "Here you set a total per person, with no day. To spread hours across days, open the work itself and use Plan the work."
   },
   "series": {
     "member_count": "{{count}} work",

@@ -329,7 +329,7 @@
   "ew_cancel_done": "Extra werk geannuleerd. Deze melding blijft zoals hij is.",
   "ew_hours_saved": "{{hours}} uur opgeslagen — nieuw totaal {{total}}, gefactureerd in {{month}}.",
   "ew_hours_saved_no_month": "{{hours}} uur opgeslagen — nieuw totaal {{total}}, gefactureerd in de maand van afronden.",
-  "ew_plan_button": "Plannen",
+  "ew_plan_button": "Werk inplannen",
   "ew_plan_loading": "Plan openen…",
   "ew_plan_saved": "Plan opgeslagen.",
   "transition.proof_required": "Deze stap heeft een foto of notitie nodig die laat zien dat het werk klaar is.",

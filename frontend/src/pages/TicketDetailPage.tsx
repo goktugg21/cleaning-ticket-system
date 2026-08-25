@@ -2618,13 +2618,22 @@ export function TicketDetailPage() {
           {/* W-PLAN2 Task 3 — the Plan action is ALWAYS in reach on
               One-off work: header-level, beside the primary action,
               rendered whichever pill tab is active. Same predicate,
-              same modal, same handler as the Plan tab's card. */}
+              same modal, same handler as the Plan tab's card.
+
+              W-HOURS3 Task 2 — the button is a VERB ("Plan the work",
+              `ew_plan_button`) while the tab stays the noun ("Plan",
+              `tab_plan`): distinct on purpose, so the door and the
+              place are never read as the same thing. And it carries
+              one step more weight than its `btn-sm` neighbours: the
+              page's own full-size primary (`.btn.btn-primary`, 36px —
+              the size every Save on this page's dialogs uses), not a
+              new pattern. Convert / Archive beside it stay small. */}
           {ticket.extra_work_origin &&
             isProviderManagementRole(me?.role) &&
             canAccessExtraWork(me?.role) && (
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                className="btn btn-primary"
                 onClick={() => void openEwPlan()}
                 disabled={ewPlanLoading}
                 data-testid="ticket-ew-plan-open"
@@ -4921,8 +4930,27 @@ export function TicketDetailPage() {
             canAccessExtraWork(me?.role) && (
               <div className="card" data-testid="ticket-ew-plan-card">
                 <div className="form-section">
-                  <div className="form-section-title">
-                    {t("ew_plan_summary_title")}
+                  {/* W-HOURS3 Task 2 — the door is ALSO inside the Plan
+                      area. W-PLAN2 lifted the button into the header so
+                      it is always in reach; the owner still expects one
+                      beside the plan it edits, and both read the VERB
+                      ("Plan the work") while the tab keeps the noun.
+                      Same handler, same modal, same gate as the header
+                      button; `.ew-hours-compare-head` is the title-plus-
+                      action head the card below already uses. */}
+                  <div className="ew-hours-compare-head">
+                    <div className="form-section-title">
+                      {t("ew_plan_summary_title")}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void openEwPlan()}
+                      disabled={ewPlanLoading}
+                      data-testid="ticket-ew-plan-open-tab"
+                    >
+                      {ewPlanLoading ? t("ew_plan_loading") : t("ew_plan_button")}
+                    </button>
                   </div>
                   {ewPlanDetail &&
                   (ewPlanDetail.planned_hours ?? []).length > 0 ? (
