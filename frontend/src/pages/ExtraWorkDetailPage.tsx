@@ -68,6 +68,8 @@ import {
   listEwMessages,
   listProposalsForEw,
   listExtraWorkAssignments,
+  listExtraWorkAssignmentCandidates,
+  bulkAssignExtraWork,
   listSpawnedTickets,
   planExtraWork,
   relabelExtraWork,
@@ -97,6 +99,7 @@ import {
   isProviderManagementRole,
 } from "../auth/permissions";
 import type {
+  AssignmentCandidate,
   Contact,
   CustomerLabel,
   EwMessage,
@@ -901,6 +904,12 @@ export function ExtraWorkDetailPage() {
   const [planAssignmentsLoading, setPlanAssignmentsLoading] = useState(false);
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState("");
+  // W-UX1 §2 — the plan area's assign surface.
+  const [planCandidates, setPlanCandidates] = useState<AssignmentCandidate[]>([]);
+  const [planCandidatesLoading, setPlanCandidatesLoading] = useState(false);
+  const [planAssignBusy, setPlanAssignBusy] = useState(false);
+  const [planAssignError, setPlanAssignError] = useState("");
+
   const [loading, setLoading] = useState(true);
   // W14 §3 — TWO ERROR CHANNELS, AND THE REASON THERE ARE TWO.
   //
@@ -1957,6 +1966,52 @@ export function ExtraWorkDetailPage() {
       setPlanAssignments([]);
     } finally {
       setPlanAssignmentsLoading(false);
+    }
+    void loadPlanCandidates();
+  }
+
+  /** W-UX1 §2 — who may still be added to this request, from the
+   *  SERVER's eligibility helper rather than "the company's employees".
+   *  Sprint 158 §1's argument stands: eligibility comes from the
+   *  request's BUILDING and differs per role, and a picker that does not
+   *  call the same helper the write validator uses will offer options
+   *  that always fail. WORKER only — the plan area distributes hours,
+   *  and hours belong to the people doing the work. */
+  async function loadPlanCandidates() {
+    setPlanCandidatesLoading(true);
+    setPlanAssignError("");
+    try {
+      setPlanCandidates(
+        await listExtraWorkAssignmentCandidates(Number(id), "WORKER"),
+      );
+    } catch {
+      setPlanCandidates([]);
+    } finally {
+      setPlanCandidatesLoading(false);
+    }
+  }
+
+  /** One bulk call through the EXISTING endpoint, then both lists are
+   *  re-read from the server rather than patched locally — the write is
+   *  all-or-nothing server-side, so the only honest picture of what
+   *  happened is the one it returns. */
+  async function assignPlanCrew(userIds: number[]) {
+    if (userIds.length === 0) return;
+    setPlanAssignBusy(true);
+    setPlanAssignError("");
+    try {
+      await bulkAssignExtraWork({
+        requests: [Number(id)],
+        workers: userIds,
+        mode: "assign",
+      });
+      const rows = await listExtraWorkAssignments(Number(id));
+      setPlanAssignments(rows);
+      await loadPlanCandidates();
+    } catch (err) {
+      setPlanAssignError(getApiError(err));
+    } finally {
+      setPlanAssignBusy(false);
     }
   }
 
@@ -3582,6 +3637,16 @@ export function ExtraWorkDetailPage() {
           ew={ew}
           assignments={planAssignments}
           assignmentsLoading={planAssignmentsLoading}
+          // R2 — the picker offers ONLY the rest. Filtered here rather
+          // than in the dialog so "who is already on this" has exactly
+          // one owner on this page.
+          candidates={planCandidates.filter(
+            (c) => !planAssignments.some((a) => a.user_id === c.id),
+          )}
+          candidatesLoading={planCandidatesLoading}
+          assignBusy={planAssignBusy}
+          assignError={planAssignError}
+          onAssign={(userIds) => void assignPlanCrew(userIds)}
           busy={planBusy}
           error={planError}
           onCancel={() => setPlanOpen(false)}

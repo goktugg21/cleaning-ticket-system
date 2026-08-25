@@ -1,0 +1,15 @@
+/* W-UX1 §2 — the plan area's add-people block.
+ *
+ * One class, and only what turning the picker into a block needs. The
+ * chips themselves reuse `.assign-picker` / `.assign-picker-row` from
+ * index.css, which this wave does not own — so nothing here restyles
+ * them, it only gives them a labelled container with room around it.
+ */
+.ew-plan-crew-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}

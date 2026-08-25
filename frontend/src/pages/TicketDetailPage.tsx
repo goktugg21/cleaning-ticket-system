@@ -885,6 +885,35 @@ export function TicketDetailPage() {
    *  UNCONDITIONALLY at the end of the page and driven entirely through
    *  this ref — a native <dialog> mounted behind a condition is an
    *  invisible dialog and a dead-looking button. */
+  /** R2 — the ticket's current crew, as ids, for the transition modal's
+   *  prefilled default. Anonymous rows carry no id and cannot be a
+   *  default, so they are dropped; a CUSTOMER never opens this modal. */
+  const assignedStaffIds = useMemo(
+    () =>
+      (ticket?.assigned_staff ?? [])
+        .filter((entry) => !("anonymous" in entry && entry.anonymous))
+        .map((entry) => (entry as { id: number }).id),
+    [ticket?.assigned_staff],
+  );
+
+  /** R2 — the ticket's planned start as `<input type="datetime-local">`
+   *  wants it: LOCAL wall time, no zone, minute precision. Built by hand
+   *  rather than with `toISOString().slice(0,16)`, which would render the
+   *  UTC instant and show an operator east of Greenwich the wrong hour —
+   *  the mirror of the bug the modal's own confirm() comment warns about
+   *  in the other direction. */
+  const currentScheduledStartLocal = useMemo(() => {
+    const raw = ticket?.scheduled_start_at;
+    if (!raw) return "";
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+      `T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    );
+  }, [ticket?.scheduled_start_at]);
+
   const credentialPreviewRef = useRef<PdfPreviewDialogHandle>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
@@ -5096,6 +5125,15 @@ export function TicketDetailPage() {
           requirements={transitionReqs}
           loading={transitionLoading}
           staff={transitionStaff}
+          // R2 — what the step ALREADY has, so the modal shows it as the
+          // default rather than asking for it again. `assigned_staff` is
+          // the ticket's own roster, which is also where an extra-work
+          // spawn's CARRIED-OVER workers land
+          // (`extra_work/assignment_carryover.py::carry_workers_to_ticket`
+          // writes `TicketStaffAssignment` rows) — so carried people
+          // arrive prefilled without the modal knowing they were carried.
+          currentAssigneeIds={assignedStaffIds}
+          currentScheduledStartAt={currentScheduledStartLocal}
           busy={statusBusy !== null}
           error={transitionError}
           onCancel={() => {

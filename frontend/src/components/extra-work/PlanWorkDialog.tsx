@@ -100,6 +100,8 @@ import type {
 import type { HourType } from "../../api/timesheets.types";
 import { listHourTypes } from "../../api/timesheets";
 import { Toggle } from "../Toggle";
+import "./plan-crew.css";
+import type { AssignmentCandidate } from "../../api/types";
 import { formatDate } from "../../lib/intl";
 
 /** W7 — how many day columns are on screen at once.
@@ -150,6 +152,11 @@ export function PlanWorkDialog({
   error,
   onCancel,
   onSubmit,
+  candidates,
+  candidatesLoading,
+  assignBusy,
+  assignError,
+  onAssign,
 }: {
   ew: ExtraWorkRequestDetail;
   assignments: ExtraWorkAssignment[];
@@ -158,6 +165,15 @@ export function PlanWorkDialog({
   error: string;
   onCancel: () => void;
   onSubmit: (payload: ExtraWorkPlanPayload) => void;
+  /** W-UX1 §2 — people the plan area may still add, from the SERVER's
+   *  own eligibility helper (`/extra-work/<id>/assignments/candidates/`).
+   *  R2: the page hands over only the not-yet-assigned, so the picker
+   *  offers exactly what is addable and the crew above is the default. */
+  candidates: AssignmentCandidate[];
+  candidatesLoading: boolean;
+  assignBusy: boolean;
+  assignError: string;
+  onAssign: (userIds: number[]) => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
 
@@ -569,6 +585,22 @@ export function PlanWorkDialog({
             <span className="ew-plan-step">2</span>
             {t("plan.hours_title")}
           </div>
+          {/* W-UX1 §2 / R2 — WHO IS ON THIS, AND WHO MAY BE ADDED.
+              The crew above is the default and stays visible; this
+              offers only the people not already on it, because the page
+              filters the server's candidate list against the current
+              assignments. Rendered whether or not the crew is empty, so
+              "nobody yet" is a state you can fix here instead of a
+              message telling you to go somewhere else. Provider-only by
+              construction: the plan dialog has no customer entry point.
+              Writes through the EXISTING bulk endpoint. */}
+          <CrewPicker
+            candidates={candidates}
+            loading={candidatesLoading}
+            busy={assignBusy}
+            error={assignError}
+            onAssign={onAssign}
+          />
           {assignmentsLoading ? (
             <div className="loading-bar">
               <div className="loading-bar-fill" />
@@ -936,6 +968,90 @@ export function PlanWorkDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+/** W-UX1 §2 — the plan area's people chips.
+ *
+ *  Local to this file rather than a shared component: the ticket
+ *  dialog's picker speaks `AssignableStaff` and posts a transition, this
+ *  one speaks `AssignmentCandidate` and posts a bulk assign. What they
+ *  share is the LOOK, and that is shared where it belongs — the same
+ *  `.assign-picker` / `.assign-picker-row` classes, no new CSS.
+ *
+ *  R2 is enforced by the caller: `candidates` arrives already filtered
+ *  to the not-yet-assigned, so a person on the crew never appears here
+ *  as something to add again.
+ */
+function CrewPicker({
+  candidates,
+  loading,
+  busy,
+  error,
+  onAssign,
+}: {
+  candidates: AssignmentCandidate[];
+  loading: boolean;
+  busy: boolean;
+  error: string;
+  onAssign: (userIds: number[]) => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const [picked, setPicked] = useState<number[]>([]);
+
+  if (loading) {
+    return (
+      <div className="loading-bar">
+        <div className="loading-bar-fill" />
+      </div>
+    );
+  }
+  if (candidates.length === 0) {
+    return null;
+  }
+  return (
+    <div className="ew-plan-crew-add" data-testid="extra-work-plan-crew-add">
+      <span className="field-label">{t("plan.add_people_label")}</span>
+      <div className="assign-picker" role="group">
+        {candidates.map((person) => (
+          <label key={person.id} className="assign-picker-row">
+            <input
+              type="checkbox"
+              className="checkbox-input"
+              checked={picked.includes(person.id)}
+              disabled={busy}
+              onChange={(event) =>
+                setPicked((current) =>
+                  event.target.checked
+                    ? [...current, person.id]
+                    : current.filter((id) => id !== person.id),
+                )
+              }
+              data-testid="extra-work-plan-crew-option"
+            />
+            <span>{person.full_name?.trim() || person.email}</span>
+          </label>
+        ))}
+      </div>
+      {error && (
+        <p className="alert-error" role="alert">
+          {error}
+        </p>
+      )}
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={busy || picked.length === 0}
+        onClick={() => {
+          onAssign(picked);
+          setPicked([]);
+        }}
+        data-testid="extra-work-plan-crew-add-button"
+      >
+        {busy ? t("plan.adding_people") : t("plan.add_people")}
+      </button>
     </div>
   );
 }

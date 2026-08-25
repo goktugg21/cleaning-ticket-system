@@ -75,6 +75,15 @@ export interface TicketTransitionModalProps {
   requirements: TransitionRequirements | null;
   loading: boolean;
   staff: AssignableStaff[];
+  /** R2 — who is ALREADY on this ticket, so the modal can show them as
+   *  the default instead of asking again. Carried assignments (an EW
+   *  spawn hands its workers to the ticket) arrive through exactly this
+   *  list, which is why the modal never has to know where they came
+   *  from. */
+  currentAssigneeIds: number[];
+  /** R2 — the date the ticket already carries, "YYYY-MM-DDTHH:mm" in
+   *  LOCAL time, ready for `<input type="datetime-local">`, or "". */
+  currentScheduledStartAt: string;
   busy: boolean;
   error?: string;
   onCancel: () => void;
@@ -88,6 +97,8 @@ export function TicketTransitionModal({
   requirements,
   loading,
   staff,
+  currentAssigneeIds,
+  currentScheduledStartAt,
   busy,
   error,
   onCancel,
@@ -103,8 +114,14 @@ export function TicketTransitionModal({
   // `key={transitionTarget}`, so a different move is a different
   // component instance and these three start empty by construction.
   const [note, setNote] = useState("");
-  const [picked, setPicked] = useState<number[]>([]);
-  const [startsAt, setStartsAt] = useState("");
+  // R2 — SEEDED, not empty. The people already on the job are the
+  // default answer; the operator edits that default rather than
+  // rebuilding it. `useState`'s initialiser runs once per mount and
+  // the parent mounts this per step, so a change of step re-seeds
+  // without a reset effect (CLAUDE.md: no synchronous setState in an
+  // effect body).
+  const [picked, setPicked] = useState<number[]>(currentAssigneeIds);
+  const [startsAt, setStartsAt] = useState(currentScheduledStartAt);
   const [reason, setReason] = useState("");
   /** W-UX1 §4 — the two-press bypass: pressing it once reveals the
    *  reason, and only a reason arms the move. */
@@ -112,6 +129,16 @@ export function TicketTransitionModal({
 
   const unmet = useMemo(() => requirements?.unmet ?? [], [requirements]);
   const needsAssignee = unmet.includes("assignee");
+  /** R2 — "the modal SHOWS what already exists and asks only for
+   *  what is missing". A requirement the ticket already satisfies is
+   *  still part of this step's checklist, so it renders — prefilled
+   *  and editable — instead of vanishing and leaving the operator to
+   *  wonder whether it was asked for. `requirements` carries the
+   *  satisfied ones for exactly this reason. */
+  const has = (key: string) =>
+    (requirements?.requirements ?? []).some((r) => r.key === key);
+  const showAssignee = has("assignee");
+  const showSchedule = has("schedule");
   const needsSchedule = unmet.includes("schedule");
   /**
    * W14 §4 — THE MOVE IS AN OVERRIDE AND THE SERVER WILL WANT A REASON.
@@ -147,7 +174,11 @@ export function TicketTransitionModal({
 
   function confirm() {
     const answers: TransitionAnswers = { note: note.trim() };
-    if (needsAssignee && picked.length > 0) answers.assigned_staff_ids = picked;
+    // Send the selection whenever the block was SHOWN and the
+    // operator changed it, not only when the requirement was unmet:
+    // editing a carried-over crew is the R2 affordance, and a change
+    // the modal accepted but did not post would be a lie.
+    if (showAssignee && picked.length > 0) answers.assigned_staff_ids = picked;
     if (needsReason && reason.trim() !== "") {
       answers.override_reason = reason.trim();
     }
@@ -155,7 +186,7 @@ export function TicketTransitionModal({
       answers.override_reason = reason.trim();
       answers.is_override = true;
     }
-    if (needsSchedule && startsAt !== "") {
+    if (showSchedule && startsAt !== "") {
       // <input type="datetime-local"> has no zone; the browser's own
       // offset is the operator's intent, so build the instant locally
       // and send ISO. Sending the naive string would be read as UTC by
@@ -230,7 +261,7 @@ export function TicketTransitionModal({
               </div>
             )}
 
-            {needsAssignee && (
+            {showAssignee && (
               <div className="transition-field" data-testid="transition-field-assignee">
                 <span className="field-label" id="transition-who-label">
                   {t("transition.who_label")}
@@ -269,7 +300,7 @@ export function TicketTransitionModal({
               </div>
             )}
 
-            {needsSchedule && (
+            {showSchedule && (
               <div className="transition-field" data-testid="transition-field-schedule">
                 <label className="field-label" htmlFor="transition-starts-at">
                   {t("transition.when_label")}
