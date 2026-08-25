@@ -85,6 +85,16 @@ export function WorkPlanDayColumn({
         <div className="wp-day-head" data-testid="agenda-group-heading">
           <span className="wp-day-name">{weekday}</span>
           <span className="wp-day-number">{dayNumber}</span>
+          {/* Today the only caller omits `onOpen` exactly when the count
+              is 0, so this never renders — but the count is a property
+              of the COLUMN, not of whether it has a door, and a future
+              caller that passes work without a handler should not
+              silently lose it. */}
+          {count > 0 && (
+            <span className="wp-day-count">
+              {t("agenda.day_count", { count })}
+            </span>
+          )}
         </div>
       )}
       <div className="wp-day-body">
