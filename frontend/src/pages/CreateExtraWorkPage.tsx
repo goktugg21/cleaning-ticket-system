@@ -12,7 +12,7 @@
 // View-first compliance: the form itself is the "Create" surface
 // (an add page is intentionally a form). After submission the
 // result panel is read-only.
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
@@ -294,22 +294,36 @@ interface AgreedTotals {
   unpricedCount: number;
 }
 
-// DISPLAY-ONLY cosmetic arithmetic over the backend-provided agreed
-// prices. NOT business logic: it never decides routing/intent and never
-// touches non-agreed lines (those carry no price and are shown as
-// "to be priced by the provider"). If the preview endpoint later
-// returns server-computed totals, switch to those.
 /**
- * Sprint 137 item 6 — the unit price + VAT a preview line is KNOWN to
+ * W-EW3 §3 — WHAT ONE LINE IS WORTH.
+ *
+ * Every money figure below comes from the server. Two server channels
+ * can supply it and they never disagree, because they are the same
+ * rows read through two endpoints:
+ *
+ *   1. the preview (`POST /api/extra-work/preview/`), which prices the
+ *      cart AS IT STANDS, on the cart's date, and is the authority;
+ *   2. the customer's own price list (`GET /customers/<id>/pricing/`
+ *      and the custom-price list), which the combobox already renders
+ *      "€31.48 / Hours" from before any line exists.
+ *
+ * `price_source` is never inferred here — (1) states it, and (2) is by
+ * construction the customer's agreed / custom price, which is what the
+ * pill says.
+ */
+interface LineMoney {
+  unit: number;
+  vatPct: number;
+  source: ExtraWorkPreviewPriceSource;
+}
+
+/**
+ * Sprint 137 item 6 — the unit price + VAT a PREVIEW line is KNOWN to
  * carry, from whichever backend-provided channel supplied it:
  * `agreed_*` on an AGREED_CUSTOMER_PRICE line, `custom_price_*` on a
- * line ordered from a CustomerCustomPrice. Still zero client-side
- * inference — both numbers come from the backend, and `price_source`
- * is never second-guessed here.
+ * line ordered from a CustomerCustomPrice.
  */
-function knownLinePrice(
-  line: ExtraWorkPreviewLine,
-): { unit: number; vatPct: number } | null {
+function previewLineMoney(line: ExtraWorkPreviewLine): LineMoney | null {
   const rawUnit =
     line.price_source === "AGREED_CUSTOMER_PRICE"
       ? line.agreed_unit_price
@@ -324,28 +338,72 @@ function knownLinePrice(
       ? line.agreed_vat_pct
       : line.custom_price_vat_pct;
   const vatPct = rawVat !== null ? Number(rawVat) : 0;
-  return { unit, vatPct: Number.isFinite(vatPct) ? vatPct : 0 };
+  return {
+    unit,
+    vatPct: Number.isFinite(vatPct) ? vatPct : 0,
+    source: line.price_source,
+  };
 }
 
-function computeAgreedTotals(lines: ExtraWorkPreviewLine[]): AgreedTotals {
-  let subtotal = 0;
-  let vat = 0;
-  let agreedCount = 0;
-  let unpricedCount = 0;
-  for (const line of lines) {
-    const qty = Number(line.quantity);
-    const known = knownLinePrice(line);
-    const unit = known ? known.unit : null;
-    if (known !== null && unit !== null && Number.isFinite(qty)) {
-      const lineSubtotal = qty * unit;
-      subtotal += lineSubtotal;
-      vat += lineSubtotal * (known.vatPct / 100);
-      agreedCount += 1;
-    } else {
-      unpricedCount += 1;
-    }
-  }
-  return { subtotal, vat, total: subtotal + vat, agreedCount, unpricedCount };
+/**
+ * W-EW3 §3 — the priced line amounts, rounded to the cent EXACTLY as
+ * the row renders them.
+ *
+ * The totals row underneath sums these same numbers, so the sum can
+ * never disagree with the numbers above it by a rounding tail. That
+ * was the second half of "the money on this page contradicts itself".
+ *
+ * `null` when the quantity is not a usable number — an amount needs a
+ * quantity, and a line being edited has none. That is NOT the same
+ * answer as "the provider has to price this", and §3 turns on the
+ * difference.
+ */
+function lineAmounts(
+  money: LineMoney,
+  quantity: string,
+): { subtotal: number; vat: number; total: number } | null {
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty)) return null;
+  const cents = (n: number) => Math.round(n * 100) / 100;
+  const subtotal = cents(qty * money.unit);
+  const vat = cents(subtotal * (money.vatPct / 100));
+  return { subtotal, vat, total: cents(subtotal + vat) };
+}
+
+/**
+ * W-EW3 §5 — ONE ARROW PRESS IS TEN.
+ *
+ * The element itself carries `step="any"`, so it never constrains what
+ * can be typed: with `step="10"` a typed 3 is a step MISMATCH and the
+ * browser refuses to submit the whole form. Typing any value stays
+ * allowed — half an hour is a real quantity — so the ten lives here
+ * instead of in an attribute.
+ *
+ * A stepper action (the spin buttons, ArrowUp/ArrowDown, the wheel)
+ * reaches `onChange` as a PLAIN Event with the value already moved by
+ * exactly one; typing reaches it as an `InputEvent`. That is the whole
+ * discriminator, and it FAILS SAFE: anything that does not read as a
+ * one-unit step is stored exactly as it arrived, so the worst a browser
+ * that behaves differently can do is step by one, which is what this
+ * field did before.
+ */
+const QUANTITY_STEP = 10;
+
+function quantityFromChange(
+  event: ChangeEvent<HTMLInputElement>,
+  previous: string,
+): string {
+  const raw = event.target.value;
+  if (event.nativeEvent instanceof InputEvent) return raw;
+  const next = Number(raw);
+  if (!Number.isFinite(next)) return raw;
+  const parsedPrevious = Number(previous);
+  const from = Number.isFinite(parsedPrevious) ? parsedPrevious : 0;
+  const delta = next - from;
+  // Float tolerance: stepping 0.1 up lands on 1.0999999999999999.
+  if (Math.abs(Math.abs(delta) - 1) > 1e-9) return raw;
+  const stepped = from + Math.sign(delta) * QUANTITY_STEP;
+  return String(Number((stepped < 0 ? 0 : stepped).toFixed(2)));
 }
 
 // True when a create rejection is an intent rejection. The backend
@@ -513,11 +571,6 @@ export function CreateExtraWorkPage({
   // done. Off by default: asking for proof is a decision.
   const [requirePhoto, setRequirePhoto] = useState(false);
   const [requireNote, setRequireNote] = useState(false);
-  // Search filter for the agreed-prices dropdown (scales to long
-  // contract lists — the list scrolls and filters rather than dumping
-  // every row inline).
-  const [priceSearch, setPriceSearch] = useState("");
-
   // Sprint 137 item 5 — REAL service-catalog category filter over the
   // cart's service pickers. Note this is a different axis from the
   // `category` field on the request itself (`ExtraWorkCategory`, the
@@ -542,12 +595,19 @@ export function CreateExtraWorkPage({
     rows: CustomerPriceFolder[];
   } | null>(null);
   /**
-   * W-EW2 §1 — THE ONE CONTROL THAT ADDS A LINE.
+   * W-EW2 §1 / W-EW3 §2 — THE CONTROL THAT ADDS A LINE.
    *
-   * `addQuery` is what is typed in the combobox that sits as the last
-   * row of the pricing table. It filters the customer's agreed-price
-   * services live, and when it matches nothing it becomes the text of
-   * a custom line.
+   * `addRowOpen` is whether the pending line EXISTS. W-EW3 §2: no
+   * permanently-visible empty row waits at the bottom of the table any
+   * more. "Add service line", next to the Pricing preview title, puts
+   * one there; finishing the search turns it into a real line and takes
+   * it away again. A line exists because somebody added it — by the
+   * button, or by finishing a search — and at no other time.
+   *
+   * `addQuery` is what is typed in that pending line's service cell.
+   * The typed-search behaviour is UNCHANGED: it filters the customer's
+   * agreed-price services live, and when it matches nothing it becomes
+   * the text of a custom line.
    *
    * `addOpen` is whether the popover is showing. It is a popover
    * ATTACHED to the input, not a block under the table: the block was
@@ -558,6 +618,7 @@ export function CreateExtraWorkPage({
    * row count, so a shrinking result list can never leave it pointing
    * past the end.
    */
+  const [addRowOpen, setAddRowOpen] = useState(false);
   const [addQuery, setAddQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [addHighlight, setAddHighlight] = useState(0);
@@ -1059,12 +1120,6 @@ export function CreateExtraWorkPage({
     return key ? t(key) : err.detail;
   };
 
-  // DISPLAY-ONLY cart total over the agreed-price lines (see
-  // computeAgreedTotals). Recomputed each render; trivially cheap.
-  const previewTotals = previewData
-    ? computeAgreedTotals(previewData.lines)
-    : null;
-
   // M3 — mode-derived intent view-state.
   // Standard page: the picker renders the FILTERED set (REQUEST_QUOTE
   // removed); when the backend would ONLY allow REQUEST_QUOTE, nothing
@@ -1096,10 +1151,23 @@ export function CreateExtraWorkPage({
     () => new Map(services.map((svc) => [svc.id, svc])),
     [services],
   );
-  const pricesLoading =
-    !!form.customer &&
-    (customerPrices === null ||
-      customerPrices.customerId !== Number(form.customer));
+  /**
+   * W-EW3 §3 — THE DATE THE CART IS PRICED ON.
+   *
+   * `ExtraWorkPreviewSerializer.validate` resolves every agreed price
+   * `on=` the cart's preferred date, falling back to today when the
+   * field is empty. This page has to use the SAME day or it promises
+   * prices the server then refuses.
+   *
+   * It used to filter on today unconditionally, and that was a real
+   * way to make money disappear: ask for work on a day outside a
+   * price's validity window and the combobox still offered
+   * "€31.48 / Hours", you picked it, and the table answered
+   * "Needs provider pricing — to be priced by the provider". The
+   * screen contradicted itself and said nothing about the date that
+   * caused it.
+   */
+  const cartDate = form.preferred_date || todayISO();
   const agreedPrices = useMemo(() => {
     if (
       customerPrices === null ||
@@ -1108,16 +1176,15 @@ export function CreateExtraWorkPage({
     ) {
       return [] as CustomerServicePrice[];
     }
-    const today = todayISO();
     return customerPrices.rows
       .filter(
         (p) =>
           p.is_active &&
-          p.valid_from <= today &&
-          (p.valid_to === null || p.valid_to >= today),
+          p.valid_from <= cartDate &&
+          (p.valid_to === null || p.valid_to >= cartDate),
       )
       .sort((a, b) => a.service_name.localeCompare(b.service_name));
-  }, [customerPrices, form.customer]);
+  }, [customerPrices, form.customer, cartDate]);
   // Sprint 137 item 6 — the custom prices that are orderable RIGHT NOW:
   // active and inside their validity window, exactly the rule the
   // backend re-enforces in `_validate_custom_price_orderable`. Offering
@@ -1130,16 +1197,19 @@ export function CreateExtraWorkPage({
     ) {
       return [] as CustomerCustomPrice[];
     }
-    const today = todayISO();
+    // W-EW3 §3 — the CART's date, for the same reason `agreedPrices`
+    // uses it: `_validate_custom_price_orderable` is re-run server-side
+    // against the cart date, so offering a row that is out of window on
+    // that day only produces a 400 on submit.
     return customCustomPrices.rows
       .filter(
         (p) =>
           p.is_active &&
-          p.valid_from <= today &&
-          (p.valid_to === null || p.valid_to >= today),
+          p.valid_from <= cartDate &&
+          (p.valid_to === null || p.valid_to >= cartDate),
       )
       .sort((a, b) => a.custom_name.localeCompare(b.custom_name));
-  }, [customCustomPrices, form.customer]);
+  }, [customCustomPrices, form.customer, cartDate]);
 
   // The unit a custom price is quoted in — its operator-supplied label
   // for OTHER, the translated unit type otherwise. Mirrors
@@ -1151,15 +1221,151 @@ export function CreateExtraWorkPage({
     return t(UNIT_TYPE_I18N_KEY[price.unit_type]);
   };
 
-  // Owner request: surface each service's AGREED/contract price inline in
-  // the cart's service-select option label. Built from the SAME currently-
-  // valid agreed rows the browse panel shows (active + in-window for the
-  // selected customer). Empty when no customer is selected or prices are
-  // still loading, so the select falls back to plain service names.
-  const agreedPriceByServiceId = useMemo(
-    () => new Map(agreedPrices.map((p) => [p.service, p])),
-    [agreedPrices],
-  );
+  /**
+   * Each service's ONE current agreed price, keyed by service id. Used
+   * for the picker's " — €31.48 / Hours" suffix and, since W-EW3 §3,
+   * for a line's money while the preview has no row for it.
+   *
+   * W-EW3 §3 — WHICH ROW, when a service has more than one.
+   *
+   * `extra_work/pricing.py::resolve_price` picks the row with the
+   * LATEST `valid_from` that is still on or before the date, breaking
+   * ties by the highest id ("the latest contract is the current
+   * contract"). Overlapping active rows are ordinary — that is how a
+   * price rise is entered — and this map used to be built by
+   * `new Map(rows.map(...))`, which silently keeps whichever row came
+   * LAST in a list sorted by service NAME. So the page could quote one
+   * contract while the server priced the line at another.
+   *
+   * It never showed while this map only fed a picker label, because
+   * nobody adds up a dropdown. It would show now. Same rule as the
+   * resolver, stated in the same words.
+   */
+  const agreedPriceByServiceId = useMemo(() => {
+    const map = new Map<number, CustomerServicePrice>();
+    for (const price of agreedPrices) {
+      const current = map.get(price.service);
+      if (
+        !current ||
+        price.valid_from > current.valid_from ||
+        (price.valid_from === current.valid_from && price.id > current.id)
+      ) {
+        map.set(price.service, price);
+      }
+    }
+    return map;
+  }, [agreedPrices]);
+
+  /**
+   * W-EW3 §3 — PRICES NEVER VANISH.
+   *
+   * THE LAW: a line with an agreed price shows its unit price, its VAT
+   * and its line total ALWAYS — whatever else is in the cart, in any
+   * order. Only a genuinely unpriced line reads "to be priced by the
+   * provider".
+   *
+   * The render used to read the money from ONE place, the live preview
+   * row for this line, and print "—" the moment there wasn't one. There
+   * are two ordinary ways to not have one, and both were reachable in
+   * three keystrokes:
+   *
+   *   * the line is not IN the request. `isPreviewableLine` drops a line
+   *     whose quantity is blank or zero, so clearing "1" to type "10"
+   *     took that line's unit price and VAT down with it — two numbers
+   *     that do not depend on the quantity at all, and printed "to be
+   *     priced by the provider" over a line the customer has an
+   *     agreement for. W-EW2 stopped an unfinished row from blanking
+   *     its NEIGHBOURS; it did not stop it blanking ITSELF.
+   *   * the answer is in flight. Every keystroke in a quantity field
+   *     rebuilds `previewKey`, and `previewData` is null until the
+   *     debounced fetch lands — so the whole table's money blinked out
+   *     and back on every edit.
+   *
+   * So the money resolves in priority order, and the first hit wins:
+   *
+   *   1. THE PREVIEW ROW for this line. It prices the cart as it stands
+   *      on the cart's date and it is the authority — when it says
+   *      NEEDS_PROVIDER_PRICING (an agreed price exists, but not on the
+   *      day the work is asked for) that IS the answer, and nothing
+   *      below is allowed to argue with it.
+   *   2. THE CUSTOMER'S OWN AGREED PRICE for this line's service, on the
+   *      cart's date — the exact row the combobox already renders
+   *      "€31.48 / Hours" from. If the picker may promise it, the table
+   *      may show it.
+   *   3. THE ORDERED CUSTOM PRICE, same rule, from the same customer's
+   *      custom-price list.
+   *
+   * Still zero client-side inference: every number is the server's, and
+   * `price_source` is never guessed — (1) states it, and (2)/(3) ARE by
+   * construction the customer's agreed / custom price.
+   */
+  const lineMoneyFor = (line: CartLineState): LineMoney | null => {
+    const priced = previewByTempId.get(line.tempId) ?? null;
+    if (priced) return previewLineMoney(priced);
+    const customPriceId = parseCustomPriceId(line.serviceId);
+    if (customPriceId !== null) {
+      const price = orderableCustomPrices.find((p) => p.id === customPriceId);
+      return price
+        ? {
+            unit: Number(price.unit_price),
+            vatPct: Number(price.vat_pct),
+            source: "AD_HOC",
+          }
+        : null;
+    }
+    if (line.serviceId === CUSTOM_SERVICE_VALUE || !line.serviceId) return null;
+    const agreed = agreedPriceByServiceId.get(Number(line.serviceId));
+    return agreed
+      ? {
+          unit: Number(agreed.unit_price),
+          vatPct: Number(agreed.vat_pct),
+          source: "AGREED_CUSTOMER_PRICE",
+        }
+      : null;
+  };
+
+  /**
+   * W-EW3 §4 — the sums under the lines.
+   *
+   * Subtotal / VAT / Total of the PRICED lines, added up from the very
+   * numbers each row renders (`lineAmounts`, cent-rounded per line), so
+   * the total can never disagree with the column above it. Custom and
+   * unpriced lines are simply not in the sums — and neither is a line
+   * whose quantity is momentarily blank, because there is nothing to
+   * multiply yet.
+   */
+  const previewTotals: AgreedTotals = (() => {
+    let subtotal = 0;
+    let vat = 0;
+    let agreedCount = 0;
+    let unpricedCount = 0;
+    for (const line of cartLines) {
+      const money = lineMoneyFor(line);
+      const amounts = money ? lineAmounts(money, line.quantity) : null;
+      if (money && amounts) {
+        subtotal += amounts.subtotal;
+        vat += amounts.vat;
+        agreedCount += 1;
+      } else if (!money) {
+        unpricedCount += 1;
+      }
+    }
+    // Adding cent-exact amounts in binary floats leaves dust
+    // (38.09 + 57.14 = 95.22999999999999), and three numbers rendered
+    // from three different piles of dust can disagree by a cent on
+    // screen. Settle each pile once, here, so Subtotal + VAT is the
+    // Total the reader can add up themselves.
+    const cents = (n: number) => Math.round(n * 100) / 100;
+    const settledSubtotal = cents(subtotal);
+    const settledVat = cents(vat);
+    return {
+      subtotal: settledSubtotal,
+      vat: settledVat,
+      total: cents(settledSubtotal + settledVat),
+      agreedCount,
+      unpricedCount,
+    };
+  })();
 
   // Compose the " — €29,00 / m²" suffix for a service that has an agreed
   // price, reusing the existing money + unit-type formatting. Returns "" so
@@ -1198,24 +1404,6 @@ export function CreateExtraWorkPage({
     customerFolders && String(customerFolders.customerId) === form.customer
       ? customerFolders.rows.filter((f) => f.is_active)
       : [];
-
-  // Which service ids each folder holds a price row for. Contract rows
-  // only — a `CustomerCustomPrice` has no `service` FK by construction,
-  // so it cannot narrow a catalog picker.
-  const serviceIdsByFolder = useMemo(() => {
-    const map = new Map<number, Set<number>>();
-    const rows =
-      customerPrices && String(customerPrices.customerId) === form.customer
-        ? customerPrices.rows
-        : [];
-    for (const row of rows) {
-      if (row.folder === null) continue;
-      const bucket = map.get(row.folder);
-      if (bucket) bucket.add(row.service);
-      else map.set(row.folder, new Set([row.service]));
-    }
-    return map;
-  }, [customerPrices, form.customer]);
 
   // Sprint 147 — what a CUSTOMER may pick from.
   //
@@ -1305,50 +1493,6 @@ export function CreateExtraWorkPage({
         ? cartLines.some((l) => l.serviceId === customPriceValue(row.id))
         : false;
 
-  // Sprint 145 — the agreed-prices browse panel obeys the SAME category
-  // choice as the service pickers. Picking a category and still being
-  // shown every agreed price underneath it is the "the screen
-  // contradicts itself" defect this series keeps removing.
-  //
-  // Defined here, below `serviceIdsByFolder`, because it reads it: a
-  // `const` is in the temporal dead zone until its own initialiser
-  // runs, so this cannot live further up the component.
-  //
-  // Search still wins over the category filter, exactly as it does for
-  // the service pickers, so a price the operator types the name of is
-  // never hidden by a filter they forgot was on.
-  const filteredAgreedPrices = useMemo(() => {
-    const q = priceSearch.trim().toLowerCase();
-    if (q) {
-      return agreedPrices.filter((p) => {
-        const svc = serviceById.get(p.service);
-        const label = svc
-          ? `${svc.category_name} ${svc.name}`
-          : p.service_name;
-        return label.toLowerCase().includes(q);
-      });
-    }
-    if (!categoryFilter) return agreedPrices;
-    if (categoryFilter.startsWith("fol:")) {
-      const ids = serviceIdsByFolder.get(Number(categoryFilter.slice(4)));
-      if (!ids) return [];
-      return agreedPrices.filter((p) => ids.has(p.service));
-    }
-    if (categoryFilter.startsWith("cat:")) {
-      const id = Number(categoryFilter.slice(4));
-      return agreedPrices.filter(
-        (p) => serviceById.get(p.service)?.category === id,
-      );
-    }
-    return agreedPrices;
-  }, [
-    agreedPrices,
-    priceSearch,
-    serviceById,
-    categoryFilter,
-    serviceIdsByFolder,
-  ]);
-
   /**
    * True when a cart line orders a custom price that is NOT on the
    * currently-selected customer's orderable list — the customer was
@@ -1370,44 +1514,6 @@ export function CreateExtraWorkPage({
     setForm((current) => ({ ...current, [name]: value }));
   }
 
-  // Add a service picked from the agreed-prices dropdown into the cart:
-  // fill the first empty line if there is one, otherwise append a new
-  // line. No-op when the service is already in the cart (the cart
-  // rejects duplicate services on submit).
-  function addServiceFromContract(serviceId: number) {
-    setCartLines((current) => {
-      if (current.some((l) => Number(l.serviceId) === serviceId)) {
-        return current;
-      }
-      const emptyIdx = current.findIndex((l) => !l.serviceId);
-      if (emptyIdx >= 0) {
-        return current.map((l, i) =>
-          i === emptyIdx ? { ...l, serviceId: String(serviceId) } : l,
-        );
-      }
-      return [...current, { ...emptyCartLine(), serviceId: String(serviceId) }];
-    });
-  }
-
-  // Sprint 137 item 6 — mirror of addServiceFromContract for a custom
-  // price: fill the first empty line, else append. No-op when the price
-  // is already in the cart (submit rejects duplicates).
-  function addCustomPriceToCart(customPriceId: number) {
-    const value = customPriceValue(customPriceId);
-    setCartLines((current) => {
-      if (current.some((l) => l.serviceId === value)) {
-        return current;
-      }
-      const emptyIdx = current.findIndex((l) => !l.serviceId);
-      if (emptyIdx >= 0) {
-        return current.map((l, i) =>
-          i === emptyIdx ? { ...l, serviceId: value } : l,
-        );
-      }
-      return [...current, { ...emptyCartLine(), serviceId: value }];
-    });
-  }
-
   /**
    * W-EW2 §1 — COMMITTING THE COMBOBOX.
    *
@@ -1423,6 +1529,10 @@ export function CreateExtraWorkPage({
     setAddQuery("");
     setAddHighlight(0);
     setAddOpen(false);
+    // W-EW3 §2 — the pending line is spent: it became a real line.
+    // Leaving it open would put the empty row back at the bottom of
+    // the table, which is the thing being removed.
+    setAddRowOpen(false);
   }
 
   function addServiceLine(serviceId: number) {
@@ -2510,215 +2620,6 @@ export function CreateExtraWorkPage({
             </div>
           </div>
 
-          {/* ----- Agreed prices (browse) -----
-
-              W-EW1 §3 — what is LEFT of the old Cart section. The two
-              service pickers that used to live here (Search Services and
-              the Service Line Items rows) are gone: the pricing preview
-              below is now the one place a line is added, swapped, or
-              edited.
-
-              This card stays because it is the only place a
-              `CustomerCustomPrice` is BROWSABLE with its amount before it
-              is ordered — those rows have no `service` FK, so they appear
-              in no catalog list anywhere in the app — and because it
-              answers "which of my services already have an agreed price,
-              and what is it?" before any line exists to preview. The
-              preview shows the price of a line you already added; this
-              shows the price of one you have not. */}
-          <div className="form-section" data-testid="extra-work-create-cart">
-            {/* Sprint 5 — agreed contract prices shown UPFRONT so the
-                customer knows which services have a pre-agreed price (and
-                what it is) before adding any line. Sourced from
-                GET /customers/<id>/pricing/ (customer-readable; backend
-                returns only the customer's OWN currently-valid rows for
-                customer-side actors). Provider rows are narrowed to
-                active + in-window here for a consistent "current" view. */}
-            {form.customer && (
-              <details
-                className="ew-agreed-prices"
-                data-testid="extra-work-create-agreed-prices"
-                open
-              >
-                <summary className="ew-agreed-prices-summary">
-                  <span className="form-section-title" style={{ margin: 0 }}>
-                    {t("create.prices.section_title")}
-                  </span>
-                  {!pricesLoading && agreedPrices.length > 0 && (
-                    <span className="muted small">({agreedPrices.length})</span>
-                  )}
-                </summary>
-                <div className="ew-agreed-prices-body">
-                  {pricesLoading ? (
-                    <div className="muted small">
-                      {t("create.prices.loading")}
-                    </div>
-                  ) : agreedPrices.length === 0 ? (
-                    <div
-                      className="muted small"
-                      data-testid="extra-work-create-agreed-prices-empty"
-                    >
-                      {t(
-                        isCustomerActor
-                          ? "create.prices.empty_customer"
-                          : "create.prices.empty",
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      <input
-                        type="text"
-                        className="field-input"
-                        data-testid="extra-work-create-agreed-prices-search"
-                        placeholder={t("create.prices.search_placeholder")}
-                        value={priceSearch}
-                        onChange={(event) => setPriceSearch(event.target.value)}
-                      />
-                      <div
-                        className="ew-agreed-prices-list"
-                        data-testid="extra-work-create-agreed-prices-list"
-                      >
-                        {filteredAgreedPrices.length === 0 ? (
-                          <div
-                            className="muted small"
-                            style={{ padding: "8px 10px" }}
-                          >
-                            {t("create.prices.no_match")}
-                          </div>
-                        ) : (
-                          filteredAgreedPrices.map((p) => {
-                            const svc = serviceById.get(p.service);
-                            const label = svc
-                              ? svc.category_name
-                                ? `${svc.category_name} — ${svc.name}`
-                                : svc.name
-                              : p.service_name;
-                            const unitLabel = svc
-                              ? t(UNIT_TYPE_I18N_KEY[svc.unit_type])
-                              : "";
-                            const inCart = cartLines.some(
-                              (l) => Number(l.serviceId) === p.service,
-                            );
-                            return (
-                              <button
-                                type="button"
-                                key={p.id}
-                                className="ew-agreed-price-item"
-                                data-testid="extra-work-create-agreed-price-item"
-                                data-in-cart={inCart ? "true" : "false"}
-                                disabled={inCart}
-                                onClick={() => addServiceFromContract(p.service)}
-                              >
-                                <span className="ew-agreed-price-item-label">
-                                  {label}
-                                  {unitLabel && (
-                                    <span className="muted small">
-                                      {" · "}
-                                      {unitLabel}
-                                    </span>
-                                  )}
-                                </span>
-                                <span className="ew-agreed-price-item-price">
-                                  {formatMoney(p.unit_price)}
-                                  <span className="muted small">
-                                    {" · "}
-                                    {formatNumber(p.vat_pct, {
-                                      maximumFractionDigits: 2,
-                                    })}
-                                    %
-                                  </span>
-                                  {inCart && (
-                                    <Check
-                                      size={14}
-                                      strokeWidth={2.5}
-                                      aria-hidden
-                                      style={{ marginLeft: 6 }}
-                                    />
-                                  )}
-                                </span>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </>
-                  )}
-                  {/* Sprint 137 item 6 — the customer's custom price
-                      lines, in the SAME browse panel as the contract
-                      prices. This panel is where the owner looked for
-                      the work types he had priced; before item 6 they
-                      were not here (nor anywhere else in this form)
-                      because a CustomerCustomPrice has no service FK
-                      and so could never be ordered at all. */}
-                  {orderableCustomPrices.length > 0 && (
-                    <div style={{ marginTop: 14 }}>
-                      <div
-                        className="form-section-title"
-                        style={{ margin: "0 0 6px" }}
-                      >
-                        {t("create.prices.custom_section_title")}
-                      </div>
-                      <div
-                        className="ew-agreed-prices-list"
-                        data-testid="extra-work-create-custom-prices-list"
-                      >
-                        {orderableCustomPrices.map((price) => {
-                          const inCart = cartLines.some(
-                            (l) => parseCustomPriceId(l.serviceId) === price.id,
-                          );
-                          return (
-                            <button
-                              type="button"
-                              key={price.id}
-                              className="ew-agreed-price-item"
-                              data-testid="extra-work-create-custom-price-item"
-                              data-in-cart={inCart ? "true" : "false"}
-                              disabled={inCart}
-                              onClick={() => addCustomPriceToCart(price.id)}
-                            >
-                              <span className="ew-agreed-price-item-label">
-                                {price.custom_name}
-                                <span className="muted small">
-                                  {" · "}
-                                  {customPriceUnitLabel(price)}
-                                </span>
-                              </span>
-                              <span className="ew-agreed-price-item-price">
-                                {formatMoney(price.unit_price)}
-                                <span className="muted small">
-                                  {" · "}
-                                  {formatNumber(price.vat_pct, {
-                                    maximumFractionDigits: 2,
-                                  })}
-                                  %
-                                </span>
-                                {inCart && (
-                                  <Check
-                                    size={14}
-                                    strokeWidth={2.5}
-                                    aria-hidden
-                                    style={{ marginLeft: 6 }}
-                                  />
-                                )}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="muted small" style={{ marginTop: 6 }}>
-                        {t("create.prices.custom_helper")}
-                      </div>
-                    </div>
-                  )}
-                  <div className="muted small" style={{ marginTop: 8 }}>
-                    {t("create.prices.helper")}
-                  </div>
-                </div>
-              </details>
-            )}
-
-          </div>
-
           {/* ----- The pricing preview IS the service-line interface -----
 
               W-EW1 §3. Until now this table was a read-only projection
@@ -2740,15 +2641,41 @@ export function CreateExtraWorkPage({
             className="form-section"
             data-testid="extra-work-create-preview"
           >
-            {/* W-EW2 §1 — the header carries the title and NOTHING
-                else. The "Add service line" button that used to sit
-                here appended a blank row and unfolded a search block
-                under the table; the one control that adds a line is
-                now the combobox in the table's own last row. */}
-            <div className="ew-preview-head">
+            {/* W-EW3 §2 — "Add service line" is back, sitting
+                immediately right of the title. `.ew-preview-head` is
+                `space-between`, which would fling it to the far edge of
+                the section, so the alignment is overridden here — next
+                to the words it belongs to.
+
+                What it appends is NOT the blank row of old. It opens
+                ONE pending line whose service cell is the combobox
+                search below; finishing that search is what puts a real,
+                already-complete line in the cart. */}
+            <div
+              className="ew-preview-head"
+              style={{ justifyContent: "flex-start" }}
+            >
               <div className="form-section-title" style={{ margin: 0 }}>
                 {t("create.preview.section_title")}
               </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                data-testid="extra-work-create-add-line"
+                aria-expanded={addRowOpen}
+                aria-controls="ew-add-row"
+                onClick={() => {
+                  setAddRowOpen(true);
+                  setAddQuery("");
+                  setAddHighlight(0);
+                  setAddOpen(true);
+                }}
+              >
+                <Plus size={14} strokeWidth={2.2} />
+                <span style={{ marginLeft: 6 }}>
+                  {t("create.add_line_button")}
+                </span>
+              </button>
             </div>
 
             {previewErrorMsg && (
@@ -2787,19 +2714,29 @@ export function CreateExtraWorkPage({
                     </tr>
                   )}
                   {cartLines.map((line, index) => {
-                    // W-EW2 §3 — the server's row for THIS cart line,
-                    // matched by identity (see `previewByTempId`).
-                    // `null` while a fetch is in flight, or for a row
-                    // that is not finished enough to price — and now
-                    // ONLY for that row: an unfinished neighbour no
-                    // longer takes this row's price down with it.
-                    const priced = previewByTempId.get(line.tempId) ?? null;
-                    const known = priced ? knownLinePrice(priced) : null;
-                    const qty = Number(line.quantity);
-                    const lineTotal =
-                      known && Number.isFinite(qty)
-                        ? qty * known.unit * (1 + known.vatPct / 100)
-                        : null;
+                    /* W-EW3 §3 — this line's money, resolved by
+                       `lineMoneyFor`: the live preview row when there
+                       is one, and otherwise the customer's own agreed
+                       (or ordered custom) price for the cart's date.
+                       A line with an agreed price therefore keeps its
+                       unit price and VAT through a quantity edit and
+                       through every debounce, and loses them only when
+                       the SERVER says the line needs pricing. */
+                    const money = lineMoneyFor(line);
+                    const amounts = money
+                      ? lineAmounts(money, line.quantity)
+                      : null;
+                    /* The PILL is not the money. When the server has
+                       answered for this line its answer is the label —
+                       including "needs provider pricing", which carries
+                       no amount and must still say so rather than
+                       falling back to a dash. Only a line the server
+                       has not answered for yet borrows its label from
+                       the price the money came from. */
+                    const priceSource =
+                      previewByTempId.get(line.tempId)?.price_source ??
+                      money?.source ??
+                      null;
                     const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
                     const customPriceId = parseCustomPriceId(line.serviceId);
                     const stale = staleCustomPriceLine(line);
@@ -2807,7 +2744,7 @@ export function CreateExtraWorkPage({
                       <Fragment key={line.tempId}>
                         <tr
                           data-testid="extra-work-create-preview-row"
-                          data-price-source={priced?.price_source ?? ""}
+                          data-price-source={priceSource ?? ""}
                         >
                           <td>
                             {/* W-EW2 §1 — the service cell STATES the
@@ -2887,12 +2824,12 @@ export function CreateExtraWorkPage({
                             />
                           </td>
                           <td>
-                            {priced ? (
+                            {priceSource ? (
                               <span
-                                className={`invoice-line-row-source-tag invoice-line-row-source-${PREVIEW_SOURCE_TAG[priced.price_source]}`}
+                                className={`invoice-line-row-source-tag invoice-line-row-source-${PREVIEW_SOURCE_TAG[priceSource]}`}
                                 data-testid="extra-work-create-preview-source"
                               >
-                                {t(PREVIEW_SOURCE_KEY[priced.price_source])}
+                                {t(PREVIEW_SOURCE_KEY[priceSource])}
                               </span>
                             ) : (
                               <span className="muted small">—</span>
@@ -2905,39 +2842,52 @@ export function CreateExtraWorkPage({
                               className="field-input ew-line-qty-input"
                               aria-label={t("create.line_field_quantity")}
                               type="number"
-                              /* W-EW1 §3 — one arrow press is one whole
-                                 unit. Typing a decimal is still allowed:
-                                 `step` constrains the STEPPER, and the
-                                 field carries no HTML validation that
-                                 would reject 1.5, because half an hour
-                                 is a real quantity. */
-                              step="1"
+                              /* W-EW3 §5 — the arrows move by TEN, and
+                                 `quantityFromChange` is where the ten
+                                 lives. `step` stays "any" on purpose:
+                                 with step="10" the browser marks 3 as a
+                                 step mismatch and then refuses to submit
+                                 the WHOLE form, which would take away
+                                 typing a value — and typing any value
+                                 stays allowed, because half an hour is a
+                                 real quantity. */
+                              step="any"
                               min="0"
                               value={line.quantity}
                               onChange={(event) =>
                                 updateCartLine(
                                   line.tempId,
                                   "quantity",
-                                  event.target.value,
+                                  quantityFromChange(event, line.quantity),
                                 )
                               }
                               required
                             />
                           </td>
-                          {/* Unit price and VAT are the AGREEMENT's
-                              numbers, resolved server-side. They are
-                              rendered, never typed — see §3. */}
-                          <td>{known ? formatMoney(known.unit) : "—"}</td>
+                          {/* W-EW3 §3 — the AGREEMENT's numbers.
+                              Server-supplied, rendered, never typed, and
+                              never dropped because a neighbour is
+                              unfinished, this line's own quantity is
+                              mid-edit, or a preview is in flight. */}
+                          <td>{money ? formatMoney(money.unit) : "—"}</td>
                           <td>
-                            {known
-                              ? `${formatNumber(known.vatPct, {
+                            {money
+                              ? `${formatNumber(money.vatPct, {
                                   maximumFractionDigits: 2,
                                 })}%`
                               : "—"}
                           </td>
                           <td>
-                            {known ? (
-                              formatMoney(lineTotal)
+                            {/* Three different answers, and the middle
+                                one is the one this sprint is about: an
+                                agreed line with no usable quantity has
+                                no TOTAL yet, but it is not a line "the
+                                provider has to price". Saying so was the
+                                lie. */}
+                            {amounts ? (
+                              formatMoney(amounts.total)
+                            ) : money ? (
+                              <span className="muted small">—</span>
                             ) : (
                               <span className="muted small">
                                 {t("create.preview.to_be_priced")}
@@ -2963,11 +2913,13 @@ export function CreateExtraWorkPage({
               </table>
             </div>
 
-            {/* ----- W-EW2 §1 — THE ONE CONTROL -----
+            {/* ----- W-EW3 §2 — THE PENDING LINE -----
 
-                The table's add row. It sits flush under the last line,
-                reads as the next row of the table, and is the only way
-                this page puts a line in the cart.
+                The service cell of the line being added. It sits flush
+                under the last row, reads as the next row of the table,
+                and exists ONLY while a line is being added — "Add
+                service line" above opens it, committing a line closes
+                it. Nothing waits here empty.
 
                 It is OUTSIDE `.table-wrap` on purpose. That wrapper is
                 `overflow-x: auto`, and a CSS box with `overflow-x: auto`
@@ -2980,7 +2932,9 @@ export function CreateExtraWorkPage({
                 The list is BOUNDED (`BoundedList`): it renders a server
                 collection, and this customer may have hundreds of
                 agreed prices. */}
+            {addRowOpen && (
             <div
+              id="ew-add-row"
               className="ew-agreed-prices"
               style={{ position: "relative", marginTop: 0, marginBottom: 12 }}
               data-testid="extra-work-create-add-box"
@@ -2997,6 +2951,11 @@ export function CreateExtraWorkPage({
                   placeholder={t("create.add_box.placeholder")}
                   aria-label={t("create.add_box.placeholder")}
                   data-testid="extra-work-create-add-input"
+                  /* W-EW3 §2 — the input only exists while a line is
+                     being added, so the caret belongs in it: the
+                     button that opened this row was the act of asking
+                     to type here. */
+                  autoFocus
                   value={addQuery}
                   onFocus={() => setAddOpen(true)}
                   onChange={(event) => {
@@ -3012,7 +2971,16 @@ export function CreateExtraWorkPage({
                      `onMouseDown preventDefault` instead, so the input
                      never loses focus and this only runs on a real
                      move away. */
-                  onBlur={() => setAddOpen(false)}
+                  /* Blur closes the popover; an UNTYPED pending row
+                     closes with it. Leaving it behind would park the
+                     empty row at the bottom of the table that §2
+                     removes. A typed-but-uncommitted search survives —
+                     the click that blurred may well be the Add button
+                     next to it. */
+                  onBlur={() => {
+                    setAddOpen(false);
+                    if (!addQuery.trim()) setAddRowOpen(false);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "ArrowDown") {
                       event.preventDefault();
@@ -3032,7 +3000,9 @@ export function CreateExtraWorkPage({
                       event.preventDefault();
                       commitAddRow(addRows[addIndex]);
                     } else if (event.key === "Escape") {
-                      setAddOpen(false);
+                      // Escape is a cancel, and cancelling adding a
+                      // line takes the pending line away with it.
+                      resetAddBox();
                     }
                   }}
                 />
@@ -3084,8 +3054,21 @@ export function CreateExtraWorkPage({
                     ariaLabel={t("create.preview.picker_label")}
                     testIdPrefix="extra-work-create-add-list"
                     emptyState={
+                      /* W-EW3 §3 — an empty box has two meanings and
+                         they are not the same news. "No matching
+                         service" answers a search that found nothing;
+                         a customer with NO agreed prices at all gets a
+                         box that is empty no matter what they type,
+                         and saying "no match" there leaves them
+                         hunting for a list that does not exist. This
+                         is the screen the owner photographed on City
+                         Office Rotterdam: nothing to pick, so every
+                         line is a custom line, so no money anywhere. */
                       <div className="muted small" style={{ padding: 8 }}>
-                        {t("create.prices.no_match")}
+                        {agreedPriceByServiceId.size === 0 &&
+                        orderableCustomPrices.length === 0
+                          ? t("create.add_box.empty_no_agreed")
+                          : t("create.prices.no_match")}
                       </div>
                     }
                   >
@@ -3175,6 +3158,7 @@ export function CreateExtraWorkPage({
                 </div>
               )}
             </div>
+            )}
 
             {previewLoading && (
               <div
@@ -3187,7 +3171,15 @@ export function CreateExtraWorkPage({
               </div>
             )}
 
-            {previewData && previewTotals && (
+            {/* W-EW3 §4 — THE SUMS, under the lines.
+
+                Shown as soon as ONE line carries a price, not only once
+                a preview response happens to be in hand: the numbers
+                being added up are the numbers in the rows above, and a
+                row that is showing money must not sit above a totals
+                box that has vanished. A cart with nothing priced in it
+                has no sums to show and shows none. */}
+            {previewTotals.agreedCount > 0 && (
               <div
                 className="alert-info"
                 style={{ marginTop: 12 }}
