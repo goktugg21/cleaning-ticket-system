@@ -1,33 +1,46 @@
 /**
- * W5-B — pick the days and times a series runs on.
+ * W5-B / W-EW4 §1 — pick the days a series runs on.
  *
  * Each pick becomes ONE real Extra Work. That is stated on the screen,
  * next to the count, because "3 slots" and "3 separate jobs, each with
  * its own price and its own invoice line" are not the same thought and
  * the operator is about to create the second one.
  *
- * TWO WAYS IN, because the two real cases are different shapes:
- *   - ADD ONE — three slots on a handover day, each at its own time.
- *   - REPEAT WEEKLY — every Tuesday for eight weeks, one click.
- * Weekly repeat is the case the reference system's week/day grid exists
- * for, and it is the one that makes a fat-fingered range dangerous, so
- * the count and the ceiling are always on screen.
+ * W-EW4 §1 — WHAT THIS CONTROL DELIBERATELY NO LONGER DOES.
+ *
+ * It used to offer "Repeat weekly" over "Number of weeks", which is a
+ * schedule. A schedule that runs every week until somebody stops it is
+ * Recurring Work — a different feature, with its own page, its own
+ * template and its own generated executions. Having both meant one
+ * question ("this happens every week") had two answers on two screens
+ * that behave differently afterwards. The weekly repeat is gone; when
+ * enough days pile up to suggest a schedule, the list says so once and
+ * points at the page that actually models it.
+ *
+ * It also offered a "Moment" column — at / before / after handover.
+ * That concept was taken out of this product's UI months ago and
+ * reappeared here. The COLUMN on the model is untouched and still
+ * nullable; this control simply stops sending the field, which the
+ * batch endpoint already treats as a real answer (see
+ * `extra_work/views_groups.py::_SlotSerializer` — `required=False`,
+ * and `groups.create_batch` reads it with `slot.get("condition")`).
+ * A slot with no condition is not "at handover"; it is a slot nobody
+ * was asked about, and it now stays that way instead of being
+ * defaulted to AT_HANDOVER by a select nobody wanted.
  *
  * THE CEILING IS SHOWN, NOT JUST ENFORCED. The server refuses more than
  * `MAX_SLOTS` and that refusal is the rule; this control simply will
  * not let the operator build a list it knows will be rejected, and says
  * why while they are still choosing rather than after they submit.
  *
- * NO TIME AND NO CONDITION ARE REAL ANSWERS. Both fields may be left
- * blank and blank is sent as absent, not as midnight and not as "at
- * handover". The reference system collapses the second pair —
- * `match($entry['condition'] ?? 'at')` — so an unanswered slot is
- * indistinguishable from an explicit one forever after.
+ * NO TIME IS A REAL ANSWER. The time may be left blank and blank is
+ * sent as absent, not as midnight.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
-import type { ExtraWorkCondition, ExtraWorkSlot } from "../../api/types";
+import type { ExtraWorkSlot } from "../../api/types";
 import { BoundedList } from "../BoundedList";
 
 /** Mirrors `groups.MAX_BATCH_SLOTS`. The SERVER's value is the rule;
@@ -35,11 +48,10 @@ import { BoundedList } from "../BoundedList";
  *  refused. If they ever disagree the server wins and says so. */
 export const MAX_SLOTS = 60;
 
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+/** W-EW4 §1 — how many days it takes before "is this actually a
+ *  schedule?" is worth asking out loud. Four is the first count that
+ *  cannot be read as "a couple of visits this month". */
+const RECURRING_HINT_AT = 4;
 
 export function SlotPicker({
   slots,
@@ -52,23 +64,20 @@ export function SlotPicker({
 
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
-  const [condition, setCondition] = useState<"" | ExtraWorkCondition>(
-    "AT_HANDOVER",
-  );
-  const [repeats, setRepeats] = useState("8");
   const [error, setError] = useState("");
 
   function makeSlot(on: string): ExtraWorkSlot {
     const slot: ExtraWorkSlot = { date: on };
-    // OMITTED, not defaulted — see the header comment.
+    // OMITTED, not defaulted — see the header comment. `condition` is
+    // never set here at all any more.
     if (time !== "") slot.time = time;
-    if (condition !== "") slot.condition = condition;
     return slot;
   }
 
   function isDuplicate(candidate: ExtraWorkSlot, list: ExtraWorkSlot[]) {
     return list.some(
-      (s) => s.date === candidate.date && (s.time ?? "") === (candidate.time ?? ""),
+      (s) =>
+        s.date === candidate.date && (s.time ?? "") === (candidate.time ?? ""),
     );
   }
 
@@ -85,24 +94,6 @@ export function SlotPicker({
       return;
     }
     onChange([...slots, candidate]);
-  }
-
-  function addWeekly() {
-    setError("");
-    if (date === "") return;
-    const count = Number(repeats);
-    if (!Number.isFinite(count) || count < 1) return;
-    const next = [...slots];
-    for (let i = 0; i < count; i += 1) {
-      const candidate = makeSlot(addDays(date, i * 7));
-      if (isDuplicate(candidate, next)) continue;
-      if (next.length + 1 > MAX_SLOTS) {
-        setError(t("series.slot_limit", { limit: MAX_SLOTS }));
-        break;
-      }
-      next.push(candidate);
-    }
-    onChange(next);
   }
 
   const sorted = [...slots].sort((a, b) =>
@@ -132,24 +123,6 @@ export function SlotPicker({
             data-testid="extra-work-slot-time"
           />
         </label>
-        <label className="field">
-          <span className="muted small">{t("series.col_condition")}</span>
-          <select
-            className="field-input"
-            value={condition}
-            onChange={(e) =>
-              setCondition(e.target.value as "" | ExtraWorkCondition)
-            }
-            data-testid="extra-work-slot-condition"
-          >
-            <option value="">{t("series.condition_unset")}</option>
-            <option value="AT_HANDOVER">{t("series.condition_at")}</option>
-            <option value="BEFORE_HANDOVER">
-              {t("series.condition_before")}
-            </option>
-            <option value="AFTER_HANDOVER">{t("series.condition_after")}</option>
-          </select>
-        </label>
         <button
           type="button"
           className="btn btn-secondary btn-sm ew-slot-add"
@@ -161,33 +134,12 @@ export function SlotPicker({
         </button>
       </div>
 
-      <div className="ew-slot-controls">
-        <label className="field ew-slot-repeat">
-          <span className="muted small">{t("series.slot_weeks")}</span>
-          <input
-            type="number"
-            min="1"
-            max={String(MAX_SLOTS)}
-            className="field-input"
-            value={repeats}
-            onChange={(e) => setRepeats(e.target.value)}
-            data-testid="extra-work-slot-weeks"
-          />
-        </label>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm ew-slot-add"
-          onClick={addWeekly}
-          disabled={date === ""}
-          data-testid="extra-work-slot-weekly"
-        >
-          {t("series.slot_weekly")}
-        </button>
-        <p className="muted small ew-slot-hint">{t("series.slot_hint")}</p>
-      </div>
-
       {error && (
-        <div className="alert-error" role="alert" data-testid="extra-work-slot-error">
+        <div
+          className="alert-error"
+          role="alert"
+          data-testid="extra-work-slot-error"
+        >
           {error}
         </div>
       )}
@@ -200,6 +152,22 @@ export function SlotPicker({
           {t("series.slot_ceiling", { limit: MAX_SLOTS })}
         </span>
       </p>
+
+      {/* W-EW4 §1 — ONE LINE, and only once the list has grown enough to
+          make the question real. Not a warning and not a block: picking
+          six days on purpose is legitimate. It names the other feature
+          and links straight to it, because "you may be on the wrong
+          screen" is only useful with the right screen attached. */}
+      {slots.length >= RECURRING_HINT_AT && (
+        <p
+          className="muted small"
+          role="status"
+          data-testid="extra-work-slot-recurring-hint"
+        >
+          {t("series.recurring_nudge")}{" "}
+          <Link to="/planned-work/new">{t("series.recurring_nudge_link")}</Link>
+        </p>
+      )}
 
       <BoundedList
         size="sm"
@@ -217,11 +185,6 @@ export function SlotPicker({
               <span>{slot.date}</span>
               <span className="muted small">
                 {slot.time ?? t("series.slot_no_time")}
-              </span>
-              <span className="muted small">
-                {slot.condition
-                  ? t(`series.condition_${CONDITION_KEY[slot.condition]}`)
-                  : t("series.condition_unset")}
               </span>
               <button
                 type="button"
@@ -248,9 +211,3 @@ export function SlotPicker({
     </div>
   );
 }
-
-const CONDITION_KEY: Record<ExtraWorkCondition, string> = {
-  AT_HANDOVER: "at",
-  BEFORE_HANDOVER: "before",
-  AFTER_HANDOVER: "after",
-};

@@ -412,6 +412,30 @@ function quantityFromChange(
   return String(Number((stepped < 0 ? 0 : stepped).toFixed(2)));
 }
 
+/**
+ * W-EW4 §3 — A SUGGESTION IS NOT AN UNAVAILABLE ROW.
+ *
+ * `.ew-agreed-price-item-label` (index.css) paints the service name
+ * `var(--text-faint)` — measured #8A9B91 against the #121A14 the rest
+ * of the table uses, at 12px against the price's 13px. In a popover
+ * whose rows genuinely DO grey out when a service is already in the
+ * cart, "paler than everything around it" is the app's own word for
+ * "you cannot have this", so every offered service read as unavailable.
+ *
+ * Overridden here rather than in the stylesheet: the class is styled in
+ * `index.css`, which this sprint does not own, and this page is now its
+ * only consumer (W-EW3 removed the browse card). The price span beside
+ * it already inherits `var(--text)` from `.ew-agreed-price-item` and is
+ * left exactly as it is — it was never the faded half.
+ *
+ * The genuinely-unavailable state is untouched: an in-cart row is
+ * `disabled`, and `:disabled` is what dims it.
+ */
+const SUGGESTION_LABEL_STYLE = {
+  color: "var(--text)",
+  fontSize: "13px",
+} as const;
+
 // True when a create rejection is an intent rejection. The backend
 // emits `{ "request_intent": ["<message>"] }`; DRF does not serialize
 // the stable error code on the wire, so we can only detect the field
@@ -3128,14 +3152,20 @@ export function CreateExtraWorkPage({
                             onClick={() => commitAddRow(row)}
                           >
                             {row.kind === "custom_text" ? (
-                              <span className="ew-agreed-price-item-label">
+                              <span
+                                className="ew-agreed-price-item-label"
+                                style={SUGGESTION_LABEL_STYLE}
+                              >
                                 {t("create.add_box.add_custom", {
                                   text: addQuery.trim(),
                                 })}
                               </span>
                             ) : (
                               <>
-                                <span className="ew-agreed-price-item-label">
+                                <span
+                                  className="ew-agreed-price-item-label"
+                                  style={SUGGESTION_LABEL_STYLE}
+                                >
                                   {row.kind === "service"
                                     ? svc && svc.category_name
                                       ? `${svc.category_name} — ${svc.name}`
