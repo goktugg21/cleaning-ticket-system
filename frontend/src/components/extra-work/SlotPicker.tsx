@@ -165,7 +165,16 @@ export function SlotPicker({
           data-testid="extra-work-slot-recurring-hint"
         >
           {t("series.recurring_nudge")}{" "}
-          <Link to="/planned-work/new">{t("series.recurring_nudge_link")}</Link>
+          {/* `.link` on purpose. Inside a `muted small` paragraph an
+              unclassed <Link> inherits the paragraph's own colour and
+              carries no underline — measured #5A6B61 against #5A6B61,
+              `text-decoration: none` — so the one word that is supposed
+              to take you to the other feature looked exactly like the
+              sentence around it. A pointer cursor on hover is not an
+              affordance; you have to already know it is there. */}
+          <Link className="link" to="/planned-work/new">
+            {t("series.recurring_nudge_link")}
+          </Link>
         </p>
       )}
 

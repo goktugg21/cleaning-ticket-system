@@ -428,8 +428,13 @@ function quantityFromChange(
  * it already inherits `var(--text)` from `.ew-agreed-price-item` and is
  * left exactly as it is — it was never the faded half.
  *
- * The genuinely-unavailable state is untouched: an in-cart row is
- * `disabled`, and `:disabled` is what dims it.
+ * These popover rows are never `disabled`, which is precisely why the
+ * fade was so misleading: a service already in the cart is marked with
+ * a tick and stays clickable (`addServiceLine` is a no-op on a
+ * duplicate), so paleness carried no meaning here at all — it was pure
+ * noise inherited from a browse card that HAS since been deleted, and
+ * whose disabled rows are what `.ew-agreed-price-item:hover:not(
+ * :disabled)` in `index.css` still remembers.
  */
 const SUGGESTION_LABEL_STYLE = {
   color: "var(--text)",
