@@ -72,6 +72,25 @@ import { getInitials } from "../lib/initials";
 // `/admin/customers` (the list page) or `/admin/customers/new`.
 const CUSTOMER_SCOPED_PATH = /^\/admin\/customers\/(\d+)(?:\/.*)?$/;
 
+// The ADMIN nav group's own entries, in the order they render. Kept
+// beside the group it describes: anything added to the group below is
+// added here, and anything under `/admin` that is NOT in this list is by
+// definition a standalone entry that must not open the group.
+const ADMIN_GROUP_PATHS = [
+  "/admin/companies",
+  "/admin/buildings",
+  "/admin/customers",
+  "/admin/services",
+  "/admin/catalogs",
+  "/admin/hours",
+  "/admin/contracts",
+  "/admin/users",
+  "/admin/employees",
+  "/admin/invitations",
+  "/admin/audit-logs",
+  "/admin/sla-warnings",
+] as const;
+
 interface SidebarModeState {
   mode: "top-level" | "customer-scoped";
   customerId: string | null;
@@ -291,11 +310,29 @@ export function AppShell({ children }: AppShellProps) {
     open: boolean;
   } | null>(null);
 
-  // Every route the group's entries point at. `/admin/` as a prefix
-  // would also catch `/admin/customers/:id`, which swaps the sidebar
-  // into customer-scoped mode entirely — this branch does not render
-  // then, so the broad prefix is the honest test of "inside ADMIN".
-  const adminChildActive = location.pathname.startsWith("/admin");
+  // Every route the group's entries point at -- LISTED, not matched by
+  // an `/admin` prefix.
+  //
+  // The prefix was not the honest test of "inside ADMIN", because not
+  // everything under `/admin` is in this group. `Staff requests` lives
+  // at `/admin/staff-assignment-requests` and is rendered OUTSIDE the
+  // group on purpose -- its own comment below says why: a BUILDING
+  // MANAGER gets that one queue without seeing the rest of the admin
+  // entries. Under the prefix, opening it swung the whole twelve-entry
+  // group open and left the operator looking at a list they had not
+  // asked for, with the entry they were actually on sitting outside it.
+  //
+  // Membership is now the group's OWN routes and nothing else, so a
+  // future standalone entry under `/admin` cannot re-acquire this bug by
+  // accident. A route matches when it IS one of these or is nested under
+  // one (`/admin/contracts/12`); `/admin/customers/:id` swaps the
+  // sidebar into customer-scoped mode and this branch does not render at
+  // all, so it costs nothing here.
+  const adminChildActive = ADMIN_GROUP_PATHS.some(
+    (path) =>
+      location.pathname === path ||
+      location.pathname.startsWith(`${path}/`),
+  );
 
   const adminOpen =
     adminManual && adminManual.path === location.pathname

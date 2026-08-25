@@ -492,10 +492,8 @@ export function EmployeesAdminPage() {
         </div>
       </div>
 
-      <p className="section-explainer" data-testid="employees-explainer">
-        {t("employees.explainer")}
-      </p>
-
+      {/* W-T3 §3 — the explainer deleted: it described what the list
+          obviously is and pointed at controls already on screen. */}
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
           {error}

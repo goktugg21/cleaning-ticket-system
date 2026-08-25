@@ -936,6 +936,48 @@ export function TicketDetailPage() {
   // Provider-management trio (SA + CA + BM). Drives note-author UI,
   // assignable-manager dropdown, etc. — the surface that may see+author
   // PROVIDER_INTERNAL notes (B7) and direct ticket assignment.
+  // W-T3 §1 — ERRORS AT THE ACTION.
+  //
+  // Seven mutations on this page reported failure by setting the
+  // page-level `error`, which renders in a banner at the very top of a
+  // long scrolling ticket. Flip the photo switch near the attachments,
+  // or fail to send a message from the composer, and the only sign was
+  // a sentence far above the fold, often off screen entirely: the
+  // control simply looked as if it had done nothing.
+  //
+  // The page already had the right shape in three places
+  // (`overrideError`, `requestAssignmentError`, `completeError`): a
+  // dedicated message rendered beside the control that failed. This is
+  // that pattern for the remaining seven. ONE keyed store rather than
+  // seven more `useState`s, because the per-person photo-permission
+  // buttons need a key per row and separate states cannot express that.
+  //
+  // `error` itself stays, and stays at the top, for the one thing that
+  // genuinely belongs there: the initial ticket LOAD failing, which is
+  // not an action anybody just took.
+  const [actionError, setActionError] = useState<Record<string, string>>({});
+
+  function failAt(key: string, err: unknown) {
+    setActionError((current) => ({ ...current, [key]: getApiError(err) }));
+  }
+  function clearAt(key: string) {
+    setActionError((current) => {
+      if (current[key] === undefined) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+  function actionErrorNode(key: string, testId: string) {
+    const message = actionError[key];
+    if (!message) return null;
+    return (
+      <div className="alert-error" role="alert" data-testid={testId}>
+        {message}
+      </div>
+    );
+  }
+
   const isStaff = isProviderManagementRole(me?.role);
 
   // W26.4 — how many of this ticket's parts the VIEWER is on. Drives the
@@ -1235,7 +1277,7 @@ export function TicketDetailPage() {
   // untouched by the call.
   async function setUploadGrant(userId: number, choice: UploadGrantChoice) {
     if (!id) return;
-    setError("");
+    clearAt(`grant:${userId}`);
     setUploadGrantBusyUserId(userId);
     try {
       const updated = await setTicketUploadVisibility(
@@ -1257,7 +1299,7 @@ export function TicketDetailPage() {
       // timeline needs the same nudge the category change gives it.
       setAuditReloadNonce((n) => n + 1);
     } catch (err) {
-      setError(getApiError(err));
+      failAt(`grant:${userId}`, err);
       // A refused write must not leave the control showing the value the
       // operator picked, so re-read the authoritative list.
       setUploadGrantsNonce((n) => n + 1);
@@ -1475,7 +1517,7 @@ export function TicketDetailPage() {
 
   async function saveCategory(categoryId: number | null) {
     if (!id) return;
-    setError("");
+    clearAt("category");
     setCategoryBusy(true);
     try {
       const updated = await setTicketCategory(Number(id), categoryId);
@@ -1484,7 +1526,7 @@ export function TicketDetailPage() {
       // so the timeline needs the same nudge assignment gives it.
       setAuditReloadNonce((n) => n + 1);
     } catch (err) {
-      setError(getApiError(err));
+      failAt("category", err);
     } finally {
       setCategoryBusy(false);
     }
@@ -1500,7 +1542,7 @@ export function TicketDetailPage() {
   // new state — no optimistic local value to get out of step.
   async function setPhotoVisibilityPolicy(nextValue: boolean) {
     if (!id) return;
-    setError("");
+    clearAt("photo_policy");
     setPhotoPolicyBusy(true);
     try {
       const response = await api.patch<TicketDetail>(
@@ -1519,7 +1561,7 @@ export function TicketDetailPage() {
         description: t("photo_policy_toast_scope"),
       });
     } catch (err) {
-      setError(getApiError(err));
+      failAt("photo_policy", err);
     } finally {
       setPhotoPolicyBusy(false);
     }
@@ -1783,7 +1825,6 @@ export function TicketDetailPage() {
       // Keep the modal open and name the refusal inside it, so the
       // answers already typed are not thrown away by a fixable error.
       setTransitionError(getApiError(err));
-      setError(getApiError(err));
     } finally {
       setStatusBusy(null);
     }
@@ -2018,7 +2059,7 @@ export function TicketDetailPage() {
   async function submitMessage(event: FormEvent) {
     event.preventDefault();
     if (!id || !message.trim()) return;
-    setError("");
+    clearAt("message");
     setSendingMessage(true);
     try {
       // Send the effective (render-time-derived) tier so a stale
@@ -2042,7 +2083,7 @@ export function TicketDetailPage() {
       setIsPrivate(false);
       await loadTicket();
     } catch (err) {
-      setError(getApiError(err));
+      failAt("message", err);
     } finally {
       setSendingMessage(false);
     }
@@ -2062,7 +2103,7 @@ export function TicketDetailPage() {
 
   async function downloadAttachment(item: TicketAttachment) {
     if (!id) return;
-    setError("");
+    clearAt("download");
     setDownloadingAttachmentId(item.id);
     try {
       const response = await api.get(
@@ -2078,7 +2119,7 @@ export function TicketDetailPage() {
       link.remove();
       URL.revokeObjectURL(blobUrl);
     } catch (err) {
-      setError(getApiError(err));
+      failAt("download", err);
     } finally {
       setDownloadingAttachmentId(null);
     }
@@ -2181,7 +2222,7 @@ export function TicketDetailPage() {
       return;
     }
 
-    setError("");
+    clearAt("attachment");
     setUploadingAttachment(true);
 
     try {
@@ -2197,7 +2238,7 @@ export function TicketDetailPage() {
       setAttachmentHidden(false);
       await loadTicket();
     } catch (err) {
-      setError(getApiError(err));
+      failAt("attachment", err);
     } finally {
       setUploadingAttachment(false);
     }
@@ -2665,6 +2706,7 @@ export function TicketDetailPage() {
               >
                 {t(NOTE_TIER_WHO_SEES_KEY[effectiveMessageType])}
               </p>
+              {actionErrorNode("message", "ticket-message-error")}
             </form>
 
             {jobThread.length === 0 ? (
@@ -2800,20 +2842,23 @@ export function TicketDetailPage() {
                     {t("photo_policy_label")}
                   </label>
                 </div>
-                <p
-                  className="photo-policy-help"
-                  data-testid="ticket-photo-policy-help"
-                >
-                  {ticket.staff_uploads_customer_visible
-                    ? t("photo_policy_help_on")
-                    : t("photo_policy_help_off")}
-                </p>
-                <p
-                  className="photo-policy-warning"
-                  data-testid="ticket-photo-policy-warning"
-                >
-                  {t("photo_policy_help_forward_only")}
-                </p>
+                {/* W-T3 §3 — two explanatory paragraphs deleted. One
+                    restated the switch's own label back at the reader
+                    ("On: a photo ... is visible to the customer"); the
+                    other explained that the setting is forward-only.
+                    That second fact is worth saying, but at the moment
+                    it matters rather than permanently above the
+                    control: the success toast already carries it
+                    (`photo_policy_toast_scope`, "Applies to uploads
+                    from now on, on this job only"). Flipping the switch
+                    gains no confirm dialog here, so per the treatment
+                    the prose is deleted rather than moved into one.
+                    The terminal-status line below survives — it is a
+                    one-line STATE, not an explanation. */}
+                {actionErrorNode(
+                  "photo_policy",
+                  "ticket-photo-policy-error",
+                )}
                 {PHOTO_POLICY_TERMINAL_STATUSES.has(ticket.status) && (
                   <p
                     className="photo-policy-help"
@@ -2825,6 +2870,9 @@ export function TicketDetailPage() {
               </div>
             )}
 
+            {/* W-T3 §1 — a failed download names itself above the
+                grid it came from, not at the top of the page. */}
+            {actionErrorNode("download", "ticket-download-error")}
             <div className="att-thumb-grid">
               {attachments.map((item) => (
                 <div className="att-thumb" key={item.id}>
@@ -2906,6 +2954,7 @@ export function TicketDetailPage() {
                 className="att-thumb-staged"
                 onSubmit={submitAttachment}
               >
+                {actionErrorNode("attachment", "ticket-attachment-error")}
                 <span className="att-thumb-staged-text">
                   {t("selected")} <b>{selectedFile.name}</b> ·{" "}
                   {formatBytes(selectedFile.size)}
@@ -4138,12 +4187,8 @@ export function TicketDetailPage() {
                   >
                     {t("upload_grant_section_heading")}
                   </div>
-                  <p
-                    className="upload-grants-help"
-                    data-testid="ticket-upload-grants-help"
-                  >
-                    {t("upload_grant_section_help")}
-                  </p>
+                  {/* W-T3 §3 — three sentences of explanation
+                      deleted; the heading and each row's state say it. */}
                   <BoundedList
                     size="sm"
                     count={uploadGrants.people.length}
@@ -4171,6 +4216,14 @@ export function TicketDetailPage() {
                             <span className="upload-grants-name">
                               {displayName}
                             </span>
+                            {/* W-T3 §1 — this row's own failure. The
+                                list can be long, so a refusal reported
+                                at the top of the page belonged to no
+                                visible person. */}
+                            {actionErrorNode(
+                              `grant:${person.user_id}`,
+                              "ticket-upload-grant-error",
+                            )}
                             <select
                               className="field-input upload-grants-select"
                               aria-label={t("upload_grant_select_aria", {
@@ -4218,12 +4271,6 @@ export function TicketDetailPage() {
                       })}
                     </ul>
                   </BoundedList>
-                  <p
-                    className="upload-grants-warning"
-                    data-testid="ticket-upload-grants-warning"
-                  >
-                    {t("upload_grant_section_forward_only")}
-                  </p>
                 </div>
               )}
 
@@ -4523,6 +4570,7 @@ export function TicketDetailPage() {
                   </span>
                   <span className="detail-kv-val">
                     {isProviderManagementRole(me?.role) ? (
+                      <>
                       <select
                         className="field-select"
                         value={ticket.category ?? ""}
@@ -4551,6 +4599,8 @@ export function TicketDetailPage() {
                             </option>
                           ))}
                       </select>
+                      {actionErrorNode("category", "ticket-category-error")}
+                      </>
                     ) : (
                       ticket.category_name || "—"
                     )}
@@ -4731,16 +4781,17 @@ export function TicketDetailPage() {
                 !ticket.sla_due_at ? (
                   t("common:sla.no_deadline_explain")
                 ) : (
-                  <>
-                    {ticket.sla_display_state !== "COMPLETED" && (
-                      <strong className="sla-detail-explainer-due">
-                        {t("common:sla.due_on", {
-                          when: formatDateTime(ticket.sla_due_at),
-                        })}
-                      </strong>
-                    )}
-                    {t("common:sla.basis")}
-                  </>
+                  /* W-T3 §3 — `sla.basis` deleted: three sentences of
+                     working-hours arithmetic that never changed and
+                     never decided anything on this page. The DUE DATE
+                     is the value and stays. */
+                  ticket.sla_display_state !== "COMPLETED" && (
+                    <strong className="sla-detail-explainer-due">
+                      {t("common:sla.due_on", {
+                        when: formatDateTime(ticket.sla_due_at),
+                      })}
+                    </strong>
+                  )
                 )}
               </p>
             </div>
