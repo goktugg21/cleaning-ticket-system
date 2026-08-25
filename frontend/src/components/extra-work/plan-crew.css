@@ -50,3 +50,23 @@
   margin-right: 3px;
   vertical-align: -1px;
 }
+
+/* W-TABS Task 3 — the required mark and the manager row. A star is a
+ * star: marked, never explained. */
+.ew-plan-req {
+  color: var(--red);
+  margin-left: 3px;
+  font-weight: 700;
+}
+.ew-plan-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ew-plan-manager-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

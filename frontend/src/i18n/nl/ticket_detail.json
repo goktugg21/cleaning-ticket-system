@@ -338,5 +338,14 @@
   "upload_grant_state_customer": "Foto's gaan naar de klant",
   "transition.proof_photo_label": "Foto van het afgeronde werk",
   "transition.proof_photo_uploading": "Uploaden…",
-  "transition.proof_photo_done": "Foto toegevoegd."
+  "transition.proof_photo_done": "Foto toegevoegd.",
+  "tab_overview": "Overzicht",
+  "tab_people": "Mensen",
+  "tab_plan": "Planning",
+  "tab_money": "Geld",
+  "tab_messages": "Berichten",
+  "tabs_aria": "Onderdelen van dit ticket",
+  "ew_plan_summary_title": "Geplande uren",
+  "ew_plan_summary_empty": "Nog geen uren gepland.",
+  "ew_plan_summary_no_day": "nog geen dag"
 }

@@ -29,8 +29,21 @@ export function dayRange(start: string, end: string): string[] {
   if (Number.isNaN(last.getTime()) || last < first) return [start];
   const out: string[] = [];
   const cursor = new Date(first);
+  // LOCAL wall date, never `toISOString()` — the cursor is a LOCAL
+  // midnight, and toISOString renders the UTC instant, which east of
+  // Greenwich is still YESTERDAY. Window 27..29 rendered columns
+  // 26/27/28 (the owner's EW 83 screenshot), and because these strings
+  // are also the grid's cell keys and the payload's dates, hours typed
+  // under "27-08" were SAVED to the 26th. Same trap this codebase has
+  // documented twice for datetime-local seeding; this was the date-only
+  // copy of it.
+  const pad = (n: number) => String(n).padStart(2, "0");
   while (cursor <= last && out.length < MAX_GRID_DAYS) {
-    out.push(cursor.toISOString().slice(0, 10));
+    out.push(
+      `${cursor.getFullYear()}-${pad(cursor.getMonth() + 1)}-${pad(
+        cursor.getDate(),
+      )}`,
+    );
     cursor.setDate(cursor.getDate() + 1);
   }
   return out;

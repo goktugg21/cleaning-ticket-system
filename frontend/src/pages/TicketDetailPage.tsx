@@ -1,6 +1,12 @@
 import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   Activity,
   Archive,
@@ -567,6 +573,23 @@ function sanitizeStatusNote(raw: string | null | undefined): string {
 }
 
 
+/* W-TABS Task 4 — THE SAME SPINE AS THE EXTRA WORK PAGE ("chip chip").
+ * The exported ordered constant every consumer iterates (CLAUDE.md —
+ * a second, independently maintained render list is how the Sprint 126
+ * headerless column happened), the same `composer-toggle` pill classes,
+ * the same `?tab=` search param with `replace: true` and absence as the
+ * overview default. Visibility is resolved per render because the Money
+ * tab depends on the TICKET (extra-work origin), not only the role —
+ * absent entirely for tickets with no money dimension. */
+const TICKET_TABS = [
+  "overview",
+  "people",
+  "plan",
+  "money",
+  "messages",
+] as const;
+type TicketTab = (typeof TICKET_TABS)[number];
+
 export function TicketDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -602,6 +625,29 @@ export function TicketDetailPage() {
     return raw;
   })();
   const backToTickets = useBackLink(chargeableFrom ?? "/tickets");
+
+  /* W-TABS Task 4 — the tab, from the URL, the EW page's exact rule:
+     absence IS overview, so the plain /tickets/<id> every existing link
+     and notification uses stays the canonical address. Clamping against
+     the VISIBLE set happens below once the ticket is loaded. */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const requestedTicketTab: TicketTab = (
+    TICKET_TABS as readonly string[]
+  ).includes(tabParam ?? "")
+    ? (tabParam as TicketTab)
+    : "overview";
+  const setTicketTab = (next: TicketTab) => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (next === "overview") params.delete("tab");
+        else params.set("tab", next);
+        return params;
+      },
+      { replace: true },
+    );
+  };
   const { me } = useAuth();
   const { t } = useTranslation(["ticket_detail", "common"]);
   // The label never lies about the destination: it names the chargeable
@@ -1265,6 +1311,31 @@ export function TicketDetailPage() {
   const [ewPlanLoading, setEwPlanLoading] = useState(false);
   const [ewPlanBusy, setEwPlanBusy] = useState(false);
   const [ewPlanError, setEwPlanError] = useState("");
+
+  /* W-TABS Task 4 — the Plan tab shows the plan it holds (planned
+     hours per person), read from the SAME store the dialog writes.
+     Lazy: fetched when the tab is looked at, refetched after a save
+     (submitEwPlan clears `ewPlanDetail`). */
+  useEffect(() => {
+    if (
+      requestedTicketTab !== "plan" ||
+      ewOriginId === null ||
+      ewPlanDetail !== null ||
+      !isProviderManagementRole(me?.role) ||
+      !canAccessExtraWork(me?.role)
+    ) {
+      return;
+    }
+    let cancelled = false;
+    getExtraWork(ewOriginId)
+      .then((detail) => {
+        if (!cancelled) setEwPlanDetail(detail);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedTicketTab, ewOriginId, ewPlanDetail, me?.role]);
 
   async function openEwPlan() {
     if (ewOriginId === null) return;
@@ -2064,6 +2135,9 @@ export function TicketDetailPage() {
   function revealStatusNote() {
     revealPendingRef.current = true;
     setActivityOpen(true);
+    // W-TABS Task 4 — the activity card lives on the Overview tab now;
+    // a reveal fired from anywhere else must land where the card is.
+    setTicketTab("overview");
   }
 
   // W14 §2 — the deferred half of `revealStatusNote()`.
@@ -2492,6 +2566,24 @@ export function TicketDetailPage() {
         .trim()
     : ticket.description;
 
+  /* W-TABS Task 4 — which tabs exist for THIS viewer on THIS ticket.
+     Money is a property of the ticket (an extra-work origin) AND the
+     role (provider management with extra-work access) — for everyone
+     else the tab is ABSENT, not empty. The other four hold content for
+     every role: their inner blocks keep their own gates. */
+  const moneyTabVisible =
+    Boolean(ticket.extra_work_origin) &&
+    isProviderManagementRole(me?.role) &&
+    canAccessExtraWork(me?.role);
+  const visibleTicketTabs = TICKET_TABS.filter(
+    (key) => key !== "money" || moneyTabVisible,
+  );
+  const ticketTab: TicketTab = visibleTicketTabs.includes(
+    requestedTicketTab,
+  )
+    ? requestedTicketTab
+    : "overview";
+
   return (
     <div>
       <div className="detail-header">
@@ -2771,8 +2863,38 @@ export function TicketDetailPage() {
         </div>
       )}
 
-      <div className="detail-grid">
+      {/* W-TABS Task 4 — the pill bar, the EW page's exact classes. */}
+      <div
+        className="composer-toggle ew-detail-tabs"
+        role="tablist"
+        aria-label={t("tabs_aria")}
+      >
+        {visibleTicketTabs.map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={ticketTab === key}
+            className={`composer-toggle-btn ${
+              ticketTab === key ? "active" : ""
+            }`}
+            onClick={() => setTicketTab(key)}
+            data-testid={`ticket-tab-${key}`}
+          >
+            {t(`tab_${key}`)}
+          </button>
+        ))}
+      </div>
+
+      <div
+        className={
+          ticketTab === "overview"
+            ? "detail-grid"
+            : "detail-grid tk-tabs-stack"
+        }
+      >
         <div className="detail-main">
+          {ticketTab === "messages" && (
           <div className="card">
             <div className="card-head-icon">
               <span className="card-head-icon-glyph">
@@ -2956,6 +3078,9 @@ export function TicketDetailPage() {
             )}
           </div>
 
+          )}
+          {ticketTab === "overview" && (
+          <>
           <div className="card">
             <div className="card-head-icon">
               <span className="card-head-icon-glyph">
@@ -3375,6 +3500,8 @@ export function TicketDetailPage() {
               </div>
             )}
           </div>
+          </>
+          )}
         </div>
 
         {/* #109 Part I — key the right column by ticket.id so every
@@ -3399,6 +3526,7 @@ export function TicketDetailPage() {
               This supersedes the orders in
               `docs/planning/ew-gap-closing-plan.md` §2.1 items 4 and 5,
               both updated in the same commit. */}
+          {ticketTab === "overview" && (
           <CollapsibleCard
             title={
               canShowCompleteWorkButton
@@ -3988,6 +4116,9 @@ export function TicketDetailPage() {
             </div>
           </CollapsibleCard>
 
+          )}
+          {ticketTab === "people" && (
+          <>
           {/* #7 Part B — Responsible managers (M:N), distinct from the
               primary "Assigned" field in the Assignment card BELOW.
               Self-gates to provider-management roles and hides on a LIST
@@ -4720,6 +4851,10 @@ export function TicketDetailPage() {
           </CollapsibleCard>
 
 
+          </>
+          )}
+          {ticketTab === "plan" && (
+          <>
           {/* Sprint 1 (frontend) — operational "Scheduled date" control.
               Surfaces the existing POST/DELETE /tickets/<id>/schedule/
               action (Sprint 9B backend) as a set / change / clear control,
@@ -4755,21 +4890,56 @@ export function TicketDetailPage() {
           {ticket.extra_work_origin &&
             isProviderManagementRole(me?.role) &&
             canAccessExtraWork(me?.role) && (
-              <div style={{ marginBottom: 10 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => void openEwPlan()}
-                  disabled={ewPlanLoading}
-                  data-testid="ticket-ew-plan-open"
-                >
-                  {ewPlanLoading
-                    ? t("ew_plan_loading")
-                    : t("ew_plan_button")}
-                </button>
+              <div className="card" data-testid="ticket-ew-plan-card">
+                <div className="form-section">
+                  <div className="form-section-title">
+                    {t("ew_plan_summary_title")}
+                  </div>
+                  {ewPlanDetail &&
+                  (ewPlanDetail.planned_hours ?? []).length > 0 ? (
+                    <ul
+                      className="muted small"
+                      style={{ margin: "0 0 10px", paddingLeft: 18 }}
+                      data-testid="ticket-ew-plan-summary"
+                    >
+                      {(ewPlanDetail.planned_hours ?? []).map((row, i) => (
+                        <li key={i} data-testid="ticket-ew-plan-summary-row">
+                          {row.user_full_name || row.user_email}
+                          {" \u00b7 "}
+                          {row.date ?? t("ew_plan_summary_no_day")}
+                          {row.hour_type_name ? ` \u00b7 ${row.hour_type_name}` : ""}
+                          {" \u00b7 "}
+                          {row.hours}h
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p
+                      className="muted small"
+                      style={{ marginTop: 0 }}
+                      data-testid="ticket-ew-plan-summary-empty"
+                    >
+                      {t("ew_plan_summary_empty")}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => void openEwPlan()}
+                    disabled={ewPlanLoading}
+                    data-testid="ticket-ew-plan-open"
+                  >
+                    {ewPlanLoading
+                      ? t("ew_plan_loading")
+                      : t("ew_plan_button")}
+                  </button>
+                </div>
               </div>
             )}
-          {ticket.extra_work_origin &&
+          </>
+          )}
+          {ticketTab === "money" &&
+            ticket.extra_work_origin &&
             isProviderManagementRole(me?.role) &&
             canAccessExtraWork(me?.role) && (
               <TicketExtraWorkCards
@@ -4782,6 +4952,8 @@ export function TicketDetailPage() {
               />
             )}
 
+          {ticketTab === "overview" && (
+          <>
           {/* Sprint 30 Batch 30.1.1 — consolidated Details card. Merges
               the prior Ticket details, Customer Contacts, and SLA cards
               into ONE card with subtle subsection separators. Contacts
@@ -5271,6 +5443,8 @@ export function TicketDetailPage() {
                 {t("card_critical_body")}
               </p>
             </div>
+          )}
+          </>
           )}
         </div>
       </div>

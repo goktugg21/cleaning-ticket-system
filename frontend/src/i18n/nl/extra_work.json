@@ -825,5 +825,9 @@
   "detail.proposal_prepare_start": "Werk prijzen",
   "detail.proposal_prepare_helper_start": "De regels worden automatisch overgenomen, met contractprijzen vooraf ingevuld. Prijs de losse regels en start het werk.",
   "detail.proposal_preparing_start": "Openen…",
-  "detail.routing_decision_start": "Wacht op prijsstelling"
+  "detail.routing_decision_start": "Wacht op prijsstelling",
+  "plan_gate.next_sentence": "Plan eerst het werk.",
+  "plan.manager_label": "Verantwoordelijke manager",
+  "plan.manager_none": "Nog niemand — kies er hieronder een.",
+  "plan.manager_add_placeholder": "Manager toevoegen…"
 }

@@ -14439,3 +14439,11 @@ table.assign-table { min-width: 0; width: 100%; }
 .cred-badge-btn:hover .cred-badge-type {
   color: var(--green);
 }
+
+/* ===================================================================
+   W-TABS — TicketDetailPage grows the EW page's pill-tab spine.
+   APPENDED BLOCK, NEW CLASS ONLY. Nothing above is edited.
+   On every tab except Overview the two-column detail grid stacks to
+   one column — the same single-column layout the <=1100px breakpoint
+   above already renders, so the cards are proven at this width. */
+.detail-grid.tk-tabs-stack { grid-template-columns: 1fr; }

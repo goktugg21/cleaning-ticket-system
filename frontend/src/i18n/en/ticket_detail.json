@@ -338,5 +338,14 @@
   "upload_grant_state_customer": "Photos go to the customer",
   "transition.proof_photo_label": "Photo of the finished work",
   "transition.proof_photo_uploading": "Uploading…",
-  "transition.proof_photo_done": "Photo attached."
+  "transition.proof_photo_done": "Photo attached.",
+  "tab_overview": "Overview",
+  "tab_people": "People",
+  "tab_plan": "Plan",
+  "tab_money": "Money",
+  "tab_messages": "Messages",
+  "tabs_aria": "Sections of this ticket",
+  "ew_plan_summary_title": "Planned hours",
+  "ew_plan_summary_empty": "No hours planned yet.",
+  "ew_plan_summary_no_day": "no day yet"
 }

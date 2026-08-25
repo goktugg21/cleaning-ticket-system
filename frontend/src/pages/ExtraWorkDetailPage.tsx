@@ -906,7 +906,6 @@ export function ExtraWorkDetailPage() {
   const [managerCandidates, setManagerCandidates] = useState<
     AssignmentCandidate[]
   >([]);
-  const [managerPick, setManagerPick] = useState("");
   const [managerBusy, setManagerBusy] = useState(false);
   const [planAssignments, setPlanAssignments] = useState<
     ExtraWorkAssignment[]
@@ -2084,8 +2083,12 @@ export function ExtraWorkDetailPage() {
    *  which renders the "assign somebody first" state rather than a
    *  half-built grid.
    */
-  async function addPlanManager() {
-    const userId = Number(managerPick);
+  /* W-TABS Task 3b — the manager write, driven from the plan modal's
+     picker (the page's inline select is gone; one owner per fact).
+     Same endpoint as before: the bulk-assign body's `managers` group
+     (`views_assignments.py` — both-roles shape). The candidate list is
+     re-read too so the picker stops offering who was just added. */
+  async function addPlanManager(userId: number) {
     if (!userId || ewId === null) return;
     setManagerBusy(true);
     try {
@@ -2094,10 +2097,12 @@ export function ExtraWorkDetailPage() {
         managers: [userId],
         mode: "assign",
       });
-      setManagerPick("");
       setPlanAssignments(await listExtraWorkAssignments(ewId));
+      setManagerCandidates(
+        await listExtraWorkAssignmentCandidates(ewId, "MANAGER"),
+      );
     } catch (err) {
-      setProposalError(getApiError(err));
+      setPlanError(getApiError(err));
     } finally {
       setManagerBusy(false);
     }
@@ -2421,7 +2426,7 @@ export function ExtraWorkDetailPage() {
     "next.rejected": "next.rejected_start",
     "next.customer.rejected": "next.customer.rejected_start",
   };
-  const nextStep = noCustomerApproval
+  const wordedNextStep = noCustomerApproval
     ? {
         ...resolvedNextStep,
         sentenceKey:
@@ -2433,6 +2438,24 @@ export function ExtraWorkDetailPage() {
           : null,
       }
     : resolvedNextStep;
+  /* W-TABS Task 2 — WHAT NEXT tells the truth STEPWISE. While the plan
+     is incomplete, pricing is not the next move — the GATE will refuse
+     it — so the header says "Plan the work first" and its button opens
+     the plan modal directly. The moment the plan completes, the worded
+     step above takes over unchanged. Provider-side only (the customer
+     never plans), and only on the two statuses whose next move IS
+     pricing — every later status keeps its own sentence. */
+  const nextStep =
+    isProvider &&
+    !planGateComplete &&
+    (ew.status === "REQUESTED" || ew.status === "UNDER_REVIEW")
+      ? {
+          sentenceKey: "plan_gate.next_sentence",
+          buttonKey: "plan_gate.open_plan",
+          action: { kind: "plan" as const },
+          waiting: false,
+        }
+      : wordedNextStep;
   const nextStepBusy =
     proposalBusy ||
     retrySpawnBusy ||
@@ -3441,47 +3464,13 @@ export function ExtraWorkDetailPage() {
                           </li>
                         ))}
                       </ul>
-                      {planGateMissing.includes("plan_manager") &&
-                        managerCandidates.length > 0 && (
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: 6,
-                              alignItems: "center",
-                              marginBottom: 8,
-                            }}
-                            data-testid="extra-work-plan-gate-manager"
-                          >
-                            <select
-                              className="field-input"
-                              style={{ maxWidth: 260 }}
-                              value={managerPick}
-                              onChange={(e) => setManagerPick(e.target.value)}
-                              aria-label={t("plan_gate.add_manager_label")}
-                            >
-                              <option value="">
-                                {t("plan_gate.add_manager_label")}
-                              </option>
-                              {managerCandidates.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.full_name || c.email}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              disabled={managerBusy || managerPick === ""}
-                              onClick={() => void addPlanManager()}
-                              data-testid="extra-work-plan-gate-manager-add"
-                            >
-                              {t("plan_gate.add_manager_button")}
-                            </button>
-                          </div>
-                        )}
+                      {/* W-TABS Task 3b — the manager is assigned IN
+                          the plan modal now (one owner); the line above
+                          says it is missing, the button below opens the
+                          place that fixes it. */}
                       <button
                         type="button"
-                        className="btn btn-secondary btn-sm"
+                        className="btn btn-primary btn-sm"
                         onClick={() => void openPlan()}
                         data-testid="extra-work-plan-gate-open-plan"
                       >
@@ -3921,6 +3910,14 @@ export function ExtraWorkDetailPage() {
           assignBusy={planAssignBusy}
           assignError={planAssignError}
           onAssign={(userIds) => void assignPlanCrew(userIds)}
+          managerCandidates={managerCandidates.filter(
+            (c) =>
+              !planAssignments.some(
+                (a) => a.user_id === c.id && a.role === "MANAGER",
+              ),
+          )}
+          managerBusy={managerBusy}
+          onAssignManager={(userId) => void addPlanManager(userId)}
           busy={planBusy}
           error={planError}
           onCancel={() => setPlanOpen(false)}

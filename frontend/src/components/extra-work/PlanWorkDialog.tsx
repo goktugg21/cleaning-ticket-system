@@ -158,6 +158,9 @@ export function PlanWorkDialog({
   assignBusy,
   assignError,
   onAssign,
+  managerCandidates = [],
+  managerBusy = false,
+  onAssignManager,
   postSpawn = false,
 }: {
   ew: ExtraWorkRequestDetail;
@@ -176,6 +179,17 @@ export function PlanWorkDialog({
   assignBusy: boolean;
   assignError: string;
   onAssign: (userIds: number[]) => void;
+  /** W-TABS Task 3b — the RESPONSIBLE MANAGER is assigned HERE now
+   *  (the page's inline select is gone; one owner per fact). Writes
+   *  through the same bulk-assign endpoint's `managers` group the page
+   *  always used; the current managers render from `assignments`
+   *  (role=MANAGER), so this component still makes no visibility or
+   *  eligibility decision of its own. Empty candidates = no picker —
+   *  the ticket mount hands over nothing and adds nobody, exactly like
+   *  the crew picker. */
+  managerCandidates?: AssignmentCandidate[];
+  managerBusy?: boolean;
+  onAssignManager?: (userId: number) => void;
   /** W-PLAN Task 2 — mounted from an operational (spawned) ticket page.
    *  SAME dialog, SAME store (the plan lives on the EW pre- and
    *  post-spawn); what changes is the words: the submit says "Save the
@@ -358,6 +372,14 @@ export function PlanWorkDialog({
       now.getDate(),
     )}`;
   })();
+  /* W-TABS Task 3c — WHAT THE BUTTON ACTUALLY DRIVES. `apply_plan`
+     only starts work from CUSTOMER_APPROVED (`_start` -> the
+     IN_PROGRESS transition; anything earlier reports a skipped start).
+     On the pricing-gate flow (REQUESTED / UNDER_REVIEW) the button
+     saves a plan and starts nothing — starting happens after pricing —
+     so the label says "Save plan" there and keeps "Plan and start"
+     only where starting is a real outcome. */
+  const submitStarts = !postSpawn && ew.status === "CUSTOMER_APPROVED";
   const [pastUnlocked, setPastUnlocked] = useState(false);
   const [pastReason, setPastReason] = useState("");
   const [pastPromptOpen, setPastPromptOpen] = useState(false);
@@ -561,7 +583,10 @@ export function PlanWorkDialog({
           </div>
           <div className="ew-plan-dates">
             <label className="field">
-              <span className="muted small">{t("plan.our_start_label")}</span>
+              <span className="muted small">
+                {t("plan.our_start_label")}
+                <span className="ew-plan-req" aria-hidden="true">*</span>
+              </span>
               <input
                 ref={startRef}
                 type="date"
@@ -608,7 +633,10 @@ export function PlanWorkDialog({
 
         <div className="ew-plan-section">
           <label className="field ew-plan-budget">
-            <span className="muted small">{t("plan.budget_hours_label")}</span>
+            <span className="muted small">
+              {t("plan.budget_hours_label")}
+              <span className="ew-plan-req" aria-hidden="true">*</span>
+            </span>
             <input
               type="number"
               min="0"
@@ -627,6 +655,7 @@ export function PlanWorkDialog({
           <div className="ew-plan-section-title">
             <span className="ew-plan-step">2</span>
             {t("plan.hours_title")}
+            <span className="ew-plan-req" aria-hidden="true">*</span>
           </div>
           {/* W-UX1 §2 / R2 — WHO IS ON THIS, AND WHO MAY BE ADDED.
               The crew above is the default and stays visible; this
@@ -637,6 +666,62 @@ export function PlanWorkDialog({
               message telling you to go somewhere else. Provider-only by
               construction: the plan dialog has no customer entry point.
               Writes through the EXISTING bulk endpoint. */}
+          {/* W-TABS Task 3b — RESPONSIBLE MANAGER, beside the crew.
+              Current managers read from the same `assignments` rows the
+              grid reads (role=MANAGER); the picker offers only what the
+              page handed over and disappears with an empty list, the
+              CrewPicker rule. */}
+          <div
+            className="ew-plan-manager"
+            data-testid="extra-work-plan-manager"
+          >
+            <span className="field-label">
+              {t("plan.manager_label")}
+              <span className="ew-plan-req" aria-hidden="true">*</span>
+            </span>
+            <div className="ew-plan-manager-row">
+              {assignments
+                .filter((a) => a.role === "MANAGER")
+                .map((a) => (
+                  <span
+                    key={a.id}
+                    className="parts-chip"
+                    data-testid="extra-work-plan-manager-chip"
+                  >
+                    {a.user_full_name || a.user_email}
+                  </span>
+                ))}
+              {assignments.filter((a) => a.role === "MANAGER").length ===
+                0 && (
+                <span
+                  className="muted small"
+                  data-testid="extra-work-plan-manager-none"
+                >
+                  {t("plan.manager_none")}
+                </span>
+              )}
+              {onAssignManager && managerCandidates.length > 0 && (
+                <select
+                  className="ew-plan-add-type"
+                  value=""
+                  disabled={managerBusy}
+                  onChange={(e) => {
+                    if (e.target.value === "") return;
+                    onAssignManager(Number(e.target.value));
+                  }}
+                  aria-label={t("plan.manager_label")}
+                  data-testid="extra-work-plan-manager-select"
+                >
+                  <option value="">{t("plan.manager_add_placeholder")}</option>
+                  {managerCandidates.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.full_name || c.email}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
           <CrewPicker
             candidates={candidates}
             loading={candidatesLoading}
@@ -1095,7 +1180,7 @@ export function PlanWorkDialog({
           >
             {busy
               ? t("plan.submitting")
-              : t(postSpawn ? "plan.submit_save" : "plan.submit")}
+              : t(submitStarts ? "plan.submit" : "plan.submit_save")}
           </button>
         </div>
       </div>
