@@ -1242,7 +1242,7 @@ def _assigned_staff_payload(ticket, viewer):
                 {
                     "anonymous": True,
                     "label_key": "tickets.assigned_team_member_anonymous",
-                    "credentials": _staff_credentials_payload_for_customer(
+                    "credentials": _staff_credentials_payload_for_viewer(
                         a.user, viewer, customer
                     ),
                 }
@@ -1272,20 +1272,31 @@ def _assigned_staff_payload(ticket, viewer):
         if show_phone:
             profile = getattr(user, "staff_profile", None)
             entry["phone"] = profile.phone if profile else ""
-        if is_customer:
-            # M2 P3 (SoT Addendum A.3) — CUSTOMER_USER viewers ONLY: the
-            # resolver-gated credential / property summary for each
-            # assigned staff member, in the context of the ticket's
-            # customer. Provider viewers get NO new keys — their payload
-            # is byte-identical to pre-M2. The anonymous-collapse early
-            # return above is untouched, so a fully-redacted roster never
-            # exposes credentials either.
-            entry["credentials"] = _staff_credentials_payload_for_customer(
-                user, viewer, customer
-            )
-            entry["properties"] = _staff_properties_payload_for_customer(
-                user, viewer, customer
-            )
+        # W-UX1-A — EVERY VIEWER, NOT JUST THE CUSTOMER.
+        #
+        # This block used to be guarded `if is_customer:` and said so:
+        # "CUSTOMER_USER viewers ONLY ... Provider viewers get NO new
+        # keys — their payload is byte-identical to pre-M2." The owner
+        # has ruled that visibility follows the ladder for everyone, so
+        # the guard is gone.
+        #
+        # It is the SAME CALL, not a provider variant. The rule lives in
+        # `accounts.visibility.filter_credentials_visible_to`, which is
+        # already written per role (visibility.py:101-123): SA/CA get
+        # the queryset unfiltered, BM gets PROVIDER_ONLY + CUSTOMER_
+        # VISIBLE, CUSTOMER_USER gets CUSTOMER_VISIBLE joined to its own
+        # grant. A second implementation here — or any filtering on the
+        # client — is how the two ladders drift apart.
+        #
+        # `customer` stays the ticket's customer for every viewer: the
+        # resolver reads it only on the CUSTOMER_USER branch, so it is
+        # context for the one role that needs it and inert for the rest.
+        entry["credentials"] = _staff_credentials_payload_for_viewer(
+            user, viewer, customer
+        )
+        entry["properties"] = _staff_properties_payload_for_viewer(
+            user, viewer, customer
+        )
         out.append(entry)
     return out
 
@@ -1307,7 +1318,7 @@ def _distinct_by_user(assignments):
     return out
 
 
-def _staff_credentials_payload_for_customer(staff_user, viewer, customer):
+def _staff_credentials_payload_for_viewer(staff_user, viewer, customer):
     """M2 P3 — credential summary for a customer viewer, filtered by the
     accounts.visibility resolver for the CONTEXT customer.
 
@@ -1358,7 +1369,7 @@ def _staff_credentials_payload_for_customer(staff_user, viewer, customer):
     return out
 
 
-def _staff_properties_payload_for_customer(staff_user, viewer, customer):
+def _staff_properties_payload_for_viewer(staff_user, viewer, customer):
     """M2 P3 — custom-property summary for a customer viewer, filtered
     by the accounts.visibility resolver for the CONTEXT customer.
     Shape: {name, value, document_url?}."""

@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Clock,
   Download,
+  Eye,
   MapPin,
   MessageSquare,
   Paperclip,
@@ -21,6 +22,10 @@ import {
 import axios from "axios";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
+// W-UX1-B — reuse, not redesign: the same viewer the invoice preview
+// opens, with its download button switched off.
+import { PdfPreviewDialog } from "../components/PdfPreviewDialog";
+import type { PdfPreviewDialogHandle } from "../components/PdfPreviewDialog";
 import { markThreadRead, notifyInboxUnreadChanged } from "../api/inbox";
 import {
   cancelStaffAssignmentRequest,
@@ -33,7 +38,6 @@ import {
 } from "../api/admin";
 import { listTicketCategories, setTicketCategory } from "../api/tickets";
 import { getMessageRecipients } from "../api/notifications";
-import { downloadDocumentFromUrl } from "../api/staffCredentials";
 import { formatDateTime } from "../lib/intl";
 import { MyPartsPanel } from "./tickets/MyPartsPanel";
 import { StaffAssignmentSection } from "./tickets/StaffAssignmentSection";
@@ -875,6 +879,13 @@ export function TicketDetailPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [attachmentHidden, setAttachmentHidden] = useState(false);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  /** W-UX1-B — the in-app viewer for credential / property documents.
+   *  One dialog for the whole section: it is opened imperatively with a
+   *  target, so a second instance per row would buy nothing. Rendered
+   *  UNCONDITIONALLY at the end of the page and driven entirely through
+   *  this ref — a native <dialog> mounted behind a condition is an
+   *  invisible dialog and a dead-looking button. */
+  const credentialPreviewRef = useRef<PdfPreviewDialogHandle>(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
   // RF-5 (Ramazan 2026-06-23) — in-app attachment preview. Clicking a tile
@@ -892,9 +903,6 @@ export function TicketDetailPage() {
   const previewDialogRef = useRef<HTMLDialogElement>(null);
   // M2 P5 — busy marker for a staff credential/property document
   // download (keyed by document_url; one in flight at a time).
-  const [downloadingStaffDocUrl, setDownloadingStaffDocUrl] = useState<
-    string | null
-  >(null);
 
   const [assignableManagers, setAssignableManagers] = useState<
     AssignableManager[]
@@ -2203,25 +2211,6 @@ export function TicketDetailPage() {
       if (dialog?.open) dialog.close();
     };
   }, []);
-
-  // M2 P5 — download a staff credential / property document from the
-  // `document_url` the customer-facing assigned-staff payload carries.
-  // Failures surface as a toast (the section is small; an inline page
-  // error banner would be disproportionate).
-  async function downloadStaffDocument(documentUrl: string, filename: string) {
-    setDownloadingStaffDocUrl(documentUrl);
-    try {
-      await downloadDocumentFromUrl(documentUrl, filename);
-    } catch (err) {
-      toast.push({
-        variant: "error",
-        title: tCred("customer.download_failed"),
-        description: getApiError(err),
-      });
-    } finally {
-      setDownloadingStaffDocUrl(null);
-    }
-  }
 
   async function submitAttachment(event: FormEvent) {
     event.preventDefault();
@@ -4073,28 +4062,42 @@ export function TicketDetailPage() {
                                       })}
                                     </span>
                                   )}
+                                  {/* W-UX1-B — LOOK, DO NOT KEEP. The
+                                      document opens in the app's own
+                                      preview with `withDownload={false}`,
+                                      the same shape the invoice preview
+                                      uses; there is no download anywhere
+                                      on this block any more, for the
+                                      customer view or the provider one.
+
+                                      The URL's AUTHORIZATION is
+                                      untouched and deliberately so:
+                                      `credential_document_visible_to_user`
+                                      (accounts/visibility.py:160) stays
+                                      the only gate, it is strictly
+                                      narrower than field visibility, and
+                                      a credential whose fields are
+                                      visible can still have no
+                                      `document_url` at all. Showing a
+                                      document in a viewer instead of a
+                                      file changes what the browser does
+                                      with the bytes, not who may fetch
+                                      them. */}
                                   {credential.document_url && (
                                     <button
                                       type="button"
                                       className="btn btn-ghost btn-sm"
                                       style={{ padding: "1px 6px", fontSize: 11 }}
                                       onClick={() =>
-                                        downloadStaffDocument(
-                                          credential.document_url ?? "",
-                                          `${credential.type.toLowerCase()}.pdf`,
-                                        )
+                                        credentialPreviewRef.current?.open({
+                                          url: credential.document_url ?? "",
+                                          filename: `${credential.type.toLowerCase()}.pdf`,
+                                        })
                                       }
-                                      disabled={
-                                        downloadingStaffDocUrl ===
-                                        credential.document_url
-                                      }
-                                      data-testid="assigned-staff-credential-download"
+                                      data-testid="assigned-staff-credential-preview"
                                     >
-                                      <Download size={12} strokeWidth={2} />
-                                      {downloadingStaffDocUrl ===
-                                      credential.document_url
-                                        ? tCred("field.downloading")
-                                        : tCred("customer.download_document")}
+                                      <Eye size={12} strokeWidth={2} />
+                                      {tCred("customer.view_document")}
                                     </button>
                                   )}
                                 </div>
@@ -4128,28 +4131,29 @@ export function TicketDetailPage() {
                                     {property.name}:
                                   </span>
                                   <span>{property.value}</span>
+                                  {/* W-UX1-B — the properties block is the
+                                      credential block's sibling: same
+                                      row, same handler, same key. Left
+                                      as a download it would sit beside a
+                                      credential that only previews, and
+                                      the shared i18n key could not be
+                                      retired. Same dialog, same
+                                      `withDownload={false}`. */}
                                   {property.document_url && (
                                     <button
                                       type="button"
                                       className="btn btn-ghost btn-sm"
                                       style={{ padding: "1px 6px", fontSize: 11 }}
                                       onClick={() =>
-                                        downloadStaffDocument(
-                                          property.document_url ?? "",
-                                          `${property.name}.pdf`,
-                                        )
+                                        credentialPreviewRef.current?.open({
+                                          url: property.document_url ?? "",
+                                          filename: `${property.name}.pdf`,
+                                        })
                                       }
-                                      disabled={
-                                        downloadingStaffDocUrl ===
-                                        property.document_url
-                                      }
-                                      data-testid="assigned-staff-property-download"
+                                      data-testid="assigned-staff-property-preview"
                                     >
-                                      <Download size={12} strokeWidth={2} />
-                                      {downloadingStaffDocUrl ===
-                                      property.document_url
-                                        ? tCred("field.downloading")
-                                        : tCred("customer.download_document")}
+                                      <Eye size={12} strokeWidth={2} />
+                                      {tCred("customer.view_document")}
                                     </button>
                                   )}
                                 </div>
@@ -5252,6 +5256,14 @@ export function TicketDetailPage() {
           ) : null}
         </div>
       </dialog>
+
+      {/* W-UX1-B — the credential / property document viewer. Mounted
+          unconditionally and driven through its ref: a native <dialog>
+          behind a condition is an invisible dialog and a dead-looking
+          button. `withDownload={false}` is the whole point — it drops
+          the button AND asks the browser's PDF viewer to hide its own
+          toolbar. */}
+      <PdfPreviewDialog ref={credentialPreviewRef} withDownload={false} />
     </div>
   );
 }

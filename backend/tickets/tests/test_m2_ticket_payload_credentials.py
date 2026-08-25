@@ -192,14 +192,34 @@ class TicketPayloadCredentialTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(b"".join(response.streaming_content), PDF_BYTES)
 
-    def test_provider_payload_unchanged(self):
+    def test_provider_payload_now_carries_credentials(self):
+        """W-UX1-A REVERSED THIS. The old assertion, quoted so the change
+        of intent survives the rename:
+
+            # Byte-identical pre-M2 shape: no new keys.
+            self.assertEqual(
+                set(entry.keys()), {"id", "full_name", "email", "phone"}
+            )
+
+        M2 wired the resolver-gated credential summary onto the CUSTOMER
+        path only, and this pinned the other half of that decision. The
+        owner has ruled that visibility follows the ladder for everyone,
+        so the provider payload carries the same two keys now — filled
+        by the SAME resolver call, which answers per role.
+
+        What each role may actually SEE is asserted in
+        `test_w_ux1a_provider_sees_credentials.py`; this only pins the
+        shape, and that the identity fields did not change with it.
+        """
         for viewer in (self.super_admin, self.company_admin, self.manager):
             entry = self._get_staff_entry(viewer)
             with self.subTest(role=viewer.role):
-                # Byte-identical pre-M2 shape: no new keys.
                 self.assertEqual(
-                    set(entry.keys()), {"id", "full_name", "email", "phone"}
+                    set(entry.keys()),
+                    {"id", "full_name", "email", "phone", "credentials", "properties"},
                 )
+                self.assertIsInstance(entry["credentials"], list)
+                self.assertIsInstance(entry["properties"], list)
 
     def test_anonymous_collapse_is_now_per_member(self):
         """W-N1 §4 CHANGED THIS DELIBERATELY, so the old assertion is
