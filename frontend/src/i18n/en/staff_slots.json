@@ -205,5 +205,18 @@
   "parts.assign_nobody_on_job": "Nobody is on this ticket yet",
   "parts.assign_everyone_here": "Everyone on this ticket is already on this part",
   "parts.error_same_part": "That person is already on this part.",
-  "parts.error_not_on_job": "That person is not on this ticket any more. Assign them to the ticket first, then give them a part."
+  "parts.error_not_on_job": "That person is not on this ticket any more. Assign them to the ticket first, then give them a part.",
+  "parts.assign_confirm_one": "Assign {{count}} person",
+  "parts.assign_confirm_other": "Assign {{count}} people",
+  "parts.toast_assigned_one": "{{names}} is now on “{{part}}”.",
+  "parts.toast_assigned_other": "{{count}} people are now on “{{part}}”: {{names}}.",
+  "parts.error_same_part_named_one": "{{names}} was already on this part.",
+  "parts.error_same_part_named_other": "{{names}} were already on this part.",
+  "parts.error_not_on_job_named_one": "{{names}} is not on this ticket any more.",
+  "parts.error_not_on_job_named_other": "{{names}} are not on this ticket any more.",
+  "my_parts.title": "My parts",
+  "my_parts.outstanding": "{{count}} of {{total}} left",
+  "my_parts.mark_done": "Mark done",
+  "my_parts.done": "Done",
+  "my_parts.auto_complete_on": "When the last part is done, this ticket goes to manager review automatically."
 }

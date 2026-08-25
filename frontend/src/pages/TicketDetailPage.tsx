@@ -35,6 +35,7 @@ import { listTicketCategories, setTicketCategory } from "../api/tickets";
 import { getMessageRecipients } from "../api/notifications";
 import { downloadDocumentFromUrl } from "../api/staffCredentials";
 import { formatDateTime } from "../lib/intl";
+import { MyPartsPanel } from "./tickets/MyPartsPanel";
 import { StaffAssignmentSection } from "./tickets/StaffAssignmentSection";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
@@ -936,6 +937,14 @@ export function TicketDetailPage() {
   // assignable-manager dropdown, etc. — the surface that may see+author
   // PROVIDER_INTERNAL notes (B7) and direct ticket assignment.
   const isStaff = isProviderManagementRole(me?.role);
+
+  // W26.4 — how many of this ticket's parts the VIEWER is on. Drives the
+  // choice between the worker's actionable "My parts" and the read-only
+  // split view; `MyPartsPanel` applies the same filter internally, so
+  // the two cannot disagree about what "mine" means.
+  const myPartCount = (ticket?.sub_tasks ?? []).filter((part) =>
+    part.staff_assignments.some((slot) => slot.user_id === me?.id),
+  ).length;
 
   /**
    * W11 §1 — IS THIS MOVE A DECISION TAKEN OUT OF THE CUSTOMER'S HANDS?
@@ -4223,13 +4232,39 @@ export function TicketDetailPage() {
                   STAFF (provider-side) see full detail; customer-side
                   viewers get a PII-safe summary (no staff identity/notes).
                   Only renders once a manager has created sub-tasks, so a
-                  ticket with none is unchanged for these roles. */}
+                  ticket with none is unchanged for these roles.
+
+                  NOTE the flag's name: `isStaff` is
+                  `isProviderManagementRole` (SA/CA/BM). This branch
+                  therefore excludes MANAGERS -- who get
+                  `StaffAssignmentSection` instead -- and not STAFF. A
+                  CUSTOMER_USER reaches it but never renders, because
+                  `sub_tasks` is emptied for that role server-side
+                  (serializers.py:840).
+
+                  W26.4 — a STAFF viewer who is ON one or more parts gets
+                  `MyPartsPanel` in its place: their OWN parts, each with
+                  the action that finishes it. `MyPartsPanel` returns
+                  null when none of the parts are theirs, and the
+                  read-only view below is what they fall back to, so a
+                  staff member on the job but on no part still sees how
+                  the job is split. */}
               {!isStaff && ticket.sub_tasks.length > 0 && (
-                <SubTaskReadOnly
-                  subTasks={ticket.sub_tasks}
-                  autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
-                  showStaffDetails={me?.role === "STAFF"}
-                />
+                myPartCount > 0 ? (
+                  <MyPartsPanel
+                    ticketId={ticket.id}
+                    subTasks={ticket.sub_tasks}
+                    myUserId={me?.id ?? -1}
+                    autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
+                    onChanged={() => void loadTicket()}
+                  />
+                ) : (
+                  <SubTaskReadOnly
+                    subTasks={ticket.sub_tasks}
+                    autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
+                    showStaffDetails={me?.role === "STAFF"}
+                  />
+                )
               )}
 
               {/* Sprint 23B — STAFF-only "Request assignment"

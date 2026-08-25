@@ -205,5 +205,18 @@
   "parts.assign_nobody_on_job": "Nog niemand op dit ticket",
   "parts.assign_everyone_here": "Iedereen op dit ticket werkt al aan dit onderdeel",
   "parts.error_same_part": "Die persoon werkt al aan dit onderdeel.",
-  "parts.error_not_on_job": "Die persoon staat niet meer op dit ticket. Wijs de persoon eerst aan het ticket toe en geef daarna een onderdeel."
+  "parts.error_not_on_job": "Die persoon staat niet meer op dit ticket. Wijs de persoon eerst aan het ticket toe en geef daarna een onderdeel.",
+  "parts.assign_confirm_one": "{{count}} medewerker toewijzen",
+  "parts.assign_confirm_other": "{{count}} medewerkers toewijzen",
+  "parts.toast_assigned_one": "{{names}} werkt nu aan “{{part}}”.",
+  "parts.toast_assigned_other": "{{count}} medewerkers werken nu aan “{{part}}”: {{names}}.",
+  "parts.error_same_part_named_one": "{{names}} werkte al aan dit onderdeel.",
+  "parts.error_same_part_named_other": "{{names}} werkten al aan dit onderdeel.",
+  "parts.error_not_on_job_named_one": "{{names}} staat niet meer op dit ticket.",
+  "parts.error_not_on_job_named_other": "{{names}} staan niet meer op dit ticket.",
+  "my_parts.title": "Mijn onderdelen",
+  "my_parts.outstanding": "{{count}} van {{total}} open",
+  "my_parts.mark_done": "Markeer als klaar",
+  "my_parts.done": "Klaar",
+  "my_parts.auto_complete_on": "Zodra het laatste onderdeel klaar is, gaat dit ticket automatisch naar managerbeoordeling."
 }

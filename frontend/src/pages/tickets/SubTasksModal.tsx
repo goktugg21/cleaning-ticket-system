@@ -98,7 +98,13 @@ export function SubTasksModal({
   const [renamingPartId, setRenamingPartId] = useState<number | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null);
-  const [pickByPart, setPickByPart] = useState<Record<number, number>>({});
+  // W26.4 -- MANY people per part, one Assign. Keyed by part id, so an
+  // open picker on one row keeps its ticks while another row is worked.
+  const [pickByPart, setPickByPart] = useState<Record<number, number[]>>({});
+  // Which row currently has its picker open. Only one at a time: the
+  // rows are the same width, and two open pickers push the actions of
+  // every row between them off the screen the W26.3 layout just fixed.
+  const [pickerPartId, setPickerPartId] = useState<number | null>(null);
   // W26.3 -- a refusal belongs to the ROW that caused it. Keyed by part
   // id so assigning on one part never blanks another row's message.
   const [errorByPart, setErrorByPart] = useState<Record<number, string>>({});
@@ -199,7 +205,7 @@ export function SubTasksModal({
   // W26.3 -- who this part can still be given to: the people on the job,
   // minus the ones already on THIS part. Same-part duplicates are what
   // the server refuses (400 `staff_already_assigned`), so the picker
-  // simply does not offer them; the inline error below is for the case
+  // simply does not offer them; the inline refusal below is for the case
   // where this list is stale.
   function offerableFor(part: SubTask): JobMember[] {
     const taken = new Set(
@@ -208,14 +214,46 @@ export function SubTasksModal({
     return onJob.filter((person) => !taken.has(person.id));
   }
 
-  // The per-part assign uses the SAME slot-create path as every other
-  // assign on this ticket -- `POST /staff-assignments/` with `sub_task`
-  // set. So the rule is the server's, said once, and its refusal is
-  // rendered on this row rather than thrown at a toast the operator
-  // reads after the list has moved.
+  function togglePick(partId: number, userId: number) {
+    setPickByPart((current) => {
+      const chosen = current[partId] ?? [];
+      return {
+        ...current,
+        [partId]: chosen.includes(userId)
+          ? chosen.filter((id) => id !== userId)
+          : [...chosen, userId],
+      };
+    });
+  }
+
+  function closePicker(partId: number) {
+    setPickerPartId(null);
+    setPickByPart((current) => {
+      const next = { ...current };
+      delete next[partId];
+      return next;
+    });
+  }
+
+  // W26.4 -- BULK ASSIGN, still one rule and one door.
+  //
+  // Several people, ONE Assign action, but one request PER PERSON
+  // through the SAME chokepoint the single assign used
+  // (`POST /staff-assignments/` with `sub_task` set). There is no bulk
+  // endpoint and deliberately so: a batch would need its own copy of
+  // the (user, sub_task) rule to say which member of the batch it
+  // refused, and a second copy of that rule is exactly what W26.3 spent
+  // a sprint removing.
+  //
+  // A refusal is NOT skipped silently. The picker already omits anyone
+  // on this part, so a same-part duplicate can only mean the list this
+  // browser is holding is out of date -- and a silent skip would leave
+  // the operator believing they had just assigned someone they had not.
+  // So the ones that landed are announced, and the ones refused are
+  // named on the row with the reason.
   async function handleAssignToPart(part: SubTask) {
-    const userId = pickByPart[part.id];
-    if (!userId) return;
+    const chosen = pickByPart[part.id] ?? [];
+    if (chosen.length === 0) return;
     setBusy(true);
     setError("");
     setErrorByPart((current) => {
@@ -223,29 +261,70 @@ export function SubTasksModal({
       delete next[part.id];
       return next;
     });
+    const nameOf = (id: number) =>
+      onJob.find((person) => person.id === id)?.name ?? String(id);
+    const done: string[] = [];
+    const duplicate: string[] = [];
+    const notOnJob: string[] = [];
+    let unexpected = "";
     try {
-      await addTicketStaffAssignment(ticketId, userId, { sub_task: part.id });
-      setPickByPart((current) => {
-        const next = { ...current };
-        delete next[part.id];
-        return next;
-      });
+      for (const userId of chosen) {
+        try {
+          await addTicketStaffAssignment(ticketId, userId, {
+            sub_task: part.id,
+          });
+          done.push(nameOf(userId));
+        } catch (err) {
+          const code = (err as { response?: { data?: { code?: string } } })
+            ?.response?.data?.code;
+          if (code === "staff_already_assigned") duplicate.push(nameOf(userId));
+          else if (code === "staff_not_on_job") notOnJob.push(nameOf(userId));
+          else unexpected = getApiError(err);
+        }
+      }
+      // The list is reloaded whatever happened, so the row can never
+      // disagree with what was actually written.
       await onChanged();
+      if (done.length > 0) {
+        push({
+          variant: "success",
+          title: t("parts.toast_assigned", {
+            count: done.length,
+            names: done.join(", "),
+            part: part.title,
+          }),
+        });
+      }
+      const refusals: string[] = [];
+      if (duplicate.length > 0) {
+        refusals.push(
+          t("parts.error_same_part_named", {
+            count: duplicate.length,
+            names: duplicate.join(", "),
+          }),
+        );
+      }
+      if (notOnJob.length > 0) {
+        refusals.push(
+          t("parts.error_not_on_job_named", {
+            count: notOnJob.length,
+            names: notOnJob.join(", "),
+          }),
+        );
+      }
+      if (unexpected) refusals.push(unexpected);
+      if (refusals.length > 0) {
+        setErrorByPart((current) => ({
+          ...current,
+          [part.id]: refusals.join(" "),
+        }));
+      }
+      // The picker closes either way. Leaving it open with the same
+      // people still ticked invites a second confirm that would try the
+      // ones that already landed all over again.
+      closePicker(part.id);
     } catch (err) {
-      const code = (err as { response?: { data?: { code?: string } } })
-        ?.response?.data?.code;
-      // Both codes are expected here and mean different things, so they
-      // get different sentences: `staff_not_on_job` is a stale picker
-      // offering someone who has since left the job, and the fix is the
-      // ticket-level assign; `staff_already_assigned` at part level can
-      // only mean this same person is already on this same part.
-      const message =
-        code === "staff_not_on_job"
-          ? t("parts.error_not_on_job")
-          : code === "staff_already_assigned"
-            ? t("parts.error_same_part")
-            : getApiError(err);
-      setErrorByPart((current) => ({ ...current, [part.id]: message }));
+      setError(getApiError(err));
     } finally {
       setBusy(false);
     }
@@ -312,6 +391,8 @@ export function SubTasksModal({
               const confirming = confirmRemoveId === part.id;
               const offerable = offerableFor(part);
               const rowError = errorByPart[part.id];
+              const pickerOpen = pickerPartId === part.id;
+              const chosen = pickByPart[part.id] ?? [];
               return (
                 <div
                   className="parts-row"
@@ -420,48 +501,37 @@ export function SubTasksModal({
                         </>
                       ) : (
                         <>
-                          <select
-                            className="field-input parts-assign-select"
-                            value={pickByPart[part.id] ?? ""}
-                            disabled={busy || offerable.length === 0}
-                            aria-label={t("parts.assign_label")}
-                            onChange={(event) =>
-                              setPickByPart((current) => ({
-                                ...current,
-                                [part.id]: Number(event.target.value),
-                              }))
-                            }
-                            data-testid="ticket-part-assign-select"
-                          >
-                            <option value="">
-                              {/* W26.3 -- the empty picker has TWO
-                                  causes and they need different
-                                  sentences: nobody is on the job at
-                                  all, or everyone on it is already on
-                                  this part. The first tells the
-                                  operator to go and assign someone to
-                                  the ticket; the second says there is
-                                  nothing left to do here. */}
-                              {onJob.length === 0
-                                ? t("parts.assign_nobody_on_job")
-                                : offerable.length === 0
-                                  ? t("parts.assign_everyone_here")
-                                  : t("parts.assign_choose")}
-                            </option>
-                            {offerable.map((person) => (
-                              <option key={person.id} value={person.id}>
-                                {person.name}
-                              </option>
-                            ))}
-                          </select>
+                          {/* W26.4 -- the assign control OPENS a
+                              picker rather than being one. A
+                              multi-select has to show several names at
+                              once, and a control that tall inside the
+                              inline actions row would undo the W26.3
+                              layout for every row on screen. So the
+                              row keeps one button, and the picker
+                              opens underneath it. */}
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
-                            onClick={() => void handleAssignToPart(part)}
-                            disabled={busy || !pickByPart[part.id]}
-                            data-testid="ticket-part-assign"
+                            onClick={() => {
+                              if (pickerOpen) closePicker(part.id);
+                              else setPickerPartId(part.id);
+                            }}
+                            disabled={busy || offerable.length === 0}
+                            aria-expanded={pickerOpen}
+                            title={
+                              offerable.length === 0
+                                ? onJob.length === 0
+                                  ? t("parts.assign_nobody_on_job")
+                                  : t("parts.assign_everyone_here")
+                                : undefined
+                            }
+                            data-testid="ticket-part-assign-open"
                           >
-                            {t("parts.assign_button")}
+                            {offerable.length === 0
+                              ? onJob.length === 0
+                                ? t("parts.assign_nobody_on_job")
+                                : t("parts.assign_everyone_here")
+                              : t("parts.assign_button")}
                           </button>
                           <button
                             type="button"
@@ -492,6 +562,69 @@ export function SubTasksModal({
                           </button>
                         </>
                       )}
+                    </div>
+                  )}
+
+                  {/* The picker's wrapper takes no class of its own:
+                      `.parts-row` is already a column flex container, so
+                      a bare div spans it and stacks its title, list and
+                      actions. The list and the buttons reuse
+                      `.assign-picker` / `.assign-picker-row` /
+                      `.assign-actions` -- the ticket-level assign
+                      dialog's own checkbox list. It is the same control,
+                      so it reads the same and needs no new CSS. */}
+                  {pickerOpen && !isTerminal && (
+                    <div data-testid="ticket-part-picker">
+                      <div className="muted small">
+                        {t("parts.assign_label")}
+                      </div>
+                      {/* The job's assigned people are a SERVER
+                          collection, so the list is bounded even though
+                          a ticket rarely carries many (CLAUDE.md). */}
+                      <BoundedList
+                        size="sm"
+                        count={offerable.length}
+                        ariaLabel={t("parts.assign_label")}
+                        testIdPrefix="ticket-part-picker-list"
+                        className="assign-picker"
+                      >
+                        {offerable.map((person) => (
+                          <label
+                            key={person.id}
+                            className="assign-picker-row"
+                            data-testid="ticket-part-picker-option"
+                            data-user-id={person.id}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={chosen.includes(person.id)}
+                              disabled={busy}
+                              onChange={() => togglePick(part.id, person.id)}
+                            />
+                            <span>{person.name}</span>
+                          </label>
+                        ))}
+                      </BoundedList>
+                      <div className="assign-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => void handleAssignToPart(part)}
+                          disabled={busy || chosen.length === 0}
+                          data-testid="ticket-part-assign"
+                        >
+                          {t("parts.assign_confirm", { count: chosen.length })}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => closePicker(part.id)}
+                          disabled={busy}
+                          data-testid="ticket-part-picker-cancel"
+                        >
+                          {t("common:cancel")}
+                        </button>
+                      </div>
                     </div>
                   )}
 
