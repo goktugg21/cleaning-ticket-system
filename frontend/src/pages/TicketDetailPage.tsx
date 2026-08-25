@@ -4921,65 +4921,35 @@ export function TicketDetailPage() {
               what keeps CUSTOMER_USER (who passes that predicate) out of
               provider money. The origin pill in the header stays the
               door to the full Extra Work page. */}
-          {/* W-PLAN Task 2 — the Plan action for One-off work. Same
-              viewer gate as the card group below: provider management
-              with extra-work access; the dialog itself is mounted at
-              the end of the page. */}
+          {/* W-PLAN Task 2 / W-PLANCARD Task 1 — the Plan action for
+              One-off work, and NOTHING ELSE in this slot.
+
+              ONE OWNER PER FACT. This card used to carry a second copy
+              of the plan — a bullet per person ("Ahmet · no day yet ·
+              4.00h") — next to the Planned-vs-worked table that already
+              owns those numbers per person. Two renderings of one store
+              on one screen is the defect; the list is gone and the
+              table below is the plan's only reading here. Day-level
+              detail stays where it lives: the plan modal.
+
+              What remains is the DOOR: the in-tab "Plan the work"
+              (W-HOURS3), right-aligned above the table it edits, same
+              handler, same gate and same modal as the header button.
+              `ewPlanDetail` is still read for the table's planned side
+              and to seed the modal. */}
           {ticket.extra_work_origin &&
             isProviderManagementRole(me?.role) &&
             canAccessExtraWork(me?.role) && (
-              <div className="card" data-testid="ticket-ew-plan-card">
-                <div className="form-section">
-                  {/* W-HOURS3 Task 2 — the door is ALSO inside the Plan
-                      area. W-PLAN2 lifted the button into the header so
-                      it is always in reach; the owner still expects one
-                      beside the plan it edits, and both read the VERB
-                      ("Plan the work") while the tab keeps the noun.
-                      Same handler, same modal, same gate as the header
-                      button; `.ew-hours-compare-head` is the title-plus-
-                      action head the card below already uses. */}
-                  <div className="ew-hours-compare-head">
-                    <div className="form-section-title">
-                      {t("ew_plan_summary_title")}
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={() => void openEwPlan()}
-                      disabled={ewPlanLoading}
-                      data-testid="ticket-ew-plan-open-tab"
-                    >
-                      {ewPlanLoading ? t("ew_plan_loading") : t("ew_plan_button")}
-                    </button>
-                  </div>
-                  {ewPlanDetail &&
-                  (ewPlanDetail.planned_hours ?? []).length > 0 ? (
-                    <ul
-                      className="muted small"
-                      style={{ margin: "0 0 10px", paddingLeft: 18 }}
-                      data-testid="ticket-ew-plan-summary"
-                    >
-                      {(ewPlanDetail.planned_hours ?? []).map((row, i) => (
-                        <li key={i} data-testid="ticket-ew-plan-summary-row">
-                          {row.user_full_name || row.user_email}
-                          {" \u00b7 "}
-                          {row.date ?? t("ew_plan_summary_no_day")}
-                          {row.hour_type_name ? ` \u00b7 ${row.hour_type_name}` : ""}
-                          {" \u00b7 "}
-                          {row.hours}h
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p
-                      className="muted small"
-                      style={{ marginTop: 0 }}
-                      data-testid="ticket-ew-plan-summary-empty"
-                    >
-                      {t("ew_plan_summary_empty")}
-                    </p>
-                  )}
-                </div>
+              <div className="tk-plan-actions" data-testid="ticket-ew-plan-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => void openEwPlan()}
+                  disabled={ewPlanLoading}
+                  data-testid="ticket-ew-plan-open-tab"
+                >
+                  {ewPlanLoading ? t("ew_plan_loading") : t("ew_plan_button")}
+                </button>
               </div>
             )}
           {/* hours2 Part 1b — PLANNED VS WORKED, on the job.

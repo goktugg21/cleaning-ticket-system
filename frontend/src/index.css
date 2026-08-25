@@ -12876,6 +12876,78 @@ a.wp-card-title:hover { text-decoration: underline; }
   }
 }
 
+/* W-PLANCARD Task 2 — the comparison earns its card.
+
+   The table hugged its content (no width, no head styling), so it read
+   as a scrap of text under a title. It is now the page's own table
+   vocabulary, borrowed rule for rule from `.data-table`: the head row
+   on the surface-2 ground in the 10px uppercase heading face, cell
+   padding from the same `--cell-*` tokens, hairline row borders, a
+   footer Total on a 2px rule. The person column takes the slack; the
+   four figure columns size to their content (`width: 1%` + nowrap) and
+   sit flush right in tabular numerals. No `min-width`, so nothing is
+   ever wider than the card: at 1366 and 1920 the table is the card.
+
+   Difference: a SURPLUS keeps the warn tone (`.ew-hours-tone-over`,
+   the waiting ink — warns, never blocks); exact-or-under is NEUTRAL
+   here, overriding the green the tone classes carry elsewhere — under
+   the plan is not an achievement to colour, it is the expected state.
+   The weighted explainer is one short muted line under the table. */
+.ew-hours-compare-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ew-hours-compare-table thead th {
+  padding: var(--cell-y) var(--cell-x);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  text-align: left;
+}
+.ew-hours-compare-table tbody td {
+  padding: var(--cell-y) var(--cell-x);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+  color: var(--text-muted);
+  vertical-align: middle;
+}
+.ew-hours-compare-table tbody td:first-child {
+  color: var(--text);
+  font-weight: 600;
+  min-width: 14ch;
+}
+.ew-hours-compare-table tfoot td {
+  padding: var(--cell-y) var(--cell-x);
+  border-top: 2px solid var(--border);
+  background: var(--surface-2);
+  font-size: 13px;
+  color: var(--text);
+}
+.ew-hours-compare-table th.ew-hours-num,
+.ew-hours-compare-table td.ew-hours-num {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ew-hours-compare-table .ew-hours-tone-under,
+.ew-hours-compare-table .ew-hours-tone-on {
+  color: inherit;
+}
+.ew-hours-compare-table .ew-hours-tone-over {
+  color: var(--state-waiting);
+  font-weight: 700;
+}
+.ew-hours-compare-note {
+  margin: 8px 0 0;
+  line-height: 1.45;
+}
+
 /* --------------------------------------------------------------------
    W4-O — the per-work bulk plan table.
 
@@ -14570,3 +14642,10 @@ table.assign-table { min-width: 0; width: 100%; }
    one column — the same single-column layout the <=1100px breakpoint
    above already renders, so the cards are proven at this width. */
 .detail-grid.tk-tabs-stack { grid-template-columns: 1fr; }
+/* W-PLANCARD Task 1 — the Plan tab's one action, right-aligned above
+   the table it edits, where the deleted "Planned hours" card stood. */
+.tk-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 14px;
+}
