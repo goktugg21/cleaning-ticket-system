@@ -53,6 +53,14 @@ import type {
 import { useToast } from "../../components/ToastProvider";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { customerLabelName } from "../../lib/customerLabelName";
+// This page wears seven `pw-*` classes (`pw-form-group*`, `pw-window*`)
+// and, until now, imported the stylesheet that defines them NOWHERE. It
+// looked right only because Vite emits one CSS bundle for the app, so
+// the detail page's import happened to cover this page too. That is a
+// coincidence of the current chunking, not a dependency: the day this
+// route gets its own CSS chunk, the form loses its group borders and
+// its window rows. Declared explicitly. Vite dedupes the second import.
+import "../../styles/planned-work.css";
 
 const FREQUENCIES: RecurringJobFrequency[] = ["WEEKLY", "BIWEEKLY", "MONTHLY"];
 // W-PW1 — a recurring job is billed as a MEMBERSHIP through its contract
