@@ -54,7 +54,7 @@ import { useTranslation } from "react-i18next";
 import axios from "axios";
 
 import { listCustomerContacts } from "../api/admin";
-import { getApiError } from "../api/client";
+import { api, getApiError } from "../api/client";
 import { labelErrorCode, listLabels } from "../api/customerLabels";
 import { markThreadRead, notifyInboxUnreadChanged } from "../api/inbox";
 import {
@@ -108,9 +108,12 @@ import type {
   ExtraWorkRequestDetail,
   ExtraWorkStatus,
   ExtraWorkUrgency,
+  PaginatedResponse,
   Proposal,
   ProposalDetail,
+  TicketDetail,
   TicketList,
+  TicketMessage,
   TicketStatus,
 } from "../api/types";
 import { ConfirmDialog, type ConfirmDialogHandle } from "../components/ConfirmDialog";
@@ -1039,6 +1042,29 @@ export function ExtraWorkDetailPage() {
 
   // M1 B6 — Extra Work message thread + composer state.
   const [ewMessages, setEwMessages] = useState<EwMessage[]>([]);
+  // TU — ONE LIVE CONVERSATION PER JOB, the customer's half.
+  //
+  // A provider who opens a spawned request is redirected to the job
+  // (see the Navigate below) so they never see this thread again. The
+  // CUSTOMER is deliberately never redirected -- their surface stays
+  // the request -- which left them writing into a thread nobody on the
+  // provider side would ever read. The backend now refuses those posts
+  // (409 `thread_frozen`); this is the other half: their composer
+  // writes to the JOB instead, and their list shows both halves of the
+  // conversation in one chronological run.
+  //
+  // Nothing here is a new read path. The ticket thread is fetched from
+  // the SAME `/tickets/<id>/messages/` endpoint the job page uses, so
+  // the per-tier visibility chokepoint decides what a customer sees,
+  // server-side, exactly as it already does. A customer whose scope
+  // does not reach this ticket simply gets nothing back (their ticket
+  // scope is the intersection of customer membership and per-building
+  // access), and then no composer is rendered at all.
+  const [jobMessages, setJobMessages] = useState<TicketMessage[]>([]);
+  const [jobTicket, setJobTicket] = useState<TicketDetail | null>(null);
+  const [jobSending, setJobSending] = useState(false);
+  const [jobError, setJobError] = useState("");
+
   const [ewMessageText, setEwMessageText] = useState("");
   const [ewMessageType, setEwMessageType] =
     useState<EwMessageType>("PUBLIC_REPLY");
@@ -1251,6 +1277,106 @@ export function ExtraWorkDetailPage() {
 
   // Load the thread, keyed on ewId (mirror the proposals-load pattern). A POST
   // does not refire this; `reloadEwMessages` is called imperatively.
+  // The job this request became, if it became one. SAME sort as the
+  // provider redirect below (earliest scheduled day, undated last, id
+  // as tiebreak) so both halves of the app agree on which ticket "the
+  // job" is when a request spawned a series.
+  const jobTicketId = useMemo(() => {
+    const spawned = ew?.spawned_tickets ?? [];
+    if (spawned.length === 0) return null;
+    return [...spawned].sort((a, b) => {
+      const ad = a.scheduled_start_at ?? "9999-12-31T23:59:59Z";
+      const bd = b.scheduled_start_at ?? "9999-12-31T23:59:59Z";
+      if (ad !== bd) return ad < bd ? -1 : 1;
+      return a.id - b.id;
+    })[0].id;
+  }, [ew?.spawned_tickets]);
+
+  const threadIsFrozen = jobTicketId !== null;
+
+  const reloadJobThread = useCallback(() => {
+    if (jobTicketId === null) return;
+    // Both reads are the job page's own endpoints. A customer outside
+    // this ticket's scope gets 404/403 and we keep `jobTicket` null,
+    // which is what removes the composer entirely.
+    void api
+      .get<PaginatedResponse<TicketMessage>>(
+        `/tickets/${jobTicketId}/messages/`,
+      )
+      .then((response) => setJobMessages(response.data.results))
+      .catch(() => setJobMessages([]));
+    void api
+      .get<TicketDetail>(`/tickets/${jobTicketId}/`)
+      .then((response) => setJobTicket(response.data))
+      .catch(() => setJobTicket(null));
+  }, [jobTicketId]);
+
+  useEffect(() => {
+    // Providers are redirected to the job before this matters; only the
+    // customer's surface needs the merge.
+    if (isProvider || jobTicketId === null) return;
+    reloadJobThread();
+  }, [isProvider, jobTicketId, reloadJobThread]);
+
+  // THE MERGED CONVERSATION, chronological: what the job's thread lets
+  // this customer read, plus the frozen request history. Both sides are
+  // already server-filtered; this only interleaves them.
+  const mergedMessages = useMemo(() => {
+    const fromRequest = ewMessages.map((m) => ({
+      key: `ew-${m.id}`,
+      created_at: m.created_at,
+      body: m.message,
+      author: m.author_email,
+      onJob: false,
+    }));
+    const fromJob = jobMessages.map((m) => ({
+      key: `job-${m.id}`,
+      created_at: m.created_at,
+      body: m.message,
+      author: m.author_email,
+      onJob: true,
+    }));
+    return [...fromRequest, ...fromJob].sort((a, b) =>
+      a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0,
+    );
+  }, [ewMessages, jobMessages]);
+
+  // ABSENT, not disabled. The composer exists only when the server says
+  // this viewer may post a customer-visible reply on the job
+  // (`actions.can_post_public_reply`, the same flag the job page's own
+  // composer reads). Unreachable ticket -> `jobTicket` is null -> no
+  // composer, and the history still reads.
+  const canWriteOnJob =
+    !isProvider &&
+    threadIsFrozen &&
+    jobTicket?.actions?.can_post_public_reply === true;
+
+  async function submitJobMessage(event: FormEvent) {
+    event.preventDefault();
+    if (jobTicketId === null || !ewMessageText.trim()) return;
+    setJobSending(true);
+    setJobError("");
+    try {
+      // The EXISTING ticket-message chokepoint, in the customer-visible
+      // mode. PUBLIC_REPLY + NORMAL is the only pair a customer may
+      // write that the provider reads on the job; nothing here widens
+      // what a customer can post or see.
+      await api.post(`/tickets/${jobTicketId}/messages/`, {
+        message: ewMessageText.trim(),
+        message_type: "PUBLIC_REPLY",
+        visibility_mode: "NORMAL",
+        directed_to: [],
+      });
+      setEwMessageText("");
+      reloadJobThread();
+      pushToast({ variant: "success", title: t("messages.posted") });
+    } catch (err) {
+      setJobError(getApiError(err));
+    } finally {
+      setJobSending(false);
+    }
+  }
+
   const reloadEwMessages = useCallback(() => {
     if (ewId === null) return;
     listEwMessages(ewId)
@@ -3170,6 +3296,44 @@ export function ExtraWorkDetailPage() {
               {/* RF-11 — restyled in the inbox design language: per-message
                   avatars, explicit visibility badges, tighter layout.
                   Presentation only — posting/visibility unchanged. */}
+              {/* TU — the ONE state line this surface gains. Not an
+                  explanation: it is where the conversation is. */}
+              {!isProvider && threadIsFrozen && (
+                <p
+                  className="muted small"
+                  data-testid="ew-thread-continues-on-job"
+                >
+                  {t("thread_continues_on_job")}
+                </p>
+              )}
+
+              {!isProvider && threadIsFrozen ? (
+                <div
+                  className="ew-message-thread"
+                  data-testid="ew-message-thread-merged"
+                >
+                  {mergedMessages.length === 0 ? (
+                    <p className="muted small">{t("messages.empty")}</p>
+                  ) : (
+                    mergedMessages.map((m) => (
+                      <div
+                        key={m.key}
+                        className="ew-msg"
+                        data-testid="ew-merged-message"
+                        data-on-job={m.onJob ? "true" : "false"}
+                      >
+                        <div className="ew-msg-head">
+                          <span className="ew-msg-author">{m.author}</span>
+                          <span className="ew-msg-time muted small">
+                            {formatDateTime(m.created_at)}
+                          </span>
+                        </div>
+                        <div className="ew-msg-body">{m.body}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : (
               <div className="ew-message-thread" data-testid="ew-message-thread">
                 {ewMessages.length === 0 ? (
                   <p className="muted small">{t("messages.empty")}</p>
@@ -3214,8 +3378,61 @@ export function ExtraWorkDetailPage() {
                   ))
                 )}
               </div>
+              )}
 
-              {ewComposerTiers.length > 0 && (
+              {/* TU — on a spawned request the customer writes to the
+                  JOB, not to this frozen thread. One textarea, one
+                  submit; the tier toggle is absent because a customer
+                  has exactly one customer-visible tier on a ticket
+                  (PUBLIC_REPLY) and a toggle with one option is a
+                  control that decides nothing.
+
+                  ABSENT, not disabled, when the server has not said
+                  they may post: an unreachable ticket or a missing
+                  `can_post_public_reply` leaves the history readable
+                  and no composer at all. */}
+              {!isProvider && threadIsFrozen ? (
+                canWriteOnJob && (
+                  <form
+                    onSubmit={submitJobMessage}
+                    data-testid="ew-job-message-composer"
+                    style={{ marginTop: 12 }}
+                  >
+                    <textarea
+                      className="field-textarea"
+                      rows={3}
+                      value={ewMessageText}
+                      disabled={jobSending}
+                      onChange={(event) =>
+                        setEwMessageText(event.target.value)
+                      }
+                      data-testid="ew-job-message-input"
+                    />
+                    {jobError && (
+                      <div
+                        className="alert-error"
+                        role="alert"
+                        data-testid="ew-job-message-error"
+                      >
+                        {jobError}
+                      </div>
+                    )}
+                    <div className="assign-actions">
+                      <button
+                        type="submit"
+                        className="btn btn-primary btn-sm"
+                        disabled={jobSending || !ewMessageText.trim()}
+                        data-testid="ew-job-message-send"
+                      >
+                        {jobSending
+                          ? t("messages.sending")
+                          : t("messages.post")}
+                      </button>
+                    </div>
+                  </form>
+                )
+              ) : (
+              ewComposerTiers.length > 0 && (
                 <form
                   onSubmit={submitEwMessage}
                   data-testid="ew-message-composer"
@@ -3315,6 +3532,7 @@ export function ExtraWorkDetailPage() {
                     {ewSending ? t("messages.sending") : t("messages.post")}
                   </button>
                 </form>
+              )
               )}
             </div>
           </section>

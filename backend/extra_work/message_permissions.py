@@ -145,3 +145,36 @@ def user_may_post_ew_message_type(user, message_type):
     if message_type == ExtraWorkMessageType.CUSTOMER_INTERNAL:
         return is_customer_side(user)
     return False
+
+
+# ---------------------------------------------------------------------------
+# TU — ONE LIVE CONVERSATION PER JOB
+# ---------------------------------------------------------------------------
+ERR_THREAD_FROZEN = "thread_frozen"
+
+
+def ew_thread_is_frozen(extra_work) -> bool:
+    """True once this Extra Work has spawned operational work.
+
+    THE LAW: a job has ONE live conversation. The moment an Extra Work
+    becomes a ticket, the ticket's thread is where the job is discussed
+    and this thread becomes history — readable for ever, writable never.
+
+    The predicate is deliberately the SAME one the detail serializer's
+    `spawned_tickets` uses (`serializers._spawned_tickets_for`): the
+    canonical `Ticket.extra_work_request` FK, soft-deleted tickets
+    excluded. It has to be the same, because that serializer field is
+    what drives the provider's redirect to the job page and what the
+    customer's page reads to decide whether to offer a composer at all.
+    If the two ever disagreed, one side would show a composer the other
+    refuses — the exact "the button did nothing" failure this rule
+    exists to remove. `test_tu_thread_freeze` pins the agreement.
+
+    Deliberately NOT a status check. An Extra Work can be APPROVED
+    without work having been spawned yet, and a spawned job outlives
+    every status its request passes through; "has this become work" is
+    the question, and the FK is the only honest answer to it.
+    """
+    return extra_work.operational_tickets.filter(
+        deleted_at__isnull=True
+    ).exists()

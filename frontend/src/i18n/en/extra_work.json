@@ -768,5 +768,6 @@
   "create.deadline_chip_overdue_other": "{{count}} days overdue",
   "create.preview.col_actions": "Actions",
   "create.preview.picker_label": "Services and agreed prices to add",
-  "create.field_description_placeholder": "Describe the work: exact area, room, surface, access, urgency, and anything that affects pricing. If one service needs its own timing, say so here."
+  "create.field_description_placeholder": "Describe the work: exact area, room, surface, access, urgency, and anything that affects pricing. If one service needs its own timing, say so here.",
+  "thread_continues_on_job": "This conversation continues on the job."
 }

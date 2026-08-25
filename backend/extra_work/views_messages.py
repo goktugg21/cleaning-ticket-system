@@ -3,6 +3,8 @@ M1 B6 — Extra Work message thread HTTP layer.
 
 Endpoints (under `/api/extra-work/<ew_id>/`):
   GET/POST  messages/              list (chokepoint-filtered) + create
+                                    POST 409s `thread_frozen` once the
+                                    request has spawned work (TU).
   GET       message-recipients/    directed_to candidates (side-aware)
 
 Mirrors the B5 ticket message views MINUS staff. Every read routes through
@@ -30,7 +32,9 @@ from notifications.services import (
 )
 
 from .message_permissions import (
+    ERR_THREAD_FROZEN,
     ew_message_type_visible_to_user,
+    ew_thread_is_frozen,
     filter_ew_messages_visible_to,
 )
 from .models import ExtraWorkMessage, ExtraWorkMessageType
@@ -76,6 +80,30 @@ class ExtraWorkMessageListCreateView(views.APIView):
 
     def post(self, request, ew_id: int):
         extra_work = _resolve_ew_or_404(request, ew_id)
+
+        # TU — ONE LIVE CONVERSATION PER JOB. Once this request has
+        # spawned work, the ticket's thread IS the job's conversation
+        # and this one is history. 409 rather than 403: nothing about
+        # WHO is asking is wrong — the same person may post the same
+        # words on the job a second later — it is the state of the
+        # resource that refuses, which is what 409 says.
+        #
+        # This is the ONLY write path to an EW thread (the repo has no
+        # other `ExtraWorkMessage` create outside the demo seeder), so
+        # the freeze needs to exist exactly here and nowhere else.
+        # Reads above are untouched: history stays readable for ever.
+        if ew_thread_is_frozen(extra_work):
+            return Response(
+                {
+                    "detail": (
+                        "This request has become a job. The conversation "
+                        "continues on the job."
+                    ),
+                    "code": ERR_THREAD_FROZEN,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
         serializer = ExtraWorkMessageSerializer(
             data=request.data,
             context={"request": request, "extra_work": extra_work},
