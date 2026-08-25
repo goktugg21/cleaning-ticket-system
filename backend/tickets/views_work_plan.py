@@ -313,6 +313,10 @@ def _slot_source(user, team: bool):
         # would fetch its own extra work, which is the N+1 the §1 read
         # design exists to avoid.
         "ticket__extra_work_request",
+        # W-N1 §3 — the slot's own part. Joined for the same reason the
+        # extra work above is: without it every slot in the week fetches
+        # its own sub-task.
+        "sub_task",
         "user",
     )
 
@@ -456,7 +460,57 @@ def _person_label(user) -> str:
     return (user.full_name or user.email) if user is not None else ""
 
 
-def _entry_from_slot(slot, job, placement, day, today, *, viewer) -> dict:
+def _parts_map(slot_rows):
+    """(ticket_id, user_id) -> the parts that person holds on that ticket.
+
+    W-N1 §3. ONE query for the whole week, not one per card — the same
+    shape `_assignee_map` uses next door and for the same reason.
+
+    SCOPING IS INHERITED, NOT RE-DERIVED. The pairs come from
+    `slot_rows`, which `_slot_source` has already scoped: `user=user` for
+    a STAFF viewer, `ticket__in=scope_tickets_for(user)` for a manager.
+    So this asks only "what parts does this same person hold on this same
+    ticket", about a person and a ticket the viewer has already been
+    admitted to. It never widens, and it deliberately does NOT call a
+    scoping helper of its own — a second scoping path is how a
+    cross-tenant leak gets written.
+
+    That inheritance is also what makes the brief's two cases fall out
+    for free: a STAFF viewer's rows are their own slots, so they see
+    their own parts; a manager's rows are everyone's, so they see all of
+    them.
+    """
+    pairs = {(row.ticket_id, row.user_id) for row in slot_rows}
+    if not pairs:
+        return {}
+    ticket_ids = {t for t, _ in pairs}
+    user_ids = {u for _, u in pairs}
+    out: dict[tuple[int, int], list] = {}
+    rows = (
+        TicketStaffAssignment.objects.filter(
+            ticket_id__in=ticket_ids,
+            user_id__in=user_ids,
+            sub_task__isnull=False,
+            ticket__deleted_at__isnull=True,
+        )
+        .select_related("sub_task")
+        .order_by("sub_task__ordering", "sub_task_id")
+    )
+    for row in rows:
+        key = (row.ticket_id, row.user_id)
+        # The id__in pair above is a cross product, so a row for a
+        # (ticket, user) combination that is not actually in `pairs` can
+        # come back. Dropped here rather than widening what is shown.
+        if key not in pairs:
+            continue
+        bucket = out.setdefault(key, [])
+        if any(p["id"] == row.sub_task_id for p in bucket):
+            continue
+        bucket.append({"id": row.sub_task_id, "title": row.sub_task.title})
+    return out
+
+
+def _entry_from_slot(slot, job, placement, day, today, *, viewer, parts=None) -> dict:
     return {
         "kind": KIND_TICKET_SLOT,
         # Stable across the two kinds so React can key one merged list
@@ -494,6 +548,11 @@ def _entry_from_slot(slot, job, placement, day, today, *, viewer) -> dict:
         "overdue_days": overdue_days(job, today),
         "assignee_names": [_person_label(slot.user)],
         "assignee_count": 1,
+        # W-N1 §3 — the parts this person holds on this ticket, so the
+        # Work Plan can say WHICH half of the job is theirs. Empty list,
+        # never null: a card that renders `parts.map` should not have to
+        # ask whether the key exists.
+        "parts": parts or [],
         # The completion actions belong to the person holding the slot.
         # An admin looking at the team's week is reading it, not working
         # it, and a "Mark done" button on somebody else's card is one
@@ -554,6 +613,10 @@ def _entry_from_extra_work(
         "placement": placement,
         "is_overdue": is_overdue(job, today),
         "overdue_days": overdue_days(job, today),
+        # W-N1 §3 — extra work has no parts; the key is present and
+        # empty so both kinds answer `entry.parts` the same way and the
+        # frontend needs no `kind` check to read it.
+        "parts": [],
         "assignee_names": names[:ASSIGNEE_NAMES_SHOWN],
         "assignee_count": len(names),
         "can_complete": False,
@@ -798,6 +861,7 @@ class WorkPlanView(APIView):
         assignees = cls._assignee_map(
             [row.id for row in ew_rows], team=team, viewer=viewer
         )
+        parts_by_pair = _parts_map(rows)
 
         entries = []
         for slot in rows:
@@ -809,7 +873,15 @@ class WorkPlanView(APIView):
                 placement = fallback_placement
             day = day_for(job, placement, week_start, week_end, today)
             entries.append(
-                _entry_from_slot(slot, job, placement, day, today, viewer=viewer)
+                _entry_from_slot(
+                    slot,
+                    job,
+                    placement,
+                    day,
+                    today,
+                    viewer=viewer,
+                    parts=parts_by_pair.get((slot.ticket_id, slot.user_id)),
+                )
             )
         for row in ew_rows:
             job = _extra_work_job(row)

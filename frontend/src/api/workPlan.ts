@@ -32,6 +32,12 @@ export type WorkPlanKind = "TICKET_SLOT" | "EXTRA_WORK";
 
 /** One card. Both kinds answer with the SAME shape — extra work has no
  *  dated slot, so its three time fields are null rather than absent. */
+/** One named part of a ticket, as the Work Plan shows it. */
+export interface WorkPlanPart {
+  id: number;
+  title: string;
+}
+
 export interface WorkPlanEntry {
   kind: WorkPlanKind;
   /** "slot-12" / "ew-7" — unique across both sources, so a merged list
@@ -68,6 +74,11 @@ export interface WorkPlanEntry {
   overdue_days: number | null;
   assignee_names: string[];
   assignee_count: number;
+  /** W-N1 §3 — the parts of this ticket THIS entry's person holds.
+   *  Always an array, never null, and empty for extra work, which has
+   *  no parts. Scope is the server's: a STAFF viewer's rows carry their
+   *  own parts, a manager's carry everyone's. */
+  parts: WorkPlanPart[];
   /** The completion actions belong to the person holding the slot — an
    *  admin reading the team's week is not working it. */
   can_complete: boolean;

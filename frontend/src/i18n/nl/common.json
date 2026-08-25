@@ -598,6 +598,8 @@
   "api_error.unexpected": "Er is iets onverwachts gebeurd. Probeer het opnieuw.",
   "tickets.assigned_team_anonymous": "Toegewezen aan het {{companyName}}-team",
   "tickets.assigned_team_anonymous_unknown": "Toegewezen aan het veldteam",
+  "tickets.assigned_team_member_anonymous": "Teamlid",
+  "tickets.assigned_team_member_anonymous_unknown": "Teamlid",
   "tickets.assigned_to_you": "Toegewezen aan jou",
   "nav.staff_requests": "Medewerker-aanvragen",
   "staff_requests.title": "Medewerker-toewijzingsaanvragen",

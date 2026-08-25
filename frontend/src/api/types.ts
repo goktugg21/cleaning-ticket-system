@@ -478,7 +478,15 @@ export interface AssignedStaffNamedEntry {
 
 export type AssignedStaffEntry =
   | AssignedStaffNamedEntry
-  | { anonymous: true; label_key: string };
+  // W-N1 §4 — the anonymous row is now one PER MEMBER and carries the
+  // same resolver-gated credentials the named row does. It still has no
+  // name, no email, no phone and no `id`: a certificate says what the
+  // work is covered for, not who is doing it.
+  | {
+      anonymous: true;
+      label_key: string;
+      credentials?: AssignedStaffCredential[];
+    };
 
 // Sprint 28 Batch 15.4 — ticket "spawned from extra work" anchor.
 // Mirrors backend `TicketDetailSerializer.extra_work_origin`. Non-

@@ -1091,6 +1091,27 @@ function EntryTableModal({
                           {entry.title}
                         </>
                       )}
+                      {/* W-N1 §3 — the same chips the week card carries,
+                          under the title rather than beside it: the day
+                          modal's Item column is already the widest thing
+                          in the row and a second inline run would push
+                          the date column off a 1366 screen. */}
+                      {entry.parts.length > 0 && (
+                        <span
+                          className="parts-chip-row parts-chip-row-stacked"
+                          data-testid={`${testId}-row-parts`}
+                        >
+                          {entry.parts.map((part) => (
+                            <span
+                              key={part.id}
+                              className="parts-chip"
+                              data-testid={`${testId}-row-part`}
+                            >
+                              {part.title}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </td>
                     <td>
                       {entry.kind === "EXTRA_WORK"

@@ -598,6 +598,8 @@
   "api_error.unexpected": "Something unexpected happened. Please try again.",
   "tickets.assigned_team_anonymous": "Assigned to the {{companyName}} team",
   "tickets.assigned_team_anonymous_unknown": "Assigned to the field-staff team",
+  "tickets.assigned_team_member_anonymous": "Team member",
+  "tickets.assigned_team_member_anonymous_unknown": "Team member",
   "tickets.assigned_to_you": "Assigned to you",
   "nav.staff_requests": "Staff requests",
   "staff_requests.title": "Staff assignment requests",

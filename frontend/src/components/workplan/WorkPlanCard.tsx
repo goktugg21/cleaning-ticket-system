@@ -173,6 +173,29 @@ export function WorkPlanCard({
           planned date on it. */}
       <PlacementMarker entry={entry} />
 
+      {/* W-N1 §3 — WHICH half of the job is this person's. Reuses the
+          Assignment section's own `.parts-chip` pair rather than a
+          second chip style: it is the same fact in a smaller place, and
+          two chip vocabularies for one concept is how a design language
+          stops being one. Extra work carries an empty list, so this
+          renders nothing there without a `kind` check. */}
+      {entry.parts.length > 0 && (
+        <span
+          className="parts-chip-row parts-chip-row-stacked"
+          data-testid="agenda-card-parts"
+        >
+          {entry.parts.map((part) => (
+            <span
+              key={part.id}
+              className="parts-chip"
+              data-testid="agenda-card-part"
+            >
+              {part.title}
+            </span>
+          ))}
+        </span>
+      )}
+
       <div className="wp-card-foot">
         {isExtraWork ? (
           <StatusBadge

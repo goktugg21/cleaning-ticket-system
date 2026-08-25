@@ -3957,6 +3957,29 @@ export function TicketDetailPage() {
                                   })
                                 : t(`${entry.label_key}_unknown`)}
                             </span>
+                            {/* W-N1 §4 — a redacted team member still
+                                says what they are QUALIFIED for. The
+                                types only, joined with the same middot
+                                the named row uses for its own meta line:
+                                a certificate is a fact about the work,
+                                not about the person, so it survives the
+                                redaction that removes their name. The
+                                server decides which ones appear — this
+                                renders whatever came back and asks no
+                                questions of its own. */}
+                            {(entry.credentials ?? []).length > 0 && (
+                              <span
+                                className="muted small"
+                                style={{ fontSize: 11 }}
+                                data-testid="assigned-staff-anon-credentials"
+                              >
+                                {(entry.credentials ?? [])
+                                  .map((credential) =>
+                                    tCred(`type.${credential.type}`),
+                                  )
+                                  .join(" · ")}
+                              </span>
+                            )}
                           </div>
                         </li>
                       );

@@ -1220,7 +1220,34 @@ def _assigned_staff_payload(ticket, viewer):
         show_email = bool(customer.show_assigned_staff_email)
         show_phone = bool(customer.show_assigned_staff_phone)
         if not (show_name or show_email or show_phone):
-            return [{"anonymous": True, "label_key": "tickets.assigned_team_anonymous"}]
+            # W-N1 §4 — ANONYMOUS, BUT NOT FACELESS.
+            #
+            # This used to return ONE row for the whole team, and the
+            # comment further down said in as many words that a fully
+            # redacted roster therefore exposed no credentials either.
+            # That was a fair reading of "anonymous" and a poor one of
+            # what a customer needs: they are entitled to know that the
+            # people in their building are qualified, and a VCA
+            # certificate says nothing about WHO holds it.
+            #
+            # So the roster becomes one row PER MEMBER, each carrying
+            # the same resolver-gated credentials the named path
+            # carries, and nothing else. Identity redaction is
+            # unchanged and is in fact stricter here than on the named
+            # path: no name, no email, no phone, and no `id` either —
+            # the numeric id is not a name, but it is a handle a
+            # customer could correlate across tickets, and this row has
+            # no need of one.
+            return [
+                {
+                    "anonymous": True,
+                    "label_key": "tickets.assigned_team_member_anonymous",
+                    "credentials": _staff_credentials_payload_for_customer(
+                        a.user, viewer, customer
+                    ),
+                }
+                for a in _distinct_by_user(assignments)
+            ]
     else:
         show_name = show_email = show_phone = True
 
@@ -1260,6 +1287,23 @@ def _assigned_staff_payload(ticket, viewer):
                 user, viewer, customer
             )
         out.append(entry)
+    return out
+
+
+def _distinct_by_user(assignments):
+    """One entry per distinct staff member, first slot wins.
+
+    The named path below does this inline because a staff member may
+    hold several slots on one ticket; the anonymous path needs exactly
+    the same collapse, and two copies of it would drift.
+    """
+    seen = set()
+    out = []
+    for a in assignments:
+        if a.user_id in seen:
+            continue
+        seen.add(a.user_id)
+        out.append(a)
     return out
 
 
