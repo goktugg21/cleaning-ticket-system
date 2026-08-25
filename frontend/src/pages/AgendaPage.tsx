@@ -340,6 +340,8 @@ function WorkPlanWeek() {
     null,
   );
   const [unableTarget, setUnableTarget] = useState<WorkPlanEntry | null>(null);
+  /** Treatment 1 — the "can't complete" failure, shown in its own modal. */
+  const [unableError, setUnableError] = useState("");
   // Sprint 181 §8 — which undated row is being planned, and why the
   // last attempt failed. Keyed by entry rather than a bare boolean so
   // only the pressed button goes busy.
@@ -535,17 +537,24 @@ function WorkPlanWeek() {
 
   async function handleUnableConfirm(reason: string) {
     const entry = unableTarget;
-    setUnableTarget(null);
     if (!entry || entry.ticket_id === null) return;
+    // Treatment 1 — the dialog is dismissed only once the write LANDS.
+    // It used to close on line two, before the await, so a rejected
+    // "can't complete" threw away the reason the worker had just typed
+    // and answered from a toast over a board that had not changed.
+    setUnableError("");
     try {
       await updateStaffSlot(entry.ticket_id, entry.source_id, {
         slot_status: "UNABLE_TO_COMPLETE",
         unable_to_complete_reason: reason,
       });
+      setUnableTarget(null);
       reload();
       push({ variant: "success", title: t("unable.toast_done") });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
+      // `RejectReasonDialog` is shared and has no error slot; its
+      // `description` IS in the open modal, which is where this belongs.
+      setUnableError(getApiError(err));
     }
   }
 
@@ -889,11 +898,14 @@ function WorkPlanWeek() {
       <RejectReasonDialog
         open={unableTarget !== null}
         title={t("unable.dialog_title")}
-        description={t("unable.dialog_desc")}
+        description={unableError || t("unable.dialog_desc")}
         placeholder={t("unable.dialog_placeholder")}
         confirmLabel={t("unable.dialog_confirm")}
         cancelLabel={t("common:cancel")}
-        onCancel={() => setUnableTarget(null)}
+        onCancel={() => {
+          setUnableError("");
+          setUnableTarget(null);
+        }}
         onConfirm={handleUnableConfirm}
       />
     </div>

@@ -181,6 +181,16 @@
   cursor: default;
 }
 
+/* Treatment 1 — a refused date write, inside the popover that fired it.
+ * Sized down because the popover is 210px wide and a server sentence is
+ * not; it wraps rather than widening the menu off the cell it points at. */
+.pw-daypop-error {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
 /* The "next up" strip: five dates, each a date and a state. */
 .pw-nextup {
   display: flex;

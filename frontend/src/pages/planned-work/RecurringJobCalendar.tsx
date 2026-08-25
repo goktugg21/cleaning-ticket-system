@@ -124,6 +124,9 @@ export function RecurringJobCalendar({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyDate, setBusyDate] = useState<string | null>(null);
+  /** Treatment 1 — a refused date write, shown in the popover that fired
+   *  it rather than in a toast over an unchanged calendar. */
+  const [dateError, setDateError] = useState("");
   // W-PW1 — the open date-actions popover: which date, and the screen rect
   // of the cell that was clicked, so the panel opens against that cell.
   const [dayMenu, setDayMenu] = useState<{
@@ -190,7 +193,12 @@ export function RecurringJobCalendar({
     action: "add" | "skip" | "clear",
   ) {
     if (busyDate || !canManage) return;
-    setDayMenu(null);
+    // Treatment 1 — the popover is NOT dismissed up front. It is the
+    // control that fired this write and it is anchored to the very date
+    // the write is about, so it is where a refusal has to appear; it
+    // used to close first and answer from a toast floating over a
+    // calendar that still showed the old tick.
+    setDateError("");
     setBusyDate(date);
     try {
       let toastKey: string;
@@ -206,15 +214,17 @@ export function RecurringJobCalendar({
       }
       await reload();
       onChanged();
+      setDayMenu(null);
       push({ variant: "success", title: t(toastKey) });
     } catch (err) {
-      push({ variant: "error", title: getApiError(err) });
+      setDateError(getApiError(err));
     } finally {
       setBusyDate(null);
     }
   }
 
   function openDayMenu(iso: string, tick: DateTick, el: HTMLElement) {
+    setDateError("");
     const r = el.getBoundingClientRect();
     setDayMenu((current) =>
       current?.iso === iso
@@ -470,6 +480,7 @@ export function RecurringJobCalendar({
             rect={dayMenu.rect}
             actions={dayActions(dayMenu.iso, dayMenu.tick)}
             label={formatDayMenuDate(dayMenu.iso, locale)}
+            error={dateError}
             onClose={() => setDayMenu(null)}
           />
         </>
@@ -510,17 +521,20 @@ function DayMenu({
   rect,
   actions,
   label,
+  error,
   onClose,
 }: {
   date: string;
   rect: { top: number; left: number; bottom: number; right: number };
   actions: DayAction[];
   label: string;
+  /** Treatment 1 — the last refusal for THIS date, or "". */
+  error: string;
   onClose: () => void;
 }) {
   const WIDTH = 210;
   const GAP = 6;
-  const estHeight = 42 + actions.length * 34;
+  const estHeight = 42 + actions.length * 34 + (error ? 44 : 0);
   const left = Math.max(
     8,
     Math.min(rect.left, window.innerWidth - WIDTH - 8),
@@ -563,6 +577,15 @@ function DayMenu({
             {action.label}
           </button>
         ),
+      )}
+      {error && (
+        <div
+          className="alert-error pw-daypop-error"
+          role="alert"
+          data-testid="calendar-day-error"
+        >
+          {error}
+        </div>
       )}
     </div>
   );
