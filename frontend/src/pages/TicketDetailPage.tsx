@@ -2605,6 +2605,23 @@ export function TicketDetailPage() {
               CONVERTED_TO_EXTRA_WORK. Gated on `canConvertTicket`
               (provider-management role + convertible status), mirroring
               the backend gate. */}
+          {/* W-PLAN2 Task 3 — the Plan action is ALWAYS in reach on
+              One-off work: header-level, beside the primary action,
+              rendered whichever pill tab is active. Same predicate,
+              same modal, same handler as the Plan tab's card. */}
+          {ticket.extra_work_origin &&
+            isProviderManagementRole(me?.role) &&
+            canAccessExtraWork(me?.role) && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => void openEwPlan()}
+                disabled={ewPlanLoading}
+                data-testid="ticket-ew-plan-open"
+              >
+                {ewPlanLoading ? t("ew_plan_loading") : t("ew_plan_button")}
+              </button>
+            )}
           {canConvertTicket && (
             <button
               type="button"
@@ -4153,7 +4170,9 @@ export function TicketDetailPage() {
             meta={t("side_summary_assignment", {
               count: ticket.assigned_staff?.length ?? 0,
             })}
-            defaultOpen={false}
+            // W-PLAN2 Task 2 — open by default; only Details and the
+            // Activity drawer stay collapsed.
+            defaultOpen
             testId="side-card-assignment"
           >
 
@@ -4922,17 +4941,6 @@ export function TicketDetailPage() {
                       {t("ew_plan_summary_empty")}
                     </p>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={() => void openEwPlan()}
-                    disabled={ewPlanLoading}
-                    data-testid="ticket-ew-plan-open"
-                  >
-                    {ewPlanLoading
-                      ? t("ew_plan_loading")
-                      : t("ew_plan_button")}
-                  </button>
                 </div>
               </div>
             )}

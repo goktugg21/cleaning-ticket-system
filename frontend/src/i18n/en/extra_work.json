@@ -829,5 +829,6 @@
   "plan_gate.next_sentence": "Plan the work first.",
   "plan.manager_label": "Responsible manager",
   "plan.manager_none": "Nobody yet — pick one below.",
-  "plan.manager_add_placeholder": "Add a manager…"
+  "plan.manager_add_label": "Add managers",
+  "plan.manager_remove": "Remove {{name}}"
 }

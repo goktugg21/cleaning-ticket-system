@@ -151,7 +151,9 @@ export function ResponsibleManagersSection({
       // #110 Part A — default COLLAPSED like the other right-column
       // cards (Workflow stays the only always-open card). No persistKey;
       // the ticket-keyed detail-side wrapper remounts it per ticket.
-      defaultOpen={false}
+      // W-PLAN2 Task 2 — open by default (Details + Activity are the
+      // only cards that stay collapsed).
+      defaultOpen
       testId="responsible-managers-section"
     >
       <div style={{ padding: "0 18px 14px" }}>

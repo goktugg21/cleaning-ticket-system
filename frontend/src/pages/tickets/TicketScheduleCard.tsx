@@ -373,7 +373,9 @@ export function TicketScheduleCard({
       }
       // #110 Part A — default COLLAPSED like the other right-column
       // cards. No persistKey; remounts per ticket via the keyed wrapper.
-      defaultOpen={false}
+      // W-PLAN2 Task 2 — open by default (Details + Activity are the
+      // only cards that stay collapsed).
+      defaultOpen
       testId="ticket-schedule-card"
     >
       <div style={{ padding: "14px 18px 16px" }}>

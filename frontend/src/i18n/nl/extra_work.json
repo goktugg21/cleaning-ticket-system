@@ -829,5 +829,6 @@
   "plan_gate.next_sentence": "Plan eerst het werk.",
   "plan.manager_label": "Verantwoordelijke manager",
   "plan.manager_none": "Nog niemand — kies er hieronder een.",
-  "plan.manager_add_placeholder": "Manager toevoegen…"
+  "plan.manager_add_label": "Managers toevoegen",
+  "plan.manager_remove": "{{name}} verwijderen"
 }

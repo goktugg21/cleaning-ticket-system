@@ -161,6 +161,7 @@ export function PlanWorkDialog({
   managerCandidates = [],
   managerBusy = false,
   onAssignManager,
+  onRemoveManager,
   postSpawn = false,
 }: {
   ew: ExtraWorkRequestDetail;
@@ -190,6 +191,9 @@ export function PlanWorkDialog({
   managerCandidates?: AssignmentCandidate[];
   managerBusy?: boolean;
   onAssignManager?: (userId: number) => void;
+  /** Optional: renders an X on each assigned-manager chip. Absent (the
+   *  current page wiring) = chips without remove. */
+  onRemoveManager?: (userId: number) => void;
   /** W-PLAN Task 2 — mounted from an operational (spawned) ticket page.
    *  SAME dialog, SAME store (the plan lives on the EW pre- and
    *  post-spawn); what changes is the words: the submit says "Save the
@@ -689,6 +693,20 @@ export function PlanWorkDialog({
                     data-testid="extra-work-plan-manager-chip"
                   >
                     {a.user_full_name || a.user_email}
+                    {onRemoveManager && (
+                      <button
+                        type="button"
+                        className="ew-plan-type-remove"
+                        disabled={managerBusy}
+                        onClick={() => onRemoveManager(a.user_id)}
+                        aria-label={t("plan.manager_remove", {
+                          name: a.user_full_name || a.user_email,
+                        })}
+                        data-testid="extra-work-plan-manager-remove"
+                      >
+                        <X size={12} aria-hidden="true" />
+                      </button>
+                    )}
                   </span>
                 ))}
               {assignments.filter((a) => a.role === "MANAGER").length ===
@@ -700,27 +718,29 @@ export function PlanWorkDialog({
                   {t("plan.manager_none")}
                 </span>
               )}
-              {onAssignManager && managerCandidates.length > 0 && (
-                <select
-                  className="ew-plan-add-type"
-                  value=""
-                  disabled={managerBusy}
-                  onChange={(e) => {
-                    if (e.target.value === "") return;
-                    onAssignManager(Number(e.target.value));
-                  }}
-                  aria-label={t("plan.manager_label")}
-                  data-testid="extra-work-plan-manager-select"
-                >
-                  <option value="">{t("plan.manager_add_placeholder")}</option>
-                  {managerCandidates.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.full_name || c.email}
-                    </option>
-                  ))}
-                </select>
-              )}
             </div>
+            {/* W-PLAN2 Task 1 — MULTI-SELECT, the standing rule: pick
+                several, ONE Add. Reuses the crew picker verbatim (label
+                and testid aside). The page's handler takes one id, so
+                the Add fans out one request per manager through the
+                existing endpoint — which recon shows takes a LIST
+                (`managers` is a ListField, views_assignments.py), so
+                the single-call collapse is a one-line page change
+                whenever that file is in territory. Already-assigned
+                managers are filtered out by the page before the prop. */}
+            {onAssignManager && (
+              <CrewPicker
+                candidates={managerCandidates}
+                loading={false}
+                busy={managerBusy}
+                error=""
+                onAssign={(userIds) => {
+                  for (const userId of userIds) onAssignManager(userId);
+                }}
+                labelKey="plan.manager_add_label"
+                testId="extra-work-plan-manager-add"
+              />
+            )}
           </div>
           <CrewPicker
             candidates={candidates}
@@ -1207,12 +1227,18 @@ function CrewPicker({
   busy,
   error,
   onAssign,
+  labelKey = "plan.add_people_label",
+  testId = "extra-work-plan-crew-add",
 }: {
   candidates: AssignmentCandidate[];
   loading: boolean;
   busy: boolean;
   error: string;
   onAssign: (userIds: number[]) => void;
+  /** W-PLAN2 Task 1 — the same multi-select serves crew AND managers;
+   *  only the label and testid differ, so they are the only props. */
+  labelKey?: string;
+  testId?: string;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [picked, setPicked] = useState<number[]>([]);
@@ -1228,8 +1254,8 @@ function CrewPicker({
     return null;
   }
   return (
-    <div className="ew-plan-crew-add" data-testid="extra-work-plan-crew-add">
-      <span className="field-label">{t("plan.add_people_label")}</span>
+    <div className="ew-plan-crew-add" data-testid={testId}>
+      <span className="field-label">{t(labelKey)}</span>
       <div className="assign-picker" role="group">
         {candidates.map((person) => (
           <label key={person.id} className="assign-picker-row">

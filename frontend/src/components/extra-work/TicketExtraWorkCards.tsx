@@ -532,7 +532,10 @@ export function TicketExtraWorkCards({
     {hasAgreement && (
       <CollapsibleCard
         title={t("ew_agreement_title")}
-        defaultOpen={false}
+        // W-PLAN2 Task 2 — open by default (Details + Activity are
+        // the only cards that stay collapsed). One token; declared as
+        // out-of-owned-list in the wave report.
+        defaultOpen
         testId="side-card-agreement"
       >
         <div style={{ padding: "14px 18px 16px" }}>
