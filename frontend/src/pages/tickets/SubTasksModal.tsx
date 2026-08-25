@@ -14,12 +14,15 @@
 //
 // Two things this modal deliberately does NOT do:
 //
-//   * It does not own the picker's rule. The people it offers are the
-//     ticket's `assignable-staff`, which already omits anyone holding a
-//     slot here (W26, one person one slot) -- so "offerable" and
-//     "acceptable" cannot disagree. When they do anyway (a stale list),
-//     the server's 400 `staff_already_assigned` is shown INLINE, next to
-//     the control that caused it, not as a toast over a closed modal.
+//   * It does not own the picker's rule. W26.3 (c): parts divide the
+//     people ALREADY on the job, so each part offers the ticket's
+//     base-slot holders (`onJob`) MINUS whoever is on that part already
+//     -- so "offerable" and "acceptable" cannot disagree. Note this is
+//     the opposite set to `assignable-staff`, which the modal used to
+//     take and which lists people NOT on the job: offering those was
+//     what made every per-part assign fail. When picker and server
+//     disagree anyway (a stale list), the server's 400 is shown INLINE
+//     on the row that caused it, not as a toast over a closed modal.
 //
 //   * It does not nest a native <dialog>. Removing a part confirms in the
 //     row itself. A `ConfirmDialog` inside a conditionally-mounted overlay
@@ -27,6 +30,16 @@
 //     itself on Escape, and Escape also closes a native dialog, so one
 //     key would unmount an open dialog and leave the page inert
 //     (Sprint 118).
+//
+// W26.3 -- LAYOUT. The rows were a `.assign-table`, and that class is
+// tuned for the ~320px RIGHT RAIL: its actions cell is `width: 1%`,
+// right-aligned, and stacks every button full-width one under the next.
+// Correct in the rail; inside this wide dialog it squeezed a select and
+// three buttons into a narrow right-hand column -- the "sagi sikismis"
+// the owner reported. So the parts list is no longer a table. Each part
+// is ONE row that lays its name, state, people and actions out inline
+// with room to breathe, under `.parts-*` classes that belong to this
+// surface alone and inherit none of the rail's sizing.
 //
 // A NON-native overlay, conditionally mounted, like `AssignStaffDialog`.
 import { useEffect, useRef, useState } from "react";
@@ -40,17 +53,20 @@ import {
   setAutoCompleteFlag,
   updateSubTask,
 } from "../../api/admin";
-import type { AssignableStaff, SubTask } from "../../api/admin";
+import type { SubTask } from "../../api/admin";
 import { getApiError } from "../../api/client";
 import { BoundedList } from "../../components/BoundedList";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Toggle } from "../../components/Toggle";
 import { useToast } from "../../components/ToastProvider";
 
+/** One person already on the job, as the part picker needs them. */
+export type JobMember = { id: number; name: string };
+
 export function SubTasksModal({
   ticketId,
   parts,
-  candidates,
+  onJob,
   isTerminal,
   canSetAutoCompleteFlag,
   autoCompleteOnSubtasks,
@@ -59,9 +75,11 @@ export function SubTasksModal({
 }: {
   ticketId: number;
   parts: SubTask[];
-  /** The ticket's assignable staff -- already excludes anyone who holds a
-   *  slot on this ticket (W26). */
-  candidates: AssignableStaff[];
+  /** W26.3 (c) -- the people ALREADY on this job (base-slot holders).
+   *  Parts divide them, so this is the opposite set to the ticket-level
+   *  picker's `assignable-staff`, which lists who is NOT on the job yet.
+   *  Deduped by the caller. */
+  onJob: JobMember[];
   isTerminal: boolean;
   /** Provider admin (PA/SA) only; the backend is the hard gate (403). */
   canSetAutoCompleteFlag: boolean;
@@ -81,6 +99,9 @@ export function SubTasksModal({
   const [renameTitle, setRenameTitle] = useState("");
   const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null);
   const [pickByPart, setPickByPart] = useState<Record<number, number>>({});
+  // W26.3 -- a refusal belongs to the ROW that caused it. Keyed by part
+  // id so assigning on one part never blanks another row's message.
+  const [errorByPart, setErrorByPart] = useState<Record<number, string>>({});
 
   const [autoFlag, setAutoFlag] = useState(autoCompleteOnSubtasks);
   const [flagBusy, setFlagBusy] = useState(false);
@@ -175,16 +196,33 @@ export function SubTasksModal({
     }
   }
 
+  // W26.3 -- who this part can still be given to: the people on the job,
+  // minus the ones already on THIS part. Same-part duplicates are what
+  // the server refuses (400 `staff_already_assigned`), so the picker
+  // simply does not offer them; the inline error below is for the case
+  // where this list is stale.
+  function offerableFor(part: SubTask): JobMember[] {
+    const taken = new Set(
+      part.staff_assignments.map((slot) => slot.user_id),
+    );
+    return onJob.filter((person) => !taken.has(person.id));
+  }
+
   // The per-part assign uses the SAME slot-create path as every other
   // assign on this ticket -- `POST /staff-assignments/` with `sub_task`
-  // set. So the one-person-one-slot rule is the server's, said once:
-  // a 400 `staff_already_assigned` is rendered here, in the modal, rather
-  // than thrown at a toast the operator reads after the list has moved.
+  // set. So the rule is the server's, said once, and its refusal is
+  // rendered on this row rather than thrown at a toast the operator
+  // reads after the list has moved.
   async function handleAssignToPart(part: SubTask) {
     const userId = pickByPart[part.id];
     if (!userId) return;
     setBusy(true);
     setError("");
+    setErrorByPart((current) => {
+      const next = { ...current };
+      delete next[part.id];
+      return next;
+    });
     try {
       await addTicketStaffAssignment(ticketId, userId, { sub_task: part.id });
       setPickByPart((current) => {
@@ -194,7 +232,20 @@ export function SubTasksModal({
       });
       await onChanged();
     } catch (err) {
-      setError(getApiError(err));
+      const code = (err as { response?: { data?: { code?: string } } })
+        ?.response?.data?.code;
+      // Both codes are expected here and mean different things, so they
+      // get different sentences: `staff_not_on_job` is a stale picker
+      // offering someone who has since left the job, and the fix is the
+      // ticket-level assign; `staff_already_assigned` at part level can
+      // only mean this same person is already on this same part.
+      const message =
+        code === "staff_not_on_job"
+          ? t("parts.error_not_on_job")
+          : code === "staff_already_assigned"
+            ? t("parts.error_same_part")
+            : getApiError(err);
+      setErrorByPart((current) => ({ ...current, [part.id]: message }));
     } finally {
       setBusy(false);
     }
@@ -253,199 +304,209 @@ export function SubTasksModal({
             count={parts.length}
             ariaLabel={t("parts.title")}
             testIdPrefix="ticket-parts-list"
-            className="table-wrap"
+            className="parts-list"
           >
-            <table
-              className="data-table data-table-dense assign-table"
-              data-testid="ticket-parts-table"
-            >
-              <thead>
-                <tr>
-                  <th className="assign-table-person">{t("parts.col_part")}</th>
-                  <th>{t("parts.col_state")}</th>
-                  <th>{t("parts.col_people")}</th>
-                  {!isTerminal && <th className="assign-table-actions" />}
-                </tr>
-              </thead>
-              <tbody>
-                {parts.map((part) => {
-                  const badge = partBadge(part);
-                  const renaming = renamingPartId === part.id;
-                  const confirming = confirmRemoveId === part.id;
-                  return (
-                    <tr
-                      key={part.id}
-                      data-testid="ticket-part-row"
-                      data-part-id={part.id}
-                    >
-                      <td className="assign-table-person">
-                        {renaming ? (
-                          <input
-                            className="field-input"
-                            type="text"
-                            maxLength={200}
-                            value={renameTitle}
-                            disabled={busy}
-                            aria-label={t("parts.rename")}
-                            onChange={(event) =>
-                              setRenameTitle(event.target.value)
-                            }
-                            data-testid="ticket-part-rename-input"
-                          />
-                        ) : (
-                          part.title
-                        )}
-                      </td>
-                      <td data-testid="ticket-part-state">
-                        <StatusBadge
-                          variant="cell"
-                          status={{
-                            kind: "generic",
-                            tone: badge.tone,
-                            label: badge.label,
-                          }}
+            {parts.map((part) => {
+              const badge = partBadge(part);
+              const renaming = renamingPartId === part.id;
+              const confirming = confirmRemoveId === part.id;
+              const offerable = offerableFor(part);
+              const rowError = errorByPart[part.id];
+              return (
+                <div
+                  className="parts-row"
+                  key={part.id}
+                  data-testid="ticket-part-row"
+                  data-part-id={part.id}
+                >
+                  <div className="parts-row-head">
+                    <div className="parts-row-name" data-testid="ticket-part-name">
+                      {renaming ? (
+                        <input
+                          className="field-input"
+                          type="text"
+                          maxLength={200}
+                          value={renameTitle}
+                          disabled={busy}
+                          aria-label={t("parts.rename")}
+                          onChange={(event) =>
+                            setRenameTitle(event.target.value)
+                          }
+                          data-testid="ticket-part-rename-input"
                         />
-                      </td>
-                      <td data-testid="ticket-part-people">
-                        {part.staff_assignments.length === 0 ? (
-                          <span
-                            className="assign-table-note"
-                            data-testid="ticket-part-nobody"
-                          >
-                            {t("parts.none_assigned")}
-                          </span>
-                        ) : (
-                          part.staff_assignments.map((slot) => (
-                            <span
-                              key={slot.id}
-                              className="assign-table-note"
-                              data-testid="ticket-part-person"
-                              data-user-id={slot.user_id}
-                            >
-                              {slot.user_full_name?.trim() || slot.user_email}
-                            </span>
-                          ))
-                        )}
-                      </td>
-                      {!isTerminal && (
-                        <td className="assign-table-actions">
-                          {renaming ? (
-                            <>
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-sm"
-                                onClick={() => void handleRenamePart(part)}
-                                disabled={busy || renameTitle.trim() === ""}
-                                data-testid="ticket-part-rename-save"
-                              >
-                                {t("common:save")}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => setRenamingPartId(null)}
-                                disabled={busy}
-                                data-testid="ticket-part-rename-cancel"
-                              >
-                                {t("common:cancel")}
-                              </button>
-                            </>
-                          ) : confirming ? (
-                            <>
-                              <button
-                                type="button"
-                                className="btn btn-danger btn-sm"
-                                onClick={() => void handleRemovePart(part)}
-                                disabled={busy}
-                                data-testid="ticket-part-remove-confirm"
-                              >
-                                {t("parts.confirm_yes")}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => setConfirmRemoveId(null)}
-                                disabled={busy}
-                                data-testid="ticket-part-remove-cancel"
-                              >
-                                {t("common:cancel")}
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <select
-                                className="field-input"
-                                value={pickByPart[part.id] ?? ""}
-                                disabled={busy || candidates.length === 0}
-                                aria-label={t("parts.assign_label")}
-                                onChange={(event) =>
-                                  setPickByPart((current) => ({
-                                    ...current,
-                                    [part.id]: Number(event.target.value),
-                                  }))
-                                }
-                                data-testid="ticket-part-assign-select"
-                              >
-                                <option value="">
-                                  {candidates.length === 0
-                                    ? t("editor.no_eligible")
-                                    : t("parts.assign_choose")}
-                                </option>
-                                {candidates.map((staff) => (
-                                  <option key={staff.id} value={staff.id}>
-                                    {staff.full_name?.trim() || staff.email}
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-sm"
-                                onClick={() => void handleAssignToPart(part)}
-                                disabled={busy || !pickByPart[part.id]}
-                                data-testid="ticket-part-assign"
-                              >
-                                {t("parts.assign_button")}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => {
-                                  setRenamingPartId(part.id);
-                                  setRenameTitle(part.title);
-                                }}
-                                disabled={busy}
-                                data-testid="ticket-part-rename"
-                              >
-                                <Pencil
-                                  size={13}
-                                  strokeWidth={2.2}
-                                  aria-hidden="true"
-                                />
-                                {t("parts.rename")}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => setConfirmRemoveId(part.id)}
-                                disabled={busy}
-                                data-testid="ticket-part-remove"
-                              >
-                                <X
-                                  size={13}
-                                  strokeWidth={2.5}
-                                  aria-hidden="true"
-                                />
-                                {t("parts.remove")}
-                              </button>
-                            </>
-                          )}
-                        </td>
+                      ) : (
+                        part.title
                       )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                    </div>
+                    <div data-testid="ticket-part-state">
+                      <StatusBadge
+                        variant="cell"
+                        status={{
+                          kind: "generic",
+                          tone: badge.tone,
+                          label: badge.label,
+                        }}
+                      />
+                    </div>
+                    <div
+                      className="parts-chip-row"
+                      data-testid="ticket-part-people"
+                    >
+                      {part.staff_assignments.length === 0 ? (
+                        <span
+                          className="muted small"
+                          data-testid="ticket-part-nobody"
+                        >
+                          {t("parts.none_assigned")}
+                        </span>
+                      ) : (
+                        part.staff_assignments.map((slot) => (
+                          <span
+                            key={slot.id}
+                            className="parts-chip"
+                            data-testid="ticket-part-person"
+                            data-user-id={slot.user_id}
+                          >
+                            {slot.user_full_name?.trim() || slot.user_email}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {!isTerminal && (
+                    <div className="parts-row-actions">
+                      {renaming ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => void handleRenamePart(part)}
+                            disabled={busy || renameTitle.trim() === ""}
+                            data-testid="ticket-part-rename-save"
+                          >
+                            {t("common:save")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setRenamingPartId(null)}
+                            disabled={busy}
+                            data-testid="ticket-part-rename-cancel"
+                          >
+                            {t("common:cancel")}
+                          </button>
+                        </>
+                      ) : confirming ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => void handleRemovePart(part)}
+                            disabled={busy}
+                            data-testid="ticket-part-remove-confirm"
+                          >
+                            {t("parts.confirm_yes")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setConfirmRemoveId(null)}
+                            disabled={busy}
+                            data-testid="ticket-part-remove-cancel"
+                          >
+                            {t("common:cancel")}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <select
+                            className="field-input parts-assign-select"
+                            value={pickByPart[part.id] ?? ""}
+                            disabled={busy || offerable.length === 0}
+                            aria-label={t("parts.assign_label")}
+                            onChange={(event) =>
+                              setPickByPart((current) => ({
+                                ...current,
+                                [part.id]: Number(event.target.value),
+                              }))
+                            }
+                            data-testid="ticket-part-assign-select"
+                          >
+                            <option value="">
+                              {/* W26.3 -- the empty picker has TWO
+                                  causes and they need different
+                                  sentences: nobody is on the job at
+                                  all, or everyone on it is already on
+                                  this part. The first tells the
+                                  operator to go and assign someone to
+                                  the ticket; the second says there is
+                                  nothing left to do here. */}
+                              {onJob.length === 0
+                                ? t("parts.assign_nobody_on_job")
+                                : offerable.length === 0
+                                  ? t("parts.assign_everyone_here")
+                                  : t("parts.assign_choose")}
+                            </option>
+                            {offerable.map((person) => (
+                              <option key={person.id} value={person.id}>
+                                {person.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => void handleAssignToPart(part)}
+                            disabled={busy || !pickByPart[part.id]}
+                            data-testid="ticket-part-assign"
+                          >
+                            {t("parts.assign_button")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              setRenamingPartId(part.id);
+                              setRenameTitle(part.title);
+                            }}
+                            disabled={busy}
+                            data-testid="ticket-part-rename"
+                          >
+                            <Pencil
+                              size={13}
+                              strokeWidth={2.2}
+                              aria-hidden="true"
+                            />
+                            {t("parts.rename")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setConfirmRemoveId(part.id)}
+                            disabled={busy}
+                            data-testid="ticket-part-remove"
+                          >
+                            <X size={13} strokeWidth={2.5} aria-hidden="true" />
+                            {t("parts.remove")}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {rowError && (
+                    <p
+                      className="parts-row-error"
+                      role="alert"
+                      data-testid="ticket-part-error"
+                    >
+                      {rowError}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </BoundedList>
         )}
 

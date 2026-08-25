@@ -203,16 +203,27 @@ class TicketBulkAssignView(APIView):
                     ticket=ticket, user=user
                 ).first()
                 if mode == "assign":
-                    if existing is not None:
-                        # For staff this means "already has a slot here" —
-                        # the W26 one-person-one-slot rule, reached by the
-                        # same `(ticket, user)` question
-                        # `staff_already_assigned` asks. It stays a COUNTER
-                        # here rather than a 400: this endpoint's contract
-                        # is a per-pair tally over a batch of tickets
-                        # (`already_assigned` is a documented response
-                        # field every caller reads), and it creates no
-                        # duplicate either way.
+                    # W26.3 — for STAFF the blocking question is "does
+                    # this person hold a BASE slot here", the same level
+                    # `staff_already_assigned` now asks, because this
+                    # path creates base slots. Asking it of ANY row (as
+                    # W26 did) would count someone who holds only a part
+                    # slot as already-assigned and leave them filed under
+                    # a part of a job they are not on — the state rule
+                    # (c) exists to prevent. Managers have no parts, so
+                    # for them any row is the answer.
+                    if model is TicketStaffAssignment:
+                        blocked = model.objects.filter(
+                            ticket=ticket, user=user, sub_task__isnull=True
+                        ).exists()
+                    else:
+                        blocked = existing is not None
+                    if blocked:
+                        # It stays a COUNTER here rather than a 400: this
+                        # endpoint's contract is a per-pair tally over a
+                        # batch of tickets (`already_assigned` is a
+                        # documented response field every caller reads),
+                        # and it creates no duplicate either way.
                         already += 1
                         continue
                     model.objects.create(
@@ -225,7 +236,10 @@ class TicketBulkAssignView(APIView):
                         continue
                     # Every matching row, because a staff member may hold
                     # several slots on one ticket and "unassign this
-                    # person" means all of them, not the oldest.
+                    # person" means all of them, not the oldest. W26.3:
+                    # that is already the base-slot cascade the per-slot
+                    # DELETE performs — base row and its part rows go
+                    # together — so this branch needed no change.
                     for row in model.objects.filter(ticket=ticket, user=user):
                         row.delete()
                         removed += 1

@@ -257,15 +257,20 @@ class StaffAssignmentRequestViewSet(viewsets.ModelViewSet):
                 # ticket (one or MORE slots) while the request sat PENDING.
                 # get_or_create's internal .get() would then raise
                 # MultipleObjectsReturned -> 500. A self-request means "let
-                # me work this ticket"; if the staff already holds ANY slot
-                # they are already on it, so approval is idempotent and
-                # creates nothing.
-                # W26 — the SAME one-person-one-slot predicate the
-                # /staff-assignments/ create uses. It is a predicate here,
-                # not a rejection: approving a request whose staff is
-                # already on the ticket creates NO row, so the rule is not
-                # broken, and 400-ing an approval that has nothing to do
-                # would strand the request PENDING for ever.
+                # me work this ticket"; if the staff already holds a
+                # BASE slot they are already on it, so approval is
+                # idempotent and creates nothing.
+                # W26.3 — the SAME predicate the /staff-assignments/
+                # create uses, at the level this path writes (a request
+                # is to work the JOB, so approval grants a base slot).
+                # It is a predicate here, not a rejection: approving a
+                # request whose staff is already on the ticket creates NO
+                # row, so the rule is not broken, and 400-ing an approval
+                # that has nothing to do would strand the request PENDING
+                # for ever. Asking at base level also repairs a legacy
+                # case W26 got wrong: someone holding only a part slot
+                # counted as "already on it" and approval left them on a
+                # part of a job they were never assigned to.
                 from .views_staff_assignments import staff_already_assigned
 
                 if not staff_already_assigned(locked.ticket, locked.staff):

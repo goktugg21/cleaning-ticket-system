@@ -6,13 +6,22 @@ dropped: tickets in the field already carry duplicate rows and they must
 keep loading, rendering, completing and deleting exactly as they do
 today. W26 restores the rule at the VALIDATION layer instead, through
 ONE chokepoint —
-`tickets.views_staff_assignments.reject_if_staff_already_assigned` — so
+`tickets.views_staff_assignments.reject_if_slot_not_allowed` — so
 it governs what is created from now on and rewrites nothing that exists.
+
+W26.3 NARROWED the rule this file pins, and the two tests that changed
+say so in place. "One slot" means one slot AT THE JOB LEVEL: a person
+holds at most one base slot (`sub_task=NULL`) per ticket, and the parts
+of that job then divide the people already on it. The part-level rules
+and the base-removal cascade are pinned next door in
+`test_w26_3_parts_divide_the_job.py`; what stays true here is every
+JOB-level statement below.
 
 What these pin:
 
-  * every user-driven CREATE path refuses a person who already holds ANY
-    slot on the ticket, with the stable code `staff_already_assigned`;
+  * every user-driven CREATE path refuses a person who already holds a
+    BASE slot on the ticket, with the stable code
+    `staff_already_assigned`;
   * this SUPERSEDES W13-FIX §6c's narrower `duplicate_flat_assignment`
     test, which allowed a second row as long as it carried a start time
     or a different window label — under the new rule a second window for
@@ -21,8 +30,8 @@ What these pin:
   * the two BATCH paths (bulk assign, assignment-request approval) still
     create nothing for someone already on the ticket, and keep their own
     idempotent contracts rather than 400-ing a whole batch;
-  * the picker's own source omits anyone already holding a slot, so
-    "offerable" and "acceptable" cannot disagree;
+  * the picker's own source omits anyone already holding a BASE slot,
+    so "offerable" and "acceptable" cannot disagree;
   * a ticket that ALREADY holds legacy duplicate rows still reads,
     edits and deletes per slot.
 """
@@ -43,7 +52,10 @@ from tickets.models import (
     TicketStaffAssignment,
     TicketStatus,
 )
-from tickets.views_staff_assignments import ERR_STAFF_ALREADY_ASSIGNED
+from tickets.views_staff_assignments import (
+    ERR_STAFF_ALREADY_ASSIGNED,
+    ERR_STAFF_NOT_ON_JOB,
+)
 
 
 User = get_user_model()
@@ -123,18 +135,33 @@ class SlotCreateIsRefusedForSomeoneAlreadyOnTheTicketTests(_OneSlotFixture):
             self._add(self.ahmet, time_window_label="afternoon")
         )
 
-    def test_a_second_slot_filed_under_a_part_is_refused(self):
-        """ANY slot on the ticket counts — including one placed inside a
-        SubTask, which is the sub-task assignment create path."""
+    def test_a_slot_filed_under_a_part_is_ACCEPTED_for_someone_on_the_job(self):
+        """W26.3 REVERSED this one. W26 refused it because ANY slot
+        counted; the owner's model is that parts divide the people
+        already on the job, so a base slot plus a part slot is the
+        normal shape, not a duplicate. The duplicate it still refuses is
+        the same person on the SAME part — pinned next door."""
         part = SubTask.objects.create(ticket=self.ticket, title="Boiler room")
         self.assertEqual(self._add(self.ahmet).status_code, 201)
-        self._assert_refused(self._add(self.ahmet, sub_task=part.id))
-
-    def test_a_first_slot_filed_under_a_part_still_succeeds(self):
-        part = SubTask.objects.create(ticket=self.ticket, title="Boiler room")
         response = self._add(self.ahmet, sub_task=part.id)
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["sub_task"], part.id)
+
+    def test_a_part_slot_without_a_base_slot_is_REFUSED(self):
+        """Also reversed by W26.3, the other way. W26 accepted a first
+        slot filed straight into a part; (c) makes the base slot the
+        precondition, so this is now `staff_not_on_job` — a distinct
+        code, because "not on this job" and "already on this job" are
+        opposite mistakes with opposite fixes."""
+        part = SubTask.objects.create(ticket=self.ticket, title="Boiler room")
+        response = self._add(self.ahmet, sub_task=part.id)
+        self.assertEqual(
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.data
+        )
+        self.assertEqual(response.data["code"], ERR_STAFF_NOT_ON_JOB)
+        self.assertFalse(
+            TicketStaffAssignment.objects.filter(ticket=self.ticket).exists()
+        )
 
     def test_a_different_person_is_still_added(self):
         self.assertEqual(self._add(self.ahmet).status_code, 201)

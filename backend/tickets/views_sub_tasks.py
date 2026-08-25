@@ -20,12 +20,14 @@ mirroring the schedule control's terminal-guard set.
 """
 from __future__ import annotations
 
+from django.db import transaction
+
 from rest_framework import generics, status
 from rest_framework.response import Response
 
 from accounts.permissions import IsAuthenticatedAndActive
 
-from .models import SubTask, TERMINAL_TICKET_STATUSES
+from .models import SubTask, TERMINAL_TICKET_STATUSES, TicketStaffAssignment
 from .serializers import SubTaskSerializer, SubTaskWriteSerializer
 from .views_staff_assignments import _gate_actor, _resolve_ticket
 
@@ -154,6 +156,7 @@ class TicketSubTaskDetailView(generics.GenericAPIView):
         sub_task.refresh_from_db()
         return Response(SubTaskSerializer(sub_task).data)
 
+    @transaction.atomic
     def delete(self, request, ticket_id, sub_task_id):
         early, ticket, sub_task = self._resolve(ticket_id, sub_task_id)
         if early is not None:
@@ -161,8 +164,30 @@ class TicketSubTaskDetailView(generics.GenericAPIView):
         terminal = _terminal_guard(ticket)
         if terminal is not None:
             return terminal
-        # on_delete=SET_NULL on TicketStaffAssignment.sub_task — deleting the
-        # sub-task returns its slots (with their completion evidence intact)
-        # to the loose pool; it NEVER deletes a staff assignment.
+        # W26.3 — the FK is `on_delete=SET_NULL`, and under the new model
+        # that alone would MINT DUPLICATE BASE SLOTS rather than tidy up.
+        #
+        # A NULL sub_task is not "the loose pool" any more, it is the
+        # person's one base slot on the job. Rule (c) says every part
+        # slot sits alongside a base slot for the same person, so under
+        # W26.3 the SET_NULL is not an edge case: for every current part
+        # slot it turns that row into a SECOND base slot for someone who
+        # already has one — the "Ahmet twice" state, arriving through a
+        # path that never passes the chokepoint.
+        #
+        # So the part's slots are removed HERE, for the people who hold a
+        # base slot — they stay on the job through that base slot, the
+        # part they were filed under is simply gone. Slots whose owner
+        # has NO base slot (legacy rows predating W26.3) are left to the
+        # FK and still fall back to the loose pool exactly as before, so
+        # old data keeps its old behaviour and cannot gain a duplicate.
+        base_holder_ids = list(
+            TicketStaffAssignment.objects.filter(
+                ticket=ticket, sub_task__isnull=True
+            ).values_list("user_id", flat=True)
+        )
+        TicketStaffAssignment.objects.filter(
+            ticket=ticket, sub_task=sub_task, user_id__in=base_holder_ids
+        ).delete()
         sub_task.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

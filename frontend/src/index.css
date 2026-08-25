@@ -14280,3 +14280,102 @@ table.assign-table { min-width: 0; width: 100%; }
 .ew-line-picker-row > td {
   background: var(--surface-2);
 }
+
+/* ===================================================================
+   W26.3 — PARTS OF A JOB: the rows in `SubTasksModal`, and the part
+   chips under a person's name in `StaffAssignmentSection`.
+
+   APPENDED BLOCK, NEW CLASSES ONLY. Nothing above is edited.
+
+   Why these exist at all: the parts list used to be a `.assign-table`,
+   and that class is deliberately tuned for the ~320px RIGHT RAIL --
+   `.assign-table-actions` is `width: 1%`, right-aligned, and stacks
+   its buttons full-width one under another. In the rail that is
+   correct and MEASURED. Inside the wide parts dialog it squeezed a
+   select and three buttons into a narrow right-hand column, which is
+   the crammed right-hand stack the owner reported. Reusing the rail's
+   class in a dialog was the bug; these classes inherit none of it.
+   =================================================================== */
+
+/* The list itself is the BoundedList's scroll container, so it only
+   owns the gap between rows. */
+.parts-list { display: flex; flex-direction: column; gap: 8px; }
+
+.parts-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+/* Name, state and people on one line. The name takes the slack; the
+   other two take what they need. `min-width: 0` on the flex children
+   is what lets a long part title ellipsize instead of pushing the row
+   wider than the dialog -- without it a flex item refuses to shrink
+   below its content and the whole row overflows. */
+.parts-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.parts-row-name {
+  flex: 1 1 180px;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.parts-row-head > [data-testid="ticket-part-state"] { flex: 0 0 auto; }
+
+/* Actions INLINE and sized to their own content -- the opposite of the
+   rail's full-width stack. They wrap onto a second line rather than
+   compress when the dialog is narrow. */
+.parts-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.parts-row-actions .btn { flex: 0 0 auto; }
+/* The picker is the one control that should absorb spare width, but it
+   is capped so it cannot crowd the three buttons beside it. */
+.parts-assign-select { flex: 1 1 190px; min-width: 150px; max-width: 320px; }
+
+.parts-row-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-sm);
+}
+
+/* Chips: the people on a part, and (in the right rail) the parts under
+   a person's name. Wraps in both places -- the rail is ~320px, so a
+   non-wrapping chip row would overflow the card it sits in. */
+.parts-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.parts-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--font-xs);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+/* In the assignment card the chips are a second line under the name,
+   not a continuation of it. Its own modifier rather than a rule scoped
+   by the card's existing class, so this block names nothing outside
+   itself. */
+.parts-chip-row-stacked { margin-top: 3px; }

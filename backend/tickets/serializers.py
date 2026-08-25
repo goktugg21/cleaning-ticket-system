@@ -2270,14 +2270,21 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                     raise serializers.ValidationError(
                         {"assigned_staff_ids": f"User {user_id} is not assignable."}
                     )
-                # W26 — ONE PERSON, ONE SLOT, decided by the SAME
-                # predicate the /staff-assignments/ create uses. This
-                # convenience path used to skip a person who was already
-                # on the ticket, which quietly hid a stale picker; the
-                # picker's source (`assignable-staff`) now omits them, so
-                # naming one here means the client is out of date and the
-                # honest answer is to say so rather than half-apply the
-                # step. Whole request refused — nothing half-written.
+                # W26.3 — ONE PERSON, ONE BASE SLOT, decided by the SAME
+                # predicate the /staff-assignments/ create uses, asked at
+                # the level this path writes: it creates JOB-level slots
+                # (no `sub_task`), so the default base-level question is
+                # the right one. Someone already on a PART of this job is
+                # necessarily already on the job, so the answer does not
+                # change for them.
+                #
+                # This convenience path used to skip a person who was
+                # already on the ticket, which quietly hid a stale
+                # picker; the picker's source (`assignable-staff`) now
+                # omits them, so naming one here means the client is out
+                # of date and the honest answer is to say so rather than
+                # half-apply the step. Whole request refused — nothing
+                # half-written.
                 if staff_already_assigned(ticket, target):
                     raise serializers.ValidationError(
                         {

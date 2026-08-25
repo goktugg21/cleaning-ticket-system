@@ -86,6 +86,59 @@ const TERMINAL_TICKET_STATUSES: ReadonlySet<TicketStatus> =
     "CONVERTED_TO_EXTRA_WORK",
   ]);
 
+// W26.3 — SHADOW DISPLAY: one row per PERSON, not one row per slot.
+//
+// A person on this job holds ONE base slot (`sub_task === null`) and, on
+// top of it, one slot per part of the job they were given. Rendered
+// slot-by-slot that is "Ahmet, Ahmet, Ahmet" down the card -- the exact
+// disease the owner's rule exists to kill, and the reason parts were
+// unusable before this sprint. So the base slot IS the row (name,
+// schedule, actions) and the parts hang under the name as chips. Part
+// slots never become rows, and they carry no schedule of their own:
+// time lives on the base slot.
+//
+// The two exceptions are both LEGACY shapes the server can no longer
+// create, and both resolve the same way -- give the row back rather
+// than hide it, because a row nobody can see is a row nobody can
+// delete:
+//
+//   * a second BASE slot for the same person (pre-W26 duplicates) gets
+//     its own row, so it stays editable and removable;
+//   * part slots with NO base slot (pre-W26.3, when a first slot could
+//     be filed straight into a part) each get their own row, because
+//     there is no base row to hang them under.
+type PersonRow = {
+  /** The slot this row represents, and whose actions it carries. */
+  anchor: TicketStaffAssignmentAdmin;
+  /** Part slots drawn as chips under the name. Never rows themselves. */
+  partSlots: TicketStaffAssignmentAdmin[];
+};
+
+function buildPersonRows(all: TicketStaffAssignmentAdmin[]): PersonRow[] {
+  const byUser = new Map<number, TicketStaffAssignmentAdmin[]>();
+  for (const slot of all) {
+    const bucket = byUser.get(slot.user_id);
+    if (bucket) bucket.push(slot);
+    else byUser.set(slot.user_id, [slot]);
+  }
+  const rows: PersonRow[] = [];
+  // Map iterates in first-insertion order, so people keep the order the
+  // server sent them in rather than being re-sorted by this grouping.
+  for (const slots of byUser.values()) {
+    const base = slots.filter((slot) => slot.sub_task === null);
+    const parts = slots.filter((slot) => slot.sub_task !== null);
+    if (base.length === 0) {
+      for (const part of parts) rows.push({ anchor: part, partSlots: [] });
+      continue;
+    }
+    rows.push({ anchor: base[0], partSlots: parts });
+    for (const extra of base.slice(1)) {
+      rows.push({ anchor: extra, partSlots: [] });
+    }
+  }
+  return rows;
+}
+
 export function StaffAssignmentSection({
   ticketId,
   onChanged,
@@ -330,6 +383,36 @@ export function StaffAssignmentSection({
   // dialog is where "nobody is eligible for this building" gets said.
   const canAssign = !busy;
 
+  const personRows = buildPersonRows(slots);
+
+  // W26.3 (c) — the PART picker's source. Parts divide the people
+  // already on the job, so the modal offers exactly the base-slot
+  // holders, deduped (a legacy duplicate base slot must not list the
+  // same person twice). Derived from the slots this card already holds
+  // rather than fetched: `assignable-staff` is the JOB-level picker and
+  // means the opposite set -- people NOT yet on the job.
+  const onJob = Array.from(
+    new Map(
+      slots
+        .filter((slot) => slot.sub_task === null)
+        .map((slot) => [slot.user_id, { id: slot.user_id, name: personName(slot) }]),
+    ).values(),
+  );
+
+  // Removing a base slot takes the person off the job, and the server
+  // takes their parts with it. The confirm NAMES those parts, because
+  // this deletes more than the row that was clicked.
+  const removeTargetParts =
+    removeTarget && removeTarget.sub_task === null
+      ? slots
+          .filter(
+            (slot) =>
+              slot.user_id === removeTarget.user_id && slot.sub_task !== null,
+          )
+          .map((slot) => partTitle(slot.sub_task))
+          .filter((title): title is string => title !== null)
+      : [];
+
   return (
     <div className="assign-section" data-testid="staff-assignment-section">
       {error && (
@@ -404,8 +487,14 @@ export function StaffAssignmentSection({
                 </tr>
               </thead>
               <tbody>
-                {slots.map((slot) => {
-                  const part = partTitle(slot.sub_task);
+                {personRows.map(({ anchor: slot, partSlots }) => {
+                  // A legacy part-anchored row still names its part, so
+                  // the row says what it is; a normal row's parts are
+                  // the chips below.
+                  const ownPart = partTitle(slot.sub_task);
+                  const chips = partSlots
+                    .map((part) => partTitle(part.sub_task))
+                    .filter((title): title is string => title !== null);
                   return (
                     <tr
                       key={slot.id}
@@ -418,12 +507,28 @@ export function StaffAssignmentSection({
                         title={slot.user_email}
                       >
                         {personName(slot)}
-                        {part && (
+                        {ownPart && (
                           <span
                             className="assign-table-part"
                             data-testid="staff-assignment-row-part"
                           >
-                            {part}
+                            {ownPart}
+                          </span>
+                        )}
+                        {chips.length > 0 && (
+                          <span
+                            className="parts-chip-row parts-chip-row-stacked"
+                            data-testid="staff-assignment-row-chips"
+                          >
+                            {chips.map((title) => (
+                              <span
+                                key={title}
+                                className="parts-chip"
+                                data-testid="staff-assignment-chip"
+                              >
+                                {title}
+                              </span>
+                            ))}
                           </span>
                         )}
                       </td>
@@ -528,7 +633,7 @@ export function StaffAssignmentSection({
         <SubTasksModal
           ticketId={ticketId}
           parts={parts}
-          candidates={assignable}
+          onJob={onJob}
           isTerminal={isTerminal}
           canSetAutoCompleteFlag={canSetAutoCompleteFlag}
           autoCompleteOnSubtasks={autoCompleteOnSubtasks}
@@ -587,7 +692,13 @@ export function StaffAssignmentSection({
         title={t("editor.remove_dialog_title", {
           name: removeTarget ? personName(removeTarget) : "",
         })}
-        body={t("editor.remove_dialog_body")}
+        body={
+          removeTargetParts.length > 0
+            ? t("editor.remove_dialog_body_with_parts", {
+                parts: removeTargetParts.join(" \u00b7 "),
+              })
+            : t("editor.remove_dialog_body")
+        }
         confirmLabel={t("assign.remove")}
         onConfirm={handleConfirmRemove}
         onCancel={() => setRemoveTarget(null)}

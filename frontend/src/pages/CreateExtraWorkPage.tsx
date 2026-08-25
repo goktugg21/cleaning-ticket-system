@@ -1496,10 +1496,15 @@ export function CreateExtraWorkPage({
   /**
    * True when a cart line orders a custom price that is NOT on the
    * currently-selected customer's orderable list — the customer was
-   * switched (or the row archived) after the line was added. The line
-   * is kept, labelled and blocked at submit rather than silently reset:
-   * quietly emptying a line the user added is the failure mode this
-   * sprint keeps finding.
+   * switched, the row was archived, or (W-EW3 §3) the cart's date moved
+   * outside the price's validity window. The line is kept, labelled and
+   * blocked at submit rather than silently reset: quietly emptying a
+   * line the user added is the failure mode this sprint keeps finding.
+   *
+   * All three causes end the same way server-side —
+   * `_validate_custom_price_orderable` refuses the line on the cart's
+   * date — so they share one message, and it names the customer AND the
+   * date rather than only the customer it used to blame.
    */
   function staleCustomPriceLine(line: CartLineState): boolean {
     const customPriceId = parseCustomPriceId(line.serviceId);
@@ -2970,13 +2975,14 @@ export function CreateExtraWorkPage({
                      row being clicked. The popover rows use
                      `onMouseDown preventDefault` instead, so the input
                      never loses focus and this only runs on a real
-                     move away. */
-                  /* Blur closes the popover; an UNTYPED pending row
-                     closes with it. Leaving it behind would park the
-                     empty row at the bottom of the table that §2
-                     removes. A typed-but-uncommitted search survives —
-                     the click that blurred may well be the Add button
-                     next to it. */
+                     move away.
+
+                     W-EW3 §2 — an UNTYPED pending row closes with it.
+                     Leaving it behind would park exactly the empty row
+                     at the bottom of the table that §2 removes. A
+                     typed-but-uncommitted search survives, because the
+                     click that blurred may well be the Add button
+                     beside it. */
                   onBlur={() => {
                     setAddOpen(false);
                     if (!addQuery.trim()) setAddRowOpen(false);
