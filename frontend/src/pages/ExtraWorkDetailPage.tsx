@@ -2986,7 +2986,11 @@ export function ExtraWorkDetailPage() {
                     />
                     {pdfBusy
                       ? t("detail.pdf_download_busy")
-                      : t("detail.pdf_download_button")}
+                      : t(
+                          noCustomerApproval
+                            ? "detail.pdf_download_button_start"
+                            : "detail.pdf_download_button",
+                        )}
                   </button>
                 )}
               </div>
@@ -3170,8 +3174,18 @@ export function ExtraWorkDetailPage() {
                 <div className="form-section-title">
                   {t("detail.preview_card_title")}
                 </div>
+                {/* W-FIX-A — the BUTTON below already lost the word
+                    (`detail.proposal_pdf_start`); this sentence sits one
+                    line above it and still called the same file a
+                    proposal. On an auto-start route there is no proposal
+                    to fetch — it is the work order for a job the
+                    customer already authorised. */}
                 <p className="muted small" style={{ marginTop: 0 }}>
-                  {t("detail.preview_card_hint")}
+                  {t(
+                    noCustomerApproval
+                      ? "detail.preview_card_hint_start"
+                      : "detail.preview_card_hint",
+                  )}
                 </p>
                 <button
                   type="button"

@@ -867,6 +867,34 @@ export function TicketDetailPage() {
    *  invisible dialog and a dead-looking button. */
   const credentialPreviewRef = useRef<PdfPreviewDialogHandle>(null);
 
+  /** W-FIX-B — OPEN A BACKEND-EMITTED `document_url` IN THE VIEWER.
+   *
+   *  The credential / property payloads carry Django `reverse()` paths,
+   *  which begin "/api/..." (`tickets/serializers.py:1364`), while the
+   *  axios instance's baseURL ALREADY ends in "/api". Handing the raw
+   *  value to `PdfPreviewDialog.open()` made it fetch
+   *  "/api/api/users/<id>/credentials/<id>/download/", and the viewer
+   *  reported the only thing it could: "We couldn't find what you were
+   *  looking for". The badge was right, the document was there, and the
+   *  request went to a URL that does not exist.
+   *
+   *  The DOWNLOAD path has always known this — `downloadDocumentFromUrl`
+   *  (`api/staffCredentials.ts:169`) strips the same prefix and says why
+   *  in its docstring. The preview added in W-UX1-B simply did not
+   *  inherit it. One function here, used by all three preview call sites
+   *  (provider table badge, customer credential row, customer property
+   *  row), so the page cannot fix one and leave another broken.
+   *
+   *  AUTHORIZATION IS UNTOUCHED. The endpoint is unchanged and
+   *  `credential_document_visible_to_user` stays the only gate; this
+   *  corrects which URL the browser asks for, not who may be answered. */
+  function openDocumentPreview(documentUrl: string, filename: string) {
+    const path = documentUrl.startsWith("/api/")
+      ? documentUrl.slice("/api".length)
+      : documentUrl;
+    credentialPreviewRef.current?.open({ url: path, filename });
+  }
+
   /** W-FIX3 — each assigned person's credentials, keyed by user id.
    *  Straight off `ticket.assigned_staff`, which the SERVER has already
    *  filtered through `accounts.visibility` for this viewer's role
@@ -955,6 +983,15 @@ export function TicketDetailPage() {
   const [assignableManagers, setAssignableManagers] = useState<
     AssignableManager[]
   >([]);
+
+  /** W-FIX-C — bumped when a staff assignment is written from OUTSIDE
+   *  `<StaffAssignmentSection>`, which owns a separate copy of the
+   *  roster. Today that is exactly one path: the transition modal posts
+   *  `assigned_staff_ids` with the move, so `changeStatus` bumps it on
+   *  success. Reloading the page's own ticket is not enough — that
+   *  refreshes the card's header count and the customer-side list, and
+   *  the provider's assignment TABLE is the section's own state. */
+  const [assignmentReloadNonce, setAssignmentReloadNonce] = useState(0);
 
   // W13-FIX §1 — THE TRANSITION MODAL's state. `transitionTarget` is the
   // status the operator pressed; while it is set the modal is open and
@@ -1823,6 +1860,17 @@ export function TicketDetailPage() {
       // afterwards and you were left to work out whether that was you.
       const said = describeTicketChange(ticket, response.data, t, tStatus);
       setTicket(response.data);
+      // W-FIX-C — the move CARRIED PEOPLE, so the card that lists them
+      // has to re-read. `setTicket` above refreshes the header count and
+      // the customer-side roster (both read `ticket.assigned_staff`,
+      // which the status response rebuilds from the database), but the
+      // provider's assignment table is `<StaffAssignmentSection>`'s own
+      // state and nothing here reaches it. Bumped only when people
+      // actually travelled with the move, so an ordinary status change
+      // costs no extra requests.
+      if (answers?.assigned_staff_ids?.length) {
+        setAssignmentReloadNonce((n) => n + 1);
+      }
       setStatusNote("");
       setTransitionTarget(null);
       setTransitionReqs(null);
@@ -4147,10 +4195,10 @@ export function TicketDetailPage() {
                                       className="btn btn-ghost btn-sm"
                                       style={{ padding: "1px 6px", fontSize: 11 }}
                                       onClick={() =>
-                                        credentialPreviewRef.current?.open({
-                                          url: credential.document_url ?? "",
-                                          filename: `${credential.type.toLowerCase()}.pdf`,
-                                        })
+                                        openDocumentPreview(
+                                          credential.document_url ?? "",
+                                          `${credential.type.toLowerCase()}.pdf`,
+                                        )
                                       }
                                       data-testid="assigned-staff-credential-preview"
                                     >
@@ -4203,10 +4251,10 @@ export function TicketDetailPage() {
                                       className="btn btn-ghost btn-sm"
                                       style={{ padding: "1px 6px", fontSize: 11 }}
                                       onClick={() =>
-                                        credentialPreviewRef.current?.open({
-                                          url: property.document_url ?? "",
-                                          filename: `${property.name}.pdf`,
-                                        })
+                                        openDocumentPreview(
+                                          property.document_url ?? "",
+                                          `${property.name}.pdf`,
+                                        )
                                       }
                                       data-testid="assigned-staff-property-preview"
                                     >
@@ -4247,8 +4295,9 @@ export function TicketDetailPage() {
                   ticketStatus={ticket.status}
                   customerWantedDate={ticket.customer_wanted_date}
                   credentialsByUserId={credentialsByUserId}
+                  reloadNonce={assignmentReloadNonce}
                   onPreviewDocument={(url, filename) =>
-                    credentialPreviewRef.current?.open({ url, filename })
+                    openDocumentPreview(url, filename)
                   }
                 />
               )}

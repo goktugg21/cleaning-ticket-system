@@ -148,6 +148,7 @@ export function StaffAssignmentSection({
   customerWantedDate,
   credentialsByUserId,
   onPreviewDocument,
+  reloadNonce = 0,
 }: {
   ticketId: number;
   onChanged?: () => void;
@@ -170,6 +171,21 @@ export function StaffAssignmentSection({
   /** Opens the page's in-app viewer. The dialog lives on the page so one
    *  instance serves every row. */
   onPreviewDocument?: (url: string, filename: string) => void;
+  /** W-FIX-C — "SOMETHING OUTSIDE THIS CARD WROTE AN ASSIGNMENT."
+   *
+   *  This card holds its OWN copy of the slots and loads it once per
+   *  ticket. That is correct for the mutations it owns — each one calls
+   *  `reload()` — but the transition modal writes slots too: it posts
+   *  `assigned_staff_ids` to `/tickets/<id>/status/`
+   *  (`tickets/serializers.py::_apply_transition_answers`), which this
+   *  component never hears about. The page refreshed its own ticket and
+   *  the table kept the roster it had read on mount, so a person put on
+   *  the job from the modal appeared only after a page reload.
+   *
+   *  The page bumps this counter after such a write and the load effect
+   *  runs again. A plain number, not a callback, because a changing
+   *  function identity would re-fetch on every render of the parent. */
+  reloadNonce?: number;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
   const { push } = useToast();
@@ -235,7 +251,9 @@ export function StaffAssignmentSection({
     return () => {
       cancelled = true;
     };
-  }, [ticketId]);
+    // `reloadNonce` is the parent's "an assignment was written elsewhere"
+    // signal (see the prop's doc above); a bump re-runs exactly this load.
+  }, [ticketId, reloadNonce]);
 
   function personName(slot: TicketStaffAssignmentAdmin): string {
     return slot.user_full_name?.trim() || slot.user_email;
