@@ -768,5 +768,6 @@
   "create.deadline_chip_overdue_other": "{{count}} dagen te laat",
   "create.preview.col_actions": "Acties",
   "create.preview.picker_label": "Diensten en afgesproken prijzen om toe te voegen",
-  "create.field_description_placeholder": "Beschrijf het werk: exacte locatie, ruimte, oppervlak, toegang, urgentie en alles wat de prijs beinvloedt. Wil je voor een dienst een eigen moment, zet dat hier."
+  "create.field_description_placeholder": "Beschrijf het werk: exacte locatie, ruimte, oppervlak, toegang, urgentie en alles wat de prijs beinvloedt. Wil je voor een dienst een eigen moment, zet dat hier.",
+  "thread_continues_on_job": "Dit gesprek gaat verder bij de klus."
 }
