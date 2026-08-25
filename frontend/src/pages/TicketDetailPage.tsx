@@ -5741,12 +5741,14 @@ export function TicketDetailPage() {
           the button AND asks the browser's PDF viewer to hide its own
           toolbar. */}
       <PdfPreviewDialog ref={credentialPreviewRef} withDownload={false} />
-      {/* hours2 Part 2 — the Book hours door. People come FROM THE CREW
-          (the ticket's named staff assignments), the building and the
-          job are this ticket's, and every row is an ordinary
-          `TimeEntry` written through `POST /timesheets/entries/`. A
-          non-native overlay, conditionally mounted — the
-          render-it-unconditionally rule is about native <dialog>. */}
+      {/* hours2 Part 2 — the "Enter hours worked" door. The crew (the
+          ticket's named staff assignments) is handed over here; the
+          dialog reads the responsible managers itself and offers
+          EVERYONE assigned (W-HOURS4 Task 3). The building and the job
+          are this ticket's, and every row is an ordinary `TimeEntry`
+          written through `POST /timesheets/entries/`. A non-native
+          overlay, conditionally mounted — the render-it-unconditionally
+          rule is about native <dialog>. */}
       {bookHoursOpen && (
         <BookHoursDialog
           ticketId={ticket.id}

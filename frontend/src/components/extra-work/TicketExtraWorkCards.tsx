@@ -27,7 +27,7 @@
  * "costs nothing". Scoped HERE; `isPriced`/`rowAmounts` serve the
  * lists unchanged.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -48,6 +48,8 @@ import type {
 import { isPriced, rowAmounts } from "../../lib/billing";
 import { formatDate, formatMoney, formatNumber } from "../../lib/intl";
 import { CollapsibleCard } from "../CollapsibleCard";
+import { PdfPreviewDialog } from "../PdfPreviewDialog";
+import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
 import { StatusBadge } from "../StatusBadge";
 import { useToast } from "../ToastProvider";
 import { ActualHoursPanel } from "./ActualHoursPanel";
@@ -107,6 +109,10 @@ export function TicketExtraWorkCards({
   const [approvedProposalDetail, setApprovedProposalDetail] =
     useState<ProposalDetail | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+  /** W-HOURS4 Task 4 — the in-app preview of the same document the
+   *  Download button fetches. Native `<dialog>`, rendered
+   *  unconditionally below and driven through the ref (CLAUDE.md). */
+  const pdfPreviewRef = useRef<PdfPreviewDialogHandle>(null);
   // W22 §1 — the billing-month editor, rebuilt from the request page
   // (the redirect closed that page for providers, and the month was
   // one of the three facts that lived only there). `null` draft means
@@ -304,6 +310,18 @@ export function TicketExtraWorkCards({
     } finally {
       setPdfBusy(false);
     }
+  }
+
+  /** W-HOURS4 Task 4 — Preview beside Download. The dialog fetches the
+   *  SAME route `fetchProposalPdf` (`api/extraWork.ts`) downloads, as
+   *  an authenticated blob, and keeps its own Download button: a
+   *  proposal is preview + download (only credentials are preview-only). */
+  function openPdfPreview() {
+    if (approvedProposalId === null) return;
+    pdfPreviewRef.current?.open({
+      url: `/extra-work/${extraWorkId}/proposals/${approvedProposalId}/pdf/`,
+      filename: `proposal-${approvedProposalId}.pdf`,
+    });
   }
 
   const storedBillingMonth = ew.invoice_date ? ew.invoice_date.slice(0, 7) : "";
@@ -625,20 +643,34 @@ export function TicketExtraWorkCards({
             </>
           )}
           {approvedProposalId !== null && canViewProposalPdf && (
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              style={{ marginTop: 12 }}
-              onClick={() => {
-                void handleDownloadPdf();
-              }}
-              disabled={pdfBusy}
-              data-testid="ticket-ew-proposal-pdf"
+            <div
+              style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}
+              data-testid="ticket-ew-proposal-pdf-actions"
             >
-              {pdfBusy
-                ? t("extra_work:detail.pdf_download_busy")
-                : t("extra_work:detail.pdf_download_button")}
-            </button>
+              {/* W-HOURS4 Task 4 — Preview opens the same document in
+                  the in-app viewer, download kept. */}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={openPdfPreview}
+                data-testid="ticket-ew-proposal-preview"
+              >
+                {t("extra_work:detail.pdf_preview_button")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  void handleDownloadPdf();
+                }}
+                disabled={pdfBusy}
+                data-testid="ticket-ew-proposal-pdf"
+              >
+                {pdfBusy
+                  ? t("extra_work:detail.pdf_download_busy")
+                  : t("extra_work:detail.pdf_download_button")}
+              </button>
+            </div>
           )}
           {isSeries && (
             <>
@@ -754,6 +786,10 @@ export function TicketExtraWorkCards({
         </div>
       </div>
     )}
+    {/* W-HOURS4 Task 4 — rendered UNCONDITIONALLY and driven through the
+        ref (CLAUDE.md's rule for a native <dialog>). `withDownload`
+        stays on: a proposal is a document you keep. */}
+    <PdfPreviewDialog ref={pdfPreviewRef} />
     </>
   );
 }

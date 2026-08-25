@@ -194,3 +194,80 @@ class SourceIdFilterTests(TimesheetsFixture):
         )
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["count"], 3)
+
+
+class TicketDoorEveryoneAssignedTests(TimesheetsFixture):
+    """W-HOURS4 Task 3 — the locked budget ruling: the ticket door
+    enters hours for EVERYONE assigned to the job, managers included.
+
+    The dialog used to offer the crew alone, and the reason was data
+    shape, not policy — the ticket payload carries `assigned_staff` and
+    nothing about responsible managers. The WRITE path never had that
+    restriction: BUILDING_MANAGER and COMPANY_ADMIN are provider
+    employees (`timesheets.scope.PROVIDER_EMPLOYEE_ROLES`). Pinned here
+    so the frontend's wider picker rests on an asserted contract, and
+    so the one role that is NOT an employee stays refused.
+    """
+
+    def _booking(self, employee):
+        return {
+            "employee": employee.id,
+            "date": MONDAY.isoformat(),
+            "hour_type": self.normal_a.id,
+            "hours": "2.00",
+            "building": self.building_a.id,
+            "company": self.company_a.id,
+            "source_type": HourSource.TICKET,
+            "source_id": TICKET_41,
+        }
+
+    def test_a_building_manager_is_an_employee_the_door_accepts(self):
+        response = self.api(self.ca_a).post(
+            ENTRIES_URL, self._booking(self.bm_a), format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        entry = TimeEntry.objects.get(pk=response.data["id"])
+        self.assertEqual(entry.employee_id, self.bm_a.id)
+        self.assertEqual(entry.source_type, HourSource.TICKET)
+        self.assertEqual(entry.source_id, TICKET_41)
+
+    def test_a_company_admin_is_an_employee_the_door_accepts(self):
+        # A SUPER_ADMIN writing for a COMPANY_ADMIN: the admin is in the
+        # company through a membership, not a building grant.
+        response = self.api(self.sa).post(
+            ENTRIES_URL, self._booking(self.ca_a), format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        entry = TimeEntry.objects.get(pk=response.data["id"])
+        self.assertEqual(entry.employee_id, self.ca_a.id)
+        self.assertEqual(entry.company_id, self.company_a.id)
+
+    def test_a_platform_admin_is_not_an_employee(self):
+        # The one assigned-looking person the door must keep refusing: a
+        # SUPER_ADMIN is not a provider employee and has no company to
+        # anchor an entry to. The serializer says so with a field error,
+        # which the dialog shows at the button.
+        response = self.api(self.sa).post(
+            ENTRIES_URL, self._booking(self.sa), format="json"
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("employee", response.data)
+        self.assertEqual(TimeEntry.objects.filter(source_id=TICKET_41).count(), 0)
+
+    def test_a_managers_entry_is_counted_on_the_jobs_comparison(self):
+        # The comparison beside the door reads the summary narrowed to
+        # the job; a manager's row must land in `by_employee` like
+        # anybody else's, or the door writes a number the panel never
+        # shows.
+        self.api(self.ca_a).post(
+            ENTRIES_URL, self._booking(self.bm_a), format="json"
+        )
+        response = self.api(self.ca_a).get(
+            SUMMARY_URL,
+            {"source_type": HourSource.TICKET, "source_id": TICKET_41},
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        by_employee = {
+            row["employee"]: row["hours"] for row in response.data["by_employee"]
+        }
+        self.assertEqual(by_employee.get(self.bm_a.id), "2.00")

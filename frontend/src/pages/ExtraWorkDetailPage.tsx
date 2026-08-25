@@ -124,6 +124,8 @@ import { Toggle } from "../components/Toggle";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { PageHeader } from "../components/PageHeader";
+import { PdfPreviewDialog } from "../components/PdfPreviewDialog";
+import type { PdfPreviewDialogHandle } from "../components/PdfPreviewDialog";
 import { ProposalBuilder } from "../components/ProposalBuilder";
 import { billedToKey } from "../lib/billedTo";
 import { customerLabelName } from "../lib/customerLabelName";
@@ -1050,6 +1052,10 @@ export function ExtraWorkDetailPage() {
   // existing CANCELLED transition path so the warning about lingering
   // spawned tickets renders before the destructive action fires.
   const cancelDialogRef = useRef<ConfirmDialogHandle>(null);
+  /** W-HOURS4 Task 4 — the proposal card's in-app preview of the same
+   *  PDF its Download button fetches. Native `<dialog>`, rendered
+   *  unconditionally beside the confirm dialogs, driven by the ref. */
+  const proposalPreviewRef = useRef<PdfPreviewDialogHandle>(null);
   // W14 §4 — completing asks first, and what it asks is not "are you
   // sure": it is the one fact the owner could not get off this screen.
   const completeDialogRef = useRef<ConfirmDialogHandle>(null);
@@ -2359,6 +2365,19 @@ export function ExtraWorkDetailPage() {
     }
   }
 
+  /** W-HOURS4 Task 4 — Preview beside Download on the proposal card.
+   *  The dialog fetches the SAME route `fetchProposalPdf`
+   *  (`api/extraWork.ts`) downloads, as an authenticated blob, and
+   *  keeps its own Download button: proposals are preview + download;
+   *  only credentials are preview-only. */
+  function openProposalPreview() {
+    if (!ew || !activeProposal) return;
+    proposalPreviewRef.current?.open({
+      url: `/extra-work/${ew.id}/proposals/${activeProposal.id}/pdf/`,
+      filename: `proposal-${activeProposal.id}.pdf`,
+    });
+  }
+
   // W7-D — the billing month, stated ONCE. The old block said the
   // month, whether it was overridden, and separately that no invoice
   // exists yet; the last two are not facts a reader needs beside the
@@ -3386,17 +3405,32 @@ export function ExtraWorkDetailPage() {
                       : "detail.preview_card_hint",
                   )}
                 </p>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => void handleDownloadPdf()}
-                  disabled={pdfBusy}
-                  data-testid="extra-work-preview-pdf"
+                <div
+                  style={{ display: "flex", flexWrap: "wrap", gap: 8 }}
+                  data-testid="extra-work-preview-actions"
                 >
-                  {pdfBusy
-                    ? t("detail.proposal_pdf_busy")
-                    : t(noCustomerApproval ? "detail.proposal_pdf_start" : "detail.proposal_pdf")}
-                </button>
+                  {/* W-HOURS4 Task 4 — Preview opens the same document
+                      in the in-app viewer; the download stays. */}
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={openProposalPreview}
+                    data-testid="extra-work-preview-open"
+                  >
+                    {t("detail.pdf_preview_button")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => void handleDownloadPdf()}
+                    disabled={pdfBusy}
+                    data-testid="extra-work-preview-pdf"
+                  >
+                    {pdfBusy
+                      ? t("detail.proposal_pdf_busy")
+                      : t(noCustomerApproval ? "detail.proposal_pdf_start" : "detail.proposal_pdf")}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -4029,6 +4063,10 @@ export function ExtraWorkDetailPage() {
         </div>
       )}
 
+      {/* W-HOURS4 Task 4 — the proposal card's preview. Rendered
+          UNCONDITIONALLY and driven through the ref (CLAUDE.md's rule
+          for a native <dialog>); `withDownload` stays on. */}
+      <PdfPreviewDialog ref={proposalPreviewRef} />
       {/* Sprint 29 Batch 29.8 — cancel-confirmation dialog. Warns when
           spawned tickets are still active so the operator is aware
           they will NOT be auto-cancelled. The transition itself is

@@ -351,6 +351,7 @@
   "detail.pdf_download_button": "Voorstel PDF downloaden",
   "detail.pdf_download_button_start": "Werkbon-PDF downloaden",
   "detail.pdf_download_busy": "PDF wordt klaargemaakt…",
+  "detail.pdf_preview_button": "Voorbeeld",
   "detail.customer_decision_approve_success": "Prijs goedgekeurd. De aanbieder zal het werk binnenkort inplannen.",
   "detail.retry_spawn": "Werk opnieuw inplannen",
   "detail.retry_spawn_busy": "Bezig met inplannen…",

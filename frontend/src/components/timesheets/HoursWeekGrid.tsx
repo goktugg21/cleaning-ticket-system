@@ -76,6 +76,8 @@ import type { BuildingAdmin } from "../../api/types";
 import { hourSourceLabel } from "../../lib/hourSource";
 import { isoWeekDays, toDateString } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
+import { RowJobPicker } from "./RowJobPicker";
+import type { RowJobSource } from "./RowJobPicker";
 
 /** One person the grid writes for. */
 /** One changed cell the grid collected. Exported because a caller that
@@ -110,6 +112,35 @@ export interface GridSeedRow {
    *  buckets; "TICKET" / "EXTRA_WORK" with an id for a record. */
   source_type: string;
   source_id: number | null;
+}
+
+/** W-HOURS4 Task 1c — what a row's "+ link a job" picker may offer.
+ *
+ *  The grid renders the picker and owns the row's identity; the CALLER
+ *  owns the answers, because they come from reads the grid must not
+ *  make (`timesheets` resolves no job titles — `reports/` does). Both
+ *  are per (person, building): "This week" is that person's proposal
+ *  for that building in the caller's week; `search` is free text over
+ *  the open work the person may book against. */
+export interface GridJobPicker {
+  thisWeek: (
+    employeeId: number,
+    buildingId: number | null,
+  ) => HourSourceOption[];
+  search: (
+    employeeId: number,
+    buildingId: number | null,
+    query: string,
+  ) => Promise<HourSourceOption[]>;
+  /** The open popover's bottom edge, for `usePickerReserve`. */
+  onOpenChange?: (listBottom: number | null) => void;
+}
+
+/** The untagged pair row, in the grid's own vocabulary. */
+const UNTAGGED: RowJobSource = { source_type: "", source_id: null };
+
+function pairKey(employeeId: number, seat: number | "") {
+  return `${employeeId}:${seat === "" ? "none" : seat}`;
 }
 
 /**
@@ -242,6 +273,7 @@ export function HoursWeekGrid({
   onCancel,
   onSaveCells,
   onDirtyChange,
+  jobPicker,
 }: {
   week: IsoWeek;
   /** Whose weeks this grid writes. Empty = nothing chosen yet. */
@@ -350,6 +382,12 @@ export function HoursWeekGrid({
    *  from an effect — a synchronous setState in an effect body is what
    *  CLAUDE.md and `react-hooks/set-state-in-effect` both forbid. */
   onDirtyChange?: (dirty: boolean) => void;
+  /** W-HOURS4 Task 1c — when given, every (person, building) pair row
+   *  the caller seeded carries "+ link a job (optional)" under the
+   *  person's name, and the Job COLUMN is not rendered: the tag on the
+   *  row is the one place the job is said. Absent (My hours, the
+   *  contract-hours dialog), the grid is exactly as it was. */
+  jobPicker?: GridJobPicker;
 }) {
   const { t, i18n } = useTranslation("common");
   const [busy, setBusy] = useState(false);
@@ -365,6 +403,14 @@ export function HoursWeekGrid({
    *  is pushed into every cell the moment it is typed, so this is a
    *  display echo and never a second source of truth for the hours. */
   const [applyRow, setApplyRow] = useState<Record<string, string>>({});
+
+  /** W-HOURS4 Task 1c — the job linked to each seeded (person,
+   *  building) pair, keyed by `pairKey`. Absent = general hours. The
+   *  seed the caller hands over is always untagged; this is where the
+   *  operator's choice on the row is kept, and `rows` below applies it
+   *  when it derives the pair's row — so a retag is a different row
+   *  key, and `setPairTag` moves the typed cells along with it. */
+  const [pairTags, setPairTags] = useState<Record<string, RowJobSource>>({});
 
   // The hour type a SEEDED row opens on: the first active type, which
   // for every company that has run the standard set is "Normale uren".
@@ -458,13 +504,17 @@ export function HoursWeekGrid({
       // saved row when one exists for the same key.
       for (const seed of seedRowsByEmployee[employee.id] ?? []) {
         const seat = seed.building ?? "";
+        // W-HOURS4 Task 1c — an untagged pair seed takes the job the
+        // operator linked on the row, if any. A seed the caller tagged
+        // itself is left exactly as handed over.
+        const linked =
+          seed.source_type === ""
+            ? pairTags[pairKey(employee.id, seat)]
+            : undefined;
+        const sourceType = linked ? linked.source_type : seed.source_type;
+        const sourceId = linked ? linked.source_id : seed.source_id;
         for (const hourType of seedTypes) {
-          const key = rowKey(
-            hourType.id,
-            seat,
-            seed.source_type,
-            seed.source_id,
-          );
+          const key = rowKey(hourType.id, seat, sourceType, sourceId);
           put({
             id: rowId(employee.id, key),
             employeeId: employee.id,
@@ -472,8 +522,8 @@ export function HoursWeekGrid({
             key,
             hourTypeId: hourType.id,
             buildingId: seat,
-            sourceType: seed.source_type,
-            sourceId: seed.source_id,
+            sourceType,
+            sourceId,
             cells: {},
             added: true,
           });
@@ -491,6 +541,7 @@ export function HoursWeekGrid({
     seedBuildingIds,
     seedSources,
     seedRowsByEmployee,
+    pairTags,
     // `hourTypes` is no longer read here: the seed is `defaultHourType`,
     // which is derived from it and is its own dependency. It went with
     // the wizard's hour-type step (§1c).
@@ -535,6 +586,11 @@ export function HoursWeekGrid({
       t,
       t("hours_week_grid.no_source"),
     );
+
+  /** W-HOURS4 Task 1c — the Job column exists only where the job is
+   *  NOT already said on the row. With a picker, the tag under the
+   *  name is the one place. */
+  const jobColumn = showSource && !jobPicker;
 
   /**
    * Sprint 162 §1 — the grid as BLOCKS, one per (worker, building).
@@ -737,6 +793,155 @@ export function HoursWeekGrid({
     }));
   }
 
+  /** W-HOURS4 Task 1c — is there an untagged pair seed for this
+   *  (person, building)? Only such a pair carries the picker. */
+  function pairSeedExists(employeeId: number, seat: number | ""): boolean {
+    return (seedRowsByEmployee[employeeId] ?? []).some(
+      (seed) => (seed.building ?? "") === seat && seed.source_type === "",
+    );
+  }
+
+  /**
+   * W-HOURS4 Task 1c — link (or unlink) a job on one pair row.
+   *
+   * The job is part of a row's KEY (`rowKey`), so retagging turns the
+   * pair's rows into different rows. Everything the operator has
+   * already typed into them — the `edits` of every hour-type row of the
+   * pair, and any `+ Add type` rows they added — is moved onto the new
+   * keys in the same handler, so no hour vanishes because a job was
+   * named after it was typed. Where the retagged row already exists as
+   * a SAVED row (the person already has hours on that job at that
+   * building this week), the moved cells land on that saved row, which
+   * is the reconciliation rule every seed follows.
+   */
+  function setPairTag(
+    employeeId: number,
+    seat: number | "",
+    next: RowJobSource | null,
+  ) {
+    const key = pairKey(employeeId, seat);
+    const previous = pairTags[key] ?? UNTAGGED;
+    const target = next ?? UNTAGGED;
+    if (
+      previous.source_type === target.source_type &&
+      previous.source_id === target.source_id
+    ) {
+      return;
+    }
+    const affected = rows.filter(
+      (row) =>
+        row.employeeId === employeeId &&
+        row.buildingId === seat &&
+        row.sourceType === previous.source_type &&
+        (row.sourceId ?? null) === previous.source_id,
+    );
+    setEdits((current) => {
+      const moved = { ...current };
+      for (const row of affected) {
+        const newId = rowId(
+          employeeId,
+          rowKey(row.hourTypeId, seat, target.source_type, target.source_id),
+        );
+        for (const dayKey of dayKeys) {
+          const from = cellKey(row.id, dayKey);
+          if (!(from in moved)) continue;
+          const value = moved[from];
+          delete moved[from];
+          moved[cellKey(newId, dayKey)] = value;
+        }
+      }
+      return moved;
+    });
+    setExtraRows((current) => ({
+      ...current,
+      [employeeId]: (current[employeeId] ?? []).map((row) => {
+        if (
+          row.buildingId !== seat ||
+          row.sourceType !== previous.source_type ||
+          (row.sourceId ?? null) !== previous.source_id
+        ) {
+          return row;
+        }
+        const newKey = rowKey(
+          row.hourTypeId,
+          seat,
+          target.source_type,
+          target.source_id,
+        );
+        return {
+          ...row,
+          key: newKey,
+          id: rowId(employeeId, newKey),
+          sourceType: target.source_type,
+          sourceId: target.source_id,
+        };
+      }),
+    }));
+    setPairTags((current) => {
+      const out = { ...current };
+      if (next === null) delete out[key];
+      else out[key] = next;
+      return out;
+    });
+  }
+
+  /** W-HOURS4 Task 1c — what sits under the person's name on a block's
+   *  first row: the picker on the pair's own row (a removable tag once
+   *  a job is linked), a plain tag on a saved block that belongs to a
+   *  job, nothing on a saved general block. */
+  function renderJobTag(block: {
+    id: string;
+    employeeId: number;
+    employeeName: string;
+    buildingId: number | "";
+    sourceType: string;
+    sourceId: number | null;
+  }) {
+    if (!jobPicker) return null;
+    const seat = block.buildingId;
+    const current = pairTags[pairKey(block.employeeId, seat)] ?? UNTAGGED;
+    const isPairBlock =
+      pairSeedExists(block.employeeId, seat) &&
+      block.sourceType === current.source_type &&
+      (block.sourceId ?? null) === current.source_id;
+    if (isPairBlock) {
+      const buildingId = seat === "" ? null : seat;
+      return (
+        <RowJobPicker
+          tag={
+            block.sourceType
+              ? { source_type: block.sourceType, source_id: block.sourceId }
+              : null
+          }
+          tagLabel={sourceName(block.sourceType, block.sourceId)}
+          thisWeek={jobPicker.thisWeek(block.employeeId, buildingId)}
+          search={(query) => jobPicker.search(block.employeeId, buildingId, query)}
+          onChange={(next) => setPairTag(block.employeeId, seat, next)}
+          onOpenChange={jobPicker.onOpenChange}
+          disabled={busy || weekClosed}
+          ariaLabel={t("hours_week_grid.job_picker_label", {
+            person: block.employeeName,
+            building: buildingName(seat),
+          })}
+          testId={`hours-week-job-${block.id}`}
+        />
+      );
+    }
+    if (block.sourceType) {
+      return (
+        <div style={{ marginTop: 2, fontWeight: 400 }}>
+          <span
+            className="cell-tag cell-tag-muted"
+            data-testid={`hours-week-job-${block.id}-saved`}
+          >
+            {sourceName(block.sourceType, block.sourceId)}
+          </span>
+        </div>
+      );
+    }
+    return null;
+  }
+
 
   async function handleSave() {
     if (employees.length === 0) return;
@@ -912,7 +1117,7 @@ export function HoursWeekGrid({
               <th>{t("hours_week_grid.building")}</th>
               {/* Sprint 179B §2 — WHICH JOB. Without it, one row per job
                   is one row per job that looks identical to the next. */}
-              {showSource && <th>{t("hours_week_grid.job")}</th>}
+              {jobColumn && <th>{t("hours_week_grid.job")}</th>}
               <th>{t("hours_week_grid.hour_type")}</th>
               {days.map((day, index) => (
                 <th
@@ -943,7 +1148,7 @@ export function HoursWeekGrid({
             >
               <th
                 scope="row"
-                colSpan={showSource ? 4 : 3}
+                colSpan={jobColumn ? 4 : 3}
                 className="hours-week-apply-label"
               >
                 {t("hours_week_grid.apply_all_label")}
@@ -988,7 +1193,7 @@ export function HoursWeekGrid({
             {blocks.length === 0 && (
               <tr>
                 <td
-                  colSpan={dayKeys.length + (showSource ? 6 : 5)}
+                  colSpan={dayKeys.length + (jobColumn ? 6 : 5)}
                   className="muted small"
                 >
                   {t("hours_week_grid.empty_block")}
@@ -1012,11 +1217,15 @@ export function HoursWeekGrid({
                         up and the eye had to re-anchor at every group. */}
                     <td className="td-subject hours-week-identity">
                       {dayRowIndex === 0 ? block.employeeName : ""}
+                      {/* W-HOURS4 Task 1c — the job, ON the row, under
+                          the name: a quiet link until one is linked, a
+                          removable tag after. */}
+                      {dayRowIndex === 0 && renderJobTag(block)}
                     </td>
                     <td className="hours-week-identity">
                       {dayRowIndex === 0 ? buildingName(block.buildingId) : ""}
                     </td>
-                    {showSource && (
+                    {jobColumn && (
                       <td
                         className="hours-week-identity hours-week-job"
                         data-testid={`hours-week-row-job-${row.id}`}
@@ -1102,7 +1311,7 @@ export function HoursWeekGrid({
                   </tr>
                 ))}
                 <tr className="hours-week-add-type-row">
-                  <td colSpan={dayKeys.length + (showSource ? 4 : 3)}>
+                  <td colSpan={dayKeys.length + (jobColumn ? 4 : 3)}>
                     {/* The ONLY way an hour type is chosen, which is how
                         the reference does it — and why the wizard no
                         longer asks for types up front. */}

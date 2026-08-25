@@ -351,6 +351,7 @@
   "detail.pdf_download_button": "Download proposal PDF",
   "detail.pdf_download_button_start": "Download work order PDF",
   "detail.pdf_download_busy": "Preparing PDF…",
+  "detail.pdf_preview_button": "Preview",
   "detail.customer_decision_approve_success": "Pricing approved. The provider will schedule the work shortly.",
   "detail.retry_spawn": "Retry scheduling work",
   "detail.retry_spawn_busy": "Scheduling…",
