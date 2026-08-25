@@ -1087,7 +1087,6 @@ export function ExtraWorkList({
            the nav row and the page heading are the same label by
            construction, and renaming it later is one edit, not two. */
         title={t("nav.quotes", { ns: "common" })}
-        subtitle={t("list.page_subtitle")}
         actions={
           /* Sprint 155 §1b — this button used to go straight to the
              direct-order form, which is only ONE of the three things
@@ -1152,7 +1151,6 @@ export function ExtraWorkList({
       {chooserOpen && (
         <ChoiceDialog
           title={t("list.create_chooser_title")}
-          subtitle={t("list.create_chooser_subtitle")}
           onCancel={() => setChooserOpen(false)}
           testIdPrefix="extra-work-create-chooser"
           choices={[
@@ -1227,8 +1225,10 @@ export function ExtraWorkList({
           selected. */}
       <div className="ew-list-scope" data-testid="extra-work-scope-band">
         <div className="ew-list-scope-top">
+          {/* T1 §3 — the two-sentence explanation of what this tab
+              holds is gone; the anomaly COUNT is a state, not prose,
+              and stays exactly where it was. */}
           <p className="ew-list-scope-hint muted small">
-            {t("list.track_quote_hint")}
             {spawnAnomalyCount > 0 && (
               <span
                 className="cell-tag cell-tag-rejected"

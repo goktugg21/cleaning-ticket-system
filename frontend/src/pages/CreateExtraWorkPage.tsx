@@ -2078,11 +2078,6 @@ export function CreateExtraWorkPage({
           <h2 className="page-title">
             {isQuoteMode ? t("quote.page_title") : t("create.page_title")}
           </h2>
-          <p className="page-sub">
-            {isQuoteMode
-              ? t("quote.page_subtitle")
-              : t("create.page_subtitle")}
-          </p>
         </div>
       </div>
 
@@ -2455,13 +2450,16 @@ export function CreateExtraWorkPage({
                     </option>
                   ))}
                 </select>
-                <div className="muted small" style={{ marginTop: 4 }}>
-                  {!form.customer
-                    ? t("create.field_category_pick_customer_first")
-                    : currentFolders.length === 0
-                      ? t("create.field_category_customer_has_none")
-                      : t("create.field_category_hint")}
-                </div>
+                {/* T1 §3 — the two STATES stay (why the control is
+                    empty, why it is disabled); the sentence explaining
+                    what picking a category does is gone. */}
+                {(!form.customer || currentFolders.length === 0) && (
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {!form.customer
+                      ? t("create.field_category_pick_customer_first")
+                      : t("create.field_category_customer_has_none")}
+                  </div>
+                )}
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="ew-urgency">
@@ -2513,7 +2511,6 @@ export function CreateExtraWorkPage({
                   <span>{t("series.mode_multiple")}</span>
                 </label>
               </div>
-              <p className="muted small">{t("series.mode_hint")}</p>
             </div>
 
             <div className="field">
@@ -2555,12 +2552,6 @@ export function CreateExtraWorkPage({
                 onChange={(event) => update("description", event.target.value)}
                 required
               />
-              <div
-                className="muted small"
-                style={{ marginTop: 6, lineHeight: 1.4 }}
-              >
-                {t("create.field_description_helper")}
-              </div>
             </div>
 
             <div className="field">
@@ -2837,7 +2828,7 @@ export function CreateExtraWorkPage({
                                   style={{ marginTop: 6 }}
                                   data-testid={`extra-work-create-line-custom-price-${index}`}
                                 >
-                                  {t("create.line_custom_price_hint")}
+                                  {t("create.line_custom_price_tag")}
                                 </div>
                               ))}
                             {/* The per-line note moved here with its
@@ -3328,9 +3319,6 @@ export function CreateExtraWorkPage({
                 >
                   <div className="form-section-title">
                     {t("create.intent.section_title")}
-                  </div>
-                  <div className="muted small" style={{ marginBottom: 12 }}>
-                    {t("create.intent.section_helper")}
                   </div>
                   <div
                     role="radiogroup"
