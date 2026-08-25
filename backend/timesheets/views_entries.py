@@ -71,6 +71,16 @@ def _apply_entry_filters(qs, query_params):
         if source_type not in HourSource.values:
             return qs.none()
         qs = qs.filter(source_type=source_type)
+    # hours2 — narrow to ONE job. `source_type` answers "which KIND of
+    # work"; this answers "which record", so the operational ticket can
+    # read the hours booked to it (`?source_type=TICKET&source_id=<id>`)
+    # through the same list and summary every other reader uses, and the
+    # totals under a comparison are computed over the same rows as the
+    # list. NARROWS like every filter here; an unparseable value is
+    # absent, not an error, the `parse_int_param` convention.
+    source_id = parse_int_param(query_params.get("source_id"))
+    if source_id is not None:
+        qs = qs.filter(source_id=source_id)
     if building is not None:
         qs = qs.filter(building_id=building)
     company = parse_int_param(query_params.get("company"))

@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views_extra_work_hours import ExtraWorkHoursView
 from .views_planned_vs_actual import ExtraWorkPlannedVsActualView
+from .views_week_assignments import WeekAssignmentsView
 from .views_labour_rates import (
     EmployeeHourlyRateDetailView,
     EmployeeHourlyRateListCreateView,
@@ -54,6 +55,16 @@ urlpatterns = [
         "hour-sources/",
         HourSourceOptionsView.as_view(),
         name="report-hour-sources",
+    ),
+    # hours2 Part 3 — the admin week grid's row proposal: per person,
+    # the buildings they may enter and the jobs they are on this week.
+    # The per-person, per-week sibling of `hour-sources/`; a literal
+    # path, before the report routes, in keeping with the ordering rule
+    # below.
+    path(
+        "week-assignments/",
+        WeekAssignmentsView.as_view(),
+        name="report-week-assignments",
     ),
     # Sprint 180 §2 — the four report CARDS, in one request. A literal
     # path, before the report routes, in keeping with the ordering rule

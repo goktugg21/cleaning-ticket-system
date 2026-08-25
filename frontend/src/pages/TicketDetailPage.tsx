@@ -90,6 +90,8 @@ import type {
   ExtraWorkRequestDetail,
 } from "../api/types";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
+import { PlannedVsWorkedPanel } from "../components/extra-work/PlannedVsWorkedPanel";
+import { BookHoursDialog } from "../components/extra-work/BookHoursDialog";
 import {
   getTicketUploadVisibility,
   setTicketUploadVisibility,
@@ -99,6 +101,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useBackLink } from "../hooks/useBackLink";
 import {
   canAccessExtraWork,
+  canManageTimesheets,
   composerTiersForRole,
   isCustomerUser,
   isProviderAdmin,
@@ -1311,6 +1314,13 @@ export function TicketDetailPage() {
   const [ewPlanLoading, setEwPlanLoading] = useState(false);
   const [ewPlanBusy, setEwPlanBusy] = useState(false);
   const [ewPlanError, setEwPlanError] = useState("");
+
+  /* hours2 — the job's own hours door and the comparison beside it.
+     One record (`TimeEntry`), two doors: the admin week grid is one,
+     "Book hours" on this tab is the other. `hoursNonce` is bumped
+     after a booking so the comparison re-reads without a reload. */
+  const [bookHoursOpen, setBookHoursOpen] = useState(false);
+  const [hoursNonce, setHoursNonce] = useState(0);
 
   /* W-TABS Task 4 — the Plan tab shows the plan it holds (planned
      hours per person), read from the SAME store the dialog writes.
@@ -4944,6 +4954,41 @@ export function TicketDetailPage() {
                 </div>
               </div>
             )}
+          {/* hours2 Part 1b — PLANNED VS WORKED, on the job.
+
+              The comparison the Extra Work page used to carry ("Hours
+              on this extra work", with its cost block) lives HERE now,
+              stripped to hours: per person, planned (the SAME store the
+              Plan dialog writes — `ExtraWorkPlannedHours`, read back as
+              `ewPlanDetail.planned_hours`) beside worked (the
+              `TimeEntry` rows tagged `TICKET` / this ticket). Money
+              stays in Reports.
+
+              Mounted for provider management on EVERY ticket: hours can
+              be booked to any open ticket from the admin week grid, and
+              a ticket that cannot show them has no place to say so. The
+              PLANNED side exists only for a ticket born from an Extra
+              Work; an ordinary ticket passes an empty plan and reads
+              "—" in that column. `null` while the plan is still being
+              read, so the table never renders a plan of nothing beside
+              real worked hours. */}
+          {isProviderManagementRole(me?.role) && (
+            <PlannedVsWorkedPanel
+              ticketId={ticket.id}
+              companyId={ticket.company}
+              planned={
+                ticket.extra_work_origin && canAccessExtraWork(me?.role)
+                  ? ewPlanDetail
+                    ? (ewPlanDetail.planned_hours ?? [])
+                    : null
+                  : []
+              }
+              selfOnly={!canManageTimesheets(me?.role)}
+              canBook={canManageTimesheets(me?.role)}
+              onBook={() => setBookHoursOpen(true)}
+              refreshNonce={hoursNonce}
+            />
+          )}
           </>
           )}
           {ticketTab === "money" &&
@@ -5698,6 +5743,40 @@ export function TicketDetailPage() {
           the button AND asks the browser's PDF viewer to hide its own
           toolbar. */}
       <PdfPreviewDialog ref={credentialPreviewRef} withDownload={false} />
+      {/* hours2 Part 2 — the Book hours door. People come FROM THE CREW
+          (the ticket's named staff assignments), the building and the
+          job are this ticket's, and every row is an ordinary
+          `TimeEntry` written through `POST /timesheets/entries/`. A
+          non-native overlay, conditionally mounted — the
+          render-it-unconditionally rule is about native <dialog>. */}
+      {bookHoursOpen && (
+        <BookHoursDialog
+          ticketId={ticket.id}
+          ticketNo={ticket.ticket_no}
+          companyId={ticket.company}
+          buildingId={ticket.building}
+          crew={ticket.assigned_staff.flatMap((entry) =>
+            entry.anonymous
+              ? []
+              : [
+                  {
+                    id: entry.id,
+                    name: entry.full_name || entry.email || `#${entry.id}`,
+                    email: entry.email,
+                  },
+                ],
+          )}
+          onClose={() => setBookHoursOpen(false)}
+          onBooked={(count) => {
+            setBookHoursOpen(false);
+            setHoursNonce((current) => current + 1);
+            toast.push({
+              variant: "success",
+              title: t("book_hours.booked", { count }),
+            });
+          }}
+        />
+      )}
       {/* W-PLAN Task 2 — the SAME plan dialog the Extra Work page
           mounts, keyed by the stored plan so a save re-seeds it. A
           non-native overlay, conditionally mounted — the

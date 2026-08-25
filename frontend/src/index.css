@@ -12139,6 +12139,66 @@ a.wp-card-title:hover { text-decoration: underline; }
   color: var(--amber);
 }
 
+/* hours2 Part 3 / 4b — the week setup after the product went.
+
+   Two pickers, not three, so the setup row is two columns (people
+   wide, week narrow); the week input carries the Hours page's lock
+   chip on the same line; and the Add-row bar is one bordered strip
+   under the pickers whose three selects and button sit on one line
+   and stack when narrow. Appended inside this block so the week-entry
+   vocabulary stays together. */
+.week-entry-setup-row--two {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+@media (max-width: 900px) {
+  .week-entry-setup-row--two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.week-setup-week-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.week-setup-week-line .field-input {
+  flex: 1 1 160px;
+}
+.week-entry-addrow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+@media (max-width: 900px) {
+  .week-entry-addrow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.week-entry-addrow .field {
+  margin: 0;
+}
+.week-entry-addrow-title {
+  grid-column: 1 / -1;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.week-entry-added {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* §4 — the report modals' group titles and their totals. `.form-section-title`
    carries no margins at all, so a group title sat 2px above its table
    and the grand total abutted the one above it. */
@@ -12773,6 +12833,47 @@ a.wp-card-title:hover { text-decoration: underline; }
 .ew-hours-table .ew-hours-day-col {
   text-align: right;
   white-space: nowrap;
+}
+
+/* hours2 — the panel moved to the job (`PlannedVsWorkedPanel`, on the
+   ticket's Plan tab) and lost its money half. What it keeps from this
+   block is the tone vocabulary (`.ew-hours-tone-*`: over the plan is a
+   WARNING, the waiting ink, never a block) and the table class; what
+   it adds is a head with the "Book hours" door beside the title,
+   right-aligned tabular figure columns, and the small two-column form
+   of the door itself. Appended here so the hours vocabulary stays in
+   one place. */
+.ew-hours-compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.ew-hours-compare-head .form-section-title {
+  margin: 0;
+}
+.ew-hours-compare-table .ew-hours-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ew-hours-compare-table tfoot td {
+  border-top: 2px solid var(--border);
+}
+.ew-hours-compare-note {
+  margin: 8px 0 0;
+}
+.book-hours-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .book-hours-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* --------------------------------------------------------------------

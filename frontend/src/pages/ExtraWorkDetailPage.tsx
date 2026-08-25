@@ -87,7 +87,6 @@ import {
   type ActualHoursLine,
 } from "../components/extra-work/activeHourlyLines";
 import { ExtraWorkAssignmentCard } from "../components/extra-work/ExtraWorkAssignmentCard";
-import { ExtraWorkHoursPanel } from "../components/extra-work/ExtraWorkHoursPanel";
 import { PlanSummary } from "../components/extra-work/PlanSummary";
 import { ExtraWorkContextHeader } from "../components/extra-work/ExtraWorkContextHeader";
 import { resolveNextStep } from "../components/extra-work/nextStep";
@@ -1121,22 +1120,6 @@ export function ExtraWorkDetailPage() {
     [me],
   );
 
-  /* The tabs this viewer actually has. DERIVED, never stored: a stored
-   * copy would need an effect to correct itself when `me` lands, and a
-   * synchronous setState in an effect body is the house rule this file
-   * already follows. */
-  const visibleTabs = useMemo(
-    () => EW_TABS.filter((entry) => entry.visibleTo(me?.role)),
-    [me],
-  );
-
-  /* Falling back rather than correcting state: a customer who somehow
-   * holds "hours" (a stale render, a future deep link) reads the first
-   * tab they do have instead of a blank page. */
-  const tab: EwTab = visibleTabs.some((entry) => entry.key === requestedTab)
-    ? requestedTab
-    : (visibleTabs[0]?.key ?? "overview");
-
   // `ewId` (hoisted Sprint 8A-fix) — the EW id, or null while loading.
   // Used by the actual-hours active-set logic below and the proposals /
   // spawned-tickets fetch effects further down.
@@ -1236,6 +1219,38 @@ export function ExtraWorkDetailPage() {
     () => deriveActiveHourlyLines(ew, approvedProposal, approvedProposalDetail),
     [ew, approvedProposal, approvedProposalDetail],
   );
+
+  /* The tabs this viewer actually has. DERIVED, never stored: a stored
+   * copy would need an effect to correct itself when `me` lands, and a
+   * synchronous setState in an effect body is the house rule this file
+   * already follows.
+   *
+   * hours2 1a — the Hours tab exists only while it has something to
+   * show. The timesheet panel ("Hours on this extra work") left this
+   * page: hours live on the job now (the ticket's Plan tab), and a
+   * provider is redirected there the moment work is spawned (W21
+   * below), so nothing on THIS page could ever have had hours. What
+   * remains under Hours is the pricing-line actual-hours entry, which
+   * exists only for hourly-priced lines — and a tab that opens on an
+   * empty page is the W8 §4 defect this file already names. Computed
+   * AFTER `activeHourlyLines` because that is the fact it depends on. */
+  const visibleTabs = useMemo(
+    () =>
+      EW_TABS.filter(
+        (entry) =>
+          entry.visibleTo(me?.role) &&
+          (entry.key !== "hours" ||
+            (isProvider && activeHourlyLines.length > 0)),
+      ),
+    [me, isProvider, activeHourlyLines],
+  );
+
+  /* Falling back rather than correcting state: a customer who somehow
+   * holds "hours" (a stale render, a future deep link) reads the first
+   * tab they do have instead of a blank page. */
+  const tab: EwTab = visibleTabs.some((entry) => entry.key === requestedTab)
+    ? requestedTab
+    : (visibleTabs[0]?.key ?? "overview");
 
   // Sprint 28 Batch 4 — fetch contacts when the request loads, but
   // only for admin viewers (mirrors backend gate). Failures collapse
@@ -3554,27 +3569,13 @@ export function ExtraWorkDetailPage() {
           )}
           {tab === "hours" && (
             <>
-          {/* W3-H (plan §2.8) — the TIMESHEET hours booked to this job,
-              with the roll-up of budget / entered / cost.
-
-              W4-N fix 2 moved it HERE: below People on this request,
-              above Requested services, where the owner asked for it. It
-              used to sit near the bottom of the page under the
-              actual-hours card, on the argument that the two are easy
-              to confuse — but the two things a manager compares are the
-              crew's booked hours and the budget that was planned for
-              them, and the planning half of this page is up here. The
-              distinction the old position was protecting is now carried
-              by the card's own words: the actual-hours card enters
-              hours onto a PRICING LINE (what the customer pays), this
-              one reads the hours the crew booked in the timesheets
-              module (what the job cost us), and its first line of body
-              text says exactly that.
-
-              Unconditional apart from its own role gate: the panel
-              fetches nothing for a non-provider and renders nothing when
-              there is nothing to say. Collapsed by default. */}
-          <ExtraWorkHoursPanel extraWorkId={ew.id} />
+          {/* hours2 1a — the TIMESHEET hours panel ("Hours on this
+              extra work", W3-H) is gone from this page. Pre-spawn
+              nothing can have hours, post-spawn a provider never sees
+              this page (W21 redirects to the job), and its planned
+              figure already shows in the plan summary. The comparison
+              it carried lives on the ticket's Plan tab as
+              `PlannedVsWorkedPanel`; its cost block stays in Reports. */}
           {/* Sprint 8A-fix — provider-only actual-hours entry for the
               active hourly line set (approved-proposal lines or INSTANT
               cart lines). Keyed by `actualHoursPanelKey` so a save

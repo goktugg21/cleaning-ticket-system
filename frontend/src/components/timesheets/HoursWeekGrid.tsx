@@ -100,6 +100,18 @@ export interface GridEmployee {
   name: string;
 }
 
+/** hours2 Part 3 — one PROPOSED row for one person: a building and a
+ *  job, from that person's own assignments. The grid seeds it on the
+ *  default hour type, reconciled against the week's saved rows exactly
+ *  as the wizard's seeds are. */
+export interface GridSeedRow {
+  building: number | null;
+  /** "" for an untagged row; "OTHER" / "CONTRACT" for the type-only
+   *  buckets; "TICKET" / "EXTRA_WORK" with an id for a record. */
+  source_type: string;
+  source_id: number | null;
+}
+
 /**
  * The bar's "no building" choice. `TimeEntry.building` is nullable BY
  * DESIGN and stays that way — this is a UI value for choosing null, and
@@ -151,6 +163,9 @@ const NO_SOURCE_OPTIONS: HourSourceOption[] = [];
 
 /** The same stable-default trick for `quietDays` (W12 §5). */
 const NO_QUIET_DAYS: string[] = [];
+
+/** And for `seedRowsByEmployee` (hours2 Part 3). */
+const NO_SEED_ROWS: Record<number, GridSeedRow[]> = {};
 
 function rowKey(
   hourTypeId: number | "",
@@ -216,6 +231,7 @@ export function HoursWeekGrid({
   entriesByEmployee,
   seedBuildingIds,
   seedSources = [],
+  seedRowsByEmployee = NO_SEED_ROWS,
   sourceOptions = NO_SOURCE_OPTIONS,
   showSource = false,
   showHead = true,
@@ -246,6 +262,19 @@ export function HoursWeekGrid({
    *  default, and what every pre-177 caller passes) seeds one untagged
    *  row exactly as before, so no existing screen changes shape. */
   seedSources?: { source_type: string; source_id: number | null }[];
+  /** hours2 Part 3 — PER-PERSON seeds, beside the shared ones above.
+   *
+   *  The admin week wizard used to seed the same (buildings x jobs)
+   *  product under every selected person, which offered a cleaner rows
+   *  in buildings they cannot enter and on jobs they are not on. It now
+   *  proposes each person's OWN rows — their assignments that week, the
+   *  job's building prefilled — and hands them over here, keyed by
+   *  employee id. Additive: a caller that passes nothing (My hours, the
+   *  contract-hours dialog) seeds exactly as before. Reconciled against
+   *  saved rows by the same `put()` as every other seed, so a proposal
+   *  that already has hours this week is the operator's real row, not
+   *  a blank twin of it. */
+  seedRowsByEmployee?: Record<number, GridSeedRow[]>;
   /** Sprint 179B §2 — the jobs the JOB COLUMN reads its titles from.
    *
    *  A `TimeEntry` stores `(source_type, source_id)` and resolves
@@ -424,6 +453,33 @@ export function HoursWeekGrid({
         }
       }
 
+      // hours2 Part 3 — this person's own proposals, one row per
+      // (building, job) on the default hour type. `put()` keeps the
+      // saved row when one exists for the same key.
+      for (const seed of seedRowsByEmployee[employee.id] ?? []) {
+        const seat = seed.building ?? "";
+        for (const hourType of seedTypes) {
+          const key = rowKey(
+            hourType.id,
+            seat,
+            seed.source_type,
+            seed.source_id,
+          );
+          put({
+            id: rowId(employee.id, key),
+            employeeId: employee.id,
+            employeeName: employee.name,
+            key,
+            hourTypeId: hourType.id,
+            buildingId: seat,
+            sourceType: seed.source_type,
+            sourceId: seed.source_id,
+            cells: {},
+            added: true,
+          });
+        }
+      }
+
       for (const extra of extraRows[employee.id] ?? []) put(extra);
       out.push(...byKey.values());
     }
@@ -434,6 +490,7 @@ export function HoursWeekGrid({
     extraRows,
     seedBuildingIds,
     seedSources,
+    seedRowsByEmployee,
     // `hourTypes` is no longer read here: the seed is `defaultHourType`,
     // which is derived from it and is its own dependency. It went with
     // the wizard's hour-type step (§1c).
