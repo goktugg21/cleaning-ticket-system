@@ -441,8 +441,19 @@ export function HoursWeekGrid({
       };
 
       for (const entry of entriesByEmployee[employee.id] ?? []) {
-        const entrySourceType = entry.source_type || "";
+        // W-HOURS5 Task 6 — a saved entry nobody tagged is stored as
+        // `OTHER` with no id (the model's default), while a seed nobody
+        // tagged is "" in this grid's vocabulary. Both mean "no job".
+        // Read as two identities they made two rows: the saved general
+        // row AND a blank twin from the seed, whose save would have
+        // REPLACED the saved hours (bulk-week keys on the same absent
+        // job). Normalised here, at the one place entries enter, so the
+        // seed reconciles onto the saved row as every seed should.
         const entrySourceId = entry.source_id ?? null;
+        const entrySourceType =
+          entry.source_type === "OTHER" && entrySourceId === null
+            ? ""
+            : entry.source_type || "";
         const key = rowKey(
           entry.hour_type,
           entry.building ?? "",
