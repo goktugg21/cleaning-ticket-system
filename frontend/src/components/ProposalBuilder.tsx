@@ -976,13 +976,17 @@ export function ProposalBuilder({
             </button>
           </div>
         )}
-        <p className="muted small" style={{ marginTop: 0 }}>
-          {t(
-            noCustomerApproval
-              ? "detail.proposal_builder_helper_start"
-              : "detail.proposal_builder_helper",
-          )}
-        </p>
+        {/* W-UX F16 -- the "set a price" instruction is only true while
+            the lines can still be edited. */}
+        {canEdit && (
+          <p className="muted small" style={{ marginTop: 0 }}>
+            {t(
+              noCustomerApproval
+                ? "detail.proposal_builder_helper_start"
+                : "detail.proposal_builder_helper",
+            )}
+          </p>
+        )}
         {error && (
           <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
             {error}

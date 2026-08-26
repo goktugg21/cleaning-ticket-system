@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { listAllCompanies } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
+import { CONTRACT_STATUS_TAG } from "../../../lib/contractStatusTag";
 import {
   deleteContract,
   getContractStats,
@@ -320,13 +321,6 @@ export function ContractsAdminPage() {
   // Contract statuses reuse the table's existing `cell-tag` vocabulary
   // rather than inventing a badge palette. Mapping stated once, here, so
   // the table and the phone cards cannot drift apart.
-  const STATUS_TAG: Record<ContractStatus, string> = {
-    ACTIVE: "cell-tag-open",
-    DRAFT: "cell-tag-muted",
-    EXPIRED: "cell-tag-closed",
-    CANCELLED: "cell-tag-rejected",
-  };
-
   const measureLabel =
     measure === "prices"
       ? timeframe === "monthly"
@@ -877,7 +871,7 @@ export function ContractsAdminPage() {
                   timeframe={timeframe}
                   locale={locale}
                   editMode={editMode}
-                  statusTag={STATUS_TAG}
+                  statusTag={CONTRACT_STATUS_TAG}
                   totalColumnCount={totalColumnCount}
                   onOpen={(id) => navigate(`/admin/contracts/${id}`)}
                   collapsed={collapsed.includes(group.key)}
@@ -948,7 +942,7 @@ export function ContractsAdminPage() {
                 >
                   {row.contract_no}
                 </Link>
-                <span className={`cell-tag ${STATUS_TAG[row.status]}`}>
+                <span className={`cell-tag ${CONTRACT_STATUS_TAG[row.status]}`}>
                   {t(`status.${row.status}`)}
                 </span>
               </div>

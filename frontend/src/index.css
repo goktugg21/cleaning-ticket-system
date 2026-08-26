@@ -14987,3 +14987,87 @@ table.assign-table { min-width: 0; width: 100%; }
   color: var(--red);
   font-size: var(--font-xs);
 }
+
+/* ===================================================================
+   W-UX — small display fixes from the ae1554e audit.
+   APPENDED BLOCK, NEW CLASSES ONLY. Nothing above is edited.
+   =================================================================== */
+/* F42 — the sidebar rows kept a fixed height but were flex children of
+   a column that scrolls, and a flex child with `min-height: auto` still
+   shrinks below its `height` when the column runs out of room. MEASURED
+   at 1366x768 before this block. `flex-shrink: 0` makes the nav scroll
+   instead of squeezing every row. */
+.sidebar-nav .nav-item,
+.sidebar-nav .nav-group-label,
+.sidebar-nav .nav-parent-row {
+  flex-shrink: 0;
+}
+/* F18 — the Rooster (week grid): a real, always-visible horizontal
+   scrollbar on its wrapper and a sticky first column, so the person is
+   in view whichever day column the table is scrolled to. Same
+   scrollbar treatment the Work Plan's week scroller declares. */
+.hours-week-table-wrap {
+  scrollbar-width: auto;
+  scrollbar-color: var(--border-strong, var(--border)) var(--surface-2);
+}
+.hours-week-table-wrap::-webkit-scrollbar {
+  height: 10px;
+}
+.hours-week-table-wrap::-webkit-scrollbar-track {
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+.hours-week-table-wrap::-webkit-scrollbar-thumb {
+  background: var(--border-strong, var(--border));
+  border-radius: 999px;
+}
+.hours-week-grid-table th:first-child,
+.hours-week-grid-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+.hours-week-grid-table thead th:first-child {
+  z-index: 2;
+}
+/* F50 — the "+N more" line under the two visible ordinary toasts. */
+.toast-more {
+  grid-template-columns: 1fr;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: center;
+}
+/* F43 — the Extra Work list's status chips clipped their label with an
+   ellipsis at 1366 ("With the custo…", "Awaiting prici…" — measured:
+   116px of text in 101px). A label that cannot be read is not a label;
+   it wraps to a second line instead, and the chip centres on it. */
+.ew-list-scope-chips .status-tile-label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.ew-list-scope-chips .status-tile {
+  align-items: center;
+}
+/* F18 — the schedule tab's table shares the week grid's table class, so
+   the sticky first column above already holds; its wrapper is the
+   generic admin list wrapper, which gets the same always-visible bar. */
+.table-wrap.admin-list-wrap {
+  scrollbar-width: auto;
+  scrollbar-color: var(--border-strong, var(--border)) var(--surface-2);
+}
+.table-wrap.admin-list-wrap::-webkit-scrollbar {
+  height: 10px;
+}
+.table-wrap.admin-list-wrap::-webkit-scrollbar-track {
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+.table-wrap.admin-list-wrap::-webkit-scrollbar-thumb {
+  background: var(--border-strong, var(--border));
+  border-radius: 999px;
+}

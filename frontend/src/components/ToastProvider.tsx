@@ -24,6 +24,7 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
 
 export type ToastVariant = "success" | "error" | "info" | "warning";
@@ -62,6 +63,16 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+/** W-UX F50 — how many ORDINARY toasts stand at once. The rest wait
+ *  behind one "+N more" line and surface as these expire or are
+ *  dismissed. W-LATE's persistent L2/L3 severity toasts are never
+ *  capped: a broken promise is not something to queue. */
+const MAX_VISIBLE_PLAIN = 2;
+
+function isSeverityToast(toast: ToastInput): boolean {
+  return toast.severity === "L2" || toast.severity === "L3";
+}
+
 const DEFAULT_DURATION: Record<ToastVariant, number> = {
   success: 4_000,
   info: 4_000,
@@ -90,6 +101,7 @@ function nextId(): string {
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation("common");
   const [toasts, setToasts] = useState<ToastInstance[]>([]);
   const timers = useRef<Map<string, number>>(new Map());
 
@@ -140,11 +152,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [push, dismiss, clear],
   );
 
+  // F50 — the stack: every severity toast, then the first two ordinary
+  // ones, then one line saying how many more are waiting.
+  const severityToasts = toasts.filter(isSeverityToast);
+  const plainToasts = toasts.filter((toast) => !isSeverityToast(toast));
+  const visible = [...severityToasts, ...plainToasts.slice(0, MAX_VISIBLE_PLAIN)];
+  const hiddenCount = Math.max(0, plainToasts.length - MAX_VISIBLE_PLAIN);
+
   return (
     <ToastContext.Provider value={value}>
       {children}
       <div className="toast-stack" role="region" aria-label="Notifications">
-        {toasts.map((toast) => {
+        {visible.map((toast) => {
           const clickable = typeof toast.onClick === "function";
           const activate = () => {
             toast.onClick?.();
@@ -203,6 +222,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             </div>
           );
         })}
+        {hiddenCount > 0 && (
+          <div className="toast toast-more" role="status" data-testid="toast-more">
+            {t("toast.more", { count: hiddenCount })}
+          </div>
+        )}
       </div>
     </ToastContext.Provider>
   );

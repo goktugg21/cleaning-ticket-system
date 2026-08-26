@@ -7,6 +7,7 @@ import {
 } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { ToastProvider } from "./components/ToastProvider";
 import { AdminRoute } from "./components/AdminRoute";
@@ -139,11 +140,12 @@ const InvoiceDetailPage = lazy(() =>
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
+  const { t } = useTranslation("common");
 
   if (loading) {
     return (
       <main className="auth-page">
-        <p className="muted">Loading…</p>
+        <p className="muted">{t("loading")}</p>
       </main>
     );
   }

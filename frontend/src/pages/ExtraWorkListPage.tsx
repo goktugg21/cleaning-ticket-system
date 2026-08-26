@@ -191,12 +191,14 @@ const QUOTE_CHIP_OF: Readonly<Record<ExtraWorkStatus, QuoteChipValue>> = {
 
 const QUOTE_CHIP_LABEL: Readonly<Record<QuoteChipValue, string>> = {
   AWAITING_PRICING: "list.chip_awaiting_pricing",
-  PRICING_PROPOSED: "list.chip_with_customer",
+  // W-UX F21 — a chip that stands for ONE status wears that status's
+  // own badge label, so the tile and the badge on the row agree.
+  PRICING_PROPOSED: "common:extra_work_status.pricing_proposed",
   CUSTOMER_APPROVED: "common:extra_work_status.customer_approved",
   IN_PROGRESS: "common:extra_work_status.in_progress",
   COMPLETED: "common:extra_work_status.completed",
-  CUSTOMER_REJECTED: "list.chip_rejected",
-  CANCELLED: "list.chip_cancelled",
+  CUSTOMER_REJECTED: "common:extra_work_status.customer_rejected",
+  CANCELLED: "common:extra_work_status.cancelled",
 };
 
 const QUOTE_TRACK_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkStatus>> =

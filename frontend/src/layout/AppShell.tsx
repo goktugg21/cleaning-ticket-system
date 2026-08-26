@@ -262,9 +262,17 @@ export function AppShell({ children }: AppShellProps) {
   // children: `/tickets/chargeable` (One-off work) and `/planned-work`
   // (Recurring work), each matched across its own subtree so the group
   // stays current on a detail page, not just the list.
+  // W-UX F42 — the new one-off-work form lights One-off work, and a
+  // ticket page lights Tickets, whatever the route table calls them.
+  const oneOffActive =
+    location.pathname.startsWith("/tickets/chargeable") ||
+    location.pathname === "/extra-work/new";
+  const ticketsActive = /^\/tickets(\/\d+(\/.*)?)?$/.test(location.pathname);
+  // Quotes lights for the list and a request, not for the new one-off
+  // form — that one lights One-off work.
+  const quotesActive = /^\/extra-work(\/\d+(\/.*)?)?$/.test(location.pathname);
   const extraWorkChildActive =
-    location.pathname.startsWith("/planned-work") ||
-    location.pathname.startsWith("/tickets/chargeable");
+    location.pathname.startsWith("/planned-work") || oneOffActive;
 
   // W-NAV2 — NOT a gate; a dead-control guard. Both children carry the
   // gates they always carried, and for a CUSTOMER_USER both are false
@@ -632,7 +640,7 @@ export function AppShell({ children }: AppShellProps) {
                 <NavLink
                   to="/tickets"
                   end
-                  className={navClass}
+                  className={() => navClass({ isActive: ticketsActive })}
                   data-testid="sidebar-tickets"
                 >
                   <span className="nav-icon">
@@ -801,7 +809,9 @@ export function AppShell({ children }: AppShellProps) {
                       {!isCustomerUser(me?.role) && (
                         <NavLink
                           to="/tickets/chargeable"
-                          className={navChildClass}
+                          className={({ isActive }) =>
+                            navChildClass({ isActive: isActive || oneOffActive })
+                          }
                           data-testid="sidebar-extra-work-chargeable"
                         >
                           <span className="nav-icon">
@@ -890,7 +900,7 @@ export function AppShell({ children }: AppShellProps) {
               {canAccessExtraWork(me?.role) && (
                 <NavLink
                   to="/extra-work"
-                  className={navClass}
+                  className={() => navClass({ isActive: quotesActive })}
                   data-testid="sidebar-quotes"
                 >
                   <span className="nav-icon">
@@ -974,19 +984,19 @@ export function AppShell({ children }: AppShellProps) {
                   </button>
                   {adminOpen && (
                     <>
-                  <NavLink to="/admin/companies" className={navClass}>
+                  <NavLink to="/admin/companies" className={navChildClass}>
                     <span className="nav-icon">
                       <Building2 size={16} strokeWidth={2} />
                     </span>
                     {t("nav.companies")}
                   </NavLink>
-                  <NavLink to="/admin/buildings" className={navClass}>
+                  <NavLink to="/admin/buildings" className={navChildClass}>
                     <span className="nav-icon">
                       <MapPin size={16} strokeWidth={2} />
                     </span>
                     {t("nav.buildings")}
                   </NavLink>
-                  <NavLink to="/admin/customers" className={navClass}>
+                  <NavLink to="/admin/customers" className={navChildClass}>
                     <span className="nav-icon">
                       <Users size={16} strokeWidth={2} />
                     </span>
@@ -995,7 +1005,7 @@ export function AppShell({ children }: AppShellProps) {
                   {/* Sprint 28 Batch 5 — provider-wide service catalog. */}
                   <NavLink
                     to="/admin/services"
-                    className={navClass}
+                    className={navChildClass}
                     data-testid="sidebar-services"
                   >
                     <span className="nav-icon">
@@ -1010,7 +1020,7 @@ export function AppShell({ children }: AppShellProps) {
                       knowing which of three screens each lives on. */}
                   <NavLink
                     to="/admin/catalogs"
-                    className={navClass}
+                    className={navChildClass}
                     data-testid="sidebar-catalogs"
                   >
                     <span className="nav-icon">
@@ -1026,7 +1036,7 @@ export function AppShell({ children }: AppShellProps) {
                   {canManageTimesheets(me?.role) && (
                     <NavLink
                       to="/admin/hours"
-                      className={navClass}
+                      className={navChildClass}
                       data-testid="sidebar-hours-admin"
                     >
                       <span className="nav-icon">
@@ -1043,7 +1053,7 @@ export function AppShell({ children }: AppShellProps) {
                       `common`, so the module owns its own strings. */}
                   <NavLink
                     to="/admin/contracts"
-                    className={navClass}
+                    className={navChildClass}
                     data-testid="sidebar-contracts"
                   >
                     <span className="nav-icon">
@@ -1051,7 +1061,7 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.contracts", { ns: "contracts" })}
                   </NavLink>
-                  <NavLink to="/admin/users" className={navClass}>
+                  <NavLink to="/admin/users" className={navChildClass}>
                     <span className="nav-icon">
                       <UserCog size={16} strokeWidth={2} />
                     </span>
@@ -1062,7 +1072,7 @@ export function AppShell({ children }: AppShellProps) {
                       gets its own entry below (BM has no admin group). */}
                   <NavLink
                     to="/admin/employees"
-                    className={navClass}
+                    className={navChildClass}
                     data-testid="sidebar-employees"
                   >
                     <span className="nav-icon">
@@ -1070,7 +1080,7 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.employees")}
                   </NavLink>
-                  <NavLink to="/admin/invitations" className={navClass}>
+                  <NavLink to="/admin/invitations" className={navChildClass}>
                     <span className="nav-icon">
                       <MailPlus size={16} strokeWidth={2} />
                     </span>
@@ -1083,7 +1093,7 @@ export function AppShell({ children }: AppShellProps) {
                     that would 403 on every visit.
                   */}
                   {canAccessAuditLogs(me?.role) && (
-                    <NavLink to="/admin/audit-logs" className={navClass}>
+                    <NavLink to="/admin/audit-logs" className={navChildClass}>
                       <span className="nav-icon">
                         <ClipboardList size={16} strokeWidth={2} />
                       </span>
@@ -1102,7 +1112,7 @@ export function AppShell({ children }: AppShellProps) {
                   {canManageSlaWarnings(me?.role) && (
                     <NavLink
                       to="/admin/sla-warnings"
-                      className={navClass}
+                      className={navChildClass}
                       data-testid="sidebar-sla-warnings"
                     >
                       <span className="nav-icon">

@@ -11,6 +11,7 @@ import { ContractHoursBulkDialog } from "../../components/timesheets/ContractHou
 import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
 import { useEditMode } from "../../lib/useEditMode";
+import { hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { workTypeLabel } from "../../lib/workTypeLabel";
 
 const DAYS = [
@@ -520,7 +521,11 @@ export function ContractHoursTab({
                 </td>
                 <td>
                   <span className="cell-tag cell-tag-normal">
-                    {row.hour_type_name}
+                    {hourTypeLabelFrom(
+                      row.hour_type_name,
+                      hourTypes.find((type) => type.id === row.hour_type)?.standard_slot,
+                      t,
+                    )}
                   </span>
                 </td>
                 {DAYS.map((day) => (

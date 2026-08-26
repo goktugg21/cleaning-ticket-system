@@ -1,6 +1,8 @@
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 
+import { StatusBadge } from "../../components/StatusBadge";
+import { hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { PeriodReportView } from "./PeriodReportView";
 import type { PeriodPayload } from "./PeriodReportView";
 import type { ReportFilters } from "../../api/reports";
@@ -180,7 +182,7 @@ export function EmployeeHoursWeeklyView({ filters }: ReportViewProps) {
                         <tr key={bucket.hour_type}>
                           <td />
                           <td className="muted small">
-                            {bucket.hour_type_name}
+                            {hourTypeLabelFrom(bucket.hour_type_name, undefined, t)}
                             {bucket.hour_type_code
                               ? ` (${bucket.hour_type_code})`
                               : ""}
@@ -340,7 +342,12 @@ export function TicketReportView({ filters }: ReportViewProps) {
                 <tr key={row.id}>
                   <td>{row.ticket_no}</td>
                   <td>{row.title}</td>
-                  <td>{row.status}</td>
+                  <td>
+                    <StatusBadge
+                      status={{ kind: "ticket", value: row.status }}
+                      variant="cell"
+                    />
+                  </td>
                   <td>{row.building_name ?? "—"}</td>
                   <td>{row.customer_name ?? "—"}</td>
                   {/* An em dash, not a zero: an unfinished ticket has no

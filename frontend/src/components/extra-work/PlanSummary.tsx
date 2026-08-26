@@ -103,7 +103,9 @@ export function PlanSummary({
             }
             data-testid="extra-work-plan-summary-total"
           >
-            {t("plan.hours_value", { hours: ew.planned_hours_total ?? "0.00" })}
+            {ew.planned_hours_total === null || ew.planned_hours_total === undefined
+              ? "\u2014"
+              : t("plan.hours_value", { hours: ew.planned_hours_total })}
           </div>
         </div>
         <div>

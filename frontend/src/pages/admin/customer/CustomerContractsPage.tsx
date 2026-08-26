@@ -6,6 +6,7 @@ import { getCustomer } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
 import { listContracts } from "../../../api/contracts";
 import type { Contract } from "../../../api/contracts.types";
+import { CONTRACT_STATUS_TAG } from "../../../lib/contractStatusTag";
 import { Plus } from "lucide-react";
 
 import { useAuth } from "../../../auth/AuthContext";
@@ -157,7 +158,7 @@ export function CustomerContractsPage() {
                     {formatMoney(row.monthly_amount, locale)}
                   </td>
                   <td>
-                    <span className={`cell-tag ${STATUS_TAG[row.status]}`}>
+                    <span className={`cell-tag ${CONTRACT_STATUS_TAG[row.status]}`}>
                       {t(`status.${row.status}`)}
                     </span>
                   </td>
@@ -227,9 +228,3 @@ export function CustomerContractsPage() {
 
 /** Same mapping the contracts list and detail pages use — the design
  *  system's `cell-tag`, not a palette of this page's own. */
-const STATUS_TAG: Record<Contract["status"], string> = {
-  ACTIVE: "cell-tag-open",
-  DRAFT: "cell-tag-muted",
-  EXPIRED: "cell-tag-closed",
-  CANCELLED: "cell-tag-rejected",
-};

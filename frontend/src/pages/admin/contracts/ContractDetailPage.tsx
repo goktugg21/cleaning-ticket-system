@@ -16,7 +16,6 @@ import type {
   Contract,
   ContractLine,
   ContractRevision,
-  ContractStatus,
 } from "../../../api/contracts.types";
 import { listLabels } from "../../../api/customerLabels";
 import type { CustomerLabel } from "../../../api/types";
@@ -38,6 +37,7 @@ import {
   formatNumber,
   lineValue,
 } from "./contractTables";
+import { CONTRACT_STATUS_TAG } from "../../../lib/contractStatusTag";
 
 type Tab = "general" | "projects" | "planning" | "billing" | "revisions";
 
@@ -64,12 +64,6 @@ const TABS: Tab[] = ["general", "projects", "planning", "billing", "revisions"];
 // rather than a badge palette of their own. Same mapping as
 // `ContractsAdminPage`; both read from the design system, so the two
 // screens cannot show the same contract in different colours.
-const STATUS_TAG: Record<ContractStatus, string> = {
-  ACTIVE: "cell-tag-open",
-  DRAFT: "cell-tag-muted",
-  EXPIRED: "cell-tag-closed",
-  CANCELLED: "cell-tag-rejected",
-};
 
 /**
  * Sprint 160 §4 — the contract detail page.
@@ -310,7 +304,7 @@ export function ContractDetailPage() {
             {contract && (
               <>
                 {" · "}
-                <span className={`cell-tag ${STATUS_TAG[contract.status]}`}>
+                <span className={`cell-tag ${CONTRACT_STATUS_TAG[contract.status]}`}>
                   {t(`status.${contract.status}`)}
                 </span>
                 {contract.buildings.length > 0 && (

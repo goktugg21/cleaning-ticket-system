@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
 import { canManageSlaWarnings } from "../auth/permissions";
 import { AppShell } from "../layout/AppShell";
@@ -23,11 +24,12 @@ import { AppShell } from "../layout/AppShell";
  */
 export function SlaWarningsRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
+  const { t } = useTranslation("common");
 
   if (loading) {
     return (
       <main className="auth-page">
-        <p className="muted">Loading…</p>
+        <p className="muted">{t("loading")}</p>
       </main>
     );
   }

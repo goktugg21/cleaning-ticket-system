@@ -896,6 +896,13 @@ export function SubTasksModal({
                 value={newTitle}
                 disabled={busy}
                 onChange={(event) => setNewTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  // W-UX F46 -- Enter adds, like the button beside it.
+                  if (event.key === "Enter" && !busy && newTitle.trim() !== "") {
+                    event.preventDefault();
+                    void handleAddPart();
+                  }
+                }}
                 data-testid="ticket-part-add-input"
               />
               <button

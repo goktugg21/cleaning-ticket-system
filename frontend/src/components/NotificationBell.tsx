@@ -38,7 +38,8 @@ const POLL_MS = 15_000;
 const PANEL_LIMIT = 8;
 // 1..N new in a single poll -> that many individual toasts; strictly above this
 // -> one aggregate "N new notifications" toast (never a wall of toasts).
-const TOAST_BURST_CAP = 3;
+// W-UX F50 — two, matching the provider's own visible cap.
+const TOAST_BURST_CAP = 2;
 // One-time-per-tab-session guard for the login backlog greeting (B9). Stored in
 // sessionStorage so a mid-session reload doesn't re-flood; a fresh tab (new
 // login) greets again.

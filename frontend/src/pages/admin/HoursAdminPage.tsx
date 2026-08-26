@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
@@ -42,6 +43,7 @@ import {
   formatIsoWeek,
   fromDateString,
   isoWeekDays,
+  parseIsoWeek,
   shiftIsoWeek,
   toDateString,
 } from "../../lib/isoWeek";
@@ -255,13 +257,56 @@ export function HoursAdminPage() {
   const { push: pushToast } = useToast();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [tab, setTab] = useState<Tab>("worked");
+  /* W-UX F41 — the tab and the week are URL state (`?tab=schedule`,
+   * `?week=2026-W35`), the ticket page's exact rule: absence is the
+   * default, writes replace history, a reload or a shared link lands on
+   * the same view. */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab: Tab =
+    searchParams.get("tab") === "schedule" ? "schedule" : "worked";
+  const initialWeek: IsoWeek =
+    parseIsoWeek(searchParams.get("week") ?? "") ?? currentIsoWeek();
+  const [tab, setTabState] = useState<Tab>(initialTab);
+  const setTab = useCallback(
+    (next: Tab) => {
+      setTabState(next);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next === "worked") params.delete("tab");
+          else params.set("tab", next);
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   /** W-HR1 §2 — the week the lock chip and the one button act on, and
    *  the week the table opens on. Its own state rather than derived
    *  from `date_from`: a lock is a fact about a WEEK, and a hand-typed
    *  range of three months has no lock state to show. */
-  const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
+  const [week, setWeekState] = useState<IsoWeek>(initialWeek);
+  const setWeek = useCallback(
+    (next: IsoWeek) => {
+      setWeekState(next);
+      const current = currentIsoWeek();
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next.isoYear === current.isoYear && next.isoWeek === current.isoWeek) {
+            params.delete("week");
+          } else {
+            params.set("week", formatIsoWeek(next));
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   const [weekStatus, setWeekStatus] = useState<WeekStatus | null>(null);
   const [lockBusy, setLockBusy] = useState(false);
   const closeWeekRef = useRef<ConfirmDialogHandle>(null);
@@ -284,7 +329,7 @@ export function HoursAdminPage() {
   const [exportBusy, setExportBusy] = useState(false);
 
   const [filters, setFilters] = useState<EntryFilterState>(() =>
-    weekFilters(currentIsoWeek()),
+    weekFilters(initialWeek),
   );
   const [employees, setEmployees] = useState<TimesheetEmployee[]>([]);
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
@@ -433,7 +478,9 @@ export function HoursAdminPage() {
       setEditing(false);
       setDrafts({});
     },
-    [],
+    // `setWeek` is the URL-writing wrapper above, not a bare state
+    // setter, so it is a real dependency.
+    [setWeek],
   );
 
   const queryFilters: TimeEntryFilters = useMemo(

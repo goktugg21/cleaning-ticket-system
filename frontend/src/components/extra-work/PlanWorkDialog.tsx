@@ -145,6 +145,7 @@ import { ChipMultiSelect } from "../ChipMultiSelect";
 import { Toggle } from "../Toggle";
 import "./plan-crew.css";
 import type { AssignmentCandidate } from "../../api/types";
+import { hourTypeLabel } from "../../lib/hourTypeLabel";
 import { formatDate } from "../../lib/intl";
 
 /** W7 — how many day columns are on screen at once.
@@ -266,6 +267,17 @@ export function PlanWorkDialog({
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
 
+  // W-UX F38 -- the starred fields, checked before the request leaves.
+  // The server stays the authority; this only says which star is empty.
+  const [requiredError, setRequiredError] = useState("");
+  // W-UX F39 -- Escape closes when idle, the parts modal's exact rule.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onCancel, busy]);
   const [budget, setBudget] = useState(ew.budget_hours ?? "");
   const [start, setStart] = useState(ew.provider_planned_date ?? "");
   const [end, setEnd] = useState(ew.provider_planned_end_date ?? "");
@@ -337,7 +349,10 @@ export function PlanWorkDialog({
   const hourTypeName = (id: number | null) =>
     id === null
       ? t("plan.hour_type_ordinary")
-      : (hourTypes.find((h) => h.id === id)?.name ??
+      : ((() => {
+          const known = hourTypes.find((h) => h.id === id);
+          return known ? hourTypeLabel(known, t) : undefined;
+        })() ??
         // Seeded from a row whose type has since been archived: name it
         // from the plan rather than printing a bare id.
         (ew.planned_hours ?? []).find((r) => r.hour_type === id)
@@ -563,6 +578,15 @@ export function PlanWorkDialog({
   const personName = (a: ExtraWorkAssignment) => a.user_full_name || a.user_email;
 
   function submit() {
+    const missing: string[] = [];
+    if (start === "") missing.push(t("plan.our_start_label"));
+    if (budget.trim() === "") missing.push(t("plan.budget_hours_label"));
+    if (workers.length === 0) missing.push(t("plan.people_label"));
+    if (missing.length > 0) {
+      setRequiredError(t("plan.required_missing", { fields: missing.join(", ") }));
+      return;
+    }
+    setRequiredError("");
     const payload: ExtraWorkPlanPayload = {};
     // OMIT, never default. A blank budget field means "leave the stored
     // budget alone"; clearing a budget is a different intention and this
@@ -641,7 +665,7 @@ export function PlanWorkDialog({
       className="ew-plan-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label={t("plan.dialog_title")}
+      aria-label={t(postSpawn ? "plan.dialog_title_planned" : "plan.dialog_title")}
       data-testid="extra-work-plan-dialog"
     >
       {/* W-HOURS5 Task 1 — HEAD / BODY / FOOT. The body is the one
@@ -649,8 +673,10 @@ export function PlanWorkDialog({
           screen, and the actions never leave it. */}
       <div className="card ew-plan-dialog ew-plan-dialog--framed">
         <div className="ew-plan-head">
+          {/* W-UX F40 -- on a job that is already spawned, starting is the
+              ticket's business; the title says what this dialog does. */}
           <h3 className="section-title ew-plan-dialog-title">
-            {t("plan.dialog_title")}
+            {t(postSpawn ? "plan.dialog_title_planned" : "plan.dialog_title")}
           </h3>
           <p className="muted small ew-plan-dialog-sub">
             {t("plan.dialog_subtitle")}
@@ -1368,6 +1394,15 @@ export function PlanWorkDialog({
             >
               {t("common:cancel")}
             </button>
+            {requiredError && (
+              <p
+                className="form-error"
+                role="alert"
+                data-testid="extra-work-plan-required"
+              >
+                {requiredError}
+              </p>
+            )}
             <button
               type="button"
               className="btn btn-primary"

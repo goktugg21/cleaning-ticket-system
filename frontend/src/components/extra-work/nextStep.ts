@@ -31,7 +31,7 @@ import type { ExtraWorkStatus, TicketStatus } from "../../api/types";
 export type NextStepAction =
   | { kind: "none" }
   | { kind: "transition"; to: ExtraWorkStatus }
-  | { kind: "tab"; tab: "overview" | "money" | "hours" | "people" }
+  | { kind: "tab"; tab: "overview" | "money" | "people" }
   | { kind: "plan" }
   | { kind: "retrySpawn" };
 

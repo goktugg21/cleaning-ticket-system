@@ -299,7 +299,7 @@
   "workflow_corrections_show": "Show correction actions",
   "workflow_corrections_hide": "Hide correction actions",
   "workflow_move_back_to": "Move back to {{status}}",
-  "workflow_upcoming": "Upcoming - planned to start {{when}}.",
+  "workflow_upcoming": "Planned - starts {{when}}.",
   "transition.move": "From {{from}} to {{to}}.",
   "transition.who_label": "Who is doing this work?",
   "transition.who_hint": "Already on this job. Add or remove people as needed.",

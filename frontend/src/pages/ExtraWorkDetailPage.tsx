@@ -896,7 +896,6 @@ function CustomerContactsPanel({ contacts }: { contacts: Contact[] }) {
 const EW_TABS = [
   { key: "overview", labelKey: "detail.tab_overview", visibleTo: everyone },
   { key: "money", labelKey: "detail.tab_money", visibleTo: everyone },
-  { key: "hours", labelKey: "detail.tab_hours", visibleTo: canSeeExtraWorkStaffing },
   { key: "people", labelKey: "detail.tab_people", visibleTo: canSeeExtraWorkStaffing },
   { key: "messages", labelKey: "detail.tab_messages", visibleTo: everyone },
 ] as const;
@@ -1274,13 +1273,8 @@ export function ExtraWorkDetailPage() {
    * AFTER `activeHourlyLines` because that is the fact it depends on. */
   const visibleTabs = useMemo(
     () =>
-      EW_TABS.filter(
-        (entry) =>
-          entry.visibleTo(me?.role) &&
-          (entry.key !== "hours" ||
-            (isProvider && activeHourlyLines.length > 0)),
-      ),
-    [me, isProvider, activeHourlyLines],
+      EW_TABS.filter((entry) => entry.visibleTo(me?.role)),
+    [me],
   );
 
   /* Falling back rather than correcting state: a customer who somehow
@@ -2947,14 +2941,6 @@ export function ExtraWorkDetailPage() {
                         </div>
                       </div>
                       <div>
-                        <div className="ew-fact-label">{t("detail.routing_decision_label")}</div>
-                        <div className="ew-fact-value" data-testid="extra-work-detail-routing-decision">
-                          {ew.routing_decision === "INSTANT"
-                            ? t("detail.routing_decision_instant")
-                            : t(noCustomerApproval ? "detail.routing_decision_start" : "detail.routing_decision_proposal")}
-                        </div>
-                      </div>
-                      <div>
                         <div className="ew-fact-label">{t("detail.field_billed_to")}</div>
                         <div className="ew-fact-value" data-testid="extra-work-billed-to">
                           {t(billedToKey(ew.billed_to))}
@@ -3384,6 +3370,15 @@ export function ExtraWorkDetailPage() {
           )}
           {tab === "money" && (
             <>
+          {/* W-UX F16 — the pricing decision is a MONEY fact, so it is
+              said here, above the lines it decides about, and not on the
+              Overview. */}
+          <p className="muted small" data-testid="extra-work-detail-routing-decision">
+            {t("detail.routing_decision_label")}:{" "}
+            {ew.routing_decision === "INSTANT"
+              ? t("detail.routing_decision_instant")
+              : t(noCustomerApproval ? "detail.routing_decision_start" : "detail.routing_decision_proposal")}
+          </p>
           {/* ----- Cart line items (Sprint 28 Batch 6; RF-14 collapsible:
               open while the request is still pre-decision, collapsed once
               it moved on — the header keeps count + final total visible.
@@ -3589,7 +3584,7 @@ export function ExtraWorkDetailPage() {
                           place that fixes it. */}
                       <button
                         type="button"
-                        className="btn btn-primary btn-sm"
+                        className="btn btn-secondary btn-sm"
                         onClick={() => void openPlan()}
                         data-testid="extra-work-plan-gate-open-plan"
                       >
@@ -3669,17 +3664,6 @@ export function ExtraWorkDetailPage() {
                   )}
                 </div>
               )}
-            </>
-          )}
-          {tab === "hours" && (
-            <>
-          {/* hours2 1a — the TIMESHEET hours panel ("Hours on this
-              extra work", W3-H) is gone from this page. Pre-spawn
-              nothing can have hours, post-spawn a provider never sees
-              this page (W21 redirects to the job), and its planned
-              figure already shows in the plan summary. The comparison
-              it carried lives on the ticket's Plan tab as
-              `PlannedVsWorkedPanel`; its cost block stays in Reports. */}
           {/* Sprint 8A-fix — provider-only actual-hours entry for the
               active hourly line set (approved-proposal lines or INSTANT
               cart lines). Keyed by `actualHoursPanelKey` so a save
