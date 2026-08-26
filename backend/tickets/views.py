@@ -788,70 +788,24 @@ class TicketViewSet(
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        old_start = ticket.scheduled_start_at
-        is_reschedule = (
-            ticket.schedule_status != TicketScheduleStatus.UNSCHEDULED
-        )
-        reason = (data.get("reschedule_reason") or "").strip()
+        # W-FIX1 B2 — the write lives in `tickets.schedule.set_schedule`,
+        # shared with the transition modal's side door, so both doors
+        # write the same facts and the same history row.
+        from .schedule import ScheduleError, set_schedule
 
-        if is_reschedule and not reason:
+        try:
+            set_schedule(
+                ticket,
+                actor=request.user,
+                scheduled_start_at=data["scheduled_start_at"],
+                scheduled_end_at=data.get("scheduled_end_at"),
+                time_window_label=data.get("time_window_label", ""),
+                reschedule_reason=data.get("reschedule_reason") or "",
+            )
+        except ScheduleError as exc:
             return Response(
-                {
-                    "detail": "A reschedule reason is required when "
-                    "changing an existing schedule.",
-                    "code": "reschedule_reason_required",
-                },
+                {"detail": exc.detail, "code": exc.code},
                 status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        with transaction.atomic():
-            ticket.scheduled_start_at = data["scheduled_start_at"]
-            ticket.scheduled_end_at = data.get("scheduled_end_at")
-            ticket.time_window_label = data.get("time_window_label", "")
-            if is_reschedule:
-                ticket.schedule_status = TicketScheduleStatus.RESCHEDULED
-                ticket.rescheduled_from = old_start
-                ticket.reschedule_reason = reason
-                history_action = "rescheduled"
-            else:
-                ticket.schedule_status = TicketScheduleStatus.SCHEDULED
-                # First scheduling leaves rescheduled_from /
-                # reschedule_reason empty.
-                ticket.rescheduled_from = None
-                ticket.reschedule_reason = ""
-                history_action = "set"
-
-            # Explicit update_fields EXCLUDES `status` so the SLA
-            # post_save signal sees no status change.
-            ticket.save(
-                update_fields=[
-                    "scheduled_start_at",
-                    "scheduled_end_at",
-                    "time_window_label",
-                    "schedule_status",
-                    "rescheduled_from",
-                    "reschedule_reason",
-                    "updated_at",
-                ]
-            )
-
-            # Sprint 8B annotation-row pattern: old_status == new_status
-            # == ticket.status; is_override=False. This IS the audit
-            # trail for the schedule change (no generic AuditLog row).
-            TicketStatusHistory.objects.create(
-                ticket=ticket,
-                old_status=ticket.status,
-                new_status=ticket.status,
-                changed_by=request.user,
-                note=self._schedule_history_note(
-                    action=history_action,
-                    old_start=old_start,
-                    new_start=ticket.scheduled_start_at,
-                    window_label=ticket.time_window_label,
-                    reason=reason,
-                ),
-                is_override=False,
-                override_reason="",
             )
 
         return Response(

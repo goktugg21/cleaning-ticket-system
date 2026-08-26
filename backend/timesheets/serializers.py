@@ -27,6 +27,7 @@ from buildings.models import Building
 from companies.models import Company
 
 from .models import (
+    ContractHours,
     HOURS_MAX,
     HOURS_MIN,
     MULTIPLIER_MAX,
@@ -58,6 +59,7 @@ ERR_BUILDING_COMPANY_MISMATCH = "timesheet_building_company_mismatch"
 ERR_EMPLOYEE_INVALID = "timesheet_employee_invalid"
 ERR_EMPLOYEE_NOT_IN_COMPANY = "timesheet_employee_not_in_company"
 ERR_COMPANY_REQUIRED = "timesheet_company_required"
+ERR_SOURCE_INVALID = "timesheet_source_invalid"
 
 
 def _request_user(serializer):
@@ -95,6 +97,33 @@ def _scoped_siblings(serializer, queryset, scope_filter):
     """
     return scope_filter(_request_user(serializer), queryset)
 
+
+
+def _source_in_scope(actor, company, source_type, source_id) -> bool:
+    """Is (source_type, source_id) a job `actor` may file hours against
+    in `company`? Resolved through the scopers the lists use, imported
+    at call time so this module keeps its import boundary."""
+    if source_type == HourSource.TICKET:
+        from accounts.scoping import scope_tickets_for
+
+        return (
+            scope_tickets_for(actor)
+            .filter(pk=source_id, company_id=company.id)
+            .exists()
+        )
+    if source_type == HourSource.EXTRA_WORK:
+        from extra_work.scoping import scope_extra_work_for
+
+        return (
+            scope_extra_work_for(actor)
+            .filter(pk=source_id, company_id=company.id)
+            .exists()
+        )
+    if source_type == HourSource.CONTRACT:
+        return ContractHours.objects.filter(
+            pk=source_id, company_id=company.id
+        ).exists()
+    return True
 
 class HourTypeSerializer(serializers.ModelSerializer):
     """Read/write serializer for the per-company hour-type catalog.
@@ -514,6 +543,31 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             enforce_week_open(company.id, old_date)
         if new_date is not None and new_date != old_date:
             enforce_week_open(company.id, new_date)
+
+        # W-FIX1 D8 (audit F47) — the job an hour is filed against must
+        # be one the actor may see, in THIS company. The ticket door
+        # refused at the button only; the endpoint took any id. Read
+        # through the same scopers every list uses, at call time
+        # (`timesheets` still imports nothing from `tickets` or
+        # `extra_work` at module level — the rule `HourSource` states).
+        source_type = attrs.get(
+            "source_type", getattr(instance, "source_type", HourSource.OTHER)
+        )
+        source_id = attrs.get("source_id", getattr(instance, "source_id", None))
+        if source_id and not _source_in_scope(
+            actor, company, source_type, source_id
+        ):
+            raise serializers.ValidationError(
+                {
+                    "source_id": [
+                        serializers.ErrorDetail(
+                            "That job is not one you can record hours "
+                            "against in this company.",
+                            code=ERR_SOURCE_INVALID,
+                        )
+                    ]
+                }
+            )
 
         return attrs
 

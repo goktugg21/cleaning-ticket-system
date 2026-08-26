@@ -279,6 +279,11 @@ class StaffAssignmentRequestViewSet(viewsets.ModelViewSet):
                         user=locked.staff,
                         assigned_by=request.user,
                     )
+                    # W-FIX1 C1 (audit F25) — an approved request puts
+                    # the person on the extra work's crew as well.
+                    from .crew_sync import worker_added
+
+                    worker_added(locked.ticket, locked.staff, actor=request.user)
         return Response(self.get_serializer(locked).data)
 
     @action(detail=True, methods=["post"])

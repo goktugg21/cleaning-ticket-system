@@ -61,7 +61,7 @@ from __future__ import annotations
 
 import datetime
 
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -240,28 +240,26 @@ def _ew_overdue_q(today: datetime.date) -> Q:
 def _slot_week_q(
     week_start: datetime.date, week_end: datetime.date, today: datetime.date
 ) -> Q:
-    planned = Q(scheduled_start_at__date__lte=week_end) & _slot_window_end_q(
+    """SQL twin of `work_plan.placement_for`: planned placement, and
+    nothing else. W-FIX1 E2 dropped the `| started | overdue` branches
+    that used to copy live and late work onto today's column; those
+    rows are the overdue strip's and the undated lane's. `today` is
+    kept in the signature so the parity test can call both twins the
+    same way."""
+    del today
+    return Q(scheduled_start_at__date__lte=week_end) & _slot_window_end_q(
         "gte", week_start
-    )
-    if not (week_start <= today <= week_end):
-        return planned
-    return (
-        planned
-        | _SLOT_STATE_Q[STATE_IN_PROGRESS]
-        | _slot_overdue_q(today)
     )
 
 
 def _ew_week_q(
     week_start: datetime.date, week_end: datetime.date, today: datetime.date
 ) -> Q:
-    planned = Q(preferred_date__lte=week_end) & (
+    del today
+    return Q(preferred_date__lte=week_end) & (
         Q(planned_end_date__gte=week_start)
         | Q(planned_end_date__isnull=True, preferred_date__gte=week_start)
     )
-    if not (week_start <= today <= week_end):
-        return planned
-    return planned | _EW_STATE_Q[STATE_IN_PROGRESS] | _ew_overdue_q(today)
 
 
 def _slot_upcoming_q(week_end: datetime.date) -> Q:
@@ -279,8 +277,25 @@ def _ew_upcoming_q(week_end: datetime.date) -> Q:
 def _slot_undated_q() -> Q:
     """No planned window at all, and still live. Belongs to no week, so
     it is counted and named rather than dropped — a job nobody has
-    scheduled is exactly the one that most needs seeing."""
-    return _SLOT_LIVE_Q & Q(scheduled_start_at__isnull=True)
+    scheduled is exactly the one that most needs seeing.
+
+    W-FIX1 A1 (audit F1) — "undated" is a fact about the JOB, not about
+    one person's slot. The lane's one action writes the TICKET's
+    schedule, so a slot whose ticket is already scheduled, or whose
+    colleague's slot on the same ticket already has a day, is not work
+    nobody has planned: the job sits in its week and must not ALSO sit
+    here. Measured on crmtest: TCK-2026-000352 was on Wednesday's column
+    through one slot and in the undated lane through another."""
+    dated_sibling = TicketStaffAssignment.objects.filter(
+        ticket_id=OuterRef("ticket_id"),
+        scheduled_start_at__isnull=False,
+    ).exclude(slot_status=StaffAssignmentSlotStatus.CANCELLED)
+    return (
+        _SLOT_LIVE_Q
+        & Q(scheduled_start_at__isnull=True)
+        & Q(ticket__scheduled_start_at__isnull=True)
+        & ~Exists(dated_sibling)
+    )
 
 
 def _ew_undated_q() -> Q:
@@ -338,6 +353,27 @@ def _extra_work_source(user, team: bool):
             deleted_at__isnull=True,
             id__in=assigned_ids.filter(user=user),
         )
+
+    # W-FIX1 A1 (audit F1) — ONE JOB, ONE ROW. Once an extra work has
+    # spawned a ticket and somebody holds a live slot on it, that slot
+    # row IS the job's row on this board: it carries the day, the slot
+    # status, the parts and the completion action, which the extra-work
+    # row cannot. Offering both put "yy" and "TCK-2026-000352 · yy" side
+    # by side in the undated lane with two "Plan for today" doors that
+    # wrote two different records. The richer row wins; the extra-work
+    # row is kept only while no slot exists to speak for the job (a
+    # spawned ticket nobody has been put on yet still needs seeing).
+    covered = TicketStaffAssignment.objects.filter(
+        ticket__deleted_at__isnull=True,
+        ticket__extra_work_request__isnull=False,
+    ).exclude(slot_status=StaffAssignmentSlotStatus.CANCELLED)
+    if team:
+        covered = covered.filter(ticket__in=scope_tickets_for(user))
+    else:
+        covered = covered.filter(user=user)
+    queryset = queryset.exclude(
+        id__in=covered.values("ticket__extra_work_request_id")
+    )
     return queryset.select_related("building", "customer")
 
 

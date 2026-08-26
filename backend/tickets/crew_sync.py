@@ -101,6 +101,7 @@ def worker_removed(ticket, user_id: int) -> bool:
 
     still_on_job = TicketStaffAssignment.objects.filter(
         ticket__extra_work_request=extra_work,
+        ticket__deleted_at__isnull=True,
         user_id=user_id,
         sub_task__isnull=True,
     ).exists()
@@ -145,7 +146,9 @@ def manager_removed(ticket, user_id: int) -> bool:
     from .models import TicketManagerAssignment
 
     still_on_job = TicketManagerAssignment.objects.filter(
-        ticket__extra_work_request=extra_work, user_id=user_id
+        ticket__extra_work_request=extra_work,
+        ticket__deleted_at__isnull=True,
+        user_id=user_id,
     ).exists()
     if still_on_job:
         return False
@@ -160,3 +163,4 @@ def manager_removed(ticket, user_id: int) -> bool:
     if removed:
         _clear_open_plan(extra_work, user_id)
     return removed
+

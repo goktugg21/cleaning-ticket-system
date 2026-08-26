@@ -91,6 +91,20 @@ def _is_customer(user) -> bool:
     return user is not None and user.role == UserRole.CUSTOMER_USER
 
 
+def redact_for_customer(data: dict, user, fields) -> dict:
+    """W-FIX1 D4 (audit F8) — ONE redaction for customer readers.
+
+    The detail and list serializers pop their `_PROVIDER_ONLY_FIELDS`
+    for a CUSTOMER_USER; the series endpoint built its member dicts by
+    hand and forgot to, so a customer read `budget_hours` there. Every
+    surface that hands a customer an extra-work dict goes through this.
+    """
+    if _is_customer(user):
+        for field in fields:
+            data.pop(field, None)
+    return data
+
+
 def derive_actor_kind(user, customer, building) -> str:
     """Sprint 2A — derive a coarse actor classification for intent
     validation. Single source of truth shared by the create
@@ -856,7 +870,16 @@ def _is_priced(obj) -> bool:
     from .final_amounts import active_priced_lines
 
     _kind, lines = active_priced_lines(obj)
-    return bool(lines)
+    if lines:
+        return True
+    # W-FIX1 A3 — the un-annotated twin of `views_financials.
+    # is_priced_expression`: a SENT proposal with lines is a price on
+    # the record. Same order as the expression: approved lines first,
+    # then a sent proposal, then nothing.
+    return ProposalLine.objects.filter(
+        proposal__extra_work_request_id=obj.pk,
+        proposal__status=ProposalStatus.SENT,
+    ).exists()
 
 
 class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
@@ -1079,10 +1102,7 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         user = self.context.get("request").user if self.context.get("request") else None
-        if _is_customer(user):
-            for field in self._PROVIDER_ONLY_FIELDS:
-                data.pop(field, None)
-        return data
+        return redact_for_customer(data, user, self._PROVIDER_ONLY_FIELDS)
 
 
 # ---------------------------------------------------------------------------
@@ -1624,10 +1644,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         user = self.context.get("request").user if self.context.get("request") else None
-        if _is_customer(user):
-            for field in self._PROVIDER_ONLY_FIELDS:
-                data.pop(field, None)
-        return data
+        return redact_for_customer(data, user, self._PROVIDER_ONLY_FIELDS)
 
 
 # ---------------------------------------------------------------------------
@@ -3500,10 +3517,17 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
         # endpoint. The parent-status guard is cheap and accurate, so
         # we DO include it here so the frontend doesn't render a Send
         # button against a REQUESTED parent (which would always 400).
+        # W-FIX1 A3 (audit F3) — nothing to send without a line. A
+        # proposal with no lines used to advertise Send and be refused
+        # at POST time by the cart-coverage gate; the button now says
+        # why it is disabled instead. `can_send_reason` names the gate
+        # so the client does not have to guess which one fired.
+        has_lines = obj.lines.exists()
         can_send = bool(
             provider_can_mutate
             and obj.status == ProposalStatus.DRAFT
             and extra_work.status == ExtraWorkStatus.UNDER_REVIEW
+            and has_lines
         )
 
         # Cancel is allowed from DRAFT or SENT. SENT cancellation is

@@ -2313,8 +2313,37 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                         "code": "schedule_forbidden_scope",
                     }
                 )
-            ticket.scheduled_start_at = scheduled_start_at
-            ticket.save(update_fields=["scheduled_start_at"])
+            # W-FIX1 B2 (audit F24) — the FRONT door. This used to write
+            # `scheduled_start_at` alone: no `schedule_status`, no
+            # `rescheduled_from`, no history row, so the ticket read
+            # UNSCHEDULED with a date and nobody was recorded as having
+            # planned it. `tickets.schedule.set_schedule` is the one
+            # writer now. An unchanged instant is not a write; a moved
+            # one on an already-scheduled ticket needs the reason the
+            # schedule endpoint has always demanded — the modal's note
+            # is that reason.
+            from .schedule import ScheduleError, set_schedule
+
+            if ticket.scheduled_start_at != scheduled_start_at:
+                current_end = ticket.scheduled_end_at
+                kept_end = (
+                    current_end
+                    if current_end is not None and current_end >= scheduled_start_at
+                    else None
+                )
+                try:
+                    set_schedule(
+                        ticket,
+                        actor=user,
+                        scheduled_start_at=scheduled_start_at,
+                        scheduled_end_at=kept_end,
+                        time_window_label=ticket.time_window_label,
+                        reschedule_reason=self.validated_data.get("note", ""),
+                    )
+                except ScheduleError as exc:
+                    raise serializers.ValidationError(
+                        {"scheduled_start_at": exc.detail, "code": exc.code}
+                    )
 
         if staff_ids:
             if _gate_actor(request, ticket) is not None:
@@ -2365,6 +2394,12 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                 TicketStaffAssignment.objects.create(
                     ticket=ticket, user=target, assigned_by=user
                 )
+                # W-FIX1 C1 (audit F25) — same mirror as the per-slot
+                # door: a person dispatched from the transition modal is
+                # on the extra work's crew too.
+                from .crew_sync import worker_added
+
+                worker_added(ticket, target, actor=user)
             ticket.refresh_from_db()
 
 

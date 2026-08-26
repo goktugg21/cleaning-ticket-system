@@ -95,8 +95,8 @@ def _line_summary(item: ExtraWorkRequestItem) -> str:
     """One-line human label for a cart line. Mirrors the line's
     `__str__` shape."""
     if item.service is not None:
-        return f"{item.service.name} × {item.quantity}"
-    return f"Extra work line × {item.quantity}"
+        return item.service.name
+    return "Extra work line"
 
 
 def _build_title(request: ExtraWorkRequest, items: List[ExtraWorkRequestItem]) -> str:

@@ -74,7 +74,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Optional
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from extra_work.billing import NON_BILLABLE_STATUSES, is_billable
@@ -127,18 +127,35 @@ def _ticket_map(ews):
     return ticket_by_ew
 
 
-def register_extra_work(company_id, customer_id):
-    """The Extra Work rows the register mirrors, oldest first."""
-    return list(
-        ExtraWorkRequest.objects.filter(
-            company_id=company_id,
-            customer_id=customer_id,
-            deleted_at__isnull=True,
-        )
-        .exclude(status__in=NON_BILLABLE_STATUSES)
-        .select_related("building")
-        .order_by("id")
-    )
+def register_extra_work(company_id, customer_id, *, building_ids=None):
+    """The Extra Work rows the register mirrors, oldest first.
+
+    W-FIX1 D5 (audit F9) — `building_ids` narrows the rows to the
+    buildings a BUILDING_MANAGER manages (`contracts.scope.
+    managed_building_ids`); `None` is every actor whose reading is not
+    narrowed by building. The sync never narrows: the register's lines
+    are the customer's whole book, and a manager reads a page of it.
+    """
+    queryset = ExtraWorkRequest.objects.filter(
+        company_id=company_id,
+        customer_id=customer_id,
+        deleted_at__isnull=True,
+    ).exclude(status__in=NON_BILLABLE_STATUSES)
+    if building_ids is not None:
+        queryset = queryset.filter(building_id__in=building_ids)
+    return list(queryset.select_related("building").order_by("id"))
+
+
+def existing_register(company, customer):
+    """The customer's register if one has been made, else None.
+
+    W-FIX1 D2 — the READ path. `get_or_create_register` is for the
+    writers (the explicit sync); a GET must not cause a contract to
+    exist.
+    """
+    return Contract.objects.filter(
+        company=company, customer=customer, kind=ContractKind.EXTRA_WORK
+    ).first()
 
 
 @transaction.atomic
@@ -150,11 +167,35 @@ def get_or_create_register(company, customer, *, actor=None) -> Contract:
     half the money. A partial unique index enforces it in the database
     as well, so a race cannot make the second one.
     """
-    contract, created = Contract.objects.get_or_create(
-        company=company,
-        customer=customer,
-        kind=ContractKind.EXTRA_WORK,
-        defaults={
+    # W-FIX1 D2 (audit F26) — the partial unique index makes a second
+    # register impossible, but two first-asks racing through this
+    # `get_or_create` used to surface that as an IntegrityError 500 for
+    # one of them. The loser now re-reads the row the winner made.
+    try:
+        with transaction.atomic():
+            contract, created = Contract.objects.get_or_create(
+                company=company,
+                customer=customer,
+                kind=ContractKind.EXTRA_WORK,
+                defaults=_register_defaults(customer),
+            )
+    except IntegrityError:
+        contract = Contract.objects.get(
+            company=company, customer=customer, kind=ContractKind.EXTRA_WORK
+        )
+        created = False
+    if created:
+        ContractRevision.objects.create(
+            contract=contract,
+            label=REGISTER_REVISION_LABEL,
+            effective_from=contract.start_date,
+            created_by=actor,
+        )
+    return contract
+
+
+def _register_defaults(customer) -> dict:
+    return {
             "contract_no": _register_contract_no(customer),
             # ACTIVE, not DRAFT: the register is not a proposal anybody
             # approves, it is a view of work already agreed one job at
@@ -167,16 +208,7 @@ def get_or_create_register(company, customer, *, actor=None) -> Contract:
                 "Chargeable work for this customer. One line per job, "
                 "priced by the same rule the invoice uses."
             ),
-        },
-    )
-    if created:
-        ContractRevision.objects.create(
-            contract=contract,
-            label=REGISTER_REVISION_LABEL,
-            effective_from=contract.start_date,
-            created_by=actor,
-        )
-    return contract
+        }
 
 
 def register_revision(contract) -> ContractRevision:
@@ -204,6 +236,13 @@ def sync_extra_work_register(company, customer, *, actor=None) -> dict:
     can say what changed in a sentence rather than "done".
     """
     contract = get_or_create_register(company, customer, actor=actor)
+    # W-FIX1 D2 (audit F26) — `ContractLine` has no uniqueness over
+    # (revision, extra_work); adding one is a migration and is reported
+    # rather than written. Two syncs of one register racing past the
+    # `existing` read below would each create the missing lines. The
+    # contract row is locked for the length of this transaction, so a
+    # concurrent sync waits here and then finds the lines present.
+    contract = Contract.objects.select_for_update().get(pk=contract.pk)
     revision = register_revision(contract)
 
     ews = register_extra_work(company.id, customer.id)
@@ -268,7 +307,7 @@ def _blended_vat_pct(subtotal, vat) -> Decimal:
     return Decimal("21.00")
 
 
-def register_summary(contract, revision, ews, tickets) -> dict:
+def register_summary(contract, revision, ews, tickets, building_ids=None) -> dict:
     """The numbers the register's header shows. THREE, not one.
 
     One figure would be a lie whichever one it was, and finding that
@@ -316,6 +355,11 @@ def register_summary(contract, revision, ews, tickets) -> dict:
     from invoicing.models import InvoiceLine
 
     lines = list(revision.lines.select_related("building"))
+    if building_ids is not None:
+        # W-FIX1 D5 — a manager's summary is over the buildings they
+        # manage, the same narrowing `register_extra_work` applied to
+        # the rows they were handed.
+        lines = [line for line in lines if line.building_id in building_ids]
     by_ew = {line.extra_work_id: line for line in lines}
 
     claimed_ids = set(

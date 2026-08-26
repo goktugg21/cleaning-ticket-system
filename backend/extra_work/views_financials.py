@@ -98,6 +98,7 @@ from django.db.models import (
     Q,
     Subquery,
     When,
+    Value,
 )
 from django.utils import timezone
 from rest_framework import status as http_status
@@ -168,6 +169,16 @@ def is_priced_expression():
         extra_work_request_id=OuterRef("pk"),
         status=ProposalStatus.CUSTOMER_APPROVED,
     )
+    # W-FIX1 A3 (audit F3) — a SENT proposal that carries lines IS a
+    # price on the record: the customer is looking at it. Before this,
+    # PRICING_PROPOSED read "Not priced yet" in the header beside
+    # "Priced. Confirm the pricing below" in WHAT NEXT — one status, two
+    # answers — because only an APPROVED proposal counted. Zero is still
+    # a legal price: this asks whether a line EXISTS, never what it costs.
+    sent_proposal_line = ProposalLine.objects.filter(
+        proposal__extra_work_request_id=OuterRef("pk"),
+        proposal__status=ProposalStatus.SENT,
+    )
     cart_rows = ExtraWorkRequestItem.objects.filter(
         extra_work_request_id=OuterRef("pk")
     )
@@ -178,6 +189,7 @@ def is_priced_expression():
     )
     return Case(
         When(Exists(any_approved_proposal), then=Exists(priced_proposal)),
+        When(Exists(sent_proposal_line), then=Value(True)),
         When(
             routing_decision=ExtraWorkRoutingDecision.INSTANT,
             then=Exists(cart_rows),

@@ -159,7 +159,20 @@ def fill_week(
     if is_week_closed(company_id, iso_year, iso_week):
         return FillResult(skipped_closed=1)
 
-    agreements = list(_agreements_for_week(company_id, days, employee_id))
+    # W-FIX1 D1 (audit F6/F28) — two fills of the same week used to race:
+    # both read `taken` empty and both wrote, so a week opened in two
+    # tabs got every contracted day twice. The agreements in force are
+    # locked for the duration of this transaction (`of=("self",)` — the
+    # row itself, not the nullable joins), so a concurrent fill of the
+    # same company-week waits here and then finds the week `taken`.
+    # `TimeEntry` has no uniqueness over (employee, date, source) to
+    # enforce this in the database; adding one is a migration and is
+    # reported rather than written.
+    agreements = list(
+        _agreements_for_week(company_id, days, employee_id).select_for_update(
+            of=("self",)
+        )
+    )
     if not agreements:
         return FillResult()
 

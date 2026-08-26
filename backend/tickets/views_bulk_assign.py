@@ -62,6 +62,7 @@ from buildings.assignment_eligibility import (
     resolve_assignable_users,
 )
 
+from . import crew_sync
 from .models import TicketManagerAssignment, TicketStaffAssignment
 
 
@@ -230,6 +231,13 @@ class TicketBulkAssignView(APIView):
                         ticket=ticket, user=user, assigned_by=request.user
                     )
                     created += 1
+                    # W-FIX1 C1 (audit F25) — the bulk door mirrors to
+                    # the extra work like the per-slot door does, so a
+                    # person put on a spawned ticket here can be planned.
+                    if model is TicketStaffAssignment:
+                        crew_sync.worker_added(ticket, user, actor=request.user)
+                    else:
+                        crew_sync.manager_added(ticket, user, actor=request.user)
                 else:
                     if existing is None:
                         not_assigned += 1
@@ -243,6 +251,12 @@ class TicketBulkAssignView(APIView):
                     for row in model.objects.filter(ticket=ticket, user=user):
                         row.delete()
                         removed += 1
+                    # W-FIX1 C1 — and the mirror on the way out: the
+                    # person's open plan goes with their last slot.
+                    if model is TicketStaffAssignment:
+                        crew_sync.worker_removed(ticket, user.id)
+                    else:
+                        crew_sync.manager_removed(ticket, user.id)
 
         return Response(
             {

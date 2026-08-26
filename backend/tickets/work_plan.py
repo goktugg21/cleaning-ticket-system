@@ -13,17 +13,21 @@ somewhere other than its planned week, WHY?
     1. Planned placement.  A job appears in the week(s) its planned
        window covers. That is its home and it stays there whatever its
        status, so September shows September's work.
-    2. Active placement.   A STARTED job also appears in the current
-       week, whatever its planned dates say.
-    3. Overdue placement.  A job past its due date and unfinished also
-       appears in the current week, marked overdue.
+    2. Overdue work lives in the OVERDUE strip ("Overdue, any week"),
+       marked with how late it is. It is NOT copied onto today's column.
+    3. Undated work lives in the UNDATED lane ("Not planned yet"). It is
+       NOT copied onto today's column either.
     4. Untouched future work does NOT clutter today. It appears only in
        its planned week, plus the separate "upcoming" list.
 
-Rules 2 and 3 only ever add to the CURRENT week. Looking at any other
-week therefore shows planned placement alone, which is what makes the
-whole thing tractable: one extra placement pass, only when the week on
-screen contains today.
+W-FIX1 E2 (audit F20) — before this, a STARTED job and an OVERDUE job
+were ALSO placed on today's column of the current week ("active" and
+"overdue" placements). Measured on crmtest: today's column read "20
+jobs" and held work planned for June, August 5th, August 14th and next
+week, plus undated extra work — a catch-all nobody could read. The day
+column now holds work PLANNED FOR that day and nothing else; the two
+strips that already existed carry the rest. `PLACEMENT_OVERDUE` and the
+STARTED placements survive as the reason stamped on a strip's rows.
 
 **Why a normalised `Job` instead of two copies of the rule.** The two
 sources are a dated ticket slot (`TicketStaffAssignment`) and an extra
@@ -166,24 +170,13 @@ def placement_for(
     if covers_week(job, week_start, week_end):
         return PLACEMENT_PLANNED
 
-    # Rules 2 and 3 add to the CURRENT week only. Any other week shows
-    # planned placement and nothing else — which is rule 4: untouched
-    # future work does not clutter today, and today does not clutter
-    # September either.
-    if not (week_start <= today <= week_end):
-        return None
-
-    if is_overdue(job, today):
-        return PLACEMENT_OVERDUE
-
-    if is_started(job):
-        # "Early" is measured against THIS week, not against today: a
-        # job planned for the week after next is early whichever day of
-        # the current week you ask on.
-        if job.planned_start is not None and job.planned_start > week_end:
-            return PLACEMENT_STARTED_EARLY
-        return PLACEMENT_STARTED
-
+    # W-FIX1 E2 — that is the whole rule for a week. A started or late
+    # job that is not planned in this week is NOT a visitor on today's
+    # column: the overdue strip and the undated lane carry it, and the
+    # strip stamps the reason (`fallback_placement` in the view). `today`
+    # stays in the signature so the two SQL twins in `views_work_plan`
+    # keep taking the same arguments as this function.
+    del today
     return None
 
 

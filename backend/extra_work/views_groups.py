@@ -43,8 +43,13 @@ the plan endpoints, and pinned by a test.
 """
 from __future__ import annotations
 
+import datetime
+import logging
+
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from notifications.services import emit_extra_work_requested_notifications
 from rest_framework import serializers, status
 from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
@@ -64,7 +69,13 @@ from .groups import (
 )
 from .models import ExtraWorkCondition, ExtraWorkGroup
 from .scoping import scope_extra_work_for
-from .serializers import ExtraWorkRequestCreateSerializer
+from .serializers import (
+    ExtraWorkRequestCreateSerializer,
+    ExtraWorkRequestDetailSerializer,
+    redact_for_customer,
+)
+
+logger = logging.getLogger(__name__)
 
 
 ERR_GROUP_PROVIDER_ONLY = "extra_work_group_provider_only"
@@ -134,8 +145,34 @@ class ExtraWorkBatchCreateView(APIView):
 
         # Everything that is not `slots` is the shared payload, verbatim.
         shared = {
-            key: value for key, value in request.data.items() if key != "slots"
+            key: value
+            for key, value in request.data.items()
+            if key not in ("slots", "idempotency_key")
         }
+
+        # W-FIX1 D3 (audit F28) — a resend is not a second series. The
+        # client stamps each batch with an `idempotency_key`; a resend
+        # carrying one is answered with the series it already made, when
+        # this actor made a series with the same title, customer,
+        # building and slot dates in the last quarter hour. The key
+        # itself is not persisted — `ExtraWorkGroup` has no column for
+        # it and adding one is a migration, reported rather than written
+        # — so the match is on the batch's own natural key, and only for
+        # callers that sent a key (an old client keeps its old contract).
+        idempotency_key = str(request.data.get("idempotency_key") or "").strip()
+        if idempotency_key:
+            duplicate = _recent_duplicate_group(request.user, shared, slots)
+            if duplicate is not None:
+                members = list(duplicate.members.order_by("group_sequence", "id"))
+                return Response(
+                    {
+                        "group": _group_block(duplicate),
+                        "created": 0,
+                        "members": [member.id for member in members],
+                        "deduplicated": True,
+                    },
+                    status=status.HTTP_200_OK,
+                )
 
         try:
             audit_context.set_current_reason("extra_work_batch_create")
@@ -152,14 +189,78 @@ class ExtraWorkBatchCreateView(APIView):
         except BatchRejected as exc:
             return Response(exc.body, status=status.HTTP_400_BAD_REQUEST)
 
+        # W-FIX1 D3 — the single create path emits the "new extra-work
+        # request" notification to provider management; the batch path
+        # bypassed `ExtraWorkRequestViewSet.create` and never did. Same
+        # helper, same best-effort contract (logged, never fatal).
+        for member in members:
+            try:
+                emit_extra_work_requested_notifications(
+                    member, actor=member.created_by
+                )
+            except Exception:  # noqa: BLE001 — best-effort fan-out, logged
+                logger.exception(
+                    "Failed to emit extra-work requested notification for EW %s",
+                    member.pk,
+                )
+
         return Response(
             {
                 "group": _group_block(group),
                 "created": len(members),
                 "members": [member.id for member in members],
+                "deduplicated": False,
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+#: How long a resend still counts as the same batch.
+_DEDUPE_WINDOW = datetime.timedelta(minutes=15)
+
+
+def _recent_duplicate_group(user, shared: dict, slots: list[dict]):
+    """The series this actor just made with this exact batch, or None.
+
+    Natural key: title, customer, building, and the SET of slot dates.
+    Everything else on the payload is shared by construction, so two
+    batches that agree on these four within the window are one batch
+    sent twice.
+    """
+    def _int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    customer_id = _int(shared.get("customer"))
+    building_id = _int(shared.get("building"))
+    if customer_id is None or building_id is None:
+        return None
+    wanted_dates = sorted({slot["date"] for slot in slots})
+    since = timezone.now() - _DEDUPE_WINDOW
+    candidates = (
+        ExtraWorkGroup.objects.filter(
+            created_by=user,
+            customer_id=customer_id,
+            building_id=building_id,
+            standard_title=str(shared.get("title", "") or ""),
+            created_at__gte=since,
+        )
+        .prefetch_related("members")
+        .order_by("-id")
+    )
+    for group in candidates:
+        dates = sorted(
+            {
+                member.preferred_date
+                for member in group.members.all()
+                if member.preferred_date is not None
+            }
+        )
+        if dates == wanted_dates:
+            return group
+    return None
 
 
 def _group_block(group) -> dict:
@@ -212,7 +313,8 @@ class ExtraWorkGroupDetailView(APIView):
             {
                 "group": _group_block(group),
                 "members": [
-                    {
+                    redact_for_customer(
+                        {
                         "extra_work": member.id,
                         "title": member.title,
                         "status": member.status,
@@ -227,7 +329,13 @@ class ExtraWorkGroupDetailView(APIView):
                             if member.budget_hours is None
                             else f"{member.budget_hours:.2f}"
                         ),
-                    }
+                        },
+                        request.user,
+                        # W-FIX1 D4 — the DETAIL serializer's own list, so
+                        # what a customer cannot read there they cannot
+                        # read here either.
+                        ExtraWorkRequestDetailSerializer._PROVIDER_ONLY_FIELDS,
+                    )
                     for member in members
                 ],
             },

@@ -152,44 +152,45 @@ class WeekPlacementRuleTests(APITestCase):
 
     # -- point 2: active placement ------------------------------------
 
-    def test_a_started_job_planned_for_september_shows_today_as_early(self):
-        """The father's own example, and the reason the rule exists."""
+    def test_a_started_job_planned_for_september_stays_in_september(self):
+        """W-FIX1 E2 — started work is not copied onto today; it is at
+        home in its planned week and nowhere else on the board."""
         job = Job(
             planned_start=datetime.date(2026, 9, 2),
             planned_end=None,
             due=None,
             state=STATE_IN_PROGRESS,
         )
-        self.assertEqual(self.place(job), PLACEMENT_STARTED_EARLY)
-        # And it is STILL in September — that is the half his father
-        # objected to losing.
+        self.assertIsNone(self.place(job))
         sep_start, sep_end = iso_week_bounds(2026, 36)
         self.assertEqual(self.place(job, sep_start, sep_end), PLACEMENT_PLANNED)
-
-    def test_a_started_job_from_a_past_week_is_carried_into_now(self):
+    def test_a_started_job_from_a_past_week_is_not_carried_into_now(self):
+        """W-FIX1 E2 — last week's job stays in last week; if it is also
+        late the overdue strip names it."""
         job = Job(
             planned_start=datetime.date(2026, 8, 4),
             planned_end=None,
             due=None,
             state=STATE_IN_PROGRESS,
         )
-        self.assertEqual(self.place(job), PLACEMENT_STARTED)
+        self.assertIsNone(self.place(job))
         self.assertEqual(
             self.place(job, self.prev_start, self.prev_end), PLACEMENT_PLANNED
         )
-
-    def test_a_started_job_with_no_plan_at_all_still_shows_today(self):
+    def test_a_started_job_with_no_plan_at_all_is_undated_not_today(self):
+        """W-FIX1 E2 — no planned window, no day column; the undated
+        lane carries it. `day_for` still hangs a strip placement on
+        today when the view asks which day."""
         job = Job(
             planned_start=None, planned_end=None, due=None, state=STATE_IN_PROGRESS
         )
-        self.assertEqual(self.place(job), PLACEMENT_STARTED)
+        self.assertIsNone(self.place(job))
         self.assertEqual(
             day_for(
                 job, PLACEMENT_STARTED, self.week_start, self.week_end, self.today
             ),
             self.today,
         )
-
     def test_a_finished_job_is_not_dragged_into_the_current_week(self):
         job = Job(
             planned_start=datetime.date(2026, 8, 4),
@@ -201,27 +202,29 @@ class WeekPlacementRuleTests(APITestCase):
 
     # -- point 3: overdue placement -----------------------------------
 
-    def test_a_job_past_its_deadline_and_unfinished_shows_today(self):
+    def test_a_job_past_its_deadline_is_late_but_not_placed_today(self):
+        """W-FIX1 E2 — late is a fact the overdue strip carries; it is not
+        a placement in this week."""
         job = Job(
             planned_start=None,
             planned_end=None,
             due=datetime.date(2026, 8, 3),
             state=STATE_OPEN,
         )
-        self.assertEqual(self.place(job), PLACEMENT_OVERDUE)
+        self.assertIsNone(self.place(job))
         self.assertTrue(is_overdue(job, self.today))
         self.assertEqual(overdue_days(job, self.today), 10)
-
-    def test_overdue_beats_started(self):
-        """A job that is both is more usefully described as late."""
+    def test_a_late_started_job_is_neither_placed_today(self):
+        """W-FIX1 E2 — both facts are carried by the strips, not by a
+        visitor card on today."""
         job = Job(
             planned_start=datetime.date(2026, 9, 2),
             planned_end=None,
             due=datetime.date(2026, 8, 3),
             state=STATE_IN_PROGRESS,
         )
-        self.assertEqual(self.place(job), PLACEMENT_OVERDUE)
-
+        self.assertIsNone(self.place(job))
+        self.assertTrue(is_overdue(job, self.today))
     def test_a_finished_job_is_never_late(self):
         for state in (STATE_DONE, STATE_BLOCKED):
             with self.subTest(state=state):
@@ -266,9 +269,9 @@ class WeekPlacementRuleTests(APITestCase):
         )
         self.assertFalse(is_upcoming(started, self.week_end, self.today))
 
-    def test_rules_two_and_three_do_not_reach_other_weeks(self):
-        """Looking at next week shows planned placement and nothing
-        else — today does not clutter September either."""
+    def test_started_and_late_work_reach_no_week_at_all(self):
+        """W-FIX1 E2 — planned placement is the only placement; neither
+        this week nor the next shows a visitor card."""
         started = Job(
             planned_start=None, planned_end=None, due=None, state=STATE_IN_PROGRESS
         )
@@ -280,10 +283,10 @@ class WeekPlacementRuleTests(APITestCase):
         )
         for job in (started, late):
             with self.subTest(job=job):
+                self.assertIsNone(self.place(job))
                 self.assertIsNone(
                     self.place(job, self.next_start, self.next_end)
                 )
-
     def test_iso_week_bounds_is_monday_to_sunday(self):
         start, end = iso_week_bounds(2026, 33)
         self.assertEqual(start, datetime.date(2026, 8, 10))
@@ -623,14 +626,14 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
 
 
 class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
-    def test_an_overdue_extra_work_shows_as_overdue_in_the_workers_week(self):
-        """THE acceptance test.
+    def test_an_overdue_extra_work_shows_as_overdue_in_the_workers_strip(self):
+        """THE acceptance test, after W-FIX1 E2.
 
         An extra work assigned to a worker, past its deadline, appears
-        as overdue in that worker's Work Plan — with a reason on the
-        card and its planned date, because a card that turns up outside
-        its planned week without explaining itself is worse than one
-        that does not turn up at all.
+        in that worker's OVERDUE strip — with a reason on the card and
+        its planned date. It is NOT copied onto today's column: the
+        column holds work planned for today (audit F20 measured a
+        "20 jobs" Wednesday that was mostly June's work).
         """
         late = self.make_extra_work(
             "Gutter clearing",
@@ -639,14 +642,12 @@ class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
             assignee=self.worker,
         )
         payload = self.get_plan(self.worker)
-        entry = self.entry(payload, f"ew-{late.id}")
-        self.assertIsNotNone(entry, payload["entries"])
+        self.assertIsNone(self.entry(payload, f"ew-{late.id}"), payload["entries"])
+        entry = self.entry(payload, f"ew-{late.id}", "overdue_entries")
+        self.assertIsNotNone(entry, payload["overdue_entries"])
         self.assertTrue(entry["is_overdue"])
         self.assertEqual(entry["placement"], PLACEMENT_OVERDUE)
         self.assertEqual(entry["overdue_days"], 3)
-        self.assertEqual(entry["day"], self.today.isoformat())
-        # The planned date travels with the card so the reason is
-        # readable without opening anything.
         self.assertEqual(
             entry["planned_start"],
             (self.today - datetime.timedelta(days=14)).isoformat(),
@@ -655,13 +656,8 @@ class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
             entry["due_date"],
             (self.today - datetime.timedelta(days=3)).isoformat(),
         )
-        self.assertEqual(payload["counts"]["overdue"], 1)
+        self.assertEqual(payload["counts"]["overdue"], 0)
         self.assertEqual(payload["counts"]["overdue_all"], 1)
-        # And it is in the Overdue list behind the button, too.
-        self.assertIsNotNone(
-            self.entry(payload, f"ew-{late.id}", "overdue_entries")
-        )
-
     def test_the_acceptance_test_holds_through_the_real_assign_endpoint(self):
         """The same claim, but the assignment is written the way an
         operator writes it — through `POST /api/extra-work/bulk-assign/`
@@ -684,23 +680,19 @@ class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
         self.assertEqual(assign.data["created"], 1)
 
         payload = self.get_plan(self.worker)
-        entry = self.entry(payload, f"ew-{late.id}")
-        self.assertIsNotNone(entry, payload["entries"])
+        entry = self.entry(payload, f"ew-{late.id}", "overdue_entries")
+        self.assertIsNotNone(entry, payload["overdue_entries"])
         self.assertTrue(entry["is_overdue"])
         self.assertEqual(entry["overdue_days"], 1)
-
-    def test_a_started_job_planned_for_later_is_marked_started_early(self):
+    def test_a_started_job_planned_for_later_is_not_on_this_week(self):
+        """W-FIX1 E2 — the job is at home in its own week (next test)
+        and nowhere on this one."""
         ticket = self.make_ticket("Deep clean", TicketStatus.IN_PROGRESS)
         slot = self.make_slot(
             ticket, start=self.today + datetime.timedelta(days=21)
         )
         payload = self.get_plan(self.worker)
-        entry = self.entry(payload, f"slot-{slot.id}")
-        self.assertIsNotNone(entry, payload["entries"])
-        self.assertEqual(entry["placement"], PLACEMENT_STARTED_EARLY)
-        self.assertEqual(entry["state"], STATE_IN_PROGRESS)
-        self.assertEqual(entry["day"], self.today.isoformat())
-
+        self.assertIsNone(self.entry(payload, f"slot-{slot.id}"), payload["entries"])
     def test_the_same_job_is_still_in_its_planned_week(self):
         planned_day = self.today + datetime.timedelta(days=21)
         ticket = self.make_ticket("Deep clean", TicketStatus.IN_PROGRESS)
@@ -1057,25 +1049,21 @@ class WorkPlanRuleParityTests(WorkPlanFixture, APITestCase):
                     "rule 3, or already at home in it",
                 )
 
-    def test_every_card_outside_its_planned_week_carries_a_reason(self):
-        """§12B: "A card shown outside its planned week must say why."
-
-        The reason and the planned date both travel on the card, so the
-        page can render the marker without a second fetch.
-        """
+    def test_no_card_sits_outside_its_planned_week(self):
+        """W-FIX1 E2 — §12B's "a card shown outside its planned week must
+        say why" is now answered by never showing one there: the week
+        holds planned placement only. The strips carry the visitors and
+        stamp their reason; this asserts both halves."""
         payload = self.get_plan(self.worker)
-        visitors = [
-            e for e in payload["entries"] if e["placement"] != PLACEMENT_PLANNED
-        ]
-        self.assertTrue(visitors, payload["entries"])
-        for entry in visitors:
+        for entry in payload["entries"]:
             with self.subTest(key=entry["key"]):
-                self.assertIn(
-                    entry["placement"],
-                    {PLACEMENT_STARTED, PLACEMENT_STARTED_EARLY, PLACEMENT_OVERDUE},
-                )
+                self.assertEqual(entry["placement"], PLACEMENT_PLANNED)
+        self.assertTrue(payload["overdue_entries"], payload)
+        for entry in payload["overdue_entries"]:
+            with self.subTest(key=entry["key"]):
+                self.assertIn(entry["placement"], (PLACEMENT_OVERDUE, PLACEMENT_PLANNED))
                 self.assertTrue(
                     entry["planned_start"] or entry["due_date"],
-                    "a visiting card with neither a planned date nor a "
+                    "a strip row with neither a planned date nor a "
                     "deadline cannot explain itself",
                 )

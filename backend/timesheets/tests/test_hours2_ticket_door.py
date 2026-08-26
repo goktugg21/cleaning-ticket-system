@@ -31,6 +31,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+from tickets.models import Ticket, TicketStatus
 from timesheets.models import HourSource, TimeEntry, WeekLock
 
 from .fixtures import ENTRIES_URL, SUMMARY_URL, TimesheetsFixture
@@ -42,7 +43,26 @@ TICKET_41 = 41
 TICKET_42 = 42
 
 
-class TicketDoorEntryTests(TimesheetsFixture):
+class _RealTicketMixin:
+    """W-FIX1 D8 — the entries endpoint now checks that `source_id` is a
+    ticket the actor may see in this company, so the door tests book
+    against a real one instead of a bare integer."""
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.ticket_a = Ticket.objects.create(
+            company=cls.company_a,
+            building=cls.building_a,
+            customer=cls.customer_a,
+            created_by=cls.ca_a,
+            title="Door ticket",
+            description="x",
+            status=TicketStatus.OPEN,
+        )
+
+
+class TicketDoorEntryTests(_RealTicketMixin, TimesheetsFixture):
     def _booking(self, **overrides):
         body = {
             "employee": self.staff_a.id,
@@ -52,7 +72,7 @@ class TicketDoorEntryTests(TimesheetsFixture):
             "building": self.building_a.id,
             "company": self.company_a.id,
             "source_type": HourSource.TICKET,
-            "source_id": TICKET_41,
+            "source_id": self.ticket_a.id,
         }
         body.update(overrides)
         return body
@@ -64,14 +84,14 @@ class TicketDoorEntryTests(TimesheetsFixture):
         self.assertEqual(response.status_code, 201, response.data)
         entry = TimeEntry.objects.get(pk=response.data["id"])
         self.assertEqual(entry.source_type, HourSource.TICKET)
-        self.assertEqual(entry.source_id, TICKET_41)
+        self.assertEqual(entry.source_id, self.ticket_a.id)
         self.assertEqual(entry.employee_id, self.staff_a.id)
         self.assertEqual(entry.building_id, self.building_a.id)
         self.assertEqual(entry.company_id, self.company_a.id)
         self.assertEqual(entry.created_by_id, self.ca_a.id)
         # The tag is echoed back, so the client can trust what it wrote.
         self.assertEqual(response.data["source_type"], HourSource.TICKET)
-        self.assertEqual(response.data["source_id"], TICKET_41)
+        self.assertEqual(response.data["source_id"], self.ticket_a.id)
 
     def test_two_crew_members_are_two_ordinary_rows(self):
         for employee in (self.staff_a, self.staff_a2):
@@ -82,7 +102,7 @@ class TicketDoorEntryTests(TimesheetsFixture):
             )
             self.assertEqual(response.status_code, 201, response.data)
         rows = TimeEntry.objects.filter(
-            source_type=HourSource.TICKET, source_id=TICKET_41
+            source_type=HourSource.TICKET, source_id=self.ticket_a.id
         )
         self.assertEqual(rows.count(), 2)
         self.assertEqual(
@@ -105,7 +125,7 @@ class TicketDoorEntryTests(TimesheetsFixture):
         self.assertEqual(response.data["date"][0].code, "week_closed")
         self.assertFalse(
             TimeEntry.objects.filter(
-                source_type=HourSource.TICKET, source_id=TICKET_41
+                source_type=HourSource.TICKET, source_id=self.ticket_a.id
             ).exists()
         )
 
@@ -196,7 +216,7 @@ class SourceIdFilterTests(TimesheetsFixture):
         self.assertEqual(response.data["count"], 3)
 
 
-class TicketDoorEveryoneAssignedTests(TimesheetsFixture):
+class TicketDoorEveryoneAssignedTests(_RealTicketMixin, TimesheetsFixture):
     """W-HOURS4 Task 3 — the locked budget ruling: the ticket door
     enters hours for EVERYONE assigned to the job, managers included.
 
@@ -218,7 +238,7 @@ class TicketDoorEveryoneAssignedTests(TimesheetsFixture):
             "building": self.building_a.id,
             "company": self.company_a.id,
             "source_type": HourSource.TICKET,
-            "source_id": TICKET_41,
+            "source_id": self.ticket_a.id,
         }
 
     def test_a_building_manager_is_an_employee_the_door_accepts(self):
@@ -229,7 +249,7 @@ class TicketDoorEveryoneAssignedTests(TimesheetsFixture):
         entry = TimeEntry.objects.get(pk=response.data["id"])
         self.assertEqual(entry.employee_id, self.bm_a.id)
         self.assertEqual(entry.source_type, HourSource.TICKET)
-        self.assertEqual(entry.source_id, TICKET_41)
+        self.assertEqual(entry.source_id, self.ticket_a.id)
 
     def test_a_company_admin_is_an_employee_the_door_accepts(self):
         # A SUPER_ADMIN writing for a COMPANY_ADMIN: the admin is in the
@@ -252,7 +272,7 @@ class TicketDoorEveryoneAssignedTests(TimesheetsFixture):
         )
         self.assertEqual(response.status_code, 400, response.data)
         self.assertIn("employee", response.data)
-        self.assertEqual(TimeEntry.objects.filter(source_id=TICKET_41).count(), 0)
+        self.assertEqual(TimeEntry.objects.filter(source_id=self.ticket_a.id).count(), 0)
 
     def test_a_managers_entry_is_counted_on_the_jobs_comparison(self):
         # The comparison beside the door reads the summary narrowed to
@@ -264,7 +284,7 @@ class TicketDoorEveryoneAssignedTests(TimesheetsFixture):
         )
         response = self.api(self.ca_a).get(
             SUMMARY_URL,
-            {"source_type": HourSource.TICKET, "source_id": TICKET_41},
+            {"source_type": HourSource.TICKET, "source_id": self.ticket_a.id},
         )
         self.assertEqual(response.status_code, 200, response.data)
         by_employee = {

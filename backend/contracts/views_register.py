@@ -34,6 +34,7 @@ from customers.models import Customer
 
 from .extra_work_register import (
     _ticket_map,
+    existing_register,
     get_or_create_register,
     register_extra_work,
     register_revision,
@@ -41,7 +42,7 @@ from .extra_work_register import (
     sync_extra_work_register,
 )
 from .permissions import IsContractManager, IsContractReader
-from .scope import filter_customers_for_contracts
+from .scope import filter_customers_for_contracts, managed_building_ids
 from .serializers import ContractLineSerializer
 
 
@@ -59,7 +60,7 @@ def _scoped_customer(user, customer_id):
     )
 
 
-def _register_payload(contract, revision, ews, tickets):
+def _register_payload(contract, revision, ews, tickets, building_ids=None):
     """The register, its lines GROUPED BY BUILDING, and the summary.
 
     Grouped by building because that is the shape his screen has and
@@ -74,6 +75,13 @@ def _register_payload(contract, revision, ews, tickets):
             "sort_order", "id"
         )
     )
+    if building_ids is not None:
+        # W-FIX1 D5 (audit F9) — a BUILDING_MANAGER reads the buildings
+        # they manage. `scope_extra_work_for` and `filter_contracts_for`
+        # both narrow a BM by building; this door did not, so a manager
+        # of B1 read every job, amount and address of the customer's
+        # other buildings.
+        lines = [line for line in lines if line.building_id in building_ids]
     by_building = {}
     for line in lines:
         by_building.setdefault(line.building_id, []).append(line)
@@ -87,6 +95,8 @@ def _register_payload(contract, revision, ews, tickets):
         ).order_by("building__name", "building_id")
     ]
     for building in customer_buildings:
+        if building_ids is not None and building.id not in building_ids:
+            continue
         seen.add(building.id)
         rows = by_building.get(building.id, [])
         buildings.append(
@@ -123,18 +133,58 @@ def _register_payload(contract, revision, ews, tickets):
             "revision": revision.id,
         },
         "buildings": buildings,
-        "summary": register_summary(contract, revision, ews, tickets),
+        "summary": register_summary(
+            contract, revision, ews, tickets, building_ids
+        ),
+    }
+
+
+def _empty_register_payload(customer, ews, building_ids=None):
+    """W-FIX1 D2 — the register before anyone has synced it: the same
+    shape with `contract: null`, the customer's buildings with no
+    lines, and a zero summary. A GET must not make the register exist;
+    the explicit sync does."""
+    buildings = []
+    for membership in customer.building_memberships.select_related(
+        "building"
+    ).order_by("building__name", "building_id"):
+        building = membership.building
+        if building_ids is not None and building.id not in building_ids:
+            continue
+        buildings.append(
+            {
+                "id": building.id,
+                "name": building.name,
+                "job_count": 0,
+                "total_amount": 0,
+                "lines": [],
+            }
+        )
+    return {
+        "contract": None,
+        "buildings": buildings,
+        "summary": {
+            "job_count": 0,
+            "building_count": 0,
+            "total_amount": 0,
+            "earned_amount": 0,
+            "invoiced_amount": 0,
+            "pending_sync": len(ews),
+        },
     }
 
 
 class ExtraWorkRegisterView(APIView):
-    """GET the customer's register, syncing it on the way.
+    """GET the customer's register. A READ: it writes nothing.
 
-    Syncing on READ is deliberate. A register is a projection, and a
-    projection nobody refreshes is a stale number presented as a
-    current one — his register's exact failure, since `addExtraWorkLine`
-    never calls `recalculateTotals`. The sync is idempotent and keyed on
-    `ContractLine.extra_work`, so reading twice changes nothing.
+    W-FIX1 D2 (audit F26) — this used to sync on read for a manager
+    and get-or-create the register for everyone, so a GET was a write
+    with no uniqueness guard under it: two tabs opening one customer
+    could each create the missing lines. The sync is now the explicit
+    `POST .../sync/` (the page calls it once when a manager opens the
+    register, and its button calls it again on demand); a customer whose
+    register has never been made reads an empty one with `contract:
+    null` rather than causing one to exist.
     """
 
     permission_classes = [IsContractReader]
@@ -146,17 +196,20 @@ class ExtraWorkRegisterView(APIView):
                 {"detail": "No such customer.", "code": "customer_not_found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        contract = get_or_create_register(
-            customer.company, customer, actor=request.user
+        building_ids = managed_building_ids(request.user)
+        contract = existing_register(customer.company, customer)
+        ews = register_extra_work(
+            customer.company_id, customer.id, building_ids=building_ids
         )
-        if IsContractManager().has_permission(request, self):
-            sync_extra_work_register(
-                customer.company, customer, actor=request.user
+        if contract is None:
+            return Response(
+                _empty_register_payload(customer, ews, building_ids)
             )
         revision = register_revision(contract)
-        ews = register_extra_work(customer.company_id, customer.id)
         return Response(
-            _register_payload(contract, revision, ews, _ticket_map(ews))
+            _register_payload(
+                contract, revision, ews, _ticket_map(ews), building_ids
+            )
         )
 
 
@@ -185,8 +238,13 @@ class ExtraWorkRegisterSyncView(APIView):
         contract = get_or_create_register(
             customer.company, customer, actor=request.user
         )
+        building_ids = managed_building_ids(request.user)
         revision = register_revision(contract)
-        ews = register_extra_work(customer.company_id, customer.id)
-        payload = _register_payload(contract, revision, ews, _ticket_map(ews))
+        ews = register_extra_work(
+            customer.company_id, customer.id, building_ids=building_ids
+        )
+        payload = _register_payload(
+            contract, revision, ews, _ticket_map(ews), building_ids
+        )
         payload["changed"] = changed
         return Response(payload)

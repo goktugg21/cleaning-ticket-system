@@ -138,15 +138,23 @@ from .thresholds import ThresholdResolver
 logger = logging.getLogger(__name__)
 
 
-#: Ticket statuses that mean "the work has not begun". OPEN is the only
+#: Ticket statuses that mean "the work has not begun". OPEN is a
 #: pre-start live status in `TicketStatus`; REOPENED_BY_ADMIN is a ticket
 #: sent back to the start of the loop and equally not being worked.
+#: W-FIX1 D6 (audit F27) — ACKNOWLEDGED is "seen and scheduled, not
+#: started" (W10), which is precisely the ticket this warning exists
+#: for: somebody has promised a start and the start has not happened.
+#: It was added to the state machine after this set was written and
+#: never joined it, so a scheduled-then-forgotten job never warned.
 #: IN_PROGRESS and everything downstream of it HAS started, whatever else
-#: may be wrong with it.
+#: may be wrong with it. ON_HOLD is deliberately NOT here: parked work
+#: is parked on purpose, and the SLA clock treats it like any other
+#: live status (only WAITING_CUSTOMER_APPROVAL pauses it).
 NOT_STARTED_TICKET_STATUSES = frozenset(
     {
         TicketStatus.OPEN,
         TicketStatus.REOPENED_BY_ADMIN,
+        TicketStatus.ACKNOWLEDGED,
     }
 )
 

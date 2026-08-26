@@ -71,10 +71,10 @@ def _proposal_line_summary(line: ProposalLine) -> str:
     """One-line human label for a proposal line. Mirrors the line's
     `__str__` shape."""
     if line.service is not None:
-        return f"{line.service.name} × {line.quantity}"
+        return line.service.name
     if (line.description or "").strip():
-        return f"{line.description.strip()} × {line.quantity}"
-    return f"Extra work line × {line.quantity}"
+        return line.description.strip()
+    return "Extra work line"
 
 
 def _build_proposal_title(
@@ -213,8 +213,8 @@ def spawn_tickets_for_proposal(
 def _ew_line_summary(item: ExtraWorkRequestItem) -> str:
     """One-line human label for a cart line."""
     if item.service is not None:
-        return f"{item.service.name} × {item.quantity}"
-    return f"Extra work line × {item.quantity}"
+        return item.service.name
+    return "Extra work line"
 
 
 def _build_ew_title(
