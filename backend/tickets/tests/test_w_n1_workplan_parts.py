@@ -52,9 +52,19 @@ class WorkPlanPartsTests(TenantFixtureMixin, APITestCase):
             assigned_by=self.company_admin,
         )
 
+    def _rows(self, payload):
+        # W-FIX1 E2 — these slots carry no date, so they live in the
+        # undated lane rather than on today's column; the parts travel
+        # with the row wherever it sits.
+        return (
+            payload["entries"]
+            + payload["overdue_entries"]
+            + payload["undated_entries"]
+        )
+
     def _titles(self, payload):
         out = set()
-        for entry in payload["entries"] + payload["overdue_entries"]:
+        for entry in self._rows(payload):
             for part in entry.get("parts", []):
                 out.add(part["title"])
         return out
@@ -72,7 +82,7 @@ class WorkPlanPartsTests(TenantFixtureMixin, APITestCase):
         """Never null — the renderer should not have to ask."""
         self.authenticate(self.ayse)
         payload = self.client.get(self.URL).data
-        rows = payload["entries"] + payload["overdue_entries"]
+        rows = self._rows(payload)
         self.assertTrue(rows, "fixture produced no work-plan rows")
         for entry in rows:
             self.assertIsInstance(entry.get("parts"), list)

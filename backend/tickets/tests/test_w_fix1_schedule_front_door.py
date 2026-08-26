@@ -16,15 +16,27 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from accounts.models import StaffProfile, UserRole
+from buildings.models import BuildingStaffVisibility
 from test_utils import TenantFixtureMixin
 from tickets.models import TicketScheduleStatus, TicketStatus, TicketStatusHistory
 from tickets.schedule_history import SCHEDULE_NOTE_PREFIX
 
 
 class TransitionScheduleFrontDoorTests(TenantFixtureMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        # A move INTO work needs somebody doing it (W13-FIX); the modal
+        # answers that with `assigned_staff_ids`, so the tests do too.
+        self.staff = self.make_user("staff-frontdoor@example.com", UserRole.STAFF)
+        StaffProfile.objects.create(user=self.staff)
+        BuildingStaffVisibility.objects.create(user=self.staff, building=self.building)
+
     def _move(self, to_status, **answers):
         self.authenticate(self.manager)
         body = {"to_status": to_status, **answers}
+        if to_status == TicketStatus.IN_PROGRESS:
+            body.setdefault("assigned_staff_ids", [self.staff.id])
         return self.client.post(
             f"/api/tickets/{self.ticket.id}/status/", body, format="json"
         )

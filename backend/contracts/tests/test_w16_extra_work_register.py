@@ -281,7 +281,14 @@ class TheRegisterIsNotInTheContractList(RegisterFixture):
 
 
 class TheRegisterEndpoint(RegisterFixture):
-    def test_it_creates_and_returns_the_register_grouped_by_building(self):
+    def test_the_sync_creates_and_the_get_returns_the_register_grouped_by_building(self):
+        """W-FIX1 D2 — the GET is a read: before the first sync it answers
+        `contract: null` and writes nothing; the explicit sync creates."""
+        before = self.api(self.ca_a).get(register_url(self.customer_a.id))
+        self.assertEqual(before.status_code, 200)
+        self.assertIsNone(before.data["contract"])
+
+        self.api(self.ca_a).post(sync_url(self.customer_a.id))
         response = self.api(self.ca_a).get(register_url(self.customer_a.id))
 
         self.assertEqual(response.status_code, 200)

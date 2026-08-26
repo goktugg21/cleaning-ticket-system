@@ -28,6 +28,7 @@ from companies.models import Company
 
 from .models import (
     ContractHours,
+    HourSource,
     HOURS_MAX,
     HOURS_MIN,
     MULTIPLIER_MAX,

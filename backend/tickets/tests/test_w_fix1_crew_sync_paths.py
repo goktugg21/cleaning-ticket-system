@@ -130,7 +130,7 @@ class CrewSyncPathsTests(TestCase):
             "/api/tickets/bulk-assign/",
             {
                 "tickets": [self.ticket.id],
-                "groups": {"STAFF": [self.ahmet.id]},
+                "workers": [self.ahmet.id],
                 "mode": "assign",
             },
             format="json",
@@ -144,7 +144,7 @@ class CrewSyncPathsTests(TestCase):
             "/api/tickets/bulk-assign/",
             {
                 "tickets": [self.ticket.id],
-                "groups": {"MANAGER": [self.bm.id]},
+                "managers": [self.bm.id],
                 "mode": "assign",
             },
             format="json",
@@ -181,7 +181,7 @@ class CrewSyncPathsTests(TestCase):
             "/api/tickets/bulk-assign/",
             {
                 "tickets": [self.ticket.id],
-                "groups": {"STAFF": [self.ahmet.id]},
+                "workers": [self.ahmet.id],
                 "mode": "unassign",
             },
             format="json",
@@ -245,7 +245,7 @@ class CrewSyncPathsTests(TestCase):
             "/api/tickets/bulk-assign/",
             {
                 "tickets": [self.ticket.id],
-                "groups": {"STAFF": [self.ahmet.id]},
+                "workers": [self.ahmet.id],
                 "mode": "assign",
             },
             format="json",
@@ -281,7 +281,7 @@ class CrewSyncPathsTests(TestCase):
             "/api/tickets/bulk-assign/",
             {
                 "tickets": [self.ticket.id],
-                "groups": {"MANAGER": [self.bm.id]},
+                "managers": [self.bm.id],
                 "mode": "unassign",
             },
             format="json",
