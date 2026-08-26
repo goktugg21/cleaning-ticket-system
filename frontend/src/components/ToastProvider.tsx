@@ -28,12 +28,20 @@ import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
 
 export type ToastVariant = "success" | "error" | "info" | "warning";
 
+/** W-LATE addendum 2 — the rung a warning toast stands on. L1 is the
+ *  standard warning tone; L2 is red; L3 dark red. L2 and L3 do NOT
+ *  auto-dismiss: `push` gives them a sticky duration unless the caller
+ *  says otherwise, because a broken promise is not a four-second fact. */
+export type ToastSeverity = "L1" | "L2" | "L3";
+
 export interface ToastInput {
   variant: ToastVariant;
   title: string;
   description?: string;
   /** Override default auto-dismiss. 0 keeps it open until dismissed. */
   durationMs?: number;
+  /** Colour the toast by rung and, for L2/L3, keep it until dismissed. */
+  severity?: ToastSeverity;
   /**
    * When set, the toast becomes activatable (click / Enter / Space):
    * invoking it runs this handler AND dismisses the toast. Callers that
@@ -97,7 +105,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback(
     (input: ToastInput) => {
       const id = nextId();
-      const duration = input.durationMs ?? DEFAULT_DURATION[input.variant];
+      // W-LATE — L2/L3 stay until dismissed; the provider already had a
+      // sticky mode (0), so persistence is a default here, not a new
+      // mechanism.
+      const sticky = input.severity === "L2" || input.severity === "L3";
+      const duration =
+        input.durationMs ?? (sticky ? 0 : DEFAULT_DURATION[input.variant]);
       setToasts((prev) => [...prev, { ...input, id }]);
       if (duration > 0) {
         const handle = window.setTimeout(() => dismiss(id), duration);
@@ -142,7 +155,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               key={toast.id}
               className={`toast toast-${toast.variant}${
                 clickable ? " toast-clickable" : ""
-              }`}
+              }${toast.severity ? ` toast-sev-${toast.severity.toLowerCase()}` : ""}`}
+              data-severity={toast.severity}
               role={
                 clickable
                   ? "button"

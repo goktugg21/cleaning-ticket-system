@@ -14904,3 +14904,53 @@ table.assign-table { min-width: 0; width: 100%; }
   font-size: 10px;
   line-height: 1.3;
 }
+
+/* ===================================================================
+   W-LATE addendum 2 — the notification carries its rung.
+   APPENDED BLOCK, NEW CLASSES ONLY. Nothing above is edited.
+
+   The bell list, the notifications page and the toast read the row's
+   own `severity`. L1 is the amber warning the W4-Q block above already
+   paints (keyed off the warning-type list), so only L2 and L3 add a
+   class: red, and the ladder's dark red. The unread accent is the same
+   inset shadow, so the rung's colour is stated on the unread variant
+   too — the rung matters more than whether the row has been read. */
+.notif-item-sev-l2,
+.notif-page-row-sev-l2,
+.notif-item-unread.notif-item-sev-l2,
+.notif-page-row-unread.notif-page-row-sev-l2 {
+  box-shadow: inset 3px 0 0 var(--late-l2);
+}
+.notif-item-sev-l3,
+.notif-page-row-sev-l3,
+.notif-item-unread.notif-item-sev-l3,
+.notif-page-row-unread.notif-page-row-sev-l3 {
+  box-shadow: inset 3px 0 0 var(--late-l3);
+}
+.notif-item-unread.notif-item-sev-l2,
+.notif-page-row-unread.notif-page-row-sev-l2 {
+  background: color-mix(in srgb, var(--late-l2) 8%, transparent);
+}
+.notif-item-unread.notif-item-sev-l3,
+.notif-page-row-unread.notif-page-row-sev-l3 {
+  background: color-mix(in srgb, var(--late-l3) 10%, transparent);
+}
+.notif-item-sev-l2 .notif-warning-title,
+.notif-page-row-sev-l2 .notif-warning-title {
+  color: var(--late-l2);
+}
+.notif-item-sev-l3 .notif-warning-title,
+.notif-page-row-sev-l3 .notif-warning-title {
+  color: var(--late-l3);
+}
+/* The toast: same three tones on the left edge and the icon. L2 and L3
+   are sticky by the provider's own default (see ToastProvider). */
+.toast-sev-l1 { border-left: 3px solid var(--late-l1); }
+.toast-sev-l1 .toast-icon { color: var(--late-l1); }
+.toast-sev-l2 { border-left: 3px solid var(--late-l2); }
+.toast-sev-l2 .toast-icon { color: var(--late-l2); }
+.toast-sev-l3 {
+  border-left: 4px solid var(--late-l3);
+  background: color-mix(in srgb, var(--late-l3) 6%, var(--surface));
+}
+.toast-sev-l3 .toast-icon { color: var(--late-l3); }

@@ -36,7 +36,12 @@ from django.utils import timezone
 from extra_work.models import ExtraWorkStatus
 
 from . import lateness as late_rules
-from .models import StaffAssignmentSlotStatus, Ticket, TicketStatus
+from .models import (
+    StaffAssignmentSlotStatus,
+    Ticket,
+    TicketEscalation,
+    TicketStatus,
+)
 
 #: W-LATE — the ticket statuses in which the WORK is still pending. A
 #: job is late only while somebody still has to do it: a ticket sitting
@@ -85,6 +90,9 @@ class LatenessIndex:
         self.today = today
         self._tickets: dict[int, late_rules.Lateness] = {}
         self._extra_work: dict[int, late_rules.Lateness] = {}
+        # W-LATE §2 — the steps the ladder has spoken for each ticket,
+        # with the display names of the people each step reached.
+        self._steps: dict[int, list[dict]] = {}
 
         ticket_ids = {tid for tid in ticket_ids if tid is not None}
         ew_rows = list(extra_work_rows)
@@ -170,6 +178,59 @@ class LatenessIndex:
                 hours_booked=hours_for(HourSource.EXTRA_WORK, row.id),
                 today=today,
             )
+        if ticket_ids:
+            self._load_steps(ticket_ids)
+
+    def _load_steps(self, ticket_ids):
+        """One query for the rows, one for the names. The names are
+        DISPLAY names resolved now, from the ids the step reached — the
+        addendum's rule: recipients by role in code, people by name on
+        the screen."""
+        from accounts.models import User
+
+        rows = list(
+            TicketEscalation.objects.filter(ticket_id__in=list(ticket_ids))
+            .order_by("notified_at", "id")
+        )
+        if not rows:
+            return
+        wanted: set[int] = set()
+        for row in rows:
+            wanted.update(int(uid) for uid in (row.recipient_ids or []))
+        names = {}
+        if wanted:
+            for user in User.objects.filter(id__in=list(wanted)).only(
+                "id", "full_name", "email"
+            ):
+                names[user.id] = (user.full_name or "").strip() or user.email
+        for row in rows:
+            self._steps.setdefault(row.ticket_id, []).append(
+                {
+                    "step": row.step,
+                    "notified_at": row.notified_at.isoformat(),
+                    "names": [
+                        names[int(uid)]
+                        for uid in (row.recipient_ids or [])
+                        if int(uid) in names
+                    ],
+                }
+            )
+
+    def steps_for_ticket(self, ticket_id) -> list[dict]:
+        return list(self._steps.get(ticket_id, []))
+
+    def lateness_dict(self, *, ticket_id=None, extra_work=None) -> dict:
+        """The wire shape: the ladder's facts plus the steps that spoke."""
+        if ticket_id is not None:
+            data = self.for_ticket(ticket_id).as_dict()
+            data["escalation_steps"] = self.steps_for_ticket(ticket_id)
+            return data
+        data = (
+            self.for_extra_work(extra_work) if extra_work is not None
+            else late_rules.NOT_LATE
+        ).as_dict()
+        data["escalation_steps"] = []
+        return data
 
     def for_ticket(self, ticket_id) -> late_rules.Lateness:
         return self._tickets.get(ticket_id, late_rules.NOT_LATE)

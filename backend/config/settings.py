@@ -508,6 +508,17 @@ CELERY_BEAT_SCHEDULE = {
         "task": "tickets.tasks.sweep_deadline_reminders",
         "schedule": 24 * 60 * 60,
     },
+    # W-LATE §2c — the late ladder. Hourly: its facts are DAYS (a
+    # deadline passed, thirty days without an hour), so a five-minute
+    # beat would buy nothing, and a daily one would make "the deadline
+    # passed at midnight" arrive up to a day late. Every step is deduped
+    # by a `TicketEscalation` row written in the same transaction as
+    # the notifications, so the cadence changes WHEN a step speaks,
+    # never HOW OFTEN. See `tickets/escalations.py`.
+    "sweep-late-escalations": {
+        "task": "tickets.tasks.sweep_late_escalations",
+        "schedule": 60 * 60,
+    },
     # Sprint W1-B §2.7 — the time-driven warning sweep. Same 5-minute
     # cadence as the SLA reconciler above, and for the same reason: it
     # answers "has a threshold been crossed since I last looked?", which

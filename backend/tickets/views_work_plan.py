@@ -555,6 +555,12 @@ def _parts_map(slot_rows):
     return out
 
 
+def _empty_lateness() -> dict:
+    data = late_rules.NOT_LATE.as_dict()
+    data["escalation_steps"] = []
+    return data
+
+
 def _entry_from_slot(
     slot, job, placement, day, today, *, viewer, parts=None, lateness=None
 ) -> dict:
@@ -600,10 +606,11 @@ def _entry_from_slot(
         # never null: a card that renders `parts.map` should not have to
         # ask whether the key exists.
         "parts": parts or [],
-        # W-LATE §1b — the rung this JOB stands on, from the one helper.
-        # Always present, `level: null` when it is not late, so the
-        # client reads one shape for every card.
-        "lateness": (lateness or late_rules.NOT_LATE).as_dict(),
+        # W-LATE §1b — the rung this JOB stands on, from the one helper,
+        # and (§2) the steps that have spoken about it. Always present,
+        # `level: null` when it is not late, so the client reads one
+        # shape for every card.
+        "lateness": lateness if lateness is not None else _empty_lateness(),
         # The completion actions belong to the person holding the slot.
         # An admin looking at the team's week is reading it, not working
         # it, and a "Mark done" button on somebody else's card is one
@@ -668,7 +675,7 @@ def _entry_from_extra_work(
         # empty so both kinds answer `entry.parts` the same way and the
         # frontend needs no `kind` check to read it.
         "parts": [],
-        "lateness": (lateness or late_rules.NOT_LATE).as_dict(),
+        "lateness": lateness if lateness is not None else _empty_lateness(),
         "assignee_names": names[:ASSIGNEE_NAMES_SHOWN],
         "assignee_count": len(names),
         "can_complete": False,
@@ -952,7 +959,7 @@ class WorkPlanView(APIView):
                     today,
                     viewer=viewer,
                     parts=parts_by_pair.get((slot.ticket_id, slot.user_id)),
-                    lateness=lateness.for_ticket(slot.ticket_id),
+                    lateness=lateness.lateness_dict(ticket_id=slot.ticket_id),
                 )
             )
         for row in ew_rows:
@@ -971,7 +978,7 @@ class WorkPlanView(APIView):
                     day,
                     today,
                     assignees=assignees.get(row.id, []),
-                    lateness=lateness.for_extra_work(row),
+                    lateness=lateness.lateness_dict(extra_work=row),
                 )
             )
 
@@ -1105,7 +1112,7 @@ class WorkPlanView(APIView):
                 today,
                 today,
                 viewer=viewer,
-                lateness=lateness,
+                lateness=index.lateness_dict(ticket_id=ticket_id),
             )
             names: list[str] = []
             parts: list[dict] = []
@@ -1132,7 +1139,7 @@ class WorkPlanView(APIView):
                 today,
                 today,
                 assignees=assignees.get(row.id, []),
-                lateness=lateness,
+                lateness=index.lateness_dict(extra_work=row),
             )
             keyed.append((late_rules.sort_key(lateness, entry["title"]), entry))
 

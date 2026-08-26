@@ -26,6 +26,7 @@ import {
 } from "../api/notifications";
 import type { CompanyAdmin, Notification } from "../api/types";
 import { isSlaWarningEvent } from "../api/types";
+import { notificationSeverityClass } from "../lib/notificationSeverity";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { Toggle } from "../components/Toggle";
@@ -347,9 +348,10 @@ export function NotificationsPage() {
                   isSlaWarningEvent(notification.event_type)
                     ? " notif-page-row-warning"
                     : ""
-                }`}
+                }${notificationSeverityClass(notification, "notif-page-row")}`}
                 onClick={() => handleSelect(notification)}
                 data-testid="notification-row"
+                data-severity={notification.severity}
                 /* Sprint W4-Q §1 — the KIND of row is an attribute, not
                    a second testid. `notification-row` stays the one
                    selector for "a row in this feed" so nothing that

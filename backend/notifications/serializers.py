@@ -27,6 +27,9 @@ class NotificationSerializer(serializers.ModelSerializer):
             "event_type",
             "is_directed",
             "summary",
+            # W-LATE addendum 2 — the rung, so the bell and the list can
+            # colour the row without a client-side lookup table.
+            "severity",
             "ticket",
             "ticket_no",
             "ticket_title",

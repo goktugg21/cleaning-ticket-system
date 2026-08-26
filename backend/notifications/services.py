@@ -16,6 +16,7 @@ from tickets.models import (
 
 from .models import (
     Notification,
+    NotificationSeverity,
     NotificationEventType,
     NotificationLog,
     NotificationPreference,
@@ -963,7 +964,13 @@ def company_admin_recipients(company_id):
 
 
 def emit_sla_warning_inapp(
-    *, event_type, recipients, summary, ticket=None, extra_work=None
+    *,
+    event_type,
+    recipients,
+    summary,
+    ticket=None,
+    extra_work=None,
+    severity=None,
 ):
     """Sprint W4-Q §1 — write the BELL half of one time-driven warning.
 
@@ -986,6 +993,10 @@ def emit_sla_warning_inapp(
 
     Returns the rows created (an empty list when there is nobody to
     tell), so the caller can count what it actually wrote.
+
+    W-LATE addendum 2 — `severity` defaults to L1: every time-driven
+    warning is the standard warning tone unless the caller says which
+    higher rung it is.
     """
     summary = (summary or "").strip()[:500]
     rows = [
@@ -997,6 +1008,38 @@ def emit_sla_warning_inapp(
             extra_work=extra_work,
             is_directed=False,
             summary=summary,
+            severity=severity or NotificationSeverity.L1,
+            read_at=None,
+        )
+        for user in recipients
+        if user is not None and user.id
+    ]
+    if rows:
+        Notification.objects.bulk_create(rows)
+    return rows
+
+
+def emit_escalation_inapp(*, event_type, recipients, summary_for, severity, ticket):
+    """W-LATE §2 — the BELL half of one escalation step.
+
+    Like `emit_sla_warning_inapp` (no actor, not directed, no roster
+    logic of its own) with two differences the ladder needs: the
+    SEVERITY is the caller's — L2 or L3, never the default — and the
+    summary is built PER RECIPIENT through `summary_for(user)`, because
+    the sentence names a fact in the reader's own language
+    (`User.language`) rather than in whichever language the sweep runs
+    in. A Dutch sentence in an English reader's bell is the thing the
+    bell's own docstring warns against.
+    """
+    rows = [
+        Notification(
+            recipient=user,
+            actor=None,
+            event_type=event_type,
+            ticket=ticket,
+            is_directed=False,
+            summary=(summary_for(user) or "").strip()[:500],
+            severity=severity,
             read_at=None,
         )
         for user in recipients

@@ -28,6 +28,7 @@ import {
 } from "../api/notifications";
 import type { Notification } from "../api/types";
 import { isSlaWarningEvent } from "../api/types";
+import { notificationSeverityClass, notificationToastSeverity } from "../lib/notificationSeverity";
 import { useToast } from "./ToastProvider";
 import type { ToastInput } from "./ToastProvider";
 
@@ -104,11 +105,22 @@ export function NotificationBell() {
       // headline of an activity toast answers "about what?"; the
       // headline of a warning has to answer "what has gone quiet?", and
       // the job name is still on the description line underneath.
-      if (isSlaWarningEvent(n.event_type)) {
+      // W-LATE addendum 2 — the TONE is the row's own `severity`: L1
+      // the standard warning, L2 red, L3 dark red and sticky. The list
+      // of warning types still decides whether the toast NAMES its kind
+      // in the headline; a row that carries a rung but no name in that
+      // list (a future warning) still warns rather than celebrating.
+      const severity = notificationToastSeverity(n);
+      if (isSlaWarningEvent(n.event_type) || severity) {
         return {
           variant: "warning",
-          title: t(`notifications.sla.${n.event_type}`),
-          description: n.summary || name,
+          severity,
+          title: isSlaWarningEvent(n.event_type)
+            ? t(`notifications.sla.${n.event_type}`)
+            : name,
+          description: isSlaWarningEvent(n.event_type)
+            ? n.summary || name
+            : n.summary,
           onClick: () => {
             openNotification(n);
           },
@@ -310,7 +322,8 @@ export function NotificationBell() {
                     isSlaWarningEvent(notification.event_type)
                       ? " notif-item-warning"
                       : ""
-                  }`}
+                  }${notificationSeverityClass(notification, "notif-item")}`}
+                  data-severity={notification.severity}
                   onClick={() => openNotification(notification)}
                 >
                   <span className="notif-item-main">

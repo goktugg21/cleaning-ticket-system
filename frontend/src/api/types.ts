@@ -724,11 +724,18 @@ export interface MessageRecipient {
 // M1 — in-app notification (mirrors notifications.serializers.
 // NotificationSerializer). Deep-link is derived from `ticket` (-> the
 // ticket detail) or `extra_work` (-> EW detail, wired for B4).
+/** W-LATE addendum 2 — the rung a notification stands on. INFO is
+ *  activity (the soft green); L1 is the standard warning tone (orange);
+ *  L2 red; L3 dark red, and its toast stays until dismissed. Mirrors
+ *  `notifications.models.NotificationSeverity`. */
+export type NotificationSeverity = "INFO" | "L1" | "L2" | "L3";
+
 export interface Notification {
   id: number;
   event_type: string;
   is_directed: boolean;
   summary: string;
+  severity: NotificationSeverity;
   ticket: number | null;
   ticket_no: string | null;
   ticket_title: string | null;
@@ -765,6 +772,12 @@ export const SLA_WARNING_EVENT_TYPES = [
   "SLA_APPROVAL_CUTOFF_DUE",
   "SLA_MANAGER_REVIEW_OVERDUE",
   "SLA_WORK_NOT_STARTED",
+  // W-LATE §2 — the three escalation steps of the late ladder. They
+  // NAME themselves the same way the SLA three do; their tone comes
+  // from the row's own `severity`, not from this list.
+  "TICKET_LATE_L2_MANAGERS",
+  "TICKET_LATE_L2_ESCALATED",
+  "TICKET_LATE_L3_QUARANTINE",
 ] as const;
 export type SlaWarningEventType = (typeof SLA_WARNING_EVENT_TYPES)[number];
 

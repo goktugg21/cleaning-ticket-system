@@ -1407,3 +1407,79 @@ class StaffAssignmentRequest(models.Model):
 
     def __str__(self):
         return f"{self.staff.email} → {self.ticket} ({self.status})"
+
+
+class TicketEscalationStep(models.TextChoices):
+    """W-LATE §2 — the three steps the ladder can speak."""
+
+    #: The deadline has passed and the work is not done. Once per
+    #: (ticket, deadline): the assigned managers.
+    L2_MANAGERS = "L2_MANAGERS", "Deadline passed: assigned managers"
+    #: Still not done a deadline-proportional step past the deadline.
+    #: Once per (ticket, deadline): the building managers and the
+    #: company admins.
+    L2_ESCALATED = "L2_ESCALATED", "Deadline still passed: managers and admins"
+    #: Thirty days past the anchor with not one hour booked. Once per
+    #: ticket, ever: the provider admins.
+    L3_QUARANTINE = "L3_QUARANTINE", "Quarantine: provider admins"
+
+
+class TicketEscalation(models.Model):
+    """W-LATE §2 — ONE ROW PER STEP THE LADDER HAS SPOKEN, per ticket.
+
+    This is the escalation-state tracking the brief allowed: one small
+    table, additive. It answers two questions nothing else could —
+
+      * "has this step already fired for this ticket?" — the once-ever
+        rule. The deadline reminder answers its equivalent by asking the
+        notification tables ("was this person ever told about this
+        ticket's deadline?"), and says in its own docstring what that
+        costs: moving the deadline cannot re-arm it, because nothing
+        recorded WHICH deadline was warned about. This row records it.
+        `anchor_date` is the deadline the L2 steps were measured
+        against, so a genuinely re-planned job (a new deadline) is a new
+        (ticket, step, anchor) and fires again; the same deadline never
+        fires twice. L3 carries no anchor: its clock only resets when
+        hours land, and once hours land the rung itself is gone.
+
+      * "when was the admin told, and who?" — the quarantine bar's own
+        line. `recipient_ids` is the list the step actually reached, so
+        the bar renders the names of the people who were told, resolved
+        at render time. Ids in a DATA row, never in code: recipients are
+        resolved by ROLE inside the ticket's provider company every time
+        the sweep runs.
+
+    Deliberately NOT audited through `audit/signals.py`: the row IS the
+    record of the event, in the same way a `*StatusHistory` row is, and a
+    generic AuditLog beside it would be the doubling H-11 warns about.
+    """
+
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="escalations",
+    )
+    step = models.CharField(max_length=16, choices=TicketEscalationStep.choices)
+    #: The deadline the two L2 steps were measured against; NULL for L3.
+    anchor_date = models.DateField(null=True, blank=True)
+    notified_at = models.DateTimeField(default=timezone.now)
+    #: The user ids the step reached, in the order they were told.
+    recipient_ids = models.JSONField(default=list, blank=True)
+    recipient_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            # The two L2 steps: once per ticket per deadline. Postgres
+            # treats NULLs as distinct in a unique index, so this does
+            # not bind the L3 row — `escalations.py` guards that one by
+            # (ticket, step) in code, which is also the only writer.
+            models.UniqueConstraint(
+                fields=["ticket", "step", "anchor_date"],
+                name="ticket_escalation_once_per_step_and_anchor",
+            ),
+        ]
+        indexes = [models.Index(fields=["ticket", "step"])]
+        ordering = ["notified_at", "id"]
+
+    def __str__(self):
+        return f"{self.step} for ticket {self.ticket_id} at {self.notified_at:%Y-%m-%d}"

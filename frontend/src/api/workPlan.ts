@@ -81,8 +81,9 @@ export interface WorkPlanLateness {
   days_late: number | null;
   /** Decimal as a string, the way every amount travels. */
   hours_booked: string;
-  /** Absent until phase 2 lands; empty when nothing has fired. */
-  escalation_steps?: WorkPlanEscalationStep[];
+  /** W-LATE §2 — the steps the ladder has spoken for this job; empty
+   *  when nothing has fired. */
+  escalation_steps: WorkPlanEscalationStep[];
 }
 
 export interface WorkPlanEntry {

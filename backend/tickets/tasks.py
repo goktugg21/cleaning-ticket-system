@@ -39,3 +39,23 @@ def sweep_deadline_reminders(now=None):
     except Exception:  # noqa: BLE001 — see the docstring
         logger.exception("sweep_deadline_reminders failed")
         return {"told": 0, "failed": 0, "error": True}
+
+
+@shared_task
+def sweep_late_escalations(now=None):
+    """W-LATE §2c — let the ladder speak. See `tickets/escalations.py`.
+
+    Never raises, for the reason the two sweeps above give. `now` (an
+    ISO datetime string) exists for tests and for an operator running a
+    step by hand; the beat schedule never passes it.
+    """
+    from datetime import datetime
+
+    from . import escalations
+
+    when = datetime.fromisoformat(now) if now else timezone.now()
+    try:
+        return escalations.sweep(now=when)
+    except Exception:  # noqa: BLE001 — see the docstring
+        logger.exception("sweep_late_escalations failed")
+        return {"told": 0, "failed": 0, "checked": 0, "error": True}

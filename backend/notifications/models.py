@@ -98,6 +98,32 @@ class NotificationEventType(models.TextChoices):
         "Ticket part assigned",
     )
 
+    # ------------------------------------------------------------------
+    # W-LATE §2 — the ladder speaks. Three steps, each sent ONCE per
+    # ticket per step (per deadline for the two L2 steps: a genuinely
+    # re-planned job restarts them from its new date). Spelled
+    # identically in the in-app enum below, like the SLA three, so one
+    # `event_type` string keys both channels.
+    # ------------------------------------------------------------------
+    #: The deadline has passed and the work is not done: the ticket's
+    #: ASSIGNED MANAGERS are told.
+    TICKET_LATE_L2_MANAGERS = (
+        "TICKET_LATE_L2_MANAGERS",
+        "Deadline passed: assigned managers notified",
+    )
+    #: Still not done a deadline-proportional step past the deadline:
+    #: the building managers AND the company admins are told.
+    TICKET_LATE_L2_ESCALATED = (
+        "TICKET_LATE_L2_ESCALATED",
+        "Deadline still passed: managers and admins notified",
+    )
+    #: Thirty days past the anchor with not one hour booked: the
+    #: PROVIDER ADMINS are told.
+    TICKET_LATE_L3_QUARANTINE = (
+        "TICKET_LATE_L3_QUARANTINE",
+        "Quarantine: provider admins notified",
+    )
+
 
 class NotificationStatus(models.TextChoices):
     QUEUED = "QUEUED", "Queued"
@@ -264,6 +290,43 @@ class NotificationType(models.TextChoices):
         "TICKET_PART_ASSIGNED",
         "Ticket part assigned",
     )
+    # W-LATE §2 — spelled exactly as in `NotificationEventType` above.
+    TICKET_LATE_L2_MANAGERS = (
+        "TICKET_LATE_L2_MANAGERS",
+        "Deadline passed: assigned managers notified",
+    )
+    TICKET_LATE_L2_ESCALATED = (
+        "TICKET_LATE_L2_ESCALATED",
+        "Deadline still passed: managers and admins notified",
+    )
+    TICKET_LATE_L3_QUARANTINE = (
+        "TICKET_LATE_L3_QUARANTINE",
+        "Quarantine: provider admins notified",
+    )
+
+
+class NotificationSeverity(models.TextChoices):
+    """W-LATE addendum 2 — THE SEVERITY ON THE NOTIFICATION ITSELF.
+
+    Recon: `Notification` carried no level or kind of its own; the only
+    "kind" was `event_type`, and the bell decided "warning or activity"
+    by looking the type up in a client-side list. That is fine for a
+    family whose members are all the same shade, and wrong for a ladder
+    whose whole point is that L2 is not L1. So the row says which rung
+    it is, and the bell, the list and the toast read the row.
+
+    INFO is the default and what every pre-existing activity row means.
+    L1 is the standard warning tone (orange) — the migration backfills
+    the four time-driven types that already existed onto it, so a row
+    that rendered as a warning yesterday renders as the same warning
+    today for the same reason. L2 is red; L3 is dark red and its toast
+    stays until dismissed.
+    """
+
+    INFO = "INFO", "Information"
+    L1 = "L1", "Level 1 — plan passed"
+    L2 = "L2", "Level 2 — deadline passed"
+    L3 = "L3", "Level 3 — quarantine"
 
 
 #: The three time-driven in-app types, for readers that need to ask "is
@@ -277,6 +340,23 @@ SLA_WARNING_INAPP_TYPES = frozenset(
         NotificationType.SLA_MANAGER_REVIEW_OVERDUE,
         NotificationType.SLA_WORK_NOT_STARTED,
     }
+)
+
+#: W-LATE §2 — the three escalation steps, for the same reason.
+LATE_ESCALATION_INAPP_TYPES = frozenset(
+    {
+        NotificationType.TICKET_LATE_L2_MANAGERS,
+        NotificationType.TICKET_LATE_L2_ESCALATED,
+        NotificationType.TICKET_LATE_L3_QUARANTINE,
+    }
+)
+
+#: The rows the severity backfill lifts from INFO to L1: everything
+#: machine-sent before the ladder existed that the bell already rendered
+#: as a warning, plus the deadline reminder, which is the same kind of
+#: thing (nothing happened yet, and it is about to matter).
+SEVERITY_L1_BACKFILL_TYPES = frozenset(
+    SLA_WARNING_INAPP_TYPES | {NotificationType.TICKET_DEADLINE_APPROACHING}
 )
 
 
@@ -349,6 +429,15 @@ class Notification(models.Model):
     # recipient set is the message's visible audience), so this carries no
     # PII the recipient could not already read on the ticket.
     summary = models.CharField(max_length=500, blank=True, default="")
+
+    # W-LATE addendum 2 — which rung, if any. See `NotificationSeverity`.
+    # Additive: the default is INFO and the migration backfills the four
+    # pre-existing time-driven types to L1.
+    severity = models.CharField(
+        max_length=4,
+        choices=NotificationSeverity.choices,
+        default=NotificationSeverity.INFO,
+    )
 
     # NULL = unread. Set to now() when the recipient marks it read.
     read_at = models.DateTimeField(null=True, blank=True)
