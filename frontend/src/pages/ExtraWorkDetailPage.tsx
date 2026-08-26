@@ -44,6 +44,8 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Download,
+  Eye,
   FileSearch,
   FileText,
   Pencil,
@@ -3411,12 +3413,15 @@ export function ExtraWorkDetailPage() {
                 >
                   {/* W-HOURS4 Task 4 — Preview opens the same document
                       in the in-app viewer; the download stays. */}
+                  {/* W-HOURS5 Task 9 — an eye before Preview, a
+                      download glyph before the download. */}
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
                     onClick={openProposalPreview}
                     data-testid="extra-work-preview-open"
                   >
+                    <Eye size={14} strokeWidth={2.2} aria-hidden="true" />
                     {t("detail.pdf_preview_button")}
                   </button>
                   <button
@@ -3426,6 +3431,7 @@ export function ExtraWorkDetailPage() {
                     disabled={pdfBusy}
                     data-testid="extra-work-preview-pdf"
                   >
+                    <Download size={14} strokeWidth={2.2} aria-hidden="true" />
                     {pdfBusy
                       ? t("detail.proposal_pdf_busy")
                       : t(noCustomerApproval ? "detail.proposal_pdf_start" : "detail.proposal_pdf")}

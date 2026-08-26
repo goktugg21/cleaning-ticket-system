@@ -112,6 +112,10 @@ export function PlannedVsWorkedPanel({
   selfOnly,
   canBook,
   onBook,
+  canPlan = false,
+  onPlan,
+  planLoading = false,
+  crewIds = null,
   refreshNonce,
 }: {
   ticketId: number;
@@ -123,9 +127,21 @@ export function PlannedVsWorkedPanel({
   planned: ExtraWorkPlannedHoursRow[] | null;
   /** The viewer reads only their own worked line (a BUILDING_MANAGER). */
   selfOnly: boolean;
-  /** Whether the "Book hours" door is offered to this viewer. */
+  /** Whether the "Enter hours worked" door is offered to this viewer. */
   canBook: boolean;
   onBook: () => void;
+  /** W-HOURS5 Task 4 — the "Plan the work" door lives in this card's
+   *  header too, beside "Enter hours worked", both the same weight.
+   *  Same handler and gate as the page header's button. */
+  canPlan?: boolean;
+  onPlan?: () => void;
+  planLoading?: boolean;
+  /** W-HOURS5 Task 2 — who is on the job's crew NOW (the plan's
+   *  `ExtraWorkAssignment` user ids). A person with planned or worked
+   *  hours who is not in it is marked "no longer assigned": their past
+   *  plan is history and stays, and the mark says why the row is
+   *  still here. `null` = unknown, no marks. */
+  crewIds?: number[] | null;
   /** Bumped by the page after a booking so the worked side re-reads
    *  without a reload. */
   refreshNonce: number;
@@ -160,18 +176,40 @@ export function PlannedVsWorkedPanel({
     };
   }, [ticketId, companyId, refreshNonce]);
 
+  /* W-HOURS5 Task 4 — ONE home for the two doors: title left, and on
+     the right "Plan the work" and "Enter hours worked" as EQUAL-weight
+     primaries (both green). The in-tab button that used to sit above
+     this card is gone; the page header's own "Plan the work" stays. */
   const header = (
     <div className="ew-hours-compare-head">
       <div className="form-section-title">{t("hours_compare.title")}</div>
-      {canBook && (
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={onBook}
-          data-testid="ticket-book-hours-open"
+      {(canBook || (canPlan && onPlan)) && (
+        <div
+          style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+          data-testid="ticket-hours-compare-actions"
         >
-          {t("hours_compare.book_button")}
-        </button>
+          {canPlan && onPlan && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={onPlan}
+              disabled={planLoading}
+              data-testid="ticket-ew-plan-open-card"
+            >
+              {planLoading ? t("ew_plan_loading") : t("ew_plan_button")}
+            </button>
+          )}
+          {canBook && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={onBook}
+              data-testid="ticket-book-hours-open"
+            >
+              {t("hours_compare.book_button")}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -316,7 +354,21 @@ export function PlannedVsWorkedPanel({
                     data-testid="ticket-hours-compare-row"
                     data-employee-id={row.id}
                   >
-                    <td>{row.name}</td>
+                    <td>
+                      {row.name}
+                      {crewIds !== null && !crewIds.includes(row.id) && (
+                        /* W-HOURS5 Task 2 — the ruling: a removed
+                           person's past plan stays, and the row says
+                           why it is still here. */
+                        <span
+                          className="muted small"
+                          style={{ marginLeft: 6 }}
+                          data-testid="ticket-hours-compare-unassigned"
+                        >
+                          ({t("hours_compare.no_longer_assigned")})
+                        </span>
+                      )}
+                    </td>
                     <td className="ew-hours-num">
                       {row.planned === null ? (
                         <span

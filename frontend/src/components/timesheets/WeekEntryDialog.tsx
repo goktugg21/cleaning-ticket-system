@@ -427,9 +427,13 @@ export function WeekEntryDialog({
         );
       },
       search: async (employeeId, _buildingId, query) => {
+        // W-HOURS5 Task 7 — candidates only; the picker applies its own
+        // code-and-title matcher, so "TCK-373" (which the server's
+        // title search cannot find) still meets its job among the
+        // person's own. The server call narrows the wider pool by
+        // title; the person's jobs list is handed over whole.
         const person = personById.get(employeeId);
         const allowed = new Set(person?.building_ids ?? []);
-        const wanted = query.trim().toLowerCase();
         const seen = new Set<number>();
         const out: HourSourceOption[] = [];
         const add = (job: HourSourceOption) => {
@@ -445,9 +449,7 @@ export function WeekEntryDialog({
           seen.add(job.source_id);
           out.push(job);
         };
-        for (const job of person?.jobs ?? []) {
-          if (job.title.toLowerCase().includes(wanted)) add(job);
-        }
+        for (const job of person?.jobs ?? []) add(job);
         for (const job of await listHourSources(query.trim())) add(job);
         return out;
       },

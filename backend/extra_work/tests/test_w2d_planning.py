@@ -843,7 +843,17 @@ class OnePayloadOneWriterTests(APITestCase):
         from extra_work.planning import PLAN_FIELDS
         from extra_work.serializers import ExtraWorkPlanSerializer
 
-        declared = set(ExtraWorkPlanSerializer().fields) - {"start"}
+        # W-HOURS5 — `past_days_override_reason` is excluded like `start`
+        # is: both are MODIFIERS of the save (start the work / record
+        # why history was edited), read by `apply_plan` and stored by
+        # neither the writer nor the row. It joined the serializer with
+        # the past-day freeze and this list was not widened with it, so
+        # the test has been red since — the two-list drift it exists
+        # to catch, caught one wave late.
+        declared = set(ExtraWorkPlanSerializer().fields) - {
+            "start",
+            "past_days_override_reason",
+        }
         self.assertEqual(declared, set(PLAN_FIELDS))
 
     def test_the_bulk_payload_is_the_single_payload_plus_the_selection(self):

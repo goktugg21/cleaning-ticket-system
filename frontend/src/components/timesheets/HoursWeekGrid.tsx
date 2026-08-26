@@ -928,13 +928,29 @@ export function HoursWeekGrid({
       );
     }
     if (block.sourceType) {
+      const label = sourceName(block.sourceType, block.sourceId);
       return (
-        <div style={{ marginTop: 2, fontWeight: 400 }}>
+        <div style={{ marginTop: 2, fontWeight: 400, maxWidth: "100%" }}>
+          {/* W-HOURS5 Task 5 — clipped inside the person cell, full
+              title on hover, so a saved tag never pushes the building
+              column either. */}
           <span
             className="cell-tag cell-tag-muted"
+            style={{ display: "inline-flex", maxWidth: "100%" }}
+            title={label}
             data-testid={`hours-week-job-${block.id}-saved`}
           >
-            {sourceName(block.sourceType, block.sourceId)}
+            <span
+              style={{
+                display: "inline-block",
+                maxWidth: "18ch",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {label}
+            </span>
           </span>
         </div>
       );

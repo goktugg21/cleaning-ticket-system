@@ -28,6 +28,7 @@
  * lists unchanged.
  */
 import { useEffect, useRef, useState } from "react";
+import { Download, Eye } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -643,8 +644,18 @@ export function TicketExtraWorkCards({
             </>
           )}
           {approvedProposalId !== null && canViewProposalPdf && (
+            /* W-HOURS5 Task 9 — an eye before Preview, a download glyph
+               before Download, and the row pulled left by the ghost
+               button's own 12px padding so the icons sit on the card
+               content's left edge. */
             <div
-              style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                marginTop: 12,
+                marginLeft: -12,
+              }}
               data-testid="ticket-ew-proposal-pdf-actions"
             >
               {/* W-HOURS4 Task 4 — Preview opens the same document in
@@ -655,7 +666,10 @@ export function TicketExtraWorkCards({
                 onClick={openPdfPreview}
                 data-testid="ticket-ew-proposal-preview"
               >
-                {t("extra_work:detail.pdf_preview_button")}
+                <Eye size={14} strokeWidth={2.2} aria-hidden="true" />
+                <span style={{ marginLeft: 6 }}>
+                  {t("extra_work:detail.pdf_preview_button")}
+                </span>
               </button>
               <button
                 type="button"
@@ -666,9 +680,12 @@ export function TicketExtraWorkCards({
                 disabled={pdfBusy}
                 data-testid="ticket-ew-proposal-pdf"
               >
-                {pdfBusy
-                  ? t("extra_work:detail.pdf_download_busy")
-                  : t("extra_work:detail.pdf_download_button")}
+                <Download size={14} strokeWidth={2.2} aria-hidden="true" />
+                <span style={{ marginLeft: 6 }}>
+                  {pdfBusy
+                    ? t("extra_work:detail.pdf_download_busy")
+                    : t("extra_work:detail.pdf_download_button")}
+                </span>
               </button>
             </div>
           )}

@@ -78,6 +78,47 @@
  *    FIRST, before the budget and the grid, and the waiting state lives
  *    INSIDE the grid where the eye already is — with the control that
  *    fixes it. The sentence is gone.
+ *
+ * W-HOURS5 — "AHMET IS NOT PLANNABLE" (Task 1), AND THE CREW (Task 2)
+ * ---------------------------------------------------------------------
+ * 8. **The last crew row was below the dialog's own fold.** Measured on
+ *    ticket 373 at 1366x768: the dialog is 92vh (707px) over 1047px of
+ *    content, and the fourth row — Ahmet's, last because his assignment
+ *    was created last — started 18px BELOW the dialog's bottom edge.
+ *    At 800px it was 12px visible, and a click at his cell's centre
+ *    landed on the dialog's clipped scroll box, not on the input:
+ *    "refuses input while others accept it". Nothing froze him; the
+ *    row was simply where a click could not reach, and the only hint
+ *    that the dialog scrolls was an overlay scrollbar that is invisible
+ *    on a touchpad.
+ *
+ *    Three things fix that, none of them per person. The dialog is now
+ *    a fixed HEAD, a scrolling BODY and a fixed FOOT (`.ew-plan-body`,
+ *    `.ew-plan-foot` in plan-crew.css): the footer's top edge marks the
+ *    fold on every screen, and the actions never scroll away. A cell
+ *    that gains focus scrolls itself fully into view (`onFocus` ->
+ *    `scrollIntoView`), so a click on a half-visible input, or a Tab
+ *    into one, brings the row up instead of leaving it clipped. And the
+ *    crew pickers above the grid are one-line chip pickers rather than
+ *    checkbox lists, so the grid starts higher on the screen.
+ *
+ * 9. **The modal owns the whole crew.** People AND responsible managers
+ *    are added (multi-select, one Add) and removed (chip x) here, and
+ *    the People tab stays the other door to the SAME crew: the page
+ *    writes through the ticket's own endpoints and `tickets.crew_sync`
+ *    mirrors every change onto the plan's `ExtraWorkAssignment` rows.
+ *    Past-day interplay, as ruled: a person added in this session gets
+ *    today-and-future cells only — their past cells stay frozen even
+ *    when the past is unlocked (they were not there); removing a person
+ *    clears only their today-and-future plan, their PAST planned hours
+ *    stay as history, and deleting those is possible only by hand —
+ *    unlock with a reason, then zero the cells.
+ *
+ * 10. **Unlock asks first.** "Unlock past days" opens the reason
+ *    prompt; nothing unlocks until the reason is given and confirmed,
+ *    and the state line then says that the reason lands on the save.
+ *    Today never carries a lock glyph: `isPastDay` is strictly before
+ *    today.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -100,6 +141,7 @@ import type {
 } from "../../api/types";
 import type { HourType } from "../../api/timesheets.types";
 import { listHourTypes } from "../../api/timesheets";
+import { ChipMultiSelect } from "../ChipMultiSelect";
 import { Toggle } from "../Toggle";
 import "./plan-crew.css";
 import type { AssignmentCandidate } from "../../api/types";
@@ -145,6 +187,16 @@ function formatDayHeader(day: string): string {
   return `${dayOfMonth}-${month}`;
 }
 
+/** The LOCAL wall date, not toISOString() — the UTC date is yesterday's
+ *  or tomorrow's for half the world. */
+function localToday(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+    now.getDate(),
+  )}`;
+}
+
 export function PlanWorkDialog({
   ew,
   assignments,
@@ -162,6 +214,8 @@ export function PlanWorkDialog({
   managerBusy = false,
   onAssignManager,
   onRemoveManager,
+  onRemovePerson,
+  removeBusy = false,
   postSpawn = false,
 }: {
   ew: ExtraWorkRequestDetail;
@@ -172,28 +226,28 @@ export function PlanWorkDialog({
   onCancel: () => void;
   onSubmit: (payload: ExtraWorkPlanPayload) => void;
   /** W-UX1 §2 — people the plan area may still add, from the SERVER's
-   *  own eligibility helper (`/extra-work/<id>/assignments/candidates/`).
-   *  R2: the page hands over only the not-yet-assigned, so the picker
-   *  offers exactly what is addable and the crew above is the default. */
+   *  own eligibility helper. R2: the page hands over only the
+   *  not-yet-assigned, so the picker offers exactly what is addable and
+   *  the crew above is the default. */
   candidates: AssignmentCandidate[];
   candidatesLoading: boolean;
   assignBusy: boolean;
   assignError: string;
   onAssign: (userIds: number[]) => void;
-  /** W-TABS Task 3b — the RESPONSIBLE MANAGER is assigned HERE now
-   *  (the page's inline select is gone; one owner per fact). Writes
-   *  through the same bulk-assign endpoint's `managers` group the page
-   *  always used; the current managers render from `assignments`
-   *  (role=MANAGER), so this component still makes no visibility or
-   *  eligibility decision of its own. Empty candidates = no picker —
-   *  the ticket mount hands over nothing and adds nobody, exactly like
-   *  the crew picker. */
+  /** W-TABS Task 3b — the RESPONSIBLE MANAGER is assigned HERE. The
+   *  current managers render from `assignments` (role=MANAGER), so this
+   *  component still makes no visibility or eligibility decision of its
+   *  own. Empty candidates = no picker. */
   managerCandidates?: AssignmentCandidate[];
   managerBusy?: boolean;
   onAssignManager?: (userId: number) => void;
-  /** Optional: renders an X on each assigned-manager chip. Absent (the
-   *  current page wiring) = chips without remove. */
+  /** Renders an X on each manager chip. Absent = chips without remove. */
   onRemoveManager?: (userId: number) => void;
+  /** W-HOURS5 Task 2 — renders an X on each PERSON chip. The page takes
+   *  the person off the job through the ticket's own endpoint; the plan
+   *  crew follows (`tickets.crew_sync`). Absent = chips without remove. */
+  onRemovePerson?: (userId: number) => void;
+  removeBusy?: boolean;
   /** W-PLAN Task 2 — mounted from an operational (spawned) ticket page.
    *  SAME dialog, SAME store (the plan lives on the EW pre- and
    *  post-spawn); what changes is the words: the submit says "Save the
@@ -363,19 +417,12 @@ export function PlanWorkDialog({
   // read-only. This is data safety, not permission — hiding the past
   // would hide the plan's history, so the numbers stay on screen and
   // only the INPUT is withheld. The one way in is the recorded
-  // override: "Unlock past days" demands a reason first, the unlock
+  // override: "Unlock past days" asks for a reason FIRST, the unlock
   // holds for this dialog session, and the reason rides with the save
   // (`past_days_override_reason`), which the server requires whenever
   // a past row actually changes and writes onto the timeline. Today
-  // and the future stay free. LOCAL wall date, not toISOString() — the
-  // UTC date is yesterday's or tomorrow's for half the world.
-  const todayStr = (() => {
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
-      now.getDate(),
-    )}`;
-  })();
+  // and the future stay free; today never carries a lock glyph.
+  const todayStr = localToday();
   /* W-TABS Task 3c — WHAT THE BUTTON ACTUALLY DRIVES. `apply_plan`
      only starts work from CUSTOMER_APPROVED (`_start` -> the
      IN_PROGRESS transition; anything earlier reports a skipped start).
@@ -389,6 +436,36 @@ export function PlanWorkDialog({
   const [pastPromptOpen, setPastPromptOpen] = useState(false);
   const hasPastDays = days.some((day) => day < todayStr);
   const isPastDay = (day: string) => day !== "" && day < todayStr;
+
+  /** W-HOURS5 Task 2 — people put on the job IN THIS SESSION. Their
+   *  past cells stay frozen even when the past is unlocked: they were
+   *  not on the job then, and "adding a person opens today and future
+   *  cells only" is the ruling. Held as ids so a person removed and
+   *  re-added in the same session is still "added this session". */
+  const [addedThisSession, setAddedThisSession] = useState<number[]>([]);
+  const isFrozen = (userId: number, day: string) =>
+    isPastDay(day) && (!pastUnlocked || addedThisSession.includes(userId));
+  const frozenTitle = (userId: number, day: string) =>
+    isPastDay(day) && pastUnlocked && addedThisSession.includes(userId)
+      ? t("plan.added_past_frozen")
+      : t("plan.past_locked_tooltip");
+
+  const handleAssign = (userIds: number[]) => {
+    if (userIds.length === 0) return;
+    setAddedThisSession((prev) => [
+      ...prev,
+      ...userIds.filter((id) => !prev.includes(id)),
+    ]);
+    onAssign(userIds);
+  };
+  const handleAssignManagers = (userIds: number[]) => {
+    if (!onAssignManager || userIds.length === 0) return;
+    setAddedThisSession((prev) => [
+      ...prev,
+      ...userIds.filter((id) => !prev.includes(id)),
+    ]);
+    for (const userId of userIds) onAssignManager(userId);
+  };
 
   // W7 — THE VISIBLE WEEK. Display only; `days` above stays the whole
   // window and is what every total and the submit read.
@@ -416,6 +493,11 @@ export function PlanWorkDialog({
   // still exist server-side and still count, so hiding them from the
   // total would put the screen and the server at odds — the reference
   // system's §4.4 defect, one level down.
+  //
+  // W-HOURS5 — only keys of people ON THE CREW. A person removed in
+  // this session may still have typed values in `hours`; they are
+  // neither sent nor counted, or the total on screen would name hours
+  // the save will not write.
   const liveKeys = useMemo(() => {
     const keys = new Set<string>();
     for (const [userId, lines] of linesByUser) {
@@ -426,7 +508,9 @@ export function PlanWorkDialog({
         }
       }
     }
-    for (const key of Object.keys(hours)) keys.add(key);
+    for (const key of Object.keys(hours)) {
+      if (linesByUser.has(Number(key.split("|")[0]))) keys.add(key);
+    }
     return keys;
   }, [linesByUser, days, hours]);
 
@@ -462,6 +546,10 @@ export function PlanWorkDialog({
   const overrun = hasBudget && distributed > budgetHours;
   const overBy = (distributed - budgetHours).toFixed(2);
 
+  const workers = assignments.filter((a) => a.role !== "MANAGER");
+  const managers = assignments.filter((a) => a.role === "MANAGER");
+  const personName = (a: ExtraWorkAssignment) => a.user_full_name || a.user_email;
+
   function submit() {
     const payload: ExtraWorkPlanPayload = {};
     // OMIT, never default. A blank budget field means "leave the stored
@@ -475,12 +563,6 @@ export function PlanWorkDialog({
       // hours on that day", it is "no plan for that day", and sending a
       // zero for every day of a two-week window would fill the grid
       // with rows nobody entered.
-      //
-      // The person-level exception is deliberate: somebody on the crew
-      // with nothing anywhere still gets one undated zero row, because
-      // "on the job, no hours budgeted yet" is a state the plan has
-      // always been able to express and losing it would drop them off
-      // the screen entirely.
       const cells: {
         user: number;
         date?: string | null;
@@ -550,14 +632,20 @@ export function PlanWorkDialog({
       aria-label={t("plan.dialog_title")}
       data-testid="extra-work-plan-dialog"
     >
-      <div className="card ew-plan-dialog">
-        <h3 className="section-title ew-plan-dialog-title">
-          {t("plan.dialog_title")}
-        </h3>
-        <p className="muted small ew-plan-dialog-sub">
-          {t("plan.dialog_subtitle")}
-        </p>
+      {/* W-HOURS5 Task 1 — HEAD / BODY / FOOT. The body is the one
+          thing that scrolls; the foot's top edge is the fold, on every
+          screen, and the actions never leave it. */}
+      <div className="card ew-plan-dialog ew-plan-dialog--framed">
+        <div className="ew-plan-head">
+          <h3 className="section-title ew-plan-dialog-title">
+            {t("plan.dialog_title")}
+          </h3>
+          <p className="muted small ew-plan-dialog-sub">
+            {t("plan.dialog_subtitle")}
+          </p>
+        </div>
 
+        <div className="ew-plan-body" data-testid="extra-work-plan-body">
         {error && (
           <div
             className="alert-error"
@@ -661,46 +749,103 @@ export function PlanWorkDialog({
             {t("plan.hours_title")}
             <span className="ew-plan-req" aria-hidden="true">*</span>
           </div>
-          {/* W-UX1 §2 / R2 — WHO IS ON THIS, AND WHO MAY BE ADDED.
-              The crew above is the default and stays visible; this
-              offers only the people not already on it, because the page
-              filters the server's candidate list against the current
-              assignments. Rendered whether or not the crew is empty, so
-              "nobody yet" is a state you can fix here instead of a
-              message telling you to go somewhere else. Provider-only by
-              construction: the plan dialog has no customer entry point.
-              Writes through the EXISTING bulk endpoint. */}
-          {/* W-TABS Task 3b — RESPONSIBLE MANAGER, beside the crew.
-              Current managers read from the same `assignments` rows the
-              grid reads (role=MANAGER); the picker offers only what the
-              page handed over and disappears with an empty list, the
-              CrewPicker rule. */}
-          <div
-            className="ew-plan-manager"
-            data-testid="extra-work-plan-manager"
-          >
-            <span className="field-label">
-              {t("plan.manager_label")}
-              <span className="ew-plan-req" aria-hidden="true">*</span>
-            </span>
-            <div className="ew-plan-manager-row">
-              {assignments
-                .filter((a) => a.role === "MANAGER")
-                .map((a) => (
+          {/* W-HOURS5 Task 2 — THE CREW, both halves, owned here.
+              People and responsible managers each read from the same
+              `assignments` rows the grid reads, each carry a chip x
+              (when the page offers a remove) and a one-line multi-select
+              adder over the candidates the page handed over. Provider-
+              only by construction: the plan dialog has no customer entry
+              point. */}
+          <div className="ew-plan-crew" data-testid="extra-work-plan-crew">
+            <div
+              className="ew-plan-crew-group"
+              data-testid="extra-work-plan-people"
+            >
+              <span className="field-label">
+                {t("plan.people_label")}
+                <span className="ew-plan-req" aria-hidden="true">*</span>
+              </span>
+              <div className="ew-plan-manager-row">
+                {workers.map((a) => (
+                  <span
+                    key={a.id}
+                    className="parts-chip"
+                    data-testid="extra-work-plan-person-chip"
+                    data-user-id={a.user_id}
+                  >
+                    {personName(a)}
+                    {onRemovePerson && (
+                      <button
+                        type="button"
+                        className="ew-plan-type-remove"
+                        disabled={removeBusy || assignBusy}
+                        onClick={() => onRemovePerson(a.user_id)}
+                        aria-label={t("plan.person_remove", {
+                          name: personName(a),
+                        })}
+                        data-testid="extra-work-plan-person-remove"
+                      >
+                        <X size={12} aria-hidden="true" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {workers.length === 0 && (
+                  <span
+                    className="muted small"
+                    data-testid="extra-work-plan-people-none"
+                  >
+                    {t("plan.people_none")}
+                  </span>
+                )}
+              </div>
+              {onRemovePerson && (
+                <p
+                  className="muted small ew-plan-crew-hint"
+                  data-testid="extra-work-plan-remove-hint"
+                >
+                  {t("plan.remove_person_hint")}
+                </p>
+              )}
+              <CrewAdder
+                candidates={candidates}
+                loading={candidatesLoading}
+                busy={assignBusy}
+                error={assignError}
+                onAssign={handleAssign}
+                placeholderKey="plan.add_people_pick"
+                buttonKey="plan.add_people"
+                testId="extra-work-plan-crew-add"
+              />
+            </div>
+
+            {/* W-TABS Task 3b — RESPONSIBLE MANAGERS, beside the crew.
+                Same rows, same chips, same adder. */}
+            <div
+              className="ew-plan-crew-group"
+              data-testid="extra-work-plan-manager"
+            >
+              <span className="field-label">
+                {t("plan.manager_label")}
+                <span className="ew-plan-req" aria-hidden="true">*</span>
+              </span>
+              <div className="ew-plan-manager-row">
+                {managers.map((a) => (
                   <span
                     key={a.id}
                     className="parts-chip"
                     data-testid="extra-work-plan-manager-chip"
+                    data-user-id={a.user_id}
                   >
-                    {a.user_full_name || a.user_email}
+                    {personName(a)}
                     {onRemoveManager && (
                       <button
                         type="button"
                         className="ew-plan-type-remove"
-                        disabled={managerBusy}
+                        disabled={managerBusy || removeBusy}
                         onClick={() => onRemoveManager(a.user_id)}
                         aria-label={t("plan.manager_remove", {
-                          name: a.user_full_name || a.user_email,
+                          name: personName(a),
                         })}
                         data-testid="extra-work-plan-manager-remove"
                       >
@@ -709,46 +854,29 @@ export function PlanWorkDialog({
                     )}
                   </span>
                 ))}
-              {assignments.filter((a) => a.role === "MANAGER").length ===
-                0 && (
-                <span
-                  className="muted small"
-                  data-testid="extra-work-plan-manager-none"
-                >
-                  {t("plan.manager_none")}
-                </span>
+                {managers.length === 0 && (
+                  <span
+                    className="muted small"
+                    data-testid="extra-work-plan-manager-none"
+                  >
+                    {t("plan.manager_none")}
+                  </span>
+                )}
+              </div>
+              {onAssignManager && (
+                <CrewAdder
+                  candidates={managerCandidates}
+                  loading={false}
+                  busy={managerBusy}
+                  error=""
+                  onAssign={handleAssignManagers}
+                  placeholderKey="plan.add_managers_pick"
+                  buttonKey="plan.add_managers_button"
+                  testId="extra-work-plan-manager-add"
+                />
               )}
             </div>
-            {/* W-PLAN2 Task 1 — MULTI-SELECT, the standing rule: pick
-                several, ONE Add. Reuses the crew picker verbatim (label
-                and testid aside). The page's handler takes one id, so
-                the Add fans out one request per manager through the
-                existing endpoint — which recon shows takes a LIST
-                (`managers` is a ListField, views_assignments.py), so
-                the single-call collapse is a one-line page change
-                whenever that file is in territory. Already-assigned
-                managers are filtered out by the page before the prop. */}
-            {onAssignManager && (
-              <CrewPicker
-                candidates={managerCandidates}
-                loading={false}
-                busy={managerBusy}
-                error=""
-                onAssign={(userIds) => {
-                  for (const userId of userIds) onAssignManager(userId);
-                }}
-                labelKey="plan.manager_add_label"
-                testId="extra-work-plan-manager-add"
-              />
-            )}
           </div>
-          <CrewPicker
-            candidates={candidates}
-            loading={candidatesLoading}
-            busy={assignBusy}
-            error={assignError}
-            onAssign={onAssign}
-          />
           {assignmentsLoading ? (
             <div className="loading-bar">
               <div className="loading-bar-fill" />
@@ -833,10 +961,14 @@ export function PlanWorkDialog({
                       {t("plan.unlock_past_active")}
                     </span>
                   ) : pastPromptOpen ? (
+                    /* Task 3 — the reason is asked BEFORE anything
+                       unlocks. Confirm is disabled until it is given;
+                       "Keep locked" backs out without unlocking. */
                     <div className="ew-plan-past-prompt">
                       <textarea
                         className="field-textarea"
                         rows={2}
+                        autoFocus
                         value={pastReason}
                         onChange={(e) => setPastReason(e.target.value)}
                         placeholder={t("plan.unlock_past_reason_placeholder")}
@@ -853,6 +985,17 @@ export function PlanWorkDialog({
                         data-testid="extra-work-plan-past-unlock-confirm"
                       >
                         {t("plan.unlock_past_confirm")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          setPastPromptOpen(false);
+                          setPastReason("");
+                        }}
+                        data-testid="extra-work-plan-past-unlock-cancel"
+                      >
+                        {t("plan.unlock_past_cancel")}
                       </button>
                     </div>
                   ) : (
@@ -893,12 +1036,16 @@ export function PlanWorkDialog({
                               ? t("plan.past_locked_tooltip")
                               : undefined
                           }
+                          data-testid="extra-work-plan-day-head"
+                          data-day={day}
+                          data-past={isPastDay(day) ? "true" : "false"}
                         >
                           {isPastDay(day) && !pastUnlocked && (
                             <Lock
                               size={10}
                               aria-hidden="true"
                               className="ew-plan-past-lock"
+                              data-testid="extra-work-plan-day-lock"
                             />
                           )}
                           {formatDayHeader(day)}
@@ -938,9 +1085,7 @@ export function PlanWorkDialog({
                               rowSpan={lines.length}
                             >
                               <div className="ew-plan-grid-person">
-                                <span>
-                                  {a.user_full_name || a.user_email}
-                                </span>
+                                <span>{personName(a)}</span>
                                 {addable.length > 0 && (
                                   <select
                                     className="ew-plan-add-type"
@@ -953,8 +1098,7 @@ export function PlanWorkDialog({
                                       );
                                     }}
                                     aria-label={t("plan.add_hour_type", {
-                                      name:
-                                        a.user_full_name || a.user_email,
+                                      name: personName(a),
                                     })}
                                     data-testid="extra-work-plan-add-hour-type"
                                   >
@@ -999,12 +1143,12 @@ export function PlanWorkDialog({
                               key={day || "none"}
                               className="ew-plan-grid-cell"
                               title={
-                                isPastDay(day) && !pastUnlocked
-                                  ? t("plan.past_locked_tooltip")
+                                isFrozen(a.user_id, day)
+                                  ? frozenTitle(a.user_id, day)
                                   : undefined
                               }
                             >
-                              {isPastDay(day) && !pastUnlocked ? (
+                              {isFrozen(a.user_id, day) ? (
                                 /* FROZEN, not absent: the value stays
                                    on screen — hiding it would hide the
                                    plan's history. */
@@ -1015,7 +1159,7 @@ export function PlanWorkDialog({
                                 >
                                   {hours[
                                     cellKey(a.user_id, day, line.hourType)
-                                  ] ?? "\u2014"}
+                                  ] ?? "—"}
                                 </span>
                               ) : (
                               <input
@@ -1039,8 +1183,17 @@ export function PlanWorkDialog({
                                     )]: e.target.value,
                                   }))
                                 }
+                                /* W-HOURS5 Task 1 — a cell that gains
+                                   focus brings its whole row into view,
+                                   so a half-clipped last row is never
+                                   typed into blind. */
+                                onFocus={(e) =>
+                                  e.currentTarget.scrollIntoView({
+                                    block: "nearest",
+                                  })
+                                }
                                 aria-label={`${t("plan.hours_for", {
-                                  name: a.user_full_name || a.user_email,
+                                  name: personName(a),
                                 })} ${hourTypeName(line.hourType)} ${
                                   day || t("plan.grid_no_day")
                                 }`}
@@ -1179,29 +1332,32 @@ export function PlanWorkDialog({
             <span>{t("plan.notes_required_label")}</span>
           </label>
         </div>
+        </div>
 
-        <div className="ew-plan-actions">
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={onCancel}
-            disabled={busy}
-            data-testid="extra-work-plan-cancel"
-          >
-            {t("common:cancel")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            /* `busy` only. NOT `overrun`. */
-            disabled={busy}
-            onClick={submit}
-            data-testid="extra-work-plan-submit"
-          >
-            {busy
-              ? t("plan.submitting")
-              : t(submitStarts ? "plan.submit" : "plan.submit_save")}
-          </button>
+        <div className="ew-plan-foot" data-testid="extra-work-plan-foot">
+          <div className="ew-plan-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={onCancel}
+              disabled={busy}
+              data-testid="extra-work-plan-cancel"
+            >
+              {t("common:cancel")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              /* `busy` only. NOT `overrun`. */
+              disabled={busy}
+              onClick={submit}
+              data-testid="extra-work-plan-submit"
+            >
+              {busy
+                ? t("plan.submitting")
+                : t(submitStarts ? "plan.submit" : "plan.submit_save")}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1209,36 +1365,36 @@ export function PlanWorkDialog({
 }
 
 
-/** W-UX1 §2 — the plan area's people chips.
+/** W-HOURS5 Task 2 — the crew's adder: ONE line, several people, one Add.
  *
- *  Local to this file rather than a shared component: the ticket
- *  dialog's picker speaks `AssignableStaff` and posts a transition, this
- *  one speaks `AssignmentCandidate` and posts a bulk assign. What they
- *  share is the LOOK, and that is shared where it belongs — the same
- *  `.assign-picker` / `.assign-picker-row` classes, no new CSS.
+ *  Replaces the checkbox list (`.assign-picker`) that stood here since
+ *  W-UX1 §2: on a crew of thirty that list was a scroll box the height
+ *  of the grid itself, which is part of why the grid's last row sat
+ *  below the fold (Task 1). `ChipMultiSelect` is the standing people
+ *  picker — every picker multi-selects — and it keeps to a line.
  *
  *  R2 is enforced by the caller: `candidates` arrives already filtered
  *  to the not-yet-assigned, so a person on the crew never appears here
- *  as something to add again.
+ *  as something to add again. Nothing to offer = nothing rendered.
  */
-function CrewPicker({
+function CrewAdder({
   candidates,
   loading,
   busy,
   error,
   onAssign,
-  labelKey = "plan.add_people_label",
-  testId = "extra-work-plan-crew-add",
+  placeholderKey,
+  buttonKey,
+  testId,
 }: {
   candidates: AssignmentCandidate[];
   loading: boolean;
   busy: boolean;
   error: string;
   onAssign: (userIds: number[]) => void;
-  /** W-PLAN2 Task 1 — the same multi-select serves crew AND managers;
-   *  only the label and testid differ, so they are the only props. */
-  labelKey?: string;
-  testId?: string;
+  placeholderKey: string;
+  buttonKey: string;
+  testId: string;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [picked, setPicked] = useState<number[]>([]);
@@ -1250,50 +1406,46 @@ function CrewPicker({
       </div>
     );
   }
-  if (candidates.length === 0) {
+  if (candidates.length === 0 && !error) {
     return null;
   }
   return (
     <div className="ew-plan-crew-add" data-testid={testId}>
-      <span className="field-label">{t(labelKey)}</span>
-      <div className="assign-picker" role="group">
-        {candidates.map((person) => (
-          <label key={person.id} className="assign-picker-row">
-            <input
-              type="checkbox"
-              className="checkbox-input"
-              checked={picked.includes(person.id)}
-              disabled={busy}
-              onChange={(event) =>
-                setPicked((current) =>
-                  event.target.checked
-                    ? [...current, person.id]
-                    : current.filter((id) => id !== person.id),
-                )
-              }
-              data-testid="extra-work-plan-crew-option"
-            />
-            <span>{person.full_name?.trim() || person.email}</span>
-          </label>
-        ))}
+      <div className="ew-plan-crew-add-line">
+        <div className="ew-plan-crew-add-picker">
+          <ChipMultiSelect
+            options={candidates.map((person) => ({
+              id: person.id,
+              label: person.full_name?.trim() || person.email,
+              sublabel: person.email,
+            }))}
+            selectedIds={picked}
+            onChange={setPicked}
+            placeholder={t(placeholderKey)}
+            removeLabel={(label) => t("plan.person_remove", { name: label })}
+            emptyText={t("plan.no_candidates")}
+            disabled={busy}
+            testIdPrefix={`${testId}-picker`}
+          />
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy || picked.length === 0}
+          onClick={() => {
+            onAssign(picked);
+            setPicked([]);
+          }}
+          data-testid={`${testId}-button`}
+        >
+          {busy ? t("plan.adding_people") : t(buttonKey)}
+        </button>
       </div>
       {error && (
-        <p className="alert-error" role="alert">
+        <p className="alert-error" role="alert" data-testid={`${testId}-error`}>
           {error}
         </p>
       )}
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        disabled={busy || picked.length === 0}
-        onClick={() => {
-          onAssign(picked);
-          setPicked([]);
-        }}
-        data-testid="extra-work-plan-crew-add-button"
-      >
-        {busy ? t("plan.adding_people") : t("plan.add_people")}
-      </button>
     </div>
   );
 }

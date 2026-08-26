@@ -546,9 +546,26 @@ def _write_planned_hours(extra_work, resolved, *, actor) -> str:
         for row in extra_work.planned_hours.all()
     }
 
+    # W-HOURS5 Task 2 — the ruling on somebody taken off the job: their
+    # PAST planned hours are history and stay (only a hand edit through
+    # the recorded override may delete them); their today-and-future
+    # and undated rows are not history and go with them. The payload
+    # cannot name a former crew member (`resolve_planned_hours` refuses
+    # them), so this is decided here rather than by key presence.
+    crew_now = set(
+        ExtraWorkAssignment.objects.filter(
+            extra_work_request=extra_work
+        ).values_list("user_id", flat=True)
+    )
+    today = timezone.localdate()
     for key, row in existing.items():
-        if key not in wanted:
-            row.delete()
+        if key in wanted:
+            continue
+        user_id, on_date, _ = key
+        is_history = on_date is not None and on_date < today
+        if user_id not in crew_now and is_history:
+            continue
+        row.delete()
 
     for (user_id, on_date, hour_type_id), hours in wanted.items():
         row = existing.get((user_id, on_date, hour_type_id))
@@ -678,9 +695,20 @@ def apply_plan(
     # Undated rows (date NULL) are never "past".
     if resolved_hours is not None:
         today = timezone.localdate()
+        # W-HOURS5 Task 2 — a FORMER crew member's rows are not this
+        # save's business: their past rows are history the save leaves
+        # alone and their open rows go regardless (see
+        # `_write_planned_hours`), so neither is "a past day changed"
+        # when the distribution no longer names them.
+        crew_now = set(
+            ExtraWorkAssignment.objects.filter(
+                extra_work_request=extra_work
+            ).values_list("user_id", flat=True)
+        )
         stored = {
             (row.user_id, row.date, row.hour_type_id): row.hours
             for row in extra_work.planned_hours.all()
+            if row.user_id in crew_now
         }
         wanted_map = {
             (user_id, on_date, hour_type_id): hours

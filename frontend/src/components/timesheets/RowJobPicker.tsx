@@ -4,24 +4,32 @@
  *
  * A row of the week grid is one (person, building) pair the operator
  * asked for. Under the person's name sits one quiet link; clicking it
- * opens a small grouped picker:
+ * opens a small picker with the SEARCH ON TOP (W-HOURS5 Task 7) and,
+ * under it:
  *
+ *   **No job — general hours**   the default, and what an untagged row
+ *                   saves as;
  *   **This week**   that person's REAL planned jobs in THAT building
  *                   for THE SELECTED WEEK — what the caller's
  *                   `thisWeek(person, building)` returns, which the
  *                   week dialog reads from `/reports/week-assignments/`
  *                   keyed by the dialog's week, never today's;
- *   **No job — general hours**   the default, and what an untagged row
- *                   saves as;
- *   **Search other work…**   free search across open jobs in the
+ *   **Other work**  what the free search finds beyond this week, in the
  *                   buildings the person may enter — the reference
  *                   system's freedom: helping on a job you were never
  *                   put on is still enterable.
  *
- * A chosen job renders as a small removable tag on the row. The row's
- * identity (which hours land where) is the GRID's business: this
- * component only reports the choice through `onChange`; the grid moves
- * the typed cells onto the retagged row.
+ * The search filters LIVE, by code and by title: "TCK-373", a bare
+ * "373" and "final test" all find TCK-2026-000373 — final test. "This
+ * week" matches come first, then other jobs. There is no separate
+ * search row any more; the box at the top is the search.
+ *
+ * A chosen job renders as a small removable tag on the row — clipped
+ * with an ellipsis inside the person's cell and carrying the full title
+ * as a tooltip (W-HOURS5 Task 5), so a long title never pushes the
+ * building column. The row's identity (which hours land where) is the
+ * GRID's business: this component only reports the choice through
+ * `onChange`; the grid moves the typed cells onto the retagged row.
  *
  * ## Portalled, like `ChipMultiSelect`'s list
  *
@@ -62,8 +70,39 @@ const GROUP_STYLE = {
 
 const NOTE_STYLE = { margin: 0, padding: "4px 8px 6px" } as const;
 
+/** Task 5 — the tag's label is clipped inside the person cell. */
+const TAG_LABEL_STYLE = {
+  display: "inline-block",
+  maxWidth: "18ch",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  verticalAlign: "bottom",
+} as const;
+
 /** How long the search waits after the last keystroke. */
 const SEARCH_DEBOUNCE_MS = 250;
+
+/**
+ * Task 7 — does this job answer the query?
+ *
+ * By TITLE (case-insensitive substring — "final test") and by CODE:
+ * the digits of the query ("TCK-373" -> "373", "373" -> "373") match
+ * the job's id or any run of digits in its title, so the ticket number
+ * "TCK-2026-000373" is found by its short form. An empty query matches
+ * everything.
+ */
+function jobMatches(job: HourSourceOption, query: string): boolean {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") return true;
+  const title = job.title.toLowerCase();
+  if (title.includes(wanted)) return true;
+  const digits = wanted.replace(/\D/g, "");
+  if (digits === "") return false;
+  if (job.source_id !== null && String(job.source_id) === digits) return true;
+  // "000373" contains "373"; so does "2026-000373". Match the digit run.
+  return title.replace(/\D/g, " ").split(" ").some((run) => run.includes(digits));
+}
 
 export function RowJobPicker({
   tag,
@@ -82,7 +121,10 @@ export function RowJobPicker({
   tagLabel: string;
   /** This person's planned jobs in this row's building this week. */
   thisWeek: HourSourceOption[];
-  /** Free search across the jobs this person may book against. */
+  /** Free search across the jobs this person may book against. The
+   *  caller narrows to the person's buildings; this component applies
+   *  `jobMatches` on top, so a code the server cannot search by ("TCK-
+   *  373") still finds its job among the person's own. */
   search: (query: string) => Promise<HourSourceOption[]>;
   onChange: (next: RowJobSource | null) => void;
   /** Reports the open popover's bottom edge (viewport px); `null` when
@@ -94,7 +136,6 @@ export function RowJobPicker({
 }) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
-  const [searchMode, setSearchMode] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<HourSourceOption[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -120,11 +161,11 @@ export function RowJobPicker({
       if (!anchor) return;
       const box = anchor.getBoundingClientRect();
       const below = window.innerHeight - box.bottom;
-      // 320 = the popover's max height plus its offset from the link.
-      const flipped = below < 320 && box.top > below;
+      // 340 = the popover's max height plus its offset from the link.
+      const flipped = below < 340 && box.top > below;
       const width = Math.max(
-        280,
-        Math.min(400, window.innerWidth - box.left - 16),
+        300,
+        Math.min(420, window.innerWidth - box.left - 16),
       );
       setRect({
         left: box.left,
@@ -151,7 +192,7 @@ export function RowJobPicker({
     }
     const node = popRef.current;
     onOpenChange(node ? node.getBoundingClientRect().bottom : null);
-  }, [open, rect, results, searchMode, onOpenChange]);
+  }, [open, rect, results, query, onOpenChange]);
 
   // Close on a click outside, bound only while open.
   useEffect(() => {
@@ -175,10 +216,10 @@ export function RowJobPicker({
     searchRef.current = search;
   }, [search]);
 
-  // The search, debounced. Everything here happens in the timer's
-  // callback, never synchronously in the effect body.
+  // The "other work" search, debounced. Everything here happens in the
+  // timer's callback, never synchronously in the effect body.
   useEffect(() => {
-    if (!open || !searchMode) return;
+    if (!open) return;
     const wanted = query.trim();
     if (wanted === "") return;
     let cancelled = false;
@@ -204,11 +245,10 @@ export function RowJobPicker({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [open, searchMode, query]);
+  }, [open, query]);
 
   function close() {
     setOpen(false);
-    setSearchMode(false);
     setQuery("");
     setResults(null);
     setSearchError(false);
@@ -240,26 +280,46 @@ export function RowJobPicker({
       aria-selected={isCurrent(job)}
       className={`chip-multiselect-option${isCurrent(job) ? " is-selected" : ""}`}
       onClick={() => pick(job)}
+      title={job.title}
       data-testid={`${testId}-option-${job.source_type}-${job.source_id ?? "none"}`}
     >
-      <span>{job.title}</span>
+      <span style={TAG_LABEL_STYLE}>{job.title}</span>
     </button>
   );
+
+  // Task 7 — "This week" matches FIRST, then the other work the search
+  // found that is not already in this week's list.
+  const weekMatches = thisWeek.filter((job) => jobMatches(job, query));
+  const weekKeys = new Set(
+    thisWeek.map((job) => `${job.source_type}:${job.source_id ?? ""}`),
+  );
+  const otherMatches = (results ?? []).filter(
+    (job) =>
+      jobMatches(job, query) &&
+      !weekKeys.has(`${job.source_type}:${job.source_id ?? ""}`),
+  );
+  const hasQuery = query.trim() !== "";
 
   return (
     <div
       ref={anchorRef}
-      style={{ marginTop: 2, fontWeight: 400 }}
+      style={{ marginTop: 2, fontWeight: 400, maxWidth: "100%" }}
       onKeyDown={onKeyDown}
       data-testid={testId}
     >
       {tag !== null ? (
         <span
           className="cell-tag cell-tag-muted"
-          style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            maxWidth: "100%",
+          }}
+          title={tagLabel}
           data-testid={`${testId}-tag`}
         >
-          {tagLabel}
+          <span style={TAG_LABEL_STYLE}>{tagLabel}</span>
           <button
             type="button"
             className="chip-multiselect-remove"
@@ -299,25 +359,32 @@ export function RowJobPicker({
             style={{
               left: rect.left,
               width: rect.width,
-              maxHeight: 300,
+              maxHeight: 320,
               ...(rect.flipped
                 ? { bottom: window.innerHeight - rect.top }
                 : { top: rect.top }),
             }}
             data-testid={`${testId}-picker`}
           >
-            <div style={GROUP_STYLE}>{t("hours_week_grid.job_group_week")}</div>
-            {thisWeek.length === 0 ? (
-              <p
-                className="muted small"
-                style={NOTE_STYLE}
-                data-testid={`${testId}-week-empty`}
-              >
-                {t("hours_week_grid.job_group_week_empty")}
-              </p>
-            ) : (
-              thisWeek.map(option)
-            )}
+            {/* Task 7 — the search, on top, live. */}
+            <div style={{ padding: "4px 4px 2px" }}>
+              <input
+                className="field-input"
+                type="search"
+                autoFocus
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  if (event.target.value.trim() === "") {
+                    setResults(null);
+                    setSearchError(false);
+                  }
+                }}
+                placeholder={t("hours_week_grid.job_search_placeholder")}
+                aria-label={t("hours_week_grid.job_search")}
+                data-testid={`${testId}-search`}
+              />
+            </div>
             <button
               type="button"
               role="option"
@@ -328,33 +395,25 @@ export function RowJobPicker({
             >
               <span>{t("hours_week_grid.job_general")}</span>
             </button>
-            {!searchMode ? (
-              <button
-                type="button"
-                className="chip-multiselect-option"
-                onClick={() => setSearchMode(true)}
-                data-testid={`${testId}-search-open`}
+            <div style={GROUP_STYLE}>{t("hours_week_grid.job_group_week")}</div>
+            {weekMatches.length === 0 ? (
+              <p
+                className="muted small"
+                style={NOTE_STYLE}
+                data-testid={`${testId}-week-empty`}
               >
-                <span>{t("hours_week_grid.job_search")}</span>
-              </button>
+                {hasQuery
+                  ? t("hours_week_grid.job_group_week_no_match")
+                  : t("hours_week_grid.job_group_week_empty")}
+              </p>
             ) : (
-              <div style={{ padding: "4px 4px 2px" }}>
-                <input
-                  className="field-input"
-                  type="search"
-                  autoFocus
-                  value={query}
-                  onChange={(event) => {
-                    setQuery(event.target.value);
-                    if (event.target.value.trim() === "") {
-                      setResults(null);
-                      setSearchError(false);
-                    }
-                  }}
-                  placeholder={t("hours_week_grid.job_search_placeholder")}
-                  aria-label={t("hours_week_grid.job_search")}
-                  data-testid={`${testId}-search`}
-                />
+              weekMatches.map(option)
+            )}
+            {hasQuery && (
+              <>
+                <div style={GROUP_STYLE}>
+                  {t("hours_week_grid.job_group_other")}
+                </div>
                 {searching ? (
                   <p className="muted small" style={NOTE_STYLE}>
                     {t("hours_week_grid.job_searching")}
@@ -363,7 +422,7 @@ export function RowJobPicker({
                   <p className="form-error" style={NOTE_STYLE}>
                     {t("hours_week_grid.job_search_error")}
                   </p>
-                ) : results !== null && results.length === 0 ? (
+                ) : otherMatches.length === 0 ? (
                   <p
                     className="muted small"
                     style={NOTE_STYLE}
@@ -372,9 +431,9 @@ export function RowJobPicker({
                     {t("hours_week_grid.job_search_none")}
                   </p>
                 ) : (
-                  (results ?? []).map(option)
+                  otherMatches.map(option)
                 )}
-              </div>
+              </>
             )}
           </div>,
           document.body,

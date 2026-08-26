@@ -5,44 +5,40 @@
  *    One record (`TimeEntry`), two doors. The admin week grid is one;
  *    this is the other.
  *
- * On the ticket's Plan tab, beside the planned-vs-worked comparison:
- * pick people (several at once), a date, an hour type and a number of
- * hours, and one ordinary `TimeEntry` row lands per person, tagged
+ * On the ticket's Plan tab, in the planned-vs-worked card's header:
+ * pick people (several at once), a date, an hour type and the hours,
+ * and one ordinary `TimeEntry` row lands per person, tagged
  * `source_type=TICKET / source_id=<this ticket>` with the ticket's
  * building prefilled. Nothing here is a second write path: every row
  * goes through `POST /api/timesheets/entries/`, which owns every rule
  * — employee eligibility, the company anchor, the hour type's
  * ownership, and the week lock.
  *
+ * ## W-HOURS5 Task 8 — per-person amounts
+ *
+ * One number for everyone was the wrong grain the moment a crew of
+ * three worked six, four and four hours. So: a shared "Hours for
+ * everyone" box PREFILLS one compact row per selected person, and each
+ * row's hours are editable on their own. A row the operator has typed
+ * into stops following the shared box — it is theirs now — while the
+ * untouched rows keep following it. Date and hour type stay shared:
+ * one day, one kind of hour, several people, several amounts. The
+ * summary line counts the rows and sums the hours it is about to save.
+ *
  * ## W-HOURS4 Task 3 — who is offered
  *
  * Everyone ASSIGNED to the job: the crew (`ticket.assigned_staff`, the
  * `TicketStaffAssignment` slots) AND the responsible managers
  * (`TicketManagerAssignment`, read through
- * `GET /tickets/<id>/manager-assignments/`). The picker used to offer
- * the crew alone — not by decision but by data shape: the ticket
- * payload carries `assigned_staff` and nothing about managers, so the
- * page handed over the one list it had. The plan meanwhile puts
- * managers on jobs and the comparison beside this door listed them
- * with worked 0,00 — and the one dialog that could change that number
- * could not name them. The write path never had the restriction:
- * BUILDING_MANAGER and COMPANY_ADMIN are provider employees the entry
- * endpoint accepts (`timesheets.scope.PROVIDER_EMPLOYEE_ROLES`).
+ * `GET /tickets/<id>/manager-assignments/`). The write path never had
+ * a staff-only restriction: BUILDING_MANAGER and COMPANY_ADMIN are
+ * provider employees the entry endpoint accepts
+ * (`timesheets.scope.PROVIDER_EMPLOYEE_ROLES`).
  *
- * ## W-HOURS4 Task 2 — the button that did nothing
+ * ## W-HOURS4 Task 2 — refusals at the button
  *
- * Driven on the deployed build, the happy path worked (201, close,
- * toast, refreshed comparison). What DID read as dead was the shape of
- * the form: the submit sat silently disabled until every input was
- * valid, with no sentence saying which one was not — and the person
- * the operator wanted (a planned manager) was not offerable at all, so
- * the button stayed grey for as long as they looked at it. Enter in
- * the hours box did nothing either (no form), and the crew list, which
- * stays open after a pick by design, could float over the actions for
- * a longer crew.
- *
- * So: it IS a form (Enter submits), the button is always pressable
- * when not busy, and pressing it with something missing says what is
+ * It IS a form (Enter submits), the button is always pressable when
+ * not busy, and pressing it with something missing says what is
  * missing AT THE BUTTON — the same place a server refusal lands. The
  * people list reports its open edge through `usePickerReserve`, and
  * the spacer sits ABOVE the actions row so the buttons are pushed
@@ -64,13 +60,6 @@
  * row before anything is written, so a locked week never half-books.
  * If a later row fails, the dialog says how many landed before it.
  *
- * ## Locked weeks
- *
- * The server answers 400 `week_closed` with its own sentence, and that
- * sentence is shown verbatim at the action. The dialog does not pre-ask
- * the lock: the answer would be one more request for a case the write
- * already handles, and a stale "open" would still be refused.
- *
  * A NON-native overlay, conditionally mounted, like every other editing
  * modal here (`WeekEntryDialog`). CLAUDE.md's render-unconditionally
  * rule is about the native `<dialog>` element.
@@ -84,6 +73,7 @@ import { createTimeEntry, listHourTypes } from "../../api/timesheets";
 import type { HourType } from "../../api/timesheets.types";
 import { ChipMultiSelect } from "../ChipMultiSelect";
 import { hourTypeLabel } from "../../lib/hourTypeLabel";
+import { formatNumber } from "../../lib/intl";
 import { toDateString } from "../../lib/isoWeek";
 import { usePickerReserve } from "../../lib/usePickerReserve";
 
@@ -133,7 +123,11 @@ export function BookHoursDialog({
   const [peopleIds, setPeopleIds] = useState<number[]>([]);
   const [date, setDate] = useState(() => toDateString(new Date()));
   const [hourTypeId, setHourTypeId] = useState<number | "">("");
-  const [hoursText, setHoursText] = useState("");
+  /** Task 8 — the shared box, and the rows that stopped following it.
+   *  A person's own entry exists only once they typed into their row;
+   *  until then the row reads the shared value. */
+  const [sharedHours, setSharedHours] = useState("");
+  const [ownHours, setOwnHours] = useState<Record<number, string>>({});
   const [hourTypes, setHourTypes] = useState<HourType[] | null>(null);
   const [typesError, setTypesError] = useState("");
   /** Task 3 — the responsible managers, `null` until read. */
@@ -218,7 +212,24 @@ export function BookHoursDialog({
     return out;
   }, [crew, managers]);
 
-  const hoursValue = parseHours(hoursText);
+  const nameOf = (id: number) =>
+    people.find((member) => member.id === id)?.name ?? `#${id}`;
+
+  /** The selected people in pick order, each with the hours their row
+   *  currently reads: their own once typed, the shared box until then. */
+  const rows = peopleIds.map((id) => ({
+    id,
+    name: nameOf(id),
+    hours: id in ownHours ? ownHours[id] : sharedHours,
+    own: id in ownHours,
+  }));
+
+  const acceptHours = (raw: string) => HOURS_INPUT.test(raw);
+
+  const totalHours = rows.reduce(
+    (sum, row) => sum + (parseHours(row.hours) ?? 0),
+    0,
+  );
 
   async function submit() {
     if (busy) return;
@@ -236,22 +247,33 @@ export function BookHoursDialog({
       setError(t("book_hours.need_type"));
       return;
     }
-    if (hoursValue === null) {
-      setError(t("book_hours.need_hours"));
-      return;
+    // Task 8 — every row must carry real hours; the first one that
+    // does not is named.
+    const amounts: { id: number; hours: number }[] = [];
+    for (const row of rows) {
+      const value = parseHours(row.hours);
+      if (value === null) {
+        setError(
+          row.own || sharedHours.trim() !== ""
+            ? t("book_hours.need_hours_for", { name: row.name })
+            : t("book_hours.need_hours"),
+        );
+        return;
+      }
+      amounts.push({ id: row.id, hours: value });
     }
     setBusy(true);
     setError("");
     setLanded(0);
     let count = 0;
     try {
-      for (const employee of peopleIds) {
+      for (const amount of amounts) {
         await createTimeEntry({
           company: companyId,
-          employee,
+          employee: amount.id,
           date,
           hour_type: hourTypeId,
-          hours: hoursValue.toFixed(2),
+          hours: amount.hours.toFixed(2),
           building: buildingId,
           source_type: "TICKET",
           source_id: ticketId,
@@ -290,7 +312,7 @@ export function BookHoursDialog({
       <div
         ref={modalRef}
         className="card book-hours-modal"
-        style={{ width: "min(96vw, 560px)", padding: 24 }}
+        style={{ width: "min(96vw, 600px)", padding: 24 }}
       >
         <h3 className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>
           {t("book_hours.title", { ticket: ticketNo })}
@@ -299,8 +321,8 @@ export function BookHoursDialog({
           {t("book_hours.subtitle")}
         </p>
 
-        {/* Task 2 — a FORM, so Enter in the hours box submits exactly
-            as the button does. */}
+        {/* Task 2 — a FORM, so Enter in an hours box submits exactly as
+            the button does. */}
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -396,19 +418,21 @@ export function BookHoursDialog({
             </div>
             <div className="field">
               <label className="field-label" htmlFor="book-hours-hours">
-                {t("book_hours.hours_label")}
+                {t("book_hours.shared_hours_label")}
               </label>
+              {/* Task 8 — the SHARED box. Every row that has not been
+                  typed into reads this value. */}
               <input
                 id="book-hours-hours"
                 className="field-input"
                 type="text"
                 inputMode="decimal"
-                value={hoursText}
+                value={sharedHours}
                 onChange={(event) => {
                   // A rejected keystroke leaves the state alone, so the
                   // character never lands — the week grid's own rule.
-                  if (HOURS_INPUT.test(event.target.value)) {
-                    setHoursText(event.target.value);
+                  if (acceptHours(event.target.value)) {
+                    setSharedHours(event.target.value);
                   }
                 }}
                 placeholder="8"
@@ -418,13 +442,90 @@ export function BookHoursDialog({
             </div>
           </div>
 
+          {/* Task 8 — ONE COMPACT ROW PER SELECTED PERSON. Their hours
+              follow the shared box until touched; a touched row is
+              marked so the operator can see which ones are their own. */}
+          {rows.length > 0 && (
+            <div
+              className="field"
+              style={{ marginTop: 4 }}
+              data-testid="book-hours-people-rows"
+            >
+              <span className="field-label">
+                {t("book_hours.per_person_title")}
+              </span>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 4 }}
+              >
+                {rows.map((row) => (
+                  <div
+                    key={row.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                    data-testid={`book-hours-person-${row.id}`}
+                    data-own={row.own ? "true" : "false"}
+                  >
+                    <span
+                      style={{
+                        flex: "1 1 auto",
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {row.name}
+                    </span>
+                    {row.own && (
+                      <span
+                        className="muted small"
+                        data-testid={`book-hours-person-own-${row.id}`}
+                      >
+                        {t("book_hours.own_amount")}
+                      </span>
+                    )}
+                    <input
+                      className="field-input"
+                      type="text"
+                      inputMode="decimal"
+                      style={{ flex: "0 0 96px", textAlign: "right" }}
+                      value={row.hours}
+                      onChange={(event) => {
+                        if (!acceptHours(event.target.value)) return;
+                        const next = event.target.value;
+                        setOwnHours((current) => ({ ...current, [row.id]: next }));
+                      }}
+                      placeholder={sharedHours || "8"}
+                      disabled={busy}
+                      aria-label={t("book_hours.person_hours_label", {
+                        name: row.name,
+                      })}
+                      data-testid={`book-hours-person-hours-${row.id}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Where the rows go, said once, so nobody wonders whether the
               building or the job has to be typed. */}
-          <p className="muted small" style={{ marginTop: 4 }}>
+          <p
+            className="muted small"
+            style={{ marginTop: 4 }}
+            data-testid="book-hours-summary"
+          >
             {peopleIds.length > 0
               ? t("book_hours.summary", {
                   count: peopleIds.length,
                   ticket: ticketNo,
+                  total: formatNumber(totalHours, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }),
                 })
               : t("book_hours.summary_none", { ticket: ticketNo })}
           </p>

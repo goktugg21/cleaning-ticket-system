@@ -34,6 +34,7 @@ import { PdfPreviewDialog } from "../components/PdfPreviewDialog";
 import type { PdfPreviewDialogHandle } from "../components/PdfPreviewDialog";
 import { markThreadRead, notifyInboxUnreadChanged } from "../api/inbox";
 import {
+  addTicketStaffAssignment,
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
   getStaffCompletionRoute,
@@ -41,8 +42,18 @@ import {
   listAssignableStaff,
   listCustomerContacts,
   listStaffAssignmentRequests,
+  listTicketStaffAssignments,
+  removeTicketStaffAssignment,
 } from "../api/admin";
-import { listTicketCategories, setTicketCategory } from "../api/tickets";
+import {
+  listTicketAssignmentCandidates,
+  listTicketCategories,
+  setTicketCategory,
+} from "../api/tickets";
+import {
+  addManagerAssignments,
+  removeManagerAssignment,
+} from "../api/managerAssignments";
 import { getMessageRecipients } from "../api/notifications";
 import { formatDateTime } from "../lib/intl";
 import { MyPartsPanel } from "./tickets/MyPartsPanel";
@@ -85,6 +96,7 @@ import {
   planExtraWork,
 } from "../api/extraWork";
 import type {
+  AssignmentCandidate,
   ExtraWorkAssignment,
   ExtraWorkPlanPayload,
   ExtraWorkRequestDetail,
@@ -1314,6 +1326,22 @@ export function TicketDetailPage() {
   const [ewPlanLoading, setEwPlanLoading] = useState(false);
   const [ewPlanBusy, setEwPlanBusy] = useState(false);
   const [ewPlanError, setEwPlanError] = useState("");
+  /* W-HOURS5 Task 2 — the plan modal owns the whole crew. People and
+     managers are added and removed through the TICKET's own endpoints
+     (the People tab's doors), and `tickets.crew_sync` mirrors every
+     change onto the plan's crew, so the modal, the People tab and the
+     plan read ONE crew. Candidates come from the ticket's own
+     eligibility helper, filtered against the plan's current crew. */
+  const [ewPlanCandidates, setEwPlanCandidates] = useState<
+    AssignmentCandidate[]
+  >([]);
+  const [ewPlanManagerCandidates, setEwPlanManagerCandidates] = useState<
+    AssignmentCandidate[]
+  >([]);
+  const [ewPlanCandidatesLoading, setEwPlanCandidatesLoading] =
+    useState(false);
+  const [ewCrewBusy, setEwCrewBusy] = useState(false);
+  const [ewCrewError, setEwCrewError] = useState("");
 
   /* hours2 — the job's own hours door and the comparison beside it.
      One record (`TimeEntry`), two doors: the admin week grid is one,
@@ -1337,9 +1365,13 @@ export function TicketDetailPage() {
       return;
     }
     let cancelled = false;
-    getExtraWork(ewOriginId)
-      .then((detail) => {
-        if (!cancelled) setEwPlanDetail(detail);
+    // W-HOURS5 Task 2 — the crew arrives WITH the plan, so the
+    // comparison can say who is no longer on the job.
+    Promise.all([getExtraWork(ewOriginId), listExtraWorkAssignments(ewOriginId)])
+      .then(([detail, assignments]) => {
+        if (cancelled) return;
+        setEwPlanAssignments(assignments);
+        setEwPlanDetail(detail);
       })
       .catch(() => undefined);
     return () => {
@@ -1347,23 +1379,119 @@ export function TicketDetailPage() {
     };
   }, [requestedTicketTab, ewOriginId, ewPlanDetail, me?.role]);
 
+  /** W-HOURS5 Task 2 — the plan's crew and who may still be added,
+   *  read together. Candidates are the TICKET's own eligibility answer
+   *  (the same helper its assign endpoints validate against), minus
+   *  everyone already on the plan's crew. */
+  async function loadEwPlanCrew(ticketId: number, ewId: number) {
+    const [assignments, workers, managers] = await Promise.all([
+      listExtraWorkAssignments(ewId),
+      listTicketAssignmentCandidates(ticketId, "WORKER"),
+      listTicketAssignmentCandidates(ticketId, "MANAGER"),
+    ]);
+    setEwPlanAssignments(assignments);
+    const onJob = new Set(assignments.map((a) => a.user_id));
+    setEwPlanCandidates(workers.filter((c) => !onJob.has(c.id)));
+    setEwPlanManagerCandidates(managers.filter((c) => !onJob.has(c.id)));
+  }
+
   async function openEwPlan() {
-    if (ewOriginId === null) return;
+    if (ewOriginId === null || !ticket) return;
     setEwPlanError("");
+    setEwCrewError("");
     setEwPlanLoading(true);
+    setEwPlanCandidatesLoading(true);
     setEwPlanOpen(true);
     try {
-      const [detail, assignments] = await Promise.all([
+      const [detail] = await Promise.all([
         getExtraWork(ewOriginId),
-        listExtraWorkAssignments(ewOriginId),
+        loadEwPlanCrew(ticket.id, ewOriginId),
       ]);
       setEwPlanDetail(detail);
-      setEwPlanAssignments(assignments);
     } catch (err) {
       setEwPlanOpen(false);
       toast.push({ variant: "error", title: getApiError(err) });
     } finally {
       setEwPlanLoading(false);
+      setEwPlanCandidatesLoading(false);
+    }
+  }
+
+  /* W-HOURS5 Task 2 — the modal's crew writes, all through the ticket's
+     own endpoints. A person gets a BASE slot dated as the ticket is
+     dated (the same seed spawn's carry-over uses); removal deletes
+     their base slot(s) on THIS ticket — the server cascades their part
+     slots and `crew_sync` clears only their today-and-future plan.
+     Managers go through the manager-assignment endpoints. After every
+     write the crew and the candidates are re-read from the server, and
+     the ticket itself is reloaded so the People tab and the hours door
+     see the same crew. */
+  async function addEwPlanPeople(userIds: number[]) {
+    if (!ticket || ewOriginId === null || userIds.length === 0) return;
+    setEwCrewBusy(true);
+    setEwCrewError("");
+    try {
+      for (const userId of userIds) {
+        await addTicketStaffAssignment(ticket.id, userId, {
+          scheduled_start_at: ticket.scheduled_start_at,
+          scheduled_end_at: ticket.scheduled_end_at,
+        });
+      }
+      await loadEwPlanCrew(ticket.id, ewOriginId);
+      await loadTicket();
+    } catch (err) {
+      setEwCrewError(getApiError(err));
+    } finally {
+      setEwCrewBusy(false);
+    }
+  }
+
+  async function removeEwPlanPerson(userId: number) {
+    if (!ticket || ewOriginId === null) return;
+    setEwCrewBusy(true);
+    setEwCrewError("");
+    try {
+      const page = await listTicketStaffAssignments(ticket.id);
+      const baseSlots = page.results.filter(
+        (slot) => slot.user_id === userId && slot.sub_task === null,
+      );
+      for (const slot of baseSlots) {
+        await removeTicketStaffAssignment(ticket.id, slot.id);
+      }
+      await loadEwPlanCrew(ticket.id, ewOriginId);
+      await loadTicket();
+    } catch (err) {
+      setEwCrewError(getApiError(err));
+    } finally {
+      setEwCrewBusy(false);
+    }
+  }
+
+  async function addEwPlanManager(userId: number) {
+    if (!ticket || ewOriginId === null) return;
+    setEwCrewBusy(true);
+    setEwCrewError("");
+    try {
+      await addManagerAssignments(ticket.id, [userId]);
+      await loadEwPlanCrew(ticket.id, ewOriginId);
+    } catch (err) {
+      setEwCrewError(getApiError(err));
+    } finally {
+      setEwCrewBusy(false);
+    }
+  }
+
+  async function removeEwPlanManager(userId: number) {
+    if (!ticket || ewOriginId === null) return;
+    setEwCrewBusy(true);
+    setEwCrewError("");
+    try {
+      await removeManagerAssignment(ticket.id, userId);
+      await loadEwPlanCrew(ticket.id, ewOriginId);
+    } catch (err) {
+      setEwCrewError(getApiError(err));
+    } finally {
+      setEwCrewBusy(false);
     }
   }
 
@@ -4932,26 +5060,12 @@ export function TicketDetailPage() {
               table below is the plan's only reading here. Day-level
               detail stays where it lives: the plan modal.
 
-              What remains is the DOOR: the in-tab "Plan the work"
-              (W-HOURS3), right-aligned above the table it edits, same
-              handler, same gate and same modal as the header button.
-              `ewPlanDetail` is still read for the table's planned side
-              and to seed the modal. */}
-          {ticket.extra_work_origin &&
-            isProviderManagementRole(me?.role) &&
-            canAccessExtraWork(me?.role) && (
-              <div className="tk-plan-actions" data-testid="ticket-ew-plan-actions">
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => void openEwPlan()}
-                  disabled={ewPlanLoading}
-                  data-testid="ticket-ew-plan-open-tab"
-                >
-                  {ewPlanLoading ? t("ew_plan_loading") : t("ew_plan_button")}
-                </button>
-              </div>
-            )}
+              W-HOURS5 Task 4 — the in-tab "Plan the work" that sat
+              above the table is gone: both doors ("Plan the work",
+              "Enter hours worked") live in the comparison card's own
+              header now, same handler, same gate and same modal as the
+              page header's button, which stays. `ewPlanDetail` is still
+              read for the table's planned side and to seed the modal. */}
           {/* hours2 Part 1b — PLANNED VS WORKED, on the job.
 
               The comparison the Extra Work page used to carry ("Hours
@@ -4984,6 +5098,19 @@ export function TicketDetailPage() {
               selfOnly={!canManageTimesheets(me?.role)}
               canBook={canManageTimesheets(me?.role)}
               onBook={() => setBookHoursOpen(true)}
+              /* W-HOURS5 Task 4 — the Plan door, in the same header,
+                 same weight. Same predicate as the page header's. */
+              canPlan={!!ticket.extra_work_origin && canAccessExtraWork(me?.role)}
+              onPlan={() => void openEwPlan()}
+              planLoading={ewPlanLoading}
+              /* W-HOURS5 Task 2 — who is on the job NOW, so a removed
+                 person's surviving past plan reads as history. Known
+                 only once the plan (and its crew) has been read. */
+              crewIds={
+                ticket.extra_work_origin && ewPlanDetail
+                  ? ewPlanAssignments.map((a) => a.user_id)
+                  : null
+              }
               refreshNonce={hoursNonce}
             />
           )}
@@ -5789,11 +5916,19 @@ export function TicketDetailPage() {
           ew={ewPlanDetail}
           assignments={ewPlanAssignments}
           assignmentsLoading={ewPlanLoading}
-          candidates={[]}
-          candidatesLoading={false}
-          assignBusy={false}
-          assignError=""
-          onAssign={() => undefined}
+          /* W-HOURS5 Task 2 — the crew is edited HERE, through the
+             ticket's own endpoints; see `addEwPlanPeople` & co. */
+          candidates={ewPlanCandidates}
+          candidatesLoading={ewPlanCandidatesLoading}
+          assignBusy={ewCrewBusy}
+          assignError={ewCrewError}
+          onAssign={(userIds) => void addEwPlanPeople(userIds)}
+          onRemovePerson={(userId) => void removeEwPlanPerson(userId)}
+          removeBusy={ewCrewBusy}
+          managerCandidates={ewPlanManagerCandidates}
+          managerBusy={ewCrewBusy}
+          onAssignManager={(userId) => void addEwPlanManager(userId)}
+          onRemoveManager={(userId) => void removeEwPlanManager(userId)}
           busy={ewPlanBusy}
           error={ewPlanError}
           onCancel={() => {

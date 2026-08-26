@@ -617,6 +617,13 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
             assigned_by=request.user,
             **slot_ser.validated_data,
         )
+        # W-HOURS5 Task 2 — a BASE slot on a spawned ticket puts the
+        # person on the PLAN's crew as well; the People tab and the plan
+        # modal are two doors to one crew. See `tickets.crew_sync`.
+        if assignment.sub_task_id is None:
+            from .crew_sync import worker_added
+
+            worker_added(ticket, target, actor=request.user)
         return Response(
             self.get_serializer(assignment).data,
             status=status.HTTP_201_CREATED,
@@ -797,6 +804,15 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
                 sub_task__isnull=False,
             ).delete()
         slot.delete()
+        # W-HOURS5 Task 2 — off the ticket's base crew means off the
+        # plan's crew too, once no ticket of the extra work names them:
+        # the WORKER assignment goes and their today-and-future plan is
+        # cleared; PAST planned hours stay as history (the ruling). See
+        # `tickets.crew_sync`.
+        if slot.sub_task_id is None:
+            from .crew_sync import worker_removed
+
+            worker_removed(ticket, slot.user_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

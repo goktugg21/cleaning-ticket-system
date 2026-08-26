@@ -332,6 +332,12 @@ class TicketManagerAssignmentListCreateView(generics.ListCreateAPIView):
             )
             any_created = any_created or created
             created_rows.append(assignment)
+            # W-HOURS5 Task 2 — a responsible manager of a spawned
+            # ticket is on the PLAN's crew as well. See
+            # `tickets.crew_sync`.
+            from .crew_sync import manager_added
+
+            manager_added(ticket, target, actor=request.user)
 
         return Response(
             self.get_serializer(created_rows, many=True).data,
@@ -361,4 +367,10 @@ class TicketManagerAssignmentDeleteView(generics.GenericAPIView):
             return Response(
                 {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
             )
+        # W-HOURS5 Task 2 — mirrored onto the plan's crew once no ticket
+        # of the extra work names them any more; their today-and-future
+        # plan is cleared, past rows stay. See `tickets.crew_sync`.
+        from .crew_sync import manager_removed
+
+        manager_removed(ticket, int(user_id))
         return Response(status=status.HTTP_204_NO_CONTENT)
