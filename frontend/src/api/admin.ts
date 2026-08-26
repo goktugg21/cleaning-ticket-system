@@ -1512,15 +1512,28 @@ export interface SubTask {
   created_by_email: string | null;
   created_at: string;
   updated_at: string;
+  // W-LATE §3a — the part's own window: a day, a range, or a day with a
+  // clock hint. All optional; a part with none behaves as before.
+  planned_start_date: string | null;
+  planned_end_date: string | null;
+  time_window_label: string;
+  // W-LATE §3b — the server's word on where the part stands against
+  // its window (`tickets/lateness.part_state`).
+  window_state: SubTaskWindowState;
   is_done: boolean;
   staff_assignments: SubTaskAssignment[];
 }
+
+export type SubTaskWindowState = "NONE" | "OPEN" | "LAST_DAY" | "MISSED" | "DONE";
 
 // POST body for SubTask create (manager only; `ordering` defaults to 0).
 export interface SubTaskCreatePayload {
   title: string;
   description?: string;
   ordering?: number;
+  planned_start_date?: string | null;
+  planned_end_date?: string | null;
+  time_window_label?: string;
 }
 
 // PATCH body for SubTask update (manager only; all fields optional).
@@ -1528,6 +1541,9 @@ export interface SubTaskPatch {
   title?: string;
   description?: string;
   ordering?: number;
+  planned_start_date?: string | null;
+  planned_end_date?: string | null;
+  time_window_label?: string;
 }
 
 export async function listAssignableStaff(

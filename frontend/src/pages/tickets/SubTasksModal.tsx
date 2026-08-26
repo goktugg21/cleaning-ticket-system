@@ -43,7 +43,7 @@
 //
 // A NON-native overlay, conditionally mounted, like `AssignStaffDialog`.
 import { useEffect, useRef, useState } from "react";
-import { Pencil, X } from "lucide-react";
+import { CalendarDays, Pencil, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -59,6 +59,41 @@ import { BoundedList } from "../../components/BoundedList";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Toggle } from "../../components/Toggle";
 import { useToast } from "../../components/ToastProvider";
+import { formatDate } from "../../lib/intl";
+import { formatPlannedWindow } from "../../lib/plannedWindow";
+
+/** A "YYYY-MM-DD" in the viewer's locale; explicit midnight so a bare
+ *  date is not read as UTC and printed a day early. */
+function formatDay(iso: string): string {
+  return formatDate(`${iso}T00:00:00`);
+}
+
+/** W-LATE §3a — the server's refusal, with the FIELD it belongs to.
+ *  `part_windows.refusal` answers `{detail, code, field}`; anything
+ *  else is a plain error for the modal's own banner. */
+function windowRefusal(err: unknown): { field: string; message: string } | null {
+  const data = (err as { response?: { data?: { field?: string; detail?: string } } })
+    ?.response?.data;
+  if (data && typeof data.field === "string" && typeof data.detail === "string") {
+    return { field: data.field, message: data.detail };
+  }
+  return null;
+}
+
+/** The window as one line: "10 aug – 12 aug · 08:00-10:00". */
+function windowText(
+  part: Pick<SubTask, "planned_start_date" | "planned_end_date" | "time_window_label">,
+  empty: string,
+): string {
+  const days = formatPlannedWindow(
+    part.planned_start_date,
+    part.planned_end_date,
+    formatDay,
+    { empty: "", endOnly: (end) => end },
+  );
+  const bits = [days, part.time_window_label].filter(Boolean);
+  return bits.length > 0 ? bits.join(" · ") : empty;
+}
 
 /** One person already on the job, as the part picker needs them. */
 export type JobMember = { id: number; name: string };
@@ -108,6 +143,16 @@ export function SubTasksModal({
   // W26.3 -- a refusal belongs to the ROW that caused it. Keyed by part
   // id so assigning on one part never blanks another row's message.
   const [errorByPart, setErrorByPart] = useState<Record<number, string>>({});
+  // W-LATE §3a -- the window editor: which row has it open, its draft,
+  // and the refusal AT THE FIELD (the server names the field).
+  const [windowPartId, setWindowPartId] = useState<number | null>(null);
+  const [windowDraft, setWindowDraft] = useState({ start: "", end: "", label: "" });
+  const [windowError, setWindowError] = useState<{ field: string; message: string } | null>(null);
+  // The add form's optional window, and its own field-level refusal.
+  const [newStart, setNewStart] = useState("");
+  const [newEnd, setNewEnd] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [addError, setAddError] = useState<{ field: string; message: string } | null>(null);
 
   const [autoFlag, setAutoFlag] = useState(autoCompleteOnSubtasks);
   const [flagBusy, setFlagBusy] = useState(false);
@@ -153,15 +198,92 @@ export function SubTasksModal({
     if (title === "") return;
     setBusy(true);
     setError("");
+    setAddError(null);
     try {
-      await createSubTask(ticketId, { title });
+      await createSubTask(ticketId, {
+        title,
+        ...(newStart ? { planned_start_date: newStart } : {}),
+        ...(newEnd ? { planned_end_date: newEnd } : {}),
+        ...(newLabel.trim() ? { time_window_label: newLabel.trim() } : {}),
+      });
       setNewTitle("");
+      setNewStart("");
+      setNewEnd("");
+      setNewLabel("");
       await onChanged();
     } catch (err) {
-      setError(getApiError(err));
+      // W-LATE §3a -- a window refusal lands under the field it names;
+      // anything else keeps the modal's banner.
+      const refusal = windowRefusal(err);
+      if (refusal) setAddError(refusal);
+      else setError(getApiError(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  // W-LATE §3a -- open the window editor seeded with what the part has.
+  function openWindowEditor(part: SubTask) {
+    setWindowPartId(part.id);
+    setWindowError(null);
+    setWindowDraft({
+      start: part.planned_start_date ?? "",
+      end: part.planned_end_date ?? "",
+      label: part.time_window_label ?? "",
+    });
+  }
+
+  async function handleSaveWindow(part: SubTask) {
+    setBusy(true);
+    setError("");
+    setWindowError(null);
+    try {
+      await updateSubTask(ticketId, part.id, {
+        planned_start_date: windowDraft.start || null,
+        planned_end_date: windowDraft.end || null,
+        time_window_label: windowDraft.label.trim(),
+      });
+      setWindowPartId(null);
+      await onChanged();
+      push({
+        variant: "success",
+        title: t("parts.toast_window_saved", { part: part.title }),
+      });
+    } catch (err) {
+      const refusal = windowRefusal(err);
+      if (refusal) setWindowError(refusal);
+      else setError(getApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** W-LATE §3b -- the part's state, as the chip vocabulary the Work
+   *  Plan already uses: done = strikethrough, last day = orange, missed
+   *  = red with "niet gedaan op <end>". */
+  function stateChip(part: SubTask) {
+    const state = part.window_state ?? "NONE";
+    if (state === "NONE" || state === "OPEN") return null;
+    const cls =
+      state === "DONE"
+        ? "parts-chip parts-chip-done"
+        : state === "LAST_DAY"
+          ? "parts-chip parts-chip-last-day"
+          : "parts-chip parts-chip-missed";
+    const end = part.planned_end_date ?? part.planned_start_date;
+    const label =
+      state === "DONE"
+        ? t("subtasks.status_done")
+        : state === "LAST_DAY"
+          ? t("parts.state_last_day")
+          : end
+            ? t("parts.missed_on", { date: formatDay(end) })
+            : t("parts.state_missed");
+    return (
+      <span className={cls} data-testid="ticket-part-window-state" data-state={state}>
+        {label}
+      </span>
+    );
   }
 
   async function handleRenamePart(part: SubTask) {
@@ -455,6 +577,23 @@ export function SubTasksModal({
                     </div>
                   </div>
 
+                  {/* W-LATE §3a/§3b -- the part's own window and where it
+                      stands against it. One line, always present, so a
+                      part without a window says so instead of showing
+                      nothing where a colleague's row shows a date. */}
+                  <div className="parts-row-window" data-testid="ticket-part-window">
+                    <CalendarDays size={12} strokeWidth={2} aria-hidden="true" />
+                    <span
+                      className={
+                        part.window_state === "DONE" ? "parts-chip-done" : undefined
+                      }
+                      data-testid="ticket-part-window-text"
+                    >
+                      {windowText(part, t("parts.window_none"))}
+                    </span>
+                    {stateChip(part)}
+                  </div>
+
                   {!isTerminal && (
                     <div className="parts-row-actions">
                       {renaming ? (
@@ -553,6 +692,20 @@ export function SubTasksModal({
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              if (windowPartId === part.id) setWindowPartId(null);
+                              else openWindowEditor(part);
+                            }}
+                            disabled={busy}
+                            aria-expanded={windowPartId === part.id}
+                            data-testid="ticket-part-window-edit"
+                          >
+                            <CalendarDays size={13} strokeWidth={2.2} aria-hidden="true" />
+                            {t("parts.window_edit")}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
                             onClick={() => setConfirmRemoveId(part.id)}
                             disabled={busy}
                             data-testid="ticket-part-remove"
@@ -562,6 +715,91 @@ export function SubTasksModal({
                           </button>
                         </>
                       )}
+                    </div>
+                  )}
+
+                  {/* W-LATE §3a -- the window editor, under the row. Three
+                      inputs, the server's refusal under the input it
+                      names, and the whole ticket window quoted in that
+                      refusal so the operator knows what to fit inside. */}
+                  {windowPartId === part.id && !isTerminal && (
+                    <div data-testid="ticket-part-window-editor">
+                      <div className="parts-window-fields">
+                        <label className="field">
+                          <span className="field-label">{t("parts.window_start")}</span>
+                          <input
+                            type="date"
+                            className="field-input"
+                            value={windowDraft.start}
+                            disabled={busy}
+                            onChange={(event) =>
+                              setWindowDraft((d) => ({ ...d, start: event.target.value }))
+                            }
+                            data-testid="ticket-part-window-start"
+                          />
+                          {windowError?.field === "planned_start_date" && (
+                            <span className="parts-window-error" role="alert" data-testid="ticket-part-window-error" data-field="planned_start_date">
+                              {windowError.message}
+                            </span>
+                          )}
+                        </label>
+                        <label className="field">
+                          <span className="field-label">{t("parts.window_end")}</span>
+                          <input
+                            type="date"
+                            className="field-input"
+                            value={windowDraft.end}
+                            disabled={busy}
+                            onChange={(event) =>
+                              setWindowDraft((d) => ({ ...d, end: event.target.value }))
+                            }
+                            data-testid="ticket-part-window-end"
+                          />
+                          {windowError?.field === "planned_end_date" && (
+                            <span className="parts-window-error" role="alert" data-testid="ticket-part-window-error" data-field="planned_end_date">
+                              {windowError.message}
+                            </span>
+                          )}
+                        </label>
+                        <label className="field">
+                          <span className="field-label">{t("parts.window_time")}</span>
+                          <input
+                            type="text"
+                            className="field-input"
+                            maxLength={64}
+                            placeholder={t("parts.window_time_placeholder")}
+                            value={windowDraft.label}
+                            disabled={busy}
+                            onChange={(event) =>
+                              setWindowDraft((d) => ({ ...d, label: event.target.value }))
+                            }
+                            data-testid="ticket-part-window-time"
+                          />
+                        </label>
+                      </div>
+                      {windowError && windowError.field !== "planned_start_date" && windowError.field !== "planned_end_date" && (
+                        <p className="parts-row-error" role="alert">{windowError.message}</p>
+                      )}
+                      <div className="assign-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => void handleSaveWindow(part)}
+                          disabled={busy}
+                          data-testid="ticket-part-window-save"
+                        >
+                          {t("parts.window_save")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setWindowPartId(null)}
+                          disabled={busy}
+                          data-testid="ticket-part-window-cancel"
+                        >
+                          {t("common:cancel")}
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -669,6 +907,55 @@ export function SubTasksModal({
               >
                 {t("parts.add_button")}
               </button>
+            </div>
+            {/* W-LATE §3a -- the optional window on a new part. Same three
+                inputs as the row editor; a refusal lands under its field. */}
+            <div className="parts-window-fields" data-testid="ticket-part-add-window">
+              <label className="field">
+                <span className="field-label">{t("parts.window_start")}</span>
+                <input
+                  type="date"
+                  className="field-input"
+                  value={newStart}
+                  disabled={busy}
+                  onChange={(event) => setNewStart(event.target.value)}
+                  data-testid="ticket-part-add-start"
+                />
+                {addError?.field === "planned_start_date" && (
+                  <span className="parts-window-error" role="alert" data-testid="ticket-part-add-error" data-field="planned_start_date">
+                    {addError.message}
+                  </span>
+                )}
+              </label>
+              <label className="field">
+                <span className="field-label">{t("parts.window_end")}</span>
+                <input
+                  type="date"
+                  className="field-input"
+                  value={newEnd}
+                  disabled={busy}
+                  onChange={(event) => setNewEnd(event.target.value)}
+                  data-testid="ticket-part-add-end"
+                />
+                {addError?.field === "planned_end_date" && (
+                  <span className="parts-window-error" role="alert" data-testid="ticket-part-add-error" data-field="planned_end_date">
+                    {addError.message}
+                  </span>
+                )}
+              </label>
+              <label className="field">
+                <span className="field-label">{t("parts.window_time")}</span>
+                <input
+                  type="text"
+                  className="field-input"
+                  maxLength={64}
+                  placeholder={t("parts.window_time_placeholder")}
+                  value={newLabel}
+                  disabled={busy}
+                  onChange={(event) => setNewLabel(event.target.value)}
+                  data-testid="ticket-part-add-time"
+                />
+              </label>
             </div>
           </div>
         )}

@@ -396,5 +396,11 @@
   "book_hours.saving": "Opslaan…",
   "book_hours.submit": "Uren opslaan",
   "book_hours.booked_one": "{{count}} regel uren opgeslagen op het werk.",
-  "book_hours.booked_other": "{{count}} regels uren opgeslagen op het werk."
+  "book_hours.booked_other": "{{count}} regels uren opgeslagen op het werk.",
+  "transition.open_parts_one": "{{count}} onderdeel is nog open:",
+  "transition.open_parts_other": "{{count}} onderdelen zijn nog open:",
+  "transition.open_parts_proceed": "U kunt doorgaan — open onderdelen blokkeren deze stap niet. Ze blijven open staan tot iemand ze gereed meldt.",
+  "transition.part_mark_done": "Markeer gereed",
+  "transition.part_nobody": "niemand toegewezen",
+  "transition.parts_quick_done_note": "Gereed gemeld bij het afronden van de melding."
 }

@@ -27,6 +27,7 @@ from rest_framework.response import Response
 
 from accounts.permissions import IsAuthenticatedAndActive
 
+from . import part_windows
 from .models import SubTask, TERMINAL_TICKET_STATUSES, TicketStaffAssignment
 from .serializers import SubTaskSerializer, SubTaskWriteSerializer
 from .views_staff_assignments import _gate_actor, _resolve_ticket
@@ -94,6 +95,10 @@ class TicketSubTaskListCreateView(generics.ListCreateAPIView):
             return terminal
         write = SubTaskWriteSerializer(data=request.data)
         write.is_valid(raise_exception=True)
+        # W-LATE §3a — the window rules, answered at the field.
+        refused = part_windows.refusal(ticket, None, write.validated_data)
+        if refused is not None:
+            return refused
         sub_task = SubTask.objects.create(
             ticket=ticket,
             created_by=request.user,
@@ -152,6 +157,9 @@ class TicketSubTaskDetailView(generics.GenericAPIView):
             return terminal
         write = SubTaskWriteSerializer(sub_task, data=request.data, partial=True)
         write.is_valid(raise_exception=True)
+        refused = part_windows.refusal(ticket, sub_task, write.validated_data)
+        if refused is not None:
+            return refused
         write.save()
         sub_task.refresh_from_db()
         return Response(SubTaskSerializer(sub_task).data)

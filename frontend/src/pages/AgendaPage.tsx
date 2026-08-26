@@ -50,6 +50,7 @@ import { getWorkPlan, planExtraWorkForDate } from "../api/workPlan";
 import type {
   WorkPlanEntry,
   WorkPlanKind,
+  WorkPlanPart,
   WorkPlanResponse,
 } from "../api/workPlan";
 import { useAuth } from "../auth/AuthContext";
@@ -70,6 +71,7 @@ import {
   dedupeByJob,
   detailPath,
   formatDay,
+  partHostDays,
 } from "../components/workplan/entryHelpers";
 import { matchesChip } from "../components/workplan/chips";
 import { isQuarantined, latenessOf, sortLate } from "../components/workplan/lateness";
@@ -518,14 +520,26 @@ function WorkPlanWeek() {
     [entries, chip, kindFilter, needle],
   );
 
-  const groups = useMemo(
-    () =>
-      dayKeys.map((key) => ({
-        key,
-        items: filtered.filter((entry) => entry.day === key),
-      })),
-    [dayKeys, filtered],
-  );
+  /** W-LATE §3b — a part with a window renders as its chip inside its
+   *  day(s) under its ticket. The ticket's card hangs on one day; on
+   *  every other day one of its parts covers, the column gets a HOST
+   *  card (`WorkPlanCard hostParts`). Built here, once, from the same
+   *  filtered list the columns render. */
+  const groups = useMemo(() => {
+    const hosts = new Map<string, { entry: WorkPlanEntry; parts: WorkPlanPart[] }[]>();
+    for (const entry of filtered) {
+      for (const [day, parts] of partHostDays(entry, dayKeys)) {
+        const bucket = hosts.get(day) ?? [];
+        bucket.push({ entry, parts });
+        hosts.set(day, bucket);
+      }
+    }
+    return dayKeys.map((key) => ({
+      key,
+      items: filtered.filter((entry) => entry.day === key),
+      hosts: hosts.get(key) ?? [],
+    }));
+  }, [dayKeys, filtered]);
 
   /** The open day's CURRENT rows. Derived from `groups` rather than
    *  captured when the header was clicked, so a filter changed behind
@@ -846,7 +860,7 @@ function WorkPlanWeek() {
               key={group.key}
               iso={group.key}
               isToday={group.key === todayKey}
-              count={group.items.length}
+              count={group.items.length + group.hosts.length}
               onOpen={
                 group.items.length > 0
                   ? () => setDayModal(group.key)
@@ -861,6 +875,17 @@ function WorkPlanWeek() {
                   locale={locale}
                   onComplete={() => setCompletionTarget(entry)}
                   onUnable={() => setUnableTarget(entry)}
+                />
+              ))}
+              {group.hosts.map((host) => (
+                <WorkPlanCard
+                  key={`host-${host.entry.key}`}
+                  entry={host.entry}
+                  role={role}
+                  locale={locale}
+                  onComplete={() => setCompletionTarget(host.entry)}
+                  onUnable={() => setUnableTarget(host.entry)}
+                  hostParts={host.parts}
                 />
               ))}
             </WorkPlanDayColumn>

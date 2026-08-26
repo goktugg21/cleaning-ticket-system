@@ -32,7 +32,13 @@ import type { SubTask, SubTaskAssignment } from "../../api/admin";
 import { BoundedList } from "../../components/BoundedList";
 import { SlotStatusBadge } from "../../components/SlotStatusBadge";
 import { StatusBadge } from "../../components/StatusBadge";
+import { formatDate } from "../../lib/intl";
+import { formatPlannedWindow } from "../../lib/plannedWindow";
 import { SlotCompletionDialog } from "../SlotCompletionDialog";
+
+function formatDay(iso: string): string {
+  return formatDate(`${iso}T00:00:00`);
+}
 
 /** A part this viewer is on, paired with THEIR slot in it. */
 type MyPart = { part: SubTask; mine: SubTaskAssignment };
@@ -175,6 +181,9 @@ export function MyPartsPanel({
                     flex: "1 1 auto",
                     minWidth: 0,
                     overflowWrap: "anywhere",
+                    // W-LATE §3b -- done = strikethrough, here too.
+                    textDecoration:
+                      part.window_state === "DONE" ? "line-through" : undefined,
                   }}
                 >
                   {part.title}
@@ -196,6 +205,46 @@ export function MyPartsPanel({
 
               {part.description && (
                 <p className="muted small" style={{ margin: 0 }}>{part.description}</p>
+              )}
+              {/* W-LATE §3b -- the part's own window and its state, in
+                  the same words and colours the Work Plan uses. */}
+              {(part.planned_start_date || part.planned_end_date || part.time_window_label) && (
+                <p
+                  className="muted small"
+                  style={{ margin: 0, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}
+                  data-testid="my-parts-row-window"
+                  data-state={part.window_state}
+                >
+                  <span>
+                    {t("my_parts.window", {
+                      window: [
+                        formatPlannedWindow(
+                          part.planned_start_date,
+                          part.planned_end_date,
+                          formatDay,
+                          { empty: "", endOnly: (end) => end },
+                        ),
+                        part.time_window_label,
+                      ]
+                        .filter(Boolean)
+                        .join(" · "),
+                    })}
+                  </span>
+                  {part.window_state === "LAST_DAY" && (
+                    <span className="parts-chip parts-chip-last-day">
+                      {t("parts.state_last_day")}
+                    </span>
+                  )}
+                  {part.window_state === "MISSED" && (
+                    <span className="parts-chip parts-chip-missed">
+                      {t("parts.missed_on", {
+                        date: formatDay(
+                          (part.planned_end_date ?? part.planned_start_date) as string,
+                        ),
+                      })}
+                    </span>
+                  )}
+                </p>
               )}
               {slot.assignment_note && (
                 <p

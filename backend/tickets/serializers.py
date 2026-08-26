@@ -565,6 +565,9 @@ class SubTaskSerializer(serializers.ModelSerializer):
         source="created_by.email", read_only=True, default=None
     )
     is_done = serializers.SerializerMethodField()
+    # W-LATE §3b — NONE / OPEN / LAST_DAY / MISSED / DONE, the server's
+    # word, so no screen re-derives the colour from the dates.
+    window_state = serializers.SerializerMethodField()
     staff_assignments = SubTaskAssignmentSerializer(many=True, read_only=True)
 
     class Meta:
@@ -575,6 +578,11 @@ class SubTaskSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "ordering",
+            # W-LATE §3a — the part's own window.
+            "planned_start_date",
+            "planned_end_date",
+            "time_window_label",
+            "window_state",
             "created_by",
             "created_by_email",
             "created_at",
@@ -587,6 +595,9 @@ class SubTaskSerializer(serializers.ModelSerializer):
     def get_is_done(self, obj) -> bool:
         return obj.is_done()
 
+    def get_window_state(self, obj) -> str:
+        return obj.window_state()
+
 
 class SubTaskWriteSerializer(serializers.ModelSerializer):
     """Validates the operator-editable SubTask fields on create / patch.
@@ -594,7 +605,18 @@ class SubTaskWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SubTask
-        fields = ["title", "description", "ordering"]
+        fields = [
+            "title",
+            "description",
+            "ordering",
+            # W-LATE §3a — the window. The two rules on it (end not before
+            # start; inside the ticket's own window) are checked in the
+            # view through `part_windows.refusal`, which answers a STABLE
+            # 400 carrying the field the message belongs to.
+            "planned_start_date",
+            "planned_end_date",
+            "time_window_label",
+        ]
 
 
 class TicketCategorySerializer(serializers.Serializer):

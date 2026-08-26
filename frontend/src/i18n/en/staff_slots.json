@@ -270,5 +270,17 @@
   "late.day_section_other": "Late ({{count}})",
   "late.day_none": "Nothing late.",
   "late.col_how_late": "How late",
-  "parts.missed_on": "not done on {{date}}"
+  "parts.missed_on": "not done on {{date}}",
+  "parts.window_none": "No window of its own",
+  "parts.window_edit": "Window",
+  "parts.window_start": "First day",
+  "parts.window_end": "Last day (optional)",
+  "parts.window_time": "Time (optional)",
+  "parts.window_time_placeholder": "e.g. 08:00-10:00 or morning",
+  "parts.window_save": "Save window",
+  "parts.toast_window_saved": "Window of “{{part}}” saved.",
+  "parts.state_last_day": "Last day today",
+  "parts.state_missed": "Not done",
+  "my_parts.window": "Planned: {{window}}",
+  "agenda.part_host": "Part planned"
 }

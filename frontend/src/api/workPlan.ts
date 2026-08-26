@@ -36,17 +36,16 @@ export type WorkPlanKind = "TICKET_SLOT" | "EXTRA_WORK";
  *  `tickets/lateness.part_state`; `NONE` is "no window". */
 export type WorkPlanPartState = "NONE" | "OPEN" | "LAST_DAY" | "MISSED" | "DONE";
 
-/** One named part of a ticket, as the Work Plan shows it. The window
- *  fields arrive with phase 3 (parts get windows); until then they are
- *  absent and the chip is the plain pill. */
+/** One named part of a ticket, as the Work Plan shows it, with its own
+ *  window (W-LATE §3a) and the STATE the server decided for it. */
 export interface WorkPlanPart {
   id: number;
   title: string;
-  planned_start?: string | null;
-  planned_end?: string | null;
-  time_window_label?: string;
-  is_done?: boolean;
-  state?: WorkPlanPartState;
+  planned_start: string | null;
+  planned_end: string | null;
+  time_window_label: string;
+  is_done: boolean;
+  state: WorkPlanPartState;
 }
 
 /** W-LATE — one rung of the ladder. `1` planned date passed, `2`

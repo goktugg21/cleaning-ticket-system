@@ -36,6 +36,89 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — W-LATE: the late surface, the ladder that speaks, and parts with windows
+
+Three phases, three commits, one deploy. The law of the wave, which
+every screen below obeys: **planned dates never change by themselves.**
+A job not done keeps its planned date; it reappears in TODAY's late
+strip every day because it is unfinished, not because anything moved.
+
+**Phase 1 — the late surface (read-only derivation).**
+- `backend/tickets/lateness.py` is the ONE owner of "how late": L1 the
+  planned date passed, L2 the customer deadline passed, L3 quarantine —
+  thirty days past the anchor (deadline, else planned date) with zero
+  worked hours booked. `lateness_index.py` gathers the facts per JOB
+  (the widest window across the ticket and its slots, the extra work's
+  deadline, hours from `timesheets` by TICKET and EXTRA_WORK source).
+- `GET /api/tickets/work-plan/` gained `late_entries` (one row per late
+  job, crew merged, sorted orange -> bordeaux), `counts.late`, and a
+  `lateness` block on EVERY entry, so the strip, the week card and the
+  day modal cannot disagree about a job.
+- The agenda: a full-width late strip ABOVE the week grid that WRAPS
+  (no horizontal scroll anywhere; the seven day columns untouched), a
+  "+N more" expander so the worst never hides, a bordeaux quarantine
+  bar that renders ONLY when an L3 job exists (Open / Reschedule /
+  Cancel through the doors that already existed), and today's day modal
+  split into "planned today" and "late" through the same client helper
+  (`components/workplan/lateness.ts`).
+
+**Phase 2 — the ladder speaks (additive migrations 0020/0032).**
+- `tickets/escalations.py`, on an hourly beat: L2 entry tells the
+  ticket's ASSIGNED MANAGERS once; persisting past half the promise's
+  own span (planned start -> deadline, else creation -> deadline, never
+  under a day) tells the building managers AND the company admins once;
+  L3 entry tells the PROVIDER ADMINS once. Recipients are resolved by
+  ROLE inside the ticket's provider company through the rosters the SLA
+  sweep already uses; no person appears in code or settings.
+- Once, ever, per step per ticket — recorded in `TicketEscalation`
+  (ticket, step, anchor_date, notified_at, recipient_ids). A genuinely
+  re-planned job (a new deadline) restarts L1/L2 from the new dates and
+  can speak again; L3's never-worked clock resets only when hours land.
+- Both channels, through the existing engine: a bell row AND a mail per
+  recipient, in the recipient's own language, saying the fact and the
+  promise broken ("Zonwering — TCK-2026-000344: deadline 20 aug is 6
+  dagen overschreden"). `Notification.severity` (INFO/L1/L2/L3) is new
+  and backfilled: the four pre-existing time-driven types are L1. The
+  bell, the list and the toast read it — L1 amber, L2 red, L3 dark red
+  and the L2/L3 toast stays until dismissed.
+- The quarantine bar and the late card name who was told, resolved at
+  render time from the recipients the step reached ("<full name> has
+  been notified"); the profile carries no honorific, so the bare full
+  name renders (see NEXT).
+
+**Phase 3 — parts get windows (additive migration 0033).**
+- `SubTask.planned_start_date / planned_end_date / time_window_label`.
+  The server refuses a window outside the ticket's own window (earliest
+  planned day -> latest of planned end, deadline, last slot day) with a
+  stable 400 that names the field (`part_window_outside_ticket`,
+  `part_window_end_before_start`); the parts modal renders it under the
+  input.
+- The Work Plan carries each part's window and STATE
+  (`lateness.part_state`): done = strikethrough, last day = orange,
+  missed = red "niet gedaan op <end>", and a missed part keeps rendering
+  forward until done or deleted — it never escalates on its own. A part
+  windowed into another week places its ticket there (host card under
+  the ticket's heading). `MyPartsPanel` shows the same.
+- Completion stays free: the transition modal lists open parts once,
+  inline, with per-part "mark done" quick actions, and the move is never
+  blocked; the server has no gate on parts (pinned by test).
+
+### Deliberately NOT done — W-LATE
+
+- **No honorific field.** The addendum says "honorific only if the
+  profile carries one"; `User` carries none, so the bare full name
+  renders. Adding the field is a product decision, listed in NEXT.
+- **No websockets.** The bell polls (15 s) as before; real push stays
+  deferred to production day as ruled.
+- **No cancel move for a plain ticket by CA/BM.** The state machine has
+  no provider-side cancel; the quarantine bar's Cancel… is the
+  SUPER_ADMIN out-of-machine jump to CLOSED (with its recorded reason)
+  for tickets, and the CANCELLED transition for extra work. Other roles
+  see Open / Reschedule.
+- **The overdue button stays.** It asks "past its due date" (deadline,
+  else last planned day); the strip asks "planned date passed" and its
+  two worse rungs. Different questions, both labelled.
+
 ### Done — W16: the extra works register, copied from his system with the billing left out
 
 The owner: **"make the contracts page exactly the same as my father's
@@ -2879,6 +2962,14 @@ still listed as open, and all of them had shipped.
 
 9. **The Work Plan demo seeder** does not add scheduled tickets and extra
    work, so a fresh dev database shows an empty week.
+
+10. **A display honorific on the user profile.** W-LATE's "Dhr. <naam>
+    is geïnformeerd" renders the bare full name today because no
+    profile field carries a form of address; the sentence is already
+    built from the resolved recipients, so the field is the whole job.
+11. **Real push for the bell.** The ladder's L2/L3 rows reach the bell
+    through the 15-second poll; websockets/SSE stay deferred to
+    production day (ruled in W4-Q and again in W-LATE).
 
 10. **The forecast's "Current Monthly" needs an as-of-today label.**
    Without it the number reads as a full-month figure.

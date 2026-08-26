@@ -396,5 +396,11 @@
   "book_hours.saving": "Saving…",
   "book_hours.submit": "Save hours",
   "book_hours.booked_one": "{{count}} row of hours saved on the job.",
-  "book_hours.booked_other": "{{count}} rows of hours saved on the job."
+  "book_hours.booked_other": "{{count}} rows of hours saved on the job.",
+  "transition.open_parts_one": "{{count}} part is still open:",
+  "transition.open_parts_other": "{{count}} parts are still open:",
+  "transition.open_parts_proceed": "You can proceed — open parts do not block this step. They stay open until somebody marks them done.",
+  "transition.part_mark_done": "Mark done",
+  "transition.part_nobody": "nobody assigned",
+  "transition.parts_quick_done_note": "Marked done while completing the ticket."
 }

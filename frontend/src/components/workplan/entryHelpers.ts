@@ -9,7 +9,7 @@
  * pointing at a real seam anyway. These are not components.
  */
 import type { Role } from "../../api/types";
-import type { WorkPlanEntry } from "../../api/workPlan";
+import type { WorkPlanEntry, WorkPlanPart } from "../../api/workPlan";
 import { canAccessExtraWork } from "../../auth/permissions";
 import { formatDate } from "../../lib/intl";
 
@@ -86,4 +86,36 @@ export function dedupeByJob(entries: WorkPlanEntry[]): WorkPlanEntry[] {
     });
   }
   return [...byJob.values()];
+}
+
+/**
+ * W-LATE §3b — the days of the week a part is windowed on.
+ *
+ * A part with a window renders as its chip inside its day(s) under its
+ * ticket. The ticket's own card hangs on ONE day of the week (§12B's
+ * `day_for`), so on every OTHER day a part covers, the page renders a
+ * HOST card — the ticket's heading and that day's chips, nothing else.
+ * This is the pure half: for one entry, `{ dayKey -> parts }` over the
+ * seven keys, skipping the entry's own day (its own card already shows
+ * every part). A part with no window is on no day but the card's.
+ */
+export function partHostDays(
+  entry: WorkPlanEntry,
+  dayKeys: string[],
+): Map<string, WorkPlanPart[]> {
+  const out = new Map<string, WorkPlanPart[]>();
+  for (const part of entry.parts) {
+    if (!part.planned_start) continue;
+    const start = part.planned_start;
+    const end = part.planned_end ?? part.planned_start;
+    for (const key of dayKeys) {
+      if (key === entry.day) continue;
+      if (key >= start && key <= end) {
+        const bucket = out.get(key) ?? [];
+        bucket.push(part);
+        out.set(key, bucket);
+      }
+    }
+  }
+  return out;
 }

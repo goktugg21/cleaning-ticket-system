@@ -742,6 +742,15 @@ class SubTask(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     ordering = models.PositiveIntegerField(default=0)
+    # W-LATE §3a — the part's OWN window. Optional, and three shapes: a
+    # day (start only), a range (start and end), a day with a clock hint
+    # (`time_window_label`, the same free-text hint the ticket and the
+    # slot already carry — "08:00-10:00", "ochtend"). The server refuses
+    # a window outside the ticket's own window (`part_windows.py`); a
+    # part with no window behaves exactly as before this wave.
+    planned_start_date = models.DateField(null=True, blank=True, default=None)
+    planned_end_date = models.DateField(null=True, blank=True, default=None)
+    time_window_label = models.CharField(max_length=64, blank=True, default="")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -771,6 +780,19 @@ class SubTask(models.Model):
         return all(
             a.slot_status == StaffAssignmentSlotStatus.COMPLETED
             for a in assignments
+        )
+
+    def window_state(self, today=None) -> str:
+        """W-LATE §3b — where this part stands against its own window:
+        NONE / OPEN / LAST_DAY / MISSED / DONE, from the one rule in
+        `tickets/lateness.py`."""
+        from . import lateness
+
+        return lateness.part_state(
+            planned_start=self.planned_start_date,
+            planned_end=self.planned_end_date,
+            is_done=self.is_done(),
+            today=today or timezone.localdate(),
         )
 
 

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import type { SlotStatus } from "../../api/admin";
 import type { Role } from "../../api/types";
-import type { WorkPlanEntry } from "../../api/workPlan";
+import type { WorkPlanEntry, WorkPlanPart } from "../../api/workPlan";
 import { SlotStatusBadge } from "../SlotStatusBadge";
 import { StatusBadge } from "../StatusBadge";
 import { formatPlannedWindow } from "../../lib/plannedWindow";
@@ -96,16 +96,23 @@ export function WorkPlanCard({
   locale,
   onComplete,
   onUnable,
+  hostParts,
 }: {
   entry: WorkPlanEntry;
   role: Role | null;
   locale: string;
   onComplete: () => void;
   onUnable: () => void;
+  /** W-LATE §3b — when set, this is a HOST card: the ticket's heading
+   *  over the parts windowed on THIS day, on a day that is not the
+   *  card's own. No status, no time, no actions — the job's own card
+   *  carries those, one column over. */
+  hostParts?: WorkPlanPart[];
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
   const to = detailPath(entry, role);
   const isExtraWork = entry.kind === "EXTRA_WORK";
+  const isHost = hostParts !== undefined;
 
   function timeOnly(iso: string | null): string {
     if (!iso) return "";
@@ -150,6 +157,30 @@ export function WorkPlanCard({
       {entry.title}
     </>
   );
+
+  if (isHost) {
+    return (
+      <li
+        className="wp-card wp-card-host"
+        data-testid="agenda-part-host-card"
+        data-kind={entry.kind}
+        data-job={entry.ticket_id !== null ? `ticket-${entry.ticket_id}` : entry.key}
+      >
+        <span className="wp-kind-tag wp-kind-tag-ticket" data-testid="agenda-card-kind">
+          {t("agenda.part_host")}
+        </span>
+        {to ? (
+          <Link to={to} className="wp-card-title">
+            {heading}
+          </Link>
+        ) : (
+          <span className="wp-card-title">{heading}</span>
+        )}
+        {where && <span className="wp-card-where">{where}</span>}
+        <PartChips parts={hostParts} testId="agenda-card-part" />
+      </li>
+    );
+  }
 
   return (
     <li

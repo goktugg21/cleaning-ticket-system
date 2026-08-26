@@ -84,6 +84,7 @@ from . import lateness as late_rules
 from .lateness_index import LATE_LIVE_TICKET_STATUSES, LatenessIndex
 from .models import (
     StaffAssignmentSlotStatus,
+    SubTask,
     Ticket,
     TicketStaffAssignment,
     TicketStatus,
@@ -246,6 +247,21 @@ def _ew_overdue_q(today: datetime.date) -> Q:
     return _EW_LIVE_Q & Q(deadline__isnull=False, deadline__lt=today)
 
 
+def _part_window_q(week_start: datetime.date, week_end: datetime.date) -> Q:
+    """W-LATE §3b — a PART this slot's person holds, windowed into this
+    week. An `Exists` rather than a join, so the predicate composes into
+    `Count(filter=...)` without multiplying slot rows by their parts."""
+    parts = SubTask.objects.filter(
+        ticket_id=OuterRef("ticket_id"),
+        staff_assignments__user_id=OuterRef("user_id"),
+        planned_start_date__lte=week_end,
+    ).filter(
+        Q(planned_end_date__gte=week_start)
+        | Q(planned_end_date__isnull=True, planned_start_date__gte=week_start)
+    )
+    return Exists(parts)
+
+
 def _slot_week_q(
     week_start: datetime.date, week_end: datetime.date, today: datetime.date
 ) -> Q:
@@ -254,11 +270,37 @@ def _slot_week_q(
     that used to copy live and late work onto today's column; those
     rows are the overdue strip's and the undated lane's. `today` is
     kept in the signature so the parity test can call both twins the
-    same way."""
+    same way.
+
+    W-LATE §3b — OR a part window: a slot whose person holds a part
+    windowed into this week is in this week too, on the part's day,
+    under its ticket (`_part_day_in_week` is the Python twin)."""
     del today
-    return Q(scheduled_start_at__date__lte=week_end) & _slot_window_end_q(
-        "gte", week_start
-    )
+    return (
+        Q(scheduled_start_at__date__lte=week_end)
+        & _slot_window_end_q("gte", week_start)
+    ) | _part_window_q(week_start, week_end)
+
+
+def _part_day_in_week(
+    parts, week_start: datetime.date, week_end: datetime.date
+) -> datetime.date | None:
+    """The first day inside the week that one of `parts` is windowed on,
+    or None. The Python twin of `_part_window_q`."""
+    days = []
+    for part in parts or []:
+        start = part.get("planned_start")
+        if not start:
+            continue
+        start_d = datetime.date.fromisoformat(start)
+        end_d = (
+            datetime.date.fromisoformat(part["planned_end"])
+            if part.get("planned_end")
+            else start_d
+        )
+        if start_d <= week_end and end_d >= week_start:
+            days.append(max(start_d, week_start))
+    return min(days) if days else None
 
 
 def _ew_week_q(
@@ -505,7 +547,7 @@ def _person_label(user) -> str:
     return (user.full_name or user.email) if user is not None else ""
 
 
-def _parts_map(slot_rows):
+def _parts_map(slot_rows, today):
     """(ticket_id, user_id) -> the parts that person holds on that ticket.
 
     W-N1 §3. ONE query for the whole week, not one per card — the same
@@ -539,6 +581,9 @@ def _parts_map(slot_rows):
             ticket__deleted_at__isnull=True,
         )
         .select_related("sub_task")
+        # W-LATE §3b — `is_done` walks the part's slots; prefetched so a
+        # week of parts is one query, not one per chip.
+        .prefetch_related("sub_task__staff_assignments")
         .order_by("sub_task__ordering", "sub_task_id")
     )
     for row in rows:
@@ -551,8 +596,22 @@ def _parts_map(slot_rows):
         bucket = out.setdefault(key, [])
         if any(p["id"] == row.sub_task_id for p in bucket):
             continue
-        bucket.append({"id": row.sub_task_id, "title": row.sub_task.title})
+        bucket.append(_part_payload(row.sub_task, today))
     return out
+
+
+def _part_payload(part, today) -> dict:
+    """W-LATE §3b — the chip's whole surface: the name, the window, and
+    the STATE the server decided (`lateness.part_state`)."""
+    return {
+        "id": part.id,
+        "title": part.title,
+        "planned_start": _iso(part.planned_start_date),
+        "planned_end": _iso(part.planned_end_date),
+        "time_window_label": part.time_window_label or "",
+        "is_done": part.is_done(),
+        "state": part.window_state(today),
+    }
 
 
 def _empty_lateness() -> dict:
@@ -933,7 +992,7 @@ class WorkPlanView(APIView):
         assignees = cls._assignee_map(
             [row.id for row in ew_rows], team=team, viewer=viewer
         )
-        parts_by_pair = _parts_map(rows)
+        parts_by_pair = _parts_map(rows, today)
         # W-LATE §1b — one index for every card in this list, so a card
         # on Tuesday's column and the same job's card in the strip say
         # the same thing.
@@ -945,11 +1004,26 @@ class WorkPlanView(APIView):
         for slot in rows:
             job = _slot_job(slot)
             placement = placement_for(job, week_start, week_end, today)
+            slot_parts = parts_by_pair.get((slot.ticket_id, slot.user_id))
+            day = None
             if placement is None:
-                if fallback_placement is None:
+                # W-LATE §3b — a part windowed into this week places its
+                # ticket here, on the part's day. The Python twin of the
+                # `_part_window_q` branch in the SQL.
+                part_day = (
+                    _part_day_in_week(slot_parts, week_start, week_end)
+                    if fallback_placement is None
+                    else None
+                )
+                if part_day is not None:
+                    placement = PLACEMENT_PLANNED
+                    day = part_day
+                elif fallback_placement is None:
                     continue
-                placement = fallback_placement
-            day = day_for(job, placement, week_start, week_end, today)
+                else:
+                    placement = fallback_placement
+            if day is None:
+                day = day_for(job, placement, week_start, week_end, today)
             entries.append(
                 _entry_from_slot(
                     slot,
@@ -1092,7 +1166,7 @@ class WorkPlanView(APIView):
                 "ticket_id", "scheduled_start_at", "id"
             )
         )
-        parts_by_pair = _parts_map(slot_rows)
+        parts_by_pair = _parts_map(slot_rows, today)
         assignees = cls._assignee_map(
             [row.id for row in late_ew], team=team, viewer=viewer
         )

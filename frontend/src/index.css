@@ -14954,3 +14954,36 @@ table.assign-table { min-width: 0; width: 100%; }
   background: color-mix(in srgb, var(--late-l3) 6%, var(--surface));
 }
 .toast-sev-l3 .toast-icon { color: var(--late-l3); }
+
+/* ===================================================================
+   W-LATE §3 — parts get windows.
+   APPENDED BLOCK, NEW CLASSES ONLY. Nothing above is edited.
+
+   The chip states (`.parts-chip-done/-last-day/-missed`) are in the
+   W-LATE block above; this adds the HOST card the week grid renders on
+   a day a part covers that is not its ticket's own day, and the parts
+   modal's window line and editor. */
+.wp-card-host {
+  border-style: dashed;
+  background: var(--surface-2);
+}
+.parts-row-window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+.parts-window-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+.parts-window-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--red);
+  font-size: var(--font-xs);
+}

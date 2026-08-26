@@ -44,6 +44,7 @@ import {
   listStaffAssignmentRequests,
   listTicketStaffAssignments,
   removeTicketStaffAssignment,
+  updateStaffSlot,
 } from "../api/admin";
 import {
   listTicketAssignmentCandidates,
@@ -57,6 +58,7 @@ import {
 import { getMessageRecipients } from "../api/notifications";
 import { formatDateTime } from "../lib/intl";
 import { MyPartsPanel } from "./tickets/MyPartsPanel";
+import type { OpenPart } from "./tickets/TicketTransitionModal";
 import { StaffAssignmentSection } from "./tickets/StaffAssignmentSection";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
@@ -605,6 +607,12 @@ const TICKET_TABS = [
 ] as const;
 type TicketTab = (typeof TICKET_TABS)[number];
 
+/** W-LATE 3c - the moves that mean "the work is done", the only ones
+ *  the open-parts warn line belongs to. */
+const COMPLETION_TARGETS: ReadonlySet<TicketStatus | null> = new Set<
+  TicketStatus | null
+>(["WAITING_MANAGER_REVIEW", "WAITING_CUSTOMER_APPROVAL", "APPROVED", "CLOSED"]);
+
 export function TicketDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -997,6 +1005,23 @@ export function TicketDetailPage() {
    *  assignable-staff endpoint already excludes anyone holding a base
    *  slot here (`views_staff_assignments.py:952`), so re-sending them is
    *  a duplicate the server refuses with `staff_already_assigned`. */
+  /** W-LATE §3c — the parts still open, for the completion moves' warn
+   *  line. A part is open while it is not done; its quick action
+   *  completes the slots still ASSIGNED under it. */
+  const openParts = useMemo<OpenPart[]>(
+    () =>
+      (ticket?.sub_tasks ?? [])
+        .filter((part) => !part.is_done)
+        .map((part) => ({
+          id: part.id,
+          title: part.title,
+          slotIds: part.staff_assignments
+            .filter((slot) => slot.slot_status === "ASSIGNED")
+            .map((slot) => slot.id),
+        })),
+    [ticket],
+  );
+
   const currentAssignees = useMemo(
     () =>
       (ticket?.assigned_staff ?? [])
@@ -5720,6 +5745,22 @@ export function TicketDetailPage() {
           currentScheduledStartAt={currentScheduledStartLocal}
           busy={statusBusy !== null}
           error={transitionError}
+          // W-LATE §3c — only the moves that mean "the work is done"
+          // get the open-parts line; a move INTO work has nothing to
+          // warn about. Never a gate: the server does not check parts
+          // and neither does the modal's confirm button.
+          openParts={
+            COMPLETION_TARGETS.has(transitionTarget) ? openParts : undefined
+          }
+          onMarkPartDone={async (part) => {
+            for (const slotId of part.slotIds) {
+              await updateStaffSlot(Number(id), slotId, {
+                slot_status: "COMPLETED",
+                completion_note: t("transition.parts_quick_done_note"),
+              });
+            }
+            await loadTicket();
+          }}
           // W-FIX2 — the proof photo, through the ticket's own attachment
           // endpoint. The gate reads non-hidden `TicketAttachment` rows
           // (`_ticket_has_visible_attachment`), so an ordinary upload

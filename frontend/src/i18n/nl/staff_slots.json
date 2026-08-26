@@ -270,5 +270,17 @@
   "late.day_section_other": "Te laat ({{count}})",
   "late.day_none": "Niets te laat.",
   "late.col_how_late": "Hoe laat",
-  "parts.missed_on": "niet gedaan op {{date}}"
+  "parts.missed_on": "niet gedaan op {{date}}",
+  "parts.window_none": "Geen eigen planning",
+  "parts.window_edit": "Planning",
+  "parts.window_start": "Eerste dag",
+  "parts.window_end": "Laatste dag (optioneel)",
+  "parts.window_time": "Tijd (optioneel)",
+  "parts.window_time_placeholder": "bijv. 08:00-10:00 of ochtend",
+  "parts.window_save": "Planning opslaan",
+  "parts.toast_window_saved": "Planning van “{{part}}” opgeslagen.",
+  "parts.state_last_day": "Laatste dag vandaag",
+  "parts.state_missed": "Niet gedaan",
+  "my_parts.window": "Gepland: {{window}}",
+  "agenda.part_host": "Onderdeel gepland"
 }

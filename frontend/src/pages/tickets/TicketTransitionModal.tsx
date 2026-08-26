@@ -81,6 +81,14 @@ function prefillStartsAt(current: string, now: Date = new Date()): string {
   );
 }
 
+/** W-LATE §3c — a part that is still open when a completion move is
+ *  pressed, with the slots a "mark done" quick action would complete. */
+export interface OpenPart {
+  id: number;
+  title: string;
+  slotIds: number[];
+}
+
 export interface TicketTransitionModalProps {
   /** The verb already rendered on the button that opened this. */
   actionLabel: string;
@@ -114,6 +122,13 @@ export interface TicketTransitionModalProps {
    *  `TicketAttachment` rows, so an ordinary upload satisfies it and no
    *  backend change is needed. Resolves when the row exists. */
   onUploadProof?: (file: File) => Promise<void>;
+  /** W-LATE §3c — the parts still open. Rendered as ONE inline warn
+   *  line with per-part "mark done" quick actions; the move is NEVER
+   *  blocked on them. Passed only for the completion moves. */
+  openParts?: OpenPart[];
+  /** Completes every open slot of the part through the slot endpoint
+   *  and reloads, so the list above shrinks as parts are ticked off. */
+  onMarkPartDone?: (part: OpenPart) => Promise<void>;
 }
 
 export function TicketTransitionModal({
@@ -131,8 +146,34 @@ export function TicketTransitionModal({
   onCancel,
   onConfirm,
   onUploadProof,
+  openParts,
+  onMarkPartDone,
 }: TicketTransitionModalProps) {
   const { t } = useTranslation(["ticket_detail", "common"]);
+  // W-LATE §3c — which part's quick action is in flight, and the
+  // refusal it met, on the part's own line.
+  const [partBusy, setPartBusy] = useState<number | null>(null);
+  const [partErrors, setPartErrors] = useState<Record<number, string>>({});
+
+  async function markPartDone(part: OpenPart) {
+    if (!onMarkPartDone) return;
+    setPartBusy(part.id);
+    setPartErrors((current) => {
+      const next = { ...current };
+      delete next[part.id];
+      return next;
+    });
+    try {
+      await onMarkPartDone(part);
+    } catch (err) {
+      setPartErrors((current) => ({
+        ...current,
+        [part.id]: err instanceof Error ? err.message : String(err),
+      }));
+    } finally {
+      setPartBusy(null);
+    }
+  }
 
   // No reset effect here on purpose. The answers must not survive a
   // change of STEP -- a date typed for "start the work" must never be
@@ -354,6 +395,61 @@ export function TicketTransitionModal({
                     />
                   </>
                 )}
+              </div>
+            )}
+
+            {/* W-LATE §3c — COMPLETION STAYS FREE. Open parts are said,
+                once, inline, with the quick action that finishes each
+                one; the confirm button below is never disabled by them
+                and the server does not gate on them either. */}
+            {openParts && openParts.length > 0 && (
+              <div
+                className="transition-field wp-notice"
+                role="status"
+                data-testid="transition-open-parts"
+              >
+                <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
+                  {t("transition.open_parts", { count: openParts.length })}
+                </p>
+                <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
+                  {openParts.map((part) => (
+                    <li
+                      key={part.id}
+                      style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}
+                      data-testid="transition-open-part"
+                      data-part-id={part.id}
+                    >
+                      <span>{part.title}</span>
+                      {part.slotIds.length === 0 ? (
+                        <span className="muted small">
+                          ({t("transition.part_nobody")})
+                        </span>
+                      ) : (
+                        onMarkPartDone && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => void markPartDone(part)}
+                            disabled={busy || partBusy !== null}
+                            data-testid="transition-part-mark-done"
+                          >
+                            {partBusy === part.id
+                              ? t("updating")
+                              : t("transition.part_mark_done")}
+                          </button>
+                        )
+                      )}
+                      {partErrors[part.id] && (
+                        <span className="form-error" role="alert">
+                          {partErrors[part.id]}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <p className="muted small" style={{ margin: "6px 0 0" }}>
+                  {t("transition.open_parts_proceed")}
+                </p>
               </div>
             )}
 
