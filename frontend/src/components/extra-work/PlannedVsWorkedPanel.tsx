@@ -117,6 +117,7 @@ export function PlannedVsWorkedPanel({
   planLoading = false,
   crewIds = null,
   refreshNonce,
+  planError = null,
 }: {
   ticketId: number;
   companyId: number;
@@ -145,6 +146,9 @@ export function PlannedVsWorkedPanel({
   /** Bumped by the page after a booking so the worked side re-reads
    *  without a reload. */
   refreshNonce: number;
+  /** W-FIX1 C3 (audit F33) — the plan read failed: say so, never load
+   *  forever. */
+  planError?: string | null;
 }) {
   // Bound like every page: the page namespace first, `common` behind
   // it (`nsMode: "fallback"`), so the hour-type slot labels and the
@@ -221,6 +225,19 @@ export function PlannedVsWorkedPanel({
           {header}
           <p className="form-error" data-testid="ticket-hours-compare-error">
             {t("hours_compare.load_error")} {worked.message}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (planError) {
+    return (
+      <div className="card" data-testid="ticket-hours-compare">
+        <div className="form-section">
+          {header}
+          <p className="form-error" data-testid="ticket-hours-compare-plan-error">
+            {t("hours_compare.plan_error")} {planError}
           </p>
         </div>
       </div>
@@ -323,7 +340,13 @@ export function PlannedVsWorkedPanel({
             {t("hours_compare.self_only")}
           </p>
         )}
-        {noHours ? (
+        {noHours && !hasPlan ? (
+          /* W-FIX1 A2 (audit F2) — a PLAN is content. This keyed on
+             worked entries alone, so ticket 373 read "No hours booked
+             yet" while the server held 4.00 planned hours for a person
+             no longer on the crew. The table renders whenever either
+             side has something to say; a removed person's past plan
+             stays and is marked below (the W-HOURS5 ruling). */
           /* 1c — ONE state line. The old empty panel explained the
              timesheets module in four sentences; here the door is the
              button beside the title. */

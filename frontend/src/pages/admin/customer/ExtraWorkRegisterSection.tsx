@@ -9,6 +9,7 @@ import {
   syncExtraWorkRegister,
 } from "../../../api/contracts";
 import type { ExtraWorkRegister } from "../../../api/contracts.types";
+import { useAuth } from "../../../auth/AuthContext";
 import { useToast } from "../../../components/ToastProvider";
 import { formatMoney } from "../contracts/contractTables";
 
@@ -59,6 +60,11 @@ export function ExtraWorkRegisterSection({
 }) {
   const { t, i18n } = useTranslation("contracts");
   const toast = useToast();
+  /* W-FIX1 D2 (audit F26) — the GET is a read now. A manager opening
+     the register asks for ONE explicit sync (the POST that always
+     existed) so the projection is current; a reader just reads. */
+  const { me } = useAuth();
+  const canSync = me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
   const locale = i18n.language;
 
   const [register, setRegister] = useState<ExtraWorkRegister | null>(null);
@@ -69,7 +75,7 @@ export function ExtraWorkRegisterSection({
   const load = useCallback(() => {
     if (!Number.isFinite(customerId)) return undefined;
     let cancelled = false;
-    getExtraWorkRegister(customerId)
+    (canSync ? syncExtraWorkRegister(customerId) : getExtraWorkRegister(customerId))
       .then((data) => {
         if (cancelled) return;
         setRegister(data);
@@ -85,7 +91,7 @@ export function ExtraWorkRegisterSection({
     return () => {
       cancelled = true;
     };
-  }, [customerId]);
+  }, [customerId, canSync]);
 
   useEffect(load, [load]);
 

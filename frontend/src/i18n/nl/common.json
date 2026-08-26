@@ -2246,6 +2246,7 @@
   "contract_hours.bulk_title": "Rooster toewijzen (staande weekafspraak)",
   "contract_hours.bulk_subtitle": "Kies medewerkers en gebouwen; per combinatie wordt een regel geopend.",
   "contract_hours.bulk_week_hint": "De week van deze datum wordt als raster getoond; opgeslagen wordt het weekpatroon.",
+  "contract_hours.bulk_valid_from_required": "Vul de datum in waarop dit rooster ingaat.",
   "contract_hours.valid_from": "Geldig vanaf",
   "contract_hours.auto_fill_label": "Vul de weekstaten van deze mensen vanuit deze afspraak, totdat die afloopt",
   "contract_hours.auto_fill_column": "Vult de weekstaat",

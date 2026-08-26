@@ -66,6 +66,21 @@ export interface TransitionAnswers {
   is_override?: boolean;
 }
 
+/** W-FIX1 B2 (audit F24) — the prefilled start is never in the past:
+ *  the plan's start when it is still ahead, otherwise TODAY at the
+ *  plan's wall-clock time. Ticket 373 opened on "yesterday 00:00". */
+function prefillStartsAt(current: string, now: Date = new Date()): string {
+  if (!current) return "";
+  const planned = new Date(current);
+  if (Number.isNaN(planned.getTime())) return "";
+  if (planned.getTime() >= now.getTime()) return current;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
+    `T${pad(planned.getHours())}:${pad(planned.getMinutes())}`
+  );
+}
+
 export interface TicketTransitionModalProps {
   /** The verb already rendered on the button that opened this. */
   actionLabel: string;
@@ -75,6 +90,10 @@ export interface TicketTransitionModalProps {
   requirements: TransitionRequirements | null;
   loading: boolean;
   staff: AssignableStaff[];
+  /** W-FIX1 C3 (audit F34) — why the list is empty when the server
+   *  refused it; rendered under the picker so a disabled confirm has
+   *  a sentence next to it. */
+  staffError?: string;
   /** R2 — who is ALREADY on this ticket. Shown as the settled default
    *  and NEVER posted back: `staff` below is the server's addable list,
    *  which already excludes them, so re-sending one is the duplicate
@@ -104,6 +123,7 @@ export function TicketTransitionModal({
   requirements,
   loading,
   staff,
+  staffError = "",
   currentAssignees,
   currentScheduledStartAt,
   busy,
@@ -128,7 +148,9 @@ export function TicketTransitionModal({
   // here, so every seeded id was one the server would refuse. The crew
   // is rendered above as settled fact instead.
   const [picked, setPicked] = useState<number[]>([]);
-  const [startsAt, setStartsAt] = useState(currentScheduledStartAt);
+  const [startsAt, setStartsAt] = useState(() =>
+    prefillStartsAt(currentScheduledStartAt),
+  );
   const [reason, setReason] = useState("");
   /** W-UX1 §4 — the two-press bypass: pressing it once reveals the
    *  reason, and only a reason arms the move. */
@@ -175,9 +197,19 @@ export function TicketTransitionModal({
   // offered. This is the "DOES NOT TRANSITION until it is answered"
   // half that lives on the screen; the backend enforces the same thing
   // independently, so a client that skipped this still cannot move it.
+  /** W-FIX1 B2 (audit F24) — moving an EXISTING schedule is a
+   *  reschedule, and a reschedule needs its reason; the note is that
+   *  reason on this door, so it stops being optional the moment the
+   *  date differs from the one the ticket already has. */
+  const movingSchedule =
+    showSchedule &&
+    currentScheduledStartAt !== "" &&
+    startsAt !== "" &&
+    startsAt !== currentScheduledStartAt;
   const answered =
     (!needsAssignee || picked.length > 0 || currentAssignees.length > 0) &&
     (!needsSchedule || startsAt !== "") &&
+    (!movingSchedule || note.trim() !== "") &&
     (!needsReason || reason.trim() !== "") &&
     // Proof is answered by writing the note this step asks for, or by
     // explicitly overriding WITH a reason. Nothing else.
@@ -386,6 +418,15 @@ export function TicketTransitionModal({
               </div>
             )}
 
+            {staffError && (
+              <p
+                className="form-error"
+                data-testid="transition-assignee-unavailable"
+              >
+                {t("transition.assignee_list_unavailable")} {staffError}
+              </p>
+            )}
+
             {showSchedule && (
               <div className="transition-field" data-testid="transition-field-schedule">
                 <label className="field-label" htmlFor="transition-starts-at">
@@ -435,6 +476,14 @@ export function TicketTransitionModal({
                 {t("transition.note_label")}
               </label>
               <p className="muted small">{t("transition.note_hint")}</p>
+              {movingSchedule && (
+                <p
+                  className="form-hint ew-hours-tone-over"
+                  data-testid="transition-note-required"
+                >
+                  {t("transition.note_required_for_move")}
+                </p>
+              )}
               <textarea
                 id="transition-note"
                 className="filter-control"

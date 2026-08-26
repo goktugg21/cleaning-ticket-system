@@ -1075,6 +1075,9 @@ export function TicketDetailPage() {
     useState<TransitionRequirements | null>(null);
   const [transitionLoading, setTransitionLoading] = useState(false);
   const [transitionStaff, setTransitionStaff] = useState<AssignableStaff[]>([]);
+  /* W-FIX1 C3 (audit F34) — why the assignee list is empty, when the
+     server refused it rather than answered it. */
+  const [transitionStaffError, setTransitionStaffError] = useState("");
   const [transitionError, setTransitionError] = useState("");
 
   // Phase B — the dated staff-slot CRUD (Sprint 25A's flat add/remove
@@ -1349,6 +1352,9 @@ export function TicketDetailPage() {
      after a booking so the comparison re-reads without a reload. */
   const [bookHoursOpen, setBookHoursOpen] = useState(false);
   const [hoursNonce, setHoursNonce] = useState(0);
+  /* W-FIX1 C3 (audit F33) — the plan read's failure, shown on the tab
+     instead of an eternal "Loading…". */
+  const [ewPlanReadError, setEwPlanReadError] = useState("");
 
   /* W-TABS Task 4 — the Plan tab shows the plan it holds (planned
      hours per person), read from the SAME store the dialog writes.
@@ -1370,10 +1376,14 @@ export function TicketDetailPage() {
     Promise.all([getExtraWork(ewOriginId), listExtraWorkAssignments(ewOriginId)])
       .then(([detail, assignments]) => {
         if (cancelled) return;
+        setEwPlanReadError("");
         setEwPlanAssignments(assignments);
         setEwPlanDetail(detail);
       })
-      .catch(() => undefined);
+      .catch((err) => {
+        // W-FIX1 C3 — a refused or failed read is said, not swallowed.
+        if (!cancelled) setEwPlanReadError(getApiError(err));
+      });
     return () => {
       cancelled = true;
     };
@@ -1397,6 +1407,8 @@ export function TicketDetailPage() {
 
   async function openEwPlan() {
     if (ewOriginId === null || !ticket) return;
+    // W-FIX1 E1 — the modal route is gated like the doors.
+    if (TERMINAL_UI_STATUSES.has(ticket.status)) return;
     setEwPlanError("");
     setEwCrewError("");
     setEwPlanLoading(true);
@@ -1467,12 +1479,14 @@ export function TicketDetailPage() {
     }
   }
 
-  async function addEwPlanManager(userId: number) {
-    if (!ticket || ewOriginId === null) return;
+  async function addEwPlanManagers(userIds: number[]) {
+    if (!ticket || ewOriginId === null || userIds.length === 0) return;
     setEwCrewBusy(true);
     setEwCrewError("");
     try {
-      await addManagerAssignments(ticket.id, [userId]);
+      // W-FIX1 D10 (audit F35) — the endpoint takes the whole list;
+      // one request, one busy flag, one reload.
+      await addManagerAssignments(ticket.id, userIds);
       await loadEwPlanCrew(ticket.id, ewOriginId);
     } catch (err) {
       setEwCrewError(getApiError(err));
@@ -2006,9 +2020,12 @@ export function TicketDetailPage() {
       // the list stayed empty, so a modal on a fully-assigned ticket
       // said "nobody available to assign" about a job with people on it.
       if (reqs.requirements.some((r) => r.key === "assignee")) {
+        setTransitionStaffError("");
         try {
           setTransitionStaff(await listAssignableStaff(Number(id)));
-        } catch {
+        } catch (err) {
+          // W-FIX1 C3 — and it says why (rendered under the picker).
+          setTransitionStaffError(getApiError(err));
           // A caller without the staff-assign permission still gets the
           // modal; the picker simply reports nobody available rather
           // than the whole step failing.
@@ -2758,7 +2775,9 @@ export function TicketDetailPage() {
               new pattern. Convert / Archive beside it stay small. */}
           {ticket.extra_work_origin &&
             isProviderManagementRole(me?.role) &&
-            canAccessExtraWork(me?.role) && (
+            canAccessExtraWork(me?.role) &&
+            /* W-FIX1 E1 (audit F7) — a finished job has no plan door. */
+            !TERMINAL_UI_STATUSES.has(ticket.status) && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -4295,6 +4314,8 @@ export function TicketDetailPage() {
             assignableManagers={assignableManagers}
             onChanged={() => {
               void loadTicket();
+              // W-FIX1 C2 — see the staff section above.
+              setEwPlanDetail(null);
             }}
           />
 
@@ -4660,6 +4681,9 @@ export function TicketDetailPage() {
                   ticketId={ticket.id}
                   onChanged={() => {
                     void loadTicket();
+                    // W-FIX1 C2 (audit F31) — the plan comparison reads
+                    // the crew with the plan; a crew change re-reads it.
+                    setEwPlanDetail(null);
                   }}
                   autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
                   canSetAutoCompleteFlag={isProviderAdmin(me?.role)}
@@ -5096,11 +5120,20 @@ export function TicketDetailPage() {
                   : []
               }
               selfOnly={!canManageTimesheets(me?.role)}
-              canBook={canManageTimesheets(me?.role)}
+              /* W-FIX1 E1 (audit F7) — neither door on a finished job. */
+              canBook={
+                canManageTimesheets(me?.role) &&
+                !TERMINAL_UI_STATUSES.has(ticket.status)
+              }
               onBook={() => setBookHoursOpen(true)}
               /* W-HOURS5 Task 4 — the Plan door, in the same header,
                  same weight. Same predicate as the page header's. */
-              canPlan={!!ticket.extra_work_origin && canAccessExtraWork(me?.role)}
+              canPlan={
+                !!ticket.extra_work_origin &&
+                canAccessExtraWork(me?.role) &&
+                !TERMINAL_UI_STATUSES.has(ticket.status)
+              }
+              planError={ewPlanReadError}
               onPlan={() => void openEwPlan()}
               planLoading={ewPlanLoading}
               /* W-HOURS5 Task 2 — who is on the job NOW, so a removed
@@ -5675,6 +5708,7 @@ export function TicketDetailPage() {
           requirements={transitionReqs}
           loading={transitionLoading}
           staff={transitionStaff}
+          staffError={transitionStaffError}
           // R2 — what the step ALREADY has, so the modal shows it as the
           // default rather than asking for it again. `assigned_staff` is
           // the ticket's own roster, which is also where an extra-work
@@ -5927,7 +5961,7 @@ export function TicketDetailPage() {
           removeBusy={ewCrewBusy}
           managerCandidates={ewPlanManagerCandidates}
           managerBusy={ewCrewBusy}
-          onAssignManager={(userId) => void addEwPlanManager(userId)}
+          onAssignManagers={(userIds) => void addEwPlanManagers(userIds)}
           onRemoveManager={(userId) => void removeEwPlanManager(userId)}
           busy={ewPlanBusy}
           error={ewPlanError}

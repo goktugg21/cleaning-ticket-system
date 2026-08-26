@@ -53,6 +53,7 @@
   "calendar.legend_adhoc": "Toegevoegd (buiten regel)",
   "calendar.legend_skipped": "Overgeslagen",
   "calendar.legend_done": "Ticket aangemaakt / klaar",
+  "calendar.legend_cancelled": "Afgezegd / verplaatst",
   "calendar.archived_readonly": "Deze terugkerende taak is gearchiveerd — de kalender is alleen-lezen.",
   "calendar.window_default": "Venster",
   "calendar.toast_added": "Datum gepland",

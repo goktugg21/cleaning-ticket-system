@@ -106,6 +106,16 @@ export function TicketExtraWorkCards({
   const { t } = useTranslation(["ticket_detail", "extra_work"]);
   const { push: pushToast } = useToast();
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
+  /* W-FIX1 C3 (audit F33) — a refused or failed read is a line, not a
+     blank Money tab. */
+  const [ewLoadFailure, setEwLoadFailure] = useState<{
+    id: number;
+    message: string;
+  } | null>(null);
+  const ewLoadError =
+    ewLoadFailure !== null && ewLoadFailure.id === extraWorkId
+      ? ewLoadFailure.message
+      : "";
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [approvedProposalDetail, setApprovedProposalDetail] =
     useState<ProposalDetail | null>(null);
@@ -135,9 +145,13 @@ export function TicketExtraWorkCards({
       .then((detail) => {
         if (!cancelled) setEw(detail);
       })
-      .catch(() => {
-        // Out-of-scope or gone: the ticket page stands on its own.
-        if (!cancelled) setEw(null);
+      .catch((err) => {
+        // Out-of-scope or gone: the ticket page stands on its own, and
+        // the Money tab SAYS so (W-FIX1 C3) instead of rendering nothing.
+        if (!cancelled) {
+          setEw(null);
+          setEwLoadFailure({ id: extraWorkId, message: getApiError(err) });
+        }
       });
     listProposalsForEw(extraWorkId)
       .then((list) => {
@@ -177,7 +191,13 @@ export function TicketExtraWorkCards({
     };
   }, [extraWorkId, approvedProposalId]);
 
-  if (!ew) return null;
+  if (!ew) {
+    return ewLoadError ? (
+      <p className="form-error" data-testid="ticket-extra-work-money-error">
+        {t("ew_money_unavailable")} {ewLoadError}
+      </p>
+    ) : null;
+  }
 
   const amounts = rowAmounts(ew);
   const priced = isPriced(ew);

@@ -439,19 +439,37 @@ const LABELS_ERROR_I18N_KEY: Record<string, string> = {
  *  mounted only while open, which is also why the drafts below can seed
  *  straight from the row in `useState` rather than needing a reset on
  *  open: a fresh mount IS the reset. */
+interface DatesDraft {
+  deadline: string;
+  plannedEnd: string;
+}
+
+interface LabelsDraft {
+  deptId: string;
+  wtId: string;
+}
+
 function DatesEditor({
   ew,
+  draft,
+  onDraftChange,
   onUpdated,
   onClose,
 }: {
   ew: ExtraWorkRequestDetail;
+  /** W-FIX1 C4 — the draft is the PAGE's, so it survives a tab switch. */
+  draft: DatesDraft;
+  onDraftChange: (next: DatesDraft) => void;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
-  const [deadline, setDeadline] = useState(ew.deadline ?? "");
-  const [plannedEnd, setPlannedEnd] = useState(ew.planned_end_date ?? "");
+  const deadline = draft.deadline;
+  const plannedEnd = draft.plannedEnd;
+  const setDeadline = (value: string) => onDraftChange({ ...draft, deadline: value });
+  const setPlannedEnd = (value: string) =>
+    onDraftChange({ ...draft, plannedEnd: value });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -588,11 +606,16 @@ function DatesEditor({
  *  reset, which is why the drafts below seed straight from the row. */
 function LabelsEditor({
   ew,
+  draft,
+  onDraftChange,
   onUpdated,
   onRefresh,
   onClose,
 }: {
   ew: ExtraWorkRequestDetail;
+  /** W-FIX1 C4 — the draft is the PAGE's, so it survives a tab switch. */
+  draft: LabelsDraft;
+  onDraftChange: (next: LabelsDraft) => void;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
   onRefresh: () => void;
   onClose: () => void;
@@ -601,10 +624,10 @@ function LabelsEditor({
   const { push: pushToast } = useToast();
   const [departments, setDepartments] = useState<CustomerLabel[]>([]);
   const [workTypes, setWorkTypes] = useState<CustomerLabel[]>([]);
-  const [deptId, setDeptId] = useState(
-    ew.department ? String(ew.department) : "",
-  );
-  const [wtId, setWtId] = useState(ew.work_type ? String(ew.work_type) : "");
+  const deptId = draft.deptId;
+  const wtId = draft.wtId;
+  const setDeptId = (value: string) => onDraftChange({ ...draft, deptId: value });
+  const setWtId = (value: string) => onDraftChange({ ...draft, wtId: value });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -892,6 +915,13 @@ export function ExtraWorkDetailPage() {
   // beside the deadline, so the open state lives here rather than inside
   // the editor it opens.
   const [datesOpen, setDatesOpen] = useState(false);
+  /* W-FIX1 C4 (audit F11) — the editors' DRAFTS live on the page, so a
+     pill-tab switch (which unmounts the Overview) brings the editor back
+     with what was typed rather than an open editor with emptied fields. */
+  const [datesDraft, setDatesDraft] = useState<DatesDraft | null>(null);
+  const [labelsDraft, setLabelsDraft] = useState<LabelsDraft | null>(null);
+  /* W-FIX1 C2 — bumped by the People tab's assignment card. */
+  const [assignmentsNonce, setAssignmentsNonce] = useState(0);
   // Sprint 189 §1 — same shape for the labels editor, which now opens in
   // the same place from a trigger in the same grid.
   const [labelsOpen, setLabelsOpen] = useState(false);
@@ -1159,7 +1189,7 @@ export function ExtraWorkDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [isProvider, ewId, ew?.status]);
+  }, [isProvider, ewId, ew?.status, assignmentsNonce]);
 
   /* The one plan fact the dialog cannot fix (its picker is WORKER-only
      by design): the responsible manager. Offered inline at the pricing
@@ -2111,13 +2141,14 @@ export function ExtraWorkDetailPage() {
      Same endpoint as before: the bulk-assign body's `managers` group
      (`views_assignments.py` — both-roles shape). The candidate list is
      re-read too so the picker stops offering who was just added. */
-  async function addPlanManager(userId: number) {
-    if (!userId || ewId === null) return;
+  async function addPlanManagers(userIds: number[]) {
+    if (userIds.length === 0 || ewId === null) return;
     setManagerBusy(true);
     try {
+      // W-FIX1 D10 (audit F35) — the bulk body takes the whole list.
       await bulkAssignExtraWork({
         requests: [ewId],
-        managers: [userId],
+        managers: userIds,
         mode: "assign",
       });
       setPlanAssignments(await listExtraWorkAssignments(ewId));
@@ -2611,6 +2642,11 @@ export function ExtraWorkDetailPage() {
           area beneath. */}
       <ExtraWorkContextHeader
         ew={ew}
+        proposedTotal={
+          ew.status === "PRICING_PROPOSED"
+            ? (proposals.find((p) => p.status === "SENT")?.total_amount ?? null)
+            : null
+        }
         urgencyLabel={t(URGENCY_I18N_KEY[ew.urgency] ?? ew.urgency)}
         departmentLabel={
           ew.department_name ? customerLabelName(ew.department_name, t) : null
@@ -2808,8 +2844,18 @@ export function ExtraWorkDetailPage() {
                   {isProvider && datesOpen && (
                     <DatesEditor
                       ew={ew}
+                      draft={
+                        datesDraft ?? {
+                          deadline: ew.deadline ?? "",
+                          plannedEnd: ew.planned_end_date ?? "",
+                        }
+                      }
+                      onDraftChange={setDatesDraft}
                       onUpdated={(detail) => setEw(detail)}
-                      onClose={() => setDatesOpen(false)}
+                      onClose={() => {
+                        setDatesOpen(false);
+                        setDatesDraft(null);
+                      }}
                     />
                   )}
                   {/* The plan reads back with the dates it commits to,
@@ -2853,9 +2899,19 @@ export function ExtraWorkDetailPage() {
                     <LabelsEditor
                       key={`labels-${ew.id}-${ew.department ?? ""}-${ew.work_type ?? ""}`}
                       ew={ew}
+                      draft={
+                        labelsDraft ?? {
+                          deptId: ew.department ? String(ew.department) : "",
+                          wtId: ew.work_type ? String(ew.work_type) : "",
+                        }
+                      }
+                      onDraftChange={setLabelsDraft}
                       onUpdated={(detail) => setEw(detail)}
                       onRefresh={() => void refresh()}
-                      onClose={() => setLabelsOpen(false)}
+                      onClose={() => {
+                        setLabelsOpen(false);
+                        setLabelsDraft(null);
+                      }}
                     />
                   ) : (
                     <div className="ew-facts-grid" data-testid="extra-work-labels">
@@ -3467,6 +3523,14 @@ export function ExtraWorkDetailPage() {
                 onChanged={reloadProposals}
                 parentAdvanceBlocked={parentAdvanceBlocked}
                 noCustomerApproval={noCustomerApproval}
+                requestLines={ew.line_items.map((item) => ({
+                  id: item.id,
+                  label:
+                    (item.service_name || item.custom_description || "").trim() ||
+                    `#${item.id}`,
+                  quantity: String(item.quantity),
+                  unit_type: item.unit_type,
+                }))}
               />
             )}
 
@@ -3658,7 +3722,13 @@ export function ExtraWorkDetailPage() {
           {isProvider && ew !== null && (
             <div className="card" data-testid="extra-work-assignments-card">
               <div className="form-section">
-                <ExtraWorkAssignmentCard extraWorkId={ew.id} />
+                <ExtraWorkAssignmentCard
+                  extraWorkId={ew.id}
+                  /* W-FIX1 C2 (audit F32) — a People-tab change re-reads
+                     the gate's crew, so WHAT NEXT and the plan gate stop
+                     saying "assign people first" about people just added. */
+                  onChanged={() => setAssignmentsNonce((n) => n + 1)}
+                />
               </div>
             </div>
           )}
@@ -3958,7 +4028,7 @@ export function ExtraWorkDetailPage() {
               ),
           )}
           managerBusy={managerBusy}
-          onAssignManager={(userId) => void addPlanManager(userId)}
+          onAssignManagers={(userIds) => void addPlanManagers(userIds)}
           busy={planBusy}
           error={planError}
           onCancel={() => setPlanOpen(false)}

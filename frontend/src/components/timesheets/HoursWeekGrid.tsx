@@ -270,6 +270,7 @@ export function HoursWeekGrid({
   showApplyRow = true,
   quietDays = NO_QUIET_DAYS,
   weekClosed,
+  saveBlockedReason = null,
   onSaved,
   onCancel,
   onSaveCells,
@@ -356,6 +357,9 @@ export function HoursWeekGrid({
   /** The hour types chosen in the setup. Empty falls back to the first
    *  active type. */
   weekClosed: boolean;
+  /** W-FIX1 B1 — a reason Save is refused that is not the week lock
+   *  (an invalid setup field). Rendered beside the button. */
+  saveBlockedReason?: string | null;
   onSaved: (changed: number) => void | Promise<void>;
   /** Sprint 168 §1 — where the collected cells GO.
    *
@@ -474,6 +478,16 @@ export function HoursWeekGrid({
         });
         byKey.get(key)!.cells[entry.date] = String(entry.hours);
       }
+      // W-FIX1 D9 (audit F29) — the pairs that already have a SAVED row
+      // this week, by (hour type, building) alone. An auto-filled week
+      // stores its rows as CONTRACT/<agreement>; W-HOURS5 6b folded only
+      // the untagged OTHER row onto the untagged seed, so those weeks
+      // opened with the saved block AND a blank general twin, and typing
+      // into the twin doubled the day. An untagged seed now yields to
+      // any saved row of its pair.
+      const savedPairs = new Set(
+        [...byKey.values()].map((row) => `${row.hourTypeId}|${row.buildingId}`),
+      );
 
       // One row per (building, hour type) from the setup. RECONCILED,
       // never appended: a pair that already has entries this week is the
@@ -494,6 +508,9 @@ export function HoursWeekGrid({
                 }))
               : [{ type: "", id: null }];
           for (const source of seats) {
+            if (source.type === "" && savedPairs.has(`${hourType.id}|${seat}`)) {
+              continue;
+            }
             const key = rowKey(hourType.id, seat, source.type, source.id);
             put({
               id: rowId(employee.id, key),
@@ -526,6 +543,9 @@ export function HoursWeekGrid({
         const sourceType = linked ? linked.source_type : seed.source_type;
         const sourceId = linked ? linked.source_id : seed.source_id;
         for (const hourType of seedTypes) {
+          if (sourceType === "" && savedPairs.has(`${hourType.id}|${seat}`)) {
+            continue;
+          }
           const key = rowKey(hourType.id, seat, sourceType, sourceId);
           put({
             id: rowId(employee.id, key),
@@ -856,9 +876,17 @@ export function HoursWeekGrid({
         );
         for (const dayKey of dayKeys) {
           const from = cellKey(row.id, dayKey);
-          if (!(from in moved)) continue;
-          const value = moved[from];
-          delete moved[from];
+          const saved = row.added ? undefined : row.cells[dayKey];
+          const hasEdit = from in moved;
+          if (!hasEdit && saved === undefined) continue;
+          // W-FIX1 D9 (audit F30) — the WHOLE row moves. Only the
+          // unsaved edit used to travel, so a saved 8 stayed general
+          // while the retyped 6 landed on the job: 14 h, no warning.
+          // A saved day now goes with the tag and the old cell is
+          // cleared ("0" deletes it server-side), so the day reads once.
+          const value = hasEdit ? moved[from] : (saved as string);
+          if (hasEdit) delete moved[from];
+          if (saved !== undefined) moved[from] = "0";
           moved[cellKey(newId, dayKey)] = value;
         }
       }
@@ -977,7 +1005,7 @@ export function HoursWeekGrid({
 
 
   async function handleSave() {
-    if (employees.length === 0) return;
+    if (employees.length === 0 || saveBlockedReason) return;
     setBusy(true);
     setError("");
     setBanner("");
@@ -1418,11 +1446,19 @@ export function HoursWeekGrid({
             </button>
           )}
           {/* ONE Save for the whole grid — every employee, every row. */}
+          {saveBlockedReason && (
+            <span
+              className="form-error small"
+              data-testid="hours-week-grid-save-blocked"
+            >
+              {saveBlockedReason}
+            </span>
+          )}
           <button
             type="button"
             className="btn btn-primary"
             onClick={handleSave}
-            disabled={busy || weekClosed}
+            disabled={busy || weekClosed || !!saveBlockedReason}
             data-testid="hours-week-grid-save"
           >
             {busy ? t("admin_form.saving") : t("hours_week_grid.save")}

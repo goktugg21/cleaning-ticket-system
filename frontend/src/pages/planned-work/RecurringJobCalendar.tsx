@@ -43,7 +43,7 @@ import type {
 import { getApiError } from "../../api/client";
 import { useToast } from "../../components/ToastProvider";
 
-type DateTick = "rule" | "skipped" | "adhoc" | "locked" | "empty";
+type DateTick = "rule" | "skipped" | "adhoc" | "locked" | "cancelled" | "empty";
 
 /** One entry in a date's actions panel. Exactly one of `run` / `to`:
  *  an action that writes, or a link that leaves the page. */
@@ -58,7 +58,14 @@ interface DayAction {
 // not toggleable from the calendar (cancel/override live in the table below).
 const LOCKED_STATUSES: ReadonlySet<PlannedOccurrenceStatus> = new Set<
   PlannedOccurrenceStatus
->(["TICKET_CREATED", "COMPLETED", "MISSED", "RESCHEDULED", "CANCELLED"]);
+>(["TICKET_CREATED", "COMPLETED"]);
+
+/** W-FIX1 B4 (audit F36) — a date whose visits were called off, missed
+ *  or moved away is NOT "ticket created / done"; it used to paint green
+ *  with a lock under that legend. Its own tick, its own legend line. */
+const CALLED_OFF_STATUSES: ReadonlySet<PlannedOccurrenceStatus> = new Set<
+  PlannedOccurrenceStatus
+>(["MISSED", "RESCHEDULED", "CANCELLED"]);
 
 function toISODate(d: Date): string {
   const y = d.getFullYear();
@@ -84,11 +91,30 @@ function monthIndex(d: Date): number {
   return d.getFullYear() * 12 + d.getMonth();
 }
 
+/** W-FIX1 B4 — the fetch window: from the job's start (or 180 days
+ *  back, whichever is later — the server caps the whole span at 366
+ *  days) to 180 days ahead. */
+function horizonFor(minDate: string | undefined): { from: string; to: string } {
+  const today = new Date();
+  const back = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 180);
+  const ahead = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 180);
+  let from = back;
+  if (minDate) {
+    const start = parseISODate(minDate);
+    if (start.getTime() > back.getTime()) from = start;
+  }
+  if (from.getTime() > today.getTime()) from = today;
+  return { from: toISODate(from), to: toISODate(ahead) };
+}
+
 function deriveTick(entry: RecurringJobCalendarDate | undefined): DateTick {
   if (!entry || entry.windows.length === 0) return "empty";
   const w = entry.windows;
   if (w.some((x) => LOCKED_STATUSES.has(x.status))) return "locked";
   if (w.every((x) => x.status === "SKIPPED")) return "skipped";
+  if (w.every((x) => CALLED_OFF_STATUSES.has(x.status) || x.status === "SKIPPED")) {
+    return "cancelled";
+  }
   if (w.some((x) => x.is_ad_hoc)) return "adhoc";
   return "rule";
 }
@@ -100,9 +126,14 @@ export function RecurringJobCalendar({
   onOverride,
   onCancelVisit,
   onChanged,
+  minDate,
 }: {
   jobId: number;
   canManage: boolean;
+  /** W-FIX1 B4 (audit F48) — the earliest month the calendar may show:
+   *  the job's start. The horizon is fetched from there (bounded by
+   *  the server's 366-day cap) so "Previous month" reaches the past. */
+  minDate?: string;
   /** The job's occurrences keyed by ISO date. The calendar endpoint says
    *  what a date IS; the override and cancel actions need the occurrence
    *  ROW, which only the occurrence list carries — so the parent, which
@@ -146,7 +177,7 @@ export function RecurringJobCalendar({
       setLoading(true);
       setError("");
       try {
-        const data = await getRecurringJobCalendar(jobId);
+        const data = await getRecurringJobCalendar(jobId, horizonFor(minDate));
         if (cancelled) return;
         setCalendar(data);
       } catch (err) {
@@ -159,7 +190,7 @@ export function RecurringJobCalendar({
     return () => {
       cancelled = true;
     };
-  }, [jobId]);
+  }, [jobId, minDate]);
 
   // Escape closes the panel. Registered only while one is open, so the
   // page carries no listener when there is nothing to close.
@@ -173,7 +204,7 @@ export function RecurringJobCalendar({
   }, [dayMenu]);
 
   async function reload() {
-    const data = await getRecurringJobCalendar(jobId);
+    const data = await getRecurringJobCalendar(jobId, horizonFor(minDate));
     setCalendar(data);
   }
 
@@ -499,6 +530,10 @@ export function RecurringJobCalendar({
         <LegendDot tone="#7c3aed" label={t("calendar.legend_adhoc")} />
         <LegendDot tone="var(--text-faint, #9ca3af)" label={t("calendar.legend_skipped")} />
         <LegendDot tone="#16a34a" label={t("calendar.legend_done")} />
+        <LegendDot
+          tone="var(--text-faint, #9ca3af)"
+          label={t("calendar.legend_cancelled")}
+        />
       </div>
     </div>
   );
@@ -628,6 +663,11 @@ const TICK_STYLE: Record<
     color: "var(--text-faint, #9ca3af)",
   },
   locked: { border: "#16a34a", background: "#f0fdf4", color: "#16a34a" },
+  cancelled: {
+    border: "var(--border)",
+    background: "transparent",
+    color: "var(--text-faint, #9ca3af)",
+  },
   empty: {
     border: "var(--border)",
     background: "transparent",

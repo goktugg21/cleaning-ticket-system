@@ -2246,6 +2246,7 @@
   "contract_hours.bulk_title": "Assign schedule (standing weekly agreement)",
   "contract_hours.bulk_subtitle": "Pick workers and buildings; one row opens per combination.",
   "contract_hours.bulk_week_hint": "The week of this date is shown as the grid; what is saved is the weekly pattern.",
+  "contract_hours.bulk_valid_from_required": "Enter the date this schedule starts.",
   "contract_hours.valid_from": "Valid from",
   "contract_hours.auto_fill_label": "Fill these people's weekly sheets from this agreement, until it ends",
   "contract_hours.auto_fill_column": "Fills the sheet",

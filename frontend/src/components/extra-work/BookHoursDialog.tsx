@@ -69,12 +69,16 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import { listManagerAssignments } from "../../api/managerAssignments";
-import { createTimeEntry, listHourTypes } from "../../api/timesheets";
+import {
+  createTimeEntry,
+  fetchWeekStatus,
+  listHourTypes,
+} from "../../api/timesheets";
 import type { HourType } from "../../api/timesheets.types";
 import { ChipMultiSelect } from "../ChipMultiSelect";
 import { hourTypeLabel } from "../../lib/hourTypeLabel";
 import { formatNumber } from "../../lib/intl";
-import { toDateString } from "../../lib/isoWeek";
+import { fromDateString, isoWeekOf, toDateString } from "../../lib/isoWeek";
 import { usePickerReserve } from "../../lib/usePickerReserve";
 
 export interface BookHoursCrewMember {
@@ -138,6 +142,35 @@ export function BookHoursDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [landed, setLanded] = useState(0);
+  /** W-FIX1 D8 (audit F47) — the week lock, read like the admin dialog
+   *  reads it: for the week of the chosen date. Closed: the inputs are
+   *  disabled and the standard closed-week line is shown; the server's
+   *  refusal stays the backstop. */
+  const [lockFor, setLockFor] = useState<{ date: string; closed: boolean } | null>(
+    null,
+  );
+  // Keyed on the date the answer was fetched for, so a changed date reads
+  // as "not known to be closed" without a synchronous reset in the effect.
+  const weekClosed = lockFor !== null && lockFor.date === date && lockFor.closed;
+  useEffect(() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    const week = isoWeekOf(fromDateString(date));
+    let cancelled = false;
+    fetchWeekStatus({
+      iso_year: week.isoYear,
+      iso_week: week.isoWeek,
+      company: companyId,
+    })
+      .then((status) => {
+        if (!cancelled) setLockFor({ date, closed: status.is_closed });
+      })
+      .catch(() => {
+        if (!cancelled) setLockFor({ date, closed: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [date, companyId]);
 
   // Task 2 — the modal grows to CONTAIN the open people list, and the
   // spacer sits above the actions so they move out from under it.
@@ -436,11 +469,16 @@ export function BookHoursDialog({
                   }
                 }}
                 placeholder="8"
-                disabled={busy}
+                disabled={busy || weekClosed}
                 data-testid="book-hours-hours"
               />
             </div>
           </div>
+          {weekClosed && (
+            <p className="form-error" data-testid="book-hours-week-closed">
+              {t("common:hours_week_grid.week_closed")}
+            </p>
+          )}
 
           {/* Task 8 — ONE COMPACT ROW PER SELECTED PERSON. Their hours
               follow the shared box until touched; a touched row is
@@ -579,7 +617,7 @@ export function BookHoursDialog({
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={busy}
+              disabled={busy || weekClosed}
               data-testid="book-hours-submit"
             >
               {busy ? t("book_hours.saving") : t("book_hours.submit")}

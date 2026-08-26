@@ -77,6 +77,7 @@ export interface ExtraWorkRegisterBuilding {
  * still billable, the rest already invoiced.
  */
 export interface ExtraWorkRegister {
+  /** W-FIX1 D2 — null until the first explicit sync has made it. */
   contract: {
     id: number;
     contract_no: string;
@@ -84,7 +85,7 @@ export interface ExtraWorkRegister {
     customer: number;
     customer_name: string;
     revision: number;
-  };
+  } | null;
   buildings: ExtraWorkRegisterBuilding[];
   summary: {
     job_count: number;

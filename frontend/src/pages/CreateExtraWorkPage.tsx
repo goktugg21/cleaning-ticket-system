@@ -13,7 +13,7 @@
 // (an add page is intentionally a form). After submission the
 // result panel is read-only.
 import type { ChangeEvent, FormEvent } from "react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -478,6 +478,11 @@ export function CreateExtraWorkPage({
 
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  /* W-FIX1 D3 (audit F28) — ONE key per series submission. It is minted
+     when the form is prepared and reused on a retry, so a resend is
+     answered with the series already made; a successful submission
+     mints the next one. */
+  const batchKeyRef = useRef<string>(crypto.randomUUID());
   const [services, setServices] = useState<Service[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
   // W5-B — SINGLE or MULTIPLE, the reference system's "entry mode".
@@ -1881,7 +1886,12 @@ export function CreateExtraWorkPage({
       };
 
       if (entryMode === "MULTIPLE") {
-        const batch = await batchCreateExtraWork(payload, slots);
+        const batch = await batchCreateExtraWork(
+          payload,
+          slots,
+          batchKeyRef.current,
+        );
+        batchKeyRef.current = crypto.randomUUID();
         setBatchResult({ group: batch.group, created: batch.created });
       } else {
         setResult(await createExtraWork(payload));

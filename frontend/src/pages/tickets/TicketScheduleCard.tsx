@@ -102,6 +102,15 @@ function formatMoment(iso: string | null): string {
 }
 
 /** A plain ISO date ("2026-09-03") as the reader's date. */
+/** Whole days from `from` to `to`, both YYYY-MM-DD, in local time. */
+function daysAfter(from: string, to: string): number {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  const a = new Date(fy, fm - 1, fd).getTime();
+  const b = new Date(ty, tm - 1, td).getTime();
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
 function formatPlainDate(value: string | null | undefined): string {
   if (!value) return "";
   return formatDate(`${value}T00:00:00`);
@@ -352,6 +361,20 @@ export function TicketScheduleCard({
                     })
                   : formatPlainDate(committedStart)}
               </span>
+              {/* W-FIX1 B3 (audit F15) — a commitment that ends after the
+                  customer's deadline is allowed and FLAGGED, in the warn
+                  tone; ticket 373 showed Aug 25–28 under "must be
+                  finished by Aug 26" with nothing said. */}
+              {committedEnd && deadline && committedEnd > deadline && (
+                <span
+                  className="detail-kv-val ew-hours-tone-over"
+                  data-testid="ticket-schedule-after-deadline"
+                >
+                  {t("schedule.committed_after_deadline", {
+                    count: daysAfter(deadline, committedEnd),
+                  })}
+                </span>
+              )}
             </div>
           )}
         </div>

@@ -169,13 +169,31 @@ export function RecurringJobDetailPage() {
     return rows;
   }
 
+  /** W-FIX1 B4 (audit F36) — EVERY occurrence, paged exhaustively (the
+   *  Sprint 120 pattern), so the calendar's day menu never silently
+   *  loses its actions past row 200 of a long-running job. */
+  async function loadAllOccurrences(jobId: string | number) {
+    const rows: PlannedOccurrence[] = [];
+    let page = 1;
+    let count = 0;
+    for (let i = 0; i < 50; i++) {
+      const resp = await listPlannedOccurrences({
+        recurring_job: Number(jobId),
+        page_size: 200,
+        page,
+      });
+      rows.push(...resp.results);
+      count = resp.count;
+      if (!resp.next) break;
+      page += 1;
+    }
+    return { rows, count };
+  }
+
   async function loadOccurrences(jobId: string | number) {
-    const resp = await listPlannedOccurrences({
-      recurring_job: Number(jobId),
-      page_size: 200,
-    });
-    setOccurrences(resp.results);
-    setOccCount(resp.count);
+    const { rows, count } = await loadAllOccurrences(jobId);
+    setOccurrences(rows);
+    setOccCount(count);
   }
 
   useEffect(() => {
@@ -187,11 +205,11 @@ export function RecurringJobDetailPage() {
       try {
         const [jobData, occResp] = await Promise.all([
           getRecurringJob(id),
-          listPlannedOccurrences({ recurring_job: Number(id), page_size: 200 }),
+          loadAllOccurrences(id),
         ]);
         if (cancelled) return;
         setJob(jobData);
-        setOccurrences(occResp.results);
+        setOccurrences(occResp.rows);
         setOccCount(occResp.count);
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
@@ -376,9 +394,18 @@ export function RecurringJobDetailPage() {
   // without making the operator page through months, which is the whole
   // reason this strip earns the space it takes.
   const nextUp = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    // W-FIX1 B4 — LOCAL today (the calendar's own reading), and a visit
+    // that was moved away is not "next up" on its old date.
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
     return occurrences
-      .filter((o) => o.planned_date >= today && o.status !== "CANCELLED")
+      .filter(
+        (o) =>
+          o.planned_date >= today &&
+          o.status !== "CANCELLED" &&
+          o.status !== "RESCHEDULED",
+      )
       .sort((a, b) => a.planned_date.localeCompare(b.planned_date))
       .slice(0, 5);
   }, [occurrences]);
@@ -661,6 +688,7 @@ export function RecurringJobDetailPage() {
         onChanged={() => {
           void loadOccurrences(job.id);
         }}
+        minDate={job.start_date}
       />
 
       {nextUp.length > 0 && (

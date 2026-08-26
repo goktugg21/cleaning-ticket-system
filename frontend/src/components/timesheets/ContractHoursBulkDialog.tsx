@@ -140,14 +140,24 @@ export function ContractHoursBulkDialog({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [requestClose]);
 
+  /** W-FIX1 B1 (audit F4) — an empty or malformed "Valid from" is
+   *  refused at the field. `fromDateString("")` is `new Date(0, ...)`,
+   *  the year 1900, so the grid used to render the week of 1900-01-01
+   *  with Save still live. */
+  const validFromValid =
+    /^\d{4}-\d{2}-\d{2}$/.test(validFrom) &&
+    !Number.isNaN(fromDateString(validFrom).getTime()) &&
+    fromDateString(validFrom).getFullYear() > 1900;
+
   /** The rendering frame: the ISO week containing valid-from. */
   const week = useMemo(() => {
+    if (!validFromValid) return isoWeekOf(new Date());
     try {
       return isoWeekOf(fromDateString(validFrom));
     } catch {
       return isoWeekOf(new Date());
     }
-  }, [validFrom]);
+  }, [validFrom, validFromValid]);
 
   const buildingOptions = useMemo(
     () => [
@@ -191,6 +201,9 @@ export function ContractHoursBulkDialog({
    * Monday-first, hence the rotation.
    */
   async function saveCells(cells: GridCell[]): Promise<number> {
+    if (!validFromValid) {
+      throw new Error(t("contract_hours.bulk_valid_from_required"));
+    }
     const byKey = new Map<string, BulkRow>();
     for (const cell of cells) {
       const key = `${cell.employee}:${cell.building ?? 0}:${cell.hour_type}`;
@@ -320,6 +333,15 @@ export function ContractHoursBulkDialog({
               onChange={(event) => setValidFrom(event.target.value)}
               data-testid="bulk-valid-from"
             />
+            {!validFromValid && (
+              <p
+                className="form-error"
+                style={{ margin: "6px 0 0" }}
+                data-testid="bulk-valid-from-error"
+              >
+                {t("contract_hours.bulk_valid_from_required")}
+              </p>
+            )}
             <p className="muted small" style={{ margin: "6px 0 0" }}>
               {t("contract_hours.bulk_week_hint")}
             </p>
@@ -405,6 +427,9 @@ export function ContractHoursBulkDialog({
           entriesByEmployee={{}}
           seedBuildingIds={seedBuildingIds}
           weekClosed={false}
+          saveBlockedReason={
+            validFromValid ? null : t("contract_hours.bulk_valid_from_required")
+          }
           onSaved={onClose}
           onCancel={requestClose}
           onDirtyChange={setDirty}

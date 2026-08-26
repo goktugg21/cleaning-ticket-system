@@ -94,11 +94,16 @@ export function ExtraWorkContextHeader({
   departmentLabel,
   workTypeLabel,
   nextStep,
+  proposedTotal = null,
 }: {
   ew: ExtraWorkRequestDetail;
   urgencyLabel: string;
   departmentLabel: string | null;
   workTypeLabel: string | null;
+  /** W-FIX1 A3 (audit F3) — the total of the proposal the customer is
+   *  looking at (SENT, not yet decided). Shown as "proposed" so MONEY
+   *  and WHAT NEXT read the same fact from the same record. */
+  proposedTotal?: string | null;
   /** The WHAT NEXT block, built by the page (it owns the handlers). */
   nextStep: ReactNode;
 }) {
@@ -161,16 +166,23 @@ export function ExtraWorkContextHeader({
             panel use, so one fact is one colour across the page. */}
         <div
           className={
-            ew.is_priced === false
+            ew.is_priced === false && proposedTotal === null
               ? "ew-ctx-strong ew-ctx-unpriced"
               : "ew-ctx-strong ew-ctx-money"
           }
           data-testid="extra-work-header-total"
         >
-          {ew.is_priced === false
-            ? t("detail.ctx_not_priced")
-            : formatMoney(rowAmounts(ew).total)}
+          {proposedTotal !== null
+            ? formatMoney(Number(proposedTotal))
+            : ew.is_priced === false
+              ? t("detail.ctx_not_priced")
+              : formatMoney(rowAmounts(ew).total)}
         </div>
+        {proposedTotal !== null && (
+          <div className="ew-ctx-sub" data-testid="extra-work-ctx-proposed">
+            {t("detail.ctx_price_proposed")}
+          </div>
+        )}
         {/* Invoiced or not, in words. An absent invoice date used to be
             the only signal, which is a fact you have to already know how
             to read. */}

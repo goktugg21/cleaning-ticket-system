@@ -197,6 +197,15 @@ function localToday(): string {
   )}`;
 }
 
+/** Whole days from `from` to `to`, both YYYY-MM-DD, in local time. */
+function daysBetweenIso(from: string, to: string): number {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  const a = new Date(fy, fm - 1, fd).getTime();
+  const b = new Date(ty, tm - 1, td).getTime();
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
 export function PlanWorkDialog({
   ew,
   assignments,
@@ -212,7 +221,7 @@ export function PlanWorkDialog({
   onAssign,
   managerCandidates = [],
   managerBusy = false,
-  onAssignManager,
+  onAssignManagers,
   onRemoveManager,
   onRemovePerson,
   removeBusy = false,
@@ -240,7 +249,7 @@ export function PlanWorkDialog({
    *  own. Empty candidates = no picker. */
   managerCandidates?: AssignmentCandidate[];
   managerBusy?: boolean;
-  onAssignManager?: (userId: number) => void;
+  onAssignManagers?: (userIds: number[]) => void;
   /** Renders an X on each manager chip. Absent = chips without remove. */
   onRemoveManager?: (userId: number) => void;
   /** W-HOURS5 Task 2 — renders an X on each PERSON chip. The page takes
@@ -459,12 +468,15 @@ export function PlanWorkDialog({
     onAssign(userIds);
   };
   const handleAssignManagers = (userIds: number[]) => {
-    if (!onAssignManager || userIds.length === 0) return;
+    if (!onAssignManagers || userIds.length === 0) return;
     setAddedThisSession((prev) => [
       ...prev,
       ...userIds.filter((id) => !prev.includes(id)),
     ]);
-    for (const userId of userIds) onAssignManager(userId);
+    // W-FIX1 D10 (audit F35) — ONE write for the whole pick. The loop
+    // this replaces fired N requests behind one busy flag: the button
+    // re-enabled after the first answer and the last reload won.
+    onAssignManagers(userIds);
   };
 
   // W7 — THE VISIBLE WEEK. Display only; `days` above stays the whole
@@ -721,6 +733,17 @@ export function PlanWorkDialog({
               })}
             </span>
           </div>
+          {/* W-FIX1 B3 (audit F15) — allowed, flagged, never blocked. */}
+          {end && ew.deadline && end > ew.deadline && (
+            <p
+              className="muted small ew-hours-tone-over"
+              data-testid="extra-work-plan-end-after-deadline"
+            >
+              {t("plan.end_after_deadline", {
+                count: daysBetweenIso(ew.deadline, end),
+              })}
+            </p>
+          )}
         </div>
 
         <div className="ew-plan-section">
@@ -863,7 +886,7 @@ export function PlanWorkDialog({
                   </span>
                 )}
               </div>
-              {onAssignManager && (
+              {onAssignManagers && (
                 <CrewAdder
                   candidates={managerCandidates}
                   loading={false}

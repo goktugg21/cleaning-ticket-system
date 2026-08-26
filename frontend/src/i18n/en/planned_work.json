@@ -53,6 +53,7 @@
   "calendar.legend_adhoc": "Added (off-rule)",
   "calendar.legend_skipped": "Skipped",
   "calendar.legend_done": "Ticket created / done",
+  "calendar.legend_cancelled": "Called off / moved",
   "calendar.archived_readonly": "This recurring job is archived — the calendar is read-only.",
   "calendar.window_default": "Window",
   "calendar.toast_added": "Date planned",

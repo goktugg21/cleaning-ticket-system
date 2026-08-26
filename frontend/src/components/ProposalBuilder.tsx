@@ -461,12 +461,23 @@ function payloadFromForm(
   };
 }
 
+export interface RequestLineSeed {
+  id: number;
+  label: string;
+  quantity: string;
+  unit_type: ExtraWorkUnitType;
+}
+
 const EMPTY_LINE_FORM: LineFormState = {
   description: "",
   unit_type: "FIXED",
   custom_unit_label: "",
   quantity: "1.00",
-  unit_price: "0.00",
+  // W-FIX1 A3 (audit F3) — EMPTY, not "0.00". Zero is a legal price the
+  // operator types on purpose; a default of 0.00 made a price nobody
+  // entered indistinguishable from free work, and EW 28 went to the
+  // customer at €0.00 that way.
+  unit_price: "",
   vat_pct: "21.00",
   customer_explanation: "",
   internal_note: "",
@@ -502,6 +513,13 @@ function formFromLine(line: ProposalLine): LineFormState {
  * form — one set of fields, one validation rule, one place a unit-type
  * change has to be handled.
  */
+/** W-FIX1 A3 — a price is "entered" when the box holds a number, 0.00
+ *  included. An empty box is not a price. */
+function priceEntered(form: LineFormState): boolean {
+  const raw = form.unit_price.trim();
+  return raw !== "" && Number.isFinite(Number(raw)) && Number(raw) >= 0;
+}
+
 function ProposalLineComposer({
   disabled,
   initial,
@@ -538,12 +556,24 @@ function ProposalLineComposer({
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              disabled={disabled || !form.description.trim()}
+              disabled={
+                disabled || !form.description.trim() || !priceEntered(form)
+              }
               onClick={() => onSubmit(payloadFromForm(form, true))}
               data-testid={`${testIdPrefix}-submit`}
             >
               {submitLabel}
             </button>
+            {form.description.trim() !== "" && !priceEntered(form) && (
+              /* W-FIX1 A3 — the reason, at the button: a line needs a
+                 deliberately entered price before it can be saved. */
+              <span
+                className="muted small"
+                data-testid={`${testIdPrefix}-price-required`}
+              >
+                {t("detail.pricing_form_unit_price_required")}
+              </span>
+            )}
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -684,6 +714,7 @@ export function ProposalBuilder({
   onChanged,
   parentAdvanceBlocked = false,
   noCustomerApproval = false,
+  requestLines,
 }: {
   ewId: number | string;
   proposal: ProposalDetail;
@@ -702,11 +733,30 @@ export function ProposalBuilder({
    *  MECHANICS UNTOUCHED: same handler, same endpoint, same statuses.
    *  The page owns the predicate; this component only words itself. */
   noCustomerApproval?: boolean;
+  /** W-FIX1 A3 — the request's own lines, offered as one-click seeds
+   *  for the composer so the proposal line inherits the requested name. */
+  requestLines?: RequestLineSeed[];
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  /* W-FIX1 A3 — what the add composer opens with; a request-line chip
+     re-seeds it (the key remounts the composer's own form state). */
+  const [addSeed, setAddSeed] = useState<{ key: number; form: LineFormState }>({
+    key: 0,
+    form: EMPTY_LINE_FORM,
+  });
+  const unseededRequestLines = (requestLines ?? []).filter(
+    (line) =>
+      !proposal.lines.some(
+        (saved) =>
+          (saved.description ?? "").trim().toLowerCase() ===
+            line.label.trim().toLowerCase() ||
+          (saved.service_name ?? "").trim().toLowerCase() ===
+            line.label.trim().toLowerCase(),
+      ),
+  );
   // Provider override-decision modal (SENT proposal). A customer decides
   // without a reason; a PROVIDER driving the customer decision is an
   // override and the backend coerces is_override + REQUIRES a non-blank
@@ -1020,14 +1070,56 @@ export function ProposalBuilder({
         {canEdit && editingLineId === null && (
           <div className="ew-pricing-add-form">
             {addOpen ? (
-              <ProposalLineComposer
-                disabled={busy}
-                initial={EMPTY_LINE_FORM}
-                submitLabel={t("detail.proposal_add_line")}
-                testIdPrefix="proposal-add-line"
-                onSubmit={addLine}
-                onCancel={() => setAddOpen(false)}
-              />
+              <>
+                {/* W-FIX1 A3 (audit F3) — the requested line's NAME
+                    comes across. The server seeds only contract-priced
+                    lines (a custom line has no price to seed and the
+                    line row cannot hold "no price yet"), so the
+                    operator retyped the name — EW 28 went out as "g"
+                    for "Waste removal — small van". One click seeds
+                    the composer with the request's own words, unit and
+                    quantity; the price stays theirs to enter. */}
+                {unseededRequestLines.length > 0 && (
+                  <div
+                    className="proposal-request-lines"
+                    data-testid="proposal-add-from-request"
+                    style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}
+                  >
+                    <span className="muted small">{t("detail.add_from_request")}</span>
+                    {unseededRequestLines.map((line) => (
+                      <button
+                        key={line.id}
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={busy}
+                        onClick={() =>
+                          setAddSeed({
+                            key: addSeed.key + 1,
+                            form: {
+                              ...EMPTY_LINE_FORM,
+                              description: line.label,
+                              quantity: line.quantity,
+                              unit_type: line.unit_type,
+                            },
+                          })
+                        }
+                        data-testid={`proposal-add-from-request-${line.id}`}
+                      >
+                        {line.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <ProposalLineComposer
+                  key={addSeed.key}
+                  disabled={busy}
+                  initial={addSeed.form}
+                  submitLabel={t("detail.proposal_add_line")}
+                  testIdPrefix="proposal-add-line"
+                  onSubmit={addLine}
+                  onCancel={() => setAddOpen(false)}
+                />
+              </>
             ) : (
               <button
                 type="button"
@@ -1118,7 +1210,11 @@ export function ProposalBuilder({
                 style={{ margin: "6px 0 0" }}
                 data-testid="extra-work-proposal-send-blocked-reason"
               >
-                {parentAdvanceBlocked
+                {proposal.lines.length === 0
+                  ? /* W-FIX1 A3 — nothing to send without a line; the
+                       server's `can_send` says the same. */
+                    t("detail.proposal_send_blocked_no_lines")
+                  : parentAdvanceBlocked
                   ? t(
                       noCustomerApproval
                         ? "detail.proposal_send_blocked_parent_start"

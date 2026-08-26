@@ -35,6 +35,7 @@ import { useEditMode } from "../../lib/useEditMode";
 import { AssignPeopleDialog } from "../AssignPeopleDialog";
 
 export function ExtraWorkAssignmentCard({
+  onChanged,
   extraWorkId,
   bare = false,
 }: {
@@ -44,6 +45,8 @@ export function ExtraWorkAssignmentCard({
    *  nesting a card in a card. Sprint 175 left the card open precisely
    *  to avoid that nesting; a flag is the honest fix. */
   bare?: boolean;
+  /** W-FIX1 C2 — after any successful crew write. */
+  onChanged?: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [rows, setRows] = useState<ExtraWorkAssignment[]>([]);
@@ -126,6 +129,7 @@ export function ExtraWorkAssignmentCard({
       });
       setAddOpen(false);
       reload();
+      onChanged?.();
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -146,6 +150,7 @@ export function ExtraWorkAssignmentCard({
       });
       setAddOpen(false);
       reload();
+      onChanged?.();
     } catch (err) {
       setError(getApiError(err));
     } finally {

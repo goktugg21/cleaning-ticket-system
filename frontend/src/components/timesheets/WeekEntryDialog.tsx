@@ -197,20 +197,37 @@ export function WeekEntryDialog({
   // `allSettled`, so a failure for one person cannot discard anybody
   // else's rows. The request count is bounded by the operator's own
   // selection.
+  /** W-FIX1 D1 (audit F6) — which (week, company, people) setups this
+   *  dialog has already asked the server to fill. The fill is a WRITE;
+   *  it used to fire on every picker change and every week glanced at.
+   *  It now fires once per confirmed setup — both pickers non-empty —
+   *  and never twice for the same one while this dialog is open. */
+  const filledSetups = useRef(new Set<string>());
   useEffect(() => {
     if (employeeIds.length === 0) return;
     let cancelled = false;
     /* W10 — fill this week from the standing agreements BEFORE reading
        it, so a contracted week is never blank and nobody has to press
-       anything weekly. Idempotent server-side, and it never touches a
-       week that already has rows, so re-opening a week the operator has
-       edited changes nothing. A failure is not fatal: the sheet then
-       simply shows what is already there. */
-    const ready = fillWeekFromContracts({
-      iso_year: week.isoYear,
-      iso_week: week.isoWeek,
-      company: companyId ?? "",
-    }).catch(() => undefined);
+       anything weekly. Idempotent server-side (and serialised there
+       since W-FIX1 D1), and it never touches a week that already has
+       rows, so re-opening a week the operator has edited changes
+       nothing. A failure is not fatal: the sheet then simply shows what
+       is already there. */
+    const setupKey = `${week.isoYear}-W${week.isoWeek}|${companyId ?? ""}|${[
+      ...employeeIds,
+    ]
+      .sort((a, b) => a - b)
+      .join(",")}`;
+    const shouldFill =
+      buildingIds.length > 0 && !filledSetups.current.has(setupKey);
+    if (shouldFill) filledSetups.current.add(setupKey);
+    const ready = shouldFill
+      ? fillWeekFromContracts({
+          iso_year: week.isoYear,
+          iso_week: week.isoWeek,
+          company: companyId ?? "",
+        }).catch(() => undefined)
+      : Promise.resolve(undefined);
     ready.then(() =>
       Promise.allSettled(
         employeeIds.map((employeeId) =>
@@ -236,7 +253,7 @@ export function WeekEntryDialog({
     return () => {
       cancelled = true;
     };
-  }, [employeeIds, week, companyId]);
+  }, [employeeIds, buildingIds, week, companyId]);
 
   // The lock, read INDEPENDENTLY — see the header comment.
   const currentLockKey = `${week.isoYear}-${week.isoWeek}|${companyId ?? ""}`;
