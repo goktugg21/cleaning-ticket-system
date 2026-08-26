@@ -52,6 +52,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import type { HourSourceOption } from "../../api/reports";
+import { splitJobTitle } from "./jobTitle";
 
 /** One job as the grid stores it on a row. */
 export interface RowJobSource {
@@ -78,6 +79,31 @@ const TAG_LABEL_STYLE = {
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   verticalAlign: "bottom",
+} as const;
+
+/** W-HOURS6 — an option is TWO lines: the number small and muted above,
+ *  the NAME at normal weight below, clipped at its own end so a match
+ *  on "final" always shows the word final and never "fin…" cut by a
+ *  code prefix in front of it. */
+const OPTION_STACK_STYLE = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "flex-start",
+  minWidth: 0,
+  maxWidth: "100%",
+} as const;
+const OPTION_CODE_STYLE = {
+  fontSize: 11,
+  lineHeight: 1.2,
+  color: "var(--text-muted)",
+} as const;
+const OPTION_NAME_STYLE = {
+  maxWidth: "100%",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  fontWeight: 400,
+  lineHeight: 1.3,
 } as const;
 
 /** How long the search waits after the last keystroke. */
@@ -107,6 +133,7 @@ function jobMatches(job: HourSourceOption, query: string): boolean {
 export function RowJobPicker({
   tag,
   tagLabel,
+  tagTooltip,
   thisWeek,
   search,
   onChange,
@@ -117,8 +144,12 @@ export function RowJobPicker({
 }: {
   /** The row's current job, or `null` for general hours. */
   tag: RowJobSource | null;
-  /** What the tag reads as (the caller resolves titles). */
+  /** What the tag reads as (the caller resolves titles) — W-HOURS6:
+   *  the name first, "final test · TCK-373". */
   tagLabel: string;
+  /** The full label for the tag's tooltip ("TCK-2026-000373 — final
+   *  test"). Defaults to `tagLabel`. */
+  tagTooltip?: string;
   /** This person's planned jobs in this row's building this week. */
   thisWeek: HourSourceOption[];
   /** Free search across the jobs this person may book against. The
@@ -272,20 +303,32 @@ export function RowJobPicker({
     }
   };
 
-  const option = (job: HourSourceOption) => (
-    <button
-      key={`${job.source_type}:${job.source_id ?? ""}`}
-      type="button"
-      role="option"
-      aria-selected={isCurrent(job)}
-      className={`chip-multiselect-option${isCurrent(job) ? " is-selected" : ""}`}
-      onClick={() => pick(job)}
-      title={job.title}
-      data-testid={`${testId}-option-${job.source_type}-${job.source_id ?? "none"}`}
-    >
-      <span style={TAG_LABEL_STYLE}>{job.title}</span>
-    </button>
-  );
+  const option = (job: HourSourceOption) => {
+    const parts = splitJobTitle(job.title);
+    return (
+      <button
+        key={`${job.source_type}:${job.source_id ?? ""}`}
+        type="button"
+        role="option"
+        aria-selected={isCurrent(job)}
+        className={`chip-multiselect-option${isCurrent(job) ? " is-selected" : ""}`}
+        onClick={() => pick(job)}
+        title={job.title}
+        data-testid={`${testId}-option-${job.source_type}-${job.source_id ?? "none"}`}
+      >
+        <span style={OPTION_STACK_STYLE}>
+          {parts.code && (
+            <span style={OPTION_CODE_STYLE} data-testid="job-option-code">
+              {parts.code}
+            </span>
+          )}
+          <span style={OPTION_NAME_STYLE} data-testid="job-option-name">
+            {parts.name}
+          </span>
+        </span>
+      </button>
+    );
+  };
 
   // Task 7 — "This week" matches FIRST, then the other work the search
   // found that is not already in this week's list.
@@ -316,7 +359,7 @@ export function RowJobPicker({
             gap: 4,
             maxWidth: "100%",
           }}
-          title={tagLabel}
+          title={tagTooltip ?? tagLabel}
           data-testid={`${testId}-tag`}
         >
           <span style={TAG_LABEL_STYLE}>{tagLabel}</span>

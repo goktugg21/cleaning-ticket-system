@@ -47,6 +47,7 @@ import {
 } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { WeekEntryDialog } from "../../components/timesheets/WeekEntryDialog";
+import { jobTitleFirst } from "../../components/timesheets/jobTitle";
 import { hourTypeLabel, hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { HoursFilterRow } from "./HoursFilterRow";
 import { ContractHoursTab } from "./ContractHoursTab";
@@ -1413,13 +1414,27 @@ export function HoursAdminPage() {
                                  the fallback for a job the picker no
                                  longer lists, which is where the raw id
                                  belonged all along. */
-                              <span className="cell-tag cell-tag-muted">
-                                {hourSourceLabel(
+                              /* W-HOURS6 — the NAME first ("final test ·
+                                 TCK-373"), the full label as the tooltip. */
+                              <span
+                                className="cell-tag cell-tag-muted"
+                                title={hourSourceLabel(
                                   entry.source_type,
                                   entry.source_id,
                                   sourceOptions,
                                   t,
                                   "—",
+                                )}
+                                data-testid="hours-entry-job"
+                              >
+                                {jobTitleFirst(
+                                  hourSourceLabel(
+                                    entry.source_type,
+                                    entry.source_id,
+                                    sourceOptions,
+                                    t,
+                                    "—",
+                                  ),
                                 )}
                               </span>
                             ) : (

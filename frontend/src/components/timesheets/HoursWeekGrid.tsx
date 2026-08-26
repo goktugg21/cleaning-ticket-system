@@ -78,6 +78,7 @@ import { isoWeekDays, toDateString } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { RowJobPicker } from "./RowJobPicker";
 import type { RowJobSource } from "./RowJobPicker";
+import { jobTitleFirst } from "./jobTitle";
 
 /** One person the grid writes for. */
 /** One changed cell the grid collected. Exported because a caller that
@@ -924,7 +925,10 @@ export function HoursWeekGrid({
               ? { source_type: block.sourceType, source_id: block.sourceId }
               : null
           }
-          tagLabel={sourceName(block.sourceType, block.sourceId)}
+          /* W-HOURS6 — the name first ("final test · TCK-373"), the
+             full label as the tooltip. */
+          tagLabel={jobTitleFirst(sourceName(block.sourceType, block.sourceId))}
+          tagTooltip={sourceName(block.sourceType, block.sourceId)}
           thisWeek={jobPicker.thisWeek(block.employeeId, buildingId)}
           search={(query) => jobPicker.search(block.employeeId, buildingId, query)}
           onChange={(next) => setPairTag(block.employeeId, seat, next)}
@@ -960,7 +964,9 @@ export function HoursWeekGrid({
                 whiteSpace: "nowrap",
               }}
             >
-              {label}
+              {/* W-HOURS6 — the name first; the tooltip above carries
+                  the full label. */}
+              {jobTitleFirst(label)}
             </span>
           </span>
         </div>
@@ -1255,10 +1261,20 @@ export function HoursWeekGrid({
                     {jobColumn && (
                       <td
                         className="hours-week-identity hours-week-job"
+                        /* W-HOURS6 — the name first; the cell's own
+                           22ch ellipsis stays, the full label is the
+                           tooltip. */
+                        title={
+                          dayRowIndex === 0
+                            ? sourceName(block.sourceType, block.sourceId)
+                            : undefined
+                        }
                         data-testid={`hours-week-row-job-${row.id}`}
                       >
                         {dayRowIndex === 0
-                          ? sourceName(block.sourceType, block.sourceId)
+                          ? jobTitleFirst(
+                              sourceName(block.sourceType, block.sourceId),
+                            )
                           : ""}
                       </td>
                     )}
