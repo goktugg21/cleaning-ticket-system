@@ -72,6 +72,10 @@ import {
   formatDay,
 } from "../components/workplan/entryHelpers";
 import { matchesChip } from "../components/workplan/chips";
+import { isQuarantined, latenessOf, sortLate } from "../components/workplan/lateness";
+import { LateBadge, LateStrip } from "../components/workplan/LateStrip";
+import { PartChips } from "../components/workplan/PartChips";
+import { QuarantineBar } from "../components/workplan/QuarantineBar";
 import { WorkPlanDayColumn } from "../components/workplan/WorkPlanDayColumn";
 import { WorkPlanStrip } from "../components/workplan/WorkPlanStrip";
 import type { ChipKey } from "../components/workplan/chips";
@@ -475,6 +479,19 @@ function WorkPlanWeek() {
   }, [data, week]);
 
   const entries = useMemo(() => data?.entries ?? [], [data]);
+  /** W-LATE §1a — the late strip's rows, one per job, through the ONE
+   *  helper. The server already sorts them; `sortLate` re-applies the
+   *  same key so the page never trusts an order it did not check. */
+  const lateEntries = useMemo(
+    () => (data ? sortLate(data.late_entries) : []),
+    [data],
+  );
+  /** W-LATE §1c — the bordeaux rung only. The bar renders nothing when
+   *  this is empty; there is no empty shell. */
+  const quarantined = useMemo(
+    () => lateEntries.filter(isQuarantined),
+    [lateEntries],
+  );
   const needle = search.trim().toLowerCase();
   const counts = data?.counts ?? null;
   const todayKey = data?.today ?? toDateString(new Date());
@@ -526,7 +543,8 @@ function WorkPlanWeek() {
     counts.total === 0 &&
     counts.overdue_all === 0 &&
     counts.upcoming === 0 &&
-    counts.undated === 0;
+    counts.undated === 0 &&
+    counts.late === 0;
 
   const weekRangeLabel = useMemo(() => {
     const days = isoWeekDays(week);
@@ -601,6 +619,12 @@ function WorkPlanWeek() {
           )}
           {counts.overdue_all > 0 && (
             <> · {t("agenda.overview_overdue", { count: counts.overdue_all })}</>
+          )}
+          {/* W-LATE §1a — the strip's own number, said in the sentence
+              that describes the plan. A late job is the one thing this
+              line must not leave to be inferred. */}
+          {counts.late > 0 && (
+            <> · {t("agenda.overview_late", { count: counts.late })}</>
           )}
         </p>
       )}
@@ -787,6 +811,22 @@ function WorkPlanWeek() {
         </p>
       )}
 
+      {/* W-LATE §1c / §1a — the quarantine bar (only when an L3 job
+          exists) and the late strip, FULL-WIDTH ABOVE the week grid.
+          Both wrap; nothing here scrolls sideways. The grid below keeps
+          its own dimensions untouched. */}
+      {data && (
+        <QuarantineBar entries={quarantined} role={role} onChanged={reload} />
+      )}
+      {data && (
+        <LateStrip
+          entries={lateEntries}
+          truncated={data.truncated.late_entries}
+          limit={data.limits.late_entries}
+          role={role}
+        />
+      )}
+
       {/* The empty state is about the whole PLAN, not about this week:
           a week with nothing in it is a normal week and gets seven
           empty columns, which is information. "No work assigned" is
@@ -849,6 +889,12 @@ function WorkPlanWeek() {
           role={role}
           onClose={() => setDayModal(null)}
           testId="agenda-day"
+          // W-LATE §1b — TODAY's modal splits "planned today" from
+          // "late": the late half is the strip's own rows, through the
+          // same helper, so the two never disagree. Any other day has no
+          // late half — the LAW says late work sits on today, not on the
+          // day it was planned.
+          lateRows={dayModal === todayKey ? lateEntries : undefined}
         />
       )}
 
@@ -990,6 +1036,7 @@ function EntryTableModal({
   role,
   onClose,
   testId,
+  lateRows,
 }: {
   title: string;
   description: string;
@@ -1002,6 +1049,10 @@ function EntryTableModal({
   role: Role | null;
   onClose: () => void;
   testId: string;
+  /** W-LATE §1b — today's late half. Rendered as a second section under
+   *  the day's own rows, each with the rung badge. Absent on any other
+   *  day and on the Overdue / Upcoming tables. */
+  lateRows?: WorkPlanEntry[];
 }) {
   const { t } = useTranslation(["staff_slots", "common", "create_ticket"]);
   return (
@@ -1054,6 +1105,11 @@ function EntryTableModal({
             {t("agenda.truncated_note", { count: limit })}
           </p>
         )}
+        {lateRows !== undefined && (
+          <div className="section-head-title" data-testid={`${testId}-planned-title`}>
+            {t("late.day_planned_section", { count: rows.length })}
+          </div>
+        )}
         <BoundedList
           size="lg"
           count={rows.length}
@@ -1097,20 +1153,10 @@ function EntryTableModal({
                           in the row and a second inline run would push
                           the date column off a 1366 screen. */}
                       {entry.parts.length > 0 && (
-                        <span
-                          className="parts-chip-row parts-chip-row-stacked"
-                          data-testid={`${testId}-row-parts`}
-                        >
-                          {entry.parts.map((part) => (
-                            <span
-                              key={part.id}
-                              className="parts-chip"
-                              data-testid={`${testId}-row-part`}
-                            >
-                              {part.title}
-                            </span>
-                          ))}
-                        </span>
+                        <PartChips
+                          parts={entry.parts}
+                          testId={`${testId}-row-part`}
+                        />
                       )}
                     </td>
                     <td>
@@ -1154,6 +1200,82 @@ function EntryTableModal({
             </tbody>
           </table>
         </BoundedList>
+
+        {/* W-LATE §1b — today's LATE half. The same helper that colours
+            the strip decides the badge here, so the modal and the strip
+            cannot disagree about a job. */}
+        {lateRows !== undefined && (
+          <div data-testid={`${testId}-late`} style={{ marginTop: 16 }}>
+            <div className="section-head-title">
+              {t("late.day_section", { count: lateRows.length })}
+            </div>
+            {lateRows.length === 0 ? (
+              <p className="muted" data-testid={`${testId}-late-empty`}>
+                {t("late.day_none")}
+              </p>
+            ) : (
+              <BoundedList
+                size="lg"
+                count={lateRows.length}
+                ariaLabel={t("late.strip_title")}
+                testIdPrefix={`${testId}-late`}
+                className="table-wrap"
+              >
+                <table className="data-table data-table-dense">
+                  <thead>
+                    <tr>
+                      <th>{t("agenda.col_item")}</th>
+                      <th>{t("common:building")}</th>
+                      <th>{t("agenda.col_planned")}</th>
+                      <th>{t("late.col_how_late")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lateRows.map((entry) => {
+                      const to = detailPath(entry, role);
+                      const facts = latenessOf(entry);
+                      return (
+                        <tr key={entry.key} data-testid={`${testId}-late-row`}>
+                          <td className="td-subject">
+                            {to ? (
+                              <Link to={to}>
+                                {entry.ticket_no ? `#${entry.ticket_no} · ` : ""}
+                                {entry.title}
+                              </Link>
+                            ) : (
+                              <>
+                                {entry.ticket_no ? `#${entry.ticket_no} · ` : ""}
+                                {entry.title}
+                              </>
+                            )}
+                            {entry.parts.length > 0 && (
+                              <PartChips
+                                parts={entry.parts}
+                                testId={`${testId}-late-row-part`}
+                              />
+                            )}
+                          </td>
+                          <td>{entry.building_name ?? "—"}</td>
+                          <td className="td-date">
+                            {facts?.plannedDate ? formatDay(facts.plannedDate) : "—"}
+                          </td>
+                          <td>
+                            {facts && (
+                              <LateBadge
+                                facts={facts}
+                                testId={`${testId}-late-row-badge`}
+                              />
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </BoundedList>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

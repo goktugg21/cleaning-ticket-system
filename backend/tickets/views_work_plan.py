@@ -80,8 +80,11 @@ from extra_work.models import (
 )
 from extra_work.scoping import scope_extra_work_for
 
+from . import lateness as late_rules
+from .lateness_index import LATE_LIVE_TICKET_STATUSES, LatenessIndex
 from .models import (
     StaffAssignmentSlotStatus,
+    Ticket,
     TicketStaffAssignment,
     TicketStatus,
 )
@@ -118,6 +121,12 @@ UPCOMING_LIMIT = 100
 #: this list is potentially the LARGEST of the three (on crmtest it is
 #: 43 of 70 live tickets), which is precisely why it needs one.
 UNDATED_LIMIT = 100
+#: W-LATE §1a — the late strip. Wider than its siblings because the
+#: strip is the one list that must never hide its worst row: the page
+#: renders the first few and offers "+N more", and only past THIS bound
+#: does the server say it stopped counting rows (it never stops counting
+#: the total — `counts.late` is the whole set).
+LATE_LIMIT = 200
 
 #: How many names a card carries before it just says how many more.
 ASSIGNEE_NAMES_SHOWN = 5
@@ -546,7 +555,9 @@ def _parts_map(slot_rows):
     return out
 
 
-def _entry_from_slot(slot, job, placement, day, today, *, viewer, parts=None) -> dict:
+def _entry_from_slot(
+    slot, job, placement, day, today, *, viewer, parts=None, lateness=None
+) -> dict:
     return {
         "kind": KIND_TICKET_SLOT,
         # Stable across the two kinds so React can key one merged list
@@ -589,6 +600,10 @@ def _entry_from_slot(slot, job, placement, day, today, *, viewer, parts=None) ->
         # never null: a card that renders `parts.map` should not have to
         # ask whether the key exists.
         "parts": parts or [],
+        # W-LATE §1b — the rung this JOB stands on, from the one helper.
+        # Always present, `level: null` when it is not late, so the
+        # client reads one shape for every card.
+        "lateness": (lateness or late_rules.NOT_LATE).as_dict(),
         # The completion actions belong to the person holding the slot.
         # An admin looking at the team's week is reading it, not working
         # it, and a "Mark done" button on somebody else's card is one
@@ -601,7 +616,7 @@ def _entry_from_slot(slot, job, placement, day, today, *, viewer, parts=None) ->
 
 
 def _entry_from_extra_work(
-    extra_work, job, placement, day, today, *, assignees
+    extra_work, job, placement, day, today, *, assignees, lateness=None
 ) -> dict:
     """The extra-work card's WHOLE surface.
 
@@ -653,6 +668,7 @@ def _entry_from_extra_work(
         # empty so both kinds answer `entry.parts` the same way and the
         # frontend needs no `kind` check to read it.
         "parts": [],
+        "lateness": (lateness or late_rules.NOT_LATE).as_dict(),
         "assignee_names": names[:ASSIGNEE_NAMES_SHOWN],
         "assignee_count": len(names),
         "can_complete": False,
@@ -778,6 +794,17 @@ class WorkPlanView(APIView):
             fallback_placement=PLACEMENT_PLANNED,
         )
 
+        # W-LATE §1a — the late strip's rows, one per job, and its total.
+        late_entries, late_truncated, late_total = self._late_entries(
+            slots, extra_work, today, team=team, viewer=user
+        )
+        counts = self._counts(slots, extra_work, week_start, week_end, today)
+        # Counted over the deduped JOB set in Python rather than as a SQL
+        # aggregate, because the ladder needs the widest window across a
+        # ticket's slots — see `_late_entries`. It is the whole set,
+        # never the page.
+        counts["late"] = late_total
+
         return Response(
             {
                 "week": {
@@ -790,25 +817,27 @@ class WorkPlanView(APIView):
                 },
                 "today": _iso(today),
                 "scope": "company" if team else "own",
-                "counts": self._counts(
-                    slots, extra_work, week_start, week_end, today
-                ),
+                "counts": counts,
                 "entries": entries,
                 "overdue_entries": overdue_entries,
                 "upcoming_entries": upcoming_entries,
                 # Sprint 181 §8 — the undated lane's rows.
                 "undated_entries": undated_entries,
+                # W-LATE §1a — the late strip's rows.
+                "late_entries": late_entries,
                 "limits": {
                     "entries": ENTRY_LIMIT,
                     "overdue_entries": OVERDUE_LIMIT,
                     "upcoming_entries": UPCOMING_LIMIT,
                     "undated_entries": UNDATED_LIMIT,
+                    "late_entries": LATE_LIMIT,
                 },
                 "truncated": {
                     "entries": truncated,
                     "overdue_entries": overdue_truncated,
                     "upcoming_entries": upcoming_truncated,
                     "undated_entries": undated_truncated,
+                    "late_entries": late_truncated,
                 },
             },
             status=status.HTTP_200_OK,
@@ -898,6 +927,12 @@ class WorkPlanView(APIView):
             [row.id for row in ew_rows], team=team, viewer=viewer
         )
         parts_by_pair = _parts_map(rows)
+        # W-LATE §1b — one index for every card in this list, so a card
+        # on Tuesday's column and the same job's card in the strip say
+        # the same thing.
+        lateness = LatenessIndex(
+            [row.ticket_id for row in rows], ew_rows, today
+        )
 
         entries = []
         for slot in rows:
@@ -917,6 +952,7 @@ class WorkPlanView(APIView):
                     today,
                     viewer=viewer,
                     parts=parts_by_pair.get((slot.ticket_id, slot.user_id)),
+                    lateness=lateness.for_ticket(slot.ticket_id),
                 )
             )
         for row in ew_rows:
@@ -935,6 +971,7 @@ class WorkPlanView(APIView):
                     day,
                     today,
                     assignees=assignees.get(row.id, []),
+                    lateness=lateness.for_extra_work(row),
                 )
             )
 
@@ -985,6 +1022,124 @@ class WorkPlanView(APIView):
             fallback_placement=fallback_placement,
             sort_key=_due_sort_key,
         )
+
+    @classmethod
+    def _late_entries(cls, slots, extra_work, today, *, team, viewer):
+        """W-LATE §1a — the late strip: ONE ROW PER LATE JOB, ordered by
+        the ladder. Returns `(entries, truncated, total)`.
+
+        Fed from "planned-date-passed-and-not-done" (L1) and its two
+        worse rungs, which is NOT the overdue list's question: that list
+        asks "past its due date", where a slot's due date is the extra
+        work's deadline when one exists. A job planned for Monday with a
+        deadline on Friday is not overdue on Tuesday, but its plan IS
+        broken, and the strip is where that shows. Both lists stay:
+        they answer different questions and are labelled as such.
+
+        Job-level, so a two-person ticket is one card carrying both
+        names — the merge `dedupeByJob` does in the browser for the
+        undated lane, done here because the strip's whole vocabulary
+        (one rung per job, one anchor, one hour total) is per job.
+
+        The SQL narrows to a SUPERSET (anything with a past start, a
+        past deadline or a past slot start); the ladder itself is asked
+        of every candidate in Python, because it needs the widest window
+        across the ticket and its slots, which is one aggregate too many
+        for a predicate that also has to compose into a count.
+        """
+        live = slots.filter(_SLOT_LIVE_Q)
+        candidate_ids = list(
+            Ticket.objects.filter(
+                id__in=live.values("ticket_id"),
+                status__in=LATE_LIVE_TICKET_STATUSES,
+                archived_at__isnull=True,
+                deleted_at__isnull=True,
+            )
+            .filter(
+                Q(scheduled_start_at__date__lt=today)
+                | Q(scheduled_end_at__date__lt=today)
+                | Q(extra_work_request__deadline__lt=today)
+                | Q(staff_assignments__scheduled_start_at__date__lt=today)
+                | Q(staff_assignments__scheduled_end_at__date__lt=today)
+            )
+            .values_list("id", flat=True)
+            .distinct()
+        )
+        ew_rows = list(
+            extra_work.filter(_EW_LIVE_Q)
+            .filter(
+                Q(preferred_date__lt=today)
+                | Q(planned_end_date__lt=today)
+                | Q(deadline__lt=today)
+            )
+            .order_by("id")
+        )
+        index = LatenessIndex(candidate_ids, ew_rows, today)
+        late_ticket_ids = [
+            tid for tid in candidate_ids if index.for_ticket(tid).is_late
+        ]
+        late_ew = [row for row in ew_rows if index.for_extra_work(row).is_late]
+
+        slot_rows = list(
+            live.filter(ticket_id__in=late_ticket_ids).order_by(
+                "ticket_id", "scheduled_start_at", "id"
+            )
+        )
+        parts_by_pair = _parts_map(slot_rows)
+        assignees = cls._assignee_map(
+            [row.id for row in late_ew], team=team, viewer=viewer
+        )
+
+        by_ticket: dict[int, list] = {}
+        for slot in slot_rows:
+            by_ticket.setdefault(slot.ticket_id, []).append(slot)
+
+        keyed = []
+        for ticket_id, bucket in by_ticket.items():
+            first = bucket[0]
+            lateness = index.for_ticket(ticket_id)
+            entry = _entry_from_slot(
+                first,
+                _slot_job(first),
+                PLACEMENT_OVERDUE,
+                today,
+                today,
+                viewer=viewer,
+                lateness=lateness,
+            )
+            names: list[str] = []
+            parts: list[dict] = []
+            for slot in bucket:
+                label = _person_label(slot.user)
+                if label and label not in names:
+                    names.append(label)
+                for part in parts_by_pair.get((slot.ticket_id, slot.user_id), []):
+                    if all(p["id"] != part["id"] for p in parts):
+                        parts.append(part)
+            entry["assignee_names"] = names[:ASSIGNEE_NAMES_SHOWN]
+            entry["assignee_count"] = len(names)
+            entry["parts"] = parts
+            # The strip is a READ. Completing a slot stays on the week
+            # card that belongs to the person holding it.
+            entry["can_complete"] = False
+            keyed.append((late_rules.sort_key(lateness, entry["title"]), entry))
+        for row in late_ew:
+            lateness = index.for_extra_work(row)
+            entry = _entry_from_extra_work(
+                row,
+                _extra_work_job(row),
+                PLACEMENT_OVERDUE,
+                today,
+                today,
+                assignees=assignees.get(row.id, []),
+                lateness=lateness,
+            )
+            keyed.append((late_rules.sort_key(lateness, entry["title"]), entry))
+
+        keyed.sort(key=lambda pair: (pair[0], pair[1]["key"]))
+        entries = [entry for _, entry in keyed]
+        total = len(entries)
+        return entries[:LATE_LIMIT], total > LATE_LIMIT, total
 
     @staticmethod
     def _counts(slots, extra_work, week_start, week_end, today) -> dict:
@@ -1050,6 +1205,8 @@ __all__ = [
     "ENTRY_LIMIT",
     "KIND_EXTRA_WORK",
     "KIND_TICKET_SLOT",
+    "LATE_LIMIT",
+    "LATE_LIVE_TICKET_STATUSES",
     "OVERDUE_LIMIT",
     "UNDATED_LIMIT",
     "UPCOMING_LIMIT",

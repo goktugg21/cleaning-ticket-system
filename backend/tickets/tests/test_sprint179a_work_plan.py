@@ -458,6 +458,10 @@ ENTRY_KEYS = {
     # on one and be forgotten on the other"), which is why extra work
     # emits `"parts": []` rather than omitting the key.
     "parts",
+    # W-LATE §1b — the rung this job stands on, from `tickets/lateness.py`.
+    # Shared by both kinds for the same reason `parts` is: an extra work
+    # answers `level: null` rather than omitting the key.
+    "lateness",
     "can_complete",
 }
 
@@ -506,6 +510,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 # (`counts.undated`), which is how two thirds of the
                 # work on crmtest came to live in one muted sentence.
                 "undated_entries",
+                # W-LATE §1a — the late strip's rows.
+                "late_entries",
                 "limits",
                 "truncated",
             },
@@ -527,6 +533,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "overdue_all",
                 "upcoming",
                 "undated",
+                # W-LATE §1a — late JOBS, deduped, any week.
+                "late",
             },
         )
         # Every list is bounded, and the response says by how much and
@@ -541,6 +549,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "overdue_entries",
                 "upcoming_entries",
                 "undated_entries",
+                "late_entries",
             },
         )
         self.assertEqual(
@@ -550,6 +559,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "overdue_entries",
                 "upcoming_entries",
                 "undated_entries",
+                "late_entries",
             },
         )
         self.assertFalse(any(payload["truncated"].values()))

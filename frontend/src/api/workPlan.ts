@@ -32,10 +32,57 @@ export type WorkPlanKind = "TICKET_SLOT" | "EXTRA_WORK";
 
 /** One card. Both kinds answer with the SAME shape — extra work has no
  *  dated slot, so its three time fields are null rather than absent. */
-/** One named part of a ticket, as the Work Plan shows it. */
+/** W-LATE §3b — where a part stands against its own window. Mirrors
+ *  `tickets/lateness.part_state`; `NONE` is "no window". */
+export type WorkPlanPartState = "NONE" | "OPEN" | "LAST_DAY" | "MISSED" | "DONE";
+
+/** One named part of a ticket, as the Work Plan shows it. The window
+ *  fields arrive with phase 3 (parts get windows); until then they are
+ *  absent and the chip is the plain pill. */
 export interface WorkPlanPart {
   id: number;
   title: string;
+  planned_start?: string | null;
+  planned_end?: string | null;
+  time_window_label?: string;
+  is_done?: boolean;
+  state?: WorkPlanPartState;
+}
+
+/** W-LATE — one rung of the ladder. `1` planned date passed, `2`
+ *  deadline passed, `3` quarantine (thirty days past the anchor with no
+ *  hour booked). Mirrors `tickets/lateness.py`, the ONE owner. */
+export type LateLevel = 1 | 2 | 3;
+
+/** W-LATE phase 2 — one escalation step that has fired for this job:
+ *  which rung spoke, when, and to whom (display names resolved at
+ *  render time from the recipients the step actually reached). */
+export interface WorkPlanEscalationStep {
+  step: "L2_MANAGERS" | "L2_ESCALATED" | "L3_QUARANTINE";
+  notified_at: string;
+  names: string[];
+}
+
+/** W-LATE §1b — the facts the ladder produced for one JOB. Always
+ *  present on every entry; `level: null` means "not late". The server
+ *  is the owner of the rule (`tickets/lateness.py`); the client only
+ *  reads this through `components/workplan/lateness.ts`. */
+export interface WorkPlanLateness {
+  level: LateLevel | null;
+  /** The last planned day — the window end — that L1 compares against. */
+  planned_date: string | null;
+  planned_days_late: number | null;
+  deadline: string | null;
+  deadline_days_late: number | null;
+  /** What L3 counts from: the deadline, else the planned date. */
+  anchor: string | null;
+  anchor_days: number | null;
+  /** Days late against the plan, else against the deadline. */
+  days_late: number | null;
+  /** Decimal as a string, the way every amount travels. */
+  hours_booked: string;
+  /** Absent until phase 2 lands; empty when nothing has fired. */
+  escalation_steps?: WorkPlanEscalationStep[];
 }
 
 export interface WorkPlanEntry {
@@ -79,6 +126,8 @@ export interface WorkPlanEntry {
    *  no parts. Scope is the server's: a STAFF viewer's rows carry their
    *  own parts, a manager's carry everyone's. */
   parts: WorkPlanPart[];
+  /** W-LATE §1b — the rung this JOB stands on. */
+  lateness: WorkPlanLateness;
   /** The completion actions belong to the person holding the slot — an
    *  admin reading the team's week is not working it. */
   can_complete: boolean;
@@ -96,6 +145,8 @@ export interface WorkPlanCounts {
   overdue_all: number;
   upcoming: number;
   undated: number;
+  /** W-LATE §1a — late JOBS (deduped), any week, the strip's own count. */
+  late: number;
 }
 
 export interface WorkPlanWeek {
@@ -120,17 +171,23 @@ export interface WorkPlanResponse {
    *  `counts.undated` has always been here; the ROWS had not, so the
    *  page could only say how much work it was declining to show. */
   undated_entries: WorkPlanEntry[];
+  /** W-LATE §1a — the late strip: one row per late JOB, sorted by the
+   *  ladder (orange leftmost, bordeaux rightmost), each carrying the
+   *  same `lateness` the week cards carry. */
+  late_entries: WorkPlanEntry[];
   limits: {
     entries: number;
     overdue_entries: number;
     upcoming_entries: number;
     undated_entries: number;
+    late_entries: number;
   };
   truncated: {
     entries: boolean;
     overdue_entries: boolean;
     upcoming_entries: boolean;
     undated_entries: boolean;
+    late_entries: boolean;
   };
 }
 

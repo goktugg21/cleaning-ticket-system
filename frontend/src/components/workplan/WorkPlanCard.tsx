@@ -9,6 +9,9 @@ import { SlotStatusBadge } from "../SlotStatusBadge";
 import { StatusBadge } from "../StatusBadge";
 import { formatPlannedWindow } from "../../lib/plannedWindow";
 import { detailPath, formatDay } from "./entryHelpers";
+import { latenessOf } from "./lateness";
+import { LateBadge } from "./LateStrip";
+import { PartChips } from "./PartChips";
 
 /**
  * Sprint 183 §3 — one job on the plan, dense.
@@ -138,6 +141,9 @@ export function WorkPlanCard({
     .filter(Boolean)
     .join(" · ");
   const window = windowText();
+  // W-LATE §1b — the same rung the strip shows, on the week card, so a
+  // job on Tuesday's column and its card in the strip agree.
+  const late = latenessOf(entry);
   const heading = (
     <>
       {entry.ticket_no ? `${entry.ticket_no} · ` : ""}
@@ -172,28 +178,18 @@ export function WorkPlanCard({
       {/* §12B — a card shown outside its planned week SAYS WHY, with its
           planned date on it. */}
       <PlacementMarker entry={entry} />
+      {late && <LateBadge facts={late} testId="agenda-card-late" />}
 
       {/* W-N1 §3 — WHICH half of the job is this person's. Reuses the
           Assignment section's own `.parts-chip` pair rather than a
           second chip style: it is the same fact in a smaller place, and
           two chip vocabularies for one concept is how a design language
           stops being one. Extra work carries an empty list, so this
-          renders nothing there without a `kind` check. */}
+          renders nothing there without a `kind` check.
+          W-LATE §3b — through `PartChips`, which also carries each
+          part's state (done / last day / missed). */}
       {entry.parts.length > 0 && (
-        <span
-          className="parts-chip-row parts-chip-row-stacked"
-          data-testid="agenda-card-parts"
-        >
-          {entry.parts.map((part) => (
-            <span
-              key={part.id}
-              className="parts-chip"
-              data-testid="agenda-card-part"
-            >
-              {part.title}
-            </span>
-          ))}
-        </span>
+        <PartChips parts={entry.parts} testId="agenda-card-part" />
       )}
 
       <div className="wp-card-foot">

@@ -14649,3 +14649,258 @@ table.assign-table { min-width: 0; width: 100%; }
   justify-content: flex-end;
   margin: 0 0 14px;
 }
+
+/* ===================================================================
+   W-LATE — the late strip, the quarantine bar and the severity ladder.
+   APPENDED BLOCK, NEW CLASSES ONLY. Nothing above is edited.
+
+   The design contract, verbatim: L1 orange (#b96a00 family), L2 red,
+   L3 dark bordeaux with a THICK left inset; late cards left-to-right in
+   ascending severity; the strip full-width ABOVE the week grid and it
+   WRAPS — horizontal scroll is forbidden anywhere on the page; the seven
+   day columns keep their current dimensions (nothing in this block
+   touches `.agenda-week-*` or `.wp-day*`); the quarantine bar renders
+   only when an L3 job exists. Part chips: done = strikethrough, last
+   day = orange, missed = red with "niet gedaan op <date>".
+
+   Tokens first, so the three colours are named once and every rule
+   below reads the name. The red pair reuses the app's own --red; the
+   orange and the bordeaux are new because the palette had no "late but
+   not broken" and no "abandoned" tone. */
+:root {
+  --late-l1: #b96a00;
+  --late-l1-soft: #fff4e3;
+  --late-l1-border: #ecc07a;
+  --late-l2: var(--red);
+  --late-l2-soft: var(--red-soft);
+  --late-l2-border: var(--red-border);
+  --late-l3: #5a0f1f;
+  --late-l3-soft: #f5e6ea;
+  --late-l3-border: #c48b99;
+}
+
+/* ---- the strip -------------------------------------------------- */
+.wp-late {
+  margin: 0 0 14px;
+  min-width: 0;
+}
+.wp-late-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+.wp-late-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--late-l1);
+}
+.wp-late-count {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+/* The cards WRAP. Fixed-basis flex items rather than a grid so a row
+   that is not full does not stretch its last card to twice the width
+   of the others; `max-width: 100%` so one card never forces the row
+   wider than its container on a narrow screen. */
+.wp-late-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.wp-late-card {
+  flex: 0 0 auto;
+  width: 262px;
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--late-l1-border);
+  border-radius: var(--r-sm);
+  background: var(--late-l1-soft);
+  box-shadow: inset 4px 0 0 var(--late-l1);
+}
+.wp-late-l1 {
+  border-color: var(--late-l1-border);
+  background: var(--late-l1-soft);
+  box-shadow: inset 4px 0 0 var(--late-l1);
+}
+.wp-late-l2 {
+  border-color: var(--late-l2-border);
+  background: var(--late-l2-soft);
+  box-shadow: inset 4px 0 0 var(--late-l2);
+}
+/* The thick inset the contract asks for on the bordeaux rung. */
+.wp-late-l3 {
+  border-color: var(--late-l3-border);
+  background: var(--late-l3-soft);
+  box-shadow: inset 8px 0 0 var(--late-l3);
+  padding-left: 18px;
+}
+.wp-late-card-kind {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.wp-late-card-level {
+  font-weight: 800;
+}
+.wp-late-l1 .wp-late-card-level { color: var(--late-l1); }
+.wp-late-l2 .wp-late-card-level { color: var(--late-l2); }
+.wp-late-l3 .wp-late-card-level { color: var(--late-l3); }
+.wp-late-card-crew {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.wp-late-more {
+  margin-top: 8px;
+}
+
+/* ---- the badge, shared by strip, week card and day modal ---------- */
+.wp-late-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  margin-top: 3px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #fff;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.wp-late-badge-l1 { background: var(--late-l1); }
+.wp-late-badge-l2 { background: var(--late-l2); }
+.wp-late-badge-l3 { background: var(--late-l3); }
+.wp-late-badge-line { display: block; }
+
+/* ---- the quarantine bar ----------------------------------------- */
+.wp-quarantine {
+  margin: 0 0 14px;
+  padding: 12px 14px 12px 20px;
+  border: 1px solid var(--late-l3-border);
+  border-radius: var(--r-lg);
+  background: var(--late-l3-soft);
+  box-shadow: inset 8px 0 0 var(--late-l3);
+  min-width: 0;
+}
+.wp-quarantine-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+  color: var(--late-l3);
+  font-family: var(--f-head);
+  font-weight: 800;
+  font-size: 13.5px;
+}
+.wp-quarantine-count {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--late-l3);
+  color: #fff;
+  font-size: 11px;
+}
+.wp-quarantine-desc {
+  font-family: inherit;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.wp-quarantine-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wp-quarantine-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 10px;
+  border: 1px solid var(--late-l3-border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  min-width: 0;
+}
+.wp-quarantine-main {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.wp-quarantine-main > a {
+  font-weight: 650;
+  color: var(--text);
+}
+.wp-quarantine-main > a:hover { text-decoration: underline; }
+.wp-quarantine-facts {
+  flex: 2 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.wp-quarantine-nohours {
+  color: var(--late-l3);
+  font-weight: 700;
+}
+.wp-quarantine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---- part chips with a state (§3b) ------------------------------ */
+.parts-chip-done {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+.parts-chip-last-day {
+  border-color: var(--late-l1-border);
+  background: var(--late-l1-soft);
+  color: var(--late-l1);
+  font-weight: 700;
+}
+.parts-chip-missed {
+  border-color: var(--late-l2-border);
+  background: var(--late-l2-soft);
+  color: var(--late-l2);
+  font-weight: 700;
+}
+.parts-chip-note {
+  display: block;
+  font-weight: 500;
+  font-size: 10px;
+  line-height: 1.3;
+}
