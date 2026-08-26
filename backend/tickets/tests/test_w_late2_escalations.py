@@ -321,6 +321,33 @@ class TheWorkPlanNamesTheStepTests(_Fixture):
         self.assertTrue(steps[0]["notified_at"])
 
 
+    def test_the_extra_work_row_carries_its_spawned_tickets_step(self):
+        """W-FIX1 A1 lets the extra-work row front a job whose spawned
+        ticket has no live slot; the ladder spoke about the ticket, and
+        the row must say so too."""
+        from extra_work.models import ExtraWorkAssignment, ExtraWorkAssignmentRole
+
+        worker = self.make_user("late2-ew-worker@example.com", UserRole.STAFF)
+        StaffProfile.objects.create(user=worker)
+        BuildingStaffVisibility.objects.create(user=worker, building=self.building)
+        ew = self._promise(planned_days=-21, deadline_days=-1)
+        ew.preferred_date = self.today - datetime.timedelta(days=21)
+        ew.save(update_fields=["preferred_date"])
+        ExtraWorkAssignment.objects.create(
+            extra_work_request=ew, user=worker,
+            role=ExtraWorkAssignmentRole.WORKER, assigned_by=self.company_admin,
+        )
+        escalations.sweep()
+
+        self.authenticate(self.company_admin)
+        payload = self.client.get(self.URL, {"scope": "company"}).data
+        [row] = [r for r in payload["late_entries"] if r["extra_work_id"] == ew.id]
+        self.assertEqual(row["kind"], "EXTRA_WORK")
+        steps = row["lateness"]["escalation_steps"]
+        self.assertEqual([s["step"] for s in steps], ["L2_MANAGERS"])
+        self.assertEqual(steps[0]["names"], [self.manager.full_name])
+
+
 class TheTaskTests(_Fixture):
     def test_the_task_never_raises_and_reports(self):
         from tickets.tasks import sweep_late_escalations

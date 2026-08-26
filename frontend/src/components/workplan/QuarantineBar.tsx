@@ -145,10 +145,11 @@ export function QuarantineBar({
                 )}
                 <span>{t("late.q_days", { count: facts.anchorDays ?? 0 })}</span>
                 <span className="wp-quarantine-nohours">{t("late.q_no_hours")}</span>
+                {/* The sentence names the person and says they were told;
+                    the "Notified:" label is only for the row that has
+                    nobody to name yet. */}
                 <span data-testid="agenda-quarantine-notified">
-                  {t("late.q_notified", {
-                    who: notified || t("late.q_notified_none"),
-                  })}
+                  {notified || t("late.q_notified", { who: t("late.q_notified_none") })}
                   {step && (
                     <span className="muted"> · {formatDay(step.notified_at.slice(0, 10))}</span>
                   )}

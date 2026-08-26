@@ -178,8 +178,22 @@ class LatenessIndex:
                 hours_booked=hours_for(HourSource.EXTRA_WORK, row.id),
                 today=today,
             )
-        if ticket_ids:
-            self._load_steps(ticket_ids)
+        # W-LATE follow-up — an extra-work row speaks for a job whose
+        # spawned ticket nobody holds a live slot on (W-FIX1 A1), and
+        # the ladder spoke about THAT ticket. So the row carries the
+        # ticket's steps: the promise is one, whichever record fronts
+        # it on the board.
+        self._spawned: dict[int, list[int]] = {}
+        if ew_ids:
+            for ticket_id, ew_id in Ticket.objects.filter(
+                extra_work_request_id__in=list(ew_ids), deleted_at__isnull=True
+            ).values_list("id", "extra_work_request_id"):
+                self._spawned.setdefault(ew_id, []).append(ticket_id)
+        step_ticket_ids = set(ticket_ids)
+        for spawned in self._spawned.values():
+            step_ticket_ids.update(spawned)
+        if step_ticket_ids:
+            self._load_steps(step_ticket_ids)
 
     def _load_steps(self, ticket_ids):
         """One query for the rows, one for the names. The names are
@@ -229,7 +243,12 @@ class LatenessIndex:
             self.for_extra_work(extra_work) if extra_work is not None
             else late_rules.NOT_LATE
         ).as_dict()
-        data["escalation_steps"] = []
+        steps: list[dict] = []
+        if extra_work is not None:
+            for ticket_id in self._spawned.get(extra_work.id, []):
+                steps.extend(self.steps_for_ticket(ticket_id))
+        steps.sort(key=lambda s: s["notified_at"])
+        data["escalation_steps"] = steps
         return data
 
     def for_ticket(self, ticket_id) -> late_rules.Lateness:

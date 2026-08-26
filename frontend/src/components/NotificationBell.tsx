@@ -48,7 +48,7 @@ export function NotificationBell() {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
-  const { push } = useToast();
+  const { push, clear } = useToast();
   const panelId = useId();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -284,7 +284,18 @@ export function NotificationBell() {
             ? t("notifications.bell_aria_unread", { count: unread })
             : t("notifications.bell_aria")
         }
-        onClick={() => setOpen((value) => !value)}
+        onClick={() =>
+          setOpen((value) => {
+            // W-LATE addendum 2 — an L2/L3 toast stays until dismissed,
+            // and the stack sits over this panel. Opening the bell IS the
+            // dismissal: the list underneath holds the same rows, so the
+            // toasts have nothing left to say and must not cover it
+            // (measured: a sticky toast intercepted the click on the row
+            // it was announcing).
+            if (!value) clear();
+            return !value;
+          })
+        }
         data-testid="topbar-notification-bell"
       >
         <Bell size={18} strokeWidth={2} />
