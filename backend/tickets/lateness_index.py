@@ -12,10 +12,18 @@ one place rather than as two copies that would drift.
 JOB-level, not slot-level, on purpose. A slot is one person's dated
 piece of a ticket; "the planned date has passed" is a fact about the
 ticket, and the strip shows one card per job. So the planned window is
-the WIDEST one the ticket carries — its own `scheduled_*` plus every
-non-cancelled slot's window — and the deadline is the extra work's, read
+the WIDEST one the WORK carries — every non-cancelled slot's window and
+every part's window — and the deadline is the extra work's, read
 through the canonical link exactly as `views_work_plan._slot_deadline`
 reads it.
+
+W-PLANTRUTH §1a (owner ruling) — the ticket-level `scheduled_start_at`
+/ `scheduled_end_at` is NOT part of that window any more. The board
+places a card on the slot's day (or a part's), never on the ticket's
+date; a ladder that measured the ticket's date would print "Planned
+7 Sep" on a card the board had filed under 29 Aug — two truths, which
+is the defect the ruling closes. Measured on crmtest before the change:
+six live tickets were late by a ticket date only, on no column.
 
 Hours are the timesheets module's `TimeEntry` rows filed against the
 job (`HourSource.TICKET` for the ticket, `HourSource.EXTRA_WORK` for the
@@ -29,7 +37,7 @@ from __future__ import annotations
 
 import datetime
 
-from django.db.models import Max, Q, Sum
+from django.db.models import Max, Min, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -90,6 +98,10 @@ class LatenessIndex:
         self.today = today
         self._tickets: dict[int, late_rules.Lateness] = {}
         self._extra_work: dict[int, late_rules.Lateness] = {}
+        # W-PLANTRUTH §1a — the FIRST planned day of the work (the
+        # earliest slot or part start), for the escalation sweep's
+        # persist rule, which used to read the ticket's own date.
+        self._planned_start: dict[int, datetime.date | None] = {}
         # W-LATE §2 — the steps the ladder has spoken for each ticket,
         # with the display names of the people each step reached.
         self._steps: dict[int, list[dict]] = {}
@@ -100,6 +112,12 @@ class LatenessIndex:
 
         tickets = []
         if ticket_ids:
+            not_cancelled = ~Q(
+                staff_assignments__slot_status=StaffAssignmentSlotStatus.CANCELLED
+            )
+            # Two multi-valued joins (slots, parts) in one annotate: the
+            # row set is a cross product, which is harmless for Max/Min
+            # (it would not be for Sum or Count).
             tickets = list(
                 Ticket.objects.filter(id__in=ticket_ids)
                 .select_related("extra_work_request")
@@ -109,12 +127,19 @@ class LatenessIndex:
                             "staff_assignments__scheduled_end_at",
                             "staff_assignments__scheduled_start_at",
                         ),
-                        filter=~Q(
-                            staff_assignments__slot_status=(
-                                StaffAssignmentSlotStatus.CANCELLED
-                            )
-                        ),
-                    )
+                        filter=not_cancelled,
+                    ),
+                    slot_window_start=Min(
+                        "staff_assignments__scheduled_start_at",
+                        filter=not_cancelled,
+                    ),
+                    part_window_end=Max(
+                        Coalesce(
+                            "sub_tasks__planned_end_date",
+                            "sub_tasks__planned_start_date",
+                        )
+                    ),
+                    part_window_start=Min("sub_tasks__planned_start_date"),
                 )
             )
         ticket_ew_ids = {
@@ -147,18 +172,28 @@ class LatenessIndex:
             return value if value is not None else late_rules.ZERO_HOURS
 
         for ticket in tickets:
-            own_end = local_date(
-                ticket.scheduled_end_at or ticket.scheduled_start_at
-            )
-            slot_end = local_date(ticket.slot_window_end)
-            ends = [d for d in (own_end, slot_end) if d is not None]
+            ends = [
+                d
+                for d in (local_date(ticket.slot_window_end), ticket.part_window_end)
+                if d is not None
+            ]
+            starts = [
+                d
+                for d in (
+                    local_date(ticket.slot_window_start),
+                    ticket.part_window_start,
+                )
+                if d is not None
+            ]
+            planned_start = min(starts) if starts else None
+            self._planned_start[ticket.id] = planned_start
             booked = hours_for(HourSource.TICKET, ticket.id)
             if ticket.extra_work_request_id is not None:
                 booked = booked + hours_for(
                     HourSource.EXTRA_WORK, ticket.extra_work_request_id
                 )
             self._tickets[ticket.id] = late_rules.assess(
-                planned_start=local_date(ticket.scheduled_start_at),
+                planned_start=planned_start,
                 planned_end=max(ends) if ends else None,
                 deadline=getattr(ticket.extra_work_request, "deadline", None),
                 done=(
@@ -253,6 +288,11 @@ class LatenessIndex:
 
     def for_ticket(self, ticket_id) -> late_rules.Lateness:
         return self._tickets.get(ticket_id, late_rules.NOT_LATE)
+
+    def planned_start_for(self, ticket_id) -> datetime.date | None:
+        """The first planned day of the work (earliest slot or part
+        start), or None when nothing is dated."""
+        return self._planned_start.get(ticket_id)
 
     def for_extra_work(self, extra_work) -> late_rules.Lateness:
         return self._extra_work.get(extra_work.id, late_rules.NOT_LATE)

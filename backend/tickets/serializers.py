@@ -2270,6 +2270,14 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                         code=ERR_TRANSITION_REQUIREMENTS,
                     )
 
+                # W-PLANTRUTH §3b — PROCEEDING CLOSES THE OPEN PARTS.
+                # The modal warns (W-LATE §3c) and the operator proceeds;
+                # the move itself says the work is done, so every part
+                # still open is marked done by the acting user, with one
+                # timeline line naming them. Inside the same transaction
+                # as the move: a refused move closes nothing.
+                self._close_open_parts(ticket, user)
+
                 return apply_transition(
                     ticket=ticket,
                     user=user,
@@ -2280,6 +2288,119 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                 )
         except TransitionError as exc:
             raise serializers.ValidationError({"detail": str(exc), "code": exc.code})
+
+    #: W-PLANTRUTH §3b — the moves that mean "the work is done", the
+    #: only ones that close open parts. Mirrors the frontend's
+    #: `COMPLETION_TARGETS`, which is the set the warn line is shown for.
+    _COMPLETION_TARGETS = frozenset(
+        {
+            TicketStatus.WAITING_MANAGER_REVIEW,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            TicketStatus.APPROVED,
+            TicketStatus.CLOSED,
+        }
+    )
+
+    def _close_open_parts(self, ticket, user) -> int:
+        """Mark every open part done as part of a completion move.
+
+        A part is done when every slot filed under it is COMPLETED
+        (`SubTask.is_done`); it has no status column of its own. So
+        closing a part is completing the ASSIGNED slots under it —
+        `completed_by` the actor, a note saying which step closed it —
+        and a part nobody was ever put on cannot be closed this way: it
+        is named in the timeline line as such and left as it is.
+
+        Provider-side actors only: this is the transition MODAL's
+        promise, and a customer approving their ticket should not land
+        as `completed_by` on a cleaner's slot.
+
+        Returns how many slots were completed. The timeline line is one
+        `TicketStatusHistory` annotation row (old == new == the status
+        BEFORE the move, the Sprint 8B pattern), written before the
+        move's own row so the two read in order.
+        """
+        from accounts.permissions import is_staff_role
+
+        from .models import (
+            StaffAssignmentSlotStatus,
+            SubTask,
+            TicketStatusHistory,
+        )
+
+        to_status = str(self.validated_data["to_status"])
+        if to_status not in self._COMPLETION_TARGETS:
+            return 0
+        if not is_staff_role(user):
+            return 0
+        open_parts = [
+            part
+            for part in SubTask.objects.filter(ticket=ticket)
+            .prefetch_related("staff_assignments")
+            .order_by("ordering", "id")
+            if not part.is_done()
+        ]
+        if not open_parts:
+            return 0
+
+        now = timezone.now()
+        closed_titles: list[str] = []
+        nobody_titles: list[str] = []
+        completed = 0
+        for part in open_parts:
+            slots = [
+                slot
+                for slot in part.staff_assignments.all()
+                if slot.slot_status == StaffAssignmentSlotStatus.ASSIGNED
+            ]
+            if not slots:
+                # Nobody ASSIGNED under it: nothing to complete. (A part
+                # nobody was ever put on, or one whose people all
+                # reported unable.)
+                nobody_titles.append(part.title)
+                continue
+            for slot in slots:
+                slot.slot_status = StaffAssignmentSlotStatus.COMPLETED
+                slot.completed_at = now
+                slot.completed_by = user
+                slot.completion_note = (
+                    f"Closed with the step to {to_status}."
+                )
+                # `save()` rather than a queryset update so the audit
+                # receivers fire per row, as every other slot write does.
+                slot.save(
+                    update_fields=[
+                        "slot_status",
+                        "completed_at",
+                        "completed_by",
+                        "completion_note",
+                    ]
+                )
+                completed += 1
+            closed_titles.append(part.title)
+
+        pieces = []
+        if closed_titles:
+            pieces.append(
+                "Parts closed with the step to "
+                f"{to_status}: {', '.join(closed_titles)}."
+            )
+        if nobody_titles:
+            pieces.append(
+                "Parts nobody was on, left as they are: "
+                f"{', '.join(nobody_titles)}."
+            )
+        if pieces:
+            TicketStatusHistory.objects.create(
+                ticket=ticket,
+                old_status=ticket.status,
+                new_status=ticket.status,
+                changed_by=user,
+                note=" ".join(pieces),
+                is_override=False,
+                override_reason="",
+            )
+        return completed
 
     def _apply_transition_answers(self, ticket, user):
         """Write the modal's answers onto the ticket, if it sent any.
@@ -2569,6 +2690,10 @@ class TicketScheduleInputSerializer(serializers.Serializer):
     reschedule_reason = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
+    # W-PLANTRUTH §1a — also move the job's PENDING slots onto this
+    # window (`tickets.schedule.move_pending_slots`). Off by default so
+    # every existing caller keeps writing exactly what it wrote.
+    apply_to_slots = serializers.BooleanField(required=False, default=False)
 
     def validate(self, attrs):
         start = attrs.get("scheduled_start_at")

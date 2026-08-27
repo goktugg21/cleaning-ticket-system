@@ -11,17 +11,26 @@ THE LADDER
 ----------
     L1  the planned date has passed          (the plan is broken)
     L2  the customer deadline has passed     (the promise is broken)
-    L3  quarantine: thirty days past the ANCHOR with ZERO worked hours
+    L3  never done: thirty days past the ANCHOR with ZERO worked hours
         booked — anchor = the deadline, else the planned date.
+        (W-PLANTRUTH §1c renamed this rung from "quarantine"; the stored
+        enum values `L3_QUARANTINE` / `TICKET_LATE_L3_QUARANTINE` keep
+        their spelling because changing a stored choice is a migration.)
 
 Each rung is a pure predicate over five facts: the planned window, the
 deadline, whether the work is done, how many hours have been booked, and
 today. The rung a job stands on is the HIGHEST predicate that holds.
 
 ONE HELPER, ONE OWNER. `views_work_plan.py` asks this for every card,
-the late strip and the quarantine bar read the same answer, the day
+the late chips and the never-done modal read the same answer, the day
 modal splits "today" from "late" with it, and the phase-2 escalation
-sweep fires off the same rungs. A second date comparison anywhere else
+sweep fires off the same rungs.
+
+W-PLANTRUTH §1a — THE PLANNED DATE IS THE WORK'S, NOT THE TICKET'S.
+The window this ladder measures is the widest window across the
+ticket's slots and its parts' windows (`lateness_index.py`); the
+ticket-level `scheduled_start_at` is a different fact, places nothing
+on the board, and is therefore not a reason to be late either. A second date comparison anywhere else
 is how one screen ends up calling a job late that another calls on time
 (`tickets/work_plan.py` says the same about §12B, and for the same
 reason).
@@ -38,14 +47,14 @@ from decimal import Decimal
 #: The three rungs. `None` is "not late at all".
 LEVEL_PLANNED_PASSED = 1
 LEVEL_DEADLINE_PASSED = 2
-LEVEL_QUARANTINE = 3
+LEVEL_NEVER_DONE = 3
 
 #: How long a job may sit past its anchor with no hour booked before it
-#: is quarantined. Thirty days is the brief's number, verbatim; it is
-#: not a setting because a threshold nobody can mis-set is a threshold
-#: nobody can mis-set to zero (the deadline reminder makes the same
-#: argument about its 48 hours).
-QUARANTINE_DAYS = 30
+#: counts as never done. Thirty days is the brief's number, verbatim; it
+#: is not a setting because a threshold nobody can mis-set is a
+#: threshold nobody can mis-set to zero (the deadline reminder makes the
+#: same argument about its 48 hours).
+NEVER_DONE_DAYS = 30
 
 ZERO_HOURS = Decimal("0")
 
@@ -178,10 +187,10 @@ def assess(
         level = LEVEL_DEADLINE_PASSED
     if (
         anchor_days is not None
-        and anchor_days >= QUARANTINE_DAYS
+        and anchor_days >= NEVER_DONE_DAYS
         and hours <= ZERO_HOURS
     ):
-        level = LEVEL_QUARANTINE
+        level = LEVEL_NEVER_DONE
 
     return Lateness(
         level=level,
@@ -251,7 +260,7 @@ def part_state(
 __all__ = [
     "LEVEL_DEADLINE_PASSED",
     "LEVEL_PLANNED_PASSED",
-    "LEVEL_QUARANTINE",
+    "LEVEL_NEVER_DONE",
     "Lateness",
     "NOT_LATE",
     "PART_STATE_DONE",
@@ -259,7 +268,7 @@ __all__ = [
     "PART_STATE_MISSED",
     "PART_STATE_NONE",
     "PART_STATE_OPEN",
-    "QUARANTINE_DAYS",
+    "NEVER_DONE_DAYS",
     "assess",
     "part_state",
     "sort_key",

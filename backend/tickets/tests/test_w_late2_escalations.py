@@ -26,6 +26,7 @@ from test_utils import TenantFixtureMixin
 from tickets import escalations
 from tickets.models import (
     StaffAssignmentSlotStatus,
+    SubTask,
     TicketEscalation,
     TicketEscalationStep,
     TicketManagerAssignment,
@@ -35,7 +36,7 @@ from tickets.models import (
 
 L2_MANAGERS = "TICKET_LATE_L2_MANAGERS"
 L2_ESCALATED = "TICKET_LATE_L2_ESCALATED"
-L3_QUARANTINE = "TICKET_LATE_L3_QUARANTINE"
+L3_NEVER_DONE = "TICKET_LATE_L3_QUARANTINE"
 
 
 class PersistDaysTests(SimpleTestCase):
@@ -98,6 +99,29 @@ class _Fixture(TenantFixtureMixin, APITestCase):
         TicketManagerAssignment.objects.create(
             ticket=self.ticket, user=self.manager, assigned_by=self.company_admin
         )
+        # W-PLANTRUTH §1a — somebody has to be ON the work for it to have
+        # a planned day at all. The ticket's own `scheduled_start_at` is
+        # a different fact and no longer answers "when was this planned".
+        self.worker = self.make_user("late2-fixture-worker@example.com", UserRole.STAFF)
+        StaffProfile.objects.create(user=self.worker)
+        BuildingStaffVisibility.objects.create(
+            user=self.worker, building=self.building
+        )
+
+    def _plan_the_work(self, days):
+        """W-PLANTRUTH §1a — THE PLANNED DAY OF THE WORK, which is the
+        slot's day. `_promise` used to write this onto the ticket header
+        and nothing else; the ladder read it there, the board read the
+        slot, and the two could disagree. The ruling made the slot the
+        one owner, so the fixture plans the work the way an operator
+        does."""
+        return TicketStaffAssignment.objects.create(
+            ticket=self.ticket,
+            user=self.worker,
+            assigned_by=self.company_admin,
+            scheduled_start_at=self._at(days),
+            slot_status=StaffAssignmentSlotStatus.ASSIGNED,
+        )
 
     def _at(self, days, hour=9):
         naive = datetime.datetime.combine(
@@ -105,8 +129,13 @@ class _Fixture(TenantFixtureMixin, APITestCase):
         )
         return timezone.make_aware(naive)
 
-    def _promise(self, *, planned_days, deadline_days):
-        """The promise: planned for one day, owed by another."""
+    def _promise(self, *, planned_days, deadline_days, plan_the_work=True):
+        """The promise: planned for one day, owed by another.
+
+        `plan_the_work` puts that planned day on a real dated SLOT, which
+        is where W-PLANTRUTH §1a says a planned day lives. The two tests
+        that need the job to have NO live slot pass it False and say
+        why."""
         ew = ExtraWorkRequest.objects.create(
             company=self.company,
             building=self.building,
@@ -122,6 +151,8 @@ class _Fixture(TenantFixtureMixin, APITestCase):
             self._at(planned_days) if planned_days is not None else None
         )
         self.ticket.save(update_fields=["extra_work_request", "scheduled_start_at"])
+        if plan_the_work and planned_days is not None:
+            self._plan_the_work(planned_days)
         return ew
 
     def _rows(self, user, event):
@@ -232,11 +263,11 @@ class DeadlinePassedTests(_Fixture):
         self.assertFalse(TicketEscalation.objects.filter(ticket=self.ticket).exists())
 
 
-class QuarantineTests(_Fixture):
+class NeverDoneTests(_Fixture):
     def test_thirty_days_without_an_hour_tells_the_provider_admins(self):
         self._promise(planned_days=-40, deadline_days=-31)
         escalations.sweep()
-        bell, mail = self._rows(self.company_admin, L3_QUARANTINE)
+        bell, mail = self._rows(self.company_admin, L3_NEVER_DONE)
         self.assertEqual(bell.count(), 1)
         self.assertEqual(mail.count(), 1)
         row = bell.get()
@@ -244,25 +275,25 @@ class QuarantineTests(_Fixture):
         self.assertIn("zonder één gewerkt uur", row.summary)
         self.assertIn("31 dagen voorbij de deadline", row.summary)
         step = TicketEscalation.objects.get(
-            ticket=self.ticket, step=TicketEscalationStep.L3_QUARANTINE
+            ticket=self.ticket, step=TicketEscalationStep.L3_NEVER_DONE
         )
         self.assertIsNone(step.anchor_date)
         self.assertEqual(step.recipient_ids, [self.company_admin.id])
         # Not the other tenant's admin, and not the super admin.
-        self.assertEqual(self._rows(self.other_company_admin, L3_QUARANTINE)[0].count(), 0)
-        self.assertEqual(self._rows(self.super_admin, L3_QUARANTINE)[0].count(), 0)
+        self.assertEqual(self._rows(self.other_company_admin, L3_NEVER_DONE)[0].count(), 0)
+        self.assertEqual(self._rows(self.super_admin, L3_NEVER_DONE)[0].count(), 0)
         self.assertEqual(escalations.sweep()["told"], 0)
 
     def test_the_anchor_is_the_planned_day_when_there_is_no_deadline(self):
         # No extra work, no deadline: thirty-one days past the plan.
-        self.ticket.scheduled_start_at = self._at(-31)
-        self.ticket.save(update_fields=["scheduled_start_at"])
+        # W-PLANTRUTH §1a — the plan is the SLOT's day.
+        self._plan_the_work(-31)
         escalations.sweep()
-        bell, _ = self._rows(self.company_admin, L3_QUARANTINE)
+        bell, _ = self._rows(self.company_admin, L3_NEVER_DONE)
         self.assertEqual(bell.count(), 1)
         self.assertIn("voorbij de geplande dag", bell.get().summary)
 
-    def test_a_booked_hour_keeps_quarantine_silent(self):
+    def test_a_booked_hour_keeps_the_never_done_step_silent(self):
         from timesheets.models import HourSource, HourType, TimeEntry
 
         self._promise(planned_days=-40, deadline_days=-31)
@@ -283,7 +314,7 @@ class QuarantineTests(_Fixture):
         escalations.sweep()
         self.assertFalse(
             TicketEscalation.objects.filter(
-                ticket=self.ticket, step=TicketEscalationStep.L3_QUARANTINE
+                ticket=self.ticket, step=TicketEscalationStep.L3_NEVER_DONE
             ).exists()
         )
         # ...but the deadline steps still speak: the promise is broken.
@@ -308,7 +339,8 @@ class TheWorkPlanNamesTheStepTests(_Fixture):
             scheduled_start_at=self._at(-21),
             slot_status=StaffAssignmentSlotStatus.ASSIGNED,
         )
-        self._promise(planned_days=-21, deadline_days=-1)
+        # It plans the work itself, just above.
+        self._promise(planned_days=-21, deadline_days=-1, plan_the_work=False)
         escalations.sweep()
 
         self.authenticate(self.company_admin)
@@ -330,7 +362,17 @@ class TheWorkPlanNamesTheStepTests(_Fixture):
         worker = self.make_user("late2-ew-worker@example.com", UserRole.STAFF)
         StaffProfile.objects.create(user=worker)
         BuildingStaffVisibility.objects.create(user=worker, building=self.building)
-        ew = self._promise(planned_days=-21, deadline_days=-1)
+        # Its whole premise is that NO live slot exists, so the job's
+        # planned day comes from a PART's window instead — which §1a
+        # counts exactly the same way.
+        ew = self._promise(
+            planned_days=-21, deadline_days=-1, plan_the_work=False
+        )
+        SubTask.objects.create(
+            ticket=self.ticket,
+            title="Ramen",
+            planned_start_date=self.today - datetime.timedelta(days=21),
+        )
         ew.preferred_date = self.today - datetime.timedelta(days=21)
         ew.save(update_fields=["preferred_date"])
         ExtraWorkAssignment.objects.create(

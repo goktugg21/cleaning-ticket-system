@@ -99,6 +99,7 @@ its audit trail and must not also be registered as a generic AuditLog.
 """
 from __future__ import annotations
 
+import datetime
 from decimal import Decimal
 
 from django.utils import timezone
@@ -599,6 +600,66 @@ def _write_planned_hours(extra_work, resolved, *, actor) -> str:
     return fragment
 
 
+def _sync_slot_windows(extra_work, resolved) -> int:
+    """Write each person's planned first..last day onto their base slot
+    on the work's live spawned tickets. Returns how many slots changed.
+
+    The slot's clock time is kept where it has one (09:00-17:00
+    otherwise), because the plan speaks in days and the slot in
+    instants; the DAY is what the board reads (`views_work_plan._local_
+    date`). Completed / unable / cancelled slots are history and are
+    not touched. `save()` per row so the audit receivers fire.
+    """
+    from tickets.models import (
+        StaffAssignmentSlotStatus,
+        Ticket,
+        TicketStaffAssignment,
+    )
+
+    days_by_user: dict[int, list] = {}
+    for user_id, on_date, _hour_type_id, _hours in resolved:
+        if on_date is not None:
+            days_by_user.setdefault(user_id, []).append(on_date)
+    if not days_by_user:
+        return 0
+
+    tickets = Ticket.objects.filter(
+        extra_work_request=extra_work, deleted_at__isnull=True
+    )
+    slots = TicketStaffAssignment.objects.filter(
+        ticket__in=tickets,
+        sub_task__isnull=True,
+        user_id__in=list(days_by_user),
+        slot_status=StaffAssignmentSlotStatus.ASSIGNED,
+    ).order_by("id")
+
+    tz = timezone.get_current_timezone()
+
+    def _at(day, existing, default_hour):
+        clock = (
+            timezone.localtime(existing).timetz().replace(tzinfo=None)
+            if existing is not None
+            else datetime.time(default_hour, 0)
+        )
+        return timezone.make_aware(datetime.datetime.combine(day, clock), tz)
+
+    moved = 0
+    for slot in slots:
+        days = sorted(days_by_user[slot.user_id])
+        first, last = days[0], days[-1]
+        start = _at(first, slot.scheduled_start_at, 9)
+        end = _at(last, slot.scheduled_end_at, 17) if last > first else None
+        if slot.scheduled_start_at == start and slot.scheduled_end_at == end:
+            continue
+        slot.scheduled_start_at = start
+        slot.scheduled_end_at = end
+        slot.save(
+            update_fields=["scheduled_start_at", "scheduled_end_at"]
+        )
+        moved += 1
+    return moved
+
+
 def _start(extra_work, *, actor) -> tuple[bool, str | None, object]:
     """Plan and start are one action. Returns `(started, skipped_code, row)`.
 
@@ -808,6 +869,18 @@ def apply_plan(
         note_parts.append(
             _write_planned_hours(extra_work, resolved_hours, actor=actor)
         )
+        # W-PLANTRUTH §1a — THE PLAN'S DAYS PLACE THE BOARD. The Work
+        # Plan buckets a job on its SLOT's day; a person planned here
+        # for Tuesday and Thursday whose slot on the spawned ticket
+        # still carried the ticket's date (or none) was on the wrong
+        # column, or on none. So a dated plan writes each person's base
+        # slot window on every live spawned ticket: first planned day to
+        # last. Undated rows leave the slot alone; a person with no base
+        # slot gets none minted here (the crew sync owns who is on the
+        # job).
+        moved = _sync_slot_windows(extra_work, resolved_hours)
+        if moved:
+            note_parts.append(f"{moved} slot window(s) set from the plan")
 
     # ---- the warning that never blocks -------------------------------
     warnings = []

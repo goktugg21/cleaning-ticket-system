@@ -91,20 +91,20 @@ class TheLadderTests(SimpleTestCase):
 
     def test_thirty_days_past_the_deadline_with_no_hours_is_l3(self):
         result = self._assess(planned_start=_d(-40), deadline=_d(-30))
-        self.assertEqual(result.level, lateness.LEVEL_QUARANTINE)
+        self.assertEqual(result.level, lateness.LEVEL_NEVER_DONE)
         self.assertEqual(result.anchor, _d(-30))
         self.assertEqual(result.anchor_days, 30)
 
-    def test_twenty_nine_days_is_not_yet_quarantine(self):
+    def test_twenty_nine_days_is_not_yet_never_done(self):
         result = self._assess(planned_start=_d(-40), deadline=_d(-29))
         self.assertEqual(result.level, lateness.LEVEL_DEADLINE_PASSED)
 
     def test_the_anchor_is_the_planned_date_when_there_is_no_deadline(self):
         result = self._assess(planned_start=_d(-31))
-        self.assertEqual(result.level, lateness.LEVEL_QUARANTINE)
+        self.assertEqual(result.level, lateness.LEVEL_NEVER_DONE)
         self.assertEqual(result.anchor, _d(-31))
 
-    def test_one_booked_hour_keeps_a_job_out_of_quarantine(self):
+    def test_one_booked_hour_keeps_a_job_out_of_never_done(self):
         result = self._assess(
             planned_start=_d(-45), deadline=_d(-40), hours_booked=Decimal("0.5")
         )
@@ -299,7 +299,7 @@ class TheStripTests(_StripFixture):
         )
         self.assertEqual(row["planned_start"], row["lateness"]["planned_date"])
 
-    def test_thirty_one_days_with_no_hours_is_quarantined(self):
+    def test_thirty_one_days_with_no_hours_is_never_done(self):
         self._slot(self.ticket, self.worker, days=-31)
         payload = self._plan(self.worker)
         [row] = payload["late_entries"]
@@ -307,7 +307,7 @@ class TheStripTests(_StripFixture):
         self.assertEqual(row["lateness"]["anchor_days"], 31)
         self.assertEqual(row["lateness"]["hours_booked"], "0")
 
-    def test_a_booked_hour_lifts_the_quarantine(self):
+    def test_a_booked_hour_lifts_the_never_done_rung(self):
         from timesheets.models import HourSource, HourType, TimeEntry
 
         self._slot(self.ticket, self.worker, days=-31)

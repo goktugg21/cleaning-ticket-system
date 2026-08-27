@@ -56,7 +56,7 @@ class SeverityOnTheRowTests(TenantFixtureMixin, APITestCase):
         self.company_admin.language = "en"
         self.company_admin.save(update_fields=["language"])
         rows = emit_escalation_inapp(
-            event_type=NotificationType.TICKET_LATE_L3_QUARANTINE,
+            event_type=NotificationType.TICKET_LATE_L3_NEVER_DONE,
             recipients=[self.manager, self.company_admin],
             summary_for=lambda user: "EN" if user.language == "en" else "NL",
             severity=NotificationSeverity.L3,
@@ -86,9 +86,28 @@ class TheStepsAreNotMutableTests(TenantFixtureMixin, APITestCase):
         for name in (
             "TICKET_LATE_L2_MANAGERS",
             "TICKET_LATE_L2_ESCALATED",
-            "TICKET_LATE_L3_QUARANTINE",
+            "TICKET_LATE_L3_NEVER_DONE",
         ):
             self.assertEqual(
                 getattr(NotificationEventType, name).value,
                 getattr(NotificationType, name).value,
             )
+
+    def test_the_never_done_rung_kept_its_stored_spelling(self):
+        """W-PLANTRUTH §1c renamed the RUNG, not the DATA.
+
+        Everything a reader sees says "never done" / "nooit uitgevoerd",
+        and the Python attribute says so too. The stored value does not:
+        changing a `TextChoices` value is a schema migration and a
+        rewrite of every row already written under the old spelling, and
+        this wave ships neither. So the value stays `..._L3_QUARANTINE`
+        forever, and this test is the reason it looks inconsistent.
+        """
+        self.assertEqual(
+            NotificationType.TICKET_LATE_L3_NEVER_DONE.value,
+            "TICKET_LATE_L3_QUARANTINE",
+        )
+        self.assertEqual(
+            NotificationEventType.TICKET_LATE_L3_NEVER_DONE.value,
+            "TICKET_LATE_L3_QUARANTINE",
+        )

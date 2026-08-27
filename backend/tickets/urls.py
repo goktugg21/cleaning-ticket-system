@@ -27,6 +27,7 @@ from .views_upload_visibility import (
 from .views_work_plan import WorkPlanView
 from .views_sub_tasks import (
     TicketSubTaskDetailView,
+    TicketSubTaskDoneView,
     TicketSubTaskListCreateView,
 )
 
@@ -200,6 +201,12 @@ urlpatterns = [
         "<int:ticket_id>/sub-tasks/",
         TicketSubTaskListCreateView.as_view(),
         name="ticket-sub-tasks",
+    ),
+    # W-PLANTRUTH §3c — the manager's mark done / undone.
+    path(
+        "<int:ticket_id>/sub-tasks/<int:sub_task_id>/done/",
+        TicketSubTaskDoneView.as_view(),
+        name="ticket-sub-task-done",
     ),
     path(
         "<int:ticket_id>/sub-tasks/<int:sub_task_id>/",

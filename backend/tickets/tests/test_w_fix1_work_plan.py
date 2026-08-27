@@ -6,7 +6,10 @@ A1. An extra work that has spawned a ticket somebody holds a live slot
     slot whose TICKET is already scheduled — through its own date, the
     ticket's date, or a colleague's slot — is not "undated" work.
 
-E2. Today's column holds work planned for today. Overdue and started
+E2 (AMENDED by W-PLANTRUTH §1b — see the rewritten test below: today
+    also holds work planned for a day that has passed and is not done,
+    stamped ROLLED with the day it came from).
+    Today's column holds work planned for today. Started
     work that is not planned this week lives in the strips that already
     existed, marked with why it is there, and is not copied onto today.
 """
@@ -84,7 +87,17 @@ class OneJobOneRowTests(WorkPlanFixture, APITestCase):
 
 
 class UndatedIsAJobLevelFactTests(WorkPlanFixture, APITestCase):
-    def test_a_slot_on_a_scheduled_ticket_is_not_undated(self):
+    def test_a_slot_with_no_day_is_undated_even_when_the_ticket_has_one(self):
+        """W-PLANTRUTH §1a — the ticket-level date is a DIFFERENT FACT.
+
+        W-FIX1 A1 let a ticket's own `scheduled_start_at` take a slot out
+        of this lane. The owner's ruling withdraws that: the board is
+        placed by the planned day of the WORK, and a job whose people
+        have no day is work nobody has planned — whatever the ticket
+        header says. It belongs here until somebody gives it a day.
+        A colleague's DATED slot still takes it out (the next test):
+        that is a real planned day for the job.
+        """
         ticket = self.make_ticket("Ticket has a date")
         ticket.scheduled_start_at = self.make_slot(
             self.make_ticket("tmp"), start=self.today
@@ -94,8 +107,11 @@ class UndatedIsAJobLevelFactTests(WorkPlanFixture, APITestCase):
 
         payload = self.get_plan(self.worker)
 
-        self.assertIsNone(self.entry(payload, f"slot-{slot.id}", "undated_entries"))
-        self.assertEqual(payload["counts"]["undated"], 0)
+        self.assertIsNotNone(
+            self.entry(payload, f"slot-{slot.id}", "undated_entries"),
+            payload["undated_entries"],
+        )
+        self.assertEqual(payload["counts"]["undated"], 1)
 
     def test_a_colleagues_dated_slot_takes_the_job_out_of_the_lane(self):
         colleague = self.make_user("colleague-fix1@example.com", "STAFF")
@@ -121,7 +137,21 @@ class UndatedIsAJobLevelFactTests(WorkPlanFixture, APITestCase):
 
 
 class TodayHoldsTodayTests(WorkPlanFixture, APITestCase):
-    def test_overdue_work_is_in_the_strip_not_on_todays_column(self):
+    def test_overdue_work_rolls_onto_today_and_is_still_in_the_strip(self):
+        """W-PLANTRUTH §1b REVERSES HALF OF W-FIX1 E2, deliberately.
+
+        E2 was right that today's column must not be a catch-all of
+        every started and late job — that column read "20 jobs" and held
+        June's work. It was wrong about where UNFINISHED work planned
+        for a day that has passed should go: nowhere is not an answer,
+        and leaving it in its old column is the "it just sits in the
+        past" the owner objected to. It rolls onto today, marked with
+        the day it was planned for.
+
+        The overdue STRIP is untouched: "past its deadline" is a
+        different question from "its planned day has gone", and both
+        still get their own answer.
+        """
         late = self.make_extra_work(
             "Gutter clearing",
             preferred=self.today - datetime.timedelta(days=14),
@@ -130,13 +160,22 @@ class TodayHoldsTodayTests(WorkPlanFixture, APITestCase):
         )
         payload = self.get_plan(self.worker)
 
-        self.assertIsNone(self.entry(payload, f"ew-{late.id}"), payload["entries"])
+        card = self.entry(payload, f"ew-{late.id}")
+        self.assertIsNotNone(card, payload["entries"])
+        self.assertEqual(card["day"], self.today.isoformat())
+        self.assertEqual(card["placement"], "ROLLED")
+        self.assertEqual(
+            card["rolled_from"],
+            (self.today - datetime.timedelta(days=14)).isoformat(),
+            "the card must name the day that placed it",
+        )
+        self.assertEqual(card["rolled_days"], 14)
+
         strip = self.entry(payload, f"ew-{late.id}", "overdue_entries")
         self.assertIsNotNone(strip, payload["overdue_entries"])
         self.assertEqual(strip["placement"], PLACEMENT_OVERDUE)
         self.assertTrue(strip["is_overdue"])
         self.assertEqual(strip["overdue_days"], 3)
-        self.assertEqual(payload["counts"]["overdue"], 0)
         self.assertEqual(payload["counts"]["overdue_all"], 1)
 
     def test_a_started_job_planned_for_later_stays_in_its_own_week(self):

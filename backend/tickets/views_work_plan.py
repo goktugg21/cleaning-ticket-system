@@ -93,6 +93,7 @@ from .work_plan import (
     CLOSED_STATES,
     PLACEMENT_OVERDUE,
     PLACEMENT_PLANNED,
+    PLACEMENT_ROLLED,
     STATE_BLOCKED,
     STATE_DONE,
     STATE_IN_PROGRESS,
@@ -103,6 +104,8 @@ from .work_plan import (
     iso_week_bounds,
     overdue_days,
     placement_for,
+    rolled_days,
+    rolls_forward,
 )
 
 
@@ -166,16 +169,43 @@ def _slot_window_end_q(lookup: str, value: datetime.date) -> Q:
 #: closed states.
 _SLOT_LIVE_Q = Q(slot_status=StaffAssignmentSlotStatus.ASSIGNED)
 
+#: W-PLANTRUTH §1b — the TICKET's work is still open: the ladder's own
+#: set (`LATE_LIVE_TICKET_STATUSES`), and not archived. An ASSIGNED slot
+#: on a ticket that is in review, approved or closed is a slot nobody is
+#: expected to work any more; before this wave it read OPEN on the
+#: board, which is how a closed ticket's stale slot rendered as an open
+#: card in a past column (measured on crmtest: TCK-2026-000226 and
+#: -000343, both CLOSED, each with an ASSIGNED slot).
+_TICKET_LIVE_Q = Q(
+    ticket__status__in=LATE_LIVE_TICKET_STATUSES,
+    ticket__archived_at__isnull=True,
+)
+#: PENDING — somebody is still expected to do this: an ASSIGNED slot on
+#: a ticket whose work is still open. The predicate rule 5 rolls on.
+_SLOT_PENDING_Q = _SLOT_LIVE_Q & _TICKET_LIVE_Q
+
+#: A ticket that ended without the work being done: the slot on it is
+#: BLOCKED rather than DONE.
+_TICKET_BLOCKED_STATUSES = frozenset(
+    {TicketStatus.REJECTED, TicketStatus.CONVERTED_TO_EXTRA_WORK}
+)
+
 _SLOT_STATE_Q = {
-    STATE_DONE: Q(slot_status=StaffAssignmentSlotStatus.COMPLETED),
+    STATE_DONE: Q(slot_status=StaffAssignmentSlotStatus.COMPLETED)
+    | (
+        _SLOT_LIVE_Q
+        & ~_TICKET_LIVE_Q
+        & ~Q(ticket__status__in=list(_TICKET_BLOCKED_STATUSES))
+    ),
     STATE_BLOCKED: Q(
         slot_status__in=[
             StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE,
             StaffAssignmentSlotStatus.CANCELLED,
         ]
-    ),
-    STATE_IN_PROGRESS: _SLOT_LIVE_Q & Q(ticket__status=TicketStatus.IN_PROGRESS),
-    STATE_OPEN: _SLOT_LIVE_Q & ~Q(ticket__status=TicketStatus.IN_PROGRESS),
+    )
+    | (_SLOT_LIVE_Q & Q(ticket__status__in=list(_TICKET_BLOCKED_STATUSES))),
+    STATE_IN_PROGRESS: _SLOT_PENDING_Q & Q(ticket__status=TicketStatus.IN_PROGRESS),
+    STATE_OPEN: _SLOT_PENDING_Q & ~Q(ticket__status=TicketStatus.IN_PROGRESS),
 }
 
 #: Extra work has no separate slot lifecycle — its own status carries
@@ -240,7 +270,54 @@ def _slot_due_q(lookup: str, value: datetime.date) -> Q:
 
 
 def _slot_overdue_q(today: datetime.date) -> Q:
-    return _SLOT_LIVE_Q & _slot_due_q("lt", today)
+    # `_SLOT_PENDING_Q`, not `_SLOT_LIVE_Q`: the Python twin `is_overdue`
+    # reads "state not closed", and a slot on a finished ticket is DONE.
+    return _SLOT_PENDING_Q & _slot_due_q("lt", today)
+
+
+def _ew_window_end_q(lookup: str, value: datetime.date) -> Q:
+    """`window_end <lookup> value` for an extra work: the planned end,
+    else the preferred (first) day — `Job.window_end`'s reading."""
+    return Q(**{f"planned_end_date__{lookup}": value}) | Q(
+        planned_end_date__isnull=True, **{f"preferred_date__{lookup}": value}
+    )
+
+
+def _slot_rolled_q(today: datetime.date) -> Q:
+    """W-PLANTRUTH §1b — SQL twin of `work_plan.rolls_forward` for a
+    slot: pending, and its last planned day has passed."""
+    return _SLOT_PENDING_Q & _slot_window_end_q("lt", today)
+
+
+def _ew_rolled_q(today: datetime.date) -> Q:
+    return _EW_LIVE_Q & _ew_window_end_q("lt", today)
+
+
+def _slot_board_q(
+    week_start: datetime.date, week_end: datetime.date, today: datetime.date
+) -> Q:
+    """What the seven columns of THIS week hold, in SQL.
+
+    Rule 1 (planned in this week) MINUS rule 5's rolled rows (a pending
+    row whose planned day has passed is not in its past column any
+    more), PLUS — when today is inside this week — every rolled row in
+    scope, whichever week it was planned in, because it sits on today.
+    The Python twin is the roll branch of `WorkPlanView._build`; the
+    parity test asserts the two agree over the same rows.
+    """
+    board = _slot_week_q(week_start, week_end, today) & ~_slot_rolled_q(today)
+    if week_start <= today <= week_end:
+        board = board | _slot_rolled_q(today)
+    return board
+
+
+def _ew_board_q(
+    week_start: datetime.date, week_end: datetime.date, today: datetime.date
+) -> Q:
+    board = _ew_week_q(week_start, week_end, today) & ~_ew_rolled_q(today)
+    if week_start <= today <= week_end:
+        board = board | _ew_rolled_q(today)
+    return board
 
 
 def _ew_overdue_q(today: datetime.date) -> Q:
@@ -341,10 +418,23 @@ def _slot_undated_q() -> Q:
         ticket_id=OuterRef("ticket_id"),
         scheduled_start_at__isnull=False,
     ).exclude(slot_status=StaffAssignmentSlotStatus.CANCELLED)
+    # W-PLANTRUTH §1a (owner ruling) — ONE FACT PLACES THE BOARD: the
+    # planned day of the work, which is the slot's (or a part's). The
+    # ticket-level schedule is a different fact and creates no
+    # placement, so it cannot take a job out of this lane either: a job
+    # whose ticket carries a date but whose people have no day is work
+    # nobody has planned, and it sits here until somebody does. The
+    # clause `ticket__scheduled_start_at__isnull=True` that W-FIX1 A1
+    # added is gone for that reason. Measured on crmtest before the
+    # change: six live tickets carried a ticket date, ASSIGNED slots and
+    # no slot day — on no column, in no lane, late by a date the board
+    # never used.
+    #
+    # `_SLOT_PENDING_Q` rather than `_SLOT_LIVE_Q`: an ASSIGNED slot on a
+    # closed ticket is not "not planned yet", it is over.
     return (
-        _SLOT_LIVE_Q
+        _SLOT_PENDING_Q
         & Q(scheduled_start_at__isnull=True)
-        & Q(ticket__scheduled_start_at__isnull=True)
         & ~Exists(dated_sibling)
     )
 
@@ -446,6 +536,22 @@ def _local_date(value) -> datetime.date | None:
     return timezone.localtime(value).date()
 
 
+def _ticket_live(ticket) -> bool:
+    """Python twin of `_TICKET_LIVE_Q`."""
+    return (
+        ticket.status in LATE_LIVE_TICKET_STATUSES
+        and ticket.archived_at is None
+    )
+
+
+def _slot_pending(slot) -> bool:
+    """Python twin of `_SLOT_PENDING_Q`."""
+    return (
+        slot.slot_status == StaffAssignmentSlotStatus.ASSIGNED
+        and _ticket_live(slot.ticket)
+    )
+
+
 def _slot_state(slot) -> str:
     if slot.slot_status == StaffAssignmentSlotStatus.COMPLETED:
         return STATE_DONE
@@ -454,6 +560,14 @@ def _slot_state(slot) -> str:
         StaffAssignmentSlotStatus.CANCELLED,
     }:
         return STATE_BLOCKED
+    # W-PLANTRUTH §1b — an ASSIGNED slot on a ticket whose work is over
+    # is over too: DONE when the ticket finished (review, approval,
+    # closed), BLOCKED when it ended without the work (rejected,
+    # converted). Twin of `_SLOT_STATE_Q`.
+    if not _ticket_live(slot.ticket):
+        if slot.ticket.status in _TICKET_BLOCKED_STATUSES:
+            return STATE_BLOCKED
+        return STATE_DONE
     if slot.ticket.status == TicketStatus.IN_PROGRESS:
         return STATE_IN_PROGRESS
     return STATE_OPEN
@@ -527,6 +641,7 @@ def _slot_job(slot) -> Job:
         planned_end=end,
         due=deadline if deadline is not None else (end or start),
         state=_slot_state(slot),
+        pending=_slot_pending(slot),
     )
 
 
@@ -621,7 +736,17 @@ def _empty_lateness() -> dict:
 
 
 def _entry_from_slot(
-    slot, job, placement, day, today, *, viewer, parts=None, lateness=None
+    slot,
+    job,
+    placement,
+    day,
+    today,
+    *,
+    viewer,
+    parts=None,
+    lateness=None,
+    rolled_from=None,
+    rolled=None,
 ) -> dict:
     return {
         "kind": KIND_TICKET_SLOT,
@@ -656,6 +781,11 @@ def _entry_from_slot(
         "unable_to_complete_reason": slot.unable_to_complete_reason,
         "day": _iso(day),
         "placement": placement,
+        # W-PLANTRUTH §1b — set only on a ROLLED card: the day this card
+        # was planned for (the date that placed it, which the badge
+        # prints) and how many whole days past it today is.
+        "rolled_from": _iso(rolled_from),
+        "rolled_days": rolled,
         "is_overdue": is_overdue(job, today),
         "overdue_days": overdue_days(job, today),
         "assignee_names": [_person_label(slot.user)],
@@ -682,7 +812,16 @@ def _entry_from_slot(
 
 
 def _entry_from_extra_work(
-    extra_work, job, placement, day, today, *, assignees, lateness=None
+    extra_work,
+    job,
+    placement,
+    day,
+    today,
+    *,
+    assignees,
+    lateness=None,
+    rolled_from=None,
+    rolled=None,
 ) -> dict:
     """The extra-work card's WHOLE surface.
 
@@ -728,6 +867,8 @@ def _entry_from_extra_work(
         "unable_to_complete_reason": None,
         "day": _iso(day),
         "placement": placement,
+        "rolled_from": _iso(rolled_from),
+        "rolled_days": rolled,
         "is_overdue": is_overdue(job, today),
         "overdue_days": overdue_days(job, today),
         # W-N1 §3 — extra work has no parts; the key is present and
@@ -749,8 +890,13 @@ _NO_TIME = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
 
 
 def _week_sort_key(entry: dict) -> tuple:
+    # W-PLANTRUTH §1b — inside a column the day's own work comes first,
+    # then the rolled cards, oldest planned day first: the backlog reads
+    # from the longest-overdue down.
     return (
         entry["day"] or "",
+        1 if entry["placement"] == PLACEMENT_ROLLED else 0,
+        entry["rolled_from"] or "",
         entry["scheduled_start_at"] or _NO_TIME,
         entry["title"] or "",
         entry["key"],
@@ -1000,13 +1146,27 @@ class WorkPlanView(APIView):
             [row.ticket_id for row in rows], ew_rows, today
         )
 
+        today_in_week = week_start <= today <= week_end
         entries = []
         for slot in rows:
             job = _slot_job(slot)
             placement = placement_for(job, week_start, week_end, today)
             slot_parts = parts_by_pair.get((slot.ticket_id, slot.user_id))
             day = None
-            if placement is None:
+            rolled_from = rolled = None
+            # W-PLANTRUTH §1b — rule 5, the Python twin of
+            # `_slot_rolled_q`. Only the WEEK view rolls (the flat lists
+            # are tables, not columns). A pending slot planned for a day
+            # that has passed is not shown in that past column; it is
+            # shown on today when today is in this week, and dropped from
+            # a past week otherwise — it lives on today's column of the
+            # current week.
+            if fallback_placement is None and rolls_forward(job, today):
+                if not today_in_week:
+                    continue
+                placement, day = PLACEMENT_ROLLED, today
+                rolled_from, rolled = job.window_end, rolled_days(job, today)
+            elif placement is None:
                 # W-LATE §3b — a part windowed into this week places its
                 # ticket here, on the part's day. The Python twin of the
                 # `_part_window_q` branch in the SQL.
@@ -1034,16 +1194,26 @@ class WorkPlanView(APIView):
                     viewer=viewer,
                     parts=parts_by_pair.get((slot.ticket_id, slot.user_id)),
                     lateness=lateness.lateness_dict(ticket_id=slot.ticket_id),
+                    rolled_from=rolled_from,
+                    rolled=rolled,
                 )
             )
         for row in ew_rows:
             job = _extra_work_job(row)
             placement = placement_for(job, week_start, week_end, today)
-            if placement is None:
+            day = None
+            rolled_from = rolled = None
+            if fallback_placement is None and rolls_forward(job, today):
+                if not today_in_week:
+                    continue
+                placement, day = PLACEMENT_ROLLED, today
+                rolled_from, rolled = job.window_end, rolled_days(job, today)
+            elif placement is None:
                 if fallback_placement is None:
                     continue
                 placement = fallback_placement
-            day = day_for(job, placement, week_start, week_end, today)
+            if day is None:
+                day = day_for(job, placement, week_start, week_end, today)
             entries.append(
                 _entry_from_extra_work(
                     row,
@@ -1053,6 +1223,8 @@ class WorkPlanView(APIView):
                     today,
                     assignees=assignees.get(row.id, []),
                     lateness=lateness.lateness_dict(extra_work=row),
+                    rolled_from=rolled_from,
+                    rolled=rolled,
                 )
             )
 
@@ -1065,8 +1237,8 @@ class WorkPlanView(APIView):
         cls, slots, extra_work, week_start, week_end, today, *, team, viewer
     ):
         return cls._build(
-            slots.filter(_slot_week_q(week_start, week_end, today)),
-            extra_work.filter(_ew_week_q(week_start, week_end, today)),
+            slots.filter(_slot_board_q(week_start, week_end, today)),
+            extra_work.filter(_ew_board_q(week_start, week_end, today)),
             week_start,
             week_end,
             today,
@@ -1136,12 +1308,15 @@ class WorkPlanView(APIView):
                 archived_at__isnull=True,
                 deleted_at__isnull=True,
             )
+            # W-PLANTRUTH §1a — the planned days are the SLOTS' and the
+            # PARTS'; the ticket-level schedule is a different fact and
+            # no longer a reason to be late (see `LatenessIndex`).
             .filter(
-                Q(scheduled_start_at__date__lt=today)
-                | Q(scheduled_end_at__date__lt=today)
-                | Q(extra_work_request__deadline__lt=today)
+                Q(extra_work_request__deadline__lt=today)
                 | Q(staff_assignments__scheduled_start_at__date__lt=today)
                 | Q(staff_assignments__scheduled_end_at__date__lt=today)
+                | Q(sub_tasks__planned_start_date__lt=today)
+                | Q(sub_tasks__planned_end_date__lt=today)
             )
             .values_list("id", flat=True)
             .distinct()
@@ -1232,8 +1407,10 @@ class WorkPlanView(APIView):
         authoritative doing it. These are `COUNT(*)` over the scoped
         queryset and stay right when `entries` is truncated.
         """
-        slot_week = slots.filter(_slot_week_q(week_start, week_end, today))
-        ew_week = extra_work.filter(_ew_week_q(week_start, week_end, today))
+        # W-PLANTRUTH §1b — the chips describe THE BOARD: what the seven
+        # columns hold, rolled rows included, past-and-pending excluded.
+        slot_week = slots.filter(_slot_board_q(week_start, week_end, today))
+        ew_week = extra_work.filter(_ew_board_q(week_start, week_end, today))
 
         # Conditional aggregation: FOUR queries for nine numbers rather
         # than eighteen `COUNT(*)` round trips. Neither source is joined

@@ -18,9 +18,16 @@ not have two shapes.
 """
 from __future__ import annotations
 
+import datetime
+
 from django.db import transaction
 
-from .models import TicketScheduleStatus, TicketStatusHistory
+from .models import (
+    StaffAssignmentSlotStatus,
+    TicketScheduleStatus,
+    TicketStaffAssignment,
+    TicketStatusHistory,
+)
 from .schedule_history import compose_schedule_note
 
 
@@ -42,6 +49,7 @@ def set_schedule(
     scheduled_end_at=None,
     time_window_label: str = "",
     reschedule_reason: str = "",
+    apply_to_slots: bool = False,
 ) -> str:
     """Set or move the ticket's schedule. Returns the history action
     written: `"set"` on first scheduling, `"rescheduled"` after.
@@ -50,6 +58,18 @@ def set_schedule(
     already has a schedule and no reason was given — the rule the
     schedule endpoint has enforced since Sprint 9B, now enforced for
     every door.
+
+    W-PLANTRUTH §1a — `apply_to_slots`. The owner's ruling is that the
+    ticket-level schedule is a different fact from the planned day of
+    the WORK (the slots' days), and only the latter places a card on the
+    Work Plan. So a door that means "move the job to this day" — the
+    board's "Plan for today" and "Reschedule", the schedule card when
+    the operator ticks it — passes `apply_to_slots=True`, and every
+    PENDING slot on the ticket (ASSIGNED, base or part) is moved onto the
+    same window: the two facts are written together by the one door,
+    rather than one being read as if it were the other. Completed,
+    unable and cancelled slots are history and are not touched. The
+    slot writes go through `save()` so the audit receivers fire per row.
     """
     old_start = ticket.scheduled_start_at
     is_reschedule = ticket.schedule_status != TicketScheduleStatus.UNSCHEDULED
@@ -93,6 +113,25 @@ def set_schedule(
             ]
         )
 
+        moved = 0
+        if apply_to_slots:
+            moved = move_pending_slots(
+                ticket,
+                scheduled_start_at=scheduled_start_at,
+                scheduled_end_at=scheduled_end_at,
+                time_window_label=time_window_label or "",
+            )
+
+        note = compose_schedule_note(
+            action=history_action,
+            old_start=old_start,
+            new_start=ticket.scheduled_start_at,
+            window_label=ticket.time_window_label,
+            reason=reason,
+        )
+        if moved:
+            note = f"{note} {moved} planned slot(s) moved with it."
+
         # Sprint 8B annotation-row pattern: old_status == new_status
         # == ticket.status; is_override=False. This IS the audit
         # trail for the schedule change (no generic AuditLog row).
@@ -101,14 +140,41 @@ def set_schedule(
             old_status=ticket.status,
             new_status=ticket.status,
             changed_by=actor,
-            note=compose_schedule_note(
-                action=history_action,
-                old_start=old_start,
-                new_start=ticket.scheduled_start_at,
-                window_label=ticket.time_window_label,
-                reason=reason,
-            ),
+            note=note,
             is_override=False,
             override_reason="",
         )
     return history_action
+
+
+def move_pending_slots(
+    ticket,
+    *,
+    scheduled_start_at: datetime.datetime,
+    scheduled_end_at: datetime.datetime | None,
+    time_window_label: str = "",
+) -> int:
+    """Put every PENDING slot of `ticket` on the given window. Returns
+    how many rows changed. See `set_schedule` for why this exists."""
+    moved = 0
+    for slot in TicketStaffAssignment.objects.filter(
+        ticket=ticket, slot_status=StaffAssignmentSlotStatus.ASSIGNED
+    ).order_by("id"):
+        if (
+            slot.scheduled_start_at == scheduled_start_at
+            and slot.scheduled_end_at == scheduled_end_at
+            and (slot.time_window_label or "") == (time_window_label or "")
+        ):
+            continue
+        slot.scheduled_start_at = scheduled_start_at
+        slot.scheduled_end_at = scheduled_end_at
+        slot.time_window_label = time_window_label or ""
+        slot.save(
+            update_fields=[
+                "scheduled_start_at",
+                "scheduled_end_at",
+                "time_window_label",
+            ]
+        )
+        moved += 1
+    return moved

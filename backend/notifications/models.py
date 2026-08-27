@@ -118,8 +118,10 @@ class NotificationEventType(models.TextChoices):
         "Deadline still passed: managers and admins notified",
     )
     #: Thirty days past the anchor with not one hour booked: the
-    #: PROVIDER ADMINS are told.
-    TICKET_LATE_L3_QUARANTINE = (
+    #: PROVIDER ADMINS are told. W-PLANTRUTH §1c: the rung is "never
+    #: done" now; the stored value and label keep the old spelling (a
+    #: changed choice is a migration). Attribute renamed only.
+    TICKET_LATE_L3_NEVER_DONE = (
         "TICKET_LATE_L3_QUARANTINE",
         "Quarantine: provider admins notified",
     )
@@ -299,7 +301,7 @@ class NotificationType(models.TextChoices):
         "TICKET_LATE_L2_ESCALATED",
         "Deadline still passed: managers and admins notified",
     )
-    TICKET_LATE_L3_QUARANTINE = (
+    TICKET_LATE_L3_NEVER_DONE = (
         "TICKET_LATE_L3_QUARANTINE",
         "Quarantine: provider admins notified",
     )
@@ -347,7 +349,7 @@ LATE_ESCALATION_INAPP_TYPES = frozenset(
     {
         NotificationType.TICKET_LATE_L2_MANAGERS,
         NotificationType.TICKET_LATE_L2_ESCALATED,
-        NotificationType.TICKET_LATE_L3_QUARANTINE,
+        NotificationType.TICKET_LATE_L3_NEVER_DONE,
     }
 )
 

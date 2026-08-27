@@ -14,7 +14,7 @@ Three steps, each about a date somebody committed to:
                  was promised in ten days gets five days of grace past
                  its deadline before the ring above hears; a job promised
                  for tomorrow gets one.
-  L3_QUARANTINE  thirty days past the anchor (the deadline, else the
+  L3_NEVER_DONE  thirty days past the anchor (the deadline, else the
                  planned date) with not one hour booked. The PROVIDER
                  ADMINS are told, once.
 
@@ -35,7 +35,7 @@ By ROLE, inside the ticket's own provider company, through the rosters
   provider admins  `company_admin_recipients` — the company's admins.
 
 No user id, name or address appears here or in any setting. The names
-the quarantine bar prints are resolved at render time from the ids the
+the never-done modal prints are resolved at render time from the ids the
 step actually reached, which this module records on the escalation row.
 
 ONCE, EVER — AND WHAT RE-PLANNING DOES
@@ -138,7 +138,7 @@ def _days_en(n: int) -> str:
 def summary_for(step: str, ticket, lateness: late_rules.Lateness, lang: str) -> str:
     """The fact and the promise broken, as one line."""
     head = f"{ticket.title} — {_label(ticket)}"
-    if step == TicketEscalationStep.L3_QUARANTINE:
+    if step == TicketEscalationStep.L3_NEVER_DONE:
         n = lateness.anchor_days or 0
         anchored_on_deadline = lateness.deadline is not None
         if lang == "en":
@@ -172,9 +172,9 @@ _SUBJECT = {
         "nl": "Deadline verstreken en nog niet af: {label}",
         "en": "Deadline passed and still not done: {label}",
     },
-    TicketEscalationStep.L3_QUARANTINE: {
-        "nl": "Quarantaine — dertig dagen zonder gewerkt uur: {label}",
-        "en": "Quarantine — thirty days without an hour worked: {label}",
+    TicketEscalationStep.L3_NEVER_DONE: {
+        "nl": "Nooit uitgevoerd — dertig dagen zonder gewerkt uur: {label}",
+        "en": "Never done — thirty days without an hour worked: {label}",
     },
 }
 
@@ -206,7 +206,7 @@ def _mail(step: str, ticket, lateness: late_rules.Lateness, lang: str) -> tuple[
 _EVENT = {
     TicketEscalationStep.L2_MANAGERS: "TICKET_LATE_L2_MANAGERS",
     TicketEscalationStep.L2_ESCALATED: "TICKET_LATE_L2_ESCALATED",
-    TicketEscalationStep.L3_QUARANTINE: "TICKET_LATE_L3_QUARANTINE",
+    TicketEscalationStep.L3_NEVER_DONE: "TICKET_LATE_L3_QUARANTINE",
 }
 
 
@@ -227,7 +227,7 @@ def _recipients(step: str, ticket):
 
 def _already_fired(ticket, step: str, anchor: datetime.date | None) -> bool:
     rows = TicketEscalation.objects.filter(ticket=ticket, step=step)
-    if step != TicketEscalationStep.L3_QUARANTINE:
+    if step != TicketEscalationStep.L3_NEVER_DONE:
         rows = rows.filter(anchor_date=anchor)
     return rows.exists()
 
@@ -237,7 +237,7 @@ def _severity(step: str):
 
     return (
         NotificationSeverity.L3
-        if step == TicketEscalationStep.L3_QUARANTINE
+        if step == TicketEscalationStep.L3_NEVER_DONE
         else NotificationSeverity.L2
     )
 
@@ -248,7 +248,7 @@ def fire_step(ticket, step: str, lateness: late_rules.Lateness, *, now) -> int:
     fired, or there was nobody to tell)."""
     from notifications.services import emit_escalation_inapp, send_logged_email
 
-    anchor = None if step == TicketEscalationStep.L3_QUARANTINE else lateness.deadline
+    anchor = None if step == TicketEscalationStep.L3_NEVER_DONE else lateness.deadline
     if _already_fired(ticket, step, anchor):
         return 0
     people = _recipients(step, ticket)
@@ -299,29 +299,46 @@ def fire_step(ticket, step: str, lateness: late_rules.Lateness, *, now) -> int:
     return len(people)
 
 
-def steps_due(ticket, lateness: late_rules.Lateness, *, today: datetime.date) -> list[str]:
-    """Which steps the ladder says should have spoken by today."""
+def steps_due(
+    ticket,
+    lateness: late_rules.Lateness,
+    *,
+    today: datetime.date,
+    planned_start: datetime.date | None = None,
+) -> list[str]:
+    """Which steps the ladder says should have spoken by today.
+
+    `planned_start` is the first planned day of the WORK (the index's
+    `planned_start_for`) — W-PLANTRUTH §1a: the ticket's own date is a
+    different fact and is not read here any more. None falls back to
+    the day the ticket was raised, as `l2_persist_days` already does.
+    """
     if not lateness.is_late:
         return []
     due: list[str] = []
     if lateness.deadline_days_late is not None and lateness.deadline is not None:
         due.append(TicketEscalationStep.L2_MANAGERS)
         persist = l2_persist_days(
-            planned_start=local_date(ticket.scheduled_start_at),
+            planned_start=planned_start,
             deadline=lateness.deadline,
             created_on=local_date(ticket.created_at) or today,
         )
         if lateness.deadline_days_late >= persist:
             due.append(TicketEscalationStep.L2_ESCALATED)
-    if lateness.level == late_rules.LEVEL_QUARANTINE:
-        due.append(TicketEscalationStep.L3_QUARANTINE)
+    if lateness.level == late_rules.LEVEL_NEVER_DONE:
+        due.append(TicketEscalationStep.L3_NEVER_DONE)
     return due
 
 
 def escalate_one(ticket, index: LatenessIndex, *, now) -> int:
     lateness = index.for_ticket(ticket.id)
     told = 0
-    for step in steps_due(ticket, lateness, today=index.today):
+    for step in steps_due(
+        ticket,
+        lateness,
+        today=index.today,
+        planned_start=index.planned_start_for(ticket.id),
+    ):
         told += fire_step(ticket, step, lateness, now=now)
     return told
 
@@ -330,7 +347,7 @@ def sweep(now=None) -> dict:
     """Every pending ticket that might be on rung two or three."""
     now = now or timezone.now()
     today = timezone.localdate(now)
-    quarantine_horizon = today - datetime.timedelta(days=late_rules.QUARANTINE_DAYS - 1)
+    never_done_horizon = today - datetime.timedelta(days=late_rules.NEVER_DONE_DAYS - 1)
     # A SUPERSET: past deadline (L2/L3 with a deadline), or any planned
     # date old enough to be thirty days past (L3 without one). The
     # ladder itself is asked of every candidate.
@@ -340,12 +357,14 @@ def sweep(now=None) -> dict:
             archived_at__isnull=True,
             deleted_at__isnull=True,
         )
+        # W-PLANTRUTH §1a — the planned days are the slots' and the
+        # parts'; the ticket's own date is not one of them.
         .filter(
             Q(extra_work_request__deadline__lt=today)
-            | Q(scheduled_start_at__date__lt=quarantine_horizon)
-            | Q(scheduled_end_at__date__lt=quarantine_horizon)
-            | Q(staff_assignments__scheduled_start_at__date__lt=quarantine_horizon)
-            | Q(staff_assignments__scheduled_end_at__date__lt=quarantine_horizon)
+            | Q(staff_assignments__scheduled_start_at__date__lt=never_done_horizon)
+            | Q(staff_assignments__scheduled_end_at__date__lt=never_done_horizon)
+            | Q(sub_tasks__planned_start_date__lt=never_done_horizon)
+            | Q(sub_tasks__planned_end_date__lt=never_done_horizon)
         )
         .distinct()
         .select_related("extra_work_request", "customer", "building", "assigned_to")

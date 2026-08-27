@@ -29,6 +29,20 @@ column now holds work PLANNED FOR that day and nothing else; the two
 strips that already existed carry the rest. `PLACEMENT_OVERDUE` and the
 STARTED placements survive as the reason stamped on a strip's rows.
 
+W-PLANTRUTH §1b (owner ruling, 2026-08-27) — THE DISPLAY ROLLS, THE
+DATE DOES NOT. A card whose planned day has passed and whose work is
+still PENDING (rule 5 below) is no longer shown in that past column: it
+is shown in TODAY's column, stamped `PLACEMENT_ROLLED`, carrying the day
+it was planned for and how many days late it is. It stays there every
+day until the work is done. A PAST day column therefore shows only work
+that is finished (done, or otherwise closed) — undone work never lingers
+in yesterday. Nothing is written: the planned date on the record is the
+same date it always was, which is what the badge prints.
+
+    5. Pending work planned for a day that has passed rolls forward to
+       today's column (current week only), marked with its planned day.
+       Past columns show finished work only.
+
 **Why a normalised `Job` instead of two copies of the rule.** The two
 sources are a dated ticket slot (`TicketStaffAssignment`) and an extra
 work request (`ExtraWorkRequest`). They share no model, no state machine
@@ -75,13 +89,17 @@ PLACEMENT_STARTED_EARLY = "STARTED_EARLY"
 PLACEMENT_STARTED = "STARTED"
 #: Past its due date and unfinished.
 PLACEMENT_OVERDUE = "OVERDUE"
+#: W-PLANTRUTH §1b — planned for a day that has passed, still pending,
+#: shown on TODAY's column instead. The card carries the day it was
+#: planned for (`rolled_from`) and how far past it we are (`rolled_days`).
+PLACEMENT_ROLLED = "ROLLED"
 
 #: Every placement that is NOT the job's planned week. §12B: "A card
 #: shown outside its planned week must say why." The frontend keys its
 #: marker off exactly this set, so adding a placement without adding a
 #: marker for it is a one-line, visible mistake rather than a silent one.
 PLACEMENTS_NEEDING_A_REASON = frozenset(
-    {PLACEMENT_STARTED_EARLY, PLACEMENT_STARTED, PLACEMENT_OVERDUE}
+    {PLACEMENT_STARTED_EARLY, PLACEMENT_STARTED, PLACEMENT_OVERDUE, PLACEMENT_ROLLED}
 )
 
 
@@ -107,12 +125,26 @@ class Job:
     planned_end: datetime.date | None
     due: datetime.date | None
     state: str
+    #: W-PLANTRUTH §1b — is somebody still expected to do this work? For
+    #: a slot: ASSIGNED on a ticket whose work is still open (the ladder's
+    #: `LATE_LIVE_TICKET_STATUSES`); for an extra work: not finished,
+    #: cancelled or rejected. Distinct from `state`: a slot can read OPEN
+    #: on a ticket that is already in review, and that slot is not
+    #: pending — nobody is expected to work it any more. Defaults from
+    #: `state` so the rule tests that build a bare `Job` keep reading.
+    pending: bool | None = None
 
     @property
     def window_end(self) -> datetime.date | None:
         """The last planned day: the end, or the start when there is no
         end. `None` only when the job has no planned window at all."""
         return self.planned_end or self.planned_start
+
+    @property
+    def is_pending(self) -> bool:
+        if self.pending is not None:
+            return self.pending
+        return self.state not in CLOSED_STATES
 
 
 def is_overdue(job: Job, today: datetime.date) -> bool:
@@ -197,6 +229,31 @@ def day_for(
     if placement != PLACEMENT_PLANNED or job.planned_start is None:
         return today if week_start <= today <= week_end else week_start
     return max(job.planned_start, week_start)
+
+
+def rolls_forward(job: Job, today: datetime.date) -> bool:
+    """Rule 5 — planned for a day that has passed, and still pending.
+
+    A job with no planned window cannot roll: it belongs to the undated
+    lane. Finished work never rolls: its past column is where it was
+    done. The comparison is against the window END — a job planned
+    Monday-to-Wednesday is not late on Tuesday.
+    """
+    end = job.window_end
+    if end is None:
+        return False
+    if not job.is_pending:
+        return False
+    return end < today
+
+
+def rolled_days(job: Job, today: datetime.date) -> int | None:
+    """How many whole days past its planned day a rolled card is, or
+    None when it does not roll. The number the card prints beside the
+    planned day: "Planned 25 Aug — 2 days late"."""
+    if not rolls_forward(job, today):
+        return None
+    return (today - job.window_end).days
 
 
 def is_upcoming(

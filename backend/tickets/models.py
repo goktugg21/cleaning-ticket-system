@@ -1442,8 +1442,11 @@ class TicketEscalationStep(models.TextChoices):
     #: company admins.
     L2_ESCALATED = "L2_ESCALATED", "Deadline still passed: managers and admins"
     #: Thirty days past the anchor with not one hour booked. Once per
-    #: ticket, ever: the provider admins.
-    L3_QUARANTINE = "L3_QUARANTINE", "Quarantine: provider admins"
+    #: ticket, ever: the provider admins. W-PLANTRUTH §1c renamed the
+    #: rung "never done"; the STORED value and its label keep the old
+    #: spelling on purpose — a changed choice is a schema migration, and
+    #: this wave ships none. Only the attribute is renamed.
+    L3_NEVER_DONE = "L3_QUARANTINE", "Quarantine: provider admins"
 
 
 class TicketEscalation(models.Model):
@@ -1464,7 +1467,7 @@ class TicketEscalation(models.Model):
         fires twice. L3 carries no anchor: its clock only resets when
         hours land, and once hours land the rung itself is gone.
 
-      * "when was the admin told, and who?" — the quarantine bar's own
+      * "when was the admin told, and who?" — the never-done modal's own
         line. `recipient_ids` is the list the step actually reached, so
         the bar renders the names of the people who were told, resolved
         at render time. Ids in a DATA row, never in code: recipients are

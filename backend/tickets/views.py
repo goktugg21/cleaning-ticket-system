@@ -801,6 +801,8 @@ class TicketViewSet(
                 scheduled_end_at=data.get("scheduled_end_at"),
                 time_window_label=data.get("time_window_label", ""),
                 reschedule_reason=data.get("reschedule_reason") or "",
+                # W-PLANTRUTH §1a — the door that means "move the job".
+                apply_to_slots=bool(data.get("apply_to_slots", False)),
             )
         except ScheduleError as exc:
             return Response(

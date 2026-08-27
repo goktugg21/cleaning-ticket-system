@@ -449,6 +449,12 @@ ENTRY_KEYS = {
     "unable_to_complete_reason",
     "day",
     "placement",
+    # W-PLANTRUTH §1b — the day a ROLLED card was planned for, and how
+    # far past it we are. Present on every entry (null off a rolled
+    # card) for the same reason `parts` and `lateness` are: one shape,
+    # whatever the source.
+    "rolled_from",
+    "rolled_days",
     "is_overdue",
     "overdue_days",
     "assignee_names",
@@ -637,13 +643,15 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
 
 class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
     def test_an_overdue_extra_work_shows_as_overdue_in_the_workers_strip(self):
-        """THE acceptance test, after W-FIX1 E2.
+        """THE acceptance test, after W-PLANTRUTH §1b.
 
         An extra work assigned to a worker, past its deadline, appears
-        in that worker's OVERDUE strip — with a reason on the card and
-        its planned date. It is NOT copied onto today's column: the
-        column holds work planned for today (audit F20 measured a
-        "20 jobs" Wednesday that was mostly June's work).
+        in that worker's OVERDUE strip — with a reason on the row and
+        its planned date. Since the ruling it ALSO appears on today's
+        column, stamped ROLLED, because its planned day has passed and
+        the work is not done: undone work does not sit in the past. The
+        two are different questions ("past its deadline" / "its planned
+        day has gone") and both keep their own answer.
         """
         late = self.make_extra_work(
             "Gutter clearing",
@@ -652,7 +660,10 @@ class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
             assignee=self.worker,
         )
         payload = self.get_plan(self.worker)
-        self.assertIsNone(self.entry(payload, f"ew-{late.id}"), payload["entries"])
+        rolled = self.entry(payload, f"ew-{late.id}")
+        self.assertIsNotNone(rolled, payload["entries"])
+        self.assertEqual(rolled["placement"], "ROLLED")
+        self.assertEqual(rolled["day"], self.today.isoformat())
         entry = self.entry(payload, f"ew-{late.id}", "overdue_entries")
         self.assertIsNotNone(entry, payload["overdue_entries"])
         self.assertTrue(entry["is_overdue"])
@@ -666,7 +677,6 @@ class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
             entry["due_date"],
             (self.today - datetime.timedelta(days=3)).isoformat(),
         )
-        self.assertEqual(payload["counts"]["overdue"], 0)
         self.assertEqual(payload["counts"]["overdue_all"], 1)
     def test_the_acceptance_test_holds_through_the_real_assign_endpoint(self):
         """The same claim, but the assignment is written the way an
@@ -1059,15 +1069,27 @@ class WorkPlanRuleParityTests(WorkPlanFixture, APITestCase):
                     "rule 3, or already at home in it",
                 )
 
-    def test_no_card_sits_outside_its_planned_week(self):
-        """W-FIX1 E2 — §12B's "a card shown outside its planned week must
-        say why" is now answered by never showing one there: the week
-        holds planned placement only. The strips carry the visitors and
-        stamp their reason; this asserts both halves."""
+    def test_every_card_is_at_home_or_says_why_it_rolled(self):
+        """§12B — "a card shown outside its planned week must say why".
+
+        W-FIX1 E2 answered that by never showing one; W-PLANTRUTH §1b
+        shows exactly one kind of visitor again, and it says why. So the
+        week holds PLANNED cards and ROLLED ones, nothing else — and
+        every ROLLED card sits on today carrying the day it came from
+        and how late that makes it. The strips still carry the rest and
+        stamp their own reason; this asserts both halves."""
         payload = self.get_plan(self.worker)
         for entry in payload["entries"]:
             with self.subTest(key=entry["key"]):
-                self.assertEqual(entry["placement"], PLACEMENT_PLANNED)
+                self.assertIn(
+                    entry["placement"], (PLACEMENT_PLANNED, "ROLLED")
+                )
+                if entry["placement"] == "ROLLED":
+                    self.assertEqual(entry["day"], payload["today"])
+                    self.assertIsNotNone(entry["rolled_from"])
+                    self.assertGreaterEqual(entry["rolled_days"], 1)
+                else:
+                    self.assertIsNone(entry["rolled_from"])
         self.assertTrue(payload["overdue_entries"], payload)
         for entry in payload["overdue_entries"]:
             with self.subTest(key=entry["key"]):

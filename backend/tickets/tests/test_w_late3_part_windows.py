@@ -219,9 +219,23 @@ class TheStateTests(_Fixture):
         chips = {p["id"]: p for r in rows for p in r["parts"]}
         self.assertEqual(chips[missed.id]["state"], "MISSED")
         self.assertEqual(chips[missed.id]["planned_start"], self._day(-2))
-        # ...and the ticket itself (window still open) is not late, and
-        # the ladder says nothing about a missed part on its own.
-        self.assertEqual(payload["late_entries"], [])
+        # ...the JOB is late at rung one, because W-PLANTRUTH §1a counts
+        # a part's window as a planned day of the work. Before the
+        # ruling the TICKET's own end date (+5, still ahead) masked
+        # this: the header said the job had until Friday while the work
+        # under it had been missed on Tuesday. The ticket's date is a
+        # different fact and no longer excuses the work.
+        [late] = [
+            row
+            for row in payload["late_entries"]
+            if row["ticket_id"] == self.ticket.id
+        ]
+        self.assertEqual(late["lateness"]["level"], 1)
+        self.assertEqual(late["lateness"]["planned_date"], self._day(-2))
+        self.assertEqual(late["lateness"]["planned_days_late"], 2)
+        # ...and STILL the ladder ESCALATES nothing on its own: a missed
+        # part never speaks by itself (W-LATE §2b), and rung two needs a
+        # deadline, which this job does not have.
         escalations.sweep()
         self.assertFalse(TicketEscalation.objects.filter(ticket=self.ticket).exists())
 
@@ -294,16 +308,24 @@ class CompletionStaysFreeTests(_Fixture):
         self.assertNotIn("sub_tasks", keys)
 
     def test_the_status_door_moves_a_ticket_with_open_parts(self):
+        """Completion stays free — and since W-PLANTRUTH §3b, proceeding
+        also CLOSES the parts that were open, because the move is the
+        operator saying the work is done. The move is still never
+        blocked by them, which is what this test is about."""
         self._window(-1, 3)
         part = SubTask.objects.create(ticket=self.ticket, title="Ramen")
         self._slot(days=-1)
-        self._slot(sub_task=part, days=-1)
+        part_slot = self._slot(sub_task=part, days=-1)
         self.authenticate(self.company_admin)
         response = self.client.post(
             f"/api/tickets/{self.ticket.id}/status/",
-            {"to_status": TicketStatus.WAITING_MANAGER_REVIEW, "note": "klaar, onderdeel blijft open"},
+            {"to_status": TicketStatus.WAITING_MANAGER_REVIEW, "note": "klaar"},
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.status, TicketStatus.WAITING_MANAGER_REVIEW)
+        part_slot.refresh_from_db()
+        self.assertEqual(
+            part_slot.slot_status, StaffAssignmentSlotStatus.COMPLETED
+        )
