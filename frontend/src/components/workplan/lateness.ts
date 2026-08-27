@@ -2,11 +2,12 @@
  * W-LATE §1b — the late ladder, read ONCE on the client.
  *
  * The rule itself lives on the server (`tickets/lateness.py`): it needs
- * the widest planned window across a ticket's slots and the hours booked
- * against the job, neither of which a browser can know. What this module
- * owns is the READING of that answer — which rung, how many days, which
- * colour class, which order — so the strip, the quarantine bar, the week
- * card and the day modal all say the same thing about the same job.
+ * the widest planned window across a ticket's slots and its parts and
+ * the hours booked against the job, neither of which a browser can know.
+ * What this module owns is the READING of that answer — which rung, how
+ * many days, which colour class, which order — so the severity chips,
+ * the group modal, the week card and the day modal all say the same
+ * thing about the same job.
  *
  * Its own module, like `entryHelpers`: a file that exports a component
  * AND a function loses fast refresh for the whole file, and these are
@@ -58,10 +59,32 @@ export function isLate(entry: WorkPlanEntry): boolean {
   return latenessOf(entry) !== null;
 }
 
-/** L3 — thirty days past the anchor with no hour booked. */
-export function isQuarantined(entry: WorkPlanEntry): boolean {
+/** L3 — thirty days past the anchor with no hour booked. W-PLANTRUTH
+ *  §1c: the rung is called "never done". */
+export function isNeverDone(entry: WorkPlanEntry): boolean {
   return latenessOf(entry)?.level === 3;
 }
+
+/** W-PLANTRUTH §1c — the three severity groups, as ONE ordered
+ *  constant every consumer iterates: the chips that count them, the
+ *  modal that lists one, and the colour each wears. Left to right,
+ *  ascending severity — orange, red, bordeaux — which is the approved
+ *  ladder's own order (`sortLate` sorts by the same key).
+ *
+ *  An exported ordered constant rather than a second literal per
+ *  consumer: CLAUDE.md's Sprint 126 lesson, where a group added to one
+ *  array and not the other rendered a headerless column for three
+ *  sprints. */
+export const LATE_GROUPS: {
+  level: LateLevel;
+  /** The i18n key under `staff_slots` for this rung's name. */
+  labelKey: string;
+  className: string;
+}[] = [
+  { level: 1, labelKey: "late.level_1", className: "wp-late-l1" },
+  { level: 2, labelKey: "late.level_2", className: "wp-late-l2" },
+  { level: 3, labelKey: "late.level_3", className: "wp-late-l3" },
+];
 
 /** The severity class the design contract names: L1 orange, L2 red, L3
  *  dark bordeaux with the thick left inset. ONE map, iterated nowhere —

@@ -1,4 +1,12 @@
-import { AlarmClock, CalendarClock, CheckCircle2, PlayCircle, Users, XCircle } from "lucide-react";
+import {
+  AlarmClock,
+  CalendarClock,
+  CheckCircle2,
+  History,
+  PlayCircle,
+  Users,
+  XCircle,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -59,10 +67,33 @@ import { PartChips } from "./PartChips";
  * A card at HOME renders nothing here — which is the point. The marker
  * means "this is a visitor", so putting one on every card would tell the
  * reader nothing.
+ *
+ * W-PLANTRUTH §1b — ROLLED is the visitor this wave adds, and the one
+ * the LAW is about. The card is on TODAY's column because its work is
+ * not done; the marker prints the day it was PLANNED for and how far
+ * past that we are, because that date is the fact and it never moved.
+ * Driven by `rolled_from` / `rolled_days` and NOT by the late ladder:
+ * a slot whose own day has passed can sit on a ticket whose widest
+ * window has not (a colleague works it on Friday), so the card rolls
+ * while the JOB is not yet late. Two different questions, two fields.
  */
 export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
   const { t } = useTranslation("staff_slots");
   if (entry.placement === "PLANNED") return null;
+
+  if (entry.placement === "ROLLED") {
+    return (
+      <div className="wp-why wp-why-rolled" data-testid="agenda-card-why">
+        <History size={11} strokeWidth={2.5} />
+        {entry.rolled_from
+          ? t("agenda.why_rolled", {
+              date: formatDay(entry.rolled_from),
+              count: entry.rolled_days ?? 0,
+            })
+          : t("agenda.why_rolled_undated")}
+      </div>
+    );
+  }
 
   if (entry.placement === "OVERDUE") {
     return (

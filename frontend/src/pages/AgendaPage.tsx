@@ -74,10 +74,9 @@ import {
   partHostDays,
 } from "../components/workplan/entryHelpers";
 import { matchesChip } from "../components/workplan/chips";
-import { isQuarantined, latenessOf, sortLate } from "../components/workplan/lateness";
+import { latenessOf, sortLate } from "../components/workplan/lateness";
 import { LateBadge, LateStrip } from "../components/workplan/LateStrip";
 import { PartChips } from "../components/workplan/PartChips";
-import { QuarantineBar } from "../components/workplan/QuarantineBar";
 import { WorkPlanDayColumn } from "../components/workplan/WorkPlanDayColumn";
 import { WorkPlanStrip } from "../components/workplan/WorkPlanStrip";
 import type { ChipKey } from "../components/workplan/chips";
@@ -488,12 +487,6 @@ function WorkPlanWeek() {
     () => (data ? sortLate(data.late_entries) : []),
     [data],
   );
-  /** W-LATE §1c — the bordeaux rung only. The bar renders nothing when
-   *  this is empty; there is no empty shell. */
-  const quarantined = useMemo(
-    () => lateEntries.filter(isQuarantined),
-    [lateEntries],
-  );
   const needle = search.trim().toLowerCase();
   const counts = data?.counts ?? null;
   const todayKey = data?.today ?? toDateString(new Date());
@@ -825,19 +818,19 @@ function WorkPlanWeek() {
         </p>
       )}
 
-      {/* W-LATE §1c / §1a — the quarantine bar (only when an L3 job
-          exists) and the late strip, FULL-WIDTH ABOVE the week grid.
-          Both wrap; nothing here scrolls sideways. The grid below keeps
+      {/* W-PLANTRUTH §1c — ONE late surface: three severity chips above
+          the week grid, each opening its group's modal. The separate
+          quarantine bar is gone — its three actions live on the NEVER
+          DONE modal's rows, which is the only place they were ever
+          needed. Nothing here scrolls sideways and the grid below keeps
           its own dimensions untouched. */}
-      {data && (
-        <QuarantineBar entries={quarantined} role={role} onChanged={reload} />
-      )}
       {data && (
         <LateStrip
           entries={lateEntries}
           truncated={data.truncated.late_entries}
           limit={data.limits.late_entries}
           role={role}
+          onChanged={reload}
         />
       )}
 

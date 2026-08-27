@@ -1719,6 +1719,14 @@ export interface TicketScheduleSetPayload {
   scheduled_end_at?: string | null;
   time_window_label?: string;
   reschedule_reason?: string;
+  /** W-PLANTRUTH §1a — also move the job's PENDING slots onto this
+   *  window. The Work Plan places a card on the planned day of the WORK
+   *  (the slot's day), not on the ticket's own date, so a door that
+   *  means "move the job" — the board's Reschedule, the schedule card
+   *  when the operator ticks it — has to write both facts or the card
+   *  does not move. Absent (the default) writes the ticket's date
+   *  alone, exactly as every existing caller does. */
+  apply_to_slots?: boolean;
 }
 
 export async function setTicketSchedule(
@@ -1806,6 +1814,33 @@ export async function deleteSubTask(
 // SUPER_ADMIN); BM / STAFF / customer get 403 `auto_complete_flag_forbidden`.
 // Blocked on a terminal ticket (`auto_complete_flag_not_allowed_terminal`).
 // Returns the full refreshed ticket detail.
+/**
+ * W-PLANTRUTH §3c — mark a PART done (or undone) as a manager.
+ *
+ * `SubTask` has no status column: a part is done when every slot filed
+ * under it is COMPLETED. A STAFF member reaches that through their own
+ * slot (`updateStaffSlot`, the workers' half); the people who RUN the
+ * job — BUILDING_MANAGER / COMPANY_ADMIN / SUPER_ADMIN, the same set
+ * that may create and assign parts — had no door, because the slot
+ * PATCH demands per-slot completion EVIDENCE, which is a worker's proof
+ * of a visit and not what a manager ticking a part off is stating.
+ *
+ * So this is that door, and the server writes the slots. It answers 400
+ * `part_has_nobody` for a part nobody is on: with no slot under it
+ * there is nothing that could make it done.
+ */
+export async function setSubTaskDone(
+  ticketId: number,
+  subTaskId: number,
+  done: boolean,
+): Promise<SubTask> {
+  const response = await api.post<SubTask>(
+    `/tickets/${ticketId}/sub-tasks/${subTaskId}/done/`,
+    { done },
+  );
+  return response.data;
+}
+
 export async function setAutoCompleteFlag(
   ticketId: number,
   value: boolean,

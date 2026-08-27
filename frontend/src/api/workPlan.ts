@@ -21,7 +21,11 @@ export type WorkPlanPlacement =
   | "PLANNED"
   | "STARTED_EARLY"
   | "STARTED"
-  | "OVERDUE";
+  | "OVERDUE"
+  /** W-PLANTRUTH §1b — planned for a day that has passed, still not
+   *  done, so the DISPLAY rolled it onto today's column. The planned
+   *  date itself never moved: `rolled_from` is it. */
+  | "ROLLED";
 
 /** The normalised state, shared by both sources. NOT `slot_status` and
  *  NOT the extra-work status — those two enums agree about almost
@@ -49,7 +53,7 @@ export interface WorkPlanPart {
 }
 
 /** W-LATE — one rung of the ladder. `1` planned date passed, `2`
- *  deadline passed, `3` quarantine (thirty days past the anchor with no
+ *  deadline passed, `3` never done (thirty days past the anchor with no
  *  hour booked). Mirrors `tickets/lateness.py`, the ONE owner. */
 export type LateLevel = 1 | 2 | 3;
 
@@ -57,6 +61,9 @@ export type LateLevel = 1 | 2 | 3;
  *  which rung spoke, when, and to whom (display names resolved at
  *  render time from the recipients the step actually reached). */
 export interface WorkPlanEscalationStep {
+  /** The STORED step values. `L3_QUARANTINE` keeps its spelling because
+   *  it is a stored choice (W-PLANTRUTH §1c renamed the rung, not the
+   *  data); everything the reader sees says "never done". */
   step: "L2_MANAGERS" | "L2_ESCALATED" | "L3_QUARANTINE";
   notified_at: string;
   names: string[];
@@ -117,6 +124,11 @@ export interface WorkPlanEntry {
   /** The day column this card hangs on, "YYYY-MM-DD". */
   day: string;
   placement: WorkPlanPlacement;
+  /** W-PLANTRUTH §1b — on a ROLLED card only: the day it was PLANNED
+   *  for (the date that placed it, and the date its badge prints) and
+   *  how many whole days past that today is. Null on every other card. */
+  rolled_from: string | null;
+  rolled_days: number | null;
   is_overdue: boolean;
   overdue_days: number | null;
   assignee_names: string[];
