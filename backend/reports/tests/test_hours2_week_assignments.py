@@ -33,7 +33,11 @@ from django.utils import timezone
 
 from buildings.models import Building, BuildingStaffVisibility
 from customers.models import Customer, CustomerBuildingMembership
-from extra_work.models import ExtraWorkPlannedHours, ExtraWorkRequest
+from extra_work.models import (
+    ExtraWorkPlannedHours,
+    ExtraWorkRequest,
+    ExtraWorkStatus,
+)
 from tickets.models import (
     Ticket,
     TicketStaffAssignment,
@@ -79,7 +83,16 @@ class WeekAssignmentsBase(TimesheetsFixture):
             company=cls.company_a, name="Building A2", address="A street 2"
         )
 
-    def make_ticket(self, company, building, customer, title, **kwargs):
+    def make_ticket(
+        self, company, building, customer, title, *, chargeable=True, **kwargs
+    ):
+        """W-PLANTRUTH §2 — a ticket the week grid may propose is a
+        CHARGEABLE one: hours belong to work that is billed. Every
+        ticket here is born from an extra work by default, the way the
+        ones an operator books hours against are; `chargeable=False`
+        builds the plain control (a recurring occurrence, a direct
+        report) that must NOT be proposed or offered."""
+        creator = self.ca_a if company == self.company_a else self.ca_b
         defaults = dict(
             company=company,
             building=building,
@@ -87,8 +100,18 @@ class WeekAssignmentsBase(TimesheetsFixture):
             type=TicketType.REPORT,
             title=title,
             description="x",
-            created_by=self.ca_a if company == self.company_a else self.ca_b,
+            created_by=creator,
         )
+        if chargeable and "extra_work_request" not in kwargs:
+            defaults["extra_work_request"] = ExtraWorkRequest.objects.create(
+                company=company,
+                building=building,
+                customer=customer,
+                created_by=creator,
+                title=f"{title} (extra work)",
+                description="x",
+                status=ExtraWorkStatus.CUSTOMER_APPROVED,
+            )
         defaults.update(kwargs)
         return Ticket.objects.create(**defaults)
 
@@ -172,6 +195,26 @@ class ProposalTests(WeekAssignmentsBase):
         self.assertNotIn(self.next_week.id, self.ids(row["assignments"]))
         self.assertIn(self.next_week.id, self.ids(row["jobs"]))
         self.assertFalse(row["jobs_truncated"])
+
+    def test_a_plain_ticket_is_proposed_nowhere(self):
+        """W-PLANTRUTH §2 — the week grid proposes CHARGEABLE work only.
+        A plain ticket takes no hours, so it is neither a proposal for
+        the week nor an option in the "Add row" picker."""
+        plain = self.make_ticket(
+            self.company_a,
+            self.building_a,
+            self.customer_a,
+            "Weekly stairwell round",
+            chargeable=False,
+        )
+        TicketStaffAssignment.objects.create(
+            ticket=plain, user=self.staff_a, scheduled_start_at=at(TUESDAY)
+        )
+
+        person = self.person(self.get(self.ca_a, employee=self.staff_a.id), self.staff_a)
+
+        self.assertNotIn(plain.id, self.ids(person["assignments"]))
+        self.assertNotIn(plain.id, self.ids(person["jobs"]))
 
     def test_a_finished_ticket_is_offered_nowhere(self):
         response = self.get(self.ca_a, employee=self.staff_a.id)

@@ -5125,15 +5125,20 @@ export function TicketDetailPage() {
               `TimeEntry` rows tagged `TICKET` / this ticket). Money
               stays in Reports.
 
-              Mounted for provider management on EVERY ticket: hours can
-              be booked to any open ticket from the admin week grid, and
-              a ticket that cannot show them has no place to say so. The
-              PLANNED side exists only for a ticket born from an Extra
-              Work; an ordinary ticket passes an empty plan and reads
-              "—" in that column. `null` while the plan is still being
-              read, so the table never renders a plan of nothing beside
-              real worked hours. */}
-          {isProviderManagementRole(me?.role) && (
+              W-PLANTRUTH §2 (owner ruling) — PLAN AND HOURS BELONG TO
+              CHARGEABLE WORK ONLY. This used to mount for provider
+              management on EVERY ticket, on the reasoning that hours
+              could be booked to any open ticket from the admin week
+              grid. That reasoning is withdrawn: the grid's own pickers
+              now offer chargeable tickets only (server-side, in
+              `reports/hour_sources.py` and `reports/week_assignments.py`),
+              so on a plain ticket — a recurring occurrence, a direct
+              report — there is no plan to show, no hours to book, and
+              nothing to compare. It is ABSENT, not disabled: a control
+              that cannot do anything is worse than no control.
+              Scheduling stays, above; it is a different fact and it
+              belongs to every ticket. */}
+          {ticket.extra_work_origin && isProviderManagementRole(me?.role) && (
             <PlannedVsWorkedPanel
               ticketId={ticket.id}
               companyId={ticket.company}

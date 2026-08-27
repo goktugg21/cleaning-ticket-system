@@ -104,7 +104,8 @@ def available_sources(user, *, query: str = "", limit: int = 50) -> list[dict]:
 
     Only OPEN work is offered: nobody logs hours against a job that is
     finished, cancelled or rejected, and a picker listing every ticket
-    ever closed is a picker nobody can use.
+    ever closed is a picker nobody can use. And only CHARGEABLE tickets
+    (W-PLANTRUTH §2): hours are booked against work that is billed.
 
     Two queries, never one per row.
     """
@@ -165,9 +166,18 @@ def available_sources(user, *, query: str = "", limit: int = 50) -> list[dict]:
             }
         )
 
+    from tickets.filters import apply_is_extra_work
     from tickets.models import TicketStatus
 
-    tickets = scope_tickets_for(user)
+    # W-PLANTRUTH §2 (owner ruling) — plan and hours belong to CHARGEABLE
+    # work only. A plain ticket (a recurring occurrence, a direct report)
+    # has no plan and takes no hours, so it is not offered here; the
+    # predicate is the ticket list's own (`apply_is_extra_work`), across
+    # all three parentage paths, so the picker and the Chargeable work
+    # list can never disagree about what is chargeable. Filtered
+    # SERVER-side: a client that filtered would still be handed the
+    # plain rows, and the search would still find them.
+    tickets = apply_is_extra_work(scope_tickets_for(user), True)
     # Expressed as "not terminal" rather than a list of open statuses, so
     # a newly added terminal status does not silently start appearing.
     terminal = [

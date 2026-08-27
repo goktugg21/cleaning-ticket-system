@@ -104,16 +104,24 @@ def _job(ticket) -> dict:
 
 
 def _open_tickets(user, company):
-    """The tickets `user` may see in `company` that are not finished.
+    """The CHARGEABLE tickets `user` may see in `company` that are not
+    finished.
 
     Mirrors `hour_sources.available_sources`: "not terminal" rather
     than a list of open statuses, so a status added later does not
     quietly start appearing.
     """
     from accounts.scoping import scope_tickets_for
+    from tickets.filters import apply_is_extra_work
     from tickets.models import TicketStatus
 
-    queryset = scope_tickets_for(user).filter(company=company)
+    # W-PLANTRUTH §2 — chargeable work only, the same predicate
+    # `hour_sources.available_sources` applies and for the same reason:
+    # a plain ticket takes no hours, so it is neither proposed for the
+    # week nor offered by the "Add row" picker.
+    queryset = apply_is_extra_work(
+        scope_tickets_for(user).filter(company=company), True
+    )
     terminal = [
         status
         for status in (

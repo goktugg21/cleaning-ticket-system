@@ -194,12 +194,34 @@ class TicketSourceTests(TimesheetsFixture):
         CustomerBuildingMembership.objects.create(
             customer=cls.customer_a, building=cls.building_a
         )
+        # W-PLANTRUTH §2 — hours belong to CHARGEABLE work, so the
+        # ticket the picker is expected to OFFER is one born from an
+        # extra work. `cls.plain_ticket` below is the control.
+        cls.parent_ew = ExtraWorkRequest.objects.create(
+            company=cls.company_a,
+            building=cls.building_a,
+            customer=cls.customer_a,
+            created_by=cls.ca_a,
+            title="Tap works",
+            description="x",
+            status=ExtraWorkStatus.CUSTOMER_APPROVED,
+        )
         cls.ticket = Ticket.objects.create(
             company=cls.company_a,
             building=cls.building_a,
             customer=cls.customer_a,
             type=TicketType.REPORT,
             title="Leaking tap",
+            description="x",
+            created_by=cls.ca_a,
+            extra_work_request=cls.parent_ew,
+        )
+        cls.plain_ticket = Ticket.objects.create(
+            company=cls.company_a,
+            building=cls.building_a,
+            customer=cls.customer_a,
+            type=TicketType.REPORT,
+            title="Weekly stairwell round",
             description="x",
             created_by=cls.ca_a,
         )
@@ -209,15 +231,33 @@ class TicketSourceTests(TimesheetsFixture):
         client.force_authenticate(user=user)
         return client
 
-    def test_an_open_ticket_is_offered_with_its_number(self):
-        response = self.api(self.ca_a).get(URL)
+    def _ticket_rows(self, user):
+        response = self.api(user).get(URL)
         self.assertEqual(response.status_code, 200, response.data)
-        rows = [
-            r for r in response.data["results"] if r["source_type"] == "TICKET"
-        ]
+        return [r for r in response.data["results"] if r["source_type"] == "TICKET"]
+
+    def test_an_open_chargeable_ticket_is_offered_with_its_number(self):
+        rows = self._ticket_rows(self.ca_a)
         self.assertTrue(rows, "expected at least one ticket source")
-        self.assertIn("Leaking tap", rows[0]["title"])
-        self.assertEqual(rows[0]["source_id"], self.ticket.id)
+        offered = {r["source_id"]: r for r in rows}
+        self.assertIn(self.ticket.id, offered)
+        self.assertIn("Leaking tap", offered[self.ticket.id]["title"])
+
+    def test_a_plain_ticket_is_not_offered_at_all(self):
+        """W-PLANTRUTH §2 (owner ruling) — plan and hours belong to
+        chargeable work. A recurring occurrence or a direct report takes
+        no hours, so the picker does not offer it, and the filter is
+        SERVER-side: a client cannot ask for it either."""
+        offered = {r["source_id"] for r in self._ticket_rows(self.ca_a)}
+        self.assertNotIn(self.plain_ticket.id, offered)
+
+    def test_the_search_cannot_reach_a_plain_ticket_either(self):
+        response = self.api(self.ca_a).get(URL, {"q": "stairwell"})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            [r for r in response.data["results"] if r["source_type"] == "TICKET"],
+            [],
+        )
 
 
 class QueryCountTests(TimesheetsFixture):
