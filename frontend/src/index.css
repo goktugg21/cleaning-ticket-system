@@ -15071,3 +15071,192 @@ table.assign-table { min-width: 0; width: 100%; }
   background: var(--border-strong, var(--border));
   border-radius: 999px;
 }
+
+/* ===================================================================
+   W-PLANTRUTH — the rolled card's marker, the three severity chips and
+   their group modal, the Agreement table, and two small sections.
+   APPENDED BLOCK, NEW CLASSES ONLY. Nothing above is edited.
+
+   The colour tokens (--late-l1 / --late-l2 / --late-l3 and their soft
+   and border pairs) are the W-LATE block's, unchanged: the approved
+   ladder keeps its colours and its left-to-right order, and this block
+   only changes what wears them.
+
+   NOTE: the `.wp-quarantine-*` rules in the block above are now
+   ORPHANED — the bar they styled is deleted. They are left in place
+   because index.css is append-only in this wave; `check-css-classes.mjs`
+   flags classes USED and not DEFINED, never the reverse, so nothing is
+   hidden by leaving them. They are ~90 lines to reap in a later pass.
+   =================================================================== */
+
+/* ---- §1b: the rolled card's own marker --------------------------- */
+/* Reuses `.wp-why`'s shape (the placement-marker family) and takes the
+   L1 orange, because "planned for a day that has passed" IS rung one's
+   sentence — the same fact the chip counts. */
+.wp-why-rolled {
+  color: var(--late-l1);
+  background: var(--late-l1-soft);
+  border: 1px solid var(--late-l1-border);
+}
+
+/* ---- §1c: the three severity chips ------------------------------- */
+.wp-late-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.wp-late-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2, #fff);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--text);
+}
+.wp-late-chip:hover:not(:disabled),
+.wp-late-chip:focus-visible:not(:disabled) {
+  filter: brightness(0.97);
+}
+.wp-late-chip:focus-visible {
+  outline: 2px solid var(--focus, var(--primary, #2563eb));
+  outline-offset: 2px;
+}
+/* A rung with nothing in it stays on screen — "0 never done" is
+   information — but it is not a door, so it does not look like one. */
+.wp-late-chip:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.wp-late-chip-label {
+  overflow-wrap: anywhere;
+}
+.wp-late-chip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 800;
+  color: #fff;
+}
+/* The ladder's own three colours, in its own left-to-right order. */
+.wp-late-chip.wp-late-l1 { border-color: var(--late-l1-border); background: var(--late-l1-soft); color: var(--late-l1); }
+.wp-late-chip.wp-late-l2 { border-color: var(--late-l2-border); background: var(--late-l2-soft); color: var(--late-l2); }
+.wp-late-chip.wp-late-l3 { border-color: var(--late-l3-border); background: var(--late-l3-soft); color: var(--late-l3); box-shadow: inset 4px 0 0 var(--late-l3); }
+.wp-late-chip.wp-late-l1 .wp-late-chip-count { background: var(--late-l1); }
+.wp-late-chip.wp-late-l2 .wp-late-chip-count { background: var(--late-l2); }
+.wp-late-chip.wp-late-l3 .wp-late-chip-count { background: var(--late-l3); }
+
+/* ---- §1c: one rung's jobs, inside the modal ---------------------- */
+.wp-nd-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wp-nd-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 16px;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  min-width: 0;
+}
+/* The rung's own tint, so a row in the modal wears the colour of the
+   chip that opened it. */
+.wp-nd-row.wp-late-l1 { border-color: var(--late-l1-border); background: var(--late-l1-soft); box-shadow: inset 4px 0 0 var(--late-l1); }
+.wp-nd-row.wp-late-l2 { border-color: var(--late-l2-border); background: var(--late-l2-soft); box-shadow: inset 4px 0 0 var(--late-l2); }
+.wp-nd-row.wp-late-l3 { border-color: var(--late-l3-border); background: var(--late-l3-soft); box-shadow: inset 8px 0 0 var(--late-l3); padding-left: 18px; }
+.wp-nd-main {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.wp-nd-main > a { font-weight: 600; }
+.wp-nd-main > a:hover { text-decoration: underline; }
+.wp-nd-crew {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.wp-nd-facts {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.wp-nd-nohours { font-weight: 700; color: var(--late-l3); }
+.wp-nd-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* ---- §3d: the ticket-level switch, on its own line --------------- */
+.parts-auto-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- §4a: the Preview / Download pair, with no card around it ---- */
+.ew-pdf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+/* ---- §4b: the Agreement card's real table ------------------------ */
+/* `table-layout: fixed` is the whole point: the two number columns keep
+   the widths declared here whatever the service name does, so QTY and
+   AMOUNT stay adjacent and right-aligned directly under their own
+   headers. Sized for the ~340px ticket rail at 1366. */
+.ew-agreement-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.ew-agreement-col-qty { width: 54px; }
+.ew-agreement-col-amount { width: 86px; }
+.ew-agreement-table th,
+.ew-agreement-table td {
+  padding: 4px 0;
+  vertical-align: baseline;
+  text-align: left;
+}
+.ew-agreement-table th + th,
+.ew-agreement-table td + td { padding-left: 8px; }
+.ew-agreement-name { overflow-wrap: anywhere; }
+.ew-agreement-num {
+  text-align: right;
+  white-space: nowrap;
+}
+.ew-agreement-amount { font-weight: 500; }

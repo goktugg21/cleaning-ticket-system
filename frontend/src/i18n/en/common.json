@@ -2540,6 +2540,6 @@
   "week_setup.assignments_error": "The week's assignments could not be read; the grid shows only saved hours.",
   "notifications.sla.TICKET_LATE_L2_MANAGERS": "Deadline passed",
   "notifications.sla.TICKET_LATE_L2_ESCALATED": "Deadline passed and still not done",
-  "notifications.sla.TICKET_LATE_L3_QUARANTINE": "Quarantine: thirty days without an hour worked",
+  "notifications.sla.TICKET_LATE_L3_QUARANTINE": "Never done: thirty days without an hour worked",
   "toast.more": "+{{count}} more"
 }

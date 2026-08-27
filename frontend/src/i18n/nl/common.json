@@ -2540,6 +2540,6 @@
   "week_setup.assignments_error": "De toewijzingen van deze week konden niet worden gelezen; het raster toont alleen opgeslagen uren.",
   "notifications.sla.TICKET_LATE_L2_MANAGERS": "Deadline verstreken",
   "notifications.sla.TICKET_LATE_L2_ESCALATED": "Deadline verstreken en nog niet af",
-  "notifications.sla.TICKET_LATE_L3_QUARANTINE": "Quarantaine: dertig dagen zonder gewerkt uur",
+  "notifications.sla.TICKET_LATE_L3_QUARANTINE": "Nooit uitgevoerd: dertig dagen zonder gewerkt uur",
   "toast.more": "+{{count}} meer"
 }
