@@ -43,6 +43,21 @@ same date it always was, which is what the badge prints.
        today's column (current week only), marked with its planned day.
        Past columns show finished work only.
 
+W-VIEWER (owner ruling, 2026-08-27) — TWO READERS, TWO PLACEMENT FACTS.
+The job's scheduled date and one staff member's assigned working date
+are DIFFERENT facts, and the previous wave's "one fact places the board"
+collapsed them: a job the ticket scheduled for 7 September was filed
+under 29 August because one of its four slots carried that day. So the
+CALLER now decides which fact it hands in — `views_work_plan.py` builds
+a `Job` from the ticket's own schedule for a manager's board and from
+the viewer's own slot for their own week (`tickets/job_dates.py` owns
+the first resolution). This module is unchanged in what it decides; it
+simply no longer assumes there is only one date to decide it from.
+
+    6. A planned window that CONTAINS today hangs on today's column,
+       so a job planned across a fortnight is on the day it is being
+       worked rather than on the day the fortnight opened.
+
 **Why a normalised `Job` instead of two copies of the rule.** The two
 sources are a dated ticket slot (`TicketStaffAssignment`) and an extra
 work request (`ExtraWorkRequest`). They share no model, no state machine
@@ -225,10 +240,33 @@ def day_for(
     week, so a job spanning Friday to Tuesday appears on Friday in one
     week and on Monday in the next rather than vanishing from the
     second. Every other placement is about now, so it hangs on today.
+
+    W-VIEWER §4 — A LIVE WINDOW HANGS ON TODAY. Rule 6: when the planned
+    window CONTAINS today and today is in this week, the card is on
+    today's column, not on the window's first day. A job planned
+    1 September to 10 September is work somebody is expected to be doing
+    on the 4th; parking its only card on the 1st for the whole run puts
+    live work in a column the reader has already walked past, which is
+    the same complaint rule 5 answers for a window that has closed.
+    Rule 5 (rolled) and this one are the two halves of one sentence: the
+    card is where the work is, which is today, until it is done.
     """
     if placement != PLACEMENT_PLANNED or job.planned_start is None:
         return today if week_start <= today <= week_end else week_start
+    if week_start <= today <= week_end and covers_today(job, today):
+        return today
     return max(job.planned_start, week_start)
+
+
+def covers_today(job: Job, today: datetime.date) -> bool:
+    """Rule 6 — is today inside the planned window, with the work still
+    pending? Finished work stays in the column it was finished in."""
+    if job.planned_start is None:
+        return False
+    if not job.is_pending:
+        return False
+    end = job.window_end or job.planned_start
+    return job.planned_start <= today <= end
 
 
 def rolls_forward(job: Job, today: datetime.date) -> bool:
@@ -284,6 +322,22 @@ def overdue_days(job: Job, today: datetime.date) -> int | None:
     if not is_overdue(job, today) or job.due is None:
         return None
     return (today - job.due).days
+
+
+def days_to_due(job: Job, today: datetime.date) -> int | None:
+    """W-VIEWER §5 — how the reader stands against the promise.
+
+    Signed and whole: `3` is three days left, `0` is today, `-2` is two
+    days past. `None` when nothing was promised.
+
+    "Late or not" was the only thing a card said before this, and it says
+    it one day too late to act on. A number that counts DOWN as well as
+    up is what lets somebody read their own standing without opening the
+    ticket, which is what the ruling asks the card to do.
+    """
+    if job.due is None:
+        return None
+    return (job.due - today).days
 
 
 def iso_week_bounds(iso_year: int, iso_week: int) -> tuple[

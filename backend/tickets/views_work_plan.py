@@ -24,6 +24,36 @@ supersedes for this page, and the rule it applies lives in
 `tickets/work_plan.py` — free of Django entirely, so it is testable
 without a request.
 
+**W-VIEWER (owner ruling, 2026-08-27) — TWO READERS, TWO SOURCES.**
+
+The previous wave placed every card on the day of the WORK — a staff
+slot's day, or a part's — for every reader alike. That is right for the
+person holding the slot and wrong for everybody else: measured on
+crmtest the same day, TCK-2026-000361 (the ticket schedules it for
+7 September) sat on 29 August because one of Ahmet's four slots did, and
+TCK-2026-000342 (scheduled 30 August) sat on today's column stamped
+"Planned 26 Aug — 1 day late" off the back of Ahmet's slot window.
+
+The job's scheduled date and one person's assigned working date are two
+different facts. Both are true. So this endpoint reads from two
+different sources depending on who is asking:
+
+    scope=company, provider-management role
+        the JOB. One row per TICKET, from `_ticket_source`, placed on
+        the ticket's own scheduled date (`tickets/job_dates.py`). Five
+        people on it is still ONE card. No slot date and no part date
+        can move it.
+
+    every other caller (this is the only shape STAFF can get)
+        the SLOT. One row per assignment the CALLER holds, from
+        `_slot_source`, placed on the day THEY were given, with THEIR
+        parts on it. Unchanged from Sprint 179A.
+
+A staff member therefore sees a job on their own working day and a
+manager sees the same job on its scheduled day, and neither is lying.
+The ticket's Scheduling card still shows every staff window to anybody
+who opens it — the general board just stops re-publishing them.
+
 **Scoping — nothing new is invented here.**
 
 * Ticket slots, team view: `scope_tickets_for`, the SAME helper the
@@ -81,6 +111,14 @@ from extra_work.models import (
 from extra_work.scoping import scope_extra_work_for
 
 from . import lateness as late_rules
+from .job_dates import (
+    JOB_START,
+    JOB_WINDOW_END,
+    job_deadline,
+    job_due_q,
+    job_window,
+    with_job_dates,
+)
 from .lateness_index import LATE_LIVE_TICKET_STATUSES, LatenessIndex
 from .models import (
     StaffAssignmentSlotStatus,
@@ -100,6 +138,7 @@ from .work_plan import (
     STATE_OPEN,
     Job,
     day_for,
+    days_to_due,
     is_overdue,
     iso_week_bounds,
     overdue_days,
@@ -109,7 +148,17 @@ from .work_plan import (
 )
 
 
+#: One person's dated piece of a ticket. The shape a caller reading
+#: THEIR OWN week gets.
 KIND_TICKET_SLOT = "TICKET_SLOT"
+#: W-VIEWER — the JOB. One row per ticket, on the ticket's own scheduled
+#: date, whatever its people's days say. The shape a provider-management
+#: caller reading the company's week gets. A separate kind rather than a
+#: flag on `TICKET_SLOT` because the two carry different `status` values
+#: — a ticket status here, a slot status there — and the browser picks a
+#: badge off `kind`. One kind meaning two status vocabularies is how a
+#: badge ends up rendering a raw enum.
+KIND_TICKET = "TICKET"
 KIND_EXTRA_WORK = "EXTRA_WORK"
 
 #: How many cards the week may return. A week view looks fine on seed
@@ -380,6 +429,36 @@ def _part_day_in_week(
     return min(days) if days else None
 
 
+def _viewer_window(job, parts):
+    """W-VIEWER §5 — the window ONE PERSON was actually given.
+
+    Their slot's window widened by their own parts' windows, which is the
+    whole of what they were asked to do on this job. Returned as a plain
+    `(start, end)` pair for `LatenessIndex.for_window`; `(None, None)`
+    when they were given no date at all, which that method reads as
+    "fall back to the job's own rung".
+    """
+    starts = [job.planned_start]
+    ends = [job.window_end]
+    for part in parts or []:
+        start = part.get("planned_start")
+        if not start:
+            continue
+        start_d = datetime.date.fromisoformat(start)
+        end_d = (
+            datetime.date.fromisoformat(part["planned_end"])
+            if part.get("planned_end")
+            else start_d
+        )
+        starts.append(start_d)
+        ends.append(end_d)
+    starts = [d for d in starts if d is not None]
+    ends = [d for d in ends if d is not None]
+    if not starts and not ends:
+        return None, None
+    return (min(starts) if starts else None), (max(ends) if ends else None)
+
+
 def _ew_week_q(
     week_start: datetime.date, week_end: datetime.date, today: datetime.date
 ) -> Q:
@@ -441,6 +520,84 @@ def _slot_undated_q() -> Q:
 
 def _ew_undated_q() -> Q:
     return _EW_LIVE_Q & Q(preferred_date__isnull=True)
+
+
+# ---------------------------------------------------------------------
+# W-VIEWER — the JOB's rule, in SQL.
+#
+# The same five questions the slot predicates above answer, asked of a
+# TICKET and answered from the ticket's own dates. Every one of them
+# reads the `job_start` / `job_window_end` annotations `with_job_dates`
+# adds, so the fallback chain is stated once (`tickets/job_dates.py`)
+# and no predicate here can drift off it.
+#
+# `WorkPlanRuleParityTests` covers these the same way it covers the slot
+# twins: each SQL count is asserted equal to the count the Python rule
+# produces over the same rows.
+# ---------------------------------------------------------------------
+
+#: Somebody on the provider side still has to do this. Same set the
+#: ladder uses, so "on the board as work" and "can be late" agree.
+_TICKET_PENDING_Q = Q(
+    status__in=LATE_LIVE_TICKET_STATUSES, archived_at__isnull=True
+)
+
+_TICKET_STATE_Q = {
+    STATE_DONE: ~_TICKET_PENDING_Q
+    & ~Q(status__in=list(_TICKET_BLOCKED_STATUSES)),
+    STATE_BLOCKED: ~_TICKET_PENDING_Q
+    & Q(status__in=list(_TICKET_BLOCKED_STATUSES)),
+    STATE_IN_PROGRESS: _TICKET_PENDING_Q & Q(status=TicketStatus.IN_PROGRESS),
+    STATE_OPEN: _TICKET_PENDING_Q & ~Q(status=TicketStatus.IN_PROGRESS),
+}
+
+
+def _ticket_week_q(week_start: datetime.date, week_end: datetime.date) -> Q:
+    """Rule 1 for a job — does its planned window overlap this week?
+
+    No part-window branch, unlike `_slot_week_q`. A part is one person's
+    named half of the work and its window is a staffing fact; the ruling
+    is explicit that no such date may move the job card off the day the
+    ticket states.
+    """
+    return Q(
+        **{f"{JOB_START}__lte": week_end, f"{JOB_WINDOW_END}__gte": week_start}
+    )
+
+
+def _ticket_rolled_q(today: datetime.date) -> Q:
+    """Rule 5 for a job: pending, and its last planned day has passed."""
+    return _TICKET_PENDING_Q & Q(**{f"{JOB_WINDOW_END}__lt": today})
+
+
+def _ticket_board_q(
+    week_start: datetime.date, week_end: datetime.date, today: datetime.date
+) -> Q:
+    board = _ticket_week_q(week_start, week_end) & ~_ticket_rolled_q(today)
+    if week_start <= today <= week_end:
+        board = board | _ticket_rolled_q(today)
+    return board
+
+
+def _ticket_overdue_q(today: datetime.date) -> Q:
+    return _TICKET_PENDING_Q & job_due_q("lt", today)
+
+
+def _ticket_upcoming_q(week_end: datetime.date) -> Q:
+    return Q(**{f"{JOB_START}__gt": week_end}) & _TICKET_STATE_Q[STATE_OPEN]
+
+
+def _ticket_undated_q() -> Q:
+    """Nobody has said when this job happens.
+
+    W-VIEWER — a JOB-level question now, and only that: the ticket
+    states no date and inherits none. Under W-PLANTRUTH §1a this lane
+    asked whether the PEOPLE had days, which put a ticket scheduled for
+    next Tuesday in "not planned yet" because nobody had been given a
+    slot time. The manager's board answers "when does this job happen",
+    and it happens on Tuesday.
+    """
+    return _TICKET_PENDING_Q & Q(**{f"{JOB_START}__isnull": True})
 
 
 # ---------------------------------------------------------------------
@@ -516,6 +673,36 @@ def _extra_work_source(user, team: bool):
         id__in=covered.values("ticket__extra_work_request_id")
     )
     return queryset.select_related("building", "customer")
+
+
+def _ticket_source(user):
+    """W-VIEWER — the JOB rows for a provider-management caller.
+
+    ONE ROW PER TICKET. `scope_tickets_for` is the same helper the ticket
+    list and the slot path already use, so this cannot show a ticket the
+    actor could not open — it is not a second scoping path.
+
+    MEMBERSHIP IS DELIBERATELY UNCHANGED: a ticket reaches this board
+    when at least one person is on it and not cancelled, which is exactly
+    the set the slot-driven board carried. The ruling is about WHERE a
+    card is placed, not about which jobs are on the board, and quietly
+    widening this to every scheduled ticket in scope would put a
+    different complaint on the owner's screen than the one being fixed.
+
+    An `Exists` rather than a join: a join would return one row per slot,
+    which is the duplication this whole change exists to end, and it
+    would also make `Count("id")` count slots.
+    """
+    staffed = TicketStaffAssignment.objects.filter(
+        ticket_id=OuterRef("id")
+    ).exclude(slot_status=StaffAssignmentSlotStatus.CANCELLED)
+    queryset = (
+        scope_tickets_for(user)
+        .filter(deleted_at__isnull=True)
+        .filter(Exists(staffed))
+        .select_related("building", "customer", "extra_work_request")
+    )
+    return with_job_dates(queryset)
 
 
 # ---------------------------------------------------------------------
@@ -645,6 +832,66 @@ def _slot_job(slot) -> Job:
     )
 
 
+def _ticket_state(ticket) -> str:
+    """The JOB's normalised state. The same reading `_slot_state` applies
+    to the ticket half of a slot's verdict, so a job card and its
+    people's cards cannot disagree about whether the work is over."""
+    if not _ticket_live(ticket):
+        if ticket.status in _TICKET_BLOCKED_STATUSES:
+            return STATE_BLOCKED
+        return STATE_DONE
+    if ticket.status == TicketStatus.IN_PROGRESS:
+        return STATE_IN_PROGRESS
+    return STATE_OPEN
+
+
+def _ticket_job(ticket) -> Job:
+    """W-VIEWER — the `Job` a manager's card is placed by.
+
+    Every date comes from `tickets/job_dates.py`: the ticket's own
+    schedule, the extra work's provider commitment, the day it was asked
+    for, in that order and no further. No slot date and no part date is
+    consulted, which is the whole point.
+    """
+    start, end = job_window(ticket)
+    deadline = job_deadline(ticket)
+    return Job(
+        planned_start=start,
+        planned_end=end,
+        due=deadline if deadline is not None else (end or start),
+        state=_ticket_state(ticket),
+        pending=_ticket_live(ticket),
+    )
+
+
+def _ticket_settled(ticket) -> bool:
+    """W-VIEWER §5 — is there nothing this reader must do right now?
+
+    A card the provider side is not currently holding renders CALM: the
+    ruling's own example is work sent to the customer and waiting on
+    their answer, where the manager may still withdraw it or react to a
+    rejection but is not being asked for anything today. That is exactly
+    the complement of `LATE_LIVE_TICKET_STATUSES` — the set the ladder
+    already treats as "nothing left to be late with" — so this adds no
+    second opinion about when a job is over, it only says so on the card.
+    """
+    return not _ticket_live(ticket)
+
+
+def _slot_settled(slot, parts) -> bool:
+    """W-VIEWER §5 — the same question for the person holding a slot.
+
+    Their own slot is off their hands AND every part of theirs is done.
+    A completed slot with an open part is NOT settled: the part is work
+    they still hold, and a calm card would be telling them otherwise.
+    """
+    if not _ticket_live(slot.ticket):
+        return True
+    if slot.slot_status == StaffAssignmentSlotStatus.ASSIGNED:
+        return False
+    return all(part["is_done"] for part in (parts or []))
+
+
 def _extra_work_job(extra_work) -> Job:
     return Job(
         planned_start=extra_work.preferred_date,
@@ -747,6 +994,7 @@ def _entry_from_slot(
     lateness=None,
     rolled_from=None,
     rolled=None,
+    settled=None,
 ) -> dict:
     return {
         "kind": KIND_TICKET_SLOT,
@@ -788,6 +1036,15 @@ def _entry_from_slot(
         "rolled_days": rolled,
         "is_overdue": is_overdue(job, today),
         "overdue_days": overdue_days(job, today),
+        # W-VIEWER §5 — the reader's standing against the promise, signed:
+        # 3 is three days left, 0 is today, -2 is two days past. Null when
+        # nothing was promised.
+        "due_in_days": days_to_due(job, today),
+        # W-VIEWER §5 — nothing left for THIS reader to do, so the card
+        # renders calm rather than urgent.
+        "viewer_settled": (
+            _slot_settled(slot, parts) if settled is None else settled
+        ),
         "assignee_names": [_person_label(slot.user)],
         "assignee_count": 1,
         # W-N1 §3 — the parts this person holds on this ticket, so the
@@ -871,6 +1128,8 @@ def _entry_from_extra_work(
         "rolled_days": rolled,
         "is_overdue": is_overdue(job, today),
         "overdue_days": overdue_days(job, today),
+        "due_in_days": days_to_due(job, today),
+        "viewer_settled": job.state in CLOSED_STATES,
         # W-N1 §3 — extra work has no parts; the key is present and
         # empty so both kinds answer `entry.parts` the same way and the
         # frontend needs no `kind` check to read it.
@@ -880,6 +1139,122 @@ def _entry_from_extra_work(
         "assignee_count": len(names),
         "can_complete": False,
     }
+
+
+def _entry_from_ticket(
+    ticket,
+    job,
+    placement,
+    day,
+    today,
+    *,
+    names,
+    parts=None,
+    lateness=None,
+    rolled_from=None,
+    rolled=None,
+) -> dict:
+    """W-VIEWER — THE JOB CARD. One per ticket, whatever its headcount.
+
+    Same key set as the other two kinds, so the browser reads one shape:
+    what differs is where the values come from. `status` is the TICKET's
+    status (the `kind` is `TICKET`, and the badge is picked off `kind`),
+    and the three time fields are the TICKET's schedule — never a slot's.
+
+    NO SLOT TIMES, deliberately. §3 of the ruling: the general board does
+    not re-publish every staff member's working hours; the ticket's own
+    Scheduling section does, to anybody who opens it. What the card says
+    instead is how many people are on it.
+    """
+    return {
+        "kind": KIND_TICKET,
+        "key": f"ticket-{ticket.id}",
+        "source_id": ticket.id,
+        "ticket_id": ticket.id,
+        "ticket_no": ticket.ticket_no,
+        "extra_work_id": ticket.extra_work_request_id,
+        "title": ticket.title,
+        "status": ticket.status,
+        "state": job.state,
+        "ticket_status": ticket.status,
+        "ticket_type": ticket.type,
+        "urgency": None,
+        "customer_name": (
+            ticket.customer.name if ticket.customer_id else None
+        ),
+        "building_id": ticket.building_id,
+        "building_name": (
+            ticket.building.name if ticket.building_id else None
+        ),
+        "planned_start": _iso(job.planned_start),
+        "planned_end": _iso(job.planned_end),
+        "due_date": _iso(job.due),
+        "scheduled_start_at": ticket.scheduled_start_at,
+        "scheduled_end_at": ticket.scheduled_end_at,
+        "time_window_label": None,
+        "assignment_note": None,
+        "completion_note": None,
+        "unable_to_complete_reason": None,
+        "day": _iso(day),
+        "placement": placement,
+        "rolled_from": _iso(rolled_from),
+        "rolled_days": rolled,
+        "is_overdue": is_overdue(job, today),
+        "overdue_days": overdue_days(job, today),
+        "due_in_days": days_to_due(job, today),
+        "viewer_settled": _ticket_settled(ticket),
+        "parts": parts or [],
+        "lateness": lateness if lateness is not None else _empty_lateness(),
+        "assignee_names": names[:ASSIGNEE_NAMES_SHOWN],
+        "assignee_count": len(names),
+        # A job card is a READ. Completing a slot belongs to the person
+        # holding it, on their own week.
+        "can_complete": False,
+    }
+
+
+def _job_people_map(ticket_ids):
+    """`{ticket_id: [display name, ...]}` — everybody on the job.
+
+    One query for the whole board, not one per card. Cancelled slots are
+    left out: somebody taken off the job is not on it.
+    """
+    if not ticket_ids:
+        return {}
+    out: dict[int, list[str]] = {}
+    rows = (
+        TicketStaffAssignment.objects.filter(ticket_id__in=list(ticket_ids))
+        .exclude(slot_status=StaffAssignmentSlotStatus.CANCELLED)
+        .select_related("user")
+        .order_by("user__full_name", "user__email", "id")
+    )
+    for row in rows:
+        names = out.setdefault(row.ticket_id, [])
+        label = _person_label(row.user)
+        if label and label not in names:
+            names.append(label)
+    return out
+
+
+def _job_parts_map(ticket_ids, today):
+    """`{ticket_id: [part payload, ...]}` — every part of the job.
+
+    The manager's half of `_parts_map`, which is keyed by (ticket,
+    person) because a worker sees only their own. A job card shows the
+    whole checklist: it is a job-level fact, and it is the one place the
+    ruling asks the general board to keep saying something about parts.
+    """
+    if not ticket_ids:
+        return {}
+    out: dict[int, list] = {}
+    rows = (
+        SubTask.objects.filter(ticket_id__in=list(ticket_ids))
+        .prefetch_related("staff_assignments")
+        .order_by("ordering", "id")
+    )
+    for part in rows:
+        out.setdefault(part.ticket_id, []).append(_part_payload(part, today))
+    return out
 
 
 #: Sorts a merged list where one source has a clock time and the other
@@ -952,15 +1327,37 @@ class WorkPlanView(APIView):
         team = request.query_params.get(
             "scope"
         ) == "company" and is_provider_management_role(user)
-        slots = _slot_source(user, team)
+        # W-VIEWER — THE ONE BRANCH THE RULING IS ABOUT. A manager
+        # reading the company's week reads JOBS, placed on the ticket's
+        # own scheduled date; everybody else — and this is the only shape
+        # a STAFF caller can get — reads their OWN slots, on the days
+        # they were given. Two sources, two predicate families, one
+        # placement rule applied to both.
+        if team:
+            jobs = _ticket_source(user)
+            board_q = _ticket_board_q(week_start, week_end, today)
+            overdue_q = _ticket_overdue_q(today)
+            upcoming_q = _ticket_upcoming_q(week_end)
+            undated_q = _ticket_undated_q()
+        else:
+            # `team=False` always, and it can be nothing else: the team
+            # widening now belongs to `_ticket_source`. The parameter
+            # stays on `_slot_source` because the tests reach the SLOT
+            # shape through it in both scopes, which is the shape a
+            # worker gets whatever their role.
+            jobs = _slot_source(user, False)
+            board_q = _slot_board_q(week_start, week_end, today)
+            overdue_q = _slot_overdue_q(today)
+            upcoming_q = _slot_upcoming_q(week_end)
+            undated_q = _slot_undated_q()
         extra_work = _extra_work_source(user, team)
 
         entries, truncated = self._week_entries(
-            slots, extra_work, week_start, week_end, today, team=team,
-            viewer=user,
+            jobs.filter(board_q), extra_work, week_start, week_end, today,
+            team=team, viewer=user,
         )
         overdue_entries, overdue_truncated = self._flat_entries(
-            slots.filter(_slot_overdue_q(today)),
+            jobs.filter(overdue_q),
             extra_work.filter(_ew_overdue_q(today)),
             week_start,
             week_end,
@@ -971,7 +1368,7 @@ class WorkPlanView(APIView):
             fallback_placement=PLACEMENT_OVERDUE,
         )
         upcoming_entries, upcoming_truncated = self._flat_entries(
-            slots.filter(_slot_upcoming_q(week_end)),
+            jobs.filter(upcoming_q),
             extra_work.filter(_ew_upcoming_q(week_end)),
             week_start,
             week_end,
@@ -995,7 +1392,7 @@ class WorkPlanView(APIView):
         # builder, same limit-plus-one truncation, same placement
         # fallback. Nothing new to learn, nothing new to keep in step.
         undated_entries, undated_truncated = self._flat_entries(
-            slots.filter(_slot_undated_q()),
+            jobs.filter(undated_q),
             extra_work.filter(_ew_undated_q()),
             week_start,
             week_end,
@@ -1008,9 +1405,11 @@ class WorkPlanView(APIView):
 
         # W-LATE §1a — the late strip's rows, one per job, and its total.
         late_entries, late_truncated, late_total = self._late_entries(
-            slots, extra_work, today, team=team, viewer=user
+            jobs, extra_work, today, team=team, viewer=user
         )
-        counts = self._counts(slots, extra_work, week_start, week_end, today)
+        counts = self._counts(
+            jobs, extra_work, week_start, week_end, today, team=team
+        )
         # Counted over the deduped JOB set in Python rather than as a SQL
         # aggregate, because the ladder needs the widest window across a
         # ticket's slots — see `_late_entries`. It is the whole set,
@@ -1108,7 +1507,7 @@ class WorkPlanView(APIView):
     @classmethod
     def _build(
         cls,
-        slots,
+        rows_source,
         extra_work,
         week_start,
         week_end,
@@ -1122,6 +1521,12 @@ class WorkPlanView(APIView):
     ):
         """Materialise both sources into merged entries.
 
+        W-VIEWER — `rows_source` is a TICKET queryset in team scope and a
+        SLOT queryset otherwise. The placement rule below is the same
+        either way; what changes is the `Job` it is asked about, which is
+        the whole shape of the ruling: one rule, two facts, chosen by who
+        is reading.
+
         `fallback_placement=None` is the week view: a row the rule does
         not place in this week is dropped. The flat lists (overdue,
         upcoming) are tables rather than columns and every row in them
@@ -1129,75 +1534,64 @@ class WorkPlanView(APIView):
         of asking the week rule a question it cannot answer about a week
         the row is not in.
         """
-        rows = list(
-            slots.order_by("scheduled_start_at", "id")[: limit + 1]
-        )
+        if team:
+            rows = list(rows_source.order_by(JOB_START, "id")[: limit + 1])
+        else:
+            rows = list(
+                rows_source.order_by("scheduled_start_at", "id")[: limit + 1]
+            )
         ew_rows = list(
             extra_work.order_by("preferred_date", "id")[: limit + 1]
         )
         assignees = cls._assignee_map(
             [row.id for row in ew_rows], team=team, viewer=viewer
         )
-        parts_by_pair = _parts_map(rows, today)
+        ticket_ids = [
+            row.id if team else row.ticket_id for row in rows
+        ]
+        if team:
+            parts_by_ticket = _job_parts_map(ticket_ids, today)
+            names_by_ticket = _job_people_map(ticket_ids)
+            parts_by_pair = {}
+        else:
+            parts_by_pair = _parts_map(rows, today)
+            parts_by_ticket = names_by_ticket = {}
         # W-LATE §1b — one index for every card in this list, so a card
         # on Tuesday's column and the same job's card in the strip say
         # the same thing.
-        lateness = LatenessIndex(
-            [row.ticket_id for row in rows], ew_rows, today
-        )
+        lateness = LatenessIndex(ticket_ids, ew_rows, today)
 
         today_in_week = week_start <= today <= week_end
         entries = []
-        for slot in rows:
-            job = _slot_job(slot)
-            placement = placement_for(job, week_start, week_end, today)
-            slot_parts = parts_by_pair.get((slot.ticket_id, slot.user_id))
-            day = None
-            rolled_from = rolled = None
-            # W-PLANTRUTH §1b — rule 5, the Python twin of
-            # `_slot_rolled_q`. Only the WEEK view rolls (the flat lists
-            # are tables, not columns). A pending slot planned for a day
-            # that has passed is not shown in that past column; it is
-            # shown on today when today is in this week, and dropped from
-            # a past week otherwise — it lives on today's column of the
-            # current week.
-            if fallback_placement is None and rolls_forward(job, today):
-                if not today_in_week:
-                    continue
-                placement, day = PLACEMENT_ROLLED, today
-                rolled_from, rolled = job.window_end, rolled_days(job, today)
-            elif placement is None:
-                # W-LATE §3b — a part windowed into this week places its
-                # ticket here, on the part's day. The Python twin of the
-                # `_part_window_q` branch in the SQL.
-                part_day = (
-                    _part_day_in_week(slot_parts, week_start, week_end)
-                    if fallback_placement is None
-                    else None
+        for row in rows:
+            if team:
+                entries.extend(
+                    cls._job_entry(
+                        row,
+                        week_start,
+                        week_end,
+                        today,
+                        today_in_week=today_in_week,
+                        fallback_placement=fallback_placement,
+                        lateness=lateness,
+                        parts=parts_by_ticket.get(row.id, []),
+                        names=names_by_ticket.get(row.id, []),
+                    )
                 )
-                if part_day is not None:
-                    placement = PLACEMENT_PLANNED
-                    day = part_day
-                elif fallback_placement is None:
-                    continue
-                else:
-                    placement = fallback_placement
-            if day is None:
-                day = day_for(job, placement, week_start, week_end, today)
-            entries.append(
-                _entry_from_slot(
-                    slot,
-                    job,
-                    placement,
-                    day,
-                    today,
-                    viewer=viewer,
-                    parts=parts_by_pair.get((slot.ticket_id, slot.user_id)),
-                    lateness=lateness.lateness_dict(ticket_id=slot.ticket_id),
-                    rolled_from=rolled_from,
-                    rolled=rolled,
+            else:
+                entries.extend(
+                    cls._slot_entry(
+                        row,
+                        week_start,
+                        week_end,
+                        today,
+                        today_in_week=today_in_week,
+                        fallback_placement=fallback_placement,
+                        lateness=lateness,
+                        viewer=viewer,
+                        parts=parts_by_pair.get((row.ticket_id, row.user_id)),
+                    )
                 )
-            )
         for row in ew_rows:
             job = _extra_work_job(row)
             placement = placement_for(job, week_start, week_end, today)
@@ -1232,12 +1626,132 @@ class WorkPlanView(APIView):
         truncated = len(entries) > limit
         return entries[:limit], truncated
 
+    @staticmethod
+    def _job_entry(
+        ticket,
+        week_start,
+        week_end,
+        today,
+        *,
+        today_in_week,
+        fallback_placement,
+        lateness,
+        parts,
+        names,
+    ):
+        """W-VIEWER — one JOB card, or none. Returns a list so the caller
+        treats both sources the same way."""
+        job = _ticket_job(ticket)
+        placement = placement_for(job, week_start, week_end, today)
+        day = None
+        rolled_from = rolled = None
+        # Rule 5, unchanged in what it decides: a pending job whose last
+        # planned day has passed is not left in that past column, it is
+        # on today until it is done. The date on the record never moved,
+        # and `rolled_from` is that date.
+        if fallback_placement is None and rolls_forward(job, today):
+            if not today_in_week:
+                return []
+            placement, day = PLACEMENT_ROLLED, today
+            rolled_from, rolled = job.window_end, rolled_days(job, today)
+        elif placement is None:
+            if fallback_placement is None:
+                return []
+            placement = fallback_placement
+        if day is None:
+            day = day_for(job, placement, week_start, week_end, today)
+        return [
+            _entry_from_ticket(
+                ticket,
+                job,
+                placement,
+                day,
+                today,
+                names=names,
+                parts=parts,
+                lateness=lateness.lateness_dict(ticket_id=ticket.id),
+                rolled_from=rolled_from,
+                rolled=rolled,
+            )
+        ]
+
+    @staticmethod
+    def _slot_entry(
+        slot,
+        week_start,
+        week_end,
+        today,
+        *,
+        today_in_week,
+        fallback_placement,
+        lateness,
+        viewer,
+        parts,
+    ):
+        """One SLOT card — the caller's own dated piece of a job.
+
+        W-VIEWER §5 — the ladder is asked about THIS PERSON'S window
+        (their slot, widened by their own parts), not the job's. A
+        colleague working next Friday does not make this person late, and
+        a person who has finished their own half is not shouted at for a
+        job that is still running.
+        """
+        job = _slot_job(slot)
+        placement = placement_for(job, week_start, week_end, today)
+        day = None
+        rolled_from = rolled = None
+        if fallback_placement is None and rolls_forward(job, today):
+            if not today_in_week:
+                return []
+            placement, day = PLACEMENT_ROLLED, today
+            rolled_from, rolled = job.window_end, rolled_days(job, today)
+        elif placement is None:
+            # W-LATE §3b — a part windowed into this week places its
+            # ticket here, on the part's day. The Python twin of the
+            # `_part_window_q` branch in the SQL.
+            part_day = (
+                _part_day_in_week(parts, week_start, week_end)
+                if fallback_placement is None
+                else None
+            )
+            if part_day is not None:
+                placement = PLACEMENT_PLANNED
+                day = part_day
+            elif fallback_placement is None:
+                return []
+            else:
+                placement = fallback_placement
+        if day is None:
+            day = day_for(job, placement, week_start, week_end, today)
+        settled = _slot_settled(slot, parts)
+        mine_start, mine_end = _viewer_window(job, parts)
+        return [
+            _entry_from_slot(
+                slot,
+                job,
+                placement,
+                day,
+                today,
+                viewer=viewer,
+                parts=parts,
+                lateness=lateness.window_dict(
+                    slot.ticket_id, mine_start, mine_end, done=settled
+                ),
+                rolled_from=rolled_from,
+                rolled=rolled,
+                settled=settled,
+            )
+        ]
+
     @classmethod
     def _week_entries(
-        cls, slots, extra_work, week_start, week_end, today, *, team, viewer
+        cls, jobs, extra_work, week_start, week_end, today, *, team, viewer
     ):
+        # `jobs` arrives already narrowed to the board — the caller picks
+        # the predicate family, because which one is right depends on who
+        # is reading (W-VIEWER).
         return cls._build(
-            slots.filter(_slot_board_q(week_start, week_end, today)),
+            jobs,
             extra_work.filter(_ew_board_q(week_start, week_end, today)),
             week_start,
             week_end,
@@ -1252,7 +1766,7 @@ class WorkPlanView(APIView):
     @classmethod
     def _flat_entries(
         cls,
-        slots,
+        jobs,
         extra_work,
         week_start,
         week_end,
@@ -1264,7 +1778,7 @@ class WorkPlanView(APIView):
         fallback_placement,
     ):
         return cls._build(
-            slots,
+            jobs,
             extra_work,
             week_start,
             week_end,
@@ -1277,28 +1791,127 @@ class WorkPlanView(APIView):
         )
 
     @classmethod
-    def _late_entries(cls, slots, extra_work, today, *, team, viewer):
+    def _late_entries(cls, jobs, extra_work, today, *, team, viewer):
         """W-LATE §1a — the late strip: ONE ROW PER LATE JOB, ordered by
         the ladder. Returns `(entries, truncated, total)`.
 
         Fed from "planned-date-passed-and-not-done" (L1) and its two
         worse rungs, which is NOT the overdue list's question: that list
-        asks "past its due date", where a slot's due date is the extra
-        work's deadline when one exists. A job planned for Monday with a
+        asks "past its due date", where the due date is the extra work's
+        deadline when one exists. A job planned for Monday with a
         deadline on Friday is not overdue on Tuesday, but its plan IS
         broken, and the strip is where that shows. Both lists stay:
         they answer different questions and are labelled as such.
 
-        Job-level, so a two-person ticket is one card carrying both
-        names — the merge `dedupeByJob` does in the browser for the
-        undated lane, done here because the strip's whole vocabulary
-        (one rung per job, one anchor, one hour total) is per job.
+        W-VIEWER — the strip is viewer-aware like the board. A manager
+        reads the JOB's rung, measured on the ticket's own date; a person
+        reading their own week reads THEIR rung, measured on the days
+        they were given. Neither is shouted at over somebody else's
+        calendar, which is the defect the ruling names.
+        """
+        if team:
+            return cls._late_jobs(jobs, extra_work, today, viewer=viewer)
+        return cls._late_own(jobs, extra_work, today, viewer=viewer)
 
-        The SQL narrows to a SUPERSET (anything with a past start, a
-        past deadline or a past slot start); the ladder itself is asked
-        of every candidate in Python, because it needs the widest window
-        across the ticket and its slots, which is one aggregate too many
-        for a predicate that also has to compose into a count.
+    @classmethod
+    def _late_jobs(cls, tickets, extra_work, today, *, viewer):
+        """The manager's strip: one row per late TICKET.
+
+        The SQL narrows to a SUPERSET (a job whose window or deadline has
+        passed); the ladder itself is asked of every candidate in Python,
+        because a rung also depends on hours booked, which is one
+        aggregate too many for a predicate that has to compose into a
+        count.
+        """
+        # The SUPERSET the ladder is then asked about, one row per
+        # ticket. The job's own window and its deadline are the first two
+        # branches; the slot and part branches are here because
+        # `LatenessIndex` falls back to the widest slot / part window for
+        # a job that states no date of its own, and a candidate filter
+        # narrower than the rule it feeds would silence exactly those
+        # jobs (W-LATE §3b's part-window case, measured as the one test
+        # this ruling's first pass broke). `.distinct()` because those
+        # two branches are multi-valued joins.
+        candidates = list(
+            tickets.filter(_TICKET_PENDING_Q)
+            .filter(
+                Q(**{f"{JOB_WINDOW_END}__lt": today})
+                | Q(extra_work_request__deadline__lt=today)
+                | (
+                    Q(**{f"{JOB_START}__isnull": True})
+                    & (
+                        Q(staff_assignments__scheduled_start_at__date__lt=today)
+                        | Q(staff_assignments__scheduled_end_at__date__lt=today)
+                        | Q(sub_tasks__planned_start_date__lt=today)
+                        | Q(sub_tasks__planned_end_date__lt=today)
+                    )
+                )
+            )
+            .distinct()
+        )
+        ew_rows = list(
+            extra_work.filter(_EW_LIVE_Q)
+            .filter(
+                Q(preferred_date__lt=today)
+                | Q(planned_end_date__lt=today)
+                | Q(deadline__lt=today)
+            )
+            .order_by("id")
+        )
+        index = LatenessIndex([t.id for t in candidates], ew_rows, today)
+        late_tickets = [
+            t for t in candidates if index.for_ticket(t.id).is_late
+        ]
+        late_ew = [row for row in ew_rows if index.for_extra_work(row).is_late]
+
+        ticket_ids = [t.id for t in late_tickets]
+        parts_by_ticket = _job_parts_map(ticket_ids, today)
+        names_by_ticket = _job_people_map(ticket_ids)
+        assignees = cls._assignee_map(
+            [row.id for row in late_ew], team=True, viewer=viewer
+        )
+
+        keyed = []
+        for ticket in late_tickets:
+            lateness = index.for_ticket(ticket.id)
+            entry = _entry_from_ticket(
+                ticket,
+                _ticket_job(ticket),
+                PLACEMENT_OVERDUE,
+                today,
+                today,
+                names=names_by_ticket.get(ticket.id, []),
+                parts=parts_by_ticket.get(ticket.id, []),
+                lateness=index.lateness_dict(ticket_id=ticket.id),
+            )
+            keyed.append((late_rules.sort_key(lateness, entry["title"]), entry))
+        for row in late_ew:
+            lateness = index.for_extra_work(row)
+            entry = _entry_from_extra_work(
+                row,
+                _extra_work_job(row),
+                PLACEMENT_OVERDUE,
+                today,
+                today,
+                assignees=assignees.get(row.id, []),
+                lateness=index.lateness_dict(extra_work=row),
+            )
+            keyed.append((late_rules.sort_key(lateness, entry["title"]), entry))
+
+        keyed.sort(key=lambda pair: (pair[0], pair[1]["key"]))
+        entries = [entry for _, entry in keyed]
+        total = len(entries)
+        return entries[:LATE_LIMIT], total > LATE_LIMIT, total
+
+    @classmethod
+    def _late_own(cls, slots, extra_work, today, *, viewer):
+        """The worker's strip: one row per job THEY are late on.
+
+        A person can hold several slots on one ticket (a base slot and
+        one per part), so the rows are collapsed onto the ticket and the
+        window is the widest of THEIRS — never a colleague's. A job whose
+        own plan is broken by somebody else's day is not this reader's
+        problem and does not appear here.
         """
         live = slots.filter(_SLOT_LIVE_Q)
         candidate_ids = list(
@@ -1307,16 +1920,6 @@ class WorkPlanView(APIView):
                 status__in=LATE_LIVE_TICKET_STATUSES,
                 archived_at__isnull=True,
                 deleted_at__isnull=True,
-            )
-            # W-PLANTRUTH §1a — the planned days are the SLOTS' and the
-            # PARTS'; the ticket-level schedule is a different fact and
-            # no longer a reason to be late (see `LatenessIndex`).
-            .filter(
-                Q(extra_work_request__deadline__lt=today)
-                | Q(staff_assignments__scheduled_start_at__date__lt=today)
-                | Q(staff_assignments__scheduled_end_at__date__lt=today)
-                | Q(sub_tasks__planned_start_date__lt=today)
-                | Q(sub_tasks__planned_end_date__lt=today)
             )
             .values_list("id", flat=True)
             .distinct()
@@ -1331,19 +1934,16 @@ class WorkPlanView(APIView):
             .order_by("id")
         )
         index = LatenessIndex(candidate_ids, ew_rows, today)
-        late_ticket_ids = [
-            tid for tid in candidate_ids if index.for_ticket(tid).is_late
-        ]
         late_ew = [row for row in ew_rows if index.for_extra_work(row).is_late]
 
         slot_rows = list(
-            live.filter(ticket_id__in=late_ticket_ids).order_by(
+            live.filter(ticket_id__in=candidate_ids).order_by(
                 "ticket_id", "scheduled_start_at", "id"
             )
         )
         parts_by_pair = _parts_map(slot_rows, today)
         assignees = cls._assignee_map(
-            [row.id for row in late_ew], team=team, viewer=viewer
+            [row.id for row in late_ew], team=False, viewer=viewer
         )
 
         by_ticket: dict[int, list] = {}
@@ -1353,7 +1953,36 @@ class WorkPlanView(APIView):
         keyed = []
         for ticket_id, bucket in by_ticket.items():
             first = bucket[0]
-            lateness = index.for_ticket(ticket_id)
+            names: list[str] = []
+            parts: list[dict] = []
+            starts: list[datetime.date] = []
+            ends: list[datetime.date] = []
+            settled = True
+            for slot in bucket:
+                label = _person_label(slot.user)
+                if label and label not in names:
+                    names.append(label)
+                slot_parts = parts_by_pair.get(
+                    (slot.ticket_id, slot.user_id), []
+                )
+                for part in slot_parts:
+                    if all(p["id"] != part["id"] for p in parts):
+                        parts.append(part)
+                if not _slot_settled(slot, slot_parts):
+                    settled = False
+                start, end = _viewer_window(_slot_job(slot), slot_parts)
+                if start is not None:
+                    starts.append(start)
+                if end is not None:
+                    ends.append(end)
+            lateness = index.for_window(
+                ticket_id,
+                min(starts) if starts else None,
+                max(ends) if ends else None,
+                done=settled,
+            )
+            if not lateness.is_late:
+                continue
             entry = _entry_from_slot(
                 first,
                 _slot_job(first),
@@ -1361,17 +1990,14 @@ class WorkPlanView(APIView):
                 today,
                 today,
                 viewer=viewer,
-                lateness=index.lateness_dict(ticket_id=ticket_id),
+                lateness=index.window_dict(
+                    ticket_id,
+                    min(starts) if starts else None,
+                    max(ends) if ends else None,
+                    done=settled,
+                ),
+                settled=settled,
             )
-            names: list[str] = []
-            parts: list[dict] = []
-            for slot in bucket:
-                label = _person_label(slot.user)
-                if label and label not in names:
-                    names.append(label)
-                for part in parts_by_pair.get((slot.ticket_id, slot.user_id), []):
-                    if all(p["id"] != part["id"] for p in parts):
-                        parts.append(part)
             entry["assignee_names"] = names[:ASSIGNEE_NAMES_SHOWN]
             entry["assignee_count"] = len(names)
             entry["parts"] = parts
@@ -1398,7 +2024,9 @@ class WorkPlanView(APIView):
         return entries[:LATE_LIMIT], total > LATE_LIMIT, total
 
     @staticmethod
-    def _counts(slots, extra_work, week_start, week_end, today) -> dict:
+    def _counts(
+        jobs, extra_work, week_start, week_end, today, *, team
+    ) -> dict:
         """Every number on the screen, over the WHOLE scope.
 
         This is the point of the endpoint. The chips used to be counted
@@ -1406,24 +2034,42 @@ class WorkPlanView(APIView):
         could report a number that described one page and looked
         authoritative doing it. These are `COUNT(*)` over the scoped
         queryset and stay right when `entries` is truncated.
+
+        W-VIEWER — and they count what the reader is looking at. A
+        manager's chips count JOBS; a worker's count their own slots.
+        Counting slots under a board that shows one card per job is how a
+        chip reading "12" sits over eight cards.
         """
+        if team:
+            board_q = _ticket_board_q(week_start, week_end, today)
+            state_q = _TICKET_STATE_Q
+            overdue_q = _ticket_overdue_q(today)
+            upcoming_q = _ticket_upcoming_q(week_end)
+            undated_q = _ticket_undated_q()
+        else:
+            board_q = _slot_board_q(week_start, week_end, today)
+            state_q = _SLOT_STATE_Q
+            overdue_q = _slot_overdue_q(today)
+            upcoming_q = _slot_upcoming_q(week_end)
+            undated_q = _slot_undated_q()
+
         # W-PLANTRUTH §1b — the chips describe THE BOARD: what the seven
         # columns hold, rolled rows included, past-and-pending excluded.
-        slot_week = slots.filter(_slot_board_q(week_start, week_end, today))
+        job_week = jobs.filter(board_q)
         ew_week = extra_work.filter(_ew_board_q(week_start, week_end, today))
 
         # Conditional aggregation: FOUR queries for nine numbers rather
         # than eighteen `COUNT(*)` round trips. Neither source is joined
         # to a multi-row relation here — the team widening goes through
-        # an `IN (subquery)`, not a join — so a filtered `Count("id")`
-        # cannot double-count.
-        slot_week_counts = slot_week.aggregate(
+        # an `IN (subquery)` or an `Exists`, not a join — so a filtered
+        # `Count("id")` cannot double-count.
+        job_week_counts = job_week.aggregate(
             total=Count("id"),
-            overdue=Count("id", filter=_slot_overdue_q(today)),
-            open=Count("id", filter=_SLOT_STATE_Q[STATE_OPEN]),
-            in_progress=Count("id", filter=_SLOT_STATE_Q[STATE_IN_PROGRESS]),
-            done=Count("id", filter=_SLOT_STATE_Q[STATE_DONE]),
-            blocked=Count("id", filter=_SLOT_STATE_Q[STATE_BLOCKED]),
+            overdue=Count("id", filter=overdue_q),
+            open=Count("id", filter=state_q[STATE_OPEN]),
+            in_progress=Count("id", filter=state_q[STATE_IN_PROGRESS]),
+            done=Count("id", filter=state_q[STATE_DONE]),
+            blocked=Count("id", filter=state_q[STATE_BLOCKED]),
         )
         ew_week_counts = ew_week.aggregate(
             total=Count("id"),
@@ -1435,10 +2081,10 @@ class WorkPlanView(APIView):
         )
         # The three "elsewhere" numbers answer questions about work that
         # is NOT in this week, so they are counted over the whole scope.
-        slot_other = slots.aggregate(
-            overdue_all=Count("id", filter=_slot_overdue_q(today)),
-            upcoming=Count("id", filter=_slot_upcoming_q(week_end)),
-            undated=Count("id", filter=_slot_undated_q()),
+        job_other = jobs.aggregate(
+            overdue_all=Count("id", filter=overdue_q),
+            upcoming=Count("id", filter=upcoming_q),
+            undated=Count("id", filter=undated_q),
         )
         ew_other = extra_work.aggregate(
             overdue_all=Count("id", filter=_ew_overdue_q(today)),
@@ -1447,12 +2093,12 @@ class WorkPlanView(APIView):
         )
 
         counts = {
-            key: slot_week_counts[key] + ew_week_counts[key]
-            for key in slot_week_counts
+            key: job_week_counts[key] + ew_week_counts[key]
+            for key in job_week_counts
         }
         counts.update(
             {
-                key: slot_other[key] + ew_other[key] for key in slot_other
+                key: job_other[key] + ew_other[key] for key in job_other
             }
         )
         return counts
@@ -1462,6 +2108,7 @@ __all__ = [
     "CLOSED_STATES",
     "ENTRY_LIMIT",
     "KIND_EXTRA_WORK",
+    "KIND_TICKET",
     "KIND_TICKET_SLOT",
     "LATE_LIMIT",
     "LATE_LIVE_TICKET_STATUSES",

@@ -17,13 +17,29 @@ every part's window — and the deadline is the extra work's, read
 through the canonical link exactly as `views_work_plan._slot_deadline`
 reads it.
 
-W-PLANTRUTH §1a (owner ruling) — the ticket-level `scheduled_start_at`
-/ `scheduled_end_at` is NOT part of that window any more. The board
-places a card on the slot's day (or a part's), never on the ticket's
-date; a ladder that measured the ticket's date would print "Planned
-7 Sep" on a card the board had filed under 29 Aug — two truths, which
-is the defect the ruling closes. Measured on crmtest before the change:
-six live tickets were late by a ticket date only, on no column.
+W-VIEWER (owner ruling, 2026-08-27) — supersedes W-PLANTRUTH §1a, which
+had removed the ticket's own date from this window and left the widest
+slot window in its place. That is what made TCK-2026-000342 — a job the
+ticket schedules for 30 August — read "Planned 26 Aug — 1 day late" on
+27 August, off the back of one of Ahmet's three slots. A staff member's
+assigned working date is not the job's date, and it must not be able to
+call the whole job late.
+
+So the JOB's window is the JOB's: `tickets/job_dates.py`, which is the
+same resolver the board places manager cards with, so the ladder and the
+board cannot disagree about which day a job belongs to.
+
+The widest slot / part window survives as a FALLBACK and only that: a
+ticket that carries no schedule of its own, and no extra work to inherit
+one from, has no other stated date, and going silent about it would take
+a real late signal away from the escalation sweep. A ticket that DOES
+state a date is judged on that date and on nothing else.
+
+A viewer's OWN standing is a different question again, and
+`for_window` answers it — the same ladder over the window that viewer
+was actually given (their slot, widened by their own parts). Staff read
+their own week; they should not be shouted at by a rung measured on
+somebody else's day.
 
 Hours are the timesheets module's `TimeEntry` rows filed against the
 job (`HourSource.TICKET` for the ticket, `HourSource.EXTRA_WORK` for the
@@ -44,6 +60,7 @@ from django.utils import timezone
 from extra_work.models import ExtraWorkStatus
 
 from . import lateness as late_rules
+from .job_dates import job_window as resolve_job_window
 from .models import (
     StaffAssignmentSlotStatus,
     Ticket,
@@ -102,6 +119,11 @@ class LatenessIndex:
         # earliest slot or part start), for the escalation sweep's
         # persist rule, which used to read the ticket's own date.
         self._planned_start: dict[int, datetime.date | None] = {}
+        # W-VIEWER §5 — kept so `for_window` can re-run the SAME ladder
+        # over a viewer's OWN window without a second round of queries.
+        self._hours: dict[int, object] = {}
+        self._done: dict[int, bool] = {}
+        self._deadline: dict[int, datetime.date | None] = {}
         # W-LATE §2 — the steps the ladder has spoken for each ticket,
         # with the display names of the people each step reached.
         self._steps: dict[int, list[dict]] = {}
@@ -172,35 +194,49 @@ class LatenessIndex:
             return value if value is not None else late_rules.ZERO_HOURS
 
         for ticket in tickets:
-            ends = [
-                d
-                for d in (local_date(ticket.slot_window_end), ticket.part_window_end)
-                if d is not None
-            ]
-            starts = [
-                d
-                for d in (
-                    local_date(ticket.slot_window_start),
-                    ticket.part_window_start,
-                )
-                if d is not None
-            ]
-            planned_start = min(starts) if starts else None
+            # W-VIEWER — the JOB's own window first. Only when the job
+            # states no date anywhere does the widest slot / part window
+            # stand in for it (see the module docstring).
+            planned_start, planned_end = resolve_job_window(ticket)
+            if planned_start is None:
+                ends = [
+                    d
+                    for d in (
+                        local_date(ticket.slot_window_end),
+                        ticket.part_window_end,
+                    )
+                    if d is not None
+                ]
+                starts = [
+                    d
+                    for d in (
+                        local_date(ticket.slot_window_start),
+                        ticket.part_window_start,
+                    )
+                    if d is not None
+                ]
+                planned_start = min(starts) if starts else None
+                planned_end = max(ends) if ends else None
             self._planned_start[ticket.id] = planned_start
             booked = hours_for(HourSource.TICKET, ticket.id)
             if ticket.extra_work_request_id is not None:
                 booked = booked + hours_for(
                     HourSource.EXTRA_WORK, ticket.extra_work_request_id
                 )
+            self._hours[ticket.id] = booked
+            self._done[ticket.id] = (
+                ticket.status not in LATE_LIVE_TICKET_STATUSES
+                or ticket.archived_at is not None
+                or ticket.deleted_at is not None
+            )
+            self._deadline[ticket.id] = getattr(
+                ticket.extra_work_request, "deadline", None
+            )
             self._tickets[ticket.id] = late_rules.assess(
                 planned_start=planned_start,
-                planned_end=max(ends) if ends else None,
-                deadline=getattr(ticket.extra_work_request, "deadline", None),
-                done=(
-                    ticket.status not in LATE_LIVE_TICKET_STATUSES
-                    or ticket.archived_at is not None
-                    or ticket.deleted_at is not None
-                ),
+                planned_end=planned_end,
+                deadline=self._deadline[ticket.id],
+                done=self._done[ticket.id],
                 hours_booked=booked,
                 today=today,
             )
@@ -288,6 +324,53 @@ class LatenessIndex:
 
     def for_ticket(self, ticket_id) -> late_rules.Lateness:
         return self._tickets.get(ticket_id, late_rules.NOT_LATE)
+
+    def for_window(
+        self,
+        ticket_id,
+        planned_start,
+        planned_end,
+        *,
+        done: bool | None = None,
+    ) -> late_rules.Lateness:
+        """W-VIEWER §5 — the same ladder over ONE VIEWER'S OWN window.
+
+        The deadline, the hours and "is the work over" are the job's and
+        are reused as loaded; only the planned window differs, because
+        that is the only thing that differs between a manager reading the
+        job and the person who was given a day on it. `done` overrides
+        the job's verdict for a viewer who has finished THEIR part of a
+        job that is still running — the case the ruling calls "the card
+        can remain visible, but it should look calm".
+
+        A viewer with no window of their own falls back to the job's
+        rung: they are still standing on a job, and saying nothing about
+        it would be quieter than the truth.
+        """
+        if ticket_id not in self._tickets:
+            return late_rules.NOT_LATE
+        if planned_start is None and planned_end is None:
+            job = self.for_ticket(ticket_id)
+            if done and job.level is not None:
+                return late_rules.NOT_LATE
+            return job
+        return late_rules.assess(
+            planned_start=planned_start,
+            planned_end=planned_end,
+            deadline=self._deadline.get(ticket_id),
+            done=self._done.get(ticket_id, False) if done is None else done,
+            hours_booked=self._hours.get(ticket_id, late_rules.ZERO_HOURS),
+            today=self.today,
+        )
+
+    def window_dict(self, ticket_id, planned_start, planned_end, *, done=None) -> dict:
+        """`for_window`, on the wire, carrying the job's escalation steps
+        — the ladder spoke about the JOB, whoever is reading it."""
+        data = self.for_window(
+            ticket_id, planned_start, planned_end, done=done
+        ).as_dict()
+        data["escalation_steps"] = self.steps_for_ticket(ticket_id)
+        return data
 
     def planned_start_for(self, ticket_id) -> datetime.date | None:
         """The first planned day of the work (earliest slot or part

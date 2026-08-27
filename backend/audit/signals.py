@@ -852,6 +852,12 @@ _TSA_TRACKED_FIELDS = (
     "completed_at",
     "completed_by_id",
     "unable_to_complete_reason",
+    # W-VIEWER §10 — the reason an operator closed somebody else's slot.
+    # Tracked because the whole point of the field is accountability:
+    # "who completed it, whether it was completed on someone else's
+    # behalf, and why" (the ruling's own words), and an untracked reason
+    # can be edited out of existence.
+    "completed_on_behalf_reason",
     # Sprint 4 — `sub_task` is now a manager-writable PATCH field; track its
     # FK id (JSON-safe via serialize_value, like completed_by_id) so a
     # re-placement / detach lands as a TicketStaffAssignment UPDATE row.

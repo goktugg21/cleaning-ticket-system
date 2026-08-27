@@ -1,0 +1,232 @@
+"""W-VIEWER §1 — THE JOB'S OWN PLANNED WINDOW, resolved once.
+
+The owner's ruling of 2026-08-27 replaces W-PLANTRUTH §1a. That wave
+decided "one fact places the board: the planned day of the WORK, which
+is the slot's (or a part's)" and applied it to every reader. Measured on
+crmtest the same day, that is what put TCK-2026-000361 — a job the
+ticket schedules for 7 September — on 29 August, because one of Ahmet's
+four slots carried 29 August; and TCK-2026-000342, scheduled for
+30 August, on today's column stamped "Planned 26 Aug — 1 day late",
+because Ahmet's slot window ended on the 26th.
+
+The ruling: THOSE ARE TWO DIFFERENT FACTS AND BOTH ARE TRUE.
+
+    the job's scheduled date        when the ticket itself is to happen
+    a staff member's working date   when THAT person is to work on it
+
+So there is no single universal placement rule. There are two, chosen by
+who is reading:
+
+    SA / PA / MANAGER   the JOB — one card per ticket, on the ticket's
+                        own scheduled date. Five people on it is still
+                        one card.
+    STAFF (own week)    their OWN slots and their OWN parts, each on the
+                        date they were given.
+
+This module owns the first half: given a ticket, WHICH DATE IS THE
+JOB'S. `views_work_plan.py` places the board with it and
+`lateness_index.py` judges lateness with it, so the board and the ladder
+cannot disagree about which day a job belongs to — the exact drift the
+ruling closes.
+
+THE FALLBACK CHAIN, and why each link is the field it is
+--------------------------------------------------------
+`Ticket.scheduled_start_at` is the answer. Its own docstring
+(`models.py`) calls it "the planned start of the on-site work", and
+`TicketStatus.ACKNOWLEDGED` says out loud that WHEN the work is due "is
+already owned by `scheduled_start_at`". It is THE field.
+
+It is nullable, and on crmtest 9 of the 54 extra-work-born tickets carry
+no value in it, so a fallback is needed and the ruling asks for the
+field's business meaning to be reconfirmed before one is picked. In
+`extra_work/models.py` §"the six dates":
+
+    preferred_date          the customer's WISH (Sprint 176 §3)
+    planned_end_date        the last day of the asked-for window
+    provider_planned_date   the provider's COMMITMENT to a day (W2-D)
+    provider_planned_end_date   the last day of the committed window
+    deadline                what was promised — never a placement date
+
+`provider_planned_date` is therefore the right second link: it is the
+same KIND of fact as `scheduled_start_at` — the provider saying when it
+will do the work — and `extra_work/dates.py` records that a write to it
+pushes the spawned tickets' schedules (Sprint 184 §1), so the two are
+the same commitment seen from either end.
+
+`preferred_date` is the third and last link, and only because the extra
+work's OWN card on this board already uses it as its planned start
+(`_extra_work_job`). Without it a request and the ticket it spawned
+would sit on different days for the same reader, which is the defect
+this module exists to end. It is not treated as a commitment anywhere
+else.
+
+Past that: NOTHING. A job with no date is undated, and the undated lane
+is where it goes. An unrelated staff slot is never promoted into the
+job's date — "if there is no valid placement date, do not invent one",
+verbatim.
+
+THE DUE DATE is the extra work's `deadline` where one exists and the
+window's last day otherwise. Unchanged from Sprint 184 §2, restated here
+so one module answers every date question about a job.
+
+TWO EXPRESSIONS, ONE RULE. `job_window` is the Python; `with_job_dates`
+annotates the identical chain onto a queryset so the counts can be
+answered in SQL without loading the rows. `WorkPlanRuleParityTests`
+asserts the two agree, the same way it already does for the slot rule.
+"""
+from __future__ import annotations
+
+import datetime
+
+from django.db.models import Case, DateField, F, Q, When
+from django.db.models.functions import Coalesce, TruncDate
+from django.utils import timezone
+
+
+def local_date(value) -> datetime.date | None:
+    """The LOCAL calendar date of an aware datetime.
+
+    `timezone.localtime` rather than `.date()` on the stored UTC value: a
+    ticket scheduled for 00:00 Amsterdam is stored as 22:00 the previous
+    day in UTC, and reading `.date()` off that files it under the wrong
+    day — and, on a Monday, under the wrong week. TCK-2026-000364 is
+    exactly that row (`2026-08-30 22:00Z` = 31 August local), so the
+    distinction is not hypothetical here.
+    """
+    if value is None:
+        return None
+    return timezone.localtime(value).date()
+
+
+def job_window(ticket) -> tuple[datetime.date | None, datetime.date | None]:
+    """`(start, end)` — the job's own planned window, or `(None, None)`.
+
+    The pair is taken from ONE source, never mixed: a ticket that carries
+    a start but no end has no end, rather than borrowing the extra work's.
+    Mixing them would print a window neither record ever stated.
+    """
+    start = local_date(ticket.scheduled_start_at)
+    if start is not None:
+        return start, local_date(ticket.scheduled_end_at)
+    extra_work = getattr(ticket, "extra_work_request", None)
+    if extra_work is None:
+        return None, None
+    if extra_work.provider_planned_date is not None:
+        return (
+            extra_work.provider_planned_date,
+            extra_work.provider_planned_end_date,
+        )
+    return extra_work.preferred_date, extra_work.planned_end_date
+
+
+def job_window_end(ticket) -> datetime.date | None:
+    """The last planned day: the end, or the start when there is none —
+    `work_plan.Job.window_end`'s single-planned-day reading."""
+    start, end = job_window(ticket)
+    return end or start
+
+
+def job_deadline(ticket) -> datetime.date | None:
+    """The REAL deadline behind this job, or None.
+
+    Read through the canonical FK exactly as Sprint 184 §2 established,
+    never copied onto the ticket, so editing the deadline on the extra
+    work moves this in the same instant.
+    """
+    return getattr(
+        getattr(ticket, "extra_work_request", None), "deadline", None
+    )
+
+
+def job_due(ticket) -> datetime.date | None:
+    """What decides late for this job: the deadline, else the last
+    planned day. A job with neither is never late — nobody said when it
+    was due, and inventing a due date to call something late is worse
+    than not marking it."""
+    deadline = job_deadline(ticket)
+    if deadline is not None:
+        return deadline
+    return job_window_end(ticket)
+
+
+# --- the same chain, in SQL ------------------------------------------
+
+#: The annotation names `with_job_dates` adds. Named here so a predicate
+#: cannot typo one into a silent `None`.
+JOB_START = "job_start"
+JOB_END = "job_end"
+JOB_WINDOW_END = "job_window_end"
+
+_EW = "extra_work_request"
+
+
+def with_job_dates(queryset):
+    """Annotate `job_start` / `job_end` / `job_window_end` onto a TICKET
+    queryset — the SQL twin of `job_window`.
+
+    `job_end` is a `Case` rather than a third `Coalesce` on purpose: the
+    branch that supplies the start must supply the end, which is what
+    keeps a ticket's start from being paired with an extra work's end.
+    `TruncDate` takes the current timezone, which is the same conversion
+    `local_date` does.
+    """
+    return queryset.annotate(
+        **{
+            JOB_START: Coalesce(
+                TruncDate("scheduled_start_at"),
+                F(f"{_EW}__provider_planned_date"),
+                F(f"{_EW}__preferred_date"),
+                output_field=DateField(),
+            ),
+            JOB_END: Case(
+                When(
+                    scheduled_start_at__isnull=False,
+                    then=TruncDate("scheduled_end_at"),
+                ),
+                When(
+                    **{f"{_EW}__provider_planned_date__isnull": False},
+                    then=F(f"{_EW}__provider_planned_end_date"),
+                ),
+                default=F(f"{_EW}__planned_end_date"),
+                output_field=DateField(),
+            ),
+        }
+    ).annotate(
+        **{
+            JOB_WINDOW_END: Coalesce(
+                F(JOB_END), F(JOB_START), output_field=DateField()
+            )
+        }
+    )
+
+
+def job_due_q(lookup: str, value: datetime.date) -> Q:
+    """`due <lookup> value` — the SQL twin of `job_due`.
+
+    Two POSITIVE branches rather than one negated branch, for the reason
+    `_slot_due_q` gives next door: `deadline__isnull=True` over a
+    nullable FK chain is true both when the ticket has no extra work at
+    all and when it has one with no deadline, which is exactly the set
+    that should fall back to the planned window.
+    """
+    return (
+        Q(**{f"{_EW}__deadline__isnull": False})
+        & Q(**{f"{_EW}__deadline__{lookup}": value})
+    ) | (
+        Q(**{f"{_EW}__deadline__isnull": True})
+        & Q(**{f"{JOB_WINDOW_END}__{lookup}": value})
+    )
+
+
+__all__ = [
+    "JOB_END",
+    "JOB_START",
+    "JOB_WINDOW_END",
+    "job_deadline",
+    "job_due",
+    "job_due_q",
+    "job_window",
+    "job_window_end",
+    "local_date",
+    "with_job_dates",
+]

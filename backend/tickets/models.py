@@ -1296,6 +1296,22 @@ class TicketStaffAssignment(models.Model):
         related_name="staff_slots_completed",
     )
     unable_to_complete_reason = models.TextField(blank=True, default="")
+    # W-VIEWER §10 — WHY SOMEBODY ELSE CLOSED THIS.
+    #
+    # A provider operator may finish a worker's slot for them (the
+    # manager's part door, `views_sub_tasks.TicketSubTaskDoneView`, and
+    # the slot PATCH). `completed_by` already records WHO pressed it;
+    # this records WHY, and it is REQUIRED on that route. A worker
+    # completing their own slot leaves it empty — they are not acting on
+    # anybody's behalf and asking them for a reason would be asking them
+    # to justify doing their job.
+    #
+    # Deliberately NOT `completion_note`: that field is the worker's own
+    # evidence of a visit (the completion gate reads it), and an
+    # operator's justification for closing a slot they did not work is a
+    # different statement. Overloading one field with both is how a
+    # completion gate ends up satisfied by an excuse.
+    completed_on_behalf_reason = models.TextField(blank=True, default="")
 
     class Meta:
         # Multi-slot per staff — the (ticket, user) uniqueness was DROPPED

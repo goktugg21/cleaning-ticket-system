@@ -536,6 +536,16 @@ class SubTaskAssignmentSerializer(serializers.ModelSerializer):
     user_full_name = serializers.CharField(
         source="user.full_name", read_only=True
     )
+    # W-VIEWER §10 — WHO closed this, when it was not the person it
+    # belongs to. `completed_by_id` alone cannot answer that: on a
+    # worker's own completion it holds the worker, and the reader has to
+    # compare two ids to tell the two apart. The name is resolved here so
+    # the chip can say "Done by Sara on behalf of Ahmet" without a second
+    # lookup.
+    completed_by_id = serializers.IntegerField(
+        source="completed_by.id", read_only=True, default=None
+    )
+    completed_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = TicketStaffAssignment
@@ -551,9 +561,21 @@ class SubTaskAssignmentSerializer(serializers.ModelSerializer):
             "slot_status",
             "completion_note",
             "completed_at",
+            "completed_by_id",
+            "completed_by_name",
+            # W-VIEWER §10 — the reason an operator closed (or reopened)
+            # this on somebody else's behalf. Empty on a worker's own
+            # completion, which is asked for no reason at all.
+            "completed_on_behalf_reason",
             "unable_to_complete_reason",
         ]
         read_only_fields = fields
+
+    def get_completed_by_name(self, obj) -> str:
+        user = obj.completed_by
+        if user is None:
+            return ""
+        return (user.full_name or "").strip() or user.email
 
 
 class SubTaskSerializer(serializers.ModelSerializer):

@@ -36,12 +36,24 @@ from .models import (
     SubTask,
     TERMINAL_TICKET_STATUSES,
     TicketStaffAssignment,
+    TicketStatusHistory,
 )
 from .serializers import SubTaskSerializer, SubTaskWriteSerializer
 from .sub_task_rollup import maybe_auto_complete_ticket_on_subtasks
 from .views_staff_assignments import _gate_actor, _resolve_ticket
 
+def _person_label(user) -> str:
+    """A display name for the timeline line. The addendum's rule:
+    recipients by role in code, PEOPLE BY NAME on the screen."""
+    if user is None:
+        return ""
+    return (user.full_name or "").strip() or user.email
+
+
 ERR_PART_NOBODY = "part_has_nobody"
+#: W-VIEWER §10 — closing (or reopening) somebody else's work without
+#: saying why. The client shows the message against the reason box.
+ERR_PART_REASON = "part_reason_required"
 
 
 def _terminal_guard(ticket):
@@ -233,6 +245,19 @@ class TicketSubTaskDoneView(generics.GenericAPIView):
     A part has no status of its own (`SubTask.is_done` is derived), so a
     part nobody is on cannot be marked done: 400 `part_has_nobody`.
     Terminal tickets refuse, as every other part mutation does.
+
+    W-VIEWER §10 — AND IT ASKS WHY. This door closes work on somebody
+    ELSE'S behalf, in both directions, so a reason is REQUIRED (400
+    `part_reason_required` without one). It lands in three places, which
+    is the ruling's own list: on each affected slot
+    (`completed_on_behalf_reason`, beside the completion state and read
+    back by the part serializer), on the ticket's timeline as one
+    annotation row naming the part, the people and the actor, and — by
+    the same write — in the audit log, because the field is tracked.
+
+    A worker finishing their OWN slot is asked for nothing: they are not
+    acting on anybody's behalf, and demanding a justification for doing
+    the job would be a different system.
     """
 
     permission_classes = [IsAuthenticatedAndActive]
@@ -254,6 +279,21 @@ class TicketSubTaskDoneView(generics.GenericAPIView):
         raw = request.data.get("done", True)
         done = raw if isinstance(raw, bool) else str(raw).lower() in {"1", "true", "yes"}
 
+        # W-VIEWER §10 — the reason, before anything is written.
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response(
+                {
+                    "detail": (
+                        "A reason is required: this closes work on "
+                        "somebody else's behalf."
+                    ),
+                    "code": ERR_PART_REASON,
+                    "reason": ["A reason is required."],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         slots = list(
             TicketStaffAssignment.objects.filter(ticket=ticket, sub_task=sub_task)
             .select_for_update()
@@ -273,33 +313,65 @@ class TicketSubTaskDoneView(generics.GenericAPIView):
 
         now = timezone.now()
         changed = 0
+        touched_names: list[str] = []
         for slot in slots:
             if done and slot.slot_status == StaffAssignmentSlotStatus.ASSIGNED:
                 slot.slot_status = StaffAssignmentSlotStatus.COMPLETED
                 slot.completed_at = now
                 slot.completed_by = request.user
                 slot.completion_note = "Marked done by a manager."
+                # W-VIEWER §10 — the WHY, on the row that was written for
+                # somebody else. Kept out of `completion_note`, which is
+                # the worker's own evidence of a visit.
+                slot.completed_on_behalf_reason = reason
                 slot.save(
                     update_fields=[
                         "slot_status",
                         "completed_at",
                         "completed_by",
                         "completion_note",
+                        "completed_on_behalf_reason",
                     ]
                 )
                 changed += 1
+                touched_names.append(_person_label(slot.user))
             elif not done and slot.slot_status == StaffAssignmentSlotStatus.COMPLETED:
                 slot.slot_status = StaffAssignmentSlotStatus.ASSIGNED
                 slot.completed_at = None
                 slot.completed_by = None
+                # Reopening is an on-behalf act too, and the reason for
+                # it is the one that matters now.
+                slot.completed_on_behalf_reason = reason
                 slot.save(
                     update_fields=[
                         "slot_status",
                         "completed_at",
                         "completed_by",
+                        "completed_on_behalf_reason",
                     ]
                 )
                 changed += 1
+                touched_names.append(_person_label(slot.user))
+
+        # W-VIEWER §10 — ONE timeline line, whatever the headcount. The
+        # Sprint 8B annotation shape (old == new == the current status),
+        # the same one `_close_open_parts` writes, so the two on-behalf
+        # events read as one family on the ticket's own history.
+        if changed:
+            verb = "done" if done else "not done"
+            people = ", ".join(n for n in touched_names if n) or "—"
+            TicketStatusHistory.objects.create(
+                ticket=ticket,
+                old_status=ticket.status,
+                new_status=ticket.status,
+                changed_by=request.user,
+                note=(
+                    f'Part "{sub_task.title}" marked {verb} on behalf of '
+                    f"{people}. Reason: {reason}"
+                ),
+                is_override=False,
+                override_reason="",
+            )
 
         if done and changed:
             # Sprint 4 — the same best-effort roll-up a worker's own

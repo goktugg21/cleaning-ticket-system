@@ -320,7 +320,28 @@ class WorkPlanFixture(TenantFixtureMixin):
 
     # -- builders -----------------------------------------------------
 
-    def make_ticket(self, title, statusValue=TicketStatus.OPEN, *, foreign=False):
+    def make_ticket(
+        self,
+        title,
+        statusValue=TicketStatus.OPEN,
+        *,
+        foreign=False,
+        scheduled=None,
+        scheduled_end=None,
+    ):
+        """W-VIEWER — `scheduled` is the JOB's own date, and it is the
+        only thing that places a manager's card. A ticket made without
+        one is a job nobody has scheduled, whatever days its people
+        carry, and the manager's board files it under "not planned yet"
+        — which is the ruling, stated as a fixture."""
+
+        def at(day, hour):
+            if day is None:
+                return None
+            return timezone.make_aware(
+                datetime.datetime.combine(day, datetime.time(hour, 0))
+            )
+
         return Ticket.objects.create(
             company=self.other_company if foreign else self.company,
             customer=self.other_customer if foreign else self.customer,
@@ -330,6 +351,8 @@ class WorkPlanFixture(TenantFixtureMixin):
             type=TicketType.REQUEST,
             status=statusValue,
             created_by=self.super_admin,
+            scheduled_start_at=at(scheduled, 8),
+            scheduled_end_at=at(scheduled_end, 17),
         )
 
     def make_slot(
@@ -457,6 +480,12 @@ ENTRY_KEYS = {
     "rolled_days",
     "is_overdue",
     "overdue_days",
+    # W-VIEWER §5 — how THIS reader stands against the promise (signed:
+    # days left, or days over), and whether anything is being asked of
+    # them right now. Both present on every kind, null / false where
+    # they do not apply, for the same one-shape reason as the rest.
+    "due_in_days",
+    "viewer_settled",
     "assignee_names",
     "assignee_count",
     # W-N1 §3 — the parts of this ticket the entry's person holds. This
@@ -769,14 +798,14 @@ class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
 class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
     def setUp(self):
         super().setUp()
-        self.mine_ticket = self.make_ticket("Mine")
+        self.mine_ticket = self.make_ticket("Mine", scheduled=self.today)
         self.mine_slot = self.make_slot(self.mine_ticket, start=self.today)
         self.mine_ew = self.make_extra_work(
             "My extra work", preferred=self.today, assignee=self.worker
         )
         # Same company, somebody else's work.
         self.colleague = self.make_user("colleague-179@example.com", UserRole.STAFF)
-        self.their_ticket = self.make_ticket("Theirs")
+        self.their_ticket = self.make_ticket("Theirs", scheduled=self.today)
         self.their_slot = self.make_slot(
             self.their_ticket, user=self.colleague, start=self.today
         )
@@ -784,7 +813,9 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
             "Their extra work", preferred=self.today, assignee=self.colleague
         )
         # A different tenant entirely.
-        self.foreign_ticket = self.make_ticket("Foreign", foreign=True)
+        self.foreign_ticket = self.make_ticket(
+            "Foreign", foreign=True, scheduled=self.today
+        )
         self.foreign_slot = self.make_slot(
             self.foreign_ticket, user=self.foreign_worker, start=self.today
         )
@@ -815,10 +846,12 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
         self.assertEqual(widened["counts"], plain["counts"])
 
     def test_an_admin_asking_for_the_company_scope_sees_the_team(self):
+        """W-VIEWER — and sees JOBS. The team board answers one row per
+        TICKET (`ticket-<id>`), not one per assigned person."""
         payload = self.get_plan(self.company_admin, scope="company")
         self.assertEqual(payload["scope"], "company")
-        self.assertIn(f"slot-{self.mine_slot.id}", self.all_keys(payload))
-        self.assertIn(f"slot-{self.their_slot.id}", self.all_keys(payload))
+        self.assertIn(f"ticket-{self.mine_ticket.id}", self.all_keys(payload))
+        self.assertIn(f"ticket-{self.their_ticket.id}", self.all_keys(payload))
         self.assertIn(f"ew-{self.their_ew.id}", self.all_keys(payload))
 
     def test_an_admin_without_the_param_sees_their_own_empty_week(self):
@@ -835,8 +868,8 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
         deliberate exclusion rather than an oversight."""
         payload = self.get_plan(self.super_admin, scope="company")
         keys = self.all_keys(payload)
-        self.assertIn(f"slot-{self.mine_slot.id}", keys)
-        self.assertIn(f"slot-{self.foreign_slot.id}", keys)
+        self.assertIn(f"ticket-{self.mine_ticket.id}", keys)
+        self.assertIn(f"ticket-{self.foreign_ticket.id}", keys)
 
     def test_a_building_manager_gets_the_team_view_through_the_same_scope(self):
         """Sprint 170 §1 already admitted BUILDING_MANAGER to
@@ -845,12 +878,14 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
         widening and a regression would be silent."""
         payload = self.get_plan(self.manager, scope="company")
         self.assertEqual(payload["scope"], "company")
-        self.assertIn(f"slot-{self.mine_slot.id}", self.all_keys(payload))
-        self.assertNotIn(f"slot-{self.foreign_slot.id}", self.all_keys(payload))
+        self.assertIn(f"ticket-{self.mine_ticket.id}", self.all_keys(payload))
+        self.assertNotIn(
+            f"ticket-{self.foreign_ticket.id}", self.all_keys(payload)
+        )
 
     def test_a_manager_of_another_building_sees_none_of_this_building(self):
         payload = self.get_plan(self.other_manager, scope="company")
-        self.assertNotIn(f"slot-{self.mine_slot.id}", self.all_keys(payload))
+        self.assertNotIn(f"ticket-{self.mine_ticket.id}", self.all_keys(payload))
         self.assertNotIn(f"ew-{self.mine_ew.id}", self.all_keys(payload))
 
     def test_no_tenant_crosses_in_either_scope(self):
@@ -868,12 +903,16 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
                     )
                     keys = self.all_keys(payload)
                     self.assertNotIn(f"slot-{self.foreign_slot.id}", keys)
+                    self.assertNotIn(
+                        f"ticket-{self.foreign_ticket.id}", keys
+                    )
                     self.assertNotIn(f"ew-{self.foreign_ew.id}", keys)
 
     def test_a_foreign_admin_sees_only_their_own_tenant(self):
         payload = self.get_plan(self.other_company_admin, scope="company")
         keys = self.all_keys(payload)
-        self.assertIn(f"slot-{self.foreign_slot.id}", keys)
+        self.assertIn(f"ticket-{self.foreign_ticket.id}", keys)
+        self.assertNotIn(f"ticket-{self.mine_ticket.id}", keys)
         self.assertNotIn(f"slot-{self.mine_slot.id}", keys)
         self.assertNotIn(f"ew-{self.mine_ew.id}", keys)
 
@@ -1021,6 +1060,73 @@ class WorkPlanRuleParityTests(WorkPlanFixture, APITestCase):
                         value,
                         f"{key}: chip says {counts[key]}, rule places {value}",
                     )
+
+    def test_the_sql_counts_equal_the_rule_for_the_TEAM_board_too(self):
+        """W-VIEWER — the team board is a second source with a second
+        family of predicates. Two expressions of one rule again, so the
+        same equality is asserted over it: the chip counts JOBS and the
+        rule places JOBS, or the page reports a number nobody can
+        reconcile with what is on screen."""
+        day = datetime.timedelta(days=1)
+        # Give the jobs of this fixture their own dates, which is what a
+        # manager's board is placed by. Spread across every branch: this
+        # week, a past week (rolls), a future week (upcoming), and one
+        # with no date at all (undated).
+        scheduled = [0, -6, 20, None, -1, 3, None]
+        for ticket, offset in zip(
+            Ticket.objects.filter(company=self.company).order_by("id"),
+            scheduled + [None] * 20,
+        ):
+            if offset is None:
+                continue
+            ticket.scheduled_start_at = timezone.make_aware(
+                datetime.datetime.combine(
+                    self.today + offset * day, datetime.time(8, 0)
+                )
+            )
+            ticket.save(update_fields=["scheduled_start_at"])
+
+        for week_offset in (-1, 0, 1, 4):
+            target = self.today + datetime.timedelta(weeks=week_offset)
+            iso = target.isocalendar()
+            with self.subTest(week=f"{iso[0]}-W{iso[1]:02d}"):
+                payload = self.get_plan(
+                    self.company_admin,
+                    week=f"{iso[0]}-W{iso[1]:02d}",
+                    scope="company",
+                )
+                self.assertEqual(payload["scope"], "company")
+                self.assertFalse(payload["truncated"]["entries"])
+                counts = payload["counts"]
+                for key, value in self.python_counts(payload).items():
+                    self.assertEqual(
+                        counts[key],
+                        value,
+                        f"{key}: chip says {counts[key]}, rule places {value}",
+                    )
+
+    def test_the_team_board_answers_one_row_per_job(self):
+        """However many people are on a ticket — the ruling's own
+        sentence, asserted as a shape rather than a count."""
+        payload = self.get_plan(self.company_admin, scope="company")
+        for bucket in (
+            "entries",
+            "overdue_entries",
+            "upcoming_entries",
+            "undated_entries",
+            "late_entries",
+        ):
+            with self.subTest(bucket=bucket):
+                ticket_ids = [
+                    row["ticket_id"]
+                    for row in payload[bucket]
+                    if row["ticket_id"] is not None
+                ]
+                self.assertEqual(
+                    len(ticket_ids),
+                    len(set(ticket_ids)),
+                    f"{bucket} repeats a job: {ticket_ids}",
+                )
 
     def test_the_upcoming_count_equals_the_upcoming_list(self):
         payload = self.get_plan(self.worker)
