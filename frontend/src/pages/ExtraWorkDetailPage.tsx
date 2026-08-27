@@ -3439,56 +3439,42 @@ export function ExtraWorkDetailPage() {
             )}
             </div>
           </div>
+          {/* W-PLANTRUTH §4a — NO PREVIEW CARD. This was a card of its
+              own, carrying a heading that said "Preview" and a sentence
+              that said "Fetches the proposal PDF" — over two buttons
+              that already say Preview and Download. Three ways of
+              saying one thing, in a box, above the document it is
+              about. The card is gone; the PAIR is the one home, at the
+              bottom of the lines it belongs to, which is where the
+              ticket's Money tab already keeps the same pair. */}
           {hasActiveProposal && canViewProposalPdf && (
-            <div className="card" data-testid="extra-work-preview-panel">
-              <div className="form-section">
-                <div className="form-section-title">
-                  {t("detail.preview_card_title")}
-                </div>
-                {/* W-FIX-A — the BUTTON below already lost the word
-                    (`detail.proposal_pdf_start`); this sentence sits one
-                    line above it and still called the same file a
-                    proposal. On an auto-start route there is no proposal
-                    to fetch — it is the work order for a job the
-                    customer already authorised. */}
-                <p className="muted small" style={{ marginTop: 0 }}>
-                  {t(
-                    noCustomerApproval
-                      ? "detail.preview_card_hint_start"
-                      : "detail.preview_card_hint",
-                  )}
-                </p>
-                <div
-                  style={{ display: "flex", flexWrap: "wrap", gap: 8 }}
-                  data-testid="extra-work-preview-actions"
-                >
-                  {/* W-HOURS4 Task 4 — Preview opens the same document
-                      in the in-app viewer; the download stays. */}
-                  {/* W-HOURS5 Task 9 — an eye before Preview, a
-                      download glyph before the download. */}
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={openProposalPreview}
-                    data-testid="extra-work-preview-open"
-                  >
-                    <Eye size={14} strokeWidth={2.2} aria-hidden="true" />
-                    {t("detail.pdf_preview_button")}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => void handleDownloadPdf()}
-                    disabled={pdfBusy}
-                    data-testid="extra-work-preview-pdf"
-                  >
-                    <Download size={14} strokeWidth={2.2} aria-hidden="true" />
-                    {pdfBusy
-                      ? t("detail.proposal_pdf_busy")
-                      : t(noCustomerApproval ? "detail.proposal_pdf_start" : "detail.proposal_pdf")}
-                  </button>
-                </div>
-              </div>
+            <div
+              className="ew-pdf-actions"
+              data-testid="extra-work-preview-actions"
+            >
+              {/* W-HOURS5 Task 9 — an eye before Preview, a download
+                  glyph before the download. */}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={openProposalPreview}
+                data-testid="extra-work-preview-open"
+              >
+                <Eye size={14} strokeWidth={2.2} aria-hidden="true" />
+                {t("detail.pdf_preview_button")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => void handleDownloadPdf()}
+                disabled={pdfBusy}
+                data-testid="extra-work-preview-pdf"
+              >
+                <Download size={14} strokeWidth={2.2} aria-hidden="true" />
+                {pdfBusy
+                  ? t("detail.proposal_pdf_busy")
+                  : t(noCustomerApproval ? "detail.proposal_pdf_start" : "detail.proposal_pdf")}
+              </button>
             </div>
           )}
           {/* Draft proposal lines — read-only display of the DRAFT

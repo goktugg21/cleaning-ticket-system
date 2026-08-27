@@ -61,33 +61,28 @@ import {
   selectApprovedProposal,
 } from "./activeHourlyLines";
 
-// W25 — ONE column geometry for the Agreement card's tables, shared by
-// the header row and the data rows so the words sit over the numbers
-// they name. The name cell takes the slack and wraps; the two number
-// cells keep a fixed basis, which is what makes a header meaningful at
-// all (a header over an elastic column names nothing). Sized for the
-// ~340px ticket rail at 1366 — measured, not guessed.
-const CELL_NAME = {
-  flex: "1 1 auto",
-  minWidth: 0,
-  overflowWrap: "anywhere",
-} as const;
-const CELL_QTY = {
-  flex: "0 0 54px",
-  textAlign: "right",
-  whiteSpace: "nowrap",
-} as const;
-const CELL_AMOUNT = {
-  flex: "0 0 86px",
-  textAlign: "right",
-  whiteSpace: "nowrap",
-} as const;
-const ROW_STYLE = {
-  display: "flex",
-  alignItems: "baseline",
-  gap: 8,
-  padding: "4px 0",
-} as const;
+// W-PLANTRUTH §4b — THE AGREEMENT CARD IS A REAL TABLE.
+//
+// W25 built these rows as flex: one shared geometry object per cell,
+// applied to a header row and to each data row, so the words would sit
+// over the numbers they name. They did line up — but only as long as
+// every row agreed to use the same three objects, and the two number
+// cells were pushed to the far right of an elastic name column, so on a
+// long service name the quantity ended up a rail's width away from the
+// label that named it. The owner's words: a field floating far from its
+// label.
+//
+// A `<table>` with `table-layout: fixed` and a `<colgroup>` makes the
+// alignment the BROWSER's job rather than a convention three call sites
+// have to keep: QTY and AMOUNT are adjacent, fixed, and right-aligned
+// directly under their own headers, and the name column takes the slack
+// and wraps. The widths live in `index.css` (`.ew-agreement-table`),
+// sized for the ~340px ticket rail at 1366.
+//
+// NOT `.data-table`: that class carries a min-width of 860px for the
+// wide list pages, and inside this rail it pushed the money cells past
+// the viewport's right edge where `.workspace` clipped them — the
+// W22.2 defect, which is why these rows were flex in the first place.
 
 export function TicketExtraWorkCards({
   extraWorkId,
@@ -601,29 +596,36 @@ export function TicketExtraWorkCards({
                     priced), so it gets the two headers it actually has
                     — an "Amount" over an absent column would be the
                     lie the header exists to prevent. */}
-                <div
-                  style={ROW_STYLE}
-                  data-testid="ticket-ew-requested-head"
-                >
-                  <span className="detail-kv-label" style={CELL_NAME}>
-                    {t("extra_work:detail.agreement_col_service")}
-                  </span>
-                  <span className="detail-kv-label" style={CELL_QTY}>
-                    {t("extra_work:detail.agreement_col_qty")}
-                  </span>
-                </div>
-                {ew.line_items.map((line) => (
-                  <div key={line.id} style={ROW_STYLE}>
-                    <span style={CELL_NAME}>
-                      {line.service_name || line.custom_description}
-                    </span>
-                    <span style={CELL_QTY}>
-                      {line.quantity != null && line.quantity !== ""
-                        ? formatNumber(line.quantity)
-                        : "—"}
-                    </span>
-                  </div>
-                ))}
+                <table className="ew-agreement-table">
+                  <colgroup>
+                    <col />
+                    <col className="ew-agreement-col-qty" />
+                  </colgroup>
+                  <thead>
+                    <tr data-testid="ticket-ew-requested-head">
+                      <th className="detail-kv-label">
+                        {t("extra_work:detail.agreement_col_service")}
+                      </th>
+                      <th className="detail-kv-label ew-agreement-num">
+                        {t("extra_work:detail.agreement_col_qty")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ew.line_items.map((line) => (
+                      <tr key={line.id}>
+                        <td className="ew-agreement-name">
+                          {line.service_name || line.custom_description}
+                        </td>
+                        <td className="ew-agreement-num">
+                          {line.quantity != null && line.quantity !== ""
+                            ? formatNumber(line.quantity)
+                            : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </>
           )}
@@ -636,30 +638,41 @@ export function TicketExtraWorkCards({
                 {t("ew_agreement_agreed")}
               </div>
               <div data-testid="ticket-ew-agreed-lines">
-                <div style={ROW_STYLE} data-testid="ticket-ew-agreed-head">
-                  <span className="detail-kv-label" style={CELL_NAME}>
-                    {t("extra_work:detail.agreement_col_service")}
-                  </span>
-                  <span className="detail-kv-label" style={CELL_QTY}>
-                    {t("extra_work:detail.agreement_col_qty")}
-                  </span>
-                  <span className="detail-kv-label" style={CELL_AMOUNT}>
-                    {t("extra_work:detail.agreement_col_amount")}
-                  </span>
-                </div>
-                {agreedRows.map((row) => (
-                  <div key={row.id} style={ROW_STYLE}>
-                    <span style={CELL_NAME}>{row.label}</span>
-                    <span style={CELL_QTY}>
-                      {row.quantity !== null && row.quantity !== ""
-                        ? formatNumber(row.quantity)
-                        : "—"}
-                    </span>
-                    <span style={{ ...CELL_AMOUNT, fontWeight: 500 }}>
-                      {row.amount !== null ? formatMoney(row.amount) : "—"}
-                    </span>
-                  </div>
-                ))}
+                <table className="ew-agreement-table">
+                  <colgroup>
+                    <col />
+                    <col className="ew-agreement-col-qty" />
+                    <col className="ew-agreement-col-amount" />
+                  </colgroup>
+                  <thead>
+                    <tr data-testid="ticket-ew-agreed-head">
+                      <th className="detail-kv-label">
+                        {t("extra_work:detail.agreement_col_service")}
+                      </th>
+                      <th className="detail-kv-label ew-agreement-num">
+                        {t("extra_work:detail.agreement_col_qty")}
+                      </th>
+                      <th className="detail-kv-label ew-agreement-num">
+                        {t("extra_work:detail.agreement_col_amount")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agreedRows.map((row) => (
+                      <tr key={row.id}>
+                        <td className="ew-agreement-name">{row.label}</td>
+                        <td className="ew-agreement-num">
+                          {row.quantity !== null && row.quantity !== ""
+                            ? formatNumber(row.quantity)
+                            : "—"}
+                        </td>
+                        <td className="ew-agreement-num ew-agreement-amount">
+                          {row.amount !== null ? formatMoney(row.amount) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </>
           )}
