@@ -1495,6 +1495,16 @@ export interface SubTaskAssignment {
   slot_status: SlotStatus;
   completion_note: string;
   completed_at: string | null;
+  /** W-VIEWER §10 — who pressed the button, and their display name. On a
+   *  worker's own completion this is the worker; on an on-behalf close it
+   *  is the operator, which is what makes the two distinguishable without
+   *  comparing ids. */
+  completed_by_id: number | null;
+  completed_by_name: string;
+  /** W-VIEWER §10 — why an operator closed or reopened this on somebody
+   *  else's behalf. Empty string on a worker's own completion — they are
+   *  not acting on anybody's behalf and are asked for no reason. */
+  completed_on_behalf_reason: string;
   unable_to_complete_reason: string;
 }
 
@@ -1828,15 +1838,23 @@ export async function deleteSubTask(
  * So this is that door, and the server writes the slots. It answers 400
  * `part_has_nobody` for a part nobody is on: with no slot under it
  * there is nothing that could make it done.
+ *
+ * W-VIEWER §10 — AND IT ASKS WHY. This closes (or reopens) work on
+ * somebody else's behalf, so `reason` is required in both directions;
+ * without one the server answers 400 `part_reason_required`. The reason
+ * lands beside the completion state on each slot, on the ticket's
+ * timeline, and in the audit log. A worker finishing their OWN slot goes
+ * through `updateStaffSlot` and is asked for nothing.
  */
 export async function setSubTaskDone(
   ticketId: number,
   subTaskId: number,
   done: boolean,
+  reason: string,
 ): Promise<SubTask> {
   const response = await api.post<SubTask>(
     `/tickets/${ticketId}/sub-tasks/${subTaskId}/done/`,
-    { done },
+    { done, reason },
   );
   return response.data;
 }

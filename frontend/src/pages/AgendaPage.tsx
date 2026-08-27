@@ -495,7 +495,21 @@ function WorkPlanWeek() {
     () =>
       entries.filter((entry) => {
         if (!matchesChip(entry, chip)) return false;
-        if (kindFilter && entry.kind !== kindFilter) return false;
+        // W-VIEWER — "Ticket" as a SOURCE covers both ticket shapes: the
+        // JOB card a manager gets and the SLOT card a worker gets are the
+        // same source seen from two sides, and a filter that dropped one
+        // of them would empty the board for whichever reader is on the
+        // other side.
+        if (
+          kindFilter === "TICKET_SLOT" &&
+          entry.kind !== "TICKET_SLOT" &&
+          entry.kind !== "TICKET"
+        ) {
+          return false;
+        }
+        if (kindFilter === "EXTRA_WORK" && entry.kind !== "EXTRA_WORK") {
+          return false;
+        }
         if (needle) {
           const haystack = [
             entry.title,
@@ -520,11 +534,20 @@ function WorkPlanWeek() {
    *  filtered list the columns render. */
   const groups = useMemo(() => {
     const hosts = new Map<string, { entry: WorkPlanEntry; parts: WorkPlanPart[] }[]>();
-    for (const entry of filtered) {
-      for (const [day, parts] of partHostDays(entry, dayKeys)) {
-        const bucket = hosts.get(day) ?? [];
-        bucket.push({ entry, parts });
-        hosts.set(day, bucket);
+    // W-VIEWER §3 — HOST CARDS ARE THE WORKER'S SURFACE ONLY. A part's
+    // window is a staffing fact, and spreading a job across the week by
+    // its parts' days is exactly what the ruling forbids on the general
+    // board: "assignment creation dates, manager assignment dates and
+    // individual staff slot dates must never move the SA/PA/Manager job
+    // card to another day". The parts still show, as chips, on the job's
+    // own card.
+    if (!teamWeek) {
+      for (const entry of filtered) {
+        for (const [day, parts] of partHostDays(entry, dayKeys)) {
+          const bucket = hosts.get(day) ?? [];
+          bucket.push({ entry, parts });
+          hosts.set(day, bucket);
+        }
       }
     }
     return dayKeys.map((key) => ({
@@ -532,7 +555,7 @@ function WorkPlanWeek() {
       items: filtered.filter((entry) => entry.day === key),
       hosts: hosts.get(key) ?? [],
     }));
-  }, [dayKeys, filtered]);
+  }, [dayKeys, filtered, teamWeek]);
 
   /** The open day's CURRENT rows. Derived from `groups` rather than
    *  captured when the header was clicked, so a filter changed behind
@@ -808,6 +831,23 @@ function WorkPlanWeek() {
             </div>
           )}
         </section>
+      )}
+
+      {/* W-VIEWER §3 — WHAT THIS BOARD IS, said once, where it is read.
+          The general plan places every job on the ticket's own scheduled
+          date and shows it once however many people are on it. Each of
+          those people may have been given a different working day, and
+          those days are real — they are just not this board's subject.
+          Saying so here is what stops the next reader concluding the
+          board has lost somebody's assignment. */}
+      {teamWeek && (
+        <p
+          className="wp-notice wp-notice-hint"
+          role="note"
+          data-testid="agenda-job-board-hint"
+        >
+          {t("agenda.job_board_hint")}
+        </p>
       )}
 
       {/* A list that silently stops is the same defect as a count that
@@ -1203,9 +1243,17 @@ function EntryTableModal({
                       </td>
                     )}
                     <td>
+                      {/* W-VIEWER — three kinds, three status
+                          vocabularies. A JOB row carries the TICKET's
+                          status; a SLOT row the slot's. */}
                       {entry.kind === "EXTRA_WORK" ? (
                         <StatusBadge
                           status={{ kind: "extra-work", value: entry.status }}
+                          variant="cell"
+                        />
+                      ) : entry.kind === "TICKET" ? (
+                        <StatusBadge
+                          status={{ kind: "ticket", value: entry.status }}
                           variant="cell"
                         />
                       ) : (

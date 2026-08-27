@@ -3,6 +3,7 @@ import {
   CalendarClock,
   CheckCircle2,
   History,
+  Hourglass,
   PlayCircle,
   Users,
   XCircle,
@@ -121,6 +122,46 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
   );
 }
 
+/**
+ * W-VIEWER §5 — HOW THIS READER STANDS AGAINST THE PROMISE.
+ *
+ * "Late" is a fact you learn one day after you could have acted on it.
+ * The ruling asks every relevant card to say the time remaining until
+ * the deadline OR how far past it, so somebody can read their standing
+ * without opening the ticket. `due_in_days` is the signed number the
+ * server computes from the same `due` the placement rule uses — days
+ * left when positive, days over when negative, today at zero.
+ *
+ * Rendered ONLY when a real deadline exists — `lateness.deadline`, the
+ * extra work's own promise, not `due_date`. `due_date` falls back to the
+ * last planned day for a job nobody promised anything about, and
+ * counting down to that under the word "deadline" would be inventing a
+ * promise. Such a card is not left silent: its planned day is on it
+ * already, through the ROLLED marker or the column it hangs in.
+ */
+export function DueChip({ entry }: { entry: WorkPlanEntry }) {
+  const { t } = useTranslation("staff_slots");
+  const days = entry.due_in_days;
+  if (days === null || entry.lateness.deadline === null) return null;
+  const tone = days < 0 ? "over" : days === 0 ? "today" : "left";
+  const label =
+    days < 0
+      ? t("agenda.due_over", { count: Math.abs(days) })
+      : days === 0
+        ? t("agenda.due_today")
+        : t("agenda.due_left", { count: days });
+  return (
+    <span
+      className={`wp-due wp-due-${tone}`}
+      data-testid="agenda-card-due"
+      data-tone={tone}
+    >
+      <Hourglass size={11} strokeWidth={2.5} />
+      {label}
+    </span>
+  );
+}
+
 export function WorkPlanCard({
   entry,
   role,
@@ -143,6 +184,9 @@ export function WorkPlanCard({
   const { t } = useTranslation(["staff_slots", "common"]);
   const to = detailPath(entry, role);
   const isExtraWork = entry.kind === "EXTRA_WORK";
+  // W-VIEWER — the JOB card. One per ticket, carrying a TICKET status
+  // and the ticket's own scheduled window; never a staff slot's clock.
+  const isJob = entry.kind === "TICKET";
   const isHost = hostParts !== undefined;
 
   function timeOnly(iso: string | null): string {
@@ -157,6 +201,21 @@ export function WorkPlanCard({
    *  there is nothing to say — the caller renders nothing rather than a
    *  line reading "No time". */
   function windowText(): string {
+    if (isJob) {
+      // The TICKET's own scheduled window — the fact that placed this
+      // card. §3 of the ruling: the general board does not re-publish
+      // each staff member's working hours; the ticket's Scheduling
+      // section does, to anybody who opens it.
+      if (!entry.scheduled_start_at) {
+        return formatPlannedWindow(entry.planned_start, entry.planned_end, formatDay, {
+          empty: "",
+          endOnly: (end) => t("agenda.until_date", { date: end }),
+        });
+      }
+      return entry.scheduled_end_at
+        ? `${timeOnly(entry.scheduled_start_at)}–${timeOnly(entry.scheduled_end_at)}`
+        : timeOnly(entry.scheduled_start_at);
+    }
     if (isExtraWork) {
       return formatPlannedWindow(entry.planned_start, entry.planned_end, formatDay, {
         empty: "",
@@ -215,10 +274,14 @@ export function WorkPlanCard({
 
   return (
     <li
-      className="wp-card"
+      // W-VIEWER §5 — a card with nothing left for THIS reader to do is
+      // calm: it stays on the board (a manager may still withdraw a job
+      // sitting with the customer) and stops demanding action.
+      className={`wp-card${entry.viewer_settled ? " wp-card-settled" : ""}`}
       data-testid="agenda-slot-card"
       data-kind={entry.kind}
       data-placement={entry.placement}
+      data-settled={entry.viewer_settled ? "1" : "0"}
     >
       <span
         className={`wp-kind-tag${isExtraWork ? "" : " wp-kind-tag-ticket"}`}
@@ -240,7 +303,14 @@ export function WorkPlanCard({
       {/* §12B — a card shown outside its planned week SAYS WHY, with its
           planned date on it. */}
       <PlacementMarker entry={entry} />
-      {late && <LateBadge facts={late} testId="agenda-card-late" />}
+      {late && !entry.viewer_settled && (
+        <LateBadge facts={late} testId="agenda-card-late" />
+      )}
+      {/* W-VIEWER §5 — the countdown, on every card that has a promise
+          to count against. It sits beside the rung rather than replacing
+          it: one says how bad it already is, the other how long is
+          left. */}
+      <DueChip entry={entry} />
 
       {/* W-N1 §3 — WHICH half of the job is this person's. Reuses the
           Assignment section's own `.parts-chip` pair rather than a
@@ -258,6 +328,11 @@ export function WorkPlanCard({
         {isExtraWork ? (
           <StatusBadge
             status={{ kind: "extra-work", value: entry.status }}
+            variant="cell"
+          />
+        ) : isJob ? (
+          <StatusBadge
+            status={{ kind: "ticket", value: entry.status }}
             variant="cell"
           />
         ) : (

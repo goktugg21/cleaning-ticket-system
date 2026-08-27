@@ -147,6 +147,15 @@ export function SubTasksModal({
   // W-PLANTRUTH §3c -- which row's done/undone write is in flight, so
   // only that row's button goes busy while the others stay usable.
   const [doneBusyId, setDoneBusyId] = useState<number | null>(null);
+  /** W-VIEWER §10 — the on-behalf reason, asked on the row that will
+   *  carry it. `{ partId, done }` is which act is waiting for one; the
+   *  server refuses without it, so the prompt is the offer rather than a
+   *  courtesy. */
+  const [reasonFor, setReasonFor] = useState<{
+    partId: number;
+    done: boolean;
+  } | null>(null);
+  const [reasonText, setReasonText] = useState("");
   // W-LATE §3a -- the window editor: which row has it open, its draft,
   // and the refusal AT THE FIELD (the server names the field).
   const [windowPartId, setWindowPartId] = useState<number | null>(null);
@@ -293,6 +302,14 @@ export function SubTasksModal({
   /**
    * W-PLANTRUTH §3c -- the MANAGER marks a part done, or reopens it.
    *
+   * W-VIEWER §10 -- ON SOMEBODY ELSE'S BEHALF, AND IT SAYS WHY. The
+   * reason is required by the server in both directions and is asked
+   * for on the row itself, so the person answering is looking at the
+   * part they are closing. It lands beside the completion state, on the
+   * ticket timeline and in the audit log. Staff closing their OWN work
+   * through `MyPartsPanel` are asked for nothing -- they are not acting
+   * on anybody's behalf.
+   *
    * A part has no status of its own: it is done when every slot under
    * it is COMPLETED. A worker reaches that through their own slot; the
    * people who run the job could only watch. The refusal that matters
@@ -301,7 +318,7 @@ export function SubTasksModal({
    * it, like every other refusal in this modal, not as a toast over a
    * list that did not change.
    */
-  async function handleSetDone(part: SubTask, done: boolean) {
+  async function handleSetDone(part: SubTask, done: boolean, reason: string) {
     setDoneBusyId(part.id);
     setError("");
     setErrorByPart((current) => {
@@ -310,7 +327,9 @@ export function SubTasksModal({
       return next;
     });
     try {
-      await setSubTaskDone(ticketId, part.id, done);
+      await setSubTaskDone(ticketId, part.id, done, reason);
+      setReasonFor(null);
+      setReasonText("");
       await onChanged();
       push({
         variant: "success",
@@ -793,9 +812,13 @@ export function SubTasksModal({
                                   ? "btn btn-ghost btn-sm"
                                   : "btn btn-primary btn-sm"
                               }
-                              onClick={() =>
-                                void handleSetDone(part, !part.is_done)
-                              }
+                              onClick={() => {
+                                setReasonFor({
+                                  partId: part.id,
+                                  done: !part.is_done,
+                                });
+                                setReasonText("");
+                              }}
                               disabled={busy || doneBusyId !== null}
                               data-testid={
                                 part.is_done
@@ -1040,6 +1063,102 @@ export function SubTasksModal({
                       </div>
                     </div>
                   )}
+
+                  {/* W-VIEWER §10 — the reason, asked on the row it will
+                      be written to. Inline, like every other prompt in
+                      this modal (the remove confirmation next door works
+                      the same way), so the operator is looking at the
+                      part they are closing while they say why. Confirm
+                      is disabled until something has been typed: the
+                      server refuses an empty reason, and a button whose
+                      only outcome is a refusal is not an offer. */}
+                  {reasonFor?.partId === part.id && (
+                    <div
+                      className="parts-reason"
+                      data-testid="ticket-part-reason"
+                      data-done={reasonFor.done ? "1" : "0"}
+                    >
+                      <label className="field">
+                        <span className="field-label">
+                          {reasonFor.done
+                            ? t("parts.reason_label_done")
+                            : t("parts.reason_label_reopen")}
+                        </span>
+                        <input
+                          type="text"
+                          className="field-input"
+                          value={reasonText}
+                          autoFocus
+                          disabled={busy || doneBusyId !== null}
+                          placeholder={t("parts.reason_placeholder")}
+                          onChange={(event) => setReasonText(event.target.value)}
+                          data-testid="ticket-part-reason-input"
+                        />
+                      </label>
+                      <p className="muted small" style={{ margin: "4px 0 0" }}>
+                        {t("parts.reason_hint")}
+                      </p>
+                      <div className="parts-row-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() =>
+                            void handleSetDone(
+                              part,
+                              reasonFor.done,
+                              reasonText.trim(),
+                            )
+                          }
+                          disabled={
+                            busy ||
+                            doneBusyId !== null ||
+                            reasonText.trim() === ""
+                          }
+                          data-testid="ticket-part-reason-confirm"
+                        >
+                          {doneBusyId === part.id
+                            ? t("parts.saving")
+                            : reasonFor.done
+                              ? t("parts.mark_done")
+                              : t("parts.reopen")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            setReasonFor(null);
+                            setReasonText("");
+                          }}
+                          disabled={busy || doneBusyId !== null}
+                          data-testid="ticket-part-reason-cancel"
+                        >
+                          {t("common:cancel")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* W-VIEWER §10 — and once it is written, it is READ
+                      BACK where the completion state is: who closed it,
+                      on whose behalf, and why. Without this the reason
+                      would live only in the timeline, which is not
+                      "beside the part's completion state". */}
+                  {part.staff_assignments
+                    .filter((slot) => slot.completed_on_behalf_reason)
+                    .map((slot) => (
+                      <p
+                        key={slot.id}
+                        className="parts-row-behalf"
+                        data-testid="ticket-part-behalf"
+                        data-slot-id={slot.id}
+                      >
+                        {t("parts.behalf_line", {
+                          actor: slot.completed_by_name || t("parts.behalf_someone"),
+                          person: slot.user_full_name || slot.user_email,
+                          reason: slot.completed_on_behalf_reason,
+                        })}
+                      </p>
+                    ))}
 
                   {rowError && (
                     <p

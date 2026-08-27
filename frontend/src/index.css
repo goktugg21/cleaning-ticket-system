@@ -15260,3 +15260,99 @@ table.assign-table { min-width: 0; width: 100%; }
   white-space: nowrap;
 }
 .ew-agreement-amount { font-weight: 500; }
+
+/* ===================================================================
+   W-VIEWER — the owner's ruling of 2026-08-27.
+
+   Two readers, two placement facts. The board itself did not change
+   shape; what it needed was a way to say two things it had never said:
+   how long is left against the promise, and when a card is not asking
+   this reader for anything.
+   =================================================================== */
+
+/* ---- §5: the deadline countdown ----------------------------------
+   "Late" is a fact a reader learns one day after they could have acted
+   on it. This is the same fact one day earlier — and every day before
+   that. It takes the `.wp-why` marker shape rather than a filled chip,
+   because it sits directly under one and two competing weights on a
+   150px card is how the reference card grew to 140px tall in the first
+   place (Sprint 183 §3, the reason `.wp-why` stopped being a banner). */
+.wp-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+.wp-due svg {
+  flex: 0 0 auto;
+}
+/* Time left is neutral — it is information, not an alarm. The last day
+   takes the amber the status badges already use for "waiting", and past
+   the deadline takes the red they use for "rejected", so a reader who
+   has learnt the palette anywhere else has learnt it here. */
+.wp-due-today {
+  color: var(--amber);
+}
+.wp-due-over {
+  color: var(--red);
+}
+
+/* ---- §5: the calm card -------------------------------------------
+   Nothing is being asked of THIS reader right now: a worker whose slot
+   and parts are done, or a manager whose job is sitting with the
+   customer. The ruling is explicit that such a card stays visible — the
+   manager may still withdraw it or react to a rejection — so this is a
+   quietening, never a hiding. Reduced contrast and a muted title, with
+   the card's own border kept so it still reads as a card and the column
+   still counts it. */
+.wp-card-settled {
+  background: var(--surface-2);
+  opacity: 0.72;
+}
+.wp-card-settled .wp-card-title {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.wp-card-settled:hover {
+  opacity: 1;
+}
+
+/* ---- §3: what the general board is, said where it is read ---------
+   `.wp-notice` is the amber "this list stopped early" tone, which is
+   wrong for a standing explanation — nothing is truncated and nothing
+   has gone wrong. Same shape, neutral tone. */
+.wp-notice-hint {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* ---- §10: closing somebody else's work, and saying why ------------
+   The prompt sits inside the part's own row, like the remove
+   confirmation next door, so the operator is looking at the part they
+   are closing while they answer. */
+.parts-reason {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.parts-reason .field-input {
+  width: 100%;
+}
+/* The answer, read back beside the completion state — the ruling asks
+   for it in two places and the timeline is only one of them. */
+.parts-row-behalf {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}

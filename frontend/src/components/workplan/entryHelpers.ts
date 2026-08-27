@@ -18,7 +18,13 @@ import { formatDate } from "../../lib/intl";
  *  by `scope_extra_work_for`, so an extra-work card is a plain title for
  *  them — a link to a page that 403s is worse than no link. */
 export function detailPath(entry: WorkPlanEntry, role: Role | null): string | null {
-  if (entry.kind === "TICKET_SLOT" && entry.ticket_id !== null) {
+  // W-VIEWER — a JOB card and a SLOT card both open the ticket. They are
+  // two kinds because they carry two status vocabularies, not because
+  // they point at two different records.
+  if (
+    (entry.kind === "TICKET" || entry.kind === "TICKET_SLOT") &&
+    entry.ticket_id !== null
+  ) {
     return `/tickets/${entry.ticket_id}`;
   }
   if (entry.kind === "EXTRA_WORK" && canAccessExtraWork(role)) {
@@ -66,6 +72,10 @@ export function formatDay(iso: string): string {
  * other or with a ticket.
  */
 export function dedupeByJob(entries: WorkPlanEntry[]): WorkPlanEntry[] {
+  // W-VIEWER — in the manager's scope the server already answers one row
+  // per job (`kind: "TICKET"`), so this is a no-op there. It still earns
+  // its place for a caller reading their OWN week, where a person can
+  // hold a base slot and one slot per part on the same ticket.
   const byJob = new Map<string, WorkPlanEntry>();
   for (const entry of entries) {
     const jobKey =

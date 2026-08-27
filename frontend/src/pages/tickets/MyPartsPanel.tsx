@@ -206,6 +206,23 @@ export function MyPartsPanel({
               {part.description && (
                 <p className="muted small" style={{ margin: 0 }}>{part.description}</p>
               )}
+              {/* W-VIEWER §10 — if somebody else closed this for them,
+                  they are told so, by whom and why. The worker is the
+                  person with the most reason to know: their slot changed
+                  state and they did not change it. */}
+              {slot.completed_on_behalf_reason && (
+                <p
+                  className="parts-row-behalf"
+                  data-testid="my-parts-behalf"
+                  style={{ margin: 0 }}
+                >
+                  {t("parts.behalf_line", {
+                    actor: slot.completed_by_name || t("parts.behalf_someone"),
+                    person: slot.user_full_name || slot.user_email,
+                    reason: slot.completed_on_behalf_reason,
+                  })}
+                </p>
+              )}
               {/* W-LATE §3b -- the part's own window and its state, in
                   the same words and colours the Work Plan uses. */}
               {(part.planned_start_date || part.planned_end_date || part.time_window_label) && (

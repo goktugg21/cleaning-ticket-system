@@ -44,7 +44,6 @@ import {
   listStaffAssignmentRequests,
   listTicketStaffAssignments,
   removeTicketStaffAssignment,
-  updateStaffSlot,
 } from "../api/admin";
 import {
   listTicketAssignmentCandidates,
@@ -672,7 +671,11 @@ export function TicketDetailPage() {
     );
   };
   const { me } = useAuth();
-  const { t } = useTranslation(["ticket_detail", "common"]);
+  // W-VIEWER §8 — `staff_slots` joins the list because the worker's own
+  // parts card now sits on THIS page's overview tab and its title and
+  // count line are that bundle's strings. Adding the namespace rather
+  // than copying two keys into `ticket_detail`: one string, one owner.
+  const { t } = useTranslation(["ticket_detail", "common", "staff_slots"]);
   // The label never lies about the destination: it names the chargeable
   // list exactly when the link goes there. Key reused from the bundle
   // that already owns the phrase.
@@ -3734,6 +3737,51 @@ export function TicketDetailPage() {
               This supersedes the orders in
               `docs/planning/ew-gap-closing-plan.md` §2.1 items 4 and 5,
               both updated in the same commit. */}
+          {/* W-VIEWER §8 — A WORKER'S OWN PARTS, WHERE THEY LAND.
+              W26.4 put `MyPartsPanel` inside the PEOPLE tab, which is
+              the management surface: a staff member opening their ticket
+              had to leave the overview, find People, and read past
+              everybody else's assignment to reach the checklist that was
+              theirs and the buttons that finish it. The ruling is
+              explicit — "the staff member's first relevant ticket view
+              should surface their work directly".
+              So it is here, on the tab they arrive at, above the
+              workflow card, and only for the person who actually holds
+              parts. Managers, PA and SA keep the broader People -> Parts
+              path untouched; `MyPartsPanel` is not rendered for them
+              here, because for them the job's parts are a management
+              read and not a to-do list. */}
+          {ticketTab === "overview" &&
+            me?.role === "STAFF" &&
+            myPartCount > 0 && (
+              <CollapsibleCard
+                title={t("staff_slots:my_parts.title")}
+                meta={t("staff_slots:my_parts.outstanding", {
+                  count: (ticket.sub_tasks ?? []).filter(
+                    (part) =>
+                      part.staff_assignments.some(
+                        (slot) =>
+                          slot.user_id === me?.id &&
+                          slot.slot_status !== "COMPLETED",
+                      ),
+                  ).length,
+                  total: myPartCount,
+                })}
+                defaultOpen
+                testId="side-card-my-parts"
+              >
+                <div style={{ padding: "0 18px 16px" }}>
+                  <MyPartsPanel
+                    ticketId={ticket.id}
+                    subTasks={ticket.sub_tasks}
+                    myUserId={me?.id ?? -1}
+                    autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
+                    onChanged={() => void loadTicket()}
+                  />
+                </div>
+              </CollapsibleCard>
+            )}
+
           {ticketTab === "overview" && (
           <CollapsibleCard
             title={
@@ -4885,22 +4933,19 @@ export function TicketDetailPage() {
                   read-only view below is what they fall back to, so a
                   staff member on the job but on no part still sees how
                   the job is split. */}
+              {/* W-VIEWER §8 — the actionable panel MOVED to the
+                  overview tab (see above); what stays here is the
+                  read-only split, which is what this tab is for: how the
+                  whole job divides, including the halves that are
+                  somebody else's. A worker who reaches People still sees
+                  the shape of the job; they no longer have to come here
+                  to find their own work. */}
               {!isStaff && ticket.sub_tasks.length > 0 && (
-                myPartCount > 0 ? (
-                  <MyPartsPanel
-                    ticketId={ticket.id}
-                    subTasks={ticket.sub_tasks}
-                    myUserId={me?.id ?? -1}
-                    autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
-                    onChanged={() => void loadTicket()}
-                  />
-                ) : (
-                  <SubTaskReadOnly
-                    subTasks={ticket.sub_tasks}
-                    autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
-                    showStaffDetails={me?.role === "STAFF"}
-                  />
-                )
+                <SubTaskReadOnly
+                  subTasks={ticket.sub_tasks}
+                  autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
+                  showStaffDetails={me?.role === "STAFF"}
+                />
               )}
 
               {/* Sprint 23B — STAFF-only "Request assignment"
@@ -5757,15 +5802,6 @@ export function TicketDetailPage() {
           openParts={
             COMPLETION_TARGETS.has(transitionTarget) ? openParts : undefined
           }
-          onMarkPartDone={async (part) => {
-            for (const slotId of part.slotIds) {
-              await updateStaffSlot(Number(id), slotId, {
-                slot_status: "COMPLETED",
-                completion_note: t("transition.parts_quick_done_note"),
-              });
-            }
-            await loadTicket();
-          }}
           // W-FIX2 — the proof photo, through the ticket's own attachment
           // endpoint. The gate reads non-hidden `TicketAttachment` rows
           // (`_ticket_has_visible_attachment`), so an ordinary upload

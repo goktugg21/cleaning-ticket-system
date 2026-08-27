@@ -397,10 +397,8 @@
   "book_hours.submit": "Uren opslaan",
   "book_hours.booked_one": "{{count}} regel uren opgeslagen op het werk.",
   "book_hours.booked_other": "{{count}} regels uren opgeslagen op het werk.",
-  "transition.open_parts_one": "{{count}} onderdeel is nog open:",
-  "transition.open_parts_other": "{{count}} onderdelen zijn nog open:",
-  "transition.open_parts_proceed": "U kunt doorgaan — open onderdelen blokkeren deze stap niet. Doorgaan meldt ze gereed, op uw naam, en zet dat op de tijdlijn.",
-  "transition.part_mark_done": "Markeer gereed",
-  "transition.part_nobody": "niemand toegewezen",
-  "transition.parts_quick_done_note": "Gereed gemeld bij het afronden van de melding."
+  "transition.open_parts_one": "{{count}} intern onderdeel is nog open:",
+  "transition.open_parts_other": "{{count}} interne onderdelen zijn nog open:",
+  "transition.open_parts_proceed": "Onderdelen zijn een interne werklijst en worden nooit aan de klant getoond. U kunt doorgaan — ze blokkeren deze stap niet. Doorgaan meldt de resterende onderdelen gereed, op uw naam, en zet dat op de tijdlijn.",
+  "transition.part_nobody": "niemand toegewezen"
 }

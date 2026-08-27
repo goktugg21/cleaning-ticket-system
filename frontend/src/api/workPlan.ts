@@ -32,7 +32,25 @@ export type WorkPlanPlacement =
  *  nothing; the server maps each onto these four once. */
 export type WorkPlanState = "OPEN" | "IN_PROGRESS" | "DONE" | "BLOCKED";
 
-export type WorkPlanKind = "TICKET_SLOT" | "EXTRA_WORK";
+/**
+ * W-VIEWER — the three shapes a card can be, and WHO gets which.
+ *
+ *   TICKET       the JOB. One card per ticket, on the ticket's own
+ *                scheduled date, whatever its people's days say. What a
+ *                provider-management caller reading the company's week
+ *                gets. `status` is a TICKET status.
+ *   TICKET_SLOT  one person's dated piece of a ticket, on the day THEY
+ *                were given, with THEIR parts. What a caller reading
+ *                their own week gets, and the only ticket shape a STAFF
+ *                caller can get. `status` is a SLOT status.
+ *   EXTRA_WORK   an extra-work request nobody has spawned a ticket for
+ *                yet. `status` is an extra-work status.
+ *
+ * The badge is picked off this field, which is why the first two are
+ * separate kinds rather than one kind with a flag: they carry different
+ * status vocabularies.
+ */
+export type WorkPlanKind = "TICKET" | "TICKET_SLOT" | "EXTRA_WORK";
 
 /** One card. Both kinds answer with the SAME shape — extra work has no
  *  dated slot, so its three time fields are null rather than absent. */
@@ -131,6 +149,20 @@ export interface WorkPlanEntry {
   rolled_days: number | null;
   is_overdue: boolean;
   overdue_days: number | null;
+  /** W-VIEWER §5 — this reader's standing against the promise, SIGNED
+   *  and whole: `3` is three days left, `0` is today, `-2` is two days
+   *  past. Null when nothing was promised. "Late or not" says it one day
+   *  too late to act on; this is what lets somebody read where they
+   *  stand without opening the ticket. */
+  due_in_days: number | null;
+  /** W-VIEWER §5 — nothing is being asked of THIS reader right now, so
+   *  the card renders calm rather than urgent. For a worker: their slot
+   *  is off their hands and every part of theirs is done. For a manager:
+   *  the job is not in a status the provider side is holding — the
+   *  ruling's own example is work sent to the customer and waiting on
+   *  their answer, which they may still withdraw. Visible either way;
+   *  just not shouting. */
+  viewer_settled: boolean;
   assignee_names: string[];
   assignee_count: number;
   /** W-N1 §3 — the parts of this ticket THIS entry's person holds.

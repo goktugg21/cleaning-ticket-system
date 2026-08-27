@@ -397,10 +397,8 @@
   "book_hours.submit": "Save hours",
   "book_hours.booked_one": "{{count}} row of hours saved on the job.",
   "book_hours.booked_other": "{{count}} rows of hours saved on the job.",
-  "transition.open_parts_one": "{{count}} part is still open:",
-  "transition.open_parts_other": "{{count}} parts are still open:",
-  "transition.open_parts_proceed": "You can proceed — open parts do not block this step. Proceeding marks them done, with your name, and says so on the timeline.",
-  "transition.part_mark_done": "Mark done",
-  "transition.part_nobody": "nobody assigned",
-  "transition.parts_quick_done_note": "Marked done while completing the ticket."
+  "transition.open_parts_one": "{{count}} internal part is still open:",
+  "transition.open_parts_other": "{{count}} internal parts are still open:",
+  "transition.open_parts_proceed": "Parts are an internal work checklist and are never shown to the customer. You can proceed — they do not block this step. Continuing marks the remaining parts done, with your name, and says so on the timeline.",
+  "transition.part_nobody": "nobody assigned"
 }
