@@ -21,8 +21,23 @@ services:
     image: mailhog/mailhog:latest
     container_name: cleaning_ticket_mailhog
     ports:
+      # SMTP stays on every interface: crmtest's own containers post to
+      # it across the docker gateway (`EMAIL_HOST=172.18.0.1:1025` in the
+      # prod .env), so binding this to 127.0.0.1 would silently stop the
+      # test site sending anything. It accepts mail; it hands none back.
       - "1025:1025"
-      - "8025:8025"
+      # W-VIEWER §17 — THE UI IS LOOPBACK ONLY.
+      #
+      # MailHog has no authentication of its own: anyone who reaches this
+      # port reads every message the system has ever sent, password-reset
+      # and invitation links included. It was published on 0.0.0.0, which
+      # on a host with a public interface is that whole archive, open.
+      #
+      # The ONLY front door is now the host nginx `/mailhog/` block
+      # (`scripts/host-nginx-osius.conf`), which is behind HTTP basic
+      # auth and proxies to 127.0.0.1:8025 — reachable from the host, and
+      # from nowhere else.
+      - "127.0.0.1:8025:8025"
 
   backend:
     build:

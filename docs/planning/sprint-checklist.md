@@ -36,6 +36,78 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — W-VIEWER: two readers, two placement facts (owner ruling, 2026-08-27)
+
+**Supersedes W-PLANTRUTH §1a.** That wave decided *one fact places the
+board* — the planned day of the WORK, a slot's day or a part's — and
+applied it to every reader alike. Measured on crmtest the same morning,
+that is what put **TCK-2026-000361** (the ticket schedules it for
+7 September) on **29 August**, because one of Ahmet's four slots carried
+that day; and **TCK-2026-000342** (scheduled 30 August) on today's
+column stamped *"Planned 26 Aug — 1 day late"*, off the back of Ahmet's
+slot window ending on the 26th.
+
+The ruling: **the job's scheduled date and one person's assigned working
+date are different facts and both are true.** So the board is
+viewer-aware.
+
+| Reader | Source | Placed by |
+| --- | --- | --- |
+| SA / PA / Manager (`?scope=company`) | one row per TICKET | the ticket's own `scheduled_start_at` |
+| Everyone else, and the only shape STAFF can get | one row per SLOT the caller holds | the day THEY were given, plus their own parts |
+
+* **`tickets/job_dates.py`** is new and owns the job's date, once, in
+  Python and in SQL. Fallback chain, each link reconfirmed against the
+  field's own documentation before it was picked:
+  `Ticket.scheduled_start_at` → `extra_work.provider_planned_date` (the
+  provider's COMMITMENT — the field a write to which already pushes the
+  spawned ticket's schedule, Sprint 184 §1) → `extra_work.preferred_date`
+  (what was ASKED for; last, and only because the extra work's own card
+  already places on it) → **nothing**. A job with no date is undated; an
+  unrelated staff slot never becomes its date.
+* **One job, one card.** Five people on a ticket is one row for a
+  manager, carrying five names — not five slot cards.
+* **The ladder reads the same date.** `lateness_index.py` now measures
+  the JOB's window, so a stale slot cannot call a scheduled job late.
+  The widest slot/part window survives only as the fallback for a job
+  that states no date anywhere.
+* **The range, and the countdown.** A planned window CONTAINING today
+  hangs on today's column (rule 6), so a job planned across a fortnight
+  is on the day it is being worked. Every card with a real deadline
+  carries `due_in_days` — signed: days left, or days over.
+* **Calm cards.** `viewer_settled` — a worker whose slot and parts are
+  done, a manager whose job is sitting with the customer. Still on the
+  board (they may withdraw it); no longer shouting.
+* **The general board says what it is**, once, above the grid: each
+  ticket appears once on its own scheduled date, and the detailed staff
+  schedule is inside the ticket.
+* **§8** — a worker's own parts moved from the People tab to the
+  OVERVIEW tab, which is the tab they arrive at. Managers keep
+  People → Parts.
+* **§10** — marking a part done (or undone) ON SOMEBODY ELSE'S BEHALF
+  now REQUIRES a reason (400 `part_reason_required`). It lands in three
+  places: on the slot (`completed_on_behalf_reason`, new column,
+  tracked for audit), beside the part's completion state, and on the
+  ticket timeline. A worker finishing their own work is asked nothing.
+* **§13** — the open-parts warning says parts are INTERNAL and never
+  shown to the customer. The per-part quick button in the transition
+  modal is gone: proceeding already closes them with the actor's name,
+  and that button was the same on-behalf act with no reason attached.
+* **§16** — `Sprint 30 Batch 30.1 — test EW 1780594338745` (EW 46) was
+  test residue: no spawned ticket, no invoice line, a proposal never
+  decided. Deleted on crmtest — 13 rows, listed in the handover.
+* **§17** — MailHog's UI is bound to `127.0.0.1` in `docker-compose.yml`
+  (it was on `0.0.0.0`, and MailHog has no authentication of its own).
+  The only front door is the basic-auth `/mailhog/` block, installed by
+  `scripts/ops/install_mailhog_front_door.sh` — the one step that needs
+  root on the host.
+
+**Deliberately NOT done.** The team board's MEMBERSHIP is unchanged: a
+ticket reaches it when at least one person is on it and not cancelled,
+exactly the set the slot-driven board carried. The ruling is about where
+a card is PLACED. Widening it to every scheduled ticket in scope is a
+separate decision with a much bigger screen behind it.
+
 ### Done — W-LATE: the late surface, the ladder that speaks, and parts with windows
 
 Three phases, three commits, one deploy. The law of the wave, which
