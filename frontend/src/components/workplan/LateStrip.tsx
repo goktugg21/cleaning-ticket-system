@@ -167,13 +167,36 @@ export function LateStrip({
 export function LateBadge({
   facts,
   testId = "agenda-late-badge",
+  omitPlanned = false,
 }: {
   facts: LateFacts;
   testId?: string;
+  /** W-VIEWER — the caller already printed the planned-day line, so
+   *  this badge must not print it again. See the note below; returns
+   *  null when that line was the badge's only one. */
+  omitPlanned?: boolean;
 }) {
   const { t } = useTranslation("staff_slots");
   const lines: string[] = [];
-  if (facts.plannedDate && facts.plannedDaysLate !== null) {
+  if (omitPlanned) {
+    // W-VIEWER — SAID ONCE.
+    //
+    // `late.badge_planned` and `agenda.why_rolled` are two keys holding
+    // the SAME sentence: "Planned 25 Aug — 2 days late". A ROLLED card
+    // renders the placement marker (which must say why it is on today's
+    // column) and then this badge, so it printed that sentence twice.
+    //
+    // It was invisible until the viewer-aware board landed. Before it,
+    // the marker printed the SLOT's day and the badge printed the
+    // ladder's widest window, so the two usually differed and read as
+    // two facts. Now both read the job's one date, and the repetition is
+    // the whole line, twice, on a 150px card.
+    //
+    // So the caller owns the planned line and this badge carries what it
+    // adds: the deadline line, and the never-done line. When it adds
+    // nothing, it renders nothing — the marker already wears the L1
+    // colour, so no severity is lost.
+  } else if (facts.plannedDate && facts.plannedDaysLate !== null) {
     lines.push(
       t("late.badge_planned", {
         date: formatDay(facts.plannedDate),
@@ -196,6 +219,7 @@ export function LateBadge({
   if (facts.level === 3 && facts.anchorDays !== null) {
     lines.push(t("late.badge_never_done", { count: facts.anchorDays }));
   }
+  if (lines.length === 0) return null;
   return (
     <span
       className={`wp-late-badge wp-late-badge-l${facts.level}`}

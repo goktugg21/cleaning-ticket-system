@@ -132,24 +132,37 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
  * server computes from the same `due` the placement rule uses — days
  * left when positive, days over when negative, today at zero.
  *
- * Rendered ONLY when a real deadline exists — `lateness.deadline`, the
- * extra work's own promise, not `due_date`. `due_date` falls back to the
- * last planned day for a job nobody promised anything about, and
- * counting down to that under the word "deadline" would be inventing a
- * promise. Such a card is not left silent: its planned day is on it
- * already, through the ROLLED marker or the column it hangs in.
+ * TWO WORDINGS, and the difference matters. `lateness.deadline` is the
+ * extra work's own PROMISE; `due_date` falls back to the last planned
+ * day for a job nobody promised anything about. Counting down to the
+ * second one under the word "deadline" would be inventing a promise, so
+ * a job with no deadline counts down to its PLAN and says so.
+ *
+ * Suppressed on a rolled card with no deadline: the placement marker
+ * there already prints "Planned <date> — N days late", and this would be
+ * that same fact a second time. Where a real deadline exists it is shown
+ * even on a rolled card, because the plan and the promise are then two
+ * different dates and the reader needs both.
  */
 export function DueChip({ entry }: { entry: WorkPlanEntry }) {
   const { t } = useTranslation("staff_slots");
   const days = entry.due_in_days;
-  if (days === null || entry.lateness.deadline === null) return null;
+  if (days === null) return null;
+  const hasDeadline = entry.lateness.deadline !== null;
+  if (!hasDeadline && entry.placement === "ROLLED") return null;
   const tone = days < 0 ? "over" : days === 0 ? "today" : "left";
-  const label =
-    days < 0
-      ? t("agenda.due_over", { count: Math.abs(days) })
+  const over = Math.abs(days);
+  const label = hasDeadline
+    ? days < 0
+      ? t("agenda.due_over", { count: over })
       : days === 0
         ? t("agenda.due_today")
-        : t("agenda.due_left", { count: days });
+        : t("agenda.due_left", { count: days })
+    : days < 0
+      ? t("agenda.plan_over", { count: over })
+      : days === 0
+        ? t("agenda.plan_today")
+        : t("agenda.plan_in", { count: days });
   return (
     <span
       className={`wp-due wp-due-${tone}`}
@@ -303,8 +316,18 @@ export function WorkPlanCard({
       {/* §12B — a card shown outside its planned week SAYS WHY, with its
           planned date on it. */}
       <PlacementMarker entry={entry} />
+      {/* W-VIEWER — the marker above ALREADY printed "Planned <date> —
+          N days late" on a rolled card, and that is word for word what
+          this badge's first line says. `omitPlanned` hands the planned
+          line to whichever of the two is already showing it; the badge
+          keeps what it alone can add (the deadline line, the never-done
+          line) and renders nothing when that is empty. */}
       {late && !entry.viewer_settled && (
-        <LateBadge facts={late} testId="agenda-card-late" />
+        <LateBadge
+          facts={late}
+          testId="agenda-card-late"
+          omitPlanned={entry.placement === "ROLLED"}
+        />
       )}
       {/* W-VIEWER §5 — the countdown, on every card that has a promise
           to count against. It sits beside the rung rather than replacing

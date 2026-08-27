@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import datetime
 
+from django.utils import timezone
+
 from rest_framework.test import APITestCase
 
 from tickets.models import StaffAssignmentSlotStatus, TicketStatus
@@ -48,14 +50,24 @@ class OneJobOneRowTests(WorkPlanFixture, APITestCase):
         self.assertEqual(payload["counts"]["undated"], 1)
 
     def test_the_same_rule_holds_for_the_team_view(self):
+        """ONE JOB, ONE ROW — still the rule, in the team view's own
+        shape. W-VIEWER changed WHICH row wins: the team board answers
+        one row per TICKET (`ticket-<id>`), not one per assigned person,
+        and the extra-work row still stands aside for it. The ticket
+        needs its own scheduled date to be on the board at all now — the
+        slot's day places nobody's card but its owner's."""
         ew = self.make_extra_work("yy", assignee=self.worker)
         ticket = self._spawn(ew, "yy")
-        slot = self.make_slot(ticket, start=self.today)
+        ticket.scheduled_start_at = timezone.make_aware(
+            datetime.datetime.combine(self.today, datetime.time(8, 0))
+        )
+        ticket.save(update_fields=["scheduled_start_at"])
+        self.make_slot(ticket, start=self.today)
 
         payload = self.get_plan(self.super_admin, scope="company")
 
         keys = {e["key"] for e in payload["entries"]}
-        self.assertIn(f"slot-{slot.id}", keys)
+        self.assertIn(f"ticket-{ticket.id}", keys)
         self.assertNotIn(f"ew-{ew.id}", keys)
         self.assertNotIn(f"ew-{ew.id}", {e["key"] for e in payload["undated_entries"]})
 
@@ -113,18 +125,47 @@ class UndatedIsAJobLevelFactTests(WorkPlanFixture, APITestCase):
         )
         self.assertEqual(payload["counts"]["undated"], 1)
 
-    def test_a_colleagues_dated_slot_takes_the_job_out_of_the_lane(self):
+    def test_the_tickets_own_date_takes_the_job_out_of_the_lane(self):
+        """W-VIEWER supersedes the colleague's-slot version of this test.
+
+        W-FIX1 A1 asked "does anybody on this job have a day?", because
+        the board was placed by slot days. The team board is placed by
+        the TICKET's date now, so that is the question the lane asks: a
+        ticket carrying Tuesday is planned for Tuesday, whatever its
+        people carry — and a ticket carrying nothing is not planned, even
+        when a colleague holds a dated slot, because an unrelated staff
+        slot is never promoted into the job's date.
+        """
         colleague = self.make_user("colleague-fix1@example.com", "STAFF")
         ticket = self.make_ticket("Two people, one dated")
+        ticket.scheduled_start_at = timezone.make_aware(
+            datetime.datetime.combine(self.today, datetime.time(8, 0))
+        )
+        ticket.save(update_fields=["scheduled_start_at"])
         self.make_slot(ticket, user=colleague, start=self.today)
-        mine = self.make_slot(ticket, start=None)
+        self.make_slot(ticket, start=None)
 
         payload = self.get_plan(self.super_admin, scope="company")
 
-        self.assertIsNone(self.entry(payload, f"slot-{mine.id}", "undated_entries"))
+        self.assertIsNone(self.entry(payload, f"ticket-{ticket.id}", "undated_entries"))
         self.assertEqual(payload["counts"]["undated"], 0)
         # The count and the rows still agree — that was Sprint 181's rule.
         self.assertEqual(len(payload["undated_entries"]), payload["counts"]["undated"])
+
+    def test_a_colleagues_dated_slot_does_NOT_take_it_out_of_the_lane(self):
+        """The other half of the same ruling, stated as its own test so
+        the reversal is deliberate rather than incidental."""
+        colleague = self.make_user("colleague-fix1b@example.com", "STAFF")
+        ticket = self.make_ticket("Nobody dated the JOB")
+        self.make_slot(ticket, user=colleague, start=self.today)
+        self.make_slot(ticket, start=None)
+
+        payload = self.get_plan(self.super_admin, scope="company")
+
+        self.assertIsNotNone(
+            self.entry(payload, f"ticket-{ticket.id}", "undated_entries"),
+            payload["undated_entries"],
+        )
 
     def test_a_truly_undated_job_is_still_in_the_lane(self):
         ticket = self.make_ticket("Nobody planned this")
