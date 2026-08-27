@@ -43,7 +43,7 @@
 //
 // A NON-native overlay, conditionally mounted, like `AssignStaffDialog`.
 import { useEffect, useRef, useState } from "react";
-import { CalendarDays, Pencil, X } from "lucide-react";
+import { CalendarDays, CheckCircle2, Pencil, RotateCcw, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -51,6 +51,7 @@ import {
   createSubTask,
   deleteSubTask,
   setAutoCompleteFlag,
+  setSubTaskDone,
   updateSubTask,
 } from "../../api/admin";
 import type { SubTask } from "../../api/admin";
@@ -143,6 +144,9 @@ export function SubTasksModal({
   // W26.3 -- a refusal belongs to the ROW that caused it. Keyed by part
   // id so assigning on one part never blanks another row's message.
   const [errorByPart, setErrorByPart] = useState<Record<number, string>>({});
+  // W-PLANTRUTH §3c -- which row's done/undone write is in flight, so
+  // only that row's button goes busy while the others stay usable.
+  const [doneBusyId, setDoneBusyId] = useState<number | null>(null);
   // W-LATE §3a -- the window editor: which row has it open, its draft,
   // and the refusal AT THE FIELD (the server names the field).
   const [windowPartId, setWindowPartId] = useState<number | null>(null);
@@ -284,6 +288,44 @@ export function SubTasksModal({
         {label}
       </span>
     );
+  }
+
+  /**
+   * W-PLANTRUTH §3c -- the MANAGER marks a part done, or reopens it.
+   *
+   * A part has no status of its own: it is done when every slot under
+   * it is COMPLETED. A worker reaches that through their own slot; the
+   * people who run the job could only watch. The refusal that matters
+   * is `part_has_nobody` -- with nobody on it there is no slot that
+   * could make it done -- and it lands INLINE on the row that caused
+   * it, like every other refusal in this modal, not as a toast over a
+   * list that did not change.
+   */
+  async function handleSetDone(part: SubTask, done: boolean) {
+    setDoneBusyId(part.id);
+    setError("");
+    setErrorByPart((current) => {
+      const next = { ...current };
+      delete next[part.id];
+      return next;
+    });
+    try {
+      await setSubTaskDone(ticketId, part.id, done);
+      await onChanged();
+      push({
+        variant: "success",
+        title: done
+          ? t("parts.toast_marked_done", { part: part.title })
+          : t("parts.toast_reopened", { part: part.title }),
+      });
+    } catch (err) {
+      setErrorByPart((current) => ({
+        ...current,
+        [part.id]: getApiError(err),
+      }));
+    } finally {
+      setDoneBusyId(null);
+    }
   }
 
   async function handleRenamePart(part: SubTask) {
@@ -495,6 +537,100 @@ export function SubTasksModal({
           </div>
         )}
 
+        {/* W-PLANTRUTH §3a — THE ADD FORM COMES FIRST.
+            It used to sit under the list, so a part you had just added
+            appeared ABOVE the form you added it from: you typed at the
+            bottom of the modal and the result landed off-screen behind
+            you. The owner's words were that it renders above the form,
+            not below it. The form is the thing you come here to use, so
+            it is at the top, and everything it creates appears under
+            it, in order, where the eye already is. */}
+        {!isTerminal && (
+          <div className="field">
+            <label className="field-label" htmlFor="ticket-part-add-input">
+              {t("parts.add_label")}
+            </label>
+            <div className="assign-actions">
+              <input
+                id="ticket-part-add-input"
+                className="field-input"
+                type="text"
+                maxLength={200}
+                placeholder={t("parts.add_placeholder")}
+                value={newTitle}
+                disabled={busy}
+                onChange={(event) => setNewTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  // W-UX F46 -- Enter adds, like the button beside it.
+                  if (event.key === "Enter" && !busy && newTitle.trim() !== "") {
+                    event.preventDefault();
+                    void handleAddPart();
+                  }
+                }}
+                data-testid="ticket-part-add-input"
+              />
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => void handleAddPart()}
+                disabled={busy || newTitle.trim() === ""}
+                data-testid="ticket-part-add"
+              >
+                {t("parts.add_button")}
+              </button>
+            </div>
+            {/* W-LATE §3a -- the optional window on a new part. Same three
+                inputs as the row editor; a refusal lands under its field. */}
+            <div className="parts-window-fields" data-testid="ticket-part-add-window">
+              <label className="field">
+                <span className="field-label">{t("parts.window_start")}</span>
+                <input
+                  type="date"
+                  className="field-input"
+                  value={newStart}
+                  disabled={busy}
+                  onChange={(event) => setNewStart(event.target.value)}
+                  data-testid="ticket-part-add-start"
+                />
+                {addError?.field === "planned_start_date" && (
+                  <span className="parts-window-error" role="alert" data-testid="ticket-part-add-error" data-field="planned_start_date">
+                    {addError.message}
+                  </span>
+                )}
+              </label>
+              <label className="field">
+                <span className="field-label">{t("parts.window_end")}</span>
+                <input
+                  type="date"
+                  className="field-input"
+                  value={newEnd}
+                  disabled={busy}
+                  onChange={(event) => setNewEnd(event.target.value)}
+                  data-testid="ticket-part-add-end"
+                />
+                {addError?.field === "planned_end_date" && (
+                  <span className="parts-window-error" role="alert" data-testid="ticket-part-add-error" data-field="planned_end_date">
+                    {addError.message}
+                  </span>
+                )}
+              </label>
+              <label className="field">
+                <span className="field-label">{t("parts.window_time")}</span>
+                <input
+                  type="text"
+                  className="field-input"
+                  maxLength={64}
+                  placeholder={t("parts.window_time_placeholder")}
+                  value={newLabel}
+                  disabled={busy}
+                  onChange={(event) => setNewLabel(event.target.value)}
+                  data-testid="ticket-part-add-time"
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
         {parts.length === 0 ? (
           <p className="muted small" data-testid="ticket-parts-modal-empty">
             {t("parts.empty")}
@@ -640,6 +776,45 @@ export function SubTasksModal({
                         </>
                       ) : (
                         <>
+                          {/* W-PLANTRUTH §3c -- the manager's own
+                              done/undone, first in the cluster because
+                              it is the thing most often wanted on a row
+                              that is finished. Staff keep MyPartsPanel;
+                              this is the same fact through the door
+                              that belongs to the people running the
+                              job. Absent on a part nobody is on -- the
+                              server refuses it, and a button whose only
+                              outcome is a refusal is not an offer. */}
+                          {part.staff_assignments.length > 0 && (
+                            <button
+                              type="button"
+                              className={
+                                part.is_done
+                                  ? "btn btn-ghost btn-sm"
+                                  : "btn btn-primary btn-sm"
+                              }
+                              onClick={() =>
+                                void handleSetDone(part, !part.is_done)
+                              }
+                              disabled={busy || doneBusyId !== null}
+                              data-testid={
+                                part.is_done
+                                  ? "ticket-part-reopen"
+                                  : "ticket-part-mark-done"
+                              }
+                            >
+                              {part.is_done ? (
+                                <RotateCcw size={13} strokeWidth={2.2} aria-hidden="true" />
+                              ) : (
+                                <CheckCircle2 size={13} strokeWidth={2.2} aria-hidden="true" />
+                              )}
+                              {doneBusyId === part.id
+                                ? t("parts.saving")
+                                : part.is_done
+                                  ? t("parts.reopen")
+                                  : t("parts.mark_done")}
+                            </button>
+                          )}
                           {/* W26.4 -- the assign control OPENS a
                               picker rather than being one. A
                               multi-select has to show several names at
@@ -881,107 +1056,37 @@ export function SubTasksModal({
           </BoundedList>
         )}
 
-        {!isTerminal && (
-          <div className="field">
-            <label className="field-label" htmlFor="ticket-part-add-input">
-              {t("parts.add_label")}
-            </label>
-            <div className="assign-actions">
-              <input
-                id="ticket-part-add-input"
-                className="field-input"
-                type="text"
-                maxLength={200}
-                placeholder={t("parts.add_placeholder")}
-                value={newTitle}
-                disabled={busy}
-                onChange={(event) => setNewTitle(event.target.value)}
-                onKeyDown={(event) => {
-                  // W-UX F46 -- Enter adds, like the button beside it.
-                  if (event.key === "Enter" && !busy && newTitle.trim() !== "") {
-                    event.preventDefault();
-                    void handleAddPart();
-                  }
-                }}
-                data-testid="ticket-part-add-input"
-              />
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => void handleAddPart()}
-                disabled={busy || newTitle.trim() === ""}
-                data-testid="ticket-part-add"
-              >
-                {t("parts.add_button")}
-              </button>
-            </div>
-            {/* W-LATE §3a -- the optional window on a new part. Same three
-                inputs as the row editor; a refusal lands under its field. */}
-            <div className="parts-window-fields" data-testid="ticket-part-add-window">
-              <label className="field">
-                <span className="field-label">{t("parts.window_start")}</span>
-                <input
-                  type="date"
-                  className="field-input"
-                  value={newStart}
-                  disabled={busy}
-                  onChange={(event) => setNewStart(event.target.value)}
-                  data-testid="ticket-part-add-start"
-                />
-                {addError?.field === "planned_start_date" && (
-                  <span className="parts-window-error" role="alert" data-testid="ticket-part-add-error" data-field="planned_start_date">
-                    {addError.message}
-                  </span>
-                )}
-              </label>
-              <label className="field">
-                <span className="field-label">{t("parts.window_end")}</span>
-                <input
-                  type="date"
-                  className="field-input"
-                  value={newEnd}
-                  disabled={busy}
-                  onChange={(event) => setNewEnd(event.target.value)}
-                  data-testid="ticket-part-add-end"
-                />
-                {addError?.field === "planned_end_date" && (
-                  <span className="parts-window-error" role="alert" data-testid="ticket-part-add-error" data-field="planned_end_date">
-                    {addError.message}
-                  </span>
-                )}
-              </label>
-              <label className="field">
-                <span className="field-label">{t("parts.window_time")}</span>
-                <input
-                  type="text"
-                  className="field-input"
-                  maxLength={64}
-                  placeholder={t("parts.window_time_placeholder")}
-                  value={newLabel}
-                  disabled={busy}
-                  onChange={(event) => setNewLabel(event.target.value)}
-                  data-testid="ticket-part-add-time"
-                />
-              </label>
-            </div>
-          </div>
-        )}
-
+        {/* W-PLANTRUTH §3d — THE TICKET-LEVEL SWITCH, ON ITS OWN.
+            It used to sit directly under the Add-part form's inputs,
+            where it read as one more field of the form — a per-PART
+            setting. It is not: it is a fact about the whole ticket, so
+            it gets its own one-line section under the list it talks
+            about. And it is DISABLED while no part exists, because
+            "advance when every part is done" cannot mean anything with
+            nothing to be done; the hint says so instead of leaving a
+            live switch that quietly does nothing. */}
         {canSetAutoCompleteFlag && !isTerminal && (
-          <label
-            className="assign-parts-auto"
-            data-testid="ticket-parts-auto-complete"
-          >
-            <Toggle
-              checked={autoFlag}
-              disabled={flagBusy}
-              onChange={(event) =>
-                void handleToggleAutoComplete(event.target.checked)
-              }
-              data-testid="ticket-parts-auto-complete-toggle"
-            />
-            <span className="small">{t("parts.auto_complete_label")}</span>
-          </label>
+          <div className="parts-auto-section" data-testid="ticket-parts-auto-section">
+            <label className="assign-parts-auto" data-testid="ticket-parts-auto-complete">
+              <Toggle
+                checked={autoFlag}
+                disabled={flagBusy || parts.length === 0}
+                onChange={(event) =>
+                  void handleToggleAutoComplete(event.target.checked)
+                }
+                data-testid="ticket-parts-auto-complete-toggle"
+              />
+              <span className="small">{t("parts.auto_complete_label")}</span>
+            </label>
+            {parts.length === 0 && (
+              <span
+                className="muted small"
+                data-testid="ticket-parts-auto-hint"
+              >
+                {t("parts.auto_complete_needs_a_part")}
+              </span>
+            )}
+          </div>
         )}
 
         <div className="assign-actions">
