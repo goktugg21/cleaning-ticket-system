@@ -193,7 +193,7 @@ def spawn_tickets_for_proposal(
         old_status="",
         new_status=TicketStatus.OPEN,
         changed_by=actor,
-        note="Spawned from approved Extra Work proposal.",
+        note="Created from approved Extra Work proposal.",
         is_override=False,
         override_reason="",
     )
@@ -340,7 +340,7 @@ def spawn_tickets_for_extra_work_request(
         old_status="",
         new_status=TicketStatus.OPEN,
         changed_by=actor,
-        note="Spawned from approved Extra Work request (legacy pricing flow).",
+        note="Created from approved Extra Work request (legacy pricing flow).",
         is_override=False,
         override_reason="",
     )

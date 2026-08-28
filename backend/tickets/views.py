@@ -627,7 +627,7 @@ class TicketViewSet(
         if resolve_extra_work_origin_core(ticket) is not None:
             return Response(
                 {
-                    "detail": "This ticket was spawned from an Extra Work "
+                    "detail": "This ticket was created from an Extra Work "
                     "request and cannot be converted to Extra Work again.",
                     "code": "ticket_already_extra_work_origin",
                 },

@@ -457,7 +457,7 @@ def apply_transition(
         extra_work, to_status
     ):
         raise TransitionError(
-            "This Extra Work already has an operational ticket, so its "
+            "This Extra Work already has a ticket, so its "
             "operational status follows that ticket. Move the ticket "
             "instead.",
             code="operational_status_follows_ticket",

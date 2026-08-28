@@ -286,7 +286,7 @@ def render_proposal_pdf(
     pdf.set_xy(provider_x, 17.0)
     pdf.set_font(FONT_FAMILY, "", 8.5)
     pdf.set_text_color(120, 114, 118)
-    pdf.cell(80, 4, _safe_pdf_text("Prijsvoorstel extra werk"))
+    pdf.cell(80, 4, _safe_pdf_text("Prijsvoorstel meerwerk"))
     pdf.set_text_color(0, 0, 0)
 
     status_nl = _STATUS_LABELS_NL.get(proposal.status, str(proposal.status))

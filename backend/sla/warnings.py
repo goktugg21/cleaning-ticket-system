@@ -429,7 +429,7 @@ def sweep_approval_cutoff(now, thresholds):
                     "gefactureerd, dan draaien wij de factuur terug met een "
                     "creditnota en verdwijnt het werk weer van uw rekening.",
                     "",
-                    f"Extra werk: {ew.title}",
+                    f"Meerwerk: {ew.title}",
                     f"Ticket: {ticket.ticket_no} - {ticket.title}",
                 ]
                 + _sign_off()
@@ -682,18 +682,18 @@ def sweep_not_started_extra_work(now, thresholds):
             hours = late // 3600
             planned_label = ew.provider_planned_date.strftime("%d-%m-%Y")
             subject = (
-                f"[Extra werk #{ew.pk}] Nog niet gestart "
+                f"[Meerwerk #{ew.pk}] Nog niet gestart "
                 f"(gepland op {planned_label})"
             )
             body = "\n".join(
                 [
-                    "Dit extra werk is goedgekeurd en ingepland, maar er is "
+                    "Dit meerwerk is goedgekeurd en ingepland, maar er is "
                     "nog geen uitvoering gestart.",
                     "",
                     f"Geplande datum: {planned_label}.",
                     f"Verstreken: {hours} werkuren.",
                     "",
-                    f"Extra werk: {ew.title}",
+                    f"Meerwerk: {ew.title}",
                 ]
                 + _sign_off()
             )

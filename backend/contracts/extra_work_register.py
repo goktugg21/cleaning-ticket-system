@@ -205,7 +205,7 @@ def _register_defaults(customer) -> dict:
             "start_date": timezone.localdate().replace(month=1, day=1),
             "end_date": None,
             "description": (
-                "Chargeable work for this customer. One line per job, "
+                "Extra work for this customer. One line per job, "
                 "priced by the same rule the invoice uses."
             ),
         }

@@ -253,7 +253,7 @@ def spawn_tickets_for_request(
             old_status="",
             new_status=TicketStatus.OPEN,
             changed_by=actor,
-            note="Spawned from Extra Work cart (instant route).",
+            note="Created from Extra Work cart (instant route).",
             is_override=False,
             override_reason="",
         )
