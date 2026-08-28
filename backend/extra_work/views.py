@@ -213,7 +213,19 @@ class ExtraWorkRequestViewSet(
                     queryset=Ticket.objects.filter(
                         deleted_at__isnull=True
                     )
-                    .only("id", "ticket_no", "status", "extra_work_request_id")
+                    # W12 §2 put the ticket's own schedule on this
+                    # payload; the two columns joined the `.only()` in
+                    # FE-2 because a deferred field fetches per row —
+                    # exactly the N+1 this prefetch exists to kill
+                    # (ListQueryGrowthTests pins it).
+                    .only(
+                        "id",
+                        "ticket_no",
+                        "status",
+                        "extra_work_request_id",
+                        "scheduled_start_at",
+                        "schedule_status",
+                    )
                     .order_by("id"),
                     to_attr="prefetched_operational_tickets",
                 ),

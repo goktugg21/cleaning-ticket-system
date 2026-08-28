@@ -520,6 +520,13 @@ class StaffTicketExtraWorkOriginIsSafeTests(_StaffPrivacyFixture):
         # check: that strictness is the mechanism, and it worked.
         "preferred_date",
         "provider_planned_date",
+        # W12 §2 / W-N1 §3 — two more OPERATIONAL keys the W-waves
+        # added: the provider window's END, and the viewer's OWN
+        # planned hours on this job (time, not money — the viewer's
+        # own number, so nothing of the commercial floor moves).
+        # Added deliberately; the set stays STRICT.
+        "provider_planned_end_date",
+        "my_planned_hours",
         "planned_end_date",
         "deadline",
     }

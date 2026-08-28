@@ -165,6 +165,9 @@ class SpawnedTicketLinkTests(_TrackFixture):
         )
         ticket = Ticket.objects.get(extra_work_request=ew)
         row = self._row_for(self._api(self.admin).get(LIST_URL), ew.id)
+        # W12 §2 added the ticket's own schedule to this payload (the
+        # screen shows a conflict it used to compute and throw away);
+        # the pinned shape moved with it.
         self.assertEqual(
             row["spawned_tickets"],
             [
@@ -172,6 +175,8 @@ class SpawnedTicketLinkTests(_TrackFixture):
                     "id": ticket.id,
                     "ticket_no": ticket.ticket_no,
                     "status": TicketStatus.OPEN,
+                    "scheduled_start_at": None,
+                    "schedule_status": "UNSCHEDULED",
                 }
             ],
         )
@@ -323,7 +328,6 @@ class BilledToTests(_TrackFixture):
                     {
                         "custom_description": "ad-hoc work",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },
@@ -348,7 +352,6 @@ class BilledToTests(_TrackFixture):
                     {
                         "custom_description": "ad-hoc work",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },
@@ -373,7 +376,6 @@ class BilledToTests(_TrackFixture):
                     {
                         "custom_description": "ad-hoc work",
                         "quantity": "1.00",
-                        "requested_date": str(date(2026, 5, 1)),
                     }
                 ],
             },
