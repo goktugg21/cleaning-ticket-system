@@ -27,8 +27,11 @@ The **owner does not write code.** The workflow is:
   verifies the pushed commits from `origin`** — never from CC's self-report —
   and issues a merge verdict. **A CC self-report is never the basis for a merge
   verdict.**
-- The owner performs all GitHub UI actions (PRs, merges). CC pushes branches;
-  **CC does not open PRs unless explicitly told to.**
+- The owner performs all GitHub UI actions. CC pushes branches; **CC
+  NEVER opens a PR.** There is no CI gate in the loop: a sprint is
+  finished when its local gates pass and the branch is DEPLOYED to
+  crmtest for the owner to see. **Merging happens only when the owner
+  says "merge" — nothing is proposed for merge before that.**
 
 ---
 
@@ -128,9 +131,12 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   Backfill data migrations required when a new column has a non-default meaning.
 
 ### Tests & gates
-- **Backend:** run from `backend/`: `python manage.py test`. **Judge by the
-  textual `OK` / `FAILED` line, NEVER the exit code.** Real Postgres (CI
-  provides one); mock only the SMTP transport. Test-first for new features.
+- **Backend:** run ONLY the test modules of the apps the sprint
+  touched: `python manage.py test <app>.tests.<module> ...` — judge by
+  the textual `OK` / `FAILED` line, NEVER the exit code. **Never run
+  the full backend suite unless the owner explicitly asks for it.**
+  Test-first for new features still applies. Real Postgres; mock only
+  the SMTP transport.
 - **Frontend gate** (all three, in `node:22-alpine`):
   `tsc --noEmit -p tsconfig.app.json` + `eslint .` + `npm run build`.
   **ESLint baseline is EXACTLY 42 (41 errors, 1 warning)** as measured
