@@ -182,6 +182,26 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   (Sprint 118, the frozen-screen bug). Full writeup:
   [docs/engineering/claude-code-operational-notes.md](docs/engineering/claude-code-operational-notes.md).
 
+### Frontend redesign rules (Addendum D)
+
+- The frontend redesign source of truth is
+  [docs/product/sot-addendum-d-frontend-redesign.md](docs/product/sot-addendum-d-frontend-redesign.md).
+  For presentation, vocabulary, navigation, and flow shape it WINS over
+  older UI descriptions in the base SoT (§16) and over current code.
+- **Vocabulary is law:** one name per concept (Addendum D §D.2). Never
+  introduce a new user-facing work noun; the §D.2 banned list applies to
+  all UI copy, both locales, in lockstep.
+- **Every FE sprint self-verifies visually** per Addendum D §D.10: run
+  the stack, screenshot the changed surfaces per affected role, check
+  against the sprint checklist, at most TWO fix iterations per item,
+  then report. Screenshots are design evidence; measured geometry
+  remains the standard for layout-regression claims.
+- Detail pages: fact block first, ONE primary action from
+  `actions.can_*`, corrections behind "Geavanceerd" with their existing
+  warning/audit surfaces. No new frontend business inference — if a
+  display needs a derived state, request/extend a backend-computed field
+  (the `display_phase` pattern), never compute it client-side.
+
 ### Naming / style
 - Backend Django/PEP-8: snake_case fields, CamelCase models, dot-namespaced
   permission keys. App-scoped file names (`serializers_users.py`,
