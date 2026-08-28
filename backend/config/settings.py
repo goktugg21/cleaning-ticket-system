@@ -532,6 +532,17 @@ CELERY_BEAT_SCHEDULE = {
         "task": "sla.tasks.sweep_sla_warnings",
         "schedule": 5 * 60,
     },
+    # WP-1 G4 — the billing-month-at-risk digest. WEEKLY: the guard's
+    # panel is recomputed live on every page load, so the mail exists to
+    # make a broken completion chain impossible to miss for a month,
+    # not to nag daily. The task de-dups per recipient over a six-day
+    # window (a query against the NotificationLog rows it wrote — the
+    # same data-is-the-idempotency-key argument the invoice claim
+    # makes), so a beat restart cannot double-mail the week.
+    "send-billing-month-at-risk-digest": {
+        "task": "invoicing.tasks.send_billing_month_at_risk_digest",
+        "schedule": 7 * 24 * 60 * 60,
+    },
 }
 
 NOTIFICATION_QUEUED_TIMEOUT_MINUTES = int(

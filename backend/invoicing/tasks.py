@@ -365,3 +365,135 @@ def run_daily_invoice_run(today=None):
         "contract_invoices_created": contracts_created,
         "failed": failed,
     }
+
+
+# ---------------------------------------------------------------------
+# WP-1 G4 — the weekly billing-month-at-risk digest.
+# ---------------------------------------------------------------------
+
+#: Subject prefix. Also the de-dup key: a recipient who already got a
+#: digest with this prefix inside the last six days is skipped, so a
+#: restarted beat container cannot double-mail the same week.
+AT_RISK_SUBJECT_PREFIX = "[Facturatie] Deze factuurmaand loopt risico"
+
+#: Human words for the machine stages, for the mail body only — the
+#: frontend translates the same keys through i18n.
+_AT_RISK_STAGE_NL = {
+    "WAITING_REVIEW": "wacht op controle",
+    "SLOT_DONE": "klaar gemeld, niet afgerond",
+    "BLOCKED": "vastgelopen",
+    "PAST_DEADLINE": "deadline verstreken",
+}
+
+
+def _at_risk_digest_body(groups) -> str:
+    lines = [
+        "Dit werk valt in de open factuurmaand (of eerder), maar de",
+        "afronding is niet compleet. Zolang dat zo blijft, komt het NIET",
+        "op de factuur van deze maand.",
+        "",
+    ]
+    for group in groups:
+        lines.append(f"{group['customer_name']}:")
+        for row in group["rows"]:
+            ref = row["ticket_no"] or f"MW-{row['extra_work_id']}"
+            stage = _AT_RISK_STAGE_NL.get(row["stage"], row["stage"])
+            where = f" ({row['building_name']})" if row["building_name"] else ""
+            lines.append(
+                f"  - {ref} · {row['title']}{where} — {stage}, "
+                f"{row['age_days']} dag(en)"
+            )
+        lines.append("")
+    lines += [
+        "Afronden, herplannen of annuleren gebeurt in het systeem zelf;",
+        "deze e-mail wijzigt niets.",
+        "",
+        "Deze e-mail is automatisch verzonden.",
+    ]
+    return "\n".join(lines)
+
+
+@shared_task
+def send_billing_month_at_risk_digest(today=None):
+    """WP-1 G4 — mail every provider company's admins the at-risk list.
+
+    Weekly through CELERY_BEAT_SCHEDULE. Reads `at_risk.at_risk_groups`
+    over each company's own active customers — never across companies —
+    and sends through `send_logged_email`, so every mail leaves a
+    `NotificationLog` row.
+
+    EVENT TYPE: reuses `INVOICE_RUN_COMPLETED`. A dedicated
+    `NotificationEventType` value would change the model's `choices`,
+    which Django records as a migration — and WP-1 is a zero-migration
+    sprint by explicit rule. The digest is an invoicing-run operator
+    mail in substance, and its subject prefix keeps it distinguishable
+    in the log. A dedicated value is a one-line follow-up (plus its
+    choices migration) for a later sprint.
+
+    Never raises; one company's failure must not cost another its
+    digest. `today` (ISO date string) exists for tests.
+    """
+    from datetime import date, timedelta
+
+    from django.utils import timezone as tz
+
+    from customers.models import Customer
+    from notifications.models import NotificationLog
+    from notifications.services import (
+        company_admin_recipients,
+        send_logged_email,
+    )
+
+    from .at_risk import at_risk_groups
+
+    day = date.fromisoformat(today) if today else tz.localdate()
+    now = tz.now()
+
+    company_ids = list(
+        Customer.objects.filter(is_active=True)
+        .values_list("company_id", flat=True)
+        .distinct()
+    )
+    mailed = failed = skipped = 0
+    for company_id in company_ids:
+        try:
+            customers = Customer.objects.filter(
+                company_id=company_id, is_active=True
+            )
+            data = at_risk_groups(customers, today=day, now=now)
+            if data["total"] == 0:
+                continue
+            subject = (
+                f"{AT_RISK_SUBJECT_PREFIX} — {data['total']} "
+                f"openstaand ({day.strftime('%Y-%m')})"
+            )
+            body = _at_risk_digest_body(data["groups"])
+            for admin in company_admin_recipients(company_id):
+                already = NotificationLog.objects.filter(
+                    recipient_user=admin,
+                    event_type=INVOICE_RUN_EVENT,
+                    subject__startswith=AT_RISK_SUBJECT_PREFIX,
+                    created_at__gte=now - timedelta(days=6),
+                ).exists()
+                if already:
+                    skipped += 1
+                    continue
+                send_logged_email(
+                    recipient_email=admin.email,
+                    recipient_user=admin,
+                    subject=subject,
+                    body=body,
+                    event_type=INVOICE_RUN_EVENT,
+                )
+                mailed += 1
+        except Exception:  # noqa: BLE001 — one company must not stop the rest.
+            failed += 1
+            logger.exception(
+                "WP-1 G4: at-risk digest failed for company %s", company_id
+            )
+    return {
+        "date": day.isoformat(),
+        "mailed": mailed,
+        "skipped": skipped,
+        "failed": failed,
+    }
