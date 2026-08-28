@@ -58,6 +58,22 @@ simply no longer assumes there is only one date to decide it from.
        so a job planned across a fortnight is on the day it is being
        worked rather than on the day the fortnight opened.
 
+WP-1 G0 (Addendum D §D.11.2) — THE SAME-WEEK HALF OF CARRY-FORWARD.
+Rule 5 rolls a job whose planned window has CLOSED onto today. What it
+could not catch is a job whose window still covers the current week but
+whose DUE DATE has already passed — planned Monday-to-Friday, deadline
+Tuesday, read on Thursday. Planned placement used to win outright, so
+the card sat at home with nothing but a flag on it. In the CURRENT week
+only, an overdue-and-open job is now stamped OVERDUE even when its
+planned window covers this week, and `day_for` hangs it on today's
+column like every other non-planned placement. Past and future weeks
+keep planned placement: September still shows September's work, and a
+job that was late in its own week is shown there as history, at home.
+
+    7. In the current week, overdue-and-open beats planned: the card is
+       marked OVERDUE on today's column, carrying its planned day and
+       how late it is. Any other week keeps rule 1 unchanged.
+
 **Why a normalised `Job` instead of two copies of the rule.** The two
 sources are a dated ticket slot (`TicketStaffAssignment`) and an extra
 work request (`ExtraWorkRequest`). They share no model, no state machine
@@ -208,22 +224,24 @@ def placement_for(
 
     Order matters and is the rule's, not an implementation detail:
 
-    * Planned placement wins outright. A job in its own week is at home
-      and needs no marker, even when it is also late — the `is_overdue`
-      flag still marks the card, but the card is not a visitor.
-    * Overdue beats started. A job that is both is more usefully
-      described as late than as running.
+    * WP-1 G0 (rule 7) — in the CURRENT week, overdue-and-open beats
+      planned. A late job's card must not sit quietly at home while the
+      deadline recedes; it is a visitor on today's column, marked, until
+      someone finishes, reschedules or cancels it.
+    * In any OTHER week, planned placement wins outright. A job in its
+      own past or future week is at home and needs no marker, even when
+      it is also late — the `is_overdue` flag still marks the card, but
+      the card is not a visitor. September shows September's work.
     """
     if covers_week(job, week_start, week_end):
+        if week_start <= today <= week_end and is_overdue(job, today):
+            return PLACEMENT_OVERDUE
         return PLACEMENT_PLANNED
 
     # W-FIX1 E2 — that is the whole rule for a week. A started or late
     # job that is not planned in this week is NOT a visitor on today's
     # column: the overdue strip and the undated lane carry it, and the
-    # strip stamps the reason (`fallback_placement` in the view). `today`
-    # stays in the signature so the two SQL twins in `views_work_plan`
-    # keep taking the same arguments as this function.
-    del today
+    # strip stamps the reason (`fallback_placement` in the view).
     return None
 
 

@@ -484,8 +484,13 @@ ENTRY_KEYS = {
     # days left, or days over), and whether anything is being asked of
     # them right now. Both present on every kind, null / false where
     # they do not apply, for the same one-shape reason as the rest.
-    "due_in_days",
+    "days_until_due",
     "viewer_settled",
+    # WP-1 G2 — days a dateless job has waited for a plan (null on a
+    # dated entry). G1 — days a stuck job has been stuck (set on the
+    # stuck list's rows, null everywhere else). One shape, both kinds.
+    "unplanned_age_days",
+    "stuck_age_days",
     "assignee_names",
     "assignee_count",
     # W-N1 §3 — the parts of this ticket the entry's person holds. This
@@ -547,6 +552,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "undated_entries",
                 # W-LATE §1a — the late strip's rows.
                 "late_entries",
+                # WP-1 G1 — the "Vastgelopen — actie nodig" rows.
+                "stuck_entries",
                 "limits",
                 "truncated",
             },
@@ -570,6 +577,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "undated",
                 # W-LATE §1a — late JOBS, deduped, any week.
                 "late",
+                # WP-1 G1 — stuck jobs, whole scope.
+                "stuck",
             },
         )
         # Every list is bounded, and the response says by how much and
@@ -585,6 +594,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "upcoming_entries",
                 "undated_entries",
                 "late_entries",
+                "stuck_entries",
             },
         )
         self.assertEqual(
@@ -595,6 +605,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "upcoming_entries",
                 "undated_entries",
                 "late_entries",
+                "stuck_entries",
             },
         )
         self.assertFalse(any(payload["truncated"].values()))
@@ -1187,13 +1198,19 @@ class WorkPlanRuleParityTests(WorkPlanFixture, APITestCase):
         payload = self.get_plan(self.worker)
         for entry in payload["entries"]:
             with self.subTest(key=entry["key"]):
+                # WP-1 G0 — a third visitor: overdue-and-open in the
+                # current week, hung on today with the overdue marker.
                 self.assertIn(
-                    entry["placement"], (PLACEMENT_PLANNED, "ROLLED")
+                    entry["placement"],
+                    (PLACEMENT_PLANNED, "ROLLED", PLACEMENT_OVERDUE),
                 )
                 if entry["placement"] == "ROLLED":
                     self.assertEqual(entry["day"], payload["today"])
                     self.assertIsNotNone(entry["rolled_from"])
                     self.assertGreaterEqual(entry["rolled_days"], 1)
+                elif entry["placement"] == PLACEMENT_OVERDUE:
+                    self.assertEqual(entry["day"], payload["today"])
+                    self.assertTrue(entry["is_overdue"])
                 else:
                     self.assertIsNone(entry["rolled_from"])
         self.assertTrue(payload["overdue_entries"], payload)
@@ -1205,3 +1222,355 @@ class WorkPlanRuleParityTests(WorkPlanFixture, APITestCase):
                     "a strip row with neither a planned date nor a "
                     "deadline cannot explain itself",
                 )
+
+
+# ---------------------------------------------------------------------
+# WP-1 (Addendum D §D.11.3) — carry-forward, the stuck list, the chip
+# ---------------------------------------------------------------------
+
+
+class Wp1SameWeekCarryRuleTests(APITestCase):
+    """G0, on the pure rule. Frozen dates: 2026-W33 is Mon 10 Aug –
+    Sun 16 Aug 2026, today is Thursday 13 Aug."""
+
+    def setUp(self):
+        self.week_start, self.week_end = iso_week_bounds(2026, 33)
+        self.today = datetime.date(2026, 8, 13)
+
+    def test_overdue_and_open_beats_planned_in_the_current_week(self):
+        """Acceptance test 1a — the same-week carry. Planned Monday to
+        Sunday of THIS week, deadline Tuesday, read on Thursday: the
+        card is a marked visitor on today, not quietly at home."""
+        job = Job(
+            planned_start=datetime.date(2026, 8, 10),
+            planned_end=datetime.date(2026, 8, 16),
+            due=datetime.date(2026, 8, 11),
+            state=STATE_OPEN,
+        )
+        placement = placement_for(
+            job, self.week_start, self.week_end, self.today
+        )
+        self.assertEqual(placement, PLACEMENT_OVERDUE)
+        self.assertEqual(
+            day_for(job, placement, self.week_start, self.week_end, self.today),
+            self.today,
+        )
+
+    def test_past_and_future_weeks_keep_planned_placement(self):
+        """September still shows September's work — and last week shows
+        last week's, as history, unmarked."""
+        prev_start, prev_end = iso_week_bounds(2026, 32)
+        next_start, next_end = iso_week_bounds(2026, 34)
+        last_week = Job(
+            planned_start=datetime.date(2026, 8, 4),
+            planned_end=datetime.date(2026, 8, 5),
+            due=datetime.date(2026, 8, 4),
+            state=STATE_OPEN,
+        )
+        self.assertEqual(
+            placement_for(last_week, prev_start, prev_end, self.today),
+            PLACEMENT_PLANNED,
+        )
+        next_week = Job(
+            planned_start=datetime.date(2026, 8, 18),
+            planned_end=None,
+            due=datetime.date(2026, 8, 3),
+            state=STATE_OPEN,
+        )
+        self.assertEqual(
+            placement_for(next_week, next_start, next_end, self.today),
+            PLACEMENT_PLANNED,
+        )
+
+    def test_closed_work_in_the_current_week_stays_planned(self):
+        """Finished or cancelled work is never late, so it is never a
+        visitor — whatever its due date says."""
+        for state in (STATE_DONE, STATE_BLOCKED):
+            with self.subTest(state=state):
+                job = Job(
+                    planned_start=datetime.date(2026, 8, 10),
+                    planned_end=datetime.date(2026, 8, 16),
+                    due=datetime.date(2026, 8, 11),
+                    state=state,
+                )
+                self.assertEqual(
+                    placement_for(
+                        job, self.week_start, self.week_end, self.today
+                    ),
+                    PLACEMENT_PLANNED,
+                )
+
+    def test_a_job_due_later_this_week_is_at_home(self):
+        """Not yet overdue: planned placement, no marker."""
+        job = Job(
+            planned_start=datetime.date(2026, 8, 10),
+            planned_end=datetime.date(2026, 8, 16),
+            due=datetime.date(2026, 8, 15),
+            state=STATE_OPEN,
+        )
+        self.assertEqual(
+            placement_for(job, self.week_start, self.week_end, self.today),
+            PLACEMENT_PLANNED,
+        )
+
+
+class Wp1CarryForwardEndpointTests(WorkPlanFixture, APITestCase):
+    """G0 on rendered responses — acceptance tests 1 and 1a."""
+
+    def test_1_rolled_slot_appears_today_and_leaves_when_completed(self):
+        """Test 1 — slot planned last week, still ASSIGNED: on today's
+        column marked with the planned day and the late count. Completed:
+        off today, at home in its own week as done work."""
+        planned = self.today - datetime.timedelta(days=7)
+        ticket = self.make_ticket("Hall carpet")
+        slot = self.make_slot(ticket, start=planned)
+
+        payload = self.get_plan(self.worker)
+        entry = self.entry(payload, f"slot-{slot.id}")
+        self.assertIsNotNone(entry, payload["entries"])
+        self.assertEqual(entry["placement"], "ROLLED")
+        self.assertEqual(entry["day"], self.today.isoformat())
+        self.assertEqual(entry["rolled_from"], planned.isoformat())
+        self.assertEqual(entry["rolled_days"], 7)
+
+        slot.slot_status = StaffAssignmentSlotStatus.COMPLETED
+        slot.save(update_fields=["slot_status"])
+        payload = self.get_plan(self.worker)
+        self.assertIsNone(self.entry(payload, f"slot-{slot.id}"))
+        iso = planned.isocalendar()
+        home = self.get_plan(self.worker, week=f"{iso[0]}-W{iso[1]:02d}")
+        entry = self.entry(home, f"slot-{slot.id}")
+        self.assertIsNotNone(entry, home["entries"])
+        self.assertEqual(entry["placement"], PLACEMENT_PLANNED)
+        self.assertEqual(entry["state"], STATE_DONE)
+
+    def test_1a_overdue_work_planned_this_week_is_marked_on_today(self):
+        """Test 1a — the same-week carry: the planned window still
+        covers this week, but the deadline has passed. Before G0 the
+        card sat at home with only a flag; now it is stamped OVERDUE on
+        today's column. Only a real deadline can produce this state — a
+        slot with no deadline is due on its last planned day, so its
+        window is always gone before it is late (and rule 5 rolls it)."""
+        week_start = self.today - datetime.timedelta(
+            days=self.today.isoweekday() - 1
+        )
+        week_end = week_start + datetime.timedelta(days=6)
+        late = self.make_extra_work(
+            "Facade wash",
+            preferred=week_start,
+            planned_end=week_end,
+            deadline=self.today - datetime.timedelta(days=1),
+            assignee=self.worker,
+        )
+        payload = self.get_plan(self.worker)
+        entry = self.entry(payload, f"ew-{late.id}")
+        self.assertIsNotNone(entry, payload["entries"])
+        self.assertEqual(entry["placement"], PLACEMENT_OVERDUE)
+        self.assertEqual(entry["day"], self.today.isoformat())
+        self.assertTrue(entry["is_overdue"])
+        self.assertEqual(entry["overdue_days"], 1)
+        # The planned day the marker prints is on the entry.
+        self.assertEqual(entry["planned_start"], week_start.isoformat())
+
+    def test_1a_the_same_card_is_planned_in_a_past_week_view(self):
+        """A past week keeps planned placement for the week it covers —
+        the carry marks the CURRENT week only."""
+        prev_monday = self.today - datetime.timedelta(
+            days=self.today.isoweekday() + 6
+        )
+        prev_sunday = prev_monday + datetime.timedelta(days=6)
+        late = self.make_extra_work(
+            "Old week work",
+            preferred=prev_monday,
+            planned_end=prev_sunday,
+            deadline=prev_monday,
+            assignee=self.worker,
+        )
+        iso = prev_monday.isocalendar()
+        payload = self.get_plan(self.worker, week=f"{iso[0]}-W{iso[1]:02d}")
+        entry = self.entry(payload, f"ew-{late.id}")
+        # Its planned week is a PAST week: rule 5 has taken the card to
+        # today's column of the CURRENT week, so the past week shows it
+        # only if the work were finished. Pending work never lingers in
+        # yesterday (W-PLANTRUTH §1b) — so the row is absent here...
+        self.assertIsNone(entry, payload["entries"])
+        # ...and rolled onto today in the current week.
+        current = self.get_plan(self.worker)
+        entry = self.entry(current, f"ew-{late.id}")
+        self.assertIsNotNone(entry, current["entries"])
+        self.assertEqual(entry["placement"], "ROLLED")
+
+
+class Wp1StuckListTests(WorkPlanFixture, APITestCase):
+    """G1 — acceptance test 2: a blocked job enters the follow-up list
+    and leaves it only through a human's reschedule / reassign /
+    cancel."""
+
+    def block(self, slot, reason="Door locked"):
+        slot.slot_status = StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE
+        slot.unable_to_complete_reason = reason
+        slot.save(update_fields=["slot_status", "unable_to_complete_reason"])
+
+    def test_2_unable_slot_enters_the_stuck_list_with_age(self):
+        planned = self.today - datetime.timedelta(days=4)
+        ticket = self.make_ticket("Blocked work", scheduled=planned)
+        slot = self.make_slot(ticket, start=planned)
+        self.block(slot)
+
+        team = self.get_plan(self.company_admin, scope="company")
+        entry = self.entry(team, f"ticket-{ticket.id}", "stuck_entries")
+        self.assertIsNotNone(entry, team["stuck_entries"])
+        # No notification row was written (the block above bypassed the
+        # API), so the age falls back to the slot's planned day.
+        self.assertEqual(entry["stuck_age_days"], 4)
+        self.assertEqual(team["counts"]["stuck"], 1)
+
+        own = self.get_plan(self.worker)
+        mine = self.entry(own, f"slot-{slot.id}", "stuck_entries")
+        self.assertIsNotNone(mine, own["stuck_entries"])
+        self.assertEqual(own["counts"]["stuck"], 1)
+
+    def test_2_reschedule_reassign_and_cancel_each_empty_the_list(self):
+        ticket = self.make_ticket("Blocked work")
+        slot = self.make_slot(ticket, start=self.today)
+        self.block(slot)
+        self.assertEqual(
+            self.get_plan(self.company_admin, scope="company")["counts"][
+                "stuck"
+            ],
+            1,
+        )
+
+        # RESCHEDULE — the unable slot back to ASSIGNED with a new day.
+        slot.slot_status = StaffAssignmentSlotStatus.ASSIGNED
+        slot.scheduled_start_at = timezone.now() + datetime.timedelta(days=2)
+        slot.save(update_fields=["slot_status", "scheduled_start_at"])
+        team = self.get_plan(self.company_admin, scope="company")
+        self.assertEqual(team["counts"]["stuck"], 0)
+        self.assertEqual(team["stuck_entries"], [])
+
+        # REASSIGN — block again, then put somebody else on the job.
+        self.block(slot)
+        colleague = self.make_user(
+            "colleague-wp1@example.com", UserRole.STAFF
+        )
+        replacement = self.make_slot(ticket, user=colleague, start=self.today)
+        team = self.get_plan(self.company_admin, scope="company")
+        self.assertEqual(team["counts"]["stuck"], 0)
+
+        # CANCEL — the replacement leaves too and the work is called off.
+        replacement.slot_status = StaffAssignmentSlotStatus.CANCELLED
+        replacement.save(update_fields=["slot_status"])
+        self.assertEqual(
+            self.get_plan(self.company_admin, scope="company")["counts"][
+                "stuck"
+            ],
+            1,
+        )
+        ticket.status = TicketStatus.REJECTED
+        ticket.save(update_fields=["status"])
+        team = self.get_plan(self.company_admin, scope="company")
+        self.assertEqual(team["counts"]["stuck"], 0)
+
+    def test_2_a_colleague_still_assigned_means_not_stuck(self):
+        """While somebody is still expected to work the job, it has not
+        silently left the system's attention — their slot still rolls."""
+        ticket = self.make_ticket("Half blocked")
+        mine = self.make_slot(ticket, start=self.today)
+        colleague = self.make_user("colleague-wp2@example.com", UserRole.STAFF)
+        self.make_slot(ticket, user=colleague, start=self.today)
+        self.block(mine)
+        team = self.get_plan(self.company_admin, scope="company")
+        self.assertEqual(team["counts"]["stuck"], 0)
+
+    def test_2_extra_work_with_a_blocked_ticket_is_stuck(self):
+        """The extra-work half: the request is live, its operational
+        ticket ended blocked — the work stopped with nobody deciding
+        about the request."""
+        ew = self.make_extra_work(
+            "Stuck request",
+            preferred=self.today - datetime.timedelta(days=2),
+            assignee=self.worker,
+        )
+        spawned = self.make_ticket("Spawned", TicketStatus.REJECTED)
+        spawned.extra_work_request = ew
+        spawned.save(update_fields=["extra_work_request"])
+        team = self.get_plan(self.company_admin, scope="company")
+        entry = self.entry(team, f"ew-{ew.id}", "stuck_entries")
+        self.assertIsNotNone(entry, team["stuck_entries"])
+        self.assertIsNotNone(entry["stuck_age_days"])
+
+    def test_2_tenancy_holds_on_the_stuck_list(self):
+        """H-1 — another tenant's stuck work is invisible in both
+        scopes."""
+        foreign_ticket = self.make_ticket("Foreign stuck", foreign=True)
+        foreign_slot = self.make_slot(
+            foreign_ticket, user=self.foreign_worker, start=self.today
+        )
+        self.block(foreign_slot)
+        team = self.get_plan(self.company_admin, scope="company")
+        self.assertEqual(team["counts"]["stuck"], 0)
+        self.assertEqual(team["stuck_entries"], [])
+
+
+class Wp1DateChipTests(WorkPlanFixture, APITestCase):
+    """G3 — acceptance test 3: the signed day count, and the wording
+    driver that keeps "deadline" off a plain planned day."""
+
+    def test_3_a_future_deadline_counts_down(self):
+        ew = self.make_extra_work(
+            "Window wax",
+            preferred=self.today,
+            deadline=self.today + datetime.timedelta(days=10),
+            assignee=self.worker,
+        )
+        payload = self.get_plan(self.worker)
+        entry = self.entry(payload, f"ew-{ew.id}")
+        self.assertIsNotNone(entry, payload["entries"])
+        self.assertEqual(entry["days_until_due"], 10)
+        # A real deadline exists, so the chip may say the word: the
+        # driver the frontend forks its wording on.
+        self.assertIsNotNone(entry["lateness"]["deadline"])
+
+    def test_3_the_count_is_stable_across_week_boundaries(self):
+        """The chip counts from TODAY, whatever week is on screen."""
+        planned = self.today + datetime.timedelta(days=9)
+        ticket = self.make_ticket("Next-week job")
+        slot = self.make_slot(ticket, start=planned)
+        iso = planned.isocalendar()
+        its_week = self.get_plan(self.worker, week=f"{iso[0]}-W{iso[1]:02d}")
+        entry = self.entry(its_week, f"slot-{slot.id}")
+        self.assertIsNotNone(entry, its_week["entries"])
+        self.assertEqual(entry["days_until_due"], 9)
+        current = self.get_plan(self.worker)
+        upcoming = self.entry(current, f"slot-{slot.id}", "upcoming_entries")
+        self.assertIsNotNone(upcoming, current["upcoming_entries"])
+        self.assertEqual(upcoming["days_until_due"], 9)
+
+    def test_3_a_slot_without_a_deadline_never_claims_one(self):
+        """A plain slot's date is its geplande dag: `days_until_due`
+        counts to it, and `lateness.deadline` stays null — the fact the
+        chip's copy rule keys on (§D.11.2-G3)."""
+        planned = self.today + datetime.timedelta(days=3)
+        ticket = self.make_ticket("Plain job")
+        slot = self.make_slot(ticket, start=planned)
+        # Read the week the slot is planned IN — three days out may
+        # cross an ISO week boundary depending on today's weekday.
+        iso = planned.isocalendar()
+        payload = self.get_plan(self.worker, week=f"{iso[0]}-W{iso[1]:02d}")
+        entry = self.entry(payload, f"slot-{slot.id}")
+        self.assertIsNotNone(entry, payload["entries"])
+        self.assertEqual(entry["days_until_due"], 3)
+        self.assertIsNone(entry["lateness"]["deadline"])
+
+    def test_g2_unplanned_age_counts_only_dateless_work(self):
+        undated = self.make_extra_work("No date", assignee=self.worker)
+        dated = self.make_extra_work(
+            "Dated", preferred=self.today, assignee=self.worker
+        )
+        payload = self.get_plan(self.worker)
+        row = self.entry(payload, f"ew-{undated.id}", "undated_entries")
+        self.assertIsNotNone(row, payload["undated_entries"])
+        self.assertEqual(row["unplanned_age_days"], 0)
+        entry = self.entry(payload, f"ew-{dated.id}")
+        self.assertIsNone(entry["unplanned_age_days"])

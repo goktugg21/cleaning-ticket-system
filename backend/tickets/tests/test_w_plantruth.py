@@ -531,7 +531,7 @@ class TheDeadlineWindowTests(_Fixture):
         card = self.entry(self._company_plan(), f"ticket-{ticket.id}")
 
         self.assertIsNotNone(card)
-        self.assertEqual(card["due_in_days"], 8)
+        self.assertEqual(card["days_until_due"], 8)
         self.assertFalse(card["is_overdue"])
 
     def test_and_counts_up_once_it_has_passed(self):
@@ -554,7 +554,7 @@ class TheDeadlineWindowTests(_Fixture):
         card = self.entry(self._company_plan(), f"ticket-{ticket.id}")
 
         self.assertIsNotNone(card)
-        self.assertEqual(card["due_in_days"], -2)
+        self.assertEqual(card["days_until_due"], -2)
         self.assertTrue(card["is_overdue"])
 
     def test_a_job_sitting_with_the_customer_reads_calm(self):

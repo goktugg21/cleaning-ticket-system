@@ -91,7 +91,7 @@ from __future__ import annotations
 
 import datetime
 
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Count, Exists, Max, OuterRef, Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -180,6 +180,9 @@ UNDATED_LIMIT = 100
 #: does the server say it stopped counting rows (it never stops counting
 #: the total — `counts.late` is the whole set).
 LATE_LIMIT = 200
+#: WP-1 G1 (Addendum D §D.11.2) — the "Vastgelopen — actie nodig" list.
+#: Same bound as its flat-list siblings, for the same reason.
+STUCK_LIMIT = 100
 
 #: How many names a card carries before it just says how many more.
 ASSIGNEE_NAMES_SHOWN = 5
@@ -523,6 +526,75 @@ def _ew_undated_q() -> Q:
 
 
 # ---------------------------------------------------------------------
+# WP-1 G1 — the "unable to complete" leak, in SQL.
+#
+# A slot marked UNABLE_TO_COMPLETE maps to BLOCKED, which counts as
+# closed: it stops carrying forward and silently leaves the system's
+# attention. These predicates name the jobs that stopped WITHOUT a human
+# decision, so the view can put them in a follow-up list that only a
+# human action empties. Blocked is not done.
+#
+# The job-level reading: a live ticket where somebody said "I could not
+# do this" and NOBODY is expected to work it any more (no ASSIGNED slot
+# left). While a colleague still holds an ASSIGNED slot the job is not
+# silently gone — their slot still rolls forward — so it is not stuck.
+# Rescheduling (the unable slot back to ASSIGNED with a new day),
+# reassigning (a fresh ASSIGNED slot for somebody else) and cancelling
+# (the slot to CANCELLED, or the ticket out of its live statuses) are
+# exactly the three existing actions that make these predicates false —
+# the list mutates nothing.
+# ---------------------------------------------------------------------
+
+
+def _unable_slots(ticket_ref: str):
+    return TicketStaffAssignment.objects.filter(
+        ticket_id=OuterRef(ticket_ref),
+        slot_status=StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE,
+    )
+
+
+def _assigned_slots(ticket_ref: str):
+    return TicketStaffAssignment.objects.filter(
+        ticket_id=OuterRef(ticket_ref),
+        slot_status=StaffAssignmentSlotStatus.ASSIGNED,
+    )
+
+
+def _ticket_stuck_q() -> Q:
+    """A stuck JOB: live, at least one unable slot, nobody assigned."""
+    return (
+        _TICKET_PENDING_Q
+        & Exists(_unable_slots("id"))
+        & ~Exists(_assigned_slots("id"))
+    )
+
+
+def _slot_stuck_q() -> Q:
+    """The caller's own stuck piece: their UNABLE_TO_COMPLETE slot on a
+    live ticket that nobody is assigned to any more. The same job-level
+    condition as `_ticket_stuck_q`, read from the slot side, so a worker
+    and their manager agree on what is stuck."""
+    return (
+        Q(slot_status=StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE)
+        & _TICKET_LIVE_Q
+        & ~Exists(_assigned_slots("ticket_id"))
+    )
+
+
+def _ew_stuck_q() -> Q:
+    """A stuck EXTRA WORK: still live commercially, but its operational
+    ticket ended in a blocked status (rejected / converted) — the work
+    stopped without being done and without anybody deciding about the
+    request itself."""
+    blocked_ticket = Ticket.objects.filter(
+        extra_work_request_id=OuterRef("id"),
+        deleted_at__isnull=True,
+        status__in=list(_TICKET_BLOCKED_STATUSES),
+    )
+    return _EW_LIVE_Q & Exists(blocked_ticket)
+
+
+# ---------------------------------------------------------------------
 # W-VIEWER — the JOB's rule, in SQL.
 #
 # The same five questions the slot predicates above answer, asked of a
@@ -673,6 +745,27 @@ def _extra_work_source(user, team: bool):
         id__in=covered.values("ticket__extra_work_request_id")
     )
     return queryset.select_related("building", "customer")
+
+
+def _stuck_extra_work_source(user, team: bool):
+    """WP-1 G1 — the stuck EXTRA WORK rows.
+
+    Mirrors `_extra_work_source`'s scoping exactly, WITHOUT the
+    covered-by-a-slot exclusion, deliberately: the slot on a blocked
+    ticket is not pending and places no card anywhere, so leaving the
+    exclusion in would hide precisely the rows this list exists for.
+    """
+    assigned_ids = ExtraWorkAssignment.objects.values("extra_work_request_id")
+    if team:
+        queryset = scope_extra_work_for(user).filter(id__in=assigned_ids)
+    else:
+        queryset = ExtraWorkRequest.objects.filter(
+            deleted_at__isnull=True,
+            id__in=assigned_ids.filter(user=user),
+        )
+    return queryset.filter(_ew_stuck_q()).select_related(
+        "building", "customer"
+    )
 
 
 def _ticket_source(user):
@@ -982,6 +1075,23 @@ def _empty_lateness() -> dict:
     return data
 
 
+def _unplanned_age(job, created, today) -> int | None:
+    """WP-1 G2 — how long a dateless job has been waiting for a plan.
+
+    A job with no planned date can never become overdue by design
+    (inventing dates would be worse), so nothing ever nags about it.
+    This is the nag: whole days since the record was created, only on a
+    job with no planned window at all. The "Nog niet gepland" lane
+    prints it past a threshold; every dated entry answers None.
+    """
+    if job.planned_start is not None or created is None:
+        return None
+    created_date = _local_date(created)
+    if created_date is None:
+        return None
+    return max((today - created_date).days, 0)
+
+
 def _entry_from_slot(
     slot,
     job,
@@ -1021,6 +1131,11 @@ def _entry_from_slot(
         "planned_start": _iso(job.planned_start),
         "planned_end": _iso(job.planned_end),
         "due_date": _iso(job.due),
+        # WP-1 G2 — days this job has sat with no plan; null on a dated
+        # entry. G1 — days this job has been stuck (set by the stuck
+        # list, null everywhere else). Both on every kind: one shape.
+        "unplanned_age_days": _unplanned_age(job, slot.assigned_at, today),
+        "stuck_age_days": None,
         "scheduled_start_at": slot.scheduled_start_at,
         "scheduled_end_at": slot.scheduled_end_at,
         "time_window_label": slot.time_window_label,
@@ -1039,7 +1154,7 @@ def _entry_from_slot(
         # W-VIEWER §5 — the reader's standing against the promise, signed:
         # 3 is three days left, 0 is today, -2 is two days past. Null when
         # nothing was promised.
-        "due_in_days": days_to_due(job, today),
+        "days_until_due": days_to_due(job, today),
         # W-VIEWER §5 — nothing left for THIS reader to do, so the card
         # renders calm rather than urgent.
         "viewer_settled": (
@@ -1112,6 +1227,10 @@ def _entry_from_extra_work(
         "planned_start": _iso(job.planned_start),
         "planned_end": _iso(job.planned_end),
         "due_date": _iso(job.due),
+        "unplanned_age_days": _unplanned_age(
+            job, extra_work.requested_at, today
+        ),
+        "stuck_age_days": None,
         # Extra work has no dated slot — Sprint 157 §2 declined to build
         # one and nothing since has changed that. The card shows a
         # planned WINDOW in days, so the three time fields are null
@@ -1128,7 +1247,7 @@ def _entry_from_extra_work(
         "rolled_days": rolled,
         "is_overdue": is_overdue(job, today),
         "overdue_days": overdue_days(job, today),
-        "due_in_days": days_to_due(job, today),
+        "days_until_due": days_to_due(job, today),
         "viewer_settled": job.state in CLOSED_STATES,
         # W-N1 §3 — extra work has no parts; the key is present and
         # empty so both kinds answer `entry.parts` the same way and the
@@ -1189,6 +1308,8 @@ def _entry_from_ticket(
         "planned_start": _iso(job.planned_start),
         "planned_end": _iso(job.planned_end),
         "due_date": _iso(job.due),
+        "unplanned_age_days": _unplanned_age(job, ticket.created_at, today),
+        "stuck_age_days": None,
         "scheduled_start_at": ticket.scheduled_start_at,
         "scheduled_end_at": ticket.scheduled_end_at,
         "time_window_label": None,
@@ -1201,7 +1322,7 @@ def _entry_from_ticket(
         "rolled_days": rolled,
         "is_overdue": is_overdue(job, today),
         "overdue_days": overdue_days(job, today),
-        "due_in_days": days_to_due(job, today),
+        "days_until_due": days_to_due(job, today),
         "viewer_settled": _ticket_settled(ticket),
         "parts": parts or [],
         "lateness": lateness if lateness is not None else _empty_lateness(),
@@ -1255,6 +1376,115 @@ def _job_parts_map(ticket_ids, today):
     for part in rows:
         out.setdefault(part.ticket_id, []).append(_part_payload(part, today))
     return out
+
+
+def _stuck_ages(entries, today) -> None:
+    """WP-1 G1 — stamp each stuck row with how long it has been stuck.
+
+    The moment a slot was marked unable is not a column on the slot, so
+    the age is read from the best witness available, in order:
+
+    1. The `NotificationLog` row the unable transition always writes
+       (`TICKET_SLOT_UNABLE` — the log row is created BEFORE the mail is
+       queued, so it exists even when the mail later fails).
+    2. The slot's own last planned day — a job that failed has been
+       stuck at least since the day it was supposed to happen.
+    3. The day the slot was assigned.
+
+    A stuck extra work is dated by the moment its operational ticket
+    entered the blocked status: `rejected_at` where the stamp exists,
+    else the status-history row that recorded the transition.
+    """
+    from notifications.models import NotificationEventType, NotificationLog
+
+    ticket_ids = {
+        e["ticket_id"]
+        for e in entries
+        if e["kind"] != KIND_EXTRA_WORK and e["ticket_id"] is not None
+    }
+    ew_ids = {
+        e["extra_work_id"] for e in entries if e["kind"] == KIND_EXTRA_WORK
+    }
+
+    def _day(stamp) -> datetime.date | None:
+        if stamp is None:
+            return None
+        return timezone.localtime(stamp).date()
+
+    since: dict[int, datetime.date] = {}
+    if ticket_ids:
+        rows = (
+            NotificationLog.objects.filter(
+                ticket_id__in=list(ticket_ids),
+                event_type=NotificationEventType.TICKET_SLOT_UNABLE,
+            )
+            .values("ticket_id")
+            .annotate(latest=Max("created_at"))
+        )
+        for row in rows:
+            since[row["ticket_id"]] = _day(row["latest"])
+        missing = ticket_ids - set(since)
+        if missing:
+            slots = TicketStaffAssignment.objects.filter(
+                ticket_id__in=list(missing),
+                slot_status=StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE,
+            ).values(
+                "ticket_id",
+                "scheduled_end_at",
+                "scheduled_start_at",
+                "assigned_at",
+            )
+            for slot in slots:
+                day = (
+                    _day(slot["scheduled_end_at"])
+                    or _day(slot["scheduled_start_at"])
+                    or _day(slot["assigned_at"])
+                    or today
+                )
+                prev = since.get(slot["ticket_id"])
+                if prev is None or day > prev:
+                    since[slot["ticket_id"]] = day
+
+    ew_since: dict[int, datetime.date] = {}
+    if ew_ids:
+        from .models import TicketStatusHistory
+
+        blocked = Ticket.objects.filter(
+            extra_work_request_id__in=list(ew_ids),
+            deleted_at__isnull=True,
+            status__in=list(_TICKET_BLOCKED_STATUSES),
+        ).values("id", "extra_work_request_id", "rejected_at")
+        history_needed: dict[int, int] = {}
+        for row in blocked:
+            day = _day(row["rejected_at"])
+            if day is None:
+                history_needed[row["id"]] = row["extra_work_request_id"]
+                continue
+            prev = ew_since.get(row["extra_work_request_id"])
+            if prev is None or day > prev:
+                ew_since[row["extra_work_request_id"]] = day
+        if history_needed:
+            history = (
+                TicketStatusHistory.objects.filter(
+                    ticket_id__in=list(history_needed),
+                    new_status__in=list(_TICKET_BLOCKED_STATUSES),
+                )
+                .values("ticket_id")
+                .annotate(latest=Max("created_at"))
+            )
+            for row in history:
+                ew_id = history_needed[row["ticket_id"]]
+                day = _day(row["latest"])
+                prev = ew_since.get(ew_id)
+                if day is not None and (prev is None or day > prev):
+                    ew_since[ew_id] = day
+
+    for entry in entries:
+        if entry["kind"] == KIND_EXTRA_WORK:
+            day = ew_since.get(entry["extra_work_id"], today)
+        else:
+            day = since.get(entry["ticket_id"], today)
+        entry["stuck_age_days"] = max((today - day).days, 0)
 
 
 #: Sorts a merged list where one source has a clock time and the other
@@ -1407,6 +1637,19 @@ class WorkPlanView(APIView):
         late_entries, late_truncated, late_total = self._late_entries(
             jobs, extra_work, today, team=team, viewer=user
         )
+        # WP-1 G1 — the "Vastgelopen — actie nodig" follow-up list:
+        # work that stopped without being done and without a human
+        # deciding about it. Reads only; a row leaves when a human
+        # reschedules, reassigns or cancels through the existing actions.
+        stuck_entries, stuck_truncated, stuck_total = self._stuck_entries(
+            jobs.filter(_ticket_stuck_q() if team else _slot_stuck_q()),
+            _stuck_extra_work_source(user, team),
+            week_start,
+            week_end,
+            today,
+            team=team,
+            viewer=user,
+        )
         counts = self._counts(
             jobs, extra_work, week_start, week_end, today, team=team
         )
@@ -1415,6 +1658,8 @@ class WorkPlanView(APIView):
         # ticket's slots — see `_late_entries`. It is the whole set,
         # never the page.
         counts["late"] = late_total
+        # WP-1 G1 — the whole stuck set, never the page.
+        counts["stuck"] = stuck_total
 
         return Response(
             {
@@ -1436,12 +1681,15 @@ class WorkPlanView(APIView):
                 "undated_entries": undated_entries,
                 # W-LATE §1a — the late strip's rows.
                 "late_entries": late_entries,
+                # WP-1 G1 — the follow-up list's rows.
+                "stuck_entries": stuck_entries,
                 "limits": {
                     "entries": ENTRY_LIMIT,
                     "overdue_entries": OVERDUE_LIMIT,
                     "upcoming_entries": UPCOMING_LIMIT,
                     "undated_entries": UNDATED_LIMIT,
                     "late_entries": LATE_LIMIT,
+                    "stuck_entries": STUCK_LIMIT,
                 },
                 "truncated": {
                     "entries": truncated,
@@ -1449,6 +1697,7 @@ class WorkPlanView(APIView):
                     "upcoming_entries": upcoming_truncated,
                     "undated_entries": undated_truncated,
                     "late_entries": late_truncated,
+                    "stuck_entries": stuck_truncated,
                 },
             },
             status=status.HTTP_200_OK,
@@ -1791,6 +2040,35 @@ class WorkPlanView(APIView):
         )
 
     @classmethod
+    def _stuck_entries(
+        cls, jobs, extra_work, week_start, week_end, today, *, team, viewer
+    ):
+        """WP-1 G1 — the follow-up list. Returns `(entries, truncated,
+        total)` like the late strip, on the same builders as every other
+        list, plus a `stuck_age_days` per row (oldest first).
+
+        `fallback_placement=PLACEMENT_PLANNED` because these rows are a
+        table, not a column: placement answers "why is this card in the
+        week on screen", which is not a question a follow-up row is
+        asked. The frontend renders no marker off it here.
+        """
+        entries, truncated = cls._flat_entries(
+            jobs,
+            extra_work,
+            week_start,
+            week_end,
+            today,
+            limit=STUCK_LIMIT,
+            team=team,
+            viewer=viewer,
+            fallback_placement=PLACEMENT_PLANNED,
+        )
+        total = jobs.count() + extra_work.count()
+        _stuck_ages(entries, today)
+        entries.sort(key=lambda e: (-(e["stuck_age_days"] or 0), e["key"]))
+        return entries, truncated, total
+
+    @classmethod
     def _late_entries(cls, jobs, extra_work, today, *, team, viewer):
         """W-LATE §1a — the late strip: ONE ROW PER LATE JOB, ordered by
         the ladder. Returns `(entries, truncated, total)`.
@@ -2113,6 +2391,7 @@ __all__ = [
     "LATE_LIMIT",
     "LATE_LIVE_TICKET_STATUSES",
     "OVERDUE_LIMIT",
+    "STUCK_LIMIT",
     "UNDATED_LIMIT",
     "UPCOMING_LIMIT",
     "WorkPlanView",
