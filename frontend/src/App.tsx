@@ -79,7 +79,6 @@ import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage"
 import { CustomerDocumentsPage } from "./pages/admin/customer/CustomerDocumentsPage";
 import { CustomerLabelsPage } from "./pages/admin/customer/CustomerLabelsPage";
 import { CustomerTicketsPage } from "./pages/admin/customer/CustomerTicketsPage";
-import { CustomerChargeableWorkPage } from "./pages/admin/customer/CustomerChargeableWorkPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
@@ -199,6 +198,49 @@ function CustomerScopedRedirect({
   );
 }
 
+/**
+ * FE-1 — the customer-scoped "Chargeable work" tab is retired the same
+ * way (§D.2: the standalone name dies). Same param-preserving shape as
+ * `CustomerScopedRedirect`, different search string: the ticket list's
+ * own work filter carries the narrowing.
+ */
+function CustomerChargeableRedirect() {
+  const { id } = useParams();
+  return (
+    <Navigate
+      to={`/admin/customers/${id}/tickets?work=chargeable&status=ALL`}
+      replace
+    />
+  );
+}
+
+/**
+ * FE-1 (Addendum D §D.3.2) — Werkplanning is the STAFF landing page.
+ * The dashboard route itself stays; only where a staff member LANDS
+ * changes. Everyone else keeps the dashboard.
+ */
+function HomeRoute() {
+  const { me } = useAuth();
+  if (me?.role === "STAFF") {
+    return <Navigate to="/agenda" replace />;
+  }
+  return <DashboardPage />;
+}
+
+/**
+ * FE-1 (§D.3.2) — for STAFF the bell feed lives as a tab inside
+ * Berichten; the standalone notifications page redirects there so the
+ * topbar bell's "see all" and old deep links keep working. Every other
+ * role keeps the standalone page.
+ */
+function NotificationsRoute() {
+  const { me } = useAuth();
+  if (me?.role === "STAFF") {
+    return <Navigate to="/inbox?tab=notifications" replace />;
+  }
+  return <NotificationsPage />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -220,7 +262,7 @@ export default function App() {
             path="/"
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <HomeRoute />
               </ProtectedRoute>
             }
           />
@@ -239,18 +281,19 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          {/* Sprint 181 §5 — chargeable work: the tickets born from an
-              Extra Work, findable as a group. They ARE tickets and only
-              their origin differs, so this mounts the same list with one
-              server-side filter pinned on rather than a second
-              implementation. Static path, so it must sit above
-              /tickets/:id. */}
+          {/* FE-1 (Addendum D §D.2) — "Chargeable work" is dead as a
+              name and as a page. The tickets born from a meerwerk ARE
+              tickets; the work queue shows them behind its own work
+              filter with the type pill saying where each came from. The
+              old deep link keeps working: it lands on the queue with
+              the meerwerk narrowing preselected and no status pin
+              (`status=ALL` parses to "no status filter", which is what
+              the old sub-page showed). Static path, so it must stay
+              above /tickets/:id. */}
           <Route
             path="/tickets/chargeable"
             element={
-              <ProtectedRoute>
-                <DashboardPage key="chargeable-work" variant="chargeable-work" />
-              </ProtectedRoute>
+              <Navigate to="/tickets?work=chargeable&status=ALL" replace />
             }
           />
           {/* W11 — ONE DOOR. Asks what happened and picks the record
@@ -298,7 +341,7 @@ export default function App() {
             path="/notifications"
             element={
               <ProtectedRoute>
-                <NotificationsPage />
+                <NotificationsRoute />
               </ProtectedRoute>
             }
           />
@@ -620,16 +663,12 @@ export default function App() {
               </AdminRoute>
             }
           />
-          {/* Sprint 184 §3b — the customer's chargeable work. The same
-              ticket list as the sibling route above, with a second pin
-              from the route rather than a second implementation. */}
+          {/* FE-1 — the customer-scoped "Chargeable work" tab is
+              retired (§D.2); the deep link lands on the customer's own
+              ticket list with the meerwerk narrowing preselected. */}
           <Route
             path="/admin/customers/:id/chargeable"
-            element={
-              <AdminRoute>
-                <CustomerChargeableWorkPage />
-              </AdminRoute>
-            }
+            element={<CustomerChargeableRedirect />}
           />
           <Route
             path="/admin/customers/:id/tickets"

@@ -8,7 +8,7 @@
 // search, unread-only. Clicking a row marks it read and opens the
 // thread's detail.
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CheckCheck, MessagesSquare, Search } from "lucide-react";
 
@@ -20,9 +20,11 @@ import {
   notifyInboxUnreadChanged,
 } from "../api/inbox";
 import type { InboxRow, InboxThreadKind } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
 import { InboxThreadAvatar } from "../components/Avatar";
 import { Toggle } from "../components/Toggle";
 import { formatRelative, useLocaleCode } from "../lib/intl";
+import { NotificationsPage } from "./NotificationsPage";
 
 type KindFilter = "all" | InboxThreadKind;
 
@@ -30,6 +32,19 @@ export function InboxPage() {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const locale = useLocaleCode();
+  const { me } = useAuth();
+
+  // FE-1 (Addendum D §D.3.2) — FOR STAFF ONLY, the bell feed lives
+  // here as a second tab: field staff get one place where the system
+  // talks to them. Other roles keep the standalone /notifications page
+  // and never see the tabs. URL-backed (`?tab=notifications`) so the
+  // topbar bell's "see all" redirect and a refresh both land right.
+  const isStaffTabs = me?.role === "STAFF";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab =
+    isStaffTabs && searchParams.get("tab") === "notifications"
+      ? "notifications"
+      : "threads";
 
   const [rows, setRows] = useState<InboxRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,18 +147,65 @@ export function InboxPage() {
           <p className="page-sub">{t("inbox.subtitle")}</p>
         </div>
         <div className="page-header-actions">
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={markAllRead}
-            data-testid="inbox-mark-all-read"
-          >
-            <CheckCheck size={15} strokeWidth={2} />
-            {t("inbox.mark_all_read")}
-          </button>
+          {activeTab === "threads" && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={markAllRead}
+              data-testid="inbox-mark-all-read"
+            >
+              <CheckCheck size={15} strokeWidth={2} />
+              {t("inbox.mark_all_read")}
+            </button>
+          )}
         </div>
       </div>
 
+      {/* FE-1 §D.3.2 — the two staff tabs. Same `.composer-toggle`
+          tablist primitive the tickets page uses for its two piles. */}
+      {isStaffTabs && (
+        <div
+          className="composer-toggle"
+          role="tablist"
+          aria-label={t("inbox.title")}
+          style={{ marginBottom: 14 }}
+          data-testid="inbox-tabs"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "threads"}
+            className={`composer-toggle-btn${activeTab === "threads" ? " active" : ""}`}
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete("tab");
+              setSearchParams(next, { replace: true });
+            }}
+            data-testid="inbox-tab-threads"
+          >
+            {t("inbox.tab_threads")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "notifications"}
+            className={`composer-toggle-btn${activeTab === "notifications" ? " active" : ""}`}
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.set("tab", "notifications");
+              setSearchParams(next, { replace: true });
+            }}
+            data-testid="inbox-tab-notifications"
+          >
+            {t("inbox.tab_notifications")}
+          </button>
+        </div>
+      )}
+
+      {activeTab === "notifications" ? (
+        <NotificationsPage embedded />
+      ) : (
+        <>
       <div className="inbox-filters" data-testid="inbox-filters">
         <div className="inbox-kind-toggle" role="group" aria-label={t("inbox.filter_kind")}>
           {(["all", "ticket", "extra_work"] as KindFilter[]).map((k) => (
@@ -231,6 +293,8 @@ export function InboxPage() {
             />
           ))}
         </ul>
+      )}
+        </>
       )}
     </div>
   );

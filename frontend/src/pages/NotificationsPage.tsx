@@ -32,7 +32,14 @@ import { PageHeader } from "../components/PageHeader";
 import { Toggle } from "../components/Toggle";
 import { formatRelative } from "../lib/intl";
 
-export function NotificationsPage() {
+export function NotificationsPage({
+  embedded = false,
+}: {
+  /** FE-1 (§D.3.2) — rendered as the "Notificaties" tab inside
+   *  Berichten for STAFF. The host page owns the header, so the
+   *  embedded feed skips its own; everything else is identical. */
+  embedded?: boolean;
+} = {}) {
   const { t } = useTranslation("common");
   const { me } = useAuth();
   const navigate = useNavigate();
@@ -154,25 +161,40 @@ export function NotificationsPage() {
 
   return (
     <div data-testid="notifications-page">
-      <PageHeader
-        eyebrow={t("notifications.eyebrow")}
-        title={t("notifications.title")}
-        subtitle={t("notifications.subtitle")}
-        actions={
-          !viewAsMode ? (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleMarkAll}
-              disabled={markingAll || unread === 0}
-              data-testid="notification-mark-all"
-            >
-              <CheckCheck size={15} strokeWidth={2} />
-              {t("notifications.mark_all_read")}
-            </button>
-          ) : undefined
-        }
-      />
+      {embedded ? (
+        <div className="page-header-actions" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleMarkAll}
+            disabled={markingAll || unread === 0}
+            data-testid="notification-mark-all"
+          >
+            <CheckCheck size={15} strokeWidth={2} />
+            {t("notifications.mark_all_read")}
+          </button>
+        </div>
+      ) : (
+        <PageHeader
+          eyebrow={t("notifications.eyebrow")}
+          title={t("notifications.title")}
+          subtitle={t("notifications.subtitle")}
+          actions={
+            !viewAsMode ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleMarkAll}
+                disabled={markingAll || unread === 0}
+                data-testid="notification-mark-all"
+              >
+                <CheckCheck size={15} strokeWidth={2} />
+                {t("notifications.mark_all_read")}
+              </button>
+            ) : undefined
+          }
+        />
+      )}
 
       {/* #109 Part D — SA-only: company view-as filter + the
           per-company subscribe Toggle (platform rule: a boolean state

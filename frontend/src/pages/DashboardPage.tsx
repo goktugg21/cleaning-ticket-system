@@ -524,13 +524,14 @@ export function DashboardPage({
    * showing everything is friendlier than showing nothing.
    */
   const [workTypeFilter, setWorkTypeFilter] = useState<WorkTypeFilter>(() => {
-    // The Chargeable work sub-page IS this page pinned to chargeable
-    // work, so the route decides the filter and the chip below never
-    // offers "chargeable" as a third state -- that redundancy is the
-    // thing the owner asked to remove.
     if (variant === "chargeable-work") return "chargeable";
     const raw = new URLSearchParams(window.location.search).get("work");
-    if (raw === "all" || raw === "tickets") return raw;
+    // FE-1 — "chargeable" is a full URL state again: the standalone
+    // meerwerk sub-page is gone (§D.2 kills the name) and its old route
+    // redirects here carrying `?work=chargeable`, so the queue itself
+    // now owns the meerwerk-only narrowing as a filter (§D.3.4: a
+    // saved filter, not a page).
+    if (raw === "all" || raw === "tickets" || raw === "chargeable") return raw;
     // The Tickets page is the ORDINARY tickets page. "Tickets only" was
     // a confusing name for a chip on a page where everything is already
     // a ticket -- and chargeable work has its own page, so showing it in
@@ -2528,11 +2529,25 @@ export function DashboardPage({
           tiles={(showArchive
             ? TICKET_ARCHIVE_STATUSES
             : TICKET_LIST_STATUSES
-          ).map((value) => ({
-            value,
-            label: tStatus(value),
-            count: stats ? (stats.by_status[value] ?? 0) : -1,
-          }))}
+          )
+            // FE-1 (Addendum D §D.2) — "Reopened by admin" stops being
+            // a PERMANENT tab. The chip appears only while there IS
+            // reopened work (or while the filter is on, so the state
+            // can always be cleared); the rows themselves never hide,
+            // the status stays a URL-addressable filter, and the badge
+            // on each row keeps saying it. Machinery earns a chip when
+            // it has something to say, not a standing seat.
+            .filter(
+              (value) =>
+                value !== "REOPENED_BY_ADMIN" ||
+                statusFilter === "REOPENED_BY_ADMIN" ||
+                (stats ? (stats.by_status[value] ?? 0) > 0 : false),
+            )
+            .map((value) => ({
+              value,
+              label: tStatus(value),
+              count: stats ? (stats.by_status[value] ?? 0) : -1,
+            }))}
           active={statusFilter}
           onChange={(value: string) => {
             setStatusFilter(value as TicketStatus | "");
@@ -2777,23 +2792,33 @@ export function DashboardPage({
                           ? hideFinishedExtraWork
                             ? "tickets"
                             : "everything"
-                          : workTypeFilter === "tickets"
-                            ? "tickets"
-                            : hideFinishedExtraWork
-                              ? "with_chargeable"
-                              : "everything"
+                          : workTypeFilter === "chargeable"
+                            ? "chargeable"
+                            : workTypeFilter === "tickets"
+                              ? "tickets"
+                              : hideFinishedExtraWork
+                                ? "with_chargeable"
+                                : "everything"
                       }
                       data-testid="tickets-work-scope"
                       onChange={(event) => {
                         const value = event.target.value;
                         setPage(1);
                         setSelectedIds(new Set<number>());
-                        setHideFinishedExtraWork(value !== "everything");
+                        // FE-1 — the meerwerk-only view shows the WHOLE
+                        // meerwerk pipeline, finished included; hiding
+                        // finished rows is a tickets-list concern.
+                        setHideFinishedExtraWork(
+                          value !== "everything" && value !== "chargeable",
+                        );
                         if (!isChargeableWork) {
                           const next = new URLSearchParams(searchParams);
                           if (value === "tickets") {
                             setWorkTypeFilter("tickets");
                             next.delete("work");
+                          } else if (value === "chargeable") {
+                            setWorkTypeFilter("chargeable");
+                            next.set("work", "chargeable");
                           } else {
                             setWorkTypeFilter("all");
                             next.set("work", "all");
@@ -2810,6 +2835,13 @@ export function DashboardPage({
                       {!isChargeableWork && (
                         <option value="with_chargeable">
                           {t("work_scope.with_chargeable")}
+                        </option>
+                      )}
+                      {/* FE-1 §D.3.4 — the meerwerk-only narrowing, the
+                          saved filter that replaced the standalone page. */}
+                      {!isChargeableWork && (
+                        <option value="chargeable">
+                          {t("work_scope.chargeable_only")}
                         </option>
                       )}
                       {isChargeableWork && (

@@ -1088,7 +1088,7 @@ export function ExtraWorkList({
            than carrying a second copy of the word in extra_work.json:
            the nav row and the page heading are the same label by
            construction, and renaming it later is one edit, not two. */
-        title={t("nav.quotes", { ns: "common" })}
+        title={t("nav.meerwerk", { ns: "common" })}
         actions={
           /* Sprint 155 §1b — this button used to go straight to the
              direct-order form, which is only ONE of the three things
@@ -1695,7 +1695,7 @@ export function ExtraWorkList({
           <ul
             className="admin-card-list"
             data-testid="admin-card-list"
-            aria-label={t("nav.quotes", { ns: "common" })}
+            aria-label={t("nav.meerwerk", { ns: "common" })}
           >
             {visibleRows.map((row) => (
               <li key={row.id} className="admin-card">
