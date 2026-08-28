@@ -1,5 +1,18 @@
 # Osius — Role → left-nav visibility matrix
 
+> **FE-1 (2026-08-28, Addendum D §D.2/§D.3):** the nav was REGROUPED
+> and RELABELLED — provider roles read four groups (Werk / Financieel /
+> Klanten & mensen / Systeem), STAFF reads four entries (Werkplanning,
+> Mijn uren, Berichten, Instellingen; the bell feed is a tab inside
+> Berichten and "/" lands on Werkplanning), CUSTOMER_USER reads the
+> Klantportaal six (Start, Melding maken, Mijn meldingen, Meerwerk,
+> Facturen, Meer). The per-entry ROLE GATES below are unchanged — FE-1
+> moved and renamed rows, it widened and narrowed nothing — but the
+> entry NAMES and grouping this file quotes are now stale ("Chargeable
+> work" and its nav entries no longer exist; "Extra werk" is
+> "Meerwerk"; EN "Work plan" is "My schedule"). Re-derivation of the
+> full matrix is deferred to the FE-6 nav-density sprint.
+
 **Created:** 2026-07-20 (Sprint #111). **Status:** reference. Every cell
 below is sourced from code — the frontend nav gate in
 [`frontend/src/auth/permissions.ts`](../../frontend/src/auth/permissions.ts)

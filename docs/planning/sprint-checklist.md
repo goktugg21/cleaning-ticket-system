@@ -36,6 +36,39 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — FE-1: vocabulary + navigation (Addendum D §D.2/§D.3, 2026-08-28)
+
+Branch `feat/fe-1-vocabulary-navigation`, stacked on
+`feat/wp-1-werkplanning-behaviour` (the train; main untouched). Labels,
+nav structure and redirects ONLY — no form, workflow, endpoint, route
+path or backend code changed; zero migrations.
+
+- **Vocabulary (§D.2):** NL standard word is **Meerwerk** — "Extra
+  werk" swept out of every NL bundle (~150 values); EN keeps "Extra
+  work". EN banned words removed: proposal→quote, spawn→created,
+  operational ticket→ticket, occurrence→planned visit, slot→work
+  block, routing→handling; "Reopened by admin"→"Reopened". EN "Work
+  plan"→"My schedule". The sweep also aligned
+  `ticket_status.converted_to_extra_work` with
+  `backend/notifications/status_labels.py` (they had drifted;
+  `test_sprint184_status_vocabulary` now passes on both).
+- **Navigation (§D.3):** provider roles read four groups (Werk /
+  Financieel / Klanten & mensen / Systeem); STAFF reads Werkplanning /
+  Mijn uren / Berichten / Instellingen, "/" lands on Werkplanning and
+  the bell feed is a tab inside Berichten (staff only); CUSTOMER_USER
+  reads the Klantportaal six (§D.3.1) with the "Meer" fold, and the
+  customer surface says **Klantportaal**, never console. Per-entry
+  role gates unchanged.
+- **Chargeable work is dead:** nav entries removed;
+  `/tickets/chargeable` → `/tickets?work=chargeable&status=ALL` and
+  `/admin/customers/:id/chargeable` → the customer ticket list, with
+  "chargeable" re-admitted as a URL/work-filter value ("Alleen
+  meerwerk" in the queue's own Show select). The type pill reads
+  Meerwerk / Extra work and keeps its link.
+- CLAUDE.md workflow rules updated (Step 0): CC never opens PRs, no
+  full backend suite without an explicit ask, sprints end deployed on
+  crmtest.
+
 ### Done — WP-1: Werkplanning behaviour + billing guard (Addendum D §D.11, 2026-08-28)
 
 Branch `feat/wp-1-werkplanning-behaviour`, stacked on
