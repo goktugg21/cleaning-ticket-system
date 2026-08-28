@@ -36,6 +36,34 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — FE-2: the customer surface (Addendum D §D.4/§D.5, 2026-08-28)
+
+Branch `feat/fe-2-customer-surface`, stacked on FE-1 (the train; main
+untouched). Zero migrations, no state-machine or permission changes,
+no new write endpoints.
+
+- **Backend:** `display_phase` on the EW list+detail and ticket
+  list+detail serializers — per-viewer SerializerMethodFields over ONE
+  closed mapping each (`extra_work/display_phase.py`,
+  `tickets/display_phase.py`), cross-product exhaustiveness tests, an
+  unmapped status raises. `GET /api/extra-work/<id>/timeline/` folds
+  the request's history + its spawned ticket's milestones into machine
+  event keys (no free text ever copied in — the B1/B7 privacy floor
+  holds by construction). FE-1's backend word leftovers swept (SLA
+  mail, quote PDF header, invoice PDF title, contracts register,
+  spawn/operational-ticket API strings; generation only).
+- **Frontend:** customer Start (own open items, `start.*` keys, one
+  primary action), the §D.5.1 three-question melding flow, the §D.5.2
+  guided meerwerk flow (server preview states the outcome; auto-start
+  only from `allowed_intents`), the §D.4 tracker grouped by phase with
+  phase-banner + folded-timeline + §D.5.3 approval detail (quote's own
+  price), Mijn meldingen + ticket detail in phase words. Role picks
+  the component, never the route; provider pages untouched.
+- Nine PRE-EXISTING red tests on the train (verified identical on the
+  FE-1 tip) turned green: requested_date payload drift, W12
+  spawned-ticket shape, two origin key sets; plus the W12
+  deferred-field N+1 fixed in the list prefetch's `.only()`.
+
 ### Done — FE-1: vocabulary + navigation (Addendum D §D.2/§D.3, 2026-08-28)
 
 Branch `feat/fe-1-vocabulary-navigation`, stacked on
