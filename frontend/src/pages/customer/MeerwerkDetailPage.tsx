@@ -19,12 +19,17 @@ import { api, getApiError } from "../../api/client";
 import {
   getExtraWork,
   getExtraWorkTimeline,
+  getProposalDetail,
   listProposalsForEw,
   transitionExtraWork,
   transitionProposal,
   type ExtraWorkTimelineEntry,
 } from "../../api/extraWork";
-import type { ExtraWorkRequestDetail, Proposal } from "../../api/types";
+import type {
+  ExtraWorkRequestDetail,
+  Proposal,
+  ProposalDetail,
+} from "../../api/types";
 import { PageHeader } from "../../components/PageHeader";
 import { RejectReasonDialog } from "../../components/RejectReasonDialog";
 import { PhaseBanner } from "../../components/customer/PhaseBadge";
@@ -36,7 +41,9 @@ export function MeerwerkDetailPage() {
 
   const [detail, setDetail] = useState<ExtraWorkRequestDetail | null>(null);
   const [timeline, setTimeline] = useState<ExtraWorkTimelineEntry[]>([]);
-  const [sentProposal, setSentProposal] = useState<Proposal | null>(null);
+  const [sentProposal, setSentProposal] = useState<ProposalDetail | null>(
+    null,
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -51,8 +58,13 @@ export function MeerwerkDetailPage() {
       ]);
       setDetail(detailData);
       setTimeline(timelineData.entries);
+      // §D.5.3 — when a SENT quote exists, ITS lines and total are the
+      // price the customer approves; the cart is only the wish list.
+      const sent = proposals.find((row) => row.status === "SENT") ?? null;
       setSentProposal(
-        proposals.find((row) => row.status === "SENT") ?? null,
+        sent === null
+          ? null
+          : await getProposalDetail(Number(id), sent.id).catch(() => null),
       );
       setError("");
     } catch (err) {
@@ -166,25 +178,46 @@ export function MeerwerkDetailPage() {
               : t("meerwerk_detail.approve_completion_title")}
           </div>
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {detail.line_items?.map((line) => (
-              <li key={line.id} className="wp-undated-row">
-                <span>
-                  {line.quantity} ×{" "}
-                  {line.service_name ||
-                    line.custom_description ||
-                    t("meerwerk_detail.line_other")}
-                </span>
-                <span className="muted small">
-                  {line.contract_unit_price
-                    ? formatMoney(line.contract_unit_price)
-                    : t("meerwerk_flow.price_follows")}
-                </span>
-              </li>
-            ))}
+            {sentProposal && canDecide
+              ? sentProposal.lines.map((line) => (
+                  <li key={line.id} className="wp-undated-row">
+                    <span>
+                      {line.quantity} ×{" "}
+                      {line.service_name ||
+                        line.description ||
+                        t("meerwerk_detail.line_other")}
+                    </span>
+                    <span className="muted small">
+                      {formatMoney(line.unit_price)}
+                    </span>
+                  </li>
+                ))
+              : detail.line_items?.map((line) => (
+                  <li key={line.id} className="wp-undated-row">
+                    <span>
+                      {line.quantity} ×{" "}
+                      {line.service_name ||
+                        line.custom_description ||
+                        t("meerwerk_detail.line_other")}
+                    </span>
+                    <span className="muted small">
+                      {line.contract_unit_price
+                        ? formatMoney(line.contract_unit_price)
+                        : t("meerwerk_flow.price_follows")}
+                    </span>
+                  </li>
+                ))}
           </ul>
-          {money !== null && (
+          {(sentProposal && canDecide ? sentProposal.total_amount : money) !==
+            null && (
             <p style={{ fontWeight: 600, marginTop: 10 }}>
-              {t("meerwerk_detail.total", { amount: formatMoney(money) })}
+              {t("meerwerk_detail.total", {
+                amount: formatMoney(
+                  sentProposal && canDecide
+                    ? sentProposal.total_amount
+                    : (money as string),
+                ),
+              })}
             </p>
           )}
           <div style={{ display: "flex", gap: 10 }}>

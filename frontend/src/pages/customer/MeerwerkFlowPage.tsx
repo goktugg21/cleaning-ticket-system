@@ -126,7 +126,11 @@ export function MeerwerkFlowPage() {
     let cancelled = false;
     Promise.all([
       listCustomerPrices(customer.id),
-      listCustomerCustomPrices(customer.id),
+      // Custom prices are readable only by some customer roles (the
+      // endpoint 403s the rest); a refusal simply means none to offer.
+      listCustomerCustomPrices(customer.id).catch(
+        () => [] as CustomerCustomPrice[],
+      ),
     ])
       .then(([priceRows, customRows]) => {
         if (cancelled) return;
