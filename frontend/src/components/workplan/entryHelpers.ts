@@ -11,7 +11,7 @@
 import type { Role } from "../../api/types";
 import type { WorkPlanEntry, WorkPlanPart } from "../../api/workPlan";
 import { canAccessExtraWork } from "../../auth/permissions";
-import { formatDate } from "../../lib/intl";
+import { formatDate, formatDateWeekday } from "../../lib/intl";
 
 /** Where a card's title points, or null when this viewer may not open
  *  it. STAFF are gated out of `/extra-work/:id` by `ExtraWorkRoute` and
@@ -38,6 +38,12 @@ export function detailPath(entry: WorkPlanEntry, role: Role | null): string | nu
  *  prints the previous day. */
 export function formatDay(iso: string): string {
   return formatDate(`${iso}T00:00:00`);
+}
+
+/** WP-1 G0 — "ma 24 aug": the placement-marker date. Same explicit
+ *  midnight, same reason. */
+export function formatPlannedDay(iso: string): string {
+  return formatDateWeekday(`${iso}T00:00:00`);
 }
 
 /**

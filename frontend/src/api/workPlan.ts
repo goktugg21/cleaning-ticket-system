@@ -154,7 +154,7 @@ export interface WorkPlanEntry {
    *  past. Null when nothing was promised. "Late or not" says it one day
    *  too late to act on; this is what lets somebody read where they
    *  stand without opening the ticket. */
-  due_in_days: number | null;
+  days_until_due: number | null;
   /** W-VIEWER §5 — nothing is being asked of THIS reader right now, so
    *  the card renders calm rather than urgent. For a worker: their slot
    *  is off their hands and every part of theirs is done. For a manager:
@@ -163,6 +163,14 @@ export interface WorkPlanEntry {
    *  their answer, which they may still withdraw. Visible either way;
    *  just not shouting. */
   viewer_settled: boolean;
+  /** WP-1 G2 — whole days this job has sat with NO planned date at
+   *  all. Null on every dated entry. The "Nog niet gepland" lane
+   *  prints it past a threshold so dateless work still nags. */
+  unplanned_age_days: number | null;
+  /** WP-1 G1 — whole days this job has been stuck (somebody said
+   *  "unable" and nobody is assigned any more). Set on the rows of
+   *  `stuck_entries`, null everywhere else. */
+  stuck_age_days: number | null;
   assignee_names: string[];
   assignee_count: number;
   /** W-N1 §3 — the parts of this ticket THIS entry's person holds.
@@ -191,6 +199,8 @@ export interface WorkPlanCounts {
   undated: number;
   /** W-LATE §1a — late JOBS (deduped), any week, the strip's own count. */
   late: number;
+  /** WP-1 G1 — stuck jobs (blocked with nobody assigned), whole scope. */
+  stuck: number;
 }
 
 export interface WorkPlanWeek {
@@ -219,12 +229,18 @@ export interface WorkPlanResponse {
    *  ladder (orange leftmost, bordeaux rightmost), each carrying the
    *  same `lateness` the week cards carry. */
   late_entries: WorkPlanEntry[];
+  /** WP-1 G1 — "Vastgelopen — actie nodig": work that stopped without
+   *  being done (unable-to-complete with nobody assigned; extra work
+   *  whose ticket ended blocked). A row leaves only when a human
+   *  reschedules, reassigns or cancels through the existing actions. */
+  stuck_entries: WorkPlanEntry[];
   limits: {
     entries: number;
     overdue_entries: number;
     upcoming_entries: number;
     undated_entries: number;
     late_entries: number;
+    stuck_entries: number;
   };
   truncated: {
     entries: boolean;
@@ -232,6 +248,7 @@ export interface WorkPlanResponse {
     upcoming_entries: boolean;
     undated_entries: boolean;
     late_entries: boolean;
+    stuck_entries: boolean;
   };
 }
 

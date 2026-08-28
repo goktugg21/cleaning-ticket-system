@@ -15356,3 +15356,21 @@ table.assign-table { min-width: 0; width: 100%; }
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
+
+/* ===================================================================
+   WP-1 (Addendum D §D.11.2) — APPEND-ONLY block.
+   G1: the "Vastgelopen — actie nodig" list's age stamp.
+   G2: the "Nog niet gepland" row's age line.
+   =================================================================== */
+.wp-stuck-age {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger, #b3261e);
+  white-space: nowrap;
+}
+.wp-undated-age {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warning-strong, #9a6a00);
+}

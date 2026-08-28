@@ -17,7 +17,7 @@ import type { WorkPlanEntry, WorkPlanPart } from "../../api/workPlan";
 import { SlotStatusBadge } from "../SlotStatusBadge";
 import { StatusBadge } from "../StatusBadge";
 import { formatPlannedWindow } from "../../lib/plannedWindow";
-import { detailPath, formatDay } from "./entryHelpers";
+import { detailPath, formatDay, formatPlannedDay } from "./entryHelpers";
 import { latenessOf } from "./lateness";
 import { LateBadge } from "./LateStrip";
 import { PartChips } from "./PartChips";
@@ -88,7 +88,7 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
         <History size={11} strokeWidth={2.5} />
         {entry.rolled_from
           ? t("agenda.why_rolled", {
-              date: formatDay(entry.rolled_from),
+              date: formatPlannedDay(entry.rolled_from),
               count: entry.rolled_days ?? 0,
             })
           : t("agenda.why_rolled_undated")}
@@ -97,13 +97,24 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
   }
 
   if (entry.placement === "OVERDUE") {
+    // WP-1 G0 — the same-week carry. An overdue-and-open job whose
+    // planned window still covers the current week is a marked visitor
+    // on today's column, and the marker says the same two facts the
+    // rolled marker says: the day it was PLANNED for, and how late it
+    // is. Only where no planned day exists does the deadline itself
+    // have to carry the sentence.
     return (
       <div className="wp-why wp-why-overdue" data-testid="agenda-card-why">
         <AlarmClock size={11} strokeWidth={2.5} />
-        {entry.due_date
-          ? t("agenda.why_overdue", { date: formatDay(entry.due_date) })
-          : t("agenda.why_overdue_undated")}
-        {entry.overdue_days !== null && (
+        {entry.planned_start
+          ? t("agenda.why_overdue_planned", {
+              date: formatPlannedDay(entry.planned_start),
+              count: entry.overdue_days ?? 0,
+            })
+          : entry.due_date
+            ? t("agenda.why_overdue", { date: formatDay(entry.due_date) })
+            : t("agenda.why_overdue_undated")}
+        {!entry.planned_start && entry.overdue_days !== null && (
           <span>{t("agenda.overdue_days", { count: entry.overdue_days })}</span>
         )}
       </div>
@@ -128,7 +139,7 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
  * "Late" is a fact you learn one day after you could have acted on it.
  * The ruling asks every relevant card to say the time remaining until
  * the deadline OR how far past it, so somebody can read their standing
- * without opening the ticket. `due_in_days` is the signed number the
+ * without opening the ticket. `days_until_due` is the signed number the
  * server computes from the same `due` the placement rule uses — days
  * left when positive, days over when negative, today at zero.
  *
@@ -146,10 +157,17 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
  */
 export function DueChip({ entry }: { entry: WorkPlanEntry }) {
   const { t } = useTranslation("staff_slots");
-  const days = entry.due_in_days;
+  const days = entry.days_until_due;
   if (days === null) return null;
   const hasDeadline = entry.lateness.deadline !== null;
-  if (!hasDeadline && entry.placement === "ROLLED") return null;
+  // WP-1 G0 — an OVERDUE-placed card's marker already prints
+  // "Gepland <day> — N dagen te laat"; without a real deadline the chip
+  // would be that same fact a second time, exactly like on ROLLED.
+  if (
+    !hasDeadline &&
+    (entry.placement === "ROLLED" || entry.placement === "OVERDUE")
+  )
+    return null;
   const tone = days < 0 ? "over" : days === 0 ? "today" : "left";
   const over = Math.abs(days);
   const label = hasDeadline
@@ -326,7 +344,12 @@ export function WorkPlanCard({
         <LateBadge
           facts={late}
           testId="agenda-card-late"
-          omitPlanned={entry.placement === "ROLLED"}
+          // WP-1 G0 — the OVERDUE marker now prints the planned line
+          // too, so both carried placements hand it over.
+          omitPlanned={
+            entry.placement === "ROLLED" ||
+            (entry.placement === "OVERDUE" && entry.planned_start !== null)
+          }
         />
       )}
       {/* W-VIEWER §5 — the countdown, on every card that has a promise

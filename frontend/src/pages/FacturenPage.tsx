@@ -42,11 +42,14 @@ import { BadgeEuro } from "lucide-react";
 import { getApiError } from "../api/client";
 import {
   generateInvoices,
+  getBillingMonthAtRisk,
   getInvoiceDueList,
   getInvoicePreview,
   granularityFor,
   listAllInvoices,
   pairForGranularity,
+  type AtRiskGroup,
+  type AtRiskStage,
   type InvoiceBillingTarget,
   type InvoicePreview,
   type InvoiceSplit,
@@ -69,12 +72,22 @@ import {
 import { useToast } from "../components/ToastProvider";
 import { customerLabelName } from "../lib/customerLabelName";
 import {
+  formatDate,
   formatDateTime,
   formatInvoiceGroupLabel,
   formatMoney,
 } from "../lib/intl";
 
 type StatusFilter = InvoiceStatus | "ALL";
+
+// WP-1 G4 — human words for the guard's machine stages. The backend
+// sends keys; the page speaks the reader's language.
+const AT_RISK_STAGE_KEYS: Record<AtRiskStage, string> = {
+  WAITING_REVIEW: "facturen.at_risk_stage_waiting_review",
+  SLOT_DONE: "facturen.at_risk_stage_slot_done",
+  BLOCKED: "facturen.at_risk_stage_blocked",
+  PAST_DEADLINE: "facturen.at_risk_stage_past_deadline",
+};
 
 /** Sprint 183 — the /due/ row carries three fields `api/types.ts` does
  *  not describe yet: the saved billing pair (Sprint 182 §3) and the
@@ -263,6 +276,12 @@ export function FacturenPage({
 
   const [dueRows, setDueRows] = useState<InvoiceDueRow[]>([]);
   const [dueLoading, setDueLoading] = useState(true);
+  // WP-1 G4 — the billing-month guard's groups, narrowed to the pinned
+  // customer in embedded mode the same client-side way the due rows
+  // are (and for the same reason: the endpoint answers the caller's
+  // whole scope). Empty means "no risk" and the panel stays away.
+  const [atRiskGroups, setAtRiskGroups] = useState<AtRiskGroup[]>([]);
+  const [atRiskTruncated, setAtRiskTruncated] = useState(false);
   // W5 fix 4 — resolved lazily per customer, keyed by customer id. An
   // absent entry means "not resolved yet or the probe failed", and a row
   // in that state simply says nothing rather than guessing a period.
@@ -339,6 +358,31 @@ export function FacturenPage({
       }
     }
     loadDue();
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId, refreshKey]);
+
+  // WP-1 G4 — the at-risk panel's data. A failed fetch keeps its
+  // silence: the due panel below is the page's load-bearing surface,
+  // and a guard that cannot load must not take the page down with it.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAtRisk() {
+      try {
+        const data = await getBillingMonthAtRisk();
+        if (cancelled) return;
+        setAtRiskGroups(
+          customerId === undefined
+            ? data.groups
+            : data.groups.filter((group) => group.customer === customerId),
+        );
+        setAtRiskTruncated(data.truncated);
+      } catch {
+        if (!cancelled) setAtRiskGroups([]);
+      }
+    }
+    loadAtRisk();
     return () => {
       cancelled = true;
     };
@@ -565,6 +609,77 @@ export function FacturenPage({
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
           {error}
         </div>
+      )}
+
+      {/* ---- WP-1 G4: the billing-month guard ---- */}
+      {atRiskGroups.length > 0 && (
+        <section
+          className="card"
+          style={{ padding: 16, marginBottom: 16 }}
+          data-testid="facturen-at-risk-panel"
+        >
+          <div className="section-head" style={{ marginBottom: 10 }}>
+            <div>
+              <div className="section-head-title">
+                {t("facturen.at_risk_title")}
+              </div>
+              <div className="section-head-sub">
+                {t("facturen.at_risk_sub")}
+              </div>
+            </div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table
+              className="data-table data-table-dense"
+              data-testid="facturen-at-risk-table"
+            >
+              <thead>
+                <tr>
+                  <th>{t("facturen.col_customer")}</th>
+                  <th>{t("facturen.at_risk_col_item")}</th>
+                  <th>{t("facturen.at_risk_col_stage")}</th>
+                  <th>{t("facturen.at_risk_col_age")}</th>
+                  <th>{t("facturen.at_risk_col_date")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {atRiskGroups.flatMap((group) =>
+                  group.rows.map((row) => (
+                    <tr
+                      key={`${group.customer}-${row.extra_work_id}`}
+                      data-testid="facturen-at-risk-row"
+                    >
+                      <td>{group.customer_name}</td>
+                      <td>
+                        <Link
+                          to={
+                            row.ticket_id !== null
+                              ? `/tickets/${row.ticket_id}`
+                              : `/extra-work/${row.extra_work_id}`
+                          }
+                        >
+                          {row.ticket_no ? `${row.ticket_no} · ` : ""}
+                          {row.title}
+                        </Link>
+                        {row.building_name && (
+                          <div className="muted small">{row.building_name}</div>
+                        )}
+                      </td>
+                      <td>{t(AT_RISK_STAGE_KEYS[row.stage])}</td>
+                      <td>{t("facturen.at_risk_age", { count: row.age_days })}</td>
+                      <td>{formatDate(`${row.date}T00:00:00`)}</td>
+                    </tr>
+                  )),
+                )}
+              </tbody>
+            </table>
+          </div>
+          {atRiskTruncated && (
+            <p className="muted small" role="status">
+              {t("facturen.at_risk_truncated")}
+            </p>
+          )}
+        </section>
       )}
 
       {/* ---- Due panel ---- */}

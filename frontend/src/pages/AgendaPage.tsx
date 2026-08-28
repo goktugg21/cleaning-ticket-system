@@ -121,6 +121,10 @@ const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
   OTHER: "type_other",
 };
 
+// WP-1 G2 — how old dateless work must be before the "Nog niet gepland"
+// row starts saying so out loud (Addendum D §D.11.2: threshold 3 days).
+const UNPLANNED_AGE_THRESHOLD_DAYS = 3;
+
 
 // ---------------------------------------------------------------------------
 // Role dispatcher — see the file-header comment for the per-role surfaces.
@@ -459,6 +463,14 @@ function WorkPlanWeek() {
     data && !data.truncated.undated_entries
       ? undatedJobs.length
       : (data?.counts.undated ?? 0);
+
+  /** WP-1 G1 — the follow-up list, one row per JOB for the same reason
+   *  the undated lane dedupes: a person can hold several slots on one
+   *  stuck ticket, and the list is about the job. */
+  const stuckJobs = useMemo(
+    () => (data ? dedupeByJob(data.stuck_entries) : []),
+    [data],
+  );
 
   /** Mon-Sun of the loaded week, ALWAYS all seven — a week with nothing
    *  on Thursday must show an empty Thursday, not silently close the
@@ -833,6 +845,47 @@ function WorkPlanWeek() {
         </section>
       )}
 
+      {/* WP-1 G1 — "Vastgelopen — actie nodig". Work that stopped
+          without being done: somebody said "unable" and nobody is
+          assigned any more, or an extra work whose ticket ended
+          blocked. Blocked is not done — a row leaves this list only
+          when a human reschedules, reassigns or cancels through the
+          existing actions, which live one click away on the record
+          itself. */}
+      {data && stuckJobs.length > 0 && (
+        <section
+          className="card"
+          data-testid="agenda-stuck-list"
+          style={{ marginBottom: 18, padding: "16px 18px" }}
+        >
+          <div className="section-head-title" style={{ marginBottom: 4 }}>
+            {t("agenda.stuck_title")}
+          </div>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            {t("agenda.stuck_desc")}
+          </p>
+          <BoundedList
+            size="lg"
+            count={stuckJobs.length}
+            ariaLabel={t("agenda.stuck_title")}
+            testIdPrefix="agenda-stuck"
+          >
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {stuckJobs.map((entry) => (
+                <StuckRow key={entry.key} entry={entry} role={role} />
+              ))}
+            </ul>
+          </BoundedList>
+          {data.truncated.stuck_entries && (
+            <p className="wp-notice" role="status">
+              {t("agenda.truncated_note", {
+                count: data.limits.stuck_entries,
+              })}
+            </p>
+          )}
+        </section>
+      )}
+
       {/* W-VIEWER §3 — WHAT THIS BOARD IS, said once, where it is read.
           The general plan places every job on the ticket's own scheduled
           date and shows it once however many people are on it. Each of
@@ -1062,6 +1115,20 @@ function UndatedRow({
             .filter(Boolean)
             .join(" · ")}
         </span>
+        {/* WP-1 G2 — dateless work never becomes overdue by design, so
+            this is its only nag: how long it has sat here, said out
+            loud once it is older than the threshold. */}
+        {entry.unplanned_age_days !== null &&
+          entry.unplanned_age_days >= UNPLANNED_AGE_THRESHOLD_DAYS && (
+            <span
+              className="wp-undated-age"
+              data-testid={`agenda-undated-age-${entry.key}`}
+            >
+              {t("agenda.unplanned_age", {
+                count: entry.unplanned_age_days,
+              })}
+            </span>
+          )}
       </div>
       {/* Sprint 182 §3 — the SAME action on both kinds. A ticket writes
           its schedule, an extra work writes the provider's planned day;
@@ -1075,6 +1142,48 @@ function UndatedRow({
       >
         {busy ? t("agenda.undated_planning") : t("agenda.undated_plan_today")}
       </button>
+    </li>
+  );
+}
+
+/** WP-1 G1 — one stuck job. A READ row: the actions that empty this
+ *  list (reschedule, reassign, cancel) are the existing ones on the
+ *  record the title opens. */
+function StuckRow({
+  entry,
+  role,
+}: {
+  entry: WorkPlanEntry;
+  role: Role | null;
+}) {
+  const { t } = useTranslation(["staff_slots", "common"]);
+  const to = detailPath(entry, role);
+  const where = [entry.building_name, entry.customer_name]
+    .filter(Boolean)
+    .join(" · ");
+  const heading = `${entry.ticket_no ? `${entry.ticket_no} · ` : ""}${entry.title}`;
+  const age = entry.stuck_age_days ?? 0;
+  return (
+    <li className="wp-undated-row" data-testid={`agenda-stuck-row-${entry.key}`}>
+      <div className="wp-undated-row-main">
+        {to ? <Link to={to}>{heading}</Link> : <span>{heading}</span>}
+        <span className="muted small">{where}</span>
+        {entry.unable_to_complete_reason && (
+          <span className="muted small">
+            {t("agenda.stuck_reason", {
+              reason: entry.unable_to_complete_reason,
+            })}
+          </span>
+        )}
+      </div>
+      <span
+        className="wp-stuck-age"
+        data-testid={`agenda-stuck-age-${entry.key}`}
+      >
+        {age === 0
+          ? t("agenda.stuck_age_today")
+          : t("agenda.stuck_age", { count: age })}
+      </span>
     </li>
   );
 }

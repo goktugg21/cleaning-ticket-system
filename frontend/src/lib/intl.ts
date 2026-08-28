@@ -84,6 +84,30 @@ export function formatDate(
 }
 
 /**
+ * WP-1 G0 — "ma 24 aug" / "Mon 24 Aug": weekday-short day, no year.
+ * For the work plan's placement markers, where the reader is inside one
+ * week and the year is noise but the WEEKDAY is the fact ("planned
+ * Monday" reads; "planned the 24th" makes them count). Empty/invalid
+ * input returns "—".
+ */
+export function formatDateWeekday(
+  value: string | Date | null | undefined,
+  locale?: string,
+): string {
+  const date = parseDate(value);
+  if (!date) return DASH;
+  try {
+    return new Intl.DateTimeFormat(resolveLocale(locale), {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    }).format(date);
+  } catch {
+    return DASH;
+  }
+}
+
+/**
  * "15 May 2026, 17:49" — with time. Empty returns "—".
  */
 export function formatDateTime(

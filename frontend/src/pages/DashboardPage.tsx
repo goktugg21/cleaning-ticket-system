@@ -18,7 +18,9 @@ import {
   listExtraWork,
 } from "../api/extraWork";
 import { getInboxUnreadCount } from "../api/inbox";
+import { getBillingMonthAtRisk } from "../api/invoices";
 import { listNotifications, notificationHref } from "../api/notifications";
+import { getWorkPlan } from "../api/workPlan";
 import type {
   AssignmentCandidate,
   ExtraWorkRequestList,
@@ -68,6 +70,7 @@ import {
   visibleTicketTotal,
 } from "../lib/ticketStatus";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
+import { currentIsoWeek, formatIsoWeek } from "../lib/isoWeek";
 import { StatusBadge } from "../components/StatusBadge";
 
 type SLAFilterValue =
@@ -1149,6 +1152,12 @@ export function DashboardPage({
   const [attnActivity, setAttnActivity] = useState<Notification[] | null>(
     null,
   );
+  // WP-1 — the three guard counts. Server-computed over the whole
+  // scope (the work-plan counts block and the at-risk endpoint); the
+  // dashboard only repeats them. Null = not loaded, renders "—".
+  const [attnStuck, setAttnStuck] = useState<number | null>(null);
+  const [attnUnplanned, setAttnUnplanned] = useState<number | null>(null);
+  const [attnAtRisk, setAttnAtRisk] = useState<number | null>(null);
 
   // RF-18 (#107) — info-widget data (dashboard variant only). One fetch
   // per widget on mount (+ the shared auto-refresh); role-ineligible
@@ -1256,6 +1265,24 @@ export function DashboardPage({
     }
   }, [isTicketsPage]);
 
+  // WP-1 — the guard counts behind the three new attention rows. A
+  // separate loader because both fetches are management-gated (the
+  // at-risk endpoint 403s everyone else) and either may fail without
+  // taking the classic rows down; `allSettled` keeps the "—" on
+  // whichever half did not land.
+  const loadGuardCounts = useCallback(async () => {
+    if (isTicketsPage || !isProviderManagementRole(userRole)) return;
+    const [plan, risk] = await Promise.allSettled([
+      getWorkPlan(formatIsoWeek(currentIsoWeek()), true),
+      getBillingMonthAtRisk(),
+    ]);
+    if (plan.status === "fulfilled") {
+      setAttnStuck(plan.value.counts.stuck);
+      setAttnUnplanned(plan.value.counts.undated);
+    }
+    if (risk.status === "fulfilled") setAttnAtRisk(risk.value.total);
+  }, [isTicketsPage, userRole]);
+
   useEffect(() => {
     // Top KPI row needs BOTH ticket and extra-work stats (it is a
     // 5-card unified row), so the stats loaders run unconditionally.
@@ -1265,12 +1292,14 @@ export function DashboardPage({
     loadStatsByBuilding();
     loadExtraWorkStats();
     loadAttention();
+    loadGuardCounts();
     loadWidgets();
   }, [
     loadStats,
     loadStatsByBuilding,
     loadExtraWorkStats,
     loadAttention,
+    loadGuardCounts,
     loadWidgets,
   ]);
 
@@ -1864,6 +1893,52 @@ export function DashboardPage({
                         {fmt(
                           extraWorkStats?.awaiting_customer_approval ?? null,
                         )}
+                      </span>
+                    </Link>
+                  </li>
+                  {/* WP-1 G1 — work that stopped without being done. */}
+                  <li className="attn-item">
+                    <Link
+                      to="/agenda"
+                      className="attn-row"
+                      data-testid="attention-stuck"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.stuck_title")}
+                      </span>
+                      <span className={attnBadge(attnStuck, true)}>
+                        {fmt(attnStuck)}
+                      </span>
+                    </Link>
+                  </li>
+                  {/* WP-1 G2 — dateless work, counted where a manager
+                      looks. */}
+                  <li className="attn-item">
+                    <Link
+                      to="/agenda"
+                      className="attn-row"
+                      data-testid="attention-unplanned"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.unplanned_title")}
+                      </span>
+                      <span className={attnBadge(attnUnplanned, true)}>
+                        {fmt(attnUnplanned)}
+                      </span>
+                    </Link>
+                  </li>
+                  {/* WP-1 G4 — the billing-month guard's count. */}
+                  <li className="attn-item">
+                    <Link
+                      to="/invoices"
+                      className="attn-row"
+                      data-testid="attention-at-risk"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.at_risk_title")}
+                      </span>
+                      <span className={attnBadge(attnAtRisk, true)}>
+                        {fmt(attnAtRisk)}
                       </span>
                     </Link>
                   </li>

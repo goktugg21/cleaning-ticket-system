@@ -69,6 +69,54 @@ export async function getInvoiceDueList(): Promise<InvoiceDueRow[]> {
   return response.data;
 }
 
+// ---- WP-1 G4 — the billing-month guard -------------------------------
+//
+// GET /api/invoices/at-risk/ — work tied to the open billing month (or
+// earlier) whose completion chain is broken, per customer. Read-only:
+// the panel makes a human act, it never writes. Types local for the
+// same reason the preview's are.
+export type AtRiskStage =
+  | "WAITING_REVIEW"
+  | "SLOT_DONE"
+  | "BLOCKED"
+  | "PAST_DEADLINE";
+
+export interface AtRiskRow {
+  kind: "EXTRA_WORK";
+  extra_work_id: number;
+  ticket_id: number | null;
+  ticket_no: string | null;
+  title: string;
+  building_id: number | null;
+  building_name: string | null;
+  stage: AtRiskStage;
+  age_days: number;
+  /** The planned day / deadline that ties this work to the month. */
+  date: string;
+}
+
+export interface AtRiskGroup {
+  customer: number;
+  customer_name: string;
+  company: number;
+  count: number;
+  rows: AtRiskRow[];
+}
+
+export interface AtRiskResponse {
+  period_year: number;
+  period_month: number;
+  total: number;
+  limit: number;
+  truncated: boolean;
+  groups: AtRiskGroup[];
+}
+
+export async function getBillingMonthAtRisk(): Promise<AtRiskResponse> {
+  const response = await api.get<AtRiskResponse>("/invoices/at-risk/");
+  return response.data;
+}
+
 // ---- Sprint 182 §2 — the invoice preview -----------------------------
 //
 // "If this were cut now, your invoice would be this." Provider-only,
