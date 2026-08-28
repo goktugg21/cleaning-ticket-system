@@ -61,7 +61,7 @@
   "agenda.role_guard_desc": "Mijn werk is alleen beschikbaar voor medewerkers en gebouwbeheerders.",
   "agenda.role_guard_title": "Niet beschikbaar voor uw rol",
   "agenda.search_placeholder": "Zoek op titel, ticket, gebouw of klant",
-  "agenda.source_extra_work": "Extra werk",
+  "agenda.source_extra_work": "Meerwerk",
   "agenda.source_ticket": "Ticket",
   "agenda.stuck_age_one": "{{count}} dag vastgelopen",
   "agenda.stuck_age_other": "{{count}} dagen vastgelopen",

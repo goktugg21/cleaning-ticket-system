@@ -2,7 +2,6 @@
   "eyebrow": "Account",
   "title": "Instellingen",
   "subtitle": "Pas uw profiel, wachtwoord en notificatievoorkeuren aan.",
-
   "profile_title": "Profiel",
   "profile_helper": "Uw naam en voorkeurstaal.",
   "email_label": "E-mail",
@@ -12,7 +11,6 @@
   "profile_saved": "Profiel opgeslagen.",
   "profile_save": "Profiel opslaan",
   "profile_saving": "Opslaan…",
-
   "password_title": "Wachtwoord",
   "password_helper": "Gebruik een sterk wachtwoord. Uw huidige sessie blijft actief na de wijziging.",
   "current_password_label": "Huidig wachtwoord",
@@ -26,7 +24,6 @@
   "password_saved": "Wachtwoord bijgewerkt.",
   "password_save": "Wachtwoord bijwerken",
   "password_saving": "Opslaan…",
-
   "notifications_title": "Notificatievoorkeuren",
   "notifications_helper": "Kies welke gebeurtenissen u per e-mail wilt ontvangen en of berichten ook in Notificaties verschijnen. Beveiligings- en uitnodigingsmails worden altijd verzonden.",
   "notifications_on": "Aan",
@@ -36,7 +33,7 @@
   "event_ticket_assigned": "Ticket toegewezen",
   "event_ticket_unassigned": "Ticket niet meer toegewezen",
   "event_ticket_message_feed": "Ticketberichten ook in Notificaties tonen",
-  "event_extra_work_message_feed": "Extra werk-berichten ook in Notificaties tonen",
+  "event_extra_work_message_feed": "Meerwerk-berichten ook in Notificaties tonen",
   "notifications_saved": "Notificatievoorkeuren opgeslagen.",
   "notifications_save": "Voorkeuren opslaan",
   "notifications_saving": "Opslaan…"

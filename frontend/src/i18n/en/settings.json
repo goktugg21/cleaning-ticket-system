@@ -2,7 +2,6 @@
   "eyebrow": "Account",
   "title": "Settings",
   "subtitle": "Update your profile, password, and notification preferences.",
-
   "profile_title": "Profile",
   "profile_helper": "Your name and preferred language.",
   "email_label": "Email",
@@ -12,7 +11,6 @@
   "profile_saved": "Profile saved.",
   "profile_save": "Save profile",
   "profile_saving": "Saving…",
-
   "password_title": "Password",
   "password_helper": "Use a strong password. Your existing session stays signed in after the change.",
   "current_password_label": "Current password",
@@ -26,7 +24,6 @@
   "password_saved": "Password updated.",
   "password_save": "Update password",
   "password_saving": "Saving…",
-
   "notifications_title": "Notification preferences",
   "notifications_helper": "Choose which events trigger an email to you and whether messages also appear in Notifications. Security and onboarding emails are always sent.",
   "notifications_on": "On",

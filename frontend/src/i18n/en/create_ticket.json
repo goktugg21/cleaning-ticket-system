@@ -64,7 +64,7 @@
   "summary_attachment_count_other": "{{count}} files",
   "summary_none": "None",
   "guidelines_title": "Ticket guidelines",
-  "guideline_1": "Be as specific as possible in the short description for faster routing.",
+  "guideline_1": "Be as specific as possible in the short description so it can be handled faster.",
   "guideline_2": "Include exact room numbers or asset IDs if known.",
   "guideline_3": "Photos drastically improve response times for maintenance issues.",
   "response_slas_title": "Response SLAs",

@@ -83,7 +83,7 @@
   "form.field_preferred_start_time_hint": "Optional. e.g. after 09:00.",
   "form.field_time_window_label": "Time window label",
   "form.field_time_window_placeholder": "e.g. Morning, After 09:00",
-  "form.field_time_window_hint": "Optional free-text label shown on each occurrence.",
+  "form.field_time_window_hint": "Optional free-text label shown on each planned visit.",
   "form.field_weekdays": "Weekdays",
   "form.field_weekdays_hint": "Pick the day(s) of the week this job runs on.",
   "form.field_weekdays_hint_biweekly": "Pick the day(s) of the week. Biweekly runs them every other week, anchored on the start date's week.",
