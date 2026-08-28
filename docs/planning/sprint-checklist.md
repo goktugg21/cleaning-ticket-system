@@ -36,6 +36,38 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — WP-1: Werkplanning behaviour + billing guard (Addendum D §D.11, 2026-08-28)
+
+Branch `feat/wp-1-werkplanning-behaviour`, stacked on
+`feat/ew-gap-closing` (NOT on `main` — the placement rule it extends,
+W-VIEWER/W-PLANTRUTH, exists only on that branch; the prompt's "off
+current main" assumed the chain had merged). Zero migrations, no
+state-machine changes, no billing-month writes. Spec:
+[Addendum D §D.11](../product/sot-addendum-d-frontend-redesign.md).
+
+- **G0** — same-week carry: `placement_for` rule 7 (current week only,
+  overdue-and-open beats planned, card on today marked with its planned
+  day + late count). Frontend markers print "Gepland ma 24 aug — N
+  dagen te laat" (weekday-short).
+- **G1** — `stuck_entries` / `counts.stuck` ("Vastgelopen — actie
+  nodig"): unable-to-complete with nobody assigned, and live extra work
+  whose ticket ended blocked; leaves only via reschedule / reassign /
+  cancel. Rendered on the work plan + dashboard attention block.
+- **G2** — `unplanned_age_days`; "Staat hier al N dagen" past 3 days on
+  the undated lane; counted in the attention block.
+- **G3** — `due_in_days` renamed `days_until_due`; the chip's copy
+  forks on `lateness.deadline` (the word "deadline" only where one
+  exists).
+- **G4** — the billing-month guard: `invoicing/at_risk.py` +
+  `GET /api/invoices/at-risk/` (four chain-break stages, open month or
+  earlier), the "Deze factuurmaand loopt risico" panel on Facturen +
+  dashboard count, and a weekly digest beat task
+  (`send_billing_month_at_risk_digest`; event type
+  `INVOICE_RUN_COMPLETED` reused — a new enum value is a choices
+  migration, deferred).
+- Tests: `test_sprint179a_work_plan` extended (G0/G1/G2/G3);
+  `invoicing/tests/test_at_risk.py` + `test_at_risk_digest.py` (G4).
+
 ### Done — W-VIEWER: two readers, two placement facts (owner ruling, 2026-08-27)
 
 **Supersedes W-PLANTRUTH §1a.** That wave decided *one fact places the
