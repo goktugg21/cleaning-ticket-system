@@ -208,7 +208,7 @@ function CustomerChargeableRedirect() {
   const { id } = useParams();
   return (
     <Navigate
-      to={`/admin/customers/${id}/tickets?work=chargeable&status=ALL`}
+      to={`/admin/customers/${id}/tickets?work=chargeable&status=ALL&period=all_time`}
       replace
     />
   );
@@ -293,7 +293,7 @@ export default function App() {
           <Route
             path="/tickets/chargeable"
             element={
-              <Navigate to="/tickets?work=chargeable&status=ALL" replace />
+              <Navigate to="/tickets?work=chargeable&status=ALL&period=all_time" replace />
             }
           />
           {/* W11 — ONE DOOR. Asks what happened and picks the record

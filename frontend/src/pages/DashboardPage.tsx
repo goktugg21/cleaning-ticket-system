@@ -573,9 +573,14 @@ export function DashboardPage({
    * every ticket ever raised is the pile his father was looking at.
    * This month is what somebody has to act on today; everything older
    * is one dropdown away and the archive is one toggle away. */
-  const [period, setPeriod] = useState<PeriodState>(() =>
-    periodState("this_month"),
-  );
+  const [period, setPeriod] = useState<PeriodState>(() => {
+    // FE-1 — the retired meerwerk sub-page defaulted WIDE; its redirect
+    // carries `?period=all_time` so the landing is not an empty month.
+    // Only that one value is admitted from the URL; the page's own
+    // default stays this month (W-H §3/§4).
+    const raw = new URLSearchParams(window.location.search).get("period");
+    return periodState(raw === "all_time" ? "all_time" : "this_month");
+  });
   /* W-H §2 — the working list or the archive. Never both: an archive
    * that still turns up among live work is a flag, not an archive. */
   const [showArchive, setShowArchive] = useState(false);
