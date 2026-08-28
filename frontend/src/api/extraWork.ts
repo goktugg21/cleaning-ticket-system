@@ -173,6 +173,42 @@ export async function listAllExtraWork(
   return all;
 }
 
+// FE-2 (§D.4) — the folded requester timeline: machine event keys the
+// UI translates, one chronological story over the request AND its
+// spawned ticket. Read-only.
+export type ExtraWorkTimelineEvent =
+  | "requested"
+  | "price_in_preparation"
+  | "quote_sent"
+  | "approved"
+  | "quote_rejected"
+  | "work_created"
+  | "work_started"
+  | "work_done"
+  | "work_reopened"
+  | "completion_submitted"
+  | "completion_approved"
+  | "completion_rejected"
+  | "invoiced"
+  | "cancelled";
+
+export interface ExtraWorkTimelineEntry {
+  at: string | null;
+  event: ExtraWorkTimelineEvent;
+  actor: string;
+  source: "MEERWERK" | "TICKET";
+}
+
+export async function getExtraWorkTimeline(
+  id: number | string,
+): Promise<{ entries: ExtraWorkTimelineEntry[]; count: number }> {
+  const response = await api.get<{
+    entries: ExtraWorkTimelineEntry[];
+    count: number;
+  }>(`/extra-work/${id}/timeline/`);
+  return response.data;
+}
+
 export async function getExtraWork(
   id: number | string,
 ): Promise<ExtraWorkRequestDetail> {

@@ -15374,3 +15374,86 @@ table.assign-table { min-width: 0; width: 100%; }
   font-weight: 600;
   color: var(--warning-strong, #9a6a00);
 }
+
+/* ===================================================================
+   FE-2 (Addendum D §D.4/§D.5) — APPEND-ONLY block.
+   The customer surface: phase badges/banners, the guided flow's
+   stepper, the folded timeline, and the confirm-step outcome line.
+   =================================================================== */
+.phase-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.phase-badge-action { background: #fdf3d7; color: #8a5a00; }
+.phase-badge-progress { background: #e8eef9; color: #274b8f; }
+.phase-badge-done { background: #e3f2e8; color: #1d6b3c; }
+.phase-badge-bad { background: #fbe4e4; color: #a12626; }
+
+.phase-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  border: 1px solid transparent;
+}
+.phase-banner-label { font-size: 16px; font-weight: 700; }
+.phase-banner-sub { font-size: 13px; opacity: 0.85; }
+.phase-banner-action { background: #fdf3d7; color: #6b4500; border-color: #eeda9e; }
+.phase-banner-progress { background: #e8eef9; color: #1f3f7a; border-color: #c9d8f2; }
+.phase-banner-done { background: #e3f2e8; color: #185a33; border-color: #bfe2cc; }
+.phase-banner-bad { background: #fbe4e4; color: #8f1f1f; border-color: #f2c4c4; }
+
+.meerwerk-steps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+}
+.meerwerk-step {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--surface-2, #f2f2f0);
+  color: var(--text-muted, #6b6b6b);
+}
+.meerwerk-step.active { background: #1d6b3c; color: #fff; }
+.meerwerk-step.done { background: #e3f2e8; color: #1d6b3c; }
+
+.meerwerk-outcome {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  margin-top: 12px;
+}
+.meerwerk-outcome-instant { background: #e3f2e8; color: #185a33; }
+.meerwerk-outcome-quote { background: #fdf3d7; color: #6b4500; }
+
+.meerwerk-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.meerwerk-timeline-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-soft, #ececea);
+}
+.meerwerk-timeline-row:last-child { border-bottom: none; }
+.meerwerk-timeline-when {
+  flex-shrink: 0;
+  width: 150px;
+  font-size: 12px;
+  color: var(--text-muted, #6b6b6b);
+}
+.meerwerk-timeline-label { font-weight: 600; }

@@ -252,6 +252,31 @@ export interface TicketCategory {
   updated_at: string;
 }
 
+
+// FE-2 (Addendum D §D.4) — the ONE presentation phase, computed
+// server-side per viewer. Never inferred client-side.
+export type ExtraWorkDisplayPhase =
+  | "WAITING_PRICE"
+  | "WAITING_YOUR_APPROVAL"
+  | "WAITING_CUSTOMER_APPROVAL"
+  | "SCHEDULED"
+  | "IN_EXECUTION"
+  | "WAITING_COMPLETION_APPROVAL"
+  | "DONE"
+  | "INVOICED"
+  | "REJECTED"
+  | "CANCELLED";
+
+export type TicketDisplayPhase =
+  | "RECEIVED"
+  | "PLANNED"
+  | "IN_EXECUTION"
+  | "WAITING_YOUR_APPROVAL"
+  | "WAITING_CUSTOMER_APPROVAL"
+  | "DONE"
+  | "REJECTED"
+  | "CONVERTED";
+
 export interface TicketList {
   // W-H §1 — the archive, on the LIST as well as the detail, so the
   // archive view can name who filed each row without a per-row fetch.
@@ -283,6 +308,7 @@ export interface TicketList {
   category_color: string | null;
   priority: string;
   status: TicketStatus;
+  display_phase: TicketDisplayPhase;
   company: number;
   // Sprint 30 Batch 30.1.2 — provider company display name. The
   // backend exposes this on BOTH list + detail serializers via
@@ -1864,6 +1890,7 @@ export interface ExtraWorkRequestList {
   category: ExtraWorkCategory;
   urgency: ExtraWorkUrgency;
   status: ExtraWorkStatus;
+  display_phase: ExtraWorkDisplayPhase;
   subtotal_amount: string;
   vat_amount: string;
   total_amount: string;

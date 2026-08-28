@@ -26,6 +26,11 @@ import { HistoryRecorder } from "./hooks/useRecordHistory";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { CreateExtraWorkPage } from "./pages/CreateExtraWorkPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
+import { MeldingCreatePage } from "./pages/customer/MeldingCreatePage";
+import { MeerwerkFlowPage } from "./pages/customer/MeerwerkFlowPage";
+import { MeerwerkTrackerPage } from "./pages/customer/MeerwerkTrackerPage";
+import { MeerwerkDetailPage } from "./pages/customer/MeerwerkDetailPage";
+import { StartPage } from "./pages/customer/StartPage";
 import { NewWorkPage } from "./pages/NewWorkPage";
 import { AgendaPage } from "./pages/AgendaPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -224,7 +229,29 @@ function HomeRoute() {
   if (me?.role === "STAFF") {
     return <Navigate to="/agenda" replace />;
   }
+  // FE-2 (§D.3.1) — a customer lands on START: their open items, not
+  // an operations console.
+  if (me?.role === "CUSTOMER_USER") {
+    return <StartPage />;
+  }
   return <DashboardPage />;
+}
+
+/**
+ * FE-2 (§D.5) — the customer surface swaps in its own three flows on
+ * the SAME routes; provider pages are untouched (FE-3/FE-5 own them).
+ * Role picks the component, never the route: deep links, notification
+ * hrefs and old bookmarks keep working for both audiences.
+ */
+function ByCustomer({
+  customer,
+  other,
+}: {
+  customer: ReactNode;
+  other: ReactNode;
+}) {
+  const { me } = useAuth();
+  return <>{me?.role === "CUSTOMER_USER" ? customer : other}</>;
 }
 
 /**
@@ -314,7 +341,10 @@ export default function App() {
             path="/tickets/new"
             element={
               <ProtectedRoute>
-                <CreateTicketPage />
+                <ByCustomer
+                  customer={<MeldingCreatePage />}
+                  other={<CreateTicketPage />}
+                />
               </ProtectedRoute>
             }
           />
@@ -426,7 +456,10 @@ export default function App() {
             path="/extra-work"
             element={
               <ExtraWorkRoute>
-                <ExtraWorkListPage />
+                <ByCustomer
+                  customer={<MeerwerkTrackerPage />}
+                  other={<ExtraWorkListPage />}
+                />
               </ExtraWorkRoute>
             }
           />
@@ -434,7 +467,10 @@ export default function App() {
             path="/extra-work/new"
             element={
               <ExtraWorkRoute>
-                <CreateExtraWorkPage />
+                <ByCustomer
+                  customer={<MeerwerkFlowPage />}
+                  other={<CreateExtraWorkPage />}
+                />
               </ExtraWorkRoute>
             }
           />
@@ -447,7 +483,10 @@ export default function App() {
             path="/extra-work/request-quote"
             element={
               <ExtraWorkRoute>
-                <CreateExtraWorkPage intentMode="quote" />
+                <ByCustomer
+                  customer={<Navigate to="/extra-work/new" replace />}
+                  other={<CreateExtraWorkPage intentMode="quote" />}
+                />
               </ExtraWorkRoute>
             }
           />
@@ -455,7 +494,10 @@ export default function App() {
             path="/extra-work/:id"
             element={
               <ExtraWorkRoute>
-                <ExtraWorkDetailPage />
+                <ByCustomer
+                  customer={<MeerwerkDetailPage />}
+                  other={<ExtraWorkDetailPage />}
+                />
               </ExtraWorkRoute>
             }
           />

@@ -1557,7 +1557,7 @@ export function DashboardPage({
           </div>
           <h2 className="page-title">
             {isChargeableWork
-              ? t("common:chargeable_work.title")
+              ? t("common:chargeable_work.pill")
               : isTicketsPage
                 ? t("tickets_page.title")
                 : t("title")}

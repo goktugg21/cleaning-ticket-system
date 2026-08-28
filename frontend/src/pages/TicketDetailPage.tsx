@@ -132,6 +132,7 @@ import { Toggle } from "../components/Toggle";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
 import { useToast } from "../components/ToastProvider";
+import { PhaseBanner } from "../components/customer/PhaseBadge";
 import { RouteBadge } from "../components/RouteBadge";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
@@ -612,6 +613,25 @@ const COMPLETION_TARGETS: ReadonlySet<TicketStatus | null> = new Set<
   TicketStatus | null
 >(["WAITING_MANAGER_REVIEW", "WAITING_CUSTOMER_APPROVAL", "APPROVED", "CLOSED"]);
 
+
+// FE-2 (§D.4) — the customer label view of the ticket workflow. Keys
+// resolve in `common` (`phase.ticket.*`); the map mirrors
+// backend/tickets/display_phase.py and exists for HISTORY rows, where
+// the server sends the raw enum per row.
+const CUSTOMER_TICKET_PHASE_KEY: Record<string, string> = {
+  OPEN: "phase.ticket.RECEIVED",
+  ACKNOWLEDGED: "phase.ticket.PLANNED",
+  IN_PROGRESS: "phase.ticket.IN_EXECUTION",
+  ON_HOLD: "phase.ticket.IN_EXECUTION",
+  WAITING_MANAGER_REVIEW: "phase.ticket.IN_EXECUTION",
+  REOPENED_BY_ADMIN: "phase.ticket.IN_EXECUTION",
+  WAITING_CUSTOMER_APPROVAL: "phase.ticket.WAITING_YOUR_APPROVAL",
+  APPROVED: "phase.ticket.DONE",
+  CLOSED: "phase.ticket.DONE",
+  REJECTED: "phase.ticket.REJECTED",
+  CONVERTED_TO_EXTRA_WORK: "phase.ticket.CONVERTED",
+};
+
 export function TicketDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -690,6 +710,15 @@ export function TicketDetailPage() {
 
   const tStatus = (status: TicketStatus | string | null): string => {
     if (!status) return t("status_default_created");
+    // FE-2 (Addendum D §D.4) — a CUSTOMER reads phase words, never the
+    // workflow enum. This is an i18n LABEL map of the server's own
+    // status→phase mapping (backend/tickets/display_phase.py) — a
+    // vocabulary choice, not client-side state inference: the current
+    // phase itself always comes from `ticket.display_phase`.
+    if (isCustomerUser(me?.role)) {
+      const phaseKey = CUSTOMER_TICKET_PHASE_KEY[String(status)];
+      if (phaseKey) return t(`common:${phaseKey}`);
+    }
     // Sprint 182 integration -- one vocabulary. See UnifiedTimeline.
     return t(`common:${ticketStatusLabelKey(status)}`);
   };
@@ -3292,6 +3321,16 @@ export function TicketDetailPage() {
           )}
           {ticketTab === "overview" && (
           <>
+          {/* FE-2 (§D.4) — the customer opens on the PHASE, said once,
+              with what happens next. Server-computed; providers keep
+              their own status surfaces. */}
+          {isCustomerUser(me?.role) && ticket.display_phase && (
+            <PhaseBanner
+              kind="ticket"
+              phase={ticket.display_phase}
+              testId="ticket-phase-banner"
+            />
+          )}
           <div className="card">
             <div className="card-head-icon">
               <span className="card-head-icon-glyph">

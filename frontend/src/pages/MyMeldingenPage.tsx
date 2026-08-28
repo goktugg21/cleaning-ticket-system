@@ -12,7 +12,7 @@ import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { PageHeader } from "../components/PageHeader";
-import { StatusBadge } from "../components/StatusBadge";
+import { PhaseBadge } from "../components/customer/PhaseBadge";
 import { formatDate } from "../lib/intl";
 
 /**
@@ -158,8 +158,13 @@ export function MyMeldingenPage() {
                             )}
                           </td>
                           <td>
-                            <StatusBadge
-                              status={{ kind: "ticket", value: row.status }}
+                            {/* FE-2 (§D.4) — the customer reads the
+                                server-computed PHASE, not the workflow
+                                status enum. */}
+                            <PhaseBadge
+                              kind="ticket"
+                              phase={row.display_phase}
+                              testId="my-meldingen-phase"
                             />
                           </td>
                           <td>{row.building_name}</td>
