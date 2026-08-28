@@ -708,6 +708,25 @@ def _spawned_tickets_for(obj):
     )
 
 
+def _display_phase_for(obj, user) -> str:
+    """FE-2 (§D.4) — the one presentation phase, shared by the list and
+    the detail serializer. Reads the same canonical spawned-ticket
+    resolution the money definition uses; never stored, never writable,
+    never consulted by backend logic."""
+    from .display_phase import display_phase
+
+    tickets = _spawned_tickets_for(obj)
+    ticket_status = tickets[0].status if tickets else None
+    return display_phase(
+        status=obj.status,
+        routing_decision=obj.routing_decision,
+        request_intent=obj.request_intent,
+        ticket_status=ticket_status,
+        is_invoiced=bool(obj.is_invoiced),
+        viewer_is_customer=_is_customer(user),
+    )
+
+
 def _serialize_spawned_tickets(obj):
     # W12 §2 — the ticket's OWN schedule, published so the screen can
     # show a conflict it currently computes and throws away.
@@ -886,6 +905,9 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     is_overdue = serializers.BooleanField(read_only=True)
     started_before_plan = serializers.BooleanField(read_only=True)
     is_priced = serializers.SerializerMethodField()
+    # FE-2 (§D.4) — the one phase the tracker groups by. Method field,
+    # so it is read-only by construction and per-viewer by context.
+    display_phase = serializers.SerializerMethodField()
 
     # Sprint 180 §1/§2 — the reverse of `Ticket.extra_work_origin`,
     # which had no serializer field at all in either direction from the
@@ -959,6 +981,7 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "category",
             "urgency",
             "status",
+            "display_phase",
             # Sprint 173 §4 — the deadline, the planned window's end, and
             # the two derived flags. These were declared on this
             # serializer but only added to the DETAIL serializer's
@@ -1093,6 +1116,11 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             }
         return cache[group_id]
 
+    def get_display_phase(self, obj) -> str:
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        return _display_phase_for(obj, user)
+
     def get_is_priced(self, obj) -> bool:
         return _is_priced(obj)
 
@@ -1116,6 +1144,8 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     `internal_cost_note` rows.
     """
 
+    # FE-2 (§D.4) — read-only by construction, per-viewer by context.
+    display_phase = serializers.SerializerMethodField()
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -1233,6 +1263,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "is_overdue",
             "started_before_plan",
             "status",
+            "display_phase",
             # Sprint 28 Batch 6 — cart routing taxonomy + nested line
             # items. routing_decision is computed at submission time by
             # the create serializer and is read-only thereafter (Batch 7
@@ -1370,6 +1401,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
 
     def get_spawned_tickets(self, obj):
         return _serialize_spawned_tickets(obj)
+
+    def get_display_phase(self, obj) -> str:
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        return _display_phase_for(obj, user)
 
     def get_is_priced(self, obj) -> bool:
         return _is_priced(obj)

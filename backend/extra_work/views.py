@@ -80,6 +80,7 @@ from .serializers import (
     derive_actor_kind,
 )
 from .state_machine import TransitionError, apply_transition
+from .timeline import build_timeline
 from .views_financials import is_priced_expression
 
 
@@ -1117,6 +1118,26 @@ class ExtraWorkRequestViewSet(
                 rows, many=True, context={"request": request}
             ).data
         )
+
+    @action(detail=True, methods=["get"], url_path="timeline")
+    def timeline(self, request, pk=None):
+        """FE-2 (Addendum D §D.4) — the requester's folded timeline.
+
+        The request's own history and its spawned ticket's milestones
+        as ONE chronological list of phase EVENTS (machine keys the
+        frontend translates). Free text from history rows is never
+        copied in, so the B1/B7 note-privacy floor holds by
+        construction for every viewer. Scope is `get_object` — the same
+        404 wall every other read on this ViewSet stands behind.
+        """
+        extra_work = self.get_object()  # 404 if out-of-scope
+        spawned = list(
+            extra_work.operational_tickets.filter(deleted_at__isnull=True)
+            .order_by("id")
+            .prefetch_related("status_history__changed_by")
+        )
+        rows = build_timeline(extra_work, spawned)
+        return Response({"entries": rows, "count": len(rows)})
 
     @action(detail=True, methods=["post"], url_path="spawn")
     def spawn(self, request, pk=None):

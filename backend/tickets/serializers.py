@@ -467,6 +467,21 @@ class TicketListSerializer(
     # across a page of EW-spawned tickets. Callers needing them hit the
     # ticket detail endpoint.
     extra_work_origin = serializers.SerializerMethodField()
+    # FE-2 (Addendum D SS D.4) -- the customer-facing phase banner.
+    # Read-only by construction, per-viewer by context; presentation
+    # only, never consulted by backend logic.
+    display_phase = serializers.SerializerMethodField()
+
+    def get_display_phase(self, obj) -> str:
+        from .display_phase import ticket_display_phase
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        viewer_is_customer = (
+            getattr(user, "role", None) == UserRole.CUSTOMER_USER
+        )
+        return ticket_display_phase(
+            status=obj.status, viewer_is_customer=viewer_is_customer
+        )
 
     class Meta:
         model = Ticket
@@ -481,6 +496,7 @@ class TicketListSerializer(
             "category_color",
             "priority",
             "status",
+            "display_phase",
             "company",
             "company_name",
             "building",
@@ -706,6 +722,22 @@ class TicketDetailSerializer(
     created_by_email = serializers.CharField(source="created_by.email", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
     status_history = TicketStatusHistorySerializer(many=True, read_only=True)
+    # FE-2 (Addendum D SS D.4) -- the customer-facing phase banner.
+    # Read-only by construction, per-viewer by context; presentation
+    # only, never consulted by backend logic.
+    display_phase = serializers.SerializerMethodField()
+
+    def get_display_phase(self, obj) -> str:
+        from .display_phase import ticket_display_phase
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        viewer_is_customer = (
+            getattr(user, "role", None) == UserRole.CUSTOMER_USER
+        )
+        return ticket_display_phase(
+            status=obj.status, viewer_is_customer=viewer_is_customer
+        )
+
     schedule_planned_by_name = serializers.SerializerMethodField()
     schedule_planned_at = serializers.SerializerMethodField()
     allowed_next_statuses = serializers.SerializerMethodField()
@@ -769,6 +801,7 @@ class TicketDetailSerializer(
             "category_color",
             "priority",
             "status",
+            "display_phase",
             "company",
             "company_name",
             "building",
