@@ -259,6 +259,8 @@ export type ExtraWorkDisplayPhase =
   | "WAITING_PRICE"
   | "WAITING_YOUR_APPROVAL"
   | "WAITING_CUSTOMER_APPROVAL"
+  /** P-2 ruling 1 — agreed, and no person has planned it yet. */
+  | "WAITING_PLANNING"
   | "SCHEDULED"
   | "IN_EXECUTION"
   | "WAITING_COMPLETION_APPROVAL"

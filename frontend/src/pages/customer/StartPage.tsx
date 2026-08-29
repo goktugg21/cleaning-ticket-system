@@ -139,7 +139,7 @@ export function StartPage() {
                         .join(" · ")}
                     </span>
                   </div>
-                  <PhaseBadge kind="ew" phase={row.display_phase} />
+                  <PhaseBadge kind="ew" phase={row.display_phase} customer />
                 </li>
               ))}
             </ul>

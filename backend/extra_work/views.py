@@ -155,6 +155,7 @@ class ExtraWorkRequestViewSet(
 
     def get_queryset(self):
         from tickets.models import Ticket
+        from tickets.plan_provenance import with_own_plan
 
         # Sprint 180 §1 — "has an operational ticket been born from this
         # extra work?" is the ONE question the two list tracks split on,
@@ -210,8 +211,8 @@ class ExtraWorkRequestViewSet(
                 # needs four columns of a ticket, not a ticket.
                 Prefetch(
                     "operational_tickets",
-                    queryset=Ticket.objects.filter(
-                        deleted_at__isnull=True
+                    queryset=with_own_plan(
+                        Ticket.objects.filter(deleted_at__isnull=True)
                     )
                     # W12 §2 put the ticket's own schedule on this
                     # payload; the two columns joined the `.only()` in
@@ -225,6 +226,11 @@ class ExtraWorkRequestViewSet(
                         "extra_work_request_id",
                         "scheduled_start_at",
                         "schedule_status",
+                        # P-2 — `display_phase` asks whether a person
+                        # planned the ticket; the occurrence FK and the
+                        # `job_own_plan` annotation answer without a
+                        # query per row.
+                        "planned_occurrence_id",
                     )
                     .order_by("id"),
                     to_attr="prefetched_operational_tickets",

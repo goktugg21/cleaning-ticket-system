@@ -31,14 +31,26 @@ function toneOf(phase: string): "action" | "progress" | "done" | "bad" {
   }
 }
 
+/** P-2 ruling 1 — ONE phase value, two labels: the customer reads
+ *  "Goedgekeurd — wordt ingepland" where the provider reads "Nog in te
+ *  plannen". A customer surface passes `customer`; the customer key
+ *  falls back to the shared one for every other phase. */
+function labelKeys(kind: Kind, phase: string, customer: boolean): string[] {
+  return customer
+    ? [`phase.${kind}_customer.${phase}`, `phase.${kind}.${phase}`]
+    : [`phase.${kind}.${phase}`];
+}
+
 export function PhaseBadge({
   kind,
   phase,
   testId,
+  customer = false,
 }: {
   kind: Kind;
   phase: ExtraWorkDisplayPhase | TicketDisplayPhase;
   testId?: string;
+  customer?: boolean;
 }) {
   const { t } = useTranslation("common");
   return (
@@ -47,7 +59,7 @@ export function PhaseBadge({
       data-testid={testId ?? "phase-badge"}
       data-phase={phase}
     >
-      {t(`phase.${kind}.${phase}`)}
+      {t(labelKeys(kind, phase, customer))}
     </span>
   );
 }
@@ -65,12 +77,14 @@ export function PhaseBanner({
   testId,
   sub,
   action,
+  customer = false,
 }: {
   kind: Kind;
   phase: ExtraWorkDisplayPhase | TicketDisplayPhase;
   testId?: string;
   sub?: ReactNode;
   action?: ReactNode;
+  customer?: boolean;
 }) {
   const { t } = useTranslation("common");
   return (
@@ -81,7 +95,7 @@ export function PhaseBanner({
       role="status"
     >
       <div className="phase-banner-text">
-        <span className="phase-banner-label">{t(`phase.${kind}.${phase}`)}</span>
+        <span className="phase-banner-label">{t(labelKeys(kind, phase, customer))}</span>
         <span className="phase-banner-sub">
           {sub ?? t(`phase.${kind}_next.${phase}`)}
         </span>

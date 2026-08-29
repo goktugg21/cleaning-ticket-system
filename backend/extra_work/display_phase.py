@@ -23,8 +23,10 @@ Phase vocabulary (§D.4, presentation enum — NOT a status):
   WAITING_PRICE               the provider owes a price
   WAITING_YOUR_APPROVAL       (customer viewer) the quote waits on YOU
   WAITING_CUSTOMER_APPROVAL   (provider viewer) same state, their side
-  SCHEDULED                   agreed; work exists or is being created,
-                              nobody has started
+  WAITING_PLANNING            agreed, and no PERSON has planned it yet
+                              (P-2 ruling 1; P-1's provenance decides)
+  SCHEDULED                   agreed and planned by a person; nobody has
+                              started
   IN_EXECUTION                somebody is doing the work
   WAITING_COMPLETION_APPROVAL the finished work waits on the customer
   DONE                        finished and confirmed
@@ -45,6 +47,7 @@ from .models import (
 PHASE_WAITING_PRICE = "WAITING_PRICE"
 PHASE_WAITING_YOUR_APPROVAL = "WAITING_YOUR_APPROVAL"
 PHASE_WAITING_CUSTOMER_APPROVAL = "WAITING_CUSTOMER_APPROVAL"
+PHASE_WAITING_PLANNING = "WAITING_PLANNING"
 PHASE_SCHEDULED = "SCHEDULED"
 PHASE_IN_EXECUTION = "IN_EXECUTION"
 PHASE_WAITING_COMPLETION_APPROVAL = "WAITING_COMPLETION_APPROVAL"
@@ -60,6 +63,7 @@ EXTRA_WORK_PHASES = frozenset(
         PHASE_WAITING_PRICE,
         PHASE_WAITING_YOUR_APPROVAL,
         PHASE_WAITING_CUSTOMER_APPROVAL,
+        PHASE_WAITING_PLANNING,
         PHASE_SCHEDULED,
         PHASE_IN_EXECUTION,
         PHASE_WAITING_COMPLETION_APPROVAL,
@@ -79,6 +83,7 @@ def display_phase(
     ticket_status: str | None,
     is_invoiced: bool,
     viewer_is_customer: bool,
+    has_real_plan: bool = False,
 ) -> str:
     """The phase for one (request, spawned ticket, viewer) reading.
 
@@ -86,7 +91,14 @@ def display_phase(
     (one per request by design, lowest id where legacy data holds
     more), or None when none exists. Every argument is a plain value so
     the function is testable without a database row.
+
+    P-2 ruling 1 — `has_real_plan`: did a PERSON plan the work (P-1's
+    `tickets/plan_provenance.py`: a schedule row on the spawned ticket,
+    a recurring occurrence, or the provider's committed window)? Agreed
+    work nobody has planned reads WAITING_PLANNING, never SCHEDULED —
+    "Ingepland" for a plan nobody made was the last phantom word.
     """
+    agreed = PHASE_SCHEDULED if has_real_plan else PHASE_WAITING_PLANNING
     if status == ExtraWorkStatus.CANCELLED:
         return PHASE_CANCELLED
     if status == ExtraWorkStatus.CUSTOMER_REJECTED:
@@ -106,8 +118,9 @@ def display_phase(
     if status == ExtraWorkStatus.CUSTOMER_APPROVED:
         # Agreed. The ticket exists (or is being created); until it
         # moves to IN_PROGRESS the parent stays CUSTOMER_APPROVED, so
-        # this whole state reads as "scheduled".
-        return PHASE_SCHEDULED
+        # this whole state reads as "scheduled" once a person planned
+        # it, and "to be planned" until then.
+        return agreed
 
     if status == ExtraWorkStatus.PRICING_PROPOSED:
         # A price exists. Who is being waited on depends on the intent:
@@ -116,7 +129,7 @@ def display_phase(
         # only honest reading is "about to be scheduled". Every other
         # intent waits on the customer's decision.
         if request_intent == ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING:
-            return PHASE_SCHEDULED
+            return agreed
         return (
             PHASE_WAITING_YOUR_APPROVAL
             if viewer_is_customer
@@ -132,7 +145,7 @@ def display_phase(
             status == ExtraWorkStatus.REQUESTED
             and routing_decision == ExtraWorkRoutingDecision.INSTANT
         ):
-            return PHASE_SCHEDULED
+            return agreed
         return PHASE_WAITING_PRICE
 
     raise ValueError(f"Unmapped extra-work state: {status!r}")

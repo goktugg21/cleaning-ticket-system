@@ -713,10 +713,19 @@ def _display_phase_for(obj, user) -> str:
     the detail serializer. Reads the same canonical spawned-ticket
     resolution the money definition uses; never stored, never writable,
     never consulted by backend logic."""
+    from tickets.plan_provenance import ticket_has_own_plan
+
     from .display_phase import display_phase
 
     tickets = _spawned_tickets_for(obj)
     ticket_status = tickets[0].status if tickets else None
+    # P-2 ruling 1 — did a PERSON plan it? The provider's committed
+    # window on the request, or the spawned ticket's own plan (a
+    # schedule row / a recurring occurrence; the list's prefetch carries
+    # the `job_own_plan` annotation so this costs no query per row).
+    has_real_plan = obj.provider_planned_date is not None or any(
+        ticket_has_own_plan(ticket) for ticket in tickets
+    )
     return display_phase(
         status=obj.status,
         routing_decision=obj.routing_decision,
@@ -724,6 +733,7 @@ def _display_phase_for(obj, user) -> str:
         ticket_status=ticket_status,
         is_invoiced=bool(obj.is_invoiced),
         viewer_is_customer=_is_customer(user),
+        has_real_plan=has_real_plan,
     )
 
 

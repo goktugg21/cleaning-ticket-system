@@ -145,7 +145,7 @@ export function MeerwerkTrackerPage() {
               className="section-head-title"
               style={{ marginBottom: 8, display: "flex", gap: 10 }}
             >
-              <PhaseBadge kind="ew" phase={group.phase} />
+              <PhaseBadge kind="ew" phase={group.phase} customer />
               <span className="muted small" style={{ alignSelf: "center" }}>
                 {t("meerwerk_tracker.group_count", {
                   count: group.items.length,

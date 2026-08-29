@@ -250,9 +250,12 @@ class TodayHoldsTodayTests(WorkPlanFixture, APITestCase):
         self.assertEqual(entry["day"], self.today.isoformat())
         self.assertEqual(payload["counts"]["total"], 1)
 
-    def test_a_job_planned_this_week_that_is_also_late_is_marked_where_it_sits(self):
-        """Planned placement is the job's home; being late is a flag on
-        the card, not a second placement."""
+    def test_a_job_planned_this_week_that_is_also_late_hangs_on_today_marked(self):
+        """WP-1 G0 (rule 7, the owner's ruling): in the CURRENT week an
+        overdue-and-open job is not left quietly at home with a flag on
+        it; it is a marked visitor on today's column. This test used to
+        assert the pre-WP-1 rule (planned placement wins) and stayed red
+        from WP-1 to P-2."""
         late = self.make_extra_work(
             "Planned and late",
             preferred=self.today,
@@ -262,7 +265,8 @@ class TodayHoldsTodayTests(WorkPlanFixture, APITestCase):
         payload = self.get_plan(self.worker)
         entry = self.entry(payload, f"ew-{late.id}")
         self.assertIsNotNone(entry)
-        self.assertEqual(entry["placement"], PLACEMENT_PLANNED)
+        self.assertEqual(entry["placement"], PLACEMENT_OVERDUE)
+        self.assertEqual(entry["day"], self.today.isoformat())
         self.assertTrue(entry["is_overdue"])
         self.assertEqual(payload["counts"]["overdue"], 1)
 

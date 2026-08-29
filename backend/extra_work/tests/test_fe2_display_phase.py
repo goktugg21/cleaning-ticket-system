@@ -38,6 +38,7 @@ from extra_work.display_phase import (
     PHASE_IN_EXECUTION,
     PHASE_INVOICED,
     PHASE_SCHEDULED,
+    PHASE_WAITING_PLANNING,
     PHASE_WAITING_COMPLETION_APPROVAL,
     PHASE_WAITING_CUSTOMER_APPROVAL,
     PHASE_WAITING_PRICE,
@@ -83,6 +84,7 @@ class DisplayPhaseMappingTests(TestCase):
             _phase(
                 ExtraWorkStatus.REQUESTED,
                 routing_decision=ExtraWorkRoutingDecision.INSTANT,
+                has_real_plan=True,
             ),
             PHASE_SCHEDULED,
         )
@@ -106,13 +108,16 @@ class DisplayPhaseMappingTests(TestCase):
                     ExtraWorkStatus.PRICING_PROPOSED,
                     request_intent=ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING,
                     viewer_is_customer=viewer,
+                    has_real_plan=True,
                 ),
                 PHASE_SCHEDULED,
             )
 
     def test_approved_work_is_scheduled(self):
+        """Once a person planned it (P-2 ruling 1)."""
         self.assertEqual(
-            _phase(ExtraWorkStatus.CUSTOMER_APPROVED), PHASE_SCHEDULED
+            _phase(ExtraWorkStatus.CUSTOMER_APPROVED, has_real_plan=True),
+            PHASE_SCHEDULED,
         )
 
     def test_execution_reads_the_spawned_ticket(self):
@@ -146,6 +151,34 @@ class DisplayPhaseMappingTests(TestCase):
         self.assertEqual(_phase(ExtraWorkStatus.CUSTOMER_REJECTED), "REJECTED")
         self.assertEqual(_phase(ExtraWorkStatus.CANCELLED), "CANCELLED")
 
+    def test_agreed_work_nobody_planned_is_to_be_planned(self):
+        """P-2 ruling 1 — "Ingepland" was the last phantom word: an
+        approved meerwerk whose ticket carries no person's plan reads
+        WAITING_PLANNING, and SCHEDULED only once a real plan exists.
+        Both viewers read the same value; the labels differ."""
+        for status_v, kwargs in (
+            (ExtraWorkStatus.CUSTOMER_APPROVED, {}),
+            (
+                ExtraWorkStatus.PRICING_PROPOSED,
+                {"request_intent": ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING},
+            ),
+            (
+                ExtraWorkStatus.REQUESTED,
+                {"routing_decision": ExtraWorkRoutingDecision.INSTANT},
+            ),
+        ):
+            for viewer in (False, True):
+                self.assertEqual(
+                    _phase(status_v, viewer_is_customer=viewer, **kwargs),
+                    PHASE_WAITING_PLANNING,
+                )
+                self.assertEqual(
+                    _phase(
+                        status_v, viewer_is_customer=viewer, has_real_plan=True, **kwargs
+                    ),
+                    PHASE_SCHEDULED,
+                )
+
     def test_every_combination_maps_somewhere_known(self):
         """THE exhaustiveness net. The cross product of every input the
         function branches on must map into the closed phase set without
@@ -160,9 +193,16 @@ class DisplayPhaseMappingTests(TestCase):
             choice[0] for choice in TicketStatus.choices
         ]
         for combo in product(
-            statuses, routings, intents, ticket_statuses, (False, True), (False, True)
+            statuses,
+            routings,
+            intents,
+            ticket_statuses,
+            (False, True),
+            (False, True),
+            # P-2 ruling 1 — whether a person planned it.
+            (False, True),
         ):
-            status_v, routing, intent, ticket_status, invoiced, viewer = combo
+            status_v, routing, intent, ticket_status, invoiced, viewer, planned = combo
             with self.subTest(combo=combo):
                 result = display_phase(
                     status=status_v,
@@ -171,6 +211,7 @@ class DisplayPhaseMappingTests(TestCase):
                     ticket_status=ticket_status,
                     is_invoiced=invoiced,
                     viewer_is_customer=viewer,
+                    has_real_plan=planned,
                 )
                 self.assertIn(result, EXTRA_WORK_PHASES)
         with self.assertRaises(ValueError):

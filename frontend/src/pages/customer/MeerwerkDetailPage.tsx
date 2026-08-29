@@ -165,7 +165,7 @@ export function MeerwerkDetailPage() {
         }
       />
 
-      {phase && <PhaseBanner kind="ew" phase={phase} testId="meerwerk-phase-banner" />}
+      {phase && <PhaseBanner kind="ew" phase={phase} customer testId="meerwerk-phase-banner" />}
 
       {error && (
         <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
