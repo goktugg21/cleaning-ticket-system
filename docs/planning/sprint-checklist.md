@@ -36,6 +36,54 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — FE-4: schedule clarity, the owner's first-round feedback (Addendum D §D.12, 2026-08-29)
+
+Branch `feat/fe-4-schedule-clarity`, stacked on FE-3 (the train; main
+untouched). Additive backend only, zero migrations, no state-machine or
+permission changes. Addendum D gains §D.6 rule 12 and §D.12 (the
+decision list).
+
+- **Back goes where you came from:** `useOriginBackLink` reads the
+  recorded in-app origin once at mount (`lib/navHistory`) and points the
+  detail's back link at it — My Schedule with its week and filters
+  (now in the URL: `?week=&status=&show=&q=`), Mijn meldingen, Tickets
+  with its query — with role defaults (staff/BM → My Schedule, customer
+  → Mijn meldingen, provider admin → Tickets). `/tickets` redirects a
+  customer role to Mijn meldingen.
+- **Honest date words (backend + cards + details):** every work-plan
+  entry carries `created_at`, `plan_source` (TICKET / PROVIDER_PLAN /
+  CUSTOMER_WISH), `due_kind`, `settled_at`, `settled_days_after_due`;
+  the ticket detail carries `unplanned_age_days`, `settled_at`,
+  `settled_days_after_due`. "Gepland" only for a plan; a customer's
+  wish says "Klant wenst"; an unplanned item says "Aangemaakt <date> ·
+  nog niet ingepland" on the card AND the detail with the same age.
+  `days_to_due` answers null for settled work (card == detail, tested
+  in `tickets.tests.test_fe4_honest_dates`).
+- **One headline lateness:** the deadline chip when a deadline exists
+  (the rolled/overdue marker then says only the origin), else the
+  planned-day marker; the never-done fact is a quiet note; the ticket
+  detail hides the SLA clock when a due countdown is on screen.
+- **Settled items:** past tense ("Afgerond op <date> (N dagen na de
+  deadline)"), "Wacht op klant" / "Wacht op controle" / "Niet gelukt"
+  as neutral chips; the week column sorts settled work last (server
+  `_week_sort_key`).
+- **My Schedule:** "Nog niet gepland" collapsed to a count-with-age
+  button (drawer oldest first); the strip keeps Totaal / Te laat / Open,
+  the three other buckets fold into the "Laat zien" select.
+- **Meerwerk flow:** N custom lines with optional notes, each a cart
+  line with "prijs volgt"; the confirm page lists them all; the
+  frontend-to-API fixture `extra_work.tests.test_fe4_custom_lines`
+  posts the page's exact body. The customer tracker gained phase chips.
+- **Language integrity:** no literal Dutch bypasses `t()` (sweep of JSX
+  text/attribute literals and EN-equals-NL values found none); the
+  pre-auth language now follows the browser instead of a hardcoded
+  "nl"; the customer-reject copy no longer names a "statusnotitieveld";
+  the SA and provider-admin demo accounts already review in English.
+- **Toasts:** repeats collapse into one card with a count.
+- **Multi-customer membership:** no model change; the chooser's one
+  input (`/auth/me/` `customer_ids`) is pinned by
+  `accounts.tests.test_fe4_membership_chooser`.
+
 ### Done — FE-3: detail restructure (Addendum D §D.4/§D.6, 2026-08-29)
 
 Branch `feat/fe-3-detail-restructure`, stacked on FE-2 (the train; main
