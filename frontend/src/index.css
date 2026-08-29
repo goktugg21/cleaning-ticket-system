@@ -6352,18 +6352,35 @@ a.attn-row:hover {
 .role-badge-compact .role-badge-label { font-size: 11px; }
 .role-badge-compact .role-badge-side { display: none; }
 
-/* ----- Toast ----- */
+/* ----- Toast -----
+   FE-3 (Addendum D §D.6 rule 2 / §D.8.3) — toasts NEVER cover actionable
+   controls. They stood top-right (top: 76px, right: 24px), which is
+   exactly where every detail page keeps its header actions; the owner's
+   screenshot had "Zet om naar meerwerk" under a toast. Audited against
+   the app shell before choosing the new corner:
+     top-right     header actions, the sticky `.ew-detail-tabs` bar.
+     bottom-right  `.sticky-save-bar`'s Save / Cancel pair (right-aligned).
+     bottom-left   the sidebar's own footer (fixed, 256px wide).
+     bottom-centre the empty middle of the sticky save bar (its message is
+                   left, its buttons right), no fixed control anywhere.
+   So: bottom-centre OF THE CONTENT AREA (offset by the sidebar), newest
+   nearest the edge, sliding up. Under 640px the sidebar collapses and
+   the stack spans the width (rule below), as before. */
 .toast-stack {
   position: fixed;
-  top: 76px;
-  right: 24px;
+  top: auto;
+  bottom: 24px;
+  left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
+  transform: translateX(-50%);
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
+  align-items: center;
   gap: 10px;
   z-index: 1000;
-  max-width: min(360px, calc(100vw - 32px));
+  width: min(420px, calc(100vw - var(--sidebar-w) - 32px));
   pointer-events: none;
 }
+.toast-stack .toast { width: 100%; }
 .toast {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -6377,7 +6394,7 @@ a.attn-row:hover {
   animation: toast-in 0.16s ease-out both;
 }
 @keyframes toast-in {
-  from { transform: translateY(-6px); opacity: 0; }
+  from { transform: translateY(6px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 .toast-icon {
@@ -6436,6 +6453,8 @@ a.attn-row:hover {
     bottom: 16px;
     left: 16px;
     right: 16px;
+    width: auto;
+    transform: none;
     max-width: none;
   }
 }
@@ -15396,13 +15415,18 @@ table.assign-table { min-width: 0; width: 100%; }
 
 .phase-banner {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
   padding: 14px 18px;
   border-radius: 10px;
   margin-bottom: 16px;
   border: 1px solid transparent;
 }
+/* FE-3 — the text stack and the ONE primary action beside it. */
+.phase-banner-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 260px; }
+.phase-banner-action { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .phase-banner-label { font-size: 16px; font-weight: 700; }
 .phase-banner-sub { font-size: 13px; opacity: 0.85; }
 .phase-banner-action { background: #fdf3d7; color: #6b4500; border-color: #eeda9e; }
@@ -15457,3 +15481,66 @@ table.assign-table { min-width: 0; width: 100%; }
   color: var(--text-muted, #6b6b6b);
 }
 .meerwerk-timeline-label { font-weight: 600; }
+
+
+/* ====================================================================
+   FE-3 (Addendum D §D.4 / §D.6) — THE FACT BLOCK AND THE FOLDS.
+   The ticket detail's fact block is the SAME four-block grid the
+   meerwerk header has drawn since W8 §1 (`.ew-ctx`); one grid for one
+   idea, so the two detail pages read alike. `.facts` is that grid under
+   a name that is not extra-work's.
+   ==================================================================== */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+@media (max-width: 1100px) {
+  .facts, .ew-ctx { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .facts .ew-ctx-block:nth-child(odd), .ew-ctx .ew-ctx-block:nth-child(odd) { border-left: none; }
+  .facts .ew-ctx-block:nth-child(n + 3), .ew-ctx .ew-ctx-block:nth-child(n + 3) { border-top: 1px solid var(--border-soft); }
+}
+.facts .ew-ctx-strong { font-size: var(--font-md); }
+.facts-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--font-sm); color: var(--text-muted); }
+.facts-line svg { flex: none; }
+.facts-line .wp-due { margin: 0; }
+.facts-pill-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* A quiet edit affordance on a fact block's own heading row. */
+.ew-ctx-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.ew-ctx-label-row .ew-ctx-label { margin-bottom: 0; }
+.facts-edit {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 0; border: 0; background: none; cursor: pointer;
+  font-size: var(--font-xs); font-weight: 700; color: var(--text-faint);
+}
+.facts-edit:hover { color: var(--text); }
+/* Contacts inside the Wie block: three by default, all behind one toggle. */
+.facts-contacts { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.facts-contacts li { font-size: var(--font-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.facts-contacts li b { color: var(--text); font-weight: 600; }
+/* The primary action inside the banner: the app's own buttons, not the
+   workflow rail's tinted `.status-btn`. */
+.phase-banner-action .btn { white-space: nowrap; }
+/* The two folds under the primary: "Andere stappen" and "Geavanceerd".
+   Same quiet toggle the correction drawer has used since W11 §1; the
+   list they open is not built until they open. */
+.action-fold { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.action-fold-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.action-fold-list .btn { justify-content: flex-start; }
+.action-fold-raw { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: var(--font-sm); color: var(--text-muted); }
+.action-fold-raw dt { font-weight: 700; font-size: var(--font-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
+.action-fold-raw dd { margin: 0 0 6px; }
+.action-fold-heading {
+  margin-top: 12px; margin-bottom: 4px;
+  font-family: var(--f-head); font-size: var(--font-xs); font-weight: 800;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint);
+}
+/* The compact composer: a select for the note type, and the folded
+   recipients (only while the composer has focus or holds text). */
+.composer-tier-select { max-width: 280px; }
+.composer-fold-hint { font-size: var(--font-xs); color: var(--text-faint); margin: 0 22px 8px; }

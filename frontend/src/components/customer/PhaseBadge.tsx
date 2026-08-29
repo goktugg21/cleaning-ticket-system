@@ -4,6 +4,7 @@
  * The value comes from the server's `display_phase` — this component
  * only translates and tints it. No client-side phase inference, ever.
  */
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -51,15 +52,25 @@ export function PhaseBadge({
   );
 }
 
-/** The banner a detail page opens with: the phase, said once, large. */
+/** The banner a detail page opens with: the phase, said once, large.
+ *
+ *  FE-3 — the same banner opens the PROVIDER detail pages. `sub`
+ *  replaces the customer-voiced "what happens next" line with the
+ *  provider's own sentence, and `action` is the ONE primary action
+ *  (§D.6 rule 3), rendered inside the banner so "what is this / what
+ *  happens next / what can I do" are read in one place (§D.0). */
 export function PhaseBanner({
   kind,
   phase,
   testId,
+  sub,
+  action,
 }: {
   kind: Kind;
   phase: ExtraWorkDisplayPhase | TicketDisplayPhase;
   testId?: string;
+  sub?: ReactNode;
+  action?: ReactNode;
 }) {
   const { t } = useTranslation("common");
   return (
@@ -69,8 +80,17 @@ export function PhaseBanner({
       data-phase={phase}
       role="status"
     >
-      <span className="phase-banner-label">{t(`phase.${kind}.${phase}`)}</span>
-      <span className="phase-banner-sub">{t(`phase.${kind}_next.${phase}`)}</span>
+      <div className="phase-banner-text">
+        <span className="phase-banner-label">{t(`phase.${kind}.${phase}`)}</span>
+        <span className="phase-banner-sub">
+          {sub ?? t(`phase.${kind}_next.${phase}`)}
+        </span>
+      </div>
+      {action != null && (
+        <div className="phase-banner-action" data-testid={`${testId ?? "phase-banner"}-action`}>
+          {action}
+        </div>
+      )}
     </div>
   );
 }

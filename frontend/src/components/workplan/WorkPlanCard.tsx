@@ -156,7 +156,6 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
  * different dates and the reader needs both.
  */
 export function DueChip({ entry }: { entry: WorkPlanEntry }) {
-  const { t } = useTranslation("staff_slots");
   const days = entry.days_until_due;
   if (days === null) return null;
   const hasDeadline = entry.lateness.deadline !== null;
@@ -168,6 +167,21 @@ export function DueChip({ entry }: { entry: WorkPlanEntry }) {
     (entry.placement === "ROLLED" || entry.placement === "OVERDUE")
   )
     return null;
+  return <DueChipCore days={days} hasDeadline={hasDeadline} />;
+}
+
+/** FE-3 — the chip itself, for surfaces that carry the two numbers
+ *  without a work-plan entry (the ticket detail's fact block reads
+ *  `days_until_due` / `due_kind` off the ticket). ONE chip vocabulary
+ *  for one concept: the words, tones and testid are the agenda's. */
+export function DueChipCore({
+  days,
+  hasDeadline,
+}: {
+  days: number;
+  hasDeadline: boolean;
+}) {
+  const { t } = useTranslation("staff_slots");
   const tone = days < 0 ? "over" : days === 0 ? "today" : "left";
   const over = Math.abs(days);
   const label = hasDeadline

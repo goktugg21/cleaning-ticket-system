@@ -33,7 +33,8 @@ import type {
 import { PageHeader } from "../../components/PageHeader";
 import { RejectReasonDialog } from "../../components/RejectReasonDialog";
 import { PhaseBanner } from "../../components/customer/PhaseBadge";
-import { formatDate, formatDateTime, formatMoney } from "../../lib/intl";
+import { MeerwerkTimeline } from "../../components/extra-work/MeerwerkTimeline";
+import { formatDate, formatMoney } from "../../lib/intl";
 
 export function MeerwerkDetailPage() {
   const { t } = useTranslation("common");
@@ -254,21 +255,12 @@ export function MeerwerkDetailPage() {
         <div className="section-head-title" style={{ marginBottom: 8 }}>
           {t("meerwerk_detail.timeline_title")}
         </div>
-        <ol className="meerwerk-timeline">
-          {timeline.map((entry, index) => (
-            <li key={`${entry.event}-${index}`} className="meerwerk-timeline-row">
-              <span className="meerwerk-timeline-when">
-                {entry.at ? formatDateTime(entry.at) : "—"}
-              </span>
-              <span className="meerwerk-timeline-label">
-                {t(`timeline.${entry.event}`)}
-              </span>
-              {entry.actor && (
-                <span className="muted small">{entry.actor}</span>
-              )}
-            </li>
-          ))}
-        </ol>
+        {/* FE-3 — the same component the provider detail mounts. */}
+        <MeerwerkTimeline
+          entries={timeline}
+          ariaLabel={t("meerwerk_detail.timeline_title")}
+          testIdPrefix="meerwerk-timeline-list"
+        />
       </section>
 
       <RejectReasonDialog

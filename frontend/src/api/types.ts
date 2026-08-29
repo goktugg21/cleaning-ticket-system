@@ -575,8 +575,26 @@ export type TicketScheduleStatus =
   | "SCHEDULED"
   | "RESCHEDULED";
 
+/** FE-3 (Addendum D §D.4) — WHAT KIND of work a ticket is, computed
+ *  server-side (`tickets/detail_facts.py`). "Chargeable work" is not a
+ *  kind: MEERWERK is the same meerwerk in its execution phase. */
+export type TicketKind = "MELDING" | "MEERWERK" | "TICKET";
+
+/** FE-3 (§D.11 G3) — which date `due_date` is, so a planned day is
+ *  never captioned "deadline". */
+export type TicketDueKind = "DEADLINE" | "PLANNED_DAY";
+
 export interface TicketDetail extends TicketList {
   description: string;
+  kind: TicketKind;
+  /** The date that decides late (`tickets/job_dates.py::job_due`): the
+   *  extra work's deadline, else the last planned day. Null when nobody
+   *  stated one. */
+  due_date: string | null;
+  due_kind: TicketDueKind | null;
+  /** Signed whole days: left when positive, over when negative, today
+   *  at zero. Null when there is no due date OR the work is over. */
+  days_until_due: number | null;
   room_label: string;
   created_by: number;
   created_by_email: string;
@@ -2086,6 +2104,12 @@ export interface ProposalLine {
 // internal_cost_note, override_*) are absent on customer responses.
 export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   description: string;
+  /** FE-3 (§D.11 G3) — signed whole days to the deadline (left when
+   *  positive, over when negative, today at zero), computed server-side
+   *  with the same rule as `is_overdue`. Null without a deadline or once
+   *  the work is finished / cancelled / rejected. Optional: an older
+   *  cached payload omits it, and the chip simply does not render. */
+  days_until_due?: number | null;
   category_other_text: string;
   preferred_date: string | null;
   customer_visible_note: string;

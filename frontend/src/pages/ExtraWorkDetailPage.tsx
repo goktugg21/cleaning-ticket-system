@@ -31,7 +31,7 @@
 // The backend computes pricing totals and gates all transitions.
 // The frontend is defense-in-depth only — it renders only what the
 // backend's allowed_next_statuses field says.
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
@@ -67,6 +67,7 @@ import {
   getEwMessageRecipients,
   getProposalDetail,
   getExtraWork,
+  getExtraWorkTimeline,
   listEwMessages,
   listProposalsForEw,
   listExtraWorkAssignments,
@@ -79,6 +80,7 @@ import {
   retrySpawnTicketsForExtraWork,
   transitionExtraWork,
   updateExtraWorkBilling,
+  type ExtraWorkTimelineEntry,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import { ActualHoursPanel } from "../components/extra-work/ActualHoursPanel";
@@ -91,6 +93,9 @@ import {
 import { ExtraWorkAssignmentCard } from "../components/extra-work/ExtraWorkAssignmentCard";
 import { PlanSummary } from "../components/extra-work/PlanSummary";
 import { ExtraWorkContextHeader } from "../components/extra-work/ExtraWorkContextHeader";
+import { MeerwerkTimeline } from "../components/extra-work/MeerwerkTimeline";
+import { PhaseBanner } from "../components/customer/PhaseBadge";
+import { DueChipCore } from "../components/workplan/WorkPlanCard";
 import { resolveNextStep } from "../components/extra-work/nextStep";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import {
@@ -295,15 +300,6 @@ function orderWorkflowTargets(
     .map((e) => e.t);
 }
 
-// Sprint 31 — one-line "what to do at this step" hint for providers,
-// shown above the workflow buttons for the early steps users found
-// confusing. Other statuses rely on the buttons + the dedicated
-// auto-start / override hints.
-const PROVIDER_STEP_HINT_I18N: Partial<Record<ExtraWorkStatus, string>> = {
-  REQUESTED: "detail.step_hint_requested",
-  UNDER_REVIEW: "detail.step_hint_under_review",
-};
-
 const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   DEEP_CLEANING: "category.deep_cleaning",
   WINDOW_CLEANING: "category.window_cleaning",
@@ -314,6 +310,14 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   EVENT_CLEANING: "category.event_cleaning",
   EMERGENCY_CLEANING: "category.emergency_cleaning",
   OTHER: "category.other",
+};
+
+/** FE-3 — the intent, behind Geavanceerd, in the create form's own
+ *  words (one label per intent, one owner). */
+const INTENT_I18N_KEY: Record<string, string> = {
+  DIRECT_AGREED_PRICE_ORDER: "create.intent.direct.label",
+  AUTO_START_AFTER_PRICING: "create.intent.auto_start.label",
+  REQUEST_QUOTE: "create.intent.request_quote.label",
 };
 
 const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
@@ -1092,6 +1096,11 @@ export function ExtraWorkDetailPage() {
   const completeDialogRef = useRef<ConfirmDialogHandle>(null);
   // W14 §2 — the secondary moves start closed.
   const [otherActionsOpen, setOtherActionsOpen] = useState(false);
+  // FE-3 (Addendum D §D.6 rule 3) — the Geavanceerd fold: corrections,
+  // overrides, the billing-month override, the raw values. Closed.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  // FE-3 (§D.4) — the folded timeline, rendered for the provider too.
+  const [timeline, setTimeline] = useState<ExtraWorkTimelineEntry[]>([]);
   const [cancelBusy, setCancelBusy] = useState(false);
 
   // M1 B6 — Extra Work message thread + composer state.
@@ -1651,6 +1660,27 @@ export function ExtraWorkDetailPage() {
     };
   }, [ewId]);
 
+  // FE-3 — the same folded timeline the customer tracker reads
+  // (`GET /extra-work/<id>/timeline/`, scope-walled by `get_object`).
+  // Re-read on every status move so a transition made on this page
+  // shows up in the story without a reload. State is set only in the
+  // async callbacks; a failed read leaves the card saying "no events".
+  const ewStatusForTimeline = ew?.status ?? null;
+  useEffect(() => {
+    if (ewId === null) return;
+    let cancelled = false;
+    getExtraWorkTimeline(ewId)
+      .then((data) => {
+        if (!cancelled) setTimeline(data.entries);
+      })
+      .catch(() => {
+        if (!cancelled) setTimeline([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId, ewStatusForTimeline]);
+
   if (loading) {
     return (
       <div>
@@ -1787,13 +1817,6 @@ export function ExtraWorkDetailPage() {
   const otherWorkflowTargets = providerWorkflowTargets.filter(
     (target) => target !== forwardTarget,
   );
-  // Planning is the primary only when no status move is. At
-  // CUSTOMER_APPROVED with a ticket already spawned there IS no forward
-  // status button (Sprint 181 §1 hands that move to the ticket), and
-  // planning the crew is exactly what is left to do.
-  const planIsPrimary = isProvider && forwardTarget === null;
-  const otherActionCount =
-    otherWorkflowTargets.length + (isProvider && !planIsPrimary ? 1 : 0);
 
   // Sprint 31 — an AUTO_START request is pre-authorized by the customer,
   // so the workflow must NOT frame the pricing step as "propose to
@@ -1896,15 +1919,6 @@ export function ExtraWorkDetailPage() {
       ? t(gatedKey)
       : t("detail.workflow_move_to", { label: tStatusLabel(t, target) });
   };
-  // One-line provider guidance for the current step (early steps only).
-  // W-FIX4 — the WHAT-NEXT card speaks the same route as the button.
-  const stepHintKey = noCustomerApproval
-    ? ew.status === "UNDER_REVIEW"
-      ? "detail.step_hint_under_review_start"
-      : ew.status === "REQUESTED"
-        ? "detail.step_hint_requested_start"
-        : PROVIDER_STEP_HINT_I18N[ew.status]
-    : PROVIDER_STEP_HINT_I18N[ew.status];
 
   // Sprint 29 Batch 29.8 — non-terminal spawned tickets that will
   // outlive a CANCELLED transition (the EW cancel does not propagate
@@ -2600,6 +2614,14 @@ export function ExtraWorkDetailPage() {
         void handleTransition(action.to);
         return;
       case "tab":
+        // FE-3 — the billing-month override moved behind Geavanceerd;
+        // the one button that leads there opens the fold instead of a
+        // tab that no longer holds it.
+        if (nextStep.buttonKey === "next.button.set_billing_month") {
+          setTab("overview");
+          setAdvancedOpen(true);
+          return;
+        }
         setTab(action.tab);
         return;
       case "plan":
@@ -2612,6 +2634,118 @@ export function ExtraWorkDetailPage() {
         return;
     }
   }
+
+  /* FE-3 (Addendum D §D.6 rule 3) — ONE PRIMARY ACTION, in the banner.
+
+     The resolver (`nextStep`) has decided the one move since W8 §2;
+     what changes is that nothing else competes with it. The auto-start
+     "Werk starten" (the customer pre-authorised it) is the one move
+     when it exists; the customer's own approve / reject pair renders
+     if this page is ever read by a customer (it is not — §D.3.1 routes
+     them to the tracker); "Plan het werk opnieuw" is a repair, so it
+     waits behind Geavanceerd even when the resolver names it. */
+  const primaryActionNode: ReactNode = canAutoStart ? (
+    <button
+      type="button"
+      className="btn btn-primary"
+      disabled={transitionBusy !== null}
+      onClick={() => handleTransition("CUSTOMER_APPROVED")}
+      data-testid="extra-work-auto-start-button"
+      title={t("detail.auto_start_hint")}
+    >
+      {transitionBusy === "CUSTOMER_APPROVED"
+        ? t("detail.auto_start_busy")
+        : t("detail.auto_start_button")}
+    </button>
+  ) : canApproveAsCustomer || canRejectAsCustomer ? (
+    <>
+      {canApproveAsCustomer && (
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={transitionBusy !== null}
+          onClick={() => handleCustomerDecision("CUSTOMER_APPROVED")}
+          data-testid="extra-work-customer-approve"
+        >
+          {transitionBusy === "CUSTOMER_APPROVED"
+            ? t("detail.workflow_approving")
+            : t("detail.workflow_approve_button")}
+        </button>
+      )}
+      {canRejectAsCustomer && (
+        <button
+          type="button"
+          className="btn btn-danger"
+          disabled={transitionBusy !== null}
+          onClick={() => setRejectDialogOpen(true)}
+          data-testid="extra-work-customer-reject"
+        >
+          {transitionBusy === "CUSTOMER_REJECTED"
+            ? t("detail.workflow_rejecting")
+            : t("detail.workflow_reject_button")}
+        </button>
+      )}
+    </>
+  ) : nextStep.buttonKey && nextStep.action.kind !== "retrySpawn" ? (
+    <button
+      type="button"
+      className="btn btn-primary"
+      onClick={runNextStep}
+      disabled={nextStepBusy}
+      data-testid="extra-work-next-button"
+    >
+      {t(nextStep.buttonKey)}
+    </button>
+  ) : null;
+
+  // "Andere stappen": the other legal forward moves (never the one the
+  // banner already offers, never cancel — that is Geavanceerd), the
+  // plan door when planning is not the primary, and the quote PDF.
+  const bannerOffersTransition = (target: ExtraWorkStatus): boolean =>
+    (nextStep.action.kind === "transition" && nextStep.action.to === target) ||
+    (canAutoStart && target === "CUSTOMER_APPROVED");
+  const otherStepNodes: ReactNode[] = [
+    ...(isProvider && forwardTarget && !bannerOffersTransition(forwardTarget)
+      ? [renderWorkflowButton(forwardTarget)]
+      : []),
+    ...(isProvider && nextStep.action.kind !== "plan" ? [renderPlanButton()] : []),
+    ...otherWorkflowTargets
+      .filter((target) => target !== "CANCELLED" && !bannerOffersTransition(target))
+      .map(renderWorkflowButton),
+    ...(hasActiveProposal && canViewProposalPdf
+      ? [
+          <button
+            key="pdf-preview"
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={openProposalPreview}
+            data-testid="extra-work-detail-pdf-preview"
+          >
+            <Eye size={14} strokeWidth={2.2} aria-hidden="true" />
+            {t("detail.pdf_preview_button")}
+          </button>,
+          <button
+            key="pdf-download"
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => {
+              void handleDownloadPdf();
+            }}
+            disabled={pdfBusy}
+            data-testid="extra-work-detail-pdf-download"
+          >
+            <FileText size={14} strokeWidth={2.2} aria-hidden="true" />
+            {pdfBusy
+              ? t("detail.pdf_download_busy")
+              : t(
+                  noCustomerApproval
+                    ? "detail.pdf_download_button_start"
+                    : "detail.pdf_download_button",
+                )}
+          </button>,
+        ]
+      : []),
+  ];
 
   return (
     <div data-testid="extra-work-detail-page">
@@ -2631,9 +2765,44 @@ export function ExtraWorkDetailPage() {
         </div>
       )}
 
-      {/* W8 §1 — the four blocks, above the tabs and outside them, so
-          they are on screen whatever tab is open. Tabs swap only the
-          area beneath. */}
+      {/* FE-3 (Addendum D §D.0 / §D.4) — THE PAGE OPENS ON THREE ANSWERS.
+          The phase banner: the server's `display_phase` (provider
+          variant), the one sentence about what happens next (W8 §2's
+          resolver, unchanged), and the ONE primary action. The badge soup
+          that stood in the context header — request status, ticket
+          status, urgency, labels at equal weight — is gone; the raw
+          values live behind Geavanceerd. */}
+      <PhaseBanner
+        kind="ew"
+        phase={ew.display_phase}
+        testId="extra-work-phase-banner"
+        sub={
+          <span data-testid="extra-work-next-sentence">
+            {t(nextStep.sentenceKey, nextStep.sentenceVars)}
+          </span>
+        }
+        action={primaryActionNode}
+      />
+      {/* Sprint 187 §2d — say where the decision went when the customer
+          is deciding on the quote itself. Purely additive: nothing new
+          can be pressed from here. */}
+      {ew.status === "PRICING_PROPOSED" && hasOpenProposal && (
+        <p
+          className="muted small"
+          style={{ margin: "-8px 0 14px" }}
+          data-testid="extra-work-workflow-decision-on-proposal"
+        >
+          {t(
+            noCustomerApproval
+              ? "detail.workflow_decision_on_proposal_start"
+              : "detail.workflow_decision_on_proposal",
+          )}
+        </p>
+      )}
+
+      {/* W8 §1 / FE-3 — the four fact blocks, above the tabs and outside
+          them, so they are on screen whatever tab is open. The two
+          provider editors open right under the block they edit. */}
       <ExtraWorkContextHeader
         ew={ew}
         proposedTotal={
@@ -2642,31 +2811,103 @@ export function ExtraWorkDetailPage() {
             : null
         }
         urgencyLabel={t(URGENCY_I18N_KEY[ew.urgency] ?? ew.urgency)}
+        categoryLabel={
+          extraWorkCategoryName(ew) ??
+          `${t(CATEGORY_I18N_KEY[ew.category] ?? ew.category)}${
+            ew.category === "OTHER" && ew.category_other_text
+              ? ` \u2014 ${ew.category_other_text}`
+              : ""
+          }`
+        }
         departmentLabel={
           ew.department_name ? customerLabelName(ew.department_name, t) : null
         }
         workTypeLabel={
           ew.work_type_name ? customerLabelName(ew.work_type_name, t) : null
         }
-        nextStep={
-          <div className="ew-next">
-            <p className="ew-next-sentence" data-testid="extra-work-next-sentence">
-              {t(nextStep.sentenceKey, nextStep.sentenceVars)}
-            </p>
-            {nextStep.buttonKey && (
-              <button
-                type="button"
-                className="btn btn-primary ew-next-button"
-                onClick={runNextStep}
-                disabled={nextStepBusy}
-                data-testid="extra-work-next-button"
-              >
-                {t(nextStep.buttonKey)}
-              </button>
-            )}
-          </div>
+        billedToLabel={t(billedToKey(ew.billed_to))}
+        dueChip={
+          ew.days_until_due !== null && ew.days_until_due !== undefined ? (
+            <DueChipCore days={ew.days_until_due} hasDeadline />
+          ) : undefined
+        }
+        whatAction={
+          isProvider && !ew.labels_locked && !labelsOpen ? (
+            <button
+              type="button"
+              className="facts-edit"
+              onClick={() => setLabelsOpen(true)}
+              data-testid="extra-work-labels-edit"
+            >
+              <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+              {t("detail.labels_edit_both")}
+            </button>
+          ) : undefined
+        }
+        whenAction={
+          isProvider && !datesOpen ? (
+            <button
+              type="button"
+              className="facts-edit"
+              onClick={() => setDatesOpen(true)}
+              data-testid="extra-work-dates-edit"
+            >
+              <Pencil size={12} strokeWidth={2} aria-hidden="true" />
+              {t("detail.dates_edit")}
+            </button>
+          ) : undefined
         }
       />
+      {isProvider && ew.labels_locked && (
+        <p className="muted small" data-testid="extra-work-labels-locked" style={{ margin: "-8px 0 14px" }}>
+          {ew.labels_locked_invoice
+            ? t("detail.labels_locked_by", { number: ew.labels_locked_invoice })
+            : t("detail.labels_locked_by_unsent")}{" "}
+          {t("detail.labels_locked_howto")}
+        </p>
+      )}
+      {isProvider && (datesOpen || (labelsOpen && !ew.labels_locked)) && (
+        <div className="card" data-testid="extra-work-fact-editors">
+          <div className="form-section">
+            {datesOpen && (
+              <DatesEditor
+                ew={ew}
+                draft={
+                  datesDraft ?? {
+                    deadline: ew.deadline ?? "",
+                    plannedEnd: ew.planned_end_date ?? "",
+                  }
+                }
+                onDraftChange={setDatesDraft}
+                onUpdated={(detail) => setEw(detail)}
+                onClose={() => {
+                  setDatesOpen(false);
+                  setDatesDraft(null);
+                }}
+              />
+            )}
+            {labelsOpen && !ew.labels_locked && (
+              <LabelsEditor
+                key={`labels-${ew.id}-${ew.department ?? ""}-${ew.work_type ?? ""}`}
+                ew={ew}
+                draft={
+                  labelsDraft ?? {
+                    deptId: ew.department ? String(ew.department) : "",
+                    wtId: ew.work_type ? String(ew.work_type) : "",
+                  }
+                }
+                onDraftChange={setLabelsDraft}
+                onUpdated={(detail) => setEw(detail)}
+                onRefresh={() => void refresh()}
+                onClose={() => {
+                  setLabelsOpen(false);
+                  setLabelsDraft(null);
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main content. The top row places Details (left, larger
           share) and the WORKFLOW card (right, smaller share) side
@@ -2780,183 +3021,19 @@ export function ExtraWorkDetailPage() {
                   GONE from here. They are in the persistent header now,
                   and printing them twice was part of the clutter. */}
               <div className="ew-facts">
-
-                {/* DATES — chronological, and each label says whose date
-                    it is. Four dates in a row all labelled like column
-                    headings is why nobody could tell the customer's wish
-                    from our own commitment. */}
-                <section className="ew-facts-group" data-testid="ew-facts-dates">
-                  {/* Same move as Classification below, and for the same
-                      reason: `DatesEditor` edits every date in this
-                      group, and the button sat inside the Deadline value
-                      as though Deadline were the only editable one. */}
-                  <div className="ew-facts-group-head">
-                    <h4 className="ew-facts-group-title">{t("detail.group_dates")}</h4>
-                    {isProvider && !datesOpen && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setDatesOpen(true)}
-                        data-testid="extra-work-dates-edit"
-                      >
-                        <Pencil size={13} strokeWidth={2} aria-hidden="true" />
-                        {t("detail.dates_edit")}
-                      </button>
-                    )}
-                  </div>
-                  <div className="ew-facts-grid">
-                    <div>
-                      <div className="ew-fact-label">{t("detail.date_requested")}</div>
-                      <div className="ew-fact-value">{formatDateTime(ew.requested_at)}</div>
-                    </div>
-                    <div>
-                      <div className="ew-fact-label">{t("detail.date_preferred")}</div>
-                      <div className="ew-fact-value" data-testid="extra-work-preferred-date">
-                        {ew.preferred_date ? formatDate(ew.preferred_date) : t("detail.empty_dash")}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="ew-fact-label">{t("detail.date_planned_end")}</div>
-                      <div className="ew-fact-value" data-testid="extra-work-planned-window">
-                        {ew.planned_end_date ? formatDate(ew.planned_end_date) : t("detail.empty_dash")}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="ew-fact-label">{t("detail.date_deadline")}</div>
-                      <div className="ew-fact-value ew-fact-with-action">
-                        <span>
-                          {ew.deadline ? formatDate(ew.deadline) : t("detail.empty_dash")}
-                        </span>
-                        {ew.deadline && ew.is_overdue && (
-                          <span className="cell-tag cell-tag-rejected" data-testid="ew-header-deadline">
-                            {t("list.overdue")}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  {isProvider && datesOpen && (
-                    <DatesEditor
-                      ew={ew}
-                      draft={
-                        datesDraft ?? {
-                          deadline: ew.deadline ?? "",
-                          plannedEnd: ew.planned_end_date ?? "",
-                        }
-                      }
-                      onDraftChange={setDatesDraft}
-                      onUpdated={(detail) => setEw(detail)}
-                      onClose={() => {
-                        setDatesOpen(false);
-                        setDatesDraft(null);
-                      }}
-                    />
-                  )}
-                  {/* The plan reads back with the dates it commits to,
-                      not at the bottom of an unrelated run of text. */}
-                  {isProvider && (
+                {/* FE-3 — the dates and the classification read in the fact
+                    block above (one owner per fact); what stays here is the
+                    PLAN we committed to, and the contacts. */}
+                {isProvider && (
+                  <section className="ew-facts-group" data-testid="ew-facts-dates">
                     <PlanSummary ew={ew} onEdit={() => void openPlan()} />
-                  )}
-                  {ew.started_before_plan && (
-                    <p className="muted small" data-testid="ew-header-started-early" style={{ margin: "8px 0 0" }}>
-                      {t("list.startedEarlyWhy")}
-                    </p>
-                  )}
-                </section>
-
-                {/* CLASSIFICATION — how this request is filed. */}
-                <section className="ew-facts-group" data-testid="ew-facts-classification">
-                  {/* W9 §4 — ONE control for the group, not a pencil on
-                      one of its values.
-
-                      The pencil lived on Work type. `LabelsEditor` has
-                      always edited Department AND Work type together, so
-                      the screen was telling the reader that one of the
-                      two was locked and the other was not. A control on
-                      the group's own heading covers what the dialog
-                      actually covers. */}
-                  <div className="ew-facts-group-head">
-                    <h4 className="ew-facts-group-title">{t("detail.group_classification")}</h4>
-                    {isProvider && !ew.labels_locked && !labelsOpen && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setLabelsOpen(true)}
-                        data-testid="extra-work-labels-edit"
-                      >
-                        <Pencil size={13} strokeWidth={2} aria-hidden="true" />
-                        {t("detail.labels_edit_both")}
-                      </button>
+                    {ew.started_before_plan && (
+                      <p className="muted small" data-testid="ew-header-started-early" style={{ margin: "8px 0 0" }}>
+                        {t("list.startedEarlyWhy")}
+                      </p>
                     )}
-                  </div>
-                  {isProvider && labelsOpen && !ew.labels_locked ? (
-                    <LabelsEditor
-                      key={`labels-${ew.id}-${ew.department ?? ""}-${ew.work_type ?? ""}`}
-                      ew={ew}
-                      draft={
-                        labelsDraft ?? {
-                          deptId: ew.department ? String(ew.department) : "",
-                          wtId: ew.work_type ? String(ew.work_type) : "",
-                        }
-                      }
-                      onDraftChange={setLabelsDraft}
-                      onUpdated={(detail) => setEw(detail)}
-                      onRefresh={() => void refresh()}
-                      onClose={() => {
-                        setLabelsOpen(false);
-                        setLabelsDraft(null);
-                      }}
-                    />
-                  ) : (
-                    <div className="ew-facts-grid" data-testid="extra-work-labels">
-                      <div>
-                        <div className="ew-fact-label">{t("detail.labels_field_department")}</div>
-                        <div className="ew-fact-value" data-testid="extra-work-labels-department-value">
-                          {ew.department_name ? customerLabelName(ew.department_name, t) : t("detail.empty_dash")}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="ew-fact-label">{t("detail.labels_field_work_type")}</div>
-                        <div className="ew-fact-value">
-                          <span data-testid="extra-work-labels-work-type-value">
-                            {ew.work_type_name ? customerLabelName(ew.work_type_name, t) : t("detail.empty_dash")}
-                          </span>
-                        </div>
-                      </div>
-                      {/* W8 §3 — the CATEGORY. It was a grey chip in the
-                          old context row and had no home in the Details
-                          card at all; with the chip row gone it would
-                          have vanished from the page. It is a
-                          classification, so it lives with the other
-                          two. */}
-                      <div>
-                        <div className="ew-fact-label">{t("detail.field_category")}</div>
-                        <div className="ew-fact-value" data-testid="extra-work-category">
-                          {extraWorkCategoryName(ew) ??
-                            `${t(CATEGORY_I18N_KEY[ew.category] ?? ew.category)}${
-                              ew.category === "OTHER" && ew.category_other_text
-                                ? ` \u2014 ${ew.category_other_text}`
-                                : ""
-                            }`}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="ew-fact-label">{t("detail.field_billed_to")}</div>
-                        <div className="ew-fact-value" data-testid="extra-work-billed-to">
-                          {t(billedToKey(ew.billed_to))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {isProvider && ew.labels_locked && (
-                    <p className="muted small" data-testid="extra-work-labels-locked" style={{ margin: "8px 0 0" }}>
-                      {ew.labels_locked_invoice
-                        ? t("detail.labels_locked_by", { number: ew.labels_locked_invoice })
-                        : t("detail.labels_locked_by_unsent")}{" "}
-                      {t("detail.labels_locked_howto")}
-                    </p>
-                  )}
-                </section>
+                  </section>
+                )}
 
                 {/* CONTACTS */}
                 {canSeeCustomerContacts && (
@@ -2971,6 +3048,17 @@ export function ExtraWorkDetailPage() {
                 </div>
             </div>
           </div>
+          {/* FE-3 (Addendum D §D.6 rule 3) — THE ACTIES CARD: everything
+              that is NOT the one primary action, behind two folds.
+              "Andere stappen" holds the other legal forward moves, the
+              plan door and the quote PDF; "Geavanceerd" holds every
+              correction and override with its EXISTING warning + audit
+              surface (the decision on the customer's behalf with its
+              reason form, direct publish with its dialog, the billing-
+              month override, cancel with its confirm dialog, "Plan het
+              werk opnieuw" only when it is actionable) and the raw
+              values the banner replaced. Every button still comes from
+              `allowed_next_statuses` / `actions.can_*`. */}
           <div
             className="card ew-workflow-card"
             data-testid="extra-work-detail-actions"
@@ -2978,107 +3066,67 @@ export function ExtraWorkDetailPage() {
           >
             <div className="form-section">
               <div className="ew-detail-actions-section-title">
-                {t("detail.actions_workflow_title")}
+                {t("detail.actions_card_title")}
               </div>
-              {isProvider && stepHintKey && (
-                <p
-                  className="muted small"
-                  style={{ margin: "0 0 10px" }}
-                  data-testid="extra-work-workflow-step-hint"
-                >
-                  {t(stepHintKey)}
-                </p>
-              )}
-              <div className="ew-workflow-actions">
-                {/* W3-F — the entry point to the planning layer W2-D
-                    built. Provider-only, and it rides the page's
-                    existing `isProvider` check rather than inventing a
-                    role rule of its own: the endpoint refuses any other
-                    role at the door with `plan_provider_only`, and the
-                    four planning fields are stripped from a customer's
-                    response anyway. First in the list because on an
-                    approved job planning IS the next thing to do. */}
-                {planIsPrimary && renderPlanButton()}
-                {canAutoStart && (
-                  <div
-                    className="ew-auto-start"
-                    data-testid="extra-work-auto-start"
-                  >
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={transitionBusy !== null}
-                      onClick={() => handleTransition("CUSTOMER_APPROVED")}
-                      data-testid="extra-work-auto-start-button"
-                    >
-                      {transitionBusy === "CUSTOMER_APPROVED"
-                        ? t("detail.auto_start_busy")
-                        : t("detail.auto_start_button")}
-                    </button>
-                    <p className="muted small" style={{ margin: "6px 0 0" }}>
-                      {t("detail.auto_start_hint")}
-                    </p>
-                  </div>
-                )}
-                {canApproveAsCustomer && (
+              {otherStepNodes.length > 0 && (
+                <div className="ew-workflow-other" style={{ marginTop: 0 }}>
                   <button
                     type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={transitionBusy !== null}
-                    onClick={() =>
-                      handleCustomerDecision("CUSTOMER_APPROVED")
-                    }
-                    data-testid="extra-work-customer-approve"
+                    className="workflow-corrections-toggle"
+                    aria-expanded={otherActionsOpen}
+                    onClick={() => setOtherActionsOpen((open) => !open)}
+                    data-testid="extra-work-other-actions-toggle"
                   >
-                    {transitionBusy === "CUSTOMER_APPROVED"
-                      ? t("detail.workflow_approving")
-                      : t("detail.workflow_approve_button")}
-                  </button>
-                )}
-                {canRejectAsCustomer && (
-                  <button
-                    type="button"
-                    /* W2-B fix 4 — one treatment for every action that
-                       says no, so none of them can be mistaken for the
-                       green one next to it. */
-                    className="btn btn-danger btn-sm"
-                    disabled={transitionBusy !== null}
-                    onClick={() => setRejectDialogOpen(true)}
-                    data-testid="extra-work-customer-reject"
-                  >
-                    {transitionBusy === "CUSTOMER_REJECTED"
-                      ? t("detail.workflow_rejecting")
-                      : t("detail.workflow_reject_button")}
-                  </button>
-                )}
-                {isProvider && forwardTarget && renderWorkflowButton(forwardTarget)}
-                {isProvider && otherActionCount > 0 && (
-                  <div className="ew-workflow-other">
-                    <button
-                      type="button"
-                      className="workflow-corrections-toggle"
-                      aria-expanded={otherActionsOpen}
-                      onClick={() => setOtherActionsOpen((open) => !open)}
-                      data-testid="extra-work-other-actions-toggle"
-                    >
-                      {otherActionsOpen ? (
-                        <ChevronDown size={13} strokeWidth={2.6} aria-hidden="true" />
-                      ) : (
-                        <ChevronRight size={13} strokeWidth={2.6} aria-hidden="true" />
-                      )}
-                      {t("detail.other_actions", { count: otherActionCount })}
-                    </button>
-                    {otherActionsOpen && (
-                      <div
-                        className="ew-workflow-other-list"
-                        data-testid="extra-work-other-actions-list"
-                      >
-                        {!planIsPrimary && renderPlanButton()}
-                        {otherWorkflowTargets.map(renderWorkflowButton)}
-                      </div>
+                    {otherActionsOpen ? (
+                      <ChevronDown size={13} strokeWidth={2.6} aria-hidden="true" />
+                    ) : (
+                      <ChevronRight size={13} strokeWidth={2.6} aria-hidden="true" />
                     )}
-                  </div>
-                )}
+                    {t("detail.other_actions", { count: otherStepNodes.length })}
+                  </button>
+                  {otherActionsOpen && (
+                    <div
+                      className="ew-workflow-other-list"
+                      data-testid="extra-work-other-actions-list"
+                    >
+                      {otherStepNodes}
+                    </div>
+                  )}
+                </div>
+              )}
+              {isProvider && (
+                <div className="action-fold">
+                  <button
+                    type="button"
+                    className="workflow-corrections-toggle"
+                    aria-expanded={advancedOpen}
+                    onClick={() => {
+                      // Closing the fold takes a half-typed override
+                      // reason with it.
+                      if (advancedOpen) {
+                        setOverrideDecision(null);
+                        setOverrideReason("");
+                        setOverrideError("");
+                      }
+                      setAdvancedOpen((open) => !open);
+                    }}
+                    data-testid="extra-work-advanced-toggle"
+                  >
+                    {advancedOpen ? (
+                      <ChevronDown size={13} strokeWidth={2.6} aria-hidden="true" />
+                    ) : (
+                      <ChevronRight size={13} strokeWidth={2.6} aria-hidden="true" />
+                    )}
+                    {advancedOpen ? t("detail.advanced_hide") : t("detail.advanced")}
+                  </button>
+                  {advancedOpen && (
+                    <div data-testid="extra-work-advanced">
+                      {providerOverrideAvailable && (
+                        <div className="action-fold-heading">
+                          {t("detail.advanced_override_heading")}
+                        </div>
+                      )}
+                      <div className="ew-workflow-actions">
                 {providerOverrideAvailable &&
                   (["CUSTOMER_APPROVED", "CUSTOMER_REJECTED"] as const)
                     .filter((target) => allowed.includes(target))
@@ -3197,21 +3245,6 @@ export function ExtraWorkDetailPage() {
                         </div>
                       );
                     })}
-                {canRetrySpawn && (
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={retrySpawnBusy}
-                    onClick={() => {
-                      void handleRetrySpawn();
-                    }}
-                    data-testid="extra-work-retry-spawn"
-                  >
-                    {retrySpawnBusy
-                      ? t("detail.retry_spawn_busy")
-                      : t("detail.retry_spawn")}
-                  </button>
-                )}
                 {draftProposalDetail?.actions?.can_direct_publish ===
                   true && (
                   <button
@@ -3227,89 +3260,132 @@ export function ExtraWorkDetailPage() {
                     {t("detail.direct_publish_button")}
                   </button>
                 )}
-                {hasActiveProposal && canViewProposalPdf && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => {
-                      void handleDownloadPdf();
-                    }}
-                    disabled={pdfBusy}
-                    data-testid="extra-work-detail-pdf-download"
-                  >
-                    <FileText
-                      size={14}
-                      strokeWidth={2.2}
-                      aria-hidden="true"
-                    />
-                    {pdfBusy
-                      ? t("detail.pdf_download_busy")
-                      : t(
-                          noCustomerApproval
-                            ? "detail.pdf_download_button_start"
-                            : "detail.pdf_download_button",
-                        )}
-                  </button>
-                )}
-              </div>
-              {/* Sprint 187 §2d — say where the decision went.
-                  At PRICING_PROPOSED with an open proposal this card
-                  renders no decision buttons AT ALL, and correctly so:
-                  the `!hasOpenProposal` guard above is load-bearing,
-                  because the customer decision has deliberately moved
-                  onto the quote and a second decision surface here would
-                  be two places to approve one price. What was missing is
-                  not a button, it is the sentence — the operator saw an
-                  empty card and no explanation.
-                  Purely additive: no guard is relaxed, nothing new can
-                  be pressed from here. */}
-              {ew.status === "PRICING_PROPOSED" && hasOpenProposal && (
-                <p
-                  className="muted small"
-                  style={{ margin: "10px 0 0" }}
-                  data-testid="extra-work-workflow-decision-on-proposal"
-                >
-                  {t(
-                    noCustomerApproval
-                      ? "detail.workflow_decision_on_proposal_start"
-                      : "detail.workflow_decision_on_proposal",
+                      </div>
+                      {canRetrySpawn && (
+                        <div data-testid="extra-work-retry-spawn-block" style={{ marginTop: 10 }}>
+                          <p className="muted small" style={{ margin: "0 0 6px" }}>
+                            {t("detail.retry_spawn_advanced_hint")}
+                          </p>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            disabled={retrySpawnBusy}
+                            onClick={() => {
+                              void handleRetrySpawn();
+                            }}
+                            data-testid="extra-work-retry-spawn"
+                          >
+                            {retrySpawnBusy
+                              ? t("detail.retry_spawn_busy")
+                              : t("detail.retry_spawn")}
+                          </button>
+                        </div>
+                      )}
+                      {/* W7-D — the billing month, stated ONCE, with the
+                          control that changes it beside it. Moved here
+                          from the Money tab: overriding the month is a
+                          correction of the Addendum B completion-month
+                          rule, not a routine step. */}
+                      {isProvider && (
+                        <div className="field ew-billing-line" data-testid="extra-work-billing-override">
+                          <div className="muted small">
+                            {t("detail.billing_section_title")}
+                          </div>
+                          <div className="ew-billing-row">
+                            <strong data-testid="extra-work-billing-month">
+                              {billingMonthLabel}
+                            </strong>
+                            <input
+                              type="month"
+                              className="field-input ew-billing-input"
+                              value={billingDraft ?? (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")}
+                              onChange={(e) => setBillingDraft(e.target.value)}
+                              aria-label={t("detail.billing_month_input_label")}
+                              data-testid="extra-work-billing-month-input"
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={
+                                billingSaving ||
+                                (billingDraft ?? (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")) ===
+                                  (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")
+                              }
+                              onClick={() => void saveBillingMonth()}
+                              data-testid="extra-work-billing-save"
+                            >
+                              {t("detail.billing_save")}
+                            </button>
+                          </div>
+                          {billingError && (
+                            <div className="alert-error" style={{ marginTop: 8 }}>
+                              {billingError}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {allowed.includes("CANCELLED") && (
+                        <>
+                          <div className="action-fold-heading">
+                            {t("detail.advanced_danger_heading")}
+                          </div>
+                          <div className="ew-workflow-actions">
+                            {renderWorkflowButton("CANCELLED")}
+                          </div>
+                        </>
+                      )}
+                      <div className="action-fold-heading">
+                        {t("detail.advanced_raw_title")}
+                      </div>
+                      <dl className="action-fold-raw" data-testid="extra-work-raw-values">
+                        <dt>{t("detail.raw_status")}</dt>
+                        <dd>
+                          <StatusBadge
+                            status={{ kind: "extra-work", value: ew.status }}
+                            testId="extra-work-header-status"
+                          />{" "}
+                          <code>{ew.status}</code>
+                        </dd>
+                        <dt>{t("detail.raw_intent")}</dt>
+                        <dd data-testid="extra-work-raw-intent">
+                          {ew.request_intent && INTENT_I18N_KEY[ew.request_intent]
+                            ? t(INTENT_I18N_KEY[ew.request_intent])
+                            : t("detail.raw_intent_none")}{" "}
+                          <code>{ew.request_intent ?? "—"}</code>
+                        </dd>
+                        <dt>{t("detail.routing_decision_label")}</dt>
+                        <dd data-testid="extra-work-detail-routing-decision">
+                          {ew.routing_decision === "INSTANT"
+                            ? t("detail.routing_decision_instant")
+                            : t(noCustomerApproval ? "detail.routing_decision_start" : "detail.routing_decision_proposal")}{" "}
+                          <code>{ew.routing_decision}</code>
+                        </dd>
+                      </dl>
+                    </div>
                   )}
-                </p>
+                </div>
               )}
-              {/* W5 fix 4 — where the job IS, in place of the apology.
-
-                  This card used to carry "No further transitions are
-                  available to you in this status" for a customer with
-                  nothing to decide. The ticket page deleted its version
-                  of that sentence in W4-M and put the current status
-                  there instead, and this is the same change: a customer
-                  is not a failed provider, and a note about what their
-                  role cannot do answers a question they did not ask.
-
-                  Only for the viewer who genuinely has no action here. A
-                  provider always has at least the Plan button, so this
-                  never displaces a provider's controls; the
-                  open-proposal case above already says where the
-                  decision went and keeps its own sentence. */}
-              {!isProvider &&
-                !canApproveAsCustomer &&
-                !canRejectAsCustomer &&
-                !(ew.status === "PRICING_PROPOSED" && hasOpenProposal) && (
-                  <div
-                    className="ew-workflow-current-status"
-                    data-testid="extra-work-workflow-current-status"
-                    data-status={ew.status}
-                  >
-                    <span className="ew-workflow-current-status-label">
-                      {t("detail.workflow_current_status_label")}
-                    </span>
-                    <span className="ew-workflow-current-status-value">
-                      {tStatusLabel(t, ew.status)}
-                    </span>
-                  </div>
-                )}
             </div>
           </div>
+
+          {/* FE-3 (§D.4) — the folded timeline, the provider's reading of
+              the same story the customer tracker tells. */}
+          <section className="card" data-testid="extra-work-timeline-card">
+            <div className="form-section">
+              <div className="form-section-title">{t("detail.timeline_title")}</div>
+              {timeline.length === 0 ? (
+                <p className="muted small" style={{ margin: 0 }}>
+                  {t("detail.timeline_empty")}
+                </p>
+              ) : (
+                <MeerwerkTimeline
+                  entries={timeline}
+                  ariaLabel={t("detail.timeline_title")}
+                  testIdPrefix="extra-work-timeline"
+                />
+              )}
+            </div>
+          </section>
           {/* Sprint 29 Batch 29.8 — spawned tickets panel. Renders
               read-only when the EW has at least one ticket spawned
               from a cart line (INSTANT route) or a proposal line
@@ -3370,15 +3446,6 @@ export function ExtraWorkDetailPage() {
           )}
           {tab === "money" && (
             <>
-          {/* W-UX F16 — the pricing decision is a MONEY fact, so it is
-              said here, above the lines it decides about, and not on the
-              Overview. */}
-          <p className="muted small" data-testid="extra-work-detail-routing-decision">
-            {t("detail.routing_decision_label")}:{" "}
-            {ew.routing_decision === "INSTANT"
-              ? t("detail.routing_decision_instant")
-              : t(noCustomerApproval ? "detail.routing_decision_start" : "detail.routing_decision_proposal")}
-          </p>
           {/* ----- Cart line items (Sprint 28 Batch 6; RF-14 collapsible:
               open while the request is still pre-decision, collapsed once
               it moved on — the header keeps count + final total visible.
@@ -3612,44 +3679,6 @@ export function ExtraWorkDetailPage() {
                   derived is not a second fact a reader needs, and
                   "not yet invoiced" is already the absence of an
                   invoice date. */}
-              {isProvider && (
-                <div className="field ew-billing-line" data-testid="extra-work-billing-override">
-                  <div className="muted small">
-                    {t("detail.billing_section_title")}
-                  </div>
-                  <div className="ew-billing-row">
-                    <strong data-testid="extra-work-billing-month">
-                      {billingMonthLabel}
-                    </strong>
-                    <input
-                      type="month"
-                      className="field-input ew-billing-input"
-                      value={billingDraft ?? (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")}
-                      onChange={(e) => setBillingDraft(e.target.value)}
-                      aria-label={t("detail.billing_month_input_label")}
-                      data-testid="extra-work-billing-month-input"
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      disabled={
-                        billingSaving ||
-                        (billingDraft ?? (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")) ===
-                          (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")
-                      }
-                      onClick={() => void saveBillingMonth()}
-                      data-testid="extra-work-billing-save"
-                    >
-                      {t("detail.billing_save")}
-                    </button>
-                  </div>
-                  {billingError && (
-                    <div className="alert-error" style={{ marginTop: 8 }}>
-                      {billingError}
-                    </div>
-                  )}
-                </div>
-              )}
           {/* Sprint 8A-fix — provider-only actual-hours entry for the
               active hourly line set (approved-proposal lines or INSTANT
               cart lines). Keyed by `actualHoursPanelKey` so a save

@@ -1,28 +1,27 @@
 /**
- * W8 §1 — the four blocks of context that never move.
+ * W8 §1 / FE-3 — the fact block of the meerwerk detail: four questions,
+ * four blocks, always on screen whichever tab is open.
  *
- * What this replaces: a single wrapping row of small grey chips —
+ * What W8 replaced: a single wrapping row of small grey chips —
  * "B Amsterdam  B3 Amsterdam · Under review · Total: — · Deadline:
- * Aug 22 · Proposal · Other · Normal". Every one of those is a real
- * fact, and the row read as a breadcrumb, so the eye skipped it. Nine
- * facts at one weight, in one colour, on one line, is a decoration.
+ * Aug 22 · Proposal · Other · Normal". Nine facts at one weight, in one
+ * colour, on one line, is a decoration.
  *
- * The fix is not more chips or bigger chips. It is that facts which
- * answer DIFFERENT questions stop sharing a line. Four blocks, four
- * questions, always on screen whichever tab is open:
+ * What FE-3 (Addendum D §D.4) changes: the STATE block is gone from
+ * here. Its badge soup — the request status, the spawned ticket's
+ * status, the urgency, the labels — was every state dimension at equal
+ * weight (§D.1 root cause 4). The one phase now opens the page in the
+ * phase banner (the server's `display_phase`), and the raw values live
+ * behind Geavanceerd. What stays here are FACTS, by the question each
+ * answers, in the order a person forms them:
  *
- *   WHO AND WHERE    the customer, and the building
- *   WHAT AND STATE   the status, how urgent, how it is classified
- *   MONEY            the total, and whether it has been invoiced
- *   WHAT NEXT        one sentence and one button (see `nextStep.ts`)
+ *   WIE / WAAR   the customer, and the building
+ *   WAT          category, urgency, department / work type
+ *   WANNEER      asked for, owed by (with the §D.11 chip), committed to
+ *   GELD         the total, and whether it has been invoiced
  *
- * The title is NOT repeated here. It is the page's h1 four pixels
- * above, and printing it twice is the clutter this sprint is removing,
- * not a fifth fact.
- *
- * WHAT NEXT is deliberately the last block and the only one with a
- * button. Reading order runs identity -> state -> money -> action,
- * which is the order a person forms the question in.
+ * The title is NOT repeated here; it is the page's h1 above. The ONE
+ * primary action is the banner's, not this block's.
  */
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -34,8 +33,6 @@ import type {
   ExtraWorkRequestDetail,
   ExtraWorkSpawnedTicket,
 } from "../../api/types";
-import { StatusBadge } from "../StatusBadge";
-import { SpawnedTicketLinks } from "./SpawnedTicketLinks";
 import { formatDate, formatMoney } from "../../lib/intl";
 import { rowAmounts } from "../../lib/billing";
 
@@ -74,15 +71,25 @@ function ticketsKeepingOwnDate(
 function Block({
   label,
   testId,
+  action,
   children,
 }: {
   label: string;
   testId: string;
+  /** FE-3 — a quiet edit affordance on the block's own heading row. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="ew-ctx-block" data-testid={testId}>
-      <div className="ew-ctx-label">{label}</div>
+      {action != null ? (
+        <div className="ew-ctx-label-row">
+          <div className="ew-ctx-label">{label}</div>
+          {action}
+        </div>
+      ) : (
+        <div className="ew-ctx-label">{label}</div>
+      )}
       <div className="ew-ctx-body">{children}</div>
     </div>
   );
@@ -91,40 +98,47 @@ function Block({
 export function ExtraWorkContextHeader({
   ew,
   urgencyLabel,
+  categoryLabel,
   departmentLabel,
   workTypeLabel,
-  nextStep,
+  billedToLabel,
   proposedTotal = null,
+  whatAction,
+  whenAction,
+  dueChip,
 }: {
   ew: ExtraWorkRequestDetail;
   urgencyLabel: string;
+  categoryLabel: string;
   departmentLabel: string | null;
   workTypeLabel: string | null;
+  /** "Komt op" — who this is billed to, in words (`lib/billedTo`). */
+  billedToLabel: string;
   /** W-FIX1 A3 (audit F3) — the total of the proposal the customer is
    *  looking at (SENT, not yet decided). Shown as "proposed" so MONEY
-   *  and WHAT NEXT read the same fact from the same record. */
+   *  and the banner read the same fact from the same record. */
   proposedTotal?: string | null;
-  /** The WHAT NEXT block, built by the page (it owns the handlers). */
-  nextStep: ReactNode;
+  /** The classification editor's trigger (provider), in the WAT block. */
+  whatAction?: ReactNode;
+  /** The dates editor's trigger (provider), in the WANNEER block. */
+  whenAction?: ReactNode;
+  /** §D.11 G3 — the one chip for the deadline, built by the page. */
+  dueChip?: ReactNode;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const conflicts = ticketsKeepingOwnDate(ew);
-
-  // The status a person means when they ask "where is this?". Once an
-  // operational ticket exists the ticket IS what is happening, which is
-  // the rule the list settled on in Sprint 181 and the reason the two
-  // screens stopped disagreeing. Unchanged here, only relocated.
-  const status =
-    ew.spawned_tickets.length > 0
-      ? ({ kind: "ticket", value: ew.spawned_tickets[0].status } as const)
-      : ({ kind: "extra-work", value: ew.status } as const);
+  const plannedWindow = ew.provider_planned_date
+    ? ew.provider_planned_end_date &&
+      ew.provider_planned_end_date !== ew.provider_planned_date
+      ? `${formatDate(ew.provider_planned_date)} – ${formatDate(
+          ew.provider_planned_end_date,
+        )}`
+      : formatDate(ew.provider_planned_date)
+    : null;
 
   return (
     <div className="ew-ctx" data-testid="extra-work-context-header">
-      <Block
-        label={t("detail.ctx_who_where")}
-        testId="extra-work-ctx-who"
-      >
+      <Block label={t("detail.ctx_who_where")} testId="extra-work-ctx-who">
         <div className="ew-ctx-strong" data-testid="extra-work-header-customer">
           {ew.customer_name}
         </div>
@@ -134,71 +148,56 @@ export function ExtraWorkContextHeader({
       </Block>
 
       <Block
-        label={t("detail.ctx_what_state")}
-        testId="extra-work-ctx-state"
+        label={t("detail.ctx_what")}
+        testId="extra-work-ctx-what"
+        action={whatAction}
       >
-        <div className="ew-ctx-badges">
-          <StatusBadge status={status} testId="extra-work-header-status" />
-          {/* Urgency is a fact about THIS request, not a status, so it
-              renders as plain text beside the badge rather than as a
-              second badge competing with it. */}
-          <span className="ew-ctx-sub">{urgencyLabel}</span>
+        <div className="ew-ctx-strong" data-testid="extra-work-category">
+          {categoryLabel}
         </div>
-        {/* The ticket number belongs with the status it is now the
-            source of. It used to be a separate cell in the Details
-            grid, one tab away from the badge that came from it. */}
-        {ew.spawned_tickets.length > 0 && (
-          <div className="ew-ctx-sub" data-testid="extra-work-ctx-ticket">
-            <SpawnedTicketLinks tickets={ew.spawned_tickets} max={3} />
-          </div>
-        )}
+        {/* Urgency is a fact about THIS request, not a status. */}
+        <div className="ew-ctx-sub" data-testid="extra-work-ctx-urgency">
+          {urgencyLabel}
+        </div>
         {(departmentLabel || workTypeLabel) && (
           <div className="ew-ctx-sub" data-testid="extra-work-ctx-labels">
             {[departmentLabel, workTypeLabel].filter(Boolean).join(" · ")}
           </div>
         )}
+        <div className="ew-ctx-sub" data-testid="extra-work-billed-to">
+          {t("detail.field_billed_to")}: {billedToLabel}
+        </div>
       </Block>
 
-      <Block label={t("detail.ctx_money")} testId="extra-work-ctx-money">
-        {/* W9 §1 — an amount is coloured as an amount; a job with no
-            price yet is coloured as WAITING, because that is what it is
-            waiting for. Same two tokens the money strip and the hours
-            panel use, so one fact is one colour across the page. */}
+      <Block
+        label={t("detail.ctx_when")}
+        testId="extra-work-ctx-when"
+        action={whenAction}
+      >
+        {/* Each date says WHOSE it is (§D.2): the customer's wish, the
+            promise we owe, the window we committed to. Never mixed. */}
+        <div className="ew-ctx-sub" data-testid="extra-work-preferred-date">
+          {t("detail.date_preferred")}:{" "}
+          {ew.preferred_date ? formatDate(ew.preferred_date) : t("detail.empty_dash")}
+        </div>
         <div
-          className={
-            ew.is_priced === false && proposedTotal === null
-              ? "ew-ctx-strong ew-ctx-unpriced"
-              : "ew-ctx-strong ew-ctx-money"
-          }
-          data-testid="extra-work-header-total"
+          className="ew-ctx-sub facts-line"
+          data-testid="extra-work-deadline"
+          style={{ display: "flex" }}
         >
-          {proposedTotal !== null
-            ? formatMoney(Number(proposedTotal))
-            : ew.is_priced === false
-              ? t("detail.ctx_not_priced")
-              : formatMoney(rowAmounts(ew).total)}
+          <span>
+            {t("detail.date_deadline")}:{" "}
+            {ew.deadline ? formatDate(ew.deadline) : t("detail.empty_dash")}
+          </span>
+          {dueChip}
         </div>
-        {proposedTotal !== null && (
-          <div className="ew-ctx-sub" data-testid="extra-work-ctx-proposed">
-            {t("detail.ctx_price_proposed")}
-          </div>
-        )}
-        {/* Invoiced or not, in words. An absent invoice date used to be
-            the only signal, which is a fact you have to already know how
-            to read. */}
-        <div className="ew-ctx-sub" data-testid="extra-work-ctx-invoiced">
-          {ew.is_invoiced
-            ? t("detail.ctx_invoiced")
-            : t("detail.ctx_not_invoiced")}
+        <div className="ew-ctx-sub" data-testid="extra-work-planned-window">
+          {t("detail.ctx_planned_window")}:{" "}
+          {plannedWindow ?? t("detail.empty_dash")}
         </div>
-      </Block>
-
-      <Block label={t("detail.ctx_what_next")} testId="extra-work-ctx-next">
-        {nextStep}
-        {/* The conflict, where the next move is decided. It names the
-            ticket, names the date it kept, and links to the row that can
-            change it — so "how to change it if they meant to" is the
-            link rather than an instruction. */}
+        {/* The conflict, where the date is read. It names the ticket,
+            names the date it kept, and links to the row that can change
+            it. */}
         {conflicts.length > 0 && (
           <div
             className="ew-ctx-date-conflict"
@@ -223,6 +222,36 @@ export function ExtraWorkContextHeader({
             </span>
           </div>
         )}
+      </Block>
+
+      <Block label={t("detail.ctx_money")} testId="extra-work-ctx-money">
+        {/* W9 §1 — an amount is coloured as an amount; a job with no
+            price yet is coloured as WAITING, because that is what it is
+            waiting for. */}
+        <div
+          className={
+            ew.is_priced === false && proposedTotal === null
+              ? "ew-ctx-strong ew-ctx-unpriced"
+              : "ew-ctx-strong ew-ctx-money"
+          }
+          data-testid="extra-work-header-total"
+        >
+          {proposedTotal !== null
+            ? formatMoney(Number(proposedTotal))
+            : ew.is_priced === false
+              ? t("detail.ctx_not_priced")
+              : formatMoney(rowAmounts(ew).total)}
+        </div>
+        {proposedTotal !== null && (
+          <div className="ew-ctx-sub" data-testid="extra-work-ctx-proposed">
+            {t("detail.ctx_price_proposed")}
+          </div>
+        )}
+        <div className="ew-ctx-sub" data-testid="extra-work-ctx-invoiced">
+          {ew.is_invoiced
+            ? t("detail.ctx_invoiced")
+            : t("detail.ctx_not_invoiced")}
+        </div>
       </Block>
     </div>
   );

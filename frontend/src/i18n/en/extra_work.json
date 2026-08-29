@@ -809,5 +809,20 @@
   "plan.no_candidates": "Nobody else is eligible for this building.",
   "plan.added_past_frozen": "Added this session — past days stay history",
   "plan.dialog_title_planned": "Plan the work",
-  "plan.required_missing": "Fill in first: {{fields}}."
+  "plan.required_missing": "Fill in first: {{fields}}.",
+  "detail.ctx_what": "What",
+  "detail.ctx_when": "When",
+  "detail.ctx_planned_window": "Planned",
+  "detail.actions_card_title": "Actions",
+  "detail.advanced": "Advanced",
+  "detail.advanced_hide": "Hide advanced",
+  "detail.advanced_raw_title": "Technical values",
+  "detail.raw_status": "Status",
+  "detail.raw_intent": "Request type",
+  "detail.raw_intent_none": "Unknown",
+  "detail.advanced_override_heading": "Decide on the customer's behalf",
+  "detail.advanced_danger_heading": "Cancel",
+  "detail.timeline_title": "History",
+  "detail.timeline_empty": "No events yet.",
+  "detail.retry_spawn_advanced_hint": "This request is approved, but no work has been created for it yet."
 }
