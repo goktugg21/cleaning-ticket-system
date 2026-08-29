@@ -47,7 +47,7 @@ class _Fixture(TenantFixtureMixin, APITestCase):
         )
 
     def make_ticket(self, title, status=TicketStatus.OPEN, *, scheduled=None, **extra):
-        return Ticket.objects.create(
+        ticket = Ticket.objects.create(
             company=self.company,
             customer=self.customer,
             building=self.building,
@@ -59,6 +59,10 @@ class _Fixture(TenantFixtureMixin, APITestCase):
             scheduled_start_at=self._at(scheduled) if scheduled is not None else None,
             **extra,
         )
+        # P-1 — a scheduled fixture is a PERSON's plan, and says so.
+        if scheduled is not None:
+            self.record_plan(ticket)
+        return ticket
 
     def make_slot(self, ticket, *, days, slot_status=StaffAssignmentSlotStatus.ASSIGNED, completed_at=None):
         return TicketStaffAssignment.objects.create(

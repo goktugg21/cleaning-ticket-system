@@ -74,6 +74,19 @@ job that was late in its own week is shown there as history, at home.
        marked OVERDUE on today's column, carrying its planned day and
        how late it is. Any other week keeps rule 1 unchanged.
 
+P-1 §3 (2026-08-29) — WORK WAITING FOR A MANAGER DOES NOT ROT IN THE
+PAST. A ticket in WAITING_MANAGER_REVIEW is not pending (the worker is
+done) and not over (nobody confirmed), and the board read "not pending"
+as "settled": the card sat calm on the day the worker finished and
+slid into last week while the billing chain stayed broken at the
+manager. `awaits_review` names that state; a manager's board hangs such
+a job on today's column, marked REVIEW with its waiting age, until it
+is confirmed. A worker's own completed slot is unchanged.
+
+    8. In the current week, a job waiting for review hangs on today's
+       column for readers who can review it, marked with how long it
+       has waited. Past and future weeks keep rule 1.
+
 **Why a normalised `Job` instead of two copies of the rule.** The two
 sources are a dated ticket slot (`TicketStaffAssignment`) and an extra
 work request (`ExtraWorkRequest`). They share no model, no state machine
@@ -125,12 +138,28 @@ PLACEMENT_OVERDUE = "OVERDUE"
 #: planned for (`rolled_from`) and how far past it we are (`rolled_days`).
 PLACEMENT_ROLLED = "ROLLED"
 
+#: P-1 §3 — the staff finished, a manager has not confirmed. The job is
+#: not pending (nobody is expected to WORK it) and it is not over (the
+#: chain slot done -> ticket confirmed -> billing month is broken at
+#: the manager). It used to sit settled on its planned day and slide
+#: into the past; for the reader who CAN confirm it, it is on today's
+#: column until they do, carrying how long it has waited
+#: (`stuck_age_days`). A worker's own completed slot is unchanged: it
+#: stays settled on its own day.
+PLACEMENT_REVIEW = "REVIEW"
+
 #: Every placement that is NOT the job's planned week. §12B: "A card
 #: shown outside its planned week must say why." The frontend keys its
 #: marker off exactly this set, so adding a placement without adding a
 #: marker for it is a one-line, visible mistake rather than a silent one.
 PLACEMENTS_NEEDING_A_REASON = frozenset(
-    {PLACEMENT_STARTED_EARLY, PLACEMENT_STARTED, PLACEMENT_OVERDUE, PLACEMENT_ROLLED}
+    {
+        PLACEMENT_STARTED_EARLY,
+        PLACEMENT_STARTED,
+        PLACEMENT_OVERDUE,
+        PLACEMENT_ROLLED,
+        PLACEMENT_REVIEW,
+    }
 )
 
 
@@ -164,6 +193,10 @@ class Job:
     #: pending — nobody is expected to work it any more. Defaults from
     #: `state` so the rule tests that build a bare `Job` keep reading.
     pending: bool | None = None
+    #: P-1 §3 — the day the work was handed to a manager for review, on
+    #: a job that is still waiting for that review. Only the JOB builder
+    #: sets it (a manager's board); a worker's slot never carries it.
+    review_since: datetime.date | None = None
 
     @property
     def window_end(self) -> datetime.date | None:
@@ -310,6 +343,23 @@ def rolled_days(job: Job, today: datetime.date) -> int | None:
     if not rolls_forward(job, today):
         return None
     return (today - job.window_end).days
+
+
+def awaits_review(job: Job) -> bool:
+    """Rule 8 (P-1 §3) — finished by the worker, not yet confirmed by a
+    manager. Such a job is neither pending nor over, so neither rule 5
+    nor the settled look fits it; in the current week it hangs on
+    today's column for the reader who can confirm it."""
+    return job.review_since is not None
+
+
+def review_days(job: Job, today: datetime.date) -> int | None:
+    """How many whole days the job has waited for review, or None when
+    it is not waiting. The number the card prints: "Wacht op controle —
+    al 5 dagen"."""
+    if not awaits_review(job):
+        return None
+    return max((today - job.review_since).days, 0)
 
 
 def is_upcoming(

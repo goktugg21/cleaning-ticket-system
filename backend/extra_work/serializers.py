@@ -1173,6 +1173,39 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
+    # P-1 — the plain facts every detail states: who opened it, and
+    # whether the window is a PERSON's plan (the provider's committed
+    # window, `tickets/plan_provenance.py`) and whose. Read-only, read
+    # off history that already exists.
+    created_by_name = serializers.SerializerMethodField()
+    has_real_plan = serializers.SerializerMethodField()
+    planned_by_name = serializers.SerializerMethodField()
+    planned_at = serializers.SerializerMethodField()
+
+    def get_created_by_name(self, obj) -> str:
+        author = obj.created_by
+        if author is None:
+            return ""
+        return (author.full_name or "").strip() or author.email
+
+    def _plan_provenance(self, obj):
+        cached = getattr(obj, "_p1_provenance", None)
+        if cached is None:
+            from tickets.plan_provenance import extra_work_plan_provenance
+
+            cached = extra_work_plan_provenance(obj)
+            obj._p1_provenance = cached
+        return cached
+
+    def get_has_real_plan(self, obj) -> bool:
+        return self._plan_provenance(obj).has_real_plan
+
+    def get_planned_by_name(self, obj):
+        return self._plan_provenance(obj).planned_by_name
+
+    def get_planned_at(self, obj):
+        return self._plan_provenance(obj).planned_at
+
     # Sprint 127 — per-customer labels. `allow_null` so an untagged row
     # (null FK) renders the key as null rather than dropping it. Visible to
     # every viewer, customers included — the label is not sensitive.
@@ -1327,6 +1360,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             # Bookkeeping.
             "created_by",
             "created_by_email",
+            "created_by_name",
+            # P-1 — is the committed window a person's plan, and whose.
+            "has_real_plan",
+            "planned_by_name",
+            "planned_at",
             "requested_at",
             "updated_at",
             "pricing_proposed_at",
@@ -1405,6 +1443,8 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         "invoice_date",
         "is_invoiced",
         "invoiced_at",
+        # P-1 — which employee planned it is internal, like the crew.
+        "planned_by_name",
         # W2-D — planning is a provider action end to end. A customer
         # must never see the budget, who is doing what for how long, or
         # whether we are over our own estimate; those are numbers about

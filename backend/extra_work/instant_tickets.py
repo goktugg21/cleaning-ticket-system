@@ -68,6 +68,22 @@ from .pricing import resolve_price
 from .state_machine import TransitionError
 
 
+#: P-1 — every spawn path creates its ticket with THIS schedule: none.
+#:
+#: Sprint 9B seeded `scheduled_start_at` from the earliest cart-line
+#: `requested_date`, and the create serializer (W-EW1 §2) defaults that
+#: date to the day of entry when the customer states no wish. So a
+#: ticket spawned from a plain cart carried its own creation day as a
+#: SCHEDULED plan, and on crmtest 43 of 54 extra-work tickets read
+#: "Planned <creation day> — N days late" to a board that had never seen
+#: anybody plan them. The customer's wish is still on the request
+#: (`preferred_date` / the cart lines) and the ticket reads it through
+#: `extra_work_origin`; the plan is made by a person in the plan dialog
+#: (`planning.apply_plan`) or the schedule endpoint, both of which write
+#: the history row `tickets/plan_provenance.py` looks for.
+_UNPLANNED = (None, TicketScheduleStatus.UNSCHEDULED)
+
+
 def earliest_requested_start(ew: ExtraWorkRequest) -> Optional[datetime.datetime]:
     """
     Sprint 9B — seed a spawned ticket's `scheduled_start_at` from the
@@ -217,17 +233,8 @@ def spawn_tickets_for_request(
         # the origin payload's representative service name.
         first_item = items[0] if items else None
 
-        # Sprint 9B — seed the operational schedule from the earliest
-        # cart-line requested_date. When None (no dated line) the ticket
-        # stays UNSCHEDULED. No schedule history annotation row is
-        # written at spawn time — the OPEN history row already records
-        # creation and the schedule fields carry the seed.
-        seed_start = earliest_requested_start(request)
-        seed_schedule_status = (
-            TicketScheduleStatus.SCHEDULED
-            if seed_start is not None
-            else TicketScheduleStatus.UNSCHEDULED
-        )
+        # P-1 — born UNPLANNED. See `_UNPLANNED`.
+        seed_start, seed_schedule_status = _UNPLANNED
 
         ticket = Ticket.objects.create(
             company=request.company,

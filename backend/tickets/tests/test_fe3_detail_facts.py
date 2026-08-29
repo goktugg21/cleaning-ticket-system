@@ -92,6 +92,7 @@ class TicketDueTests(TenantFixtureMixin, APITestCase):
         self.ticket.scheduled_start_at = self._aware(datetime.date(2026, 9, 1))
         self.ticket.scheduled_end_at = self._aware(datetime.date(2026, 9, 2))
         self.ticket.save()
+        self.record_plan(self.ticket)  # P-1: a person planned it
         facts = ticket_due(self.ticket, self.today)
         self.assertEqual(facts["due_date"], "2026-09-02")
         self.assertEqual(facts["due_kind"], DUE_KIND_PLANNED_DAY)
@@ -121,6 +122,7 @@ class TicketDueTests(TenantFixtureMixin, APITestCase):
         self.ticket.scheduled_start_at = self._aware(datetime.date(2026, 8, 20))
         self.ticket.status = TicketStatus.CLOSED
         self.ticket.save()
+        self.record_plan(self.ticket)  # P-1: a person planned it
         facts = ticket_due(self.ticket, self.today)
         self.assertEqual(facts["due_date"], "2026-08-20")
         self.assertIsNone(facts["days_until_due"])
@@ -132,6 +134,7 @@ class TicketDetailFactsSerializerTests(TenantFixtureMixin, APITestCase):
             days=3
         )
         self.ticket.save(update_fields=["scheduled_start_at"])
+        self.record_plan(self.ticket)  # P-1: a person planned it
         self.client.force_authenticate(self.company_admin)
         response = self.client.get(f"/api/tickets/{self.ticket.id}/")
         self.assertEqual(response.status_code, http.HTTP_200_OK, response.data)

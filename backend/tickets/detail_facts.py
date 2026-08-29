@@ -30,8 +30,9 @@ from django.utils import timezone
 
 from accounts.models import UserRole
 
-from .job_dates import job_deadline, job_due, job_window
+from .job_dates import job_deadline, job_due, job_plan_source, job_window
 from .lateness_index import LATE_LIVE_TICKET_STATUSES
+from .plan_provenance import ticket_plan_provenance
 
 KIND_MELDING = "MELDING"
 KIND_MEERWERK = "MEERWERK"
@@ -85,7 +86,15 @@ def ticket_due(ticket, today: datetime.date) -> dict:
             or ticket.rejected_at
         )
     due = job_due(ticket)
+    # P-1 — WHO planned the window and WHEN, or that nobody did. The
+    # words on the detail and on the card both key off `has_real_plan`;
+    # a phantom (a seeded date with no person behind it) reads as no
+    # plan here AND has already been read as no window by `job_window`,
+    # so the two cannot disagree.
+    provenance = ticket_plan_provenance(ticket)
     facts = {
+        **provenance.as_dict(),
+        "plan_source": job_plan_source(ticket),
         "due_date": None,
         "due_kind": None,
         "days_until_due": None,

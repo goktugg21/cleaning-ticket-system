@@ -522,8 +522,11 @@ class ExtraWorkSchedulePropagationTest(APITestCase):
         tickets = spawn_tickets_for_request(ew, actor=self.actor)
         self.assertEqual(len(tickets), 1)
         t = tickets[0]
-        self.assertEqual(t.schedule_status, TicketScheduleStatus.SCHEDULED)
-        self.assertEqual(t.scheduled_start_at, self._expected_seed(earliest))
+        # P-1 -- the seed is STOPPED: a spawned ticket is born UNPLANNED.
+        # The cart's requested_date is the customer's wish and stays on
+        # the request; the plan is made by a person.
+        self.assertEqual(t.schedule_status, TicketScheduleStatus.UNSCHEDULED)
+        self.assertIsNone(t.scheduled_start_at)
 
     def test_proposal_spawn_carries_schedule_from_cart(self):
         ew = ExtraWorkRequest.objects.create(
@@ -549,8 +552,11 @@ class ExtraWorkSchedulePropagationTest(APITestCase):
         tickets = spawn_tickets_for_proposal(proposal, actor=self.actor)
         self.assertEqual(len(tickets), 1)
         t = tickets[0]
-        self.assertEqual(t.schedule_status, TicketScheduleStatus.SCHEDULED)
-        self.assertEqual(t.scheduled_start_at, self._expected_seed(earliest))
+        # P-1 -- the seed is STOPPED: a spawned ticket is born UNPLANNED.
+        # The cart's requested_date is the customer's wish and stays on
+        # the request; the plan is made by a person.
+        self.assertEqual(t.schedule_status, TicketScheduleStatus.UNSCHEDULED)
+        self.assertIsNone(t.scheduled_start_at)
 
     def test_auto_start_pricing_send_spawn_carries_schedule(self):
         # AUTO_START / proposal-send lands in the same proposal spawn
@@ -578,8 +584,10 @@ class ExtraWorkSchedulePropagationTest(APITestCase):
         )
         tickets = spawn_tickets_for_proposal(proposal, actor=self.actor)
         self.assertEqual(len(tickets), 1)
+        # P-1 -- born UNPLANNED, whatever the cart asked for.
+        self.assertIsNone(tickets[0].scheduled_start_at)
         self.assertEqual(
-            tickets[0].scheduled_start_at, self._expected_seed(earliest)
+            tickets[0].schedule_status, TicketScheduleStatus.UNSCHEDULED
         )
 
     def test_seed_none_when_no_dated_line(self):

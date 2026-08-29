@@ -54,7 +54,7 @@ from tickets.models import (
     TicketStatusHistory,
 )
 
-from .instant_tickets import earliest_requested_start
+from .instant_tickets import _UNPLANNED
 
 from .models import (
     ExtraWorkRequest,
@@ -163,15 +163,13 @@ def spawn_tickets_for_proposal(
     # Back-compat legacy link: FIRST approved-for-spawn line.
     first_line = spawn_lines[0]
 
-    # Sprint 9B — seed the operational schedule from the EW's cart
-    # `line_items` requested_date (NOT the proposal lines — ProposalLine
-    # has no requested_date). None -> ticket stays UNSCHEDULED.
-    seed_start = earliest_requested_start(request)
-    seed_schedule_status = (
-        TicketScheduleStatus.SCHEDULED
-        if seed_start is not None
-        else TicketScheduleStatus.UNSCHEDULED
-    )
+    # P-1 — a spawned ticket is born UNPLANNED. Sprint 9B seeded
+    # `scheduled_start_at` from the cart's `requested_date` here, which
+    # the create serializer defaults to the day of entry; the board then
+    # read a creation date as a plan (TCK-2026-000209, "87 days late").
+    # The wish stays readable through `extra_work_origin`; the plan is
+    # made in the plan dialog, by a person. See `instant_tickets._UNPLANNED`.
+    seed_start, seed_schedule_status = _UNPLANNED
 
     ticket = Ticket.objects.create(
         company=request.company,
@@ -311,14 +309,8 @@ def spawn_tickets_for_extra_work_request(
     # Back-compat legacy link: FIRST cart line.
     first_item = items[0] if items else None
 
-    # Sprint 9B — seed the operational schedule from the earliest cart
-    # `line_items` requested_date. None -> ticket stays UNSCHEDULED.
-    seed_start = earliest_requested_start(ew)
-    seed_schedule_status = (
-        TicketScheduleStatus.SCHEDULED
-        if seed_start is not None
-        else TicketScheduleStatus.UNSCHEDULED
-    )
+    # P-1 — born UNPLANNED; see the proposal path above.
+    seed_start, seed_schedule_status = _UNPLANNED
 
     ticket = Ticket.objects.create(
         company=ew.company,

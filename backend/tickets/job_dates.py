@@ -82,6 +82,8 @@ from django.db.models import Case, DateField, F, Q, When
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
+from .plan_provenance import OWN_PLAN, ticket_has_own_plan, with_own_plan
+
 
 def local_date(value) -> datetime.date | None:
     """The LOCAL calendar date of an aware datetime.
@@ -105,9 +107,15 @@ def job_window(ticket) -> tuple[datetime.date | None, datetime.date | None]:
     a start but no end has no end, rather than borrowing the extra work's.
     Mixing them would print a window neither record ever stated.
     """
-    start = local_date(ticket.scheduled_start_at)
-    if start is not None:
-        return start, local_date(ticket.scheduled_end_at)
+    # P-1 — the column counts only when a person (or the recurring plan)
+    # stands behind it. A seeded `scheduled_start_at` with no schedule
+    # row and no occurrence is a PHANTOM and is read as absent, so the
+    # chain falls through to what the extra work actually states (see
+    # `plan_provenance.py`).
+    if ticket_has_own_plan(ticket):
+        start = local_date(ticket.scheduled_start_at)
+        if start is not None:
+            return start, local_date(ticket.scheduled_end_at)
     extra_work = getattr(ticket, "extra_work_request", None)
     if extra_work is None:
         return None, None
@@ -132,7 +140,7 @@ PLAN_SOURCE_CUSTOMER_WISH = "CUSTOMER_WISH"
 def job_plan_source(ticket) -> str | None:
     """Which of `job_window`'s three sources answered, or None when the
     job has no window at all. Mirrors `job_window` branch for branch."""
-    if ticket.scheduled_start_at is not None:
+    if ticket_has_own_plan(ticket):
         return PLAN_SOURCE_TICKET
     extra_work = getattr(ticket, "extra_work_request", None)
     if extra_work is None:
@@ -195,19 +203,24 @@ def with_job_dates(queryset):
     `TruncDate` takes the current timezone, which is the same conversion
     `local_date` does.
     """
-    return queryset.annotate(
+    # P-1 — the SQL twin of `ticket_has_own_plan`: the ticket's own
+    # column is read only behind a schedule row or an occurrence.
+    own = Q(scheduled_start_at__isnull=False) & (
+        Q(planned_occurrence__isnull=False) | Q(**{OWN_PLAN: True})
+    )
+    return with_own_plan(queryset).annotate(
         **{
             JOB_START: Coalesce(
-                TruncDate("scheduled_start_at"),
+                Case(
+                    When(own, then=TruncDate("scheduled_start_at")),
+                    output_field=DateField(),
+                ),
                 F(f"{_EW}__provider_planned_date"),
                 F(f"{_EW}__preferred_date"),
                 output_field=DateField(),
             ),
             JOB_END: Case(
-                When(
-                    scheduled_start_at__isnull=False,
-                    then=TruncDate("scheduled_end_at"),
-                ),
+                When(own, then=TruncDate("scheduled_end_at")),
                 When(
                     **{f"{_EW}__provider_planned_date__isnull": False},
                     then=F(f"{_EW}__provider_planned_end_date"),

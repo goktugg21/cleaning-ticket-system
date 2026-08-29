@@ -205,6 +205,10 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   against the sprint checklist, at most TWO fix iterations per item,
   then report. Screenshots are design evidence; measured geometry
   remains the standard for layout-regression claims.
+- **§D.10 verification walks the OLDEST real records on crmtest
+  (read-only), not only fixtures; every sprint report includes what the
+  ugly data showed.** FE-4's "Planned" fix passed on clean fixtures and
+  failed on crmtest's June tickets (P-1).
 - Detail pages: fact block first, ONE primary action from
   `actions.can_*`, corrections behind "Geavanceerd" with their existing
   warning/audit surfaces. No new frontend business inference — if a

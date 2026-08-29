@@ -746,10 +746,37 @@ class TicketDetailSerializer(
     due_date = serializers.SerializerMethodField()
     due_kind = serializers.SerializerMethodField()
     days_until_due = serializers.SerializerMethodField()
+    # P-1 — provenance: is the window a PERSON's plan, whose, and when.
+    # Read off history that already exists (`tickets/plan_provenance.py`);
+    # nothing stored. `created_by_name` is the plain fact every detail
+    # states — nobody guesses who opened a ticket.
+    has_real_plan = serializers.SerializerMethodField()
+    plan_source = serializers.SerializerMethodField()
+    planned_by_name = serializers.SerializerMethodField()
+    planned_at = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
 
     def get_kind(self, obj) -> str:
         from .detail_facts import ticket_kind
         return ticket_kind(obj)
+
+    def get_has_real_plan(self, obj) -> bool:
+        return self._due_facts(obj)["has_real_plan"]
+
+    def get_plan_source(self, obj):
+        return self._due_facts(obj)["plan_source"]
+
+    def get_planned_by_name(self, obj):
+        return self._due_facts(obj)["planned_by_name"]
+
+    def get_planned_at(self, obj):
+        return self._due_facts(obj)["planned_at"]
+
+    def get_created_by_name(self, obj) -> str:
+        author = obj.created_by
+        if author is None:
+            return ""
+        return (author.full_name or "").strip() or author.email
 
     def _due_facts(self, obj) -> dict:
         cached = getattr(obj, "_fe3_due_facts", None)
@@ -863,6 +890,7 @@ class TicketDetailSerializer(
             "customer_name",
             "created_by",
             "created_by_email",
+            "created_by_name",
             "assigned_to",
             "assigned_to_email",
             "assigned_staff",
@@ -925,6 +953,11 @@ class TicketDetailSerializer(
             # `reschedule_reason` and `rescheduled_from` below.
             "schedule_planned_by_name",
             "schedule_planned_at",
+            # P-1 — is the window a person's plan at all, and whose.
+            "has_real_plan",
+            "plan_source",
+            "planned_by_name",
+            "planned_at",
             # Sprint 4 — sub-tasks + auto-complete opt-in (additive).
             "sub_tasks",
             "auto_complete_on_subtasks",
@@ -967,6 +1000,9 @@ class TicketDetailSerializer(
             data["rescheduled_from"] = None
             data["schedule_planned_by_name"] = None
             data["schedule_planned_at"] = None
+            # P-1 — same gate: which employee planned it is internal.
+            # `has_real_plan` and the dates stay; only the name goes.
+            data["planned_by_name"] = None
             data["sub_tasks"] = []
         return data
 

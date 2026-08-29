@@ -183,6 +183,35 @@ class TenantFixtureMixin:
         )
         return ticket
 
+    def record_plan(self, ticket, actor=None):
+        """P-1 — say out loud that a PERSON planned this ticket.
+
+        A `scheduled_start_at` written straight onto the row is what the
+        Sprint 9B seed left behind on crmtest, and since P-1 the board
+        and the detail read such a date as NO plan (`tickets/
+        plan_provenance.py`). A fixture whose subject is a planned job
+        writes the same annotation row `set_schedule` writes, so the
+        test states the precondition the rule actually needs.
+        """
+        from tickets.models import TicketStatusHistory
+        from tickets.schedule_history import compose_schedule_note
+
+        return TicketStatusHistory.objects.create(
+            ticket=ticket,
+            old_status=ticket.status,
+            new_status=ticket.status,
+            changed_by=actor or self.super_admin,
+            note=compose_schedule_note(
+                action="set",
+                old_start=None,
+                new_start=ticket.scheduled_start_at,
+                window_label="",
+                reason="",
+            ),
+            is_override=False,
+            override_reason="",
+        )
+
     def move_ticket_to_customer_approval(self, ticket=None):
         ticket = ticket or self.ticket
         ticket.status = TicketStatus.WAITING_CUSTOMER_APPROVAL

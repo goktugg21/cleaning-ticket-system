@@ -65,7 +65,7 @@ class _Fixture(TenantFixtureMixin, APITestCase):
     # -- builders -----------------------------------------------------
 
     def make_ticket(self, title, ticket_status=TicketStatus.OPEN, *, scheduled=None):
-        return Ticket.objects.create(
+        ticket = Ticket.objects.create(
             company=self.company,
             customer=self.customer,
             building=self.building,
@@ -76,6 +76,10 @@ class _Fixture(TenantFixtureMixin, APITestCase):
             created_by=self.super_admin,
             scheduled_start_at=self._at(scheduled) if scheduled is not None else None,
         )
+        # P-1 — a scheduled fixture is a PERSON's plan, and says so.
+        if scheduled is not None:
+            self.record_plan(ticket)
+        return ticket
 
     def _at(self, offset_days, hour=9):
         if offset_days is None:
@@ -490,6 +494,7 @@ class TheDeadlineWindowTests(_Fixture):
             scheduled_start_at=self._at(-2),
             scheduled_end_at=self._at(4, hour=17),
         )
+        self.record_plan(ticket)  # P-1: a person planned it
         self.make_slot(ticket, days=None)
 
         card = self.entry(self._company_plan(), f"ticket-{ticket.id}")

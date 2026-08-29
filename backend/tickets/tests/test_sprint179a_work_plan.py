@@ -342,7 +342,7 @@ class WorkPlanFixture(TenantFixtureMixin):
                 datetime.datetime.combine(day, datetime.time(hour, 0))
             )
 
-        return Ticket.objects.create(
+        ticket = Ticket.objects.create(
             company=self.other_company if foreign else self.company,
             customer=self.other_customer if foreign else self.customer,
             building=self.other_building if foreign else self.building,
@@ -354,6 +354,10 @@ class WorkPlanFixture(TenantFixtureMixin):
             scheduled_start_at=at(scheduled, 8),
             scheduled_end_at=at(scheduled_end, 17),
         )
+        # P-1 — a scheduled fixture is a PERSON's plan, and says so.
+        if scheduled is not None:
+            self.record_plan(ticket)
+        return ticket
 
     def make_slot(
         self,
@@ -496,6 +500,11 @@ ENTRY_KEYS = {
     # headline lateness counts against, and when settled work was over.
     "created_at",
     "plan_source",
+    # P-1 -- provenance: a date is a plan only if a person made it.
+    "has_real_plan",
+    "planned_by_name",
+    "planned_at",
+    "created_by_name",
     "due_kind",
     "settled_at",
     "settled_days_after_due",
@@ -562,6 +571,9 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "late_entries",
                 # WP-1 G1 — the "Vastgelopen — actie nodig" rows.
                 "stuck_entries",
+                # FE-5 step 0 — whether this viewer may plan undated work.
+                # (On the wire since FE-5; this set had drifted — P-1.)
+                "can_plan",
                 "limits",
                 "truncated",
             },

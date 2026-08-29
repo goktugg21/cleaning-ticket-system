@@ -62,6 +62,7 @@ class OneJobOneRowTests(WorkPlanFixture, APITestCase):
             datetime.datetime.combine(self.today, datetime.time(8, 0))
         )
         ticket.save(update_fields=["scheduled_start_at"])
+        self.record_plan(ticket)  # P-1: a person planned it
         self.make_slot(ticket, start=self.today)
 
         payload = self.get_plan(self.super_admin, scope="company")
@@ -115,6 +116,7 @@ class UndatedIsAJobLevelFactTests(WorkPlanFixture, APITestCase):
             self.make_ticket("tmp"), start=self.today
         ).scheduled_start_at
         ticket.save(update_fields=["scheduled_start_at"])
+        self.record_plan(ticket)  # P-1: a person planned it
         slot = self.make_slot(ticket, start=None)
 
         payload = self.get_plan(self.worker)
@@ -142,6 +144,7 @@ class UndatedIsAJobLevelFactTests(WorkPlanFixture, APITestCase):
             datetime.datetime.combine(self.today, datetime.time(8, 0))
         )
         ticket.save(update_fields=["scheduled_start_at"])
+        self.record_plan(ticket)  # P-1: a person planned it
         self.make_slot(ticket, user=colleague, start=self.today)
         self.make_slot(ticket, start=None)
 

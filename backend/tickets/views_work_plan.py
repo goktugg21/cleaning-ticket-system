@@ -130,10 +130,18 @@ from .models import (
     TicketStaffAssignment,
     TicketStatus,
 )
+from .plan_provenance import (
+    NO_PLAN,
+    PLAN_KIND_SCHEDULE,
+    PlanProvenance,
+    extra_work_plan_provenance,
+    ticket_plan_provenance,
+)
 from .work_plan import (
     CLOSED_STATES,
     PLACEMENT_OVERDUE,
     PLACEMENT_PLANNED,
+    PLACEMENT_REVIEW,
     PLACEMENT_ROLLED,
     STATE_BLOCKED,
     STATE_DONE,
@@ -146,6 +154,7 @@ from .work_plan import (
     iso_week_bounds,
     overdue_days,
     placement_for,
+    review_days,
     rolled_days,
     rolls_forward,
 )
@@ -645,12 +654,22 @@ def _ticket_rolled_q(today: datetime.date) -> Q:
     return _TICKET_PENDING_Q & Q(**{f"{JOB_WINDOW_END}__lt": today})
 
 
+def _ticket_review_q() -> Q:
+    """Rule 8 (P-1 §3) — SQL twin of `work_plan.awaits_review` for a
+    job: the worker finished, a manager has not confirmed."""
+    return Q(
+        status=TicketStatus.WAITING_MANAGER_REVIEW, archived_at__isnull=True
+    )
+
+
 def _ticket_board_q(
     week_start: datetime.date, week_end: datetime.date, today: datetime.date
 ) -> Q:
     board = _ticket_week_q(week_start, week_end) & ~_ticket_rolled_q(today)
     if week_start <= today <= week_end:
-        board = board | _ticket_rolled_q(today)
+        # Rule 5's rolled rows and rule 8's review rows both sit on
+        # today, whichever week they were planned in.
+        board = board | _ticket_rolled_q(today) | _ticket_review_q()
     return board
 
 
@@ -695,6 +714,9 @@ def _slot_source(user, team: bool):
         "ticket",
         "ticket__building",
         "ticket__customer",
+        # P-1 — who created the ticket and who gave the slot its day.
+        "ticket__created_by",
+        "assigned_by",
         # Sprint 184 §2 — the slot's due date is the parent extra work's
         # deadline where one exists. Joined here so `_slot_deadline`
         # reads an already-loaded row: without it every slot in the week
@@ -747,7 +769,11 @@ def _extra_work_source(user, team: bool):
     queryset = queryset.exclude(
         id__in=covered.values("ticket__extra_work_request_id")
     )
-    return queryset.select_related("building", "customer")
+    # P-1 — the plan's provenance (`extra_work_plan_provenance`) reads
+    # the "committed window" history row; one prefetch for the board.
+    return queryset.select_related(
+        "building", "customer", "created_by"
+    ).prefetch_related("status_history__changed_by")
 
 
 def _stuck_extra_work_source(user, team: bool):
@@ -796,7 +822,20 @@ def _ticket_source(user):
         scope_tickets_for(user)
         .filter(deleted_at__isnull=True)
         .filter(Exists(staffed))
-        .select_related("building", "customer", "extra_work_request")
+        .select_related(
+            "building",
+            "customer",
+            "extra_work_request",
+            # P-1 — provenance: who created it, who planned it. The
+            # schedule rows and the extra work's "committed window" row
+            # are prefetched once for the board rather than per card.
+            "created_by",
+            "planned_occurrence__recurring_job__created_by",
+        )
+        .prefetch_related(
+            "status_history__changed_by",
+            "extra_work_request__status_history__changed_by",
+        )
     )
     return with_job_dates(queryset)
 
@@ -951,12 +990,24 @@ def _ticket_job(ticket) -> Job:
     """
     start, end = job_window(ticket)
     deadline = job_deadline(ticket)
+    # Rule 8 (P-1 §3) — waiting for a manager. The day it was handed
+    # over is `manager_review_at` (stamped on entry to the status);
+    # `updated_at` stands in for rows older than that stamp.
+    review_since = None
+    if (
+        ticket.status == TicketStatus.WAITING_MANAGER_REVIEW
+        and ticket.archived_at is None
+    ):
+        review_since = _local_date(
+            ticket.manager_review_at or ticket.updated_at
+        )
     return Job(
         planned_start=start,
         planned_end=end,
         due=deadline if deadline is not None else (end or start),
         state=_ticket_state(ticket),
         pending=_ticket_live(ticket),
+        review_since=review_since,
     )
 
 
@@ -1102,7 +1153,16 @@ DUE_KIND_DEADLINE = "DEADLINE"
 DUE_KIND_PLANNED_DAY = "PLANNED_DAY"
 
 
-def _fe4_facts(job, *, created, deadline, plan_source, settled_at) -> dict:
+def _fe4_facts(
+    job,
+    *,
+    created,
+    deadline,
+    plan_source,
+    settled_at,
+    provenance: PlanProvenance = NO_PLAN,
+    created_by=None,
+) -> dict:
     """FE-4 (Addendum D SS D.12 items 2-4) -- the honest-date facts every
     entry carries, whatever its source:
 
@@ -1115,6 +1175,14 @@ def _fe4_facts(job, *, created, deadline, plan_source, settled_at) -> dict:
                               is over; None while it is live
       settled_days_after_due  whole days the finish came after the due
                               date (quiet history), None otherwise
+
+    P-1 adds the provenance (`tickets/plan_provenance.py`):
+
+      has_real_plan           a PERSON (or the recurring plan) made the
+                              window -- "Gepland" is allowed only then
+      planned_by_name / planned_at   who, and when they did
+      created_by_name         who opened the record; the plain fact
+                              every card and detail states
     """
     due_kind = None
     if job.due is not None:
@@ -1128,7 +1196,11 @@ def _fe4_facts(job, *, created, deadline, plan_source, settled_at) -> dict:
         settled_after = late_by if late_by > 0 else None
     return {
         "created_at": created,
+        "created_by_name": _person_label(created_by) if created_by else None,
         "plan_source": plan_source,
+        "has_real_plan": provenance.has_real_plan,
+        "planned_by_name": provenance.planned_by_name,
+        "planned_at": provenance.planned_at,
         "due_kind": due_kind,
         "settled_at": settled_at,
         "settled_days_after_due": settled_after,
@@ -1167,10 +1239,21 @@ def _entry_from_slot(
             job,
             created=slot.ticket.created_at,
             deadline=_slot_deadline(slot),
-            # A slot IS a dated piece of a ticket: its own day is a plan.
+            # A slot IS a dated piece of a ticket: its own day is a plan,
+            # given by whoever put this person on it.
             plan_source=(
                 PLAN_SOURCE_TICKET if job.planned_start is not None else None
             ),
+            provenance=(
+                PlanProvenance(
+                    kind=PLAN_KIND_SCHEDULE,
+                    planned_by_name=_person_label(slot.assigned_by),
+                    planned_at=slot.assigned_at,
+                )
+                if job.planned_start is not None
+                else NO_PLAN
+            ),
+            created_by=slot.ticket.created_by,
             settled_at=(
                 slot.completed_at or _ticket_settled_at(slot.ticket)
                 if (
@@ -1289,6 +1372,8 @@ def _entry_from_extra_work(
                 if job.planned_start is not None
                 else None
             ),
+            provenance=extra_work_plan_provenance(extra_work),
+            created_by=extra_work.created_by,
             # No completion stamp on the request itself; its story is on
             # the timeline. Never live once closed, so no countdown.
             settled_at=None,
@@ -1380,6 +1465,8 @@ def _entry_from_ticket(
             deadline=job_deadline(ticket),
             plan_source=job_plan_source(ticket),
             settled_at=_ticket_settled_at(ticket),
+            provenance=ticket_plan_provenance(ticket),
+            created_by=ticket.created_by,
         ),
         "kind": KIND_TICKET,
         "key": f"ticket-{ticket.id}",
@@ -1404,7 +1491,11 @@ def _entry_from_ticket(
         "planned_end": _iso(job.planned_end),
         "due_date": _iso(job.due),
         "unplanned_age_days": _unplanned_age(job, ticket.created_at, today),
-        "stuck_age_days": None,
+        # Rule 8 — how long the job has waited for a manager; the
+        # number the REVIEW marker prints. None on any other placement.
+        "stuck_age_days": (
+            review_days(job, today) if placement == PLACEMENT_REVIEW else None
+        ),
         "scheduled_start_at": ticket.scheduled_start_at,
         "scheduled_end_at": ticket.scheduled_end_at,
         "time_window_label": None,
@@ -1418,7 +1509,12 @@ def _entry_from_ticket(
         "is_overdue": is_overdue(job, today),
         "overdue_days": overdue_days(job, today),
         "days_until_due": days_to_due(job, today),
-        "viewer_settled": _ticket_settled(ticket),
+        # Rule 8 — a job on today's column waiting for THIS reader's
+        # confirmation is not settled for them, whatever its status set
+        # says; the card must ask, not soothe.
+        "viewer_settled": (
+            False if placement == PLACEMENT_REVIEW else _ticket_settled(ticket)
+        ),
         "parts": parts or [],
         "lateness": lateness if lateness is not None else _empty_lateness(),
         "assignee_names": names[:ASSIGNEE_NAMES_SHOWN],
@@ -1599,7 +1695,7 @@ def _week_sort_key(entry: dict) -> tuple:
     return (
         entry["day"] or "",
         1 if entry["viewer_settled"] else 0,
-        1 if entry["placement"] == PLACEMENT_ROLLED else 0,
+        1 if entry["placement"] in (PLACEMENT_ROLLED, PLACEMENT_REVIEW) else 0,
         entry["rolled_from"] or "",
         entry["scheduled_start_at"] or _NO_TIME,
         entry["title"] or "",
@@ -2002,11 +2098,20 @@ class WorkPlanView(APIView):
         placement = placement_for(job, week_start, week_end, today)
         day = None
         rolled_from = rolled = None
+        # Rule 8 (P-1 §3) — waiting for a manager: on today's column of
+        # the current week, marked. Any other week keeps rule 1, so the
+        # week the worker finished it still shows it, settled, at home.
+        if (
+            fallback_placement is None
+            and today_in_week
+            and job.review_since is not None
+        ):
+            placement, day = PLACEMENT_REVIEW, today
         # Rule 5, unchanged in what it decides: a pending job whose last
         # planned day has passed is not left in that past column, it is
         # on today until it is done. The date on the record never moved,
         # and `rolled_from` is that date.
-        if fallback_placement is None and rolls_forward(job, today):
+        elif fallback_placement is None and rolls_forward(job, today):
             if not today_in_week:
                 return []
             placement, day = PLACEMENT_ROLLED, today
