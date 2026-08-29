@@ -319,6 +319,11 @@ this list before it is called done.
     operational ticket data..." over an empty console.
 11. **Progressive disclosure is the pattern, not a second product.** The
     Advanced layer must itself satisfy rules 1–10.
+12. **The system talks like a person — every surface, admin and super
+    admin included.** Dense, efficient screens for professionals; never
+    a wall of technical values; the screen tells the reader where they
+    stand and what happens next. Admin surfaces do NOT become multi-step
+    wizards — efficiency stays. (Owner, 2026-08-29.)
 
 ---
 
@@ -559,3 +564,53 @@ action (existing reschedule flow with reason). Confirm or override.
 ```markdown
 | [product/sot-addendum-d-frontend-redesign.md](product/sot-addendum-d-frontend-redesign.md) | **Addendum D** (2026-08-28): the frontend redesign — diagnosis, vocabulary table, role-based navigation, the meerwerk `display_phase` presentation model, the five core flow shapes, UX principles, screen-inventory verdicts, the FE sprint plan, and the bounded visual-verification protocol. **Wins over base SoT §16 for the items it covers once signed off.** | Whenever a redesign decision is made or a FE sprint completes. |
 ```
+
+---
+
+## D.12 Owner feedback, round 1 (2026-08-29)
+
+The owner's first live review of crmtest (FE-1..FE-3 deployed). The
+owner's words are the spec; where they conflict with earlier text in
+this Addendum, the owner wins. Implemented as sprint **FE-4**.
+
+1. **Back goes where you came from.** A detail page's "back" returns to
+   the in-app surface the reader actually came from — My Schedule with
+   its week and filters, Mijn meldingen, Tickets with its query intact.
+   Role default when there is no in-app origin: staff / building manager
+   → My Schedule, customer → Mijn meldingen, provider admin → Tickets.
+   The legacy tickets list is not a customer surface: a customer role
+   reaching it is redirected to Mijn meldingen (single-ticket deep links
+   keep working).
+2. **Honest date words, cards and details alike.** "Gepland / Planned
+   <date>" ONLY when a planned date exists. An unplanned item says
+   "Aangemaakt <date>" + "nog niet ingepland". A customer's wished date
+   is a wish, never a plan. The creation date is never dressed as a plan.
+3. **One headline lateness per item.** The deadline when one exists,
+   otherwise the planned day; the card's number and the detail's number
+   come from the same server field (`days_until_due` / `due_kind`).
+   Every other time-fact is secondary and says what it is ("87 dagen
+   zonder uren" is information under the facts, never a second "te
+   laat" headline). One alarm per item, maximum.
+4. **Closed and settled items stop applying pressure.** Past tense,
+   neutral styling — "Afgerond op <date>" and, when after the deadline,
+   "(2 dagen na deadline)" as quiet history. No red chip, nothing that
+   implies action. Work waiting on the customer wears a "wacht op klant"
+   chip on provider boards, never late-styling against the provider.
+5. **My Schedule reading order (current week):** today's planned open
+   work first; carried late open work second, with its honest origin;
+   settled work visually settled at the end of its day; "Nog niet
+   gepland" collapsed to a count-with-age button that opens the drawer,
+   oldest first. The stat tiles reduce to what earns its place (Totaal /
+   Te laat / Open); the rest fold into the filter.
+6. **Multiple custom meerwerk lines.** "Iets anders" is a real cart line:
+   add another, each rendered like a priced line (title, optional note,
+   "prijs volgt"), all listed on the confirm page. The customer list
+   filters by phase.
+7. **Multi-customer membership stays as is** (no model change); the
+   customer chooser appears only for a multi-membership user, never for
+   a single-membership one.
+8. **Turkish locale is parked until after FE-7.**
+9. **Language integrity:** no hardcoded Dutch may reach an English
+   session; the language switch is plainly visible for every role; the
+   SA and provider-admin demo accounts review in English.
+
