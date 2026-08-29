@@ -450,7 +450,7 @@ export function UserDetailPage() {
     try {
       await deactivateUser(numericId);
       deactivateDialogRef.current?.close();
-      navigate("/admin/users?deactivated=ok", { replace: true });
+      navigate("/admin/people/users?deactivated=ok", { replace: true });
     } catch (err) {
       setError(getApiError(err));
       deactivateDialogRef.current?.close();
@@ -466,7 +466,7 @@ export function UserDetailPage() {
     try {
       await reactivateUser(numericId);
       reactivateDialogRef.current?.close();
-      navigate("/admin/users?reactivated=ok", { replace: true });
+      navigate("/admin/people/users?reactivated=ok", { replace: true });
     } catch (err) {
       setError(getApiError(err));
       reactivateDialogRef.current?.close();

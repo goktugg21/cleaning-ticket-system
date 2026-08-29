@@ -118,7 +118,8 @@ function rateInForce(
   return rows.find((row) => row.valid_from <= onDate);
 }
 
-export function EmployeesAdminPage() {
+/** FE-6 — `embedded`: a tab of the Mensen surface (see UsersAdminPage). */
+export function EmployeesAdminPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { me } = useAuth();
   const { t } = useTranslation("common");
   const { push: pushToast } = useToast();
@@ -467,12 +468,16 @@ export function EmployeesAdminPage() {
 
   return (
     <div data-testid="employees-admin-page">
-      <div className="page-header">
+      <div className={embedded ? "page-header page-header-embedded" : "page-header"}>
         <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">{t("employees.page_title")}</h2>
+          {!embedded && (
+            <>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>
+                {t("nav.admin_group")}
+              </div>
+              <h2 className="page-title">{t("employees.page_title")}</h2>
+            </>
+          )}
           <p className="page-sub">
             {loading
               ? t("employees.loading")

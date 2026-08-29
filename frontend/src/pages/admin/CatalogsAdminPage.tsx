@@ -55,17 +55,22 @@ const TABS: { key: Tab; labelKey: string }[] = [
   { key: "managed_units", labelKey: "catalogs.tab_managed_units" },
 ];
 
-export function CatalogsAdminPage() {
+/** FE-6 — `embedded`: a tab of the Diensten & catalogi surface. The
+ *  surface owns the title, and its Diensten tab IS the services screen,
+ *  so the pointer card to it is not rendered there. */
+export function CatalogsAdminPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation("common");
   const [tab, setTab] = useState<Tab>("hour_types");
 
   return (
     <div>
-      <PageHeader
-        title={t("catalogs.title")}
-        subtitle={t("catalogs.subtitle")}
-        testId="catalogs-page-header"
-      />
+      {!embedded && (
+        <PageHeader
+          title={t("catalogs.title")}
+          subtitle={t("catalogs.subtitle")}
+          testId="catalogs-page-header"
+        />
+      )}
 
       <div
         className="composer-toggle"
@@ -104,6 +109,7 @@ export function CatalogsAdminPage() {
           deliberately has none, because plenty of cards hold a
           full-bleed table; this one holds a heading, a sentence and a
           button, and all three rendered flush against the border. */}
+      {!embedded && (
       <div className="card card-detail-pad" style={{ marginTop: 16 }}>
         <div className="form-section-title">
           {t("catalogs.services_title")}
@@ -112,13 +118,14 @@ export function CatalogsAdminPage() {
           {t("catalogs.services_hint")}
         </p>
         <Link
-          to="/admin/services"
+          to="/admin/services-catalogs/services"
           className="btn btn-secondary btn-sm"
           data-testid="catalogs-services-link"
         >
           {t("catalogs.services_link")}
         </Link>
       </div>
+      )}
     </div>
   );
 }

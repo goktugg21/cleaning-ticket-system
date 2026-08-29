@@ -63,7 +63,6 @@ import { CompanyDetailPage } from "./pages/admin/CompanyDetailPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerContactsPage } from "./pages/admin/CustomerContactsPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
-import { EmployeesAdminPage } from "./pages/admin/EmployeesAdminPage";
 import { CustomerPricingPage } from "./pages/admin/CustomerPricingPage";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // Sprint 28 Batch 13 — view-first refactor of the customer detail
@@ -88,7 +87,6 @@ import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPag
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
 import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
-import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
 import { HoursAdminPage } from "./pages/admin/HoursAdminPage";
 // Sprint W4-Q §2 — per-company thresholds for the three time-driven
 // SLA warnings. SA / CA only, on its own guard (see SlaWarningsRoute).
@@ -98,12 +96,11 @@ import { SlaWarningsAdminPage } from "./pages/admin/SlaWarningsAdminPage";
 import { ContractsAdminPage } from "./pages/admin/contracts/ContractsAdminPage";
 import { ContractDetailPage } from "./pages/admin/contracts/ContractDetailPage";
 import { ContractsRoute } from "./components/ContractsRoute";
-import { CatalogsAdminPage } from "./pages/admin/CatalogsAdminPage";
-import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
+import { PeopleAdminPage } from "./pages/admin/PeopleAdminPage";
+import { ServicesCatalogsPage } from "./pages/admin/ServicesCatalogsPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserDetailPage } from "./pages/admin/UserDetailPage";
 import { UserFormPage } from "./pages/admin/UserFormPage";
-import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
 
 // ReportsPage is lazy-loaded. recharts 2.x does not tree-shake cleanly
 // from its main entry, so route-level splitting is the lever available
@@ -804,35 +801,41 @@ export default function App() {
               </AdminRoute>
             }
           />
-          {/* Sprint 28 Batch 5 — provider-wide service catalog. Single
-              page with two tabs (Services + Categories) to honour
-              §3 "no data dumps". */}
+          {/* FE-6 (§D.3.4) — ONE "Diensten & catalogi" surface with two
+              tabs; each tab is the page its old route opened, behind
+              the same AdminRoute gate. The old addresses redirect. */}
           <Route
-            path="/admin/services"
+            path="/admin/services-catalogs/:tab?"
             element={
               <AdminRoute>
-                <ServicesAdminPage />
+                <ServicesCatalogsPage />
               </AdminRoute>
             }
           />
-          {/* Sprint 178 §1 — the Catalogs area. Same AdminRoute gate as
-              every other per-company admin screen; the individual
-              catalogs keep their own endpoint permissions unchanged. */}
+          <Route
+            path="/admin/services"
+            element={<Navigate to="/admin/services-catalogs/services" replace />}
+          />
           <Route
             path="/admin/catalogs"
+            element={<Navigate to="/admin/services-catalogs/catalogs" replace />}
+          />
+          {/* FE-6 (§D.3.4) — ONE "Mensen" surface: users, employees and
+              invitations as tabs, each behind the gate its route always
+              had (AdminRoute for users and invitations, the SA/CA/BM
+              reader gate for employees). The old list addresses
+              redirect; the per-user pages below are untouched. */}
+          <Route
+            path="/admin/people/:tab?"
             element={
-              <AdminRoute>
-                <CatalogsAdminPage />
-              </AdminRoute>
+              <CustomerReadRoute>
+                <PeopleAdminPage />
+              </CustomerReadRoute>
             }
           />
           <Route
             path="/admin/users"
-            element={
-              <AdminRoute>
-                <UsersAdminPage />
-              </AdminRoute>
-            }
+            element={<Navigate to="/admin/people/users" replace />}
           />
           {/* Sprint 29 Batch 29.6 — view-first split mirroring 29.3
               (companies) and 29.4 (buildings). `/admin/users/:id` now
@@ -855,24 +858,13 @@ export default function App() {
               </AdminRoute>
             }
           />
-          {/* Employees directory — provider-wide. CustomerReadRoute
-              admits SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER
-              (BM read-only); STAFF / CUSTOMER_USER are bounced. */}
           <Route
             path="/admin/employees"
-            element={
-              <CustomerReadRoute>
-                <EmployeesAdminPage />
-              </CustomerReadRoute>
-            }
+            element={<Navigate to="/admin/people/employees" replace />}
           />
           <Route
             path="/admin/invitations"
-            element={
-              <AdminRoute>
-                <InvitationsAdminPage />
-              </AdminRoute>
-            }
+            element={<Navigate to="/admin/people/invitations" replace />}
           />
           <Route
             path="/admin/audit-logs"

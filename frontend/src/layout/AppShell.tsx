@@ -15,12 +15,10 @@ import {
   Files,
   FileText,
   LayoutGrid,
-  MailPlus,
   MapPin,
   Megaphone,
   MessagesSquare,
   Menu,
-  Library,
   MoreHorizontal,
   Package,
   PlusCircle,
@@ -57,6 +55,7 @@ import { useLanguageSync } from "../i18n/useLanguageSync";
 import { UserMenu } from "../components/UserMenu";
 import { NotificationBell } from "../components/NotificationBell";
 import { InboxNavBadge } from "../components/InboxNavBadge";
+import { listStaffAssignmentRequests } from "../api/admin";
 import { getInitials } from "../lib/initials";
 
 // FE-1 (Addendum D §D.3.1) — the customer "Meer" group's own routes.
@@ -96,6 +95,40 @@ export function AppShell({ children }: AppShellProps) {
   // A customer is a page with tabs; the Klanten entry simply stays lit
   // across its subtree.
   const customersActive = /^\/admin\/customers(\/.*)?$/.test(location.pathname);
+  // FE-6 — the merged surfaces light on their tabs AND on the per-record
+  // pages that still live under the old prefixes.
+  const peopleActive =
+    /^\/admin\/(people|users|employees|invitations)(\/.*)?$/.test(
+      location.pathname,
+    );
+  const servicesActive =
+    /^\/admin\/(services-catalogs|services|catalogs)(\/.*)?$/.test(
+      location.pathname,
+    );
+
+  /* FE-6 — how many staff requests wait for a reviewer. Read from the
+     existing list endpoint (`count` on a PENDING query), fetched for
+     the roles that may review and re-read on every navigation so the
+     badge follows approvals. Null until it lands: the entry renders
+     only once the server has said "more than zero". */
+  const [staffRequestCount, setStaffRequestCount] = useState<number | null>(
+    null,
+  );
+  const mayReviewRequests = canAccessStaffRequestReview(me?.role);
+  useEffect(() => {
+    if (!mayReviewRequests) return;
+    let cancelled = false;
+    listStaffAssignmentRequests({ status: "PENDING" })
+      .then((page) => {
+        if (!cancelled) setStaffRequestCount(page.count);
+      })
+      .catch(() => {
+        /* the entry simply stays hidden */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mayReviewRequests, location.pathname]);
 
   // Sprint 12 — mobile sidebar toggle. The sidebar is `position: fixed`
   // and hidden by default below the mobile breakpoint via CSS; the
@@ -554,78 +587,62 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.buildings")}
                   </NavLink>
-                  <NavLink to="/admin/users" className={navClass}>
-                    <span className="nav-icon">
-                      <UserCog size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.users")}
-                  </NavLink>
                 </>
               )}
-              {/* Employees directory: SA/CA through the admin area, BM
-                  through its own read-only entry — the same two doors
-                  as before, now one row with the union gate. */}
+              {/* FE-6 (§D.3.4) — ONE "Mensen" entry for the users +
+                  employees + invitations surface. The gate is the union
+                  of the three it replaces (SA/CA everywhere, BM through
+                  the employees tab), and each tab keeps its own. */}
               {(canAccessAdminArea(me?.role) ||
                 isBuildingManager(me?.role)) && (
                 <NavLink
-                  to="/admin/employees"
-                  className={navClass}
-                  data-testid="sidebar-employees"
+                  to="/admin/people"
+                  className={() => navClass({ isActive: peopleActive })}
+                  data-testid="sidebar-people"
                 >
                   <span className="nav-icon">
-                    <Contact size={16} strokeWidth={2} />
+                    <UserCog size={16} strokeWidth={2} />
                   </span>
-                  {t("nav.employees")}
-                </NavLink>
-              )}
-              {canAccessAdminArea(me?.role) && (
-                <NavLink to="/admin/invitations" className={navClass}>
-                  <span className="nav-icon">
-                    <MailPlus size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.invitations")}
+                  {t("nav.people")}
                 </NavLink>
               )}
               {/* Sprint 23B — staff assignment requests review queue.
-                  BM sees this one queue without the rest of the admin
-                  entries, exactly as before. */}
-              {canAccessStaffRequestReview(me?.role) && (
-                <NavLink
-                  to="/admin/staff-assignment-requests"
-                  className={navClass}
-                >
-                  <span className="nav-icon">
-                    <ClipboardList size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.staff_requests")}
-                </NavLink>
-              )}
+                  FE-6: badge-driven, hidden when there is nothing to
+                  review. The page stays reachable by address. */}
+              {canAccessStaffRequestReview(me?.role) &&
+                staffRequestCount !== null &&
+                staffRequestCount > 0 && (
+                  <NavLink
+                    to="/admin/staff-assignment-requests"
+                    className={navClass}
+                    data-testid="sidebar-staff-requests"
+                  >
+                    <span className="nav-icon">
+                      <ClipboardList size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.staff_requests")}
+                    <span
+                      className="nav-badge"
+                      data-testid="sidebar-staff-requests-count"
+                    >
+                      {staffRequestCount}
+                    </span>
+                  </NavLink>
+                )}
 
               <div className="nav-group-label">{t("nav.group_systeem")}</div>
               {canAccessAdminArea(me?.role) && (
                 <>
-                  {/* Sprint 28 Batch 5 — provider-wide service catalog. */}
+                  {/* FE-6 (§D.3.4) — ONE "Diensten & catalogi" entry. */}
                   <NavLink
-                    to="/admin/services"
-                    className={navClass}
-                    data-testid="sidebar-services"
+                    to="/admin/services-catalogs"
+                    className={() => navClass({ isActive: servicesActive })}
+                    data-testid="sidebar-services-catalogs"
                   >
                     <span className="nav-icon">
                       <Package size={16} strokeWidth={2} />
                     </span>
-                    {t("nav.services")}
-                  </NavLink>
-                  {/* Sprint 178 §1 — ONE place for every per-company
-                      catalog. */}
-                  <NavLink
-                    to="/admin/catalogs"
-                    className={navClass}
-                    data-testid="sidebar-catalogs"
-                  >
-                    <span className="nav-icon">
-                      <Library size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.catalogs")}
+                    {t("nav.services_catalogs")}
                   </NavLink>
                   <NavLink to="/admin/companies" className={navClass}>
                     <span className="nav-icon">

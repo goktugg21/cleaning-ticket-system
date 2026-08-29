@@ -145,7 +145,9 @@ function formatDecimal(value: string): string {
 // people should inherit.
 const CATALOG_COMPANY_STORAGE_KEY = "osius.catalog.company";
 
-export function ServicesAdminPage() {
+/** FE-6 — `embedded`: a tab of the Diensten & catalogi surface, which
+ *  owns the title; the page keeps its own inner tabs and everything else. */
+export function ServicesAdminPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t, i18n } = useTranslation("common");
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
   const { me } = useAuth();
@@ -1181,14 +1183,16 @@ export function ServicesAdminPage() {
 
   return (
     <div data-testid="services-admin-page">
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
+      {!embedded && (
+        <div className="page-header">
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              {t("nav.admin_group")}
+            </div>
+            <h2 className="page-title">{t("services.page_title")}</h2>
           </div>
-          <h2 className="page-title">{t("services.page_title")}</h2>
         </div>
-      </div>
+      )}
 
       <div
         className="composer-toggle"
