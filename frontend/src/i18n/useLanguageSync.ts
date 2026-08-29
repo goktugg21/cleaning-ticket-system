@@ -16,5 +16,9 @@ export function useLanguageSync() {
     if (i18n.language !== target) {
       i18n.changeLanguage(target);
     }
+    // FE-7 (§D.6.9) — the document language follows the session, so
+    // screen readers and the browser's own hyphenation/spell tools read
+    // the page in the language it is actually in (index.html says "en").
+    document.documentElement.lang = target;
   }, [me?.language, i18n]);
 }

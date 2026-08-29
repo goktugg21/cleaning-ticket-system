@@ -155,7 +155,9 @@ export function PlannedWorkListPage() {
 
       {visibleRows.length > 0 && (
         <div className="responsive-table-wrap">
-          <div className="card" style={{ overflow: "hidden" }}>
+          {/* FE-7 — the card clipped its own table at 768 (overflow hidden,
+              no scroller); the wrap scrolls the table inside the card. */}
+          <div className="card table-wrap">
             <table className="data-table">
               <thead>
                 <tr>

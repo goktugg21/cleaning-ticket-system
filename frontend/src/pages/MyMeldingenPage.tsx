@@ -123,7 +123,10 @@ export function MyMeldingenPage() {
                 </div>
 
                 <div className="table-wrap">
-                  <table className="data-table" data-testid="my-meldingen-table">
+                  <table
+                    className="data-table table-cards"
+                    data-testid="my-meldingen-table"
+                  >
                     <thead>
                       <tr>
                         <th>{t("customer_view.ticket_table.col_subject")}</th>
@@ -157,7 +160,7 @@ export function MyMeldingenPage() {
                               />
                             )}
                           </td>
-                          <td>
+                          <td data-label={t("customer_view.ticket_table.col_status")}>
                             {/* FE-2 (§D.4) — the customer reads the
                                 server-computed PHASE, not the workflow
                                 status enum. */}
@@ -167,8 +170,12 @@ export function MyMeldingenPage() {
                               testId="my-meldingen-phase"
                             />
                           </td>
-                          <td>{row.building_name}</td>
-                          <td>{formatDate(row.created_at)}</td>
+                          <td data-label={t("customer_view.ticket_table.col_building")}>
+                            {row.building_name}
+                          </td>
+                          <td data-label={t("customer_view.ticket_table.col_created")}>
+                            {formatDate(row.created_at)}
+                          </td>
                         </ClickableRow>
                       ))}
                     </tbody>

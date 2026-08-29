@@ -15792,6 +15792,8 @@ table.assign-table { min-width: 0; width: 100%; }
 .skeleton-row .skeleton-line { height: 11px; }
 @keyframes skeleton-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .skeleton-line { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .loading-bar-fill { animation: none; } }
+.chart-skeleton { justify-content: center; }
 
 /* FE-6 — the tickets list's four primary tabs beside the optional
    "Heropend" chip; the tiles themselves are the shared status tiles. */
@@ -15812,6 +15814,76 @@ table.assign-table { min-width: 0; width: 100%; }
   .ticket-tabs-row .ticket-tabs { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 }
 .skeleton-table { padding-bottom: 6px; }
+
+/* FE-7 (§D.6.8, base SoT §3.5) — a table that becomes cards on a phone.
+   The invitations table has done this since Sprint 20; this is the same
+   shape as a shared class, so any list can opt in with `data-label` on
+   its cells. Below 720px the header row goes, every row is a card and
+   every cell is a label/value line. */
+@media (max-width: 720px) {
+  table.table-cards { min-width: 0; }
+  .table-cards,
+  .table-cards thead,
+  .table-cards tbody,
+  .table-cards tr,
+  .table-cards td { display: block; width: 100%; }
+  .table-cards thead { display: none; }
+  .table-cards tr {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: var(--surface);
+  }
+  .table-cards tr:last-child { margin-bottom: 0; }
+  .table-cards td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 0;
+    border-bottom: none;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+  .table-cards td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-family: var(--f-head);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-align: left;
+  }
+  .table-cards td:not([data-label])::before { display: none; }
+  .table-cards td.td-subject {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 4px;
+  }
+  .table-cards td.td-subject::before { display: none; }
+}
+
+/* FE-7 (base SoT §3.5, tablet) — at 768 the sidebar is still pinned and
+   the header row has ~500px: the actions wrap under the title instead
+   of running past the viewport (seen on Diensten & catalogi). */
+@media (max-width: 900px) {
+  .page-header { flex-wrap: wrap; }
+  .page-header-actions { flex-wrap: wrap; }
+}
+
+/* FE-7 (base SoT §3.5) — tap targets on a phone: the detail tab pills
+   and the "Geavanceerd" fold were 28px and 15px tall. */
+@media (max-width: 480px) {
+  .composer-toggle-btn { min-height: 36px; height: auto; }
+  .workflow-corrections-toggle { min-height: 36px; }
+}
+
 
 /* FE-6 (§D.8.4) — the audit log's "changes" cell: a diff needs room,
    and the table's auto layout was handing this cell 100px. The table

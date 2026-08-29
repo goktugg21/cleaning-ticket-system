@@ -269,7 +269,7 @@ export function CustomerEmployeesDirectory({
       )}
 
       <div className="table-wrap">
-        <table className="data-table">
+        <table className="data-table table-cards">
           <thead>
             <tr>
               <th>{t("customer_employees.col_name")}</th>
@@ -296,13 +296,16 @@ export function CustomerEmployeesDirectory({
                     {row.full_name || row.email}
                   </Link>
                 </td>
-                <td>
+                <td data-label={t("customer_employees.col_email")}>
                   <a href={`mailto:${row.email}`}>{row.email}</a>
                 </td>
-                <td data-testid="customer-employee-access-role">
+                <td
+                  data-testid="customer-employee-access-role"
+                  data-label={t("customer_employees.col_access_role")}
+                >
                   <AccessRoleBadge accessRole={row.customer_access_role} />
                 </td>
-                <td>
+                <td data-label={t("status")}>
                   <StatusBadge
                     variant="cell"
                     status={{
