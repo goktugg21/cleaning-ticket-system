@@ -654,9 +654,6 @@
   "next.customer.redoing": "You told us this was not right. We are putting it right.",
   "detail.ctx_ticket_kept_own_date": "Ticket {{ticket}} keeps its own date, {{date}}.",
   "detail.ctx_ticket_kept_own_date_link": "Open the ticket to change it",
-  "create.proof_question": "What has to be there before this may be called done?",
-  "create.proof_photo": "A photo of the finished work",
-  "create.proof_note": "A short note on what was done",
   "next.in_progress_ticket_decides": "Ticket {{ticket}} decides when this work is done. Finish the ticket; this extra work follows on its own.",
   "next.in_progress_ticket_decides_unnumbered": "The ticket decides when this work is done. Finish the ticket; this extra work follows on its own.",
   "next.move_not_available": "This step is not available right now. Reload the page, or pick an action below.",
@@ -760,7 +757,6 @@
   "create.series_hint": "Each chosen day becomes its own meerwerk with the same content.",
   "create.series_summary_one": "{{count}} day",
   "create.series_summary_other": "{{count}} days",
-  "create.proof_summary": "proof on completion",
   "create.urgent_label": "This is urgent",
   "create.urgent_helper": "Urgent means: this cannot wait for the next planned round.",
   "create.confirm_title": "This is what you are creating",
@@ -768,5 +764,10 @@
   "create.price_follows_count_one": "{{count}} line: price follows",
   "create.price_follows_count_other": "{{count}} lines: price follows",
   "create.preview_unavailable": "We cannot fetch what happens next right now. You can still create it.",
-  "create.intent.choose": "What happens next?"
+  "create.intent.choose": "What happens next?",
+  "detail.ctx_not_planned_yet": "not planned yet",
+  "detail.ctx_planned_by_on": "by {{name}}, on {{date}}",
+  "detail.ctx_planned_on_date": "on {{date}}",
+  "detail.ctx_created_by_on": "Created {{date}} by {{name}}",
+  "detail.billed_to_follows_sentence": "Goes on the invoice the way this customer is set up"
 }

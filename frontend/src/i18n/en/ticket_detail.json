@@ -383,5 +383,12 @@
   "facts.settled_after_deadline_one": "({{count}} day after the deadline)",
   "facts.settled_after_deadline_other": "({{count}} days after the deadline)",
   "facts.settled_after_plan_one": "({{count}} day after the planned day)",
-  "facts.settled_after_plan_other": "({{count}} days after the planned day)"
+  "facts.settled_after_plan_other": "({{count}} days after the planned day)",
+  "facts.planned_for": "Planned for {{date}}",
+  "facts.planned_for_range": "Planned for {{from}} – {{to}}",
+  "facts.planned_by_on": "by {{name}}, on {{date}}",
+  "facts.planned_on_date": "on {{date}}",
+  "facts.created_by_on": "Created {{date}} by {{name}}",
+  "facts.not_planned_yet_age_one": "not planned yet · {{count}} day now",
+  "facts.not_planned_yet_age_other": "not planned yet · {{count}} days now"
 }

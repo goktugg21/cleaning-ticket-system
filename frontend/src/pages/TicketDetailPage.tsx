@@ -3481,33 +3481,54 @@ export function TicketDetailPage() {
             <div className="ew-ctx-block" data-testid="ticket-fact-when">
               <div className="ew-ctx-label">{t("facts.when")}</div>
               <div className="ew-ctx-body">
-                {/* The planned day(s) — the ticket's own schedule, which
-                    is the one date the crew works to. */}
+                {/* P-1 — A DATE IS A PLAN ONLY IF A PERSON MADE IT. The
+                    server says whether the window is real
+                    (`has_real_plan`) and whose; a seeded date nobody set
+                    (the Sprint 9B spawn seed on crmtest's June tickets)
+                    reads "not planned yet", never "planned", never late.
+                    The words: "Ingepland voor <date> — door <name>, op
+                    <date>" / "Aangemaakt op <date> door <name> — nog niet
+                    ingepland · al N dagen". */}
                 <div className="ew-ctx-strong" data-testid="ticket-fact-planned">
-                  {ticket.scheduled_start_at
+                  {ticket.has_real_plan && ticket.scheduled_start_at
                     ? ticket.scheduled_end_at &&
                       ticket.scheduled_end_at !== ticket.scheduled_start_at
-                      ? t("schedule.range", {
+                      ? t("facts.planned_for_range", {
                           from: formatDate(ticket.scheduled_start_at),
                           to: formatDate(ticket.scheduled_end_at),
                         })
-                      : formatDate(ticket.scheduled_start_at)
-                    : t("schedule.not_scheduled")}
+                      : t("facts.planned_for", { date: formatDate(ticket.scheduled_start_at) })
+                    : ticket.has_real_plan && ticket.due_date
+                      ? t("facts.planned_for", { date: formatDay(ticket.due_date) })
+                      : t("schedule.not_scheduled")}
                 </div>
-                {ticket.time_window_label && (
+                {ticket.has_real_plan && ticket.time_window_label && (
                   <div className="ew-ctx-sub">{ticket.time_window_label}</div>
                 )}
-                {/* FE-4 (Addendum D §D.12 item 2) — the honest words for
-                    an unplanned job, with the SAME age the Werkplanning's
-                    row prints (`unplanned_age_days`, server-computed). */}
-                {!ticket.scheduled_start_at && (
-                  <div className="ew-ctx-sub" data-testid="ticket-fact-created">
-                    {t("facts.created_on", { date: formatDate(ticket.created_at) })}
-                    {ticket.unplanned_age_days !== null && ticket.unplanned_age_days > 0
-                      ? ` · ${t("facts.unplanned_age", { count: ticket.unplanned_age_days })}`
-                      : ""}
+                {ticket.has_real_plan && ticket.planned_at && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-planned-by">
+                    {ticket.planned_by_name
+                      ? t("facts.planned_by_on", {
+                          name: ticket.planned_by_name,
+                          date: formatDate(ticket.planned_at),
+                        })
+                      : t("facts.planned_on_date", { date: formatDate(ticket.planned_at) })}
                   </div>
                 )}
+                {/* The plain fact, on EVERY ticket: who opened it and when.
+                    On an unplanned job it carries the SAME age the
+                    Werkplanning's row prints (`unplanned_age_days`). */}
+                <div className="ew-ctx-sub" data-testid="ticket-fact-created">
+                  {t("facts.created_by_on", {
+                    date: formatDate(ticket.created_at),
+                    name: ticket.created_by_name || ticket.created_by_email,
+                  })}
+                  {!ticket.has_real_plan &&
+                  ticket.unplanned_age_days !== null &&
+                  ticket.unplanned_age_days > 0
+                    ? ` — ${t("facts.not_planned_yet_age", { count: ticket.unplanned_age_days })}`
+                    : ""}
+                </div>
                 {/* FE-4 (§D.12 item 4) — work that is over reads in the
                     past tense, with the after-deadline fact as quiet
                     history: no chip, no "te laat". */}

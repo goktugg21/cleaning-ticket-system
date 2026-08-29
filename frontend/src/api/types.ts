@@ -637,6 +637,18 @@ export interface TicketDetail extends TicketList {
    *  `reschedule_reason`) and null on a ticket nobody has planned. */
   schedule_planned_by_name: string | null;
   schedule_planned_at: string | null;
+  /** P-1 — is the window a PERSON's plan at all? False for a seeded
+   *  date nobody set (the Sprint 9B spawn seed on old crmtest tickets):
+   *  such a ticket reads "created ... not planned yet", never "planned",
+   *  and never late. `plan_source` mirrors the work-plan card's.
+   *  `planned_by_name` is null for a CUSTOMER_USER (internal staffing
+   *  detail) and when the plan came in without a named person. */
+  has_real_plan: boolean;
+  plan_source: "TICKET" | "PROVIDER_PLAN" | "CUSTOMER_WISH" | null;
+  planned_by_name: string | null;
+  planned_at: string | null;
+  /** P-1 — who opened the ticket, as a name. Nobody guesses this. */
+  created_by_name: string;
   allowed_next_statuses: TicketStatus[];
   sla_status: SLAStatus;
   sla_due_at: string | null;
@@ -2113,6 +2125,13 @@ export interface ProposalLine {
 // internal_cost_note, override_*) are absent on customer responses.
 export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   description: string;
+  /** P-1 — who opened it (a name), and whether the committed window is
+   *  a person's plan and whose. Optional: an older cached payload omits
+   *  them. */
+  created_by_name?: string;
+  has_real_plan?: boolean;
+  planned_by_name?: string | null;
+  planned_at?: string | null;
   /** FE-3 (§D.11 G3) — signed whole days to the deadline (left when
    *  positive, over when negative, today at zero), computed server-side
    *  with the same rule as `is_overdue`. Null without a deadline or once

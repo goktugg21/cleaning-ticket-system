@@ -7,6 +7,7 @@ import {
   PlayCircle,
   Users,
   XCircle,
+  ClipboardCheck,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -99,10 +100,16 @@ export function PlacementMarker({
     if (entry.plan_source === "CUSTOMER_WISH" && originDate) {
       return t("agenda.wished_on", { date: formatPlannedDay(originDate) });
     }
-    if (entry.plan_source === null || !originDate) {
-      return entry.created_at
-        ? `${t("agenda.created_on", { date: formatDay(entry.created_at.slice(0, 10)) })} · ${t("agenda.not_planned_yet")}`
-        : t("agenda.not_planned_yet");
+    // P-1 — a date is a plan only if a PERSON made it: a seeded date
+    // (`has_real_plan` false) reads exactly like no date at all, with
+    // who created it. Never "Gepland", never "te laat".
+    if (entry.plan_source === null || !originDate || !entry.has_real_plan) {
+      if (!entry.created_at) return t("agenda.not_planned_yet");
+      const created = formatDay(entry.created_at.slice(0, 10));
+      const line = entry.created_by_name
+        ? t("agenda.created_by_on", { date: created, name: entry.created_by_name })
+        : t("agenda.created_on", { date: created });
+      return `${line} · ${t("agenda.not_planned_yet")}`;
     }
     if (deadlineIsHeadline || count === null) {
       return t("agenda.planned_on", { date: formatPlannedDay(originDate) });
@@ -118,6 +125,17 @@ export function PlacementMarker({
       >
         <History size={11} strokeWidth={2.5} />
         {origin(entry.rolled_days)}
+      </div>
+    );
+  }
+
+  if (entry.placement === "REVIEW") {
+    // P-1 §3 — finished by the worker, waiting for THIS reader to
+    // confirm it. Not late, not settled: it asks, with its waiting age.
+    return (
+      <div className="wp-why wp-why-review" data-testid="agenda-card-why">
+        <ClipboardCheck size={11} strokeWidth={2.5} />
+        {t("agenda.why_review", { count: entry.stuck_age_days ?? 0 })}
       </div>
     );
   }

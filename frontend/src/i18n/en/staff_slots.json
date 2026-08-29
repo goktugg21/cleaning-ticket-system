@@ -306,5 +306,9 @@
   "agenda.undated_oldest_one": "the oldest has waited {{count}} day",
   "agenda.undated_oldest_other": "the oldest has waited {{count}} days",
   "agenda.undated_hide": "Hide list",
-  "agenda.filter_status_group": "Status"
+  "agenda.filter_status_group": "Status",
+  "agenda.why_review_one": "Waiting for review — {{count}} day now",
+  "agenda.why_review_other": "Waiting for review — {{count}} days now",
+  "agenda.created_by_on": "Created {{date}} by {{name}}",
+  "agenda.planned_by_on": "Planned by {{name}}"
 }

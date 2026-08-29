@@ -383,5 +383,12 @@
   "facts.settled_after_deadline_one": "({{count}} dag na de deadline)",
   "facts.settled_after_deadline_other": "({{count}} dagen na de deadline)",
   "facts.settled_after_plan_one": "({{count}} dag na de geplande dag)",
-  "facts.settled_after_plan_other": "({{count}} dagen na de geplande dag)"
+  "facts.settled_after_plan_other": "({{count}} dagen na de geplande dag)",
+  "facts.planned_for": "Ingepland voor {{date}}",
+  "facts.planned_for_range": "Ingepland voor {{from}} – {{to}}",
+  "facts.planned_by_on": "door {{name}}, op {{date}}",
+  "facts.planned_on_date": "op {{date}}",
+  "facts.created_by_on": "Aangemaakt op {{date}} door {{name}}",
+  "facts.not_planned_yet_age_one": "nog niet ingepland · al {{count}} dag",
+  "facts.not_planned_yet_age_other": "nog niet ingepland · al {{count}} dagen"
 }

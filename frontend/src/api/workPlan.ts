@@ -25,7 +25,10 @@ export type WorkPlanPlacement =
   /** W-PLANTRUTH §1b — planned for a day that has passed, still not
    *  done, so the DISPLAY rolled it onto today's column. The planned
    *  date itself never moved: `rolled_from` is it. */
-  | "ROLLED";
+  | "ROLLED"
+  /** P-1 §3 — finished by the worker, waiting for a manager; on today
+   *  for readers who can confirm it, with `stuck_age_days`. */
+  | "REVIEW";
 
 /** The normalised state, shared by both sources. NOT `slot_status` and
  *  NOT the extra-work status — those two enums agree about almost
@@ -172,6 +175,15 @@ export interface WorkPlanEntry {
    *  are the past-tense facts of work that is over. */
   created_at: string | null;
   plan_source: "TICKET" | "PROVIDER_PLAN" | "CUSTOMER_WISH" | null;
+  /** P-1 — a date is a plan only if a PERSON made it. `has_real_plan`
+   *  is false for a seeded date nobody set; such a card reads "created
+   *  ... not planned yet", never "planned", never late. `planned_by_name`
+   *  / `planned_at` say who and when; `created_by_name` says who opened
+   *  the record. */
+  has_real_plan: boolean;
+  planned_by_name: string | null;
+  planned_at: string | null;
+  created_by_name: string | null;
   due_kind: "DEADLINE" | "PLANNED_DAY" | null;
   settled_at: string | null;
   settled_days_after_due: number | null;

@@ -306,5 +306,9 @@
   "agenda.undated_oldest_one": "de oudste staat er al {{count}} dag",
   "agenda.undated_oldest_other": "de oudste staat er al {{count}} dagen",
   "agenda.undated_hide": "Lijst verbergen",
-  "agenda.filter_status_group": "Status"
+  "agenda.filter_status_group": "Status",
+  "agenda.why_review_one": "Wacht op controle — al {{count}} dag",
+  "agenda.why_review_other": "Wacht op controle — al {{count}} dagen",
+  "agenda.created_by_on": "Aangemaakt {{date}} door {{name}}",
+  "agenda.planned_by_on": "Ingepland door {{name}}"
 }

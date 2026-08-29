@@ -164,8 +164,13 @@ export function ExtraWorkContextHeader({
             {[departmentLabel, workTypeLabel].filter(Boolean).join(" · ")}
           </div>
         )}
+        {/* P-1 — "Goes on: follows the customer's setting" was a label
+            and a machinery value; when nothing was chosen it is one
+            human sentence instead. */}
         <div className="ew-ctx-sub" data-testid="extra-work-billed-to">
-          {t("detail.field_billed_to")}: {billedToLabel}
+          {ew.billed_to
+            ? `${t("detail.field_billed_to")}: ${billedToLabel}`
+            : t("detail.billed_to_follows_sentence")}
         </div>
       </Block>
 
@@ -191,9 +196,27 @@ export function ExtraWorkContextHeader({
           </span>
           {dueChip}
         </div>
+        {/* P-1 — words, not a dash: "not planned yet" until a person
+            plans it, and then who did, when. */}
         <div className="ew-ctx-sub" data-testid="extra-work-planned-window">
           {t("detail.ctx_planned_window")}:{" "}
-          {plannedWindow ?? t("detail.empty_dash")}
+          {plannedWindow ?? t("detail.ctx_not_planned_yet")}
+          {plannedWindow && ew.planned_at
+            ? ` — ${
+                ew.planned_by_name
+                  ? t("detail.ctx_planned_by_on", {
+                      name: ew.planned_by_name,
+                      date: formatDate(ew.planned_at),
+                    })
+                  : t("detail.ctx_planned_on_date", { date: formatDate(ew.planned_at) })
+              }`
+            : ""}
+        </div>
+        <div className="ew-ctx-sub" data-testid="extra-work-created-by">
+          {t("detail.ctx_created_by_on", {
+            date: formatDate(ew.requested_at),
+            name: ew.created_by_name || ew.created_by_email,
+          })}
         </div>
         {/* The conflict, where the date is read. It names the ticket,
             names the date it kept, and links to the row that can change

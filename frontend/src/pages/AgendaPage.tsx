@@ -1222,7 +1222,13 @@ function UndatedRow({
             created, and that it is not planned yet. Never "Gepland". */}
         {entry.created_at && (
           <span className="muted small" data-testid={`agenda-undated-created-${entry.key}`}>
-            {t("agenda.created_on", { date: formatDay(entry.created_at.slice(0, 10)) })}
+            {/* P-1 — and WHO created it: nobody guesses who opened a ticket. */}
+            {entry.created_by_name
+              ? t("agenda.created_by_on", {
+                  date: formatDay(entry.created_at.slice(0, 10)),
+                  name: entry.created_by_name,
+                })
+              : t("agenda.created_on", { date: formatDay(entry.created_at.slice(0, 10)) })}
             {" · "}
             {t("agenda.not_planned_yet")}
           </span>

@@ -654,9 +654,6 @@
   "next.customer.redoing": "U gaf aan dat dit niet goed was. Wij lossen het op.",
   "detail.ctx_ticket_kept_own_date": "Ticket {{ticket}} houdt zijn eigen datum, {{date}}.",
   "detail.ctx_ticket_kept_own_date_link": "Open het ticket om dit te wijzigen",
-  "create.proof_question": "Wat moet er zijn voordat dit klaar mag heten?",
-  "create.proof_photo": "Een foto van het afgeronde werk",
-  "create.proof_note": "Een korte notitie over wat er is gedaan",
   "next.in_progress_ticket_decides": "Ticket {{ticket}} bepaalt wanneer dit werk klaar is. Rond het ticket af; dit meerwerk volgt vanzelf.",
   "next.in_progress_ticket_decides_unnumbered": "Het ticket bepaalt wanneer dit werk klaar is. Rond het ticket af; dit meerwerk volgt vanzelf.",
   "next.move_not_available": "Deze stap kan nu niet gezet worden. Ververs de pagina of kies een actie hieronder.",
@@ -760,7 +757,6 @@
   "create.series_hint": "Elke gekozen dag wordt een eigen meerwerk met dezelfde inhoud.",
   "create.series_summary_one": "{{count}} dag",
   "create.series_summary_other": "{{count}} dagen",
-  "create.proof_summary": "bewijs bij afronding",
   "create.urgent_label": "Dit is spoed",
   "create.urgent_helper": "Spoed betekent: dit kan niet wachten tot de volgende geplande ronde.",
   "create.confirm_title": "Dit maakt u aan",
@@ -768,5 +764,10 @@
   "create.price_follows_count_one": "{{count}} regel: prijs volgt",
   "create.price_follows_count_other": "{{count}} regels: prijs volgt",
   "create.preview_unavailable": "Wat er hierna gebeurt kunnen we nu niet ophalen. Aanmaken kan wel.",
-  "create.intent.choose": "Wat gebeurt er hierna?"
+  "create.intent.choose": "Wat gebeurt er hierna?",
+  "detail.ctx_not_planned_yet": "nog niet ingepland",
+  "detail.ctx_planned_by_on": "door {{name}}, op {{date}}",
+  "detail.ctx_planned_on_date": "op {{date}}",
+  "detail.ctx_created_by_on": "Aangemaakt op {{date}} door {{name}}",
+  "detail.billed_to_follows_sentence": "Komt op de factuur volgens de instelling van de klant"
 }
