@@ -36,6 +36,53 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — FE-3: detail restructure (Addendum D §D.4/§D.6, 2026-08-29)
+
+Branch `feat/fe-3-detail-restructure`, stacked on FE-2 (the train; main
+untouched). Zero migrations, no state-machine or permission changes;
+backend limited to additive read-only serializer facts.
+
+- **Owner decision 2026-08-29 (step 0):** the work queue keeps Ramazan's
+  word — nav label **Tickets** in both locales (FE-1's "Werkqueue" /
+  "Work queue" reverted); Addendum D §D.3.4 records it. The Meerwerk
+  filter, the dead Chargeable entry and the redirects stay.
+- **Backend (additive, read-only):** `kind` (MELDING / MEERWERK /
+  TICKET), `due_date`, `due_kind` (DEADLINE / PLANNED_DAY) and
+  `days_until_due` on the ticket detail (`tickets/detail_facts.py`,
+  same due rule as the Werkplanning's `job_due`); `days_until_due` on
+  the meerwerk detail (same rule as `is_overdue`). Tests:
+  `tickets.tests.test_fe3_detail_facts`,
+  `extra_work.tests.test_fe3_days_until_due`.
+- **Ticket detail (all roles, provider shape):** the page opens on the
+  phase banner (`display_phase`, provider variant with the workflow
+  sentence + since-when) carrying the ONE primary action from
+  `allowed_next_statuses`; a four-block fact grid (Waar / Wie / Wanneer
+  with the §D.11 chip / Wat) replaces the collapsed "Ticketgegevens"
+  accordion and the header status/place aside; messages sit under the
+  facts with a compact composer (tier `<select>`, recipients + private
+  toggle fold until the composer has focus, bounded thread); the
+  Messages tab is gone (`?tab=messages` clamps to the overview); the
+  side "Acties" card holds "Andere stappen" (other forward moves, plan,
+  convert, archive) and "Geavanceerd" (undo of the last step, the
+  provider's decision on the customer's behalf with its reason prompt,
+  every backward move, raw status/kind, delete). Header buttons are
+  gone. The inline status-note input is gone (the transition modal
+  collects the note; the override prompt collects the reason).
+- **Meerwerk detail (provider):** phase banner + next-step sentence +
+  ONE primary action replaces the badge soup; fact grid Wie/waar · Wat
+  (with the classification editor's pencil) · Wanneer (with the dates
+  editor's pencil and the deadline chip) · Geld; the folded timeline
+  (FE-2's endpoint) rendered for the provider through the shared
+  `MeerwerkTimeline`; "Andere stappen" + "Geavanceerd" (override pair,
+  direct publish, "Plan het werk opnieuw" only when actionable, the
+  billing-month override moved out of the Money tab, cancel, raw
+  status / intent / handling values).
+- **Toasts (§D.8.3, global):** the stack moved from top-right (over the
+  header actions) to bottom-centre of the content area, audited
+  against the shell (bottom-right collides with `StickySaveBar`'s
+  buttons); the old "Zet om naar meerwerk under a toast" collision is
+  measured gone.
+
 ### Done — FE-2: the customer surface (Addendum D §D.4/§D.5, 2026-08-28)
 
 Branch `feat/fe-2-customer-surface`, stacked on FE-1 (the train; main
