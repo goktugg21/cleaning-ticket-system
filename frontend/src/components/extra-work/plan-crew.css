@@ -89,16 +89,34 @@
 }
 .ew-plan-head {
   flex: 0 0 auto;
-  padding: 22px 24px 0;
+  padding: 22px 24px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* P-1 §4 — the subtitle's `margin-top: -10px` (index.css) was written
+   for the unframed dialog, whose flex gap of 16px it pulls back by
+   ten; inside the framed head there is no gap to pull back, so the
+   subtitle sat ON the title (measured on /extra-work/88: the two rects
+   overlapped by 8px). The head has its own gap now; the subtitle keeps
+   nothing negative. */
+.ew-plan-head .ew-plan-dialog-sub {
+  margin: 0;
 }
 .ew-plan-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 24px 16px;
+  padding: 4px 24px 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  /* P-1 §4 — this is the scheduling moment: the numbered sections get
+     the guided form's air instead of the dense grid's. */
+  gap: 26px;
+}
+.ew-plan-body > .ew-plan-section + .ew-plan-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
 }
 .ew-plan-foot {
   flex: 0 0 auto;

@@ -1955,6 +1955,22 @@ export function ExtraWorkDetailPage() {
     ew.status === "CUSTOMER_APPROVED" &&
     spawnedTickets.length === 0;
 
+  // P-1 §5 — the Details card has two possible tenants; with neither it
+  // does not render (a bare "Details" header is furniture, not a fact).
+  // `PlanSummary` returns null without a plan, so the same test decides
+  // both the section and the card.
+  const showPlanSummary =
+    isProvider &&
+    Boolean(
+      ew.budget_hours ||
+        (ew.planned_hours ?? []).length > 0 ||
+        ew.provider_planned_date ||
+        ew.provider_planned_end_date ||
+        ew.file_upload_required === true ||
+        ew.completion_notes_required === true,
+    );
+  const showContacts = canSeeCustomerContacts && customerContacts.length > 0;
+
   // Pick the currently-active proposal for PDF download. SENT and
   // CUSTOMER_APPROVED are the two "live" states; DRAFT is provider-
   // private and not downloadable until sent, CUSTOMER_REJECTED /
@@ -2693,7 +2709,24 @@ export function ExtraWorkDetailPage() {
         </button>
       )}
     </>
-  ) : nextStep.buttonKey && nextStep.action.kind !== "retrySpawn" ? (
+  ) : nextStep.action.kind === "retrySpawn" ? (
+    // P-1 §5 — "accepted but no work was created yet" with no button
+    // was a dead end; the repair IS the one move, so the banner carries
+    // it (the Geavanceerd copy below keeps its hint).
+    canRetrySpawn ? (
+      <button
+        type="button"
+        className="btn btn-primary"
+        disabled={retrySpawnBusy}
+        onClick={() => {
+          void handleRetrySpawn();
+        }}
+        data-testid="extra-work-retry-spawn-primary"
+      >
+        {retrySpawnBusy ? t("detail.retry_spawn_busy") : t("next.button.retry_scheduling")}
+      </button>
+    ) : null
+  ) : nextStep.buttonKey ? (
     <button
       type="button"
       className="btn btn-primary"
@@ -3009,6 +3042,9 @@ export function ExtraWorkDetailPage() {
               </div>
             </div>
           </div>
+            {/* P-1 §5 — no furniture: the card renders only when it has
+                a fact to show (a plan, or contacts that exist). */}
+            {(showPlanSummary || showContacts) && (
             <div className="card">
               <div className="form-section">
                 <div className="form-section-title">
@@ -3031,7 +3067,7 @@ export function ExtraWorkDetailPage() {
                 {/* FE-3 — the dates and the classification read in the fact
                     block above (one owner per fact); what stays here is the
                     PLAN we committed to, and the contacts. */}
-                {isProvider && (
+                {showPlanSummary && (
                   <section className="ew-facts-group" data-testid="ew-facts-dates">
                     <PlanSummary ew={ew} onEdit={() => void openPlan()} />
                     {ew.started_before_plan && (
@@ -3042,19 +3078,17 @@ export function ExtraWorkDetailPage() {
                   </section>
                 )}
 
-                {/* CONTACTS */}
-                {canSeeCustomerContacts && (
+                {/* CONTACTS — only when there are any (P-1 §5). */}
+                {showContacts && (
                   <section className="ew-facts-group" data-testid="ew-facts-contacts">
                     <h4 className="ew-facts-group-title">{t("detail.group_contacts")}</h4>
                     <CustomerContactsPanel contacts={customerContacts} />
                   </section>
                 )}
-
-
-
                 </div>
             </div>
           </div>
+            )}
           {/* FE-3 (Addendum D §D.6 rule 3) — THE ACTIES CARD: everything
               that is NOT the one primary action, behind two folds.
               "Andere stappen" holds the other legal forward moves, the

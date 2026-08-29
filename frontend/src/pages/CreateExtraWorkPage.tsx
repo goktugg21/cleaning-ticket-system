@@ -209,9 +209,11 @@ export function CreateExtraWorkPage() {
   /* W12 — the explicit invoice-target pick, or null for "left alone"
      (posts null = follow the customer's own setting). */
   const [billedTo, setBilledTo] = useState<ExtraWorkBilledTo | null>(null);
-  /* W13 — what must be there before this may be called done. */
-  const [requirePhoto, setRequirePhoto] = useState(false);
-  const [requireNote, setRequireNote] = useState(false);
+  /* W13 asked "what must be there before this may be called done?" on
+     this form; P-1 §4 moved the question to the plan dialog, which is
+     where the planner answers it. The create payload no longer sends a
+     choice, so the server default (nothing required) stands until the
+     plan says otherwise. */
   /* Sprint 128/186 — the explicit label picks; "" = the seeded default. */
   const [departmentId, setDepartmentId] = useState("");
   const [workTypeId, setWorkTypeId] = useState("");
@@ -664,8 +666,6 @@ export function CreateExtraWorkPage() {
         ...(effectiveDepartment ? { department: effectiveDepartment.id } : {}),
         ...(effectiveWorkType ? { work_type: effectiveWorkType.id } : {}),
         billed_to: billedToPayload,
-        customer_requires_photo: requirePhoto,
-        customer_requires_note: requireNote,
         ...(intentToSend ? { request_intent: intentToSend } : {}),
         line_items: cartLineItemsPayload(cartWithOther),
       };
@@ -811,7 +811,6 @@ export function CreateExtraWorkPage() {
     form.deadline && `${t("detail.deadline")} ${form.deadline}`,
     entryMode === "MULTIPLE" &&
       t("create.series_summary", { count: slots.length }),
-    (requirePhoto || requireNote) && t("create.proof_summary"),
   ].filter(Boolean) as string[];
 
   const factValue = (key: FactKey): string => {
@@ -1158,7 +1157,7 @@ export function CreateExtraWorkPage() {
                     : t("create.fold_planning_empty")}
                 </span>
               </summary>
-              <div className="form-fold-body">
+              <div className="form-fold-body form-fold-body-planning">
                 <div className="form-2col">
                   <div className="field">
                     <label className="field-label" htmlFor="ew-planned-end">
@@ -1216,8 +1215,9 @@ export function CreateExtraWorkPage() {
                   </div>
                 </div>
 
-                {/* W5-B — a series: one real meerwerk per chosen day. */}
-                <div className="field">
+                {/* W5-B — a series: one real meerwerk per chosen day. P-1 §4:
+                    one clear line of air around it. */}
+                <div className="field form-fold-series">
                   <label className="ew-billed-to-option">
                     <input
                       type="checkbox"
@@ -1242,32 +1242,6 @@ export function CreateExtraWorkPage() {
                   )}
                 </div>
 
-                {/* W13 — what must be there before this may be called done. */}
-                <fieldset
-                  className="field"
-                  style={{ border: 0, padding: 0, margin: 0 }}
-                  data-testid="extra-work-create-proof"
-                >
-                  <span className="field-label">{t("create.proof_question")}</span>
-                  <label className="ew-billed-to-option">
-                    <input
-                      type="checkbox"
-                      checked={requirePhoto}
-                      onChange={(e) => setRequirePhoto(e.target.checked)}
-                      data-testid="extra-work-create-require-photo"
-                    />
-                    <span>{t("create.proof_photo")}</span>
-                  </label>
-                  <label className="ew-billed-to-option">
-                    <input
-                      type="checkbox"
-                      checked={requireNote}
-                      onChange={(e) => setRequireNote(e.target.checked)}
-                      data-testid="extra-work-create-require-note"
-                    />
-                    <span>{t("create.proof_note")}</span>
-                  </label>
-                </fieldset>
               </div>
             </details>
           </div>
