@@ -355,6 +355,12 @@ def days_to_due(job: Job, today: datetime.date) -> int | None:
     """
     if job.due is None:
         return None
+    # FE-4 (Addendum D SS D.12 item 4) -- finished or settled work stops
+    # counting. A closed job "3 days over its deadline" is history, not
+    # pressure, and the detail's own countdown (`detail_facts.ticket_due`)
+    # already answered None for it: the card and the detail must agree.
+    if not job.is_pending:
+        return None
     return (job.due - today).days
 
 

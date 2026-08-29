@@ -26,9 +26,11 @@ from __future__ import annotations
 
 import datetime
 
+from django.utils import timezone
+
 from accounts.models import UserRole
 
-from .job_dates import job_deadline, job_due
+from .job_dates import job_deadline, job_due, job_window
 from .lateness_index import LATE_LIVE_TICKET_STATUSES
 
 KIND_MELDING = "MELDING"
@@ -59,27 +61,55 @@ def ticket_kind(ticket) -> str:
 
 
 def ticket_due(ticket, today: datetime.date) -> dict:
-    """`{due_date, due_kind, days_until_due}` for the fact block.
+    """The due facts for the fact block: `due_date`, `due_kind`,
+    `days_until_due`, `unplanned_age_days`, `settled_at`,
+    `settled_days_after_due`.
 
     `due_date` / `due_kind` are stated whatever the status — a finished
     job still had a deadline. Only the countdown stops: `days_until_due`
     is None unless the ticket is live (the same set the lateness ladder
     calls live) and unarchived.
     """
-    due = job_due(ticket)
-    if due is None:
-        return {"due_date": None, "due_kind": None, "days_until_due": None}
-    due_kind = (
-        DUE_KIND_DEADLINE
-        if job_deadline(ticket) is not None
-        else DUE_KIND_PLANNED_DAY
-    )
     live = (
         ticket.status in LATE_LIVE_TICKET_STATUSES
         and ticket.archived_at is None
     )
-    return {
-        "due_date": due.isoformat(),
-        "due_kind": due_kind,
-        "days_until_due": (due - today).days if live else None,
+    # FE-4 (Addendum D SS D.12 item 4) -- when the work was over, and how
+    # far after its due date that came: past tense, quiet history.
+    settled_at = None
+    if not live:
+        settled_at = (
+            ticket.closed_at
+            or ticket.approved_at
+            or ticket.resolved_at
+            or ticket.rejected_at
+        )
+    due = job_due(ticket)
+    facts = {
+        "due_date": None,
+        "due_kind": None,
+        "days_until_due": None,
+        # FE-4 (SS D.12 item 2) -- the SAME age the Werkplanning's "Nog
+        # niet gepland" row prints: whole days since creation, only on a
+        # live job with no window at all. The card and the detail agree.
+        "unplanned_age_days": None,
+        "settled_at": settled_at.isoformat() if settled_at else None,
+        "settled_days_after_due": None,
     }
+    if due is None:
+        if live and job_window(ticket)[0] is None:
+            created = timezone.localtime(ticket.created_at).date()
+            facts["unplanned_age_days"] = max((today - created).days, 0)
+        return facts
+    facts["due_date"] = due.isoformat()
+    facts["due_kind"] = (
+        DUE_KIND_DEADLINE
+        if job_deadline(ticket) is not None
+        else DUE_KIND_PLANNED_DAY
+    )
+    if live:
+        facts["days_until_due"] = (due - today).days
+    elif settled_at is not None:
+        late_by = (timezone.localtime(settled_at).date() - due).days
+        facts["settled_days_after_due"] = late_by if late_by > 0 else None
+    return facts

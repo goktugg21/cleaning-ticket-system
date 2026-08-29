@@ -769,6 +769,20 @@ class TicketDetailSerializer(
     def get_days_until_due(self, obj):
         return self._due_facts(obj)["days_until_due"]
 
+    # FE-4 (Addendum D SS D.12) -- the honest-date facts, same source.
+    unplanned_age_days = serializers.SerializerMethodField()
+    settled_at = serializers.SerializerMethodField()
+    settled_days_after_due = serializers.SerializerMethodField()
+
+    def get_unplanned_age_days(self, obj):
+        return self._due_facts(obj)["unplanned_age_days"]
+
+    def get_settled_at(self, obj):
+        return self._due_facts(obj)["settled_at"]
+
+    def get_settled_days_after_due(self, obj):
+        return self._due_facts(obj)["settled_days_after_due"]
+
     schedule_planned_by_name = serializers.SerializerMethodField()
     schedule_planned_at = serializers.SerializerMethodField()
     allowed_next_statuses = serializers.SerializerMethodField()
@@ -838,6 +852,9 @@ class TicketDetailSerializer(
             "due_date",
             "due_kind",
             "days_until_due",
+            "unplanned_age_days",
+            "settled_at",
+            "settled_days_after_due",
             "company",
             "company_name",
             "building",

@@ -119,6 +119,31 @@ def job_window(ticket) -> tuple[datetime.date | None, datetime.date | None]:
     return extra_work.preferred_date, extra_work.planned_end_date
 
 
+#: FE-4 (Addendum D SS D.12 item 2) -- WHERE a job's window came from, so
+#: a card can say "Gepland" only when somebody planned it. The three
+#: branches of `job_window`, named: the ticket's own schedule, the extra
+#: work's provider commitment, or the customer's WISH -- which is a wish,
+#: never a plan, and is captioned as one.
+PLAN_SOURCE_TICKET = "TICKET"
+PLAN_SOURCE_PROVIDER_PLAN = "PROVIDER_PLAN"
+PLAN_SOURCE_CUSTOMER_WISH = "CUSTOMER_WISH"
+
+
+def job_plan_source(ticket) -> str | None:
+    """Which of `job_window`'s three sources answered, or None when the
+    job has no window at all. Mirrors `job_window` branch for branch."""
+    if ticket.scheduled_start_at is not None:
+        return PLAN_SOURCE_TICKET
+    extra_work = getattr(ticket, "extra_work_request", None)
+    if extra_work is None:
+        return None
+    if extra_work.provider_planned_date is not None:
+        return PLAN_SOURCE_PROVIDER_PLAN
+    if extra_work.preferred_date is not None:
+        return PLAN_SOURCE_CUSTOMER_WISH
+    return None
+
+
 def job_window_end(ticket) -> datetime.date | None:
     """The last planned day: the end, or the start when there is none —
     `work_plan.Job.window_end`'s single-planned-day reading."""

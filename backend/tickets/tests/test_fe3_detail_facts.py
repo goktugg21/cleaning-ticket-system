@@ -80,10 +80,13 @@ class TicketDueTests(TenantFixtureMixin, APITestCase):
         )
 
     def test_nothing_planned_means_no_due(self):
+        facts = ticket_due(self.ticket, self.today)
         self.assertEqual(
-            ticket_due(self.ticket, self.today),
+            {k: facts[k] for k in ("due_date", "due_kind", "days_until_due")},
             {"due_date": None, "due_kind": None, "days_until_due": None},
         )
+        # FE-4 — an unplanned live ticket reports how long it has waited.
+        self.assertIsNotNone(facts["unplanned_age_days"])
 
     def test_a_planned_day_counts_down_as_a_plan_not_a_deadline(self):
         self.ticket.scheduled_start_at = self._aware(datetime.date(2026, 9, 1))

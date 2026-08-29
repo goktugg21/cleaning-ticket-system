@@ -112,6 +112,9 @@ from extra_work.scoping import scope_extra_work_for
 
 from . import lateness as late_rules
 from .job_dates import (
+    PLAN_SOURCE_CUSTOMER_WISH,
+    PLAN_SOURCE_TICKET,
+    job_plan_source,
     JOB_START,
     JOB_WINDOW_END,
     job_deadline,
@@ -1092,6 +1095,59 @@ def _unplanned_age(job, created, today) -> int | None:
     return max((today - created_date).days, 0)
 
 
+#: FE-4 (Addendum D SS D.12) -- the same two words the detail uses
+#: (`tickets/detail_facts.py`), so the card and the detail cannot caption
+#: one date two ways.
+DUE_KIND_DEADLINE = "DEADLINE"
+DUE_KIND_PLANNED_DAY = "PLANNED_DAY"
+
+
+def _fe4_facts(job, *, created, deadline, plan_source, settled_at) -> dict:
+    """FE-4 (Addendum D SS D.12 items 2-4) -- the honest-date facts every
+    entry carries, whatever its source:
+
+      created_at              when the record was created (never a plan)
+      plan_source             TICKET / PROVIDER_PLAN / CUSTOMER_WISH / None
+                              -- "Gepland" only for the first two
+      due_kind                DEADLINE / PLANNED_DAY / None -- what the
+                              headline lateness counts against
+      settled_at              when the work was finished, on a card that
+                              is over; None while it is live
+      settled_days_after_due  whole days the finish came after the due
+                              date (quiet history), None otherwise
+    """
+    due_kind = None
+    if job.due is not None:
+        due_kind = (
+            DUE_KIND_DEADLINE if deadline is not None else DUE_KIND_PLANNED_DAY
+        )
+    settled_after = None
+    settled_day = _local_date(settled_at) if settled_at is not None else None
+    if settled_day is not None and job.due is not None:
+        late_by = (settled_day - job.due).days
+        settled_after = late_by if late_by > 0 else None
+    return {
+        "created_at": created,
+        "plan_source": plan_source,
+        "due_kind": due_kind,
+        "settled_at": settled_at,
+        "settled_days_after_due": settled_after,
+    }
+
+
+def _ticket_settled_at(ticket):
+    """The moment the ticket's work was over, for the past-tense card.
+    Null while the ticket is live."""
+    if _ticket_live(ticket):
+        return None
+    return (
+        ticket.closed_at
+        or ticket.approved_at
+        or ticket.resolved_at
+        or ticket.rejected_at
+    )
+
+
 def _entry_from_slot(
     slot,
     job,
@@ -1107,6 +1163,23 @@ def _entry_from_slot(
     settled=None,
 ) -> dict:
     return {
+        **_fe4_facts(
+            job,
+            created=slot.ticket.created_at,
+            deadline=_slot_deadline(slot),
+            # A slot IS a dated piece of a ticket: its own day is a plan.
+            plan_source=(
+                PLAN_SOURCE_TICKET if job.planned_start is not None else None
+            ),
+            settled_at=(
+                slot.completed_at or _ticket_settled_at(slot.ticket)
+                if (
+                    slot.slot_status != StaffAssignmentSlotStatus.ASSIGNED
+                    or not _ticket_live(slot.ticket)
+                )
+                else None
+            ),
+        ),
         "kind": KIND_TICKET_SLOT,
         # Stable across the two kinds so React can key one merged list
         # without inventing an index.
@@ -1205,6 +1278,21 @@ def _entry_from_extra_work(
     """
     names = [_person_label(user) for user in assignees]
     return {
+        **_fe4_facts(
+            job,
+            created=extra_work.requested_at,
+            deadline=extra_work.deadline,
+            # `_extra_work_job` places by the CUSTOMER's preferred date.
+            # That is a wish, and the card says so.
+            plan_source=(
+                PLAN_SOURCE_CUSTOMER_WISH
+                if job.planned_start is not None
+                else None
+            ),
+            # No completion stamp on the request itself; its story is on
+            # the timeline. Never live once closed, so no countdown.
+            settled_at=None,
+        ),
         "kind": KIND_EXTRA_WORK,
         "key": f"ew-{extra_work.id}",
         "source_id": extra_work.id,
@@ -1286,6 +1374,13 @@ def _entry_from_ticket(
     instead is how many people are on it.
     """
     return {
+        **_fe4_facts(
+            job,
+            created=ticket.created_at,
+            deadline=job_deadline(ticket),
+            plan_source=job_plan_source(ticket),
+            settled_at=_ticket_settled_at(ticket),
+        ),
         "kind": KIND_TICKET,
         "key": f"ticket-{ticket.id}",
         "source_id": ticket.id,
@@ -1498,8 +1593,12 @@ def _week_sort_key(entry: dict) -> tuple:
     # W-PLANTRUTH §1b — inside a column the day's own work comes first,
     # then the rolled cards, oldest planned day first: the backlog reads
     # from the longest-overdue down.
+    # FE-4 (Addendum D SS D.12 item 5) -- the reading order of a column:
+    # the day's own open work, then the carried late work, then whatever
+    # is settled (done, or waiting on somebody else) at the end.
     return (
         entry["day"] or "",
+        1 if entry["viewer_settled"] else 0,
         1 if entry["placement"] == PLACEMENT_ROLLED else 0,
         entry["rolled_from"] or "",
         entry["scheduled_start_at"] or _NO_TIME,

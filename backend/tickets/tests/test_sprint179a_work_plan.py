@@ -491,6 +491,14 @@ ENTRY_KEYS = {
     # stuck list's rows, null everywhere else). One shape, both kinds.
     "unplanned_age_days",
     "stuck_age_days",
+    # FE-4 (Addendum D SS D.12) -- the honest-date facts: when the record
+    # was created (never a plan), what kind of date placed it, what the
+    # headline lateness counts against, and when settled work was over.
+    "created_at",
+    "plan_source",
+    "due_kind",
+    "settled_at",
+    "settled_days_after_due",
     "assignee_names",
     "assignee_count",
     # W-N1 §3 — the parts of this ticket the entry's person holds. This
