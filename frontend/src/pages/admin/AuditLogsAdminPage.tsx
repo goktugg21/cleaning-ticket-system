@@ -575,7 +575,7 @@ export function AuditLogsAdminPage() {
                       {log.request_id ? ` · ${log.request_id}` : ""}
                     </span>
                   </td>
-                  <td>
+                  <td className="audit-changes-cell">
                     <details>
                       <summary
                         style={{ cursor: "pointer" }}

@@ -4495,8 +4495,23 @@ a.attn-row:hover {
   align-self: start;
 }
 
-.dashboard-mini-table {
+/* `table.dashboard-mini-table`, not the bare class: the 860px floor is
+   declared on `table.data-table` (0,1,1) and a class alone loses to it. */
+table.dashboard-mini-table {
   width: 100%;
+  /* FE-6 (§D.8.4) — measured at 1280/1440: the nowrap number cells
+     pushed the table 480-530px past its card. Fixed layout splits the
+     card's width between the columns; the name cell ellipsises. */
+  table-layout: fixed;
+  /* ...and `.data-table`'s 860px floor does not apply to a three-cell
+     summary inside a one-third-width card — that floor was the whole
+     overflow. */
+  min-width: 0;
+}
+.dashboard-mini-table td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dashboard-mini-table td {
   padding: 6px 8px;
@@ -6576,7 +6591,10 @@ a.attn-row:hover {
 }
 .change-diff-row {
   display: grid;
-  grid-template-columns: 180px 1fr;
+  /* FE-6 (§D.8.4) — `1fr` is minmax(auto, 1fr): a long value sized the
+     track past the card by up to 105px at 1280. minmax(0, 1fr) lets the
+     values column shrink and wrap. */
+  grid-template-columns: minmax(0, 180px) minmax(0, 1fr);
   gap: 12px;
   padding: 8px 12px;
   background: var(--surface);
@@ -6584,6 +6602,8 @@ a.attn-row:hover {
   border-radius: 8px;
 }
 .change-diff-field {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-weight: 700;
   color: var(--text-2);
   font-family: var(--f-head);
@@ -15792,3 +15812,8 @@ table.assign-table { min-width: 0; width: 100%; }
   .ticket-tabs-row .ticket-tabs { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 }
 .skeleton-table { padding-bottom: 6px; }
+
+/* FE-6 (§D.8.4) — the audit log's "changes" cell: a diff needs room,
+   and the table's auto layout was handing this cell 100px. The table
+   scrolls inside its wrap when it must; the diff no longer spills. */
+.audit-changes-cell { min-width: 260px; }

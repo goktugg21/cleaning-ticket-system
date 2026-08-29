@@ -631,7 +631,9 @@ export function UsersAdminPage({ embedded = false }: { embedded?: boolean } = {}
         )}
 
         <div className="table-wrap admin-list-wrap">
-          <table className="data-table">
+          {/* FE-6 (§D.8.4) — ten columns measured 63px past the viewport
+              at 1280; the dense cells bring the row back inside. */}
+          <table className="data-table data-table-dense data-table-fit">
             <thead>
               <tr>
                 <th>{t("users.col_email")}</th>

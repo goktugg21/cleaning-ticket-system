@@ -1598,7 +1598,9 @@ export function ExtraWorkList({
               scrollbar and nothing on screen to say so. `overflowX:
               "auto"` is what the Facturen list card already does. */}
           <div className="card" style={{ overflowX: "auto" }}>
-            <table className="data-table">
+            {/* FE-6 (§D.8.4) — ten columns measured 111px past the
+                viewport at 1280; dense cells bring the row inside it. */}
+            <table className="data-table data-table-dense data-table-fit">
               <thead>
                 <tr>
                   {edit.editMode && (

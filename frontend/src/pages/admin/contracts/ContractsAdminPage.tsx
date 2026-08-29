@@ -793,7 +793,10 @@ export function ContractsAdminPage() {
         )}
 
         <div className="table-wrap admin-list-wrap">
-          <table className="data-table data-table-dense">
+          {/* FE-6 (§D.8.4) — measured 1485px past the viewport at 1280:
+              every cell was nowrap. `data-table-fit` lets them wrap, so
+              the list reads inside its card instead of scrolling. */}
+          <table className="data-table data-table-dense data-table-fit">
             <thead>
               <tr>
                 {editMode.editMode && (
