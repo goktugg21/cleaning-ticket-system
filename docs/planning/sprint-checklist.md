@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p2-guidance` — stacked on `feat/p1-honest-dates`, the
-head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1 →
-P-2), each sprint stacked on the previous one and deployed to crmtest;
+**Branch:** `feat/p3-schedule-contracts` — stacked on `feat/p2-guidance`,
+the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
+→ P-2 → P-3), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,54 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-3: schedule truth pass + contracts clarity (Addendum D §D.15, 2026-08-29)
+
+Branch `feat/p3-schedule-contracts`, stacked on P-2. Zero migrations.
+The owner needed three days to understand why waiting-for-customer
+tickets sat in past day columns; that is the bar failing. Contracts
+were copied from the reference system and their functional revision
+waits for the owner's meeting (2026-08-30) — P-3 changed words, layout
+and teaching modals there, not one rule.
+
+- **(A.1) Waiting-for-customer leaves the day columns.** Rule 9
+  (`work_plan.py` / `views_work_plan.py`): in the current week such a
+  ticket is in no column; it is one row behind "Wacht op klant: N" in
+  its own calm blue, the same drawer as "Nog niet gepland"
+  (`waiting_customer_entries`, `counts.waiting_customer`). Past weeks
+  keep placement as history.
+- **(A.2) One card, one voice.** One status line, at most one time
+  chip; the couldn't-complete reason is on the detail only ("Niet
+  gelukt op 26 aug" on the card); every closed shape has its own words.
+- **(A.3) Phantom clock times die.** Diagnosis: a date-only plan is
+  stored as Amsterdam midnight (`2026-08-26 22:00Z` on TCK-373) and the
+  card printed the instant in the browser's zone — "01:00 AM" three
+  hours east. The server now states the clock (`start_time` /
+  `scheduled_start_time`, null on a day-only plan) and the day; writers
+  send a naive local datetime (`plannedDayIso`), so the day picked is
+  the day stored in any browser zone and "plan for today" no longer
+  invents a 12:00.
+- **(A.4) The manager sees the truth.** `WAITING_MANAGER_CHECK`
+  ("Gemeld als klaar — wacht op uw controle") on banner and card; the
+  customer keeps "wordt uitgevoerd".
+- **(A.5) Plan-after-deadline warns** in the schedule dialog; card and
+  detail say "Gepland na de deadline" (`planned_after_deadline`).
+- **(A.6–A.10)** Title == description renders no subtitle; day columns
+  grow and fold past six cards ("Toon er nog N") instead of scrolling
+  inside themselves; `test_p3_schedule_truth.py` reconciles every count
+  with its list and places every ticket, slot and extra-work status on
+  a pinned Wednesday (the full matrix is in the sprint report); the
+  contact row says "functie: A" instead of a bare "A".
+- **(B) The sidebar stays put** across route changes (its scroll
+  position survives the per-guard `AppShell` remount).
+- **(C) Contracts clarity, no rule changes.** Every listed contract
+  reads as a sentence; every term teaches on click with the contract's
+  own numbers (`components/contracts/ContractTerms.tsx`); unset facts
+  are absent, never a dash; one teaching line per surface (invoices and
+  contracts trimmed). §D.15 records that the functional revision waits
+  for the owner's meeting.
+- **(D) The greeting** reads the account's own first name and falls
+  back to the whole display name — never "Super" from "Super Admin".
 
 ### Done — P-2: the guidance round (Addendum D §D.6 rule 12 / §D.2, 2026-08-29)
 

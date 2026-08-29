@@ -30,6 +30,9 @@ import { canManageContracts } from "../../../auth/permissions";
 import { useEditMode } from "../../../lib/useEditMode";
 import { ContractFormDialog } from "./ContractFormDialog";
 import { ContractTypesTab } from "./ContractTypesTab";
+import { ContractTermDialog, Term } from "../../../components/contracts/ContractTerms";
+import { contractSentence } from "../../../components/contracts/contractSentence";
+import type { ContractTerm } from "../../../components/contracts/ContractTerms";
 import { contractTypeLabel } from "../../../lib/contractTypeLabel";
 import {
   MAX_PROJECT_COLUMNS,
@@ -139,6 +142,9 @@ export function ContractsAdminPage() {
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // P-3 §C.2 — the term being taught (the list has no one contract, so
+  // the dialog teaches with the tiles' own counts).
+  const [term, setTerm] = useState<ContractTerm | null>(null);
   // Bumped by Refresh and after a mutation. It is part of the request
   // key below, so "reload" and "the filters changed" are the same
   // mechanism rather than two paths that can drift.
@@ -480,15 +486,21 @@ export function ContractsAdminPage() {
             <span className="summary-stat-value">{stats?.total ?? 0}</span>
           </div>
           <div className="summary-stat">
-            <span className="summary-stat-label">{t("stats.active")}</span>
+            <span className="summary-stat-label">
+              <Term term="status" onOpen={setTerm} testId="contracts-term-active">{t("stats.active")}</Term>
+            </span>
             <span className="summary-stat-value">{stats?.active ?? 0}</span>
           </div>
           <div className="summary-stat">
-            <span className="summary-stat-label">{t("stats.draft")}</span>
+            <span className="summary-stat-label">
+              <Term term="status" onOpen={setTerm} testId="contracts-term-draft">{t("stats.draft")}</Term>
+            </span>
             <span className="summary-stat-value">{stats?.draft ?? 0}</span>
           </div>
           <div className="summary-stat">
-            <span className="summary-stat-label">{t("stats.expired")}</span>
+            <span className="summary-stat-label">
+              <Term term="status" onOpen={setTerm} testId="contracts-term-expired">{t("stats.expired")}</Term>
+            </span>
             <span className="summary-stat-value">{stats?.expired ?? 0}</span>
           </div>
           {/* Sprint 169 §5 — Geannuleerd was COMPUTED by the stats
@@ -497,7 +509,9 @@ export function ContractsAdminPage() {
               existed, was filterable, had a badge on its detail page,
               and was in none of the totals above the table. */}
           <div className="summary-stat" data-testid="contracts-stat-cancelled">
-            <span className="summary-stat-label">{t("stats.cancelled")}</span>
+            <span className="summary-stat-label">
+              <Term term="status" onOpen={setTerm} testId="contracts-term-cancelled">{t("stats.cancelled")}</Term>
+            </span>
             <span className="summary-stat-value">{stats?.cancelled ?? 0}</span>
           </div>
           {/* Sprint 165 §4 — the two money tiles follow the
@@ -513,9 +527,13 @@ export function ContractsAdminPage() {
               tenant-wide — is stated rather than hidden. */}
           <div className="summary-stat">
             <span className="summary-stat-label">
-              {measure === "prices"
-                ? t("stats.monthlyTotal")
-                : t("stats.hoursPerMonth")}
+              {measure === "prices" ? (
+                <Term term="monthly" onOpen={setTerm} testId="contracts-term-monthly">
+                  {t("stats.monthlyTotal")}
+                </Term>
+              ) : (
+                t("stats.hoursPerMonth")
+              )}
             </span>
             <span className="summary-stat-value">
               {measure === "prices"
@@ -525,9 +543,13 @@ export function ContractsAdminPage() {
           </div>
           <div className="summary-stat">
             <span className="summary-stat-label">
-              {measure === "prices"
-                ? t("stats.yearlyTotal")
-                : t("stats.hoursPerYear")}
+              {measure === "prices" ? (
+                <Term term="yearly" onOpen={setTerm} testId="contracts-term-yearly">
+                  {t("stats.yearlyTotal")}
+                </Term>
+              ) : (
+                t("stats.hoursPerYear")
+              )}
             </span>
             <span className="summary-stat-value">
               {measure === "prices"
@@ -988,8 +1010,8 @@ export function ContractsAdminPage() {
                 </span>
               </div>
               <div className="admin-card-meta-row">
-                <span className="admin-card-meta">
-                  {row.buildings.map((b) => b.name).join(", ") || "—"}
+                <span className="admin-card-meta contract-sentence">
+                  {contractSentence(row, t, locale)}
                 </span>
               </div>
               <div className="admin-card-meta-row">
@@ -1036,6 +1058,12 @@ export function ContractsAdminPage() {
       {/* Rendered UNCONDITIONALLY and driven entirely through the ref —
           a native <dialog> wrapped in `{open && ...}` mounts invisible
           and the trigger looks dead (CLAUDE.md §3, Sprint 128). */}
+      {/* P-3 §C.2 — the list's terms teach with the tiles' own counts. */}
+      <ContractTermDialog
+        term={term}
+        context={{ contract: null, stats }}
+        onClose={() => setTerm(null)}
+      />
       <ConfirmDialog
         ref={deleteDialogRef}
         title={t("delete.title")}
@@ -1161,14 +1189,19 @@ function ContractGroup({
               />
             </td>
           )}
-          <td className="td-subject">{row.contract_no}</td>
-          <td className="muted small">
-            {row.company_name ?? <span className="muted-empty">—</span>}
+          <td className="td-subject">
+            {row.contract_no}
+            {/* P-3 §C.1 — the row reads as a sentence under its number,
+                whatever the columns say. */}
+            <span className="contract-sentence" data-testid={`contracts-sentence-${row.id}`}>
+              {contractSentence(row, t, locale)}
+            </span>
           </td>
-          <td>{row.customer_name ?? <span className="muted-empty">—</span>}</td>
+          <td className="muted small">{row.company_name ?? ""}</td>
+          <td>{row.customer_name ?? ""}</td>
           <td>
             {row.buildings.length === 0 ? (
-              <span className="muted-empty">—</span>
+              <span className="muted-empty">{t("sentence.no_locations")}</span>
             ) : (
               <BuildingsCell
                 names={row.buildings.map((building) => building.name)}
@@ -1177,15 +1210,13 @@ function ContractGroup({
             )}
           </td>
           <td>
-            {row.contract_type_name ? (
-              contractTypeLabel(
-                row.contract_type_name,
-                row.contract_type_standard_slot,
-                t,
-              )
-            ) : (
-              <span className="muted-empty">—</span>
-            )}
+            {row.contract_type_name
+              ? contractTypeLabel(
+                  row.contract_type_name,
+                  row.contract_type_standard_slot,
+                  t,
+                )
+              : ""}
           </td>
           {columns.columns.map((column) => (
             <td key={column.key} className="contract-num">

@@ -226,8 +226,15 @@ class CardEqualsDetailTests(_Fixture):
             "With the customer", TicketStatus.WAITING_CUSTOMER_APPROVAL, scheduled=-1
         )
         self.make_slot(ticket, days=-1, slot_status=StaffAssignmentSlotStatus.COMPLETED)
-        card = self.find(self.company_plan(), f"ticket-{ticket.id}")
+        payload = self.company_plan()
+        # P-3 rule 9 — in the current week it is behind the chip, not in
+        # a column; the facts on the row are the same either way.
+        card = next(
+            (e for e in payload["waiting_customer_entries"] if e["key"] == f"ticket-{ticket.id}"),
+            None,
+        )
         self.assertIsNotNone(card)
+        self.assertIsNone(self.find(payload, f"ticket-{ticket.id}"))
         self.assertTrue(card["viewer_settled"])
         self.assertIsNone(card["days_until_due"])
         self.assertIsNone(card["settled_at"])

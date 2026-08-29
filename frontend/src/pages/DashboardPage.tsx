@@ -1542,7 +1542,10 @@ export function DashboardPage({
   const greetingHour = new Date().getHours();
   const greetingKey =
     greetingHour < 12 ? "greeting.morning" : greetingHour < 18 ? "greeting.afternoon" : "greeting.evening";
-  const greetingName = (me?.full_name || "").trim().split(" ")[0] || me?.email || "";
+  // P-3 §D — the account's OWN first name, else the whole display name.
+  // Never a split of the display name: "Super Admin" greeted "Super".
+  const greetingName =
+    (me?.first_name || "").trim() || (me?.full_name || "").trim() || me?.email || "";
 
   return (
     <div>

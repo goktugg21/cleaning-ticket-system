@@ -470,6 +470,10 @@ ENTRY_KEYS = {
     "due_date",
     "scheduled_start_at",
     "scheduled_end_at",
+    # P-3 §A.3 — the clock, decided server-side in the server's zone;
+    # null when the plan is a day and not a time.
+    "start_time",
+    "end_time",
     "time_window_label",
     "assignment_note",
     "completion_note",
@@ -508,6 +512,8 @@ ENTRY_KEYS = {
     "due_kind",
     "settled_at",
     "settled_days_after_due",
+    # P-3 §A.5 — a real plan whose last day is past the deadline.
+    "planned_after_deadline",
     "assignee_names",
     "assignee_count",
     # W-N1 §3 — the parts of this ticket the entry's person holds. This
@@ -571,6 +577,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "late_entries",
                 # WP-1 G1 — the "Vastgelopen — actie nodig" rows.
                 "stuck_entries",
+                # P-3 §A.1 — the "Wacht op klant" chip's rows.
+                "waiting_customer_entries",
                 # FE-5 step 0 — whether this viewer may plan undated work.
                 # (On the wire since FE-5; this set had drifted — P-1.)
                 "can_plan",
@@ -599,6 +607,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "late",
                 # WP-1 G1 — stuck jobs, whole scope.
                 "stuck",
+                # P-3 §A.1 — jobs waiting on the customer, whole scope.
+                "waiting_customer",
             },
         )
         # Every list is bounded, and the response says by how much and
@@ -615,6 +625,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "undated_entries",
                 "late_entries",
                 "stuck_entries",
+                "waiting_customer_entries",
             },
         )
         self.assertEqual(
@@ -626,6 +637,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "undated_entries",
                 "late_entries",
                 "stuck_entries",
+                "waiting_customer_entries",
             },
         )
         self.assertFalse(any(payload["truncated"].values()))

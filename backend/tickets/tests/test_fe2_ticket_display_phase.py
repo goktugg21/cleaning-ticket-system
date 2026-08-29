@@ -51,6 +51,25 @@ class TicketDisplayPhaseMappingTests(APITestCase):
             "WAITING_CUSTOMER_APPROVAL",
         )
 
+    def test_the_manager_reads_the_truth_about_their_own_check(self):
+        """P-3 — the worker reported it done; the manager's screen says
+        so ("Gemeld als klaar — wacht op uw controle"), the customer's
+        keeps "wordt uitgevoerd" for the same status."""
+        self.assertEqual(
+            ticket_display_phase(
+                status=TicketStatus.WAITING_MANAGER_REVIEW,
+                viewer_is_customer=False,
+            ),
+            "WAITING_MANAGER_CHECK",
+        )
+        self.assertEqual(
+            ticket_display_phase(
+                status=TicketStatus.WAITING_MANAGER_REVIEW,
+                viewer_is_customer=True,
+            ),
+            "IN_EXECUTION",
+        )
+
     def test_every_status_maps_and_unknown_raises(self):
         for choice, _label in TicketStatus.choices:
             for viewer in (True, False):
@@ -88,3 +107,13 @@ class TicketDisplayPhaseSerializerTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(
             detail.data["display_phase"], "WAITING_CUSTOMER_APPROVAL"
         )
+
+    def test_the_manager_check_phase_reaches_the_provider_detail_only(self):
+        self.ticket.status = TicketStatus.WAITING_MANAGER_REVIEW
+        self.ticket.save(update_fields=["status"])
+        self.client.force_authenticate(self.company_admin)
+        detail = self.client.get(f"/api/tickets/{self.ticket.id}/")
+        self.assertEqual(detail.data["display_phase"], "WAITING_MANAGER_CHECK")
+        self.client.force_authenticate(self.customer_user)
+        detail = self.client.get(f"/api/tickets/{self.ticket.id}/")
+        self.assertEqual(detail.data["display_phase"], "IN_EXECUTION")

@@ -9,14 +9,19 @@ import {
   createContractRevision,
   deleteContractLine,
   getContract,
+  getContractForecast,
   listContractRevisions,
   updateContract,
 } from "../../../api/contracts";
 import type {
   Contract,
+  ContractForecast,
   ContractLine,
   ContractRevision,
 } from "../../../api/contracts.types";
+import { ContractTermDialog, Term } from "../../../components/contracts/ContractTerms";
+import { contractSentence } from "../../../components/contracts/contractSentence";
+import type { ContractTerm } from "../../../components/contracts/ContractTerms";
 import { listLabels } from "../../../api/customerLabels";
 import type { CustomerLabel } from "../../../api/types";
 import { BoundedList } from "../../../components/BoundedList";
@@ -99,6 +104,10 @@ export function ContractDetailPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [activating, setActivating] = useState(false);
+  // P-3 §C.2 — which term is being taught, and the forecast the
+  // teaching examples draw their dates and amounts from.
+  const [term, setTerm] = useState<ContractTerm | null>(null);
+  const [forecast, setForecast] = useState<ContractForecast | null>(null);
   const toast = useToast();
   const deleteLineRef = useRef<ConfirmDialogHandle>(null);
   const [lineToDelete, setLineToDelete] = useState<ContractLine | null>(null);
@@ -131,6 +140,22 @@ export function ContractDetailPage() {
   }, [id, requestKey]);
 
   const reload = () => setReloadToken((current) => current + 1);
+
+  useEffect(() => {
+    if (!Number.isFinite(id)) return;
+    let cancelled = false;
+    getContractForecast(id, new Date().getFullYear())
+      .then((data) => {
+        if (!cancelled) setForecast(data);
+      })
+      .catch(() => {
+        // The examples simply have fewer numbers to show.
+        if (!cancelled) setForecast(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, requestKey]);
 
   // W20 — an EXTRA_WORK register's lines are PROJECTED from chargeable
   // jobs by the server's sync; the planning fields are authored on
@@ -299,32 +324,19 @@ export function ContractDetailPage() {
           <h2 className="page-title">{contract?.contract_no ?? "…"}</h2>
           {/* Sprint 167 §2 — customer, number, status, LOCATION and the
               two money figures on one line, above the tiles. */}
+          {/* P-3 §C.1 — the contract reads as ONE sentence: "B Amsterdam
+              — € 850 per maand voor B1 + B2 — sinds jan 2026 — volgende
+              periode: sep", then the status word, which teaches. */}
           <p className="page-sub" data-testid="contract-header-line">
-            {contract?.customer_name ?? ""}
+            {contract ? contractSentence(contract, t, locale) : ""}
             {contract && (
               <>
                 {" · "}
-                <span className={`cell-tag ${CONTRACT_STATUS_TAG[contract.status]}`}>
-                  {t(`status.${contract.status}`)}
-                </span>
-                {contract.buildings.length > 0 && (
-                  <>
-                    {" · "}
-                    {contract.buildings.map((b) => b.name).join(", ")}
-                  </>
-                )}
-                {" · "}
-                <strong data-testid="contract-header-monthly">
-                  {t("header.perMonth", {
-                    amount: formatMoney(contract.monthly_amount, locale),
-                  })}
-                </strong>
-                {" · "}
-                <strong data-testid="contract-header-yearly">
-                  {t("header.perYear", {
-                    amount: formatMoney(contract.yearly_amount, locale),
-                  })}
-                </strong>
+                <Term term="status" onOpen={setTerm} testId="contract-term-status-head">
+                  <span className={`cell-tag ${CONTRACT_STATUS_TAG[contract.status]}`}>
+                    {t(`status.${contract.status}`)}
+                  </span>
+                </Term>
               </>
             )}
           </p>
@@ -387,19 +399,19 @@ export function ContractDetailPage() {
       {/* Header tiles — all four DERIVED from the active revision. */}
       <div className="summary-grid" data-testid="contract-tiles">
         <Tile
-          label={t("tiles.monthly")}
+          label={<Term term="monthly" onOpen={setTerm}>{t("tiles.monthly")}</Term>}
           value={formatMoney(contract?.monthly_amount ?? "0", locale)}
         />
         <Tile
-          label={t("tiles.yearly")}
+          label={<Term term="yearly" onOpen={setTerm}>{t("tiles.yearly")}</Term>}
           value={formatMoney(contract?.yearly_amount ?? "0", locale)}
         />
         <Tile
-          label={t("tiles.hours")}
+          label={<Term term="hours" onOpen={setTerm}>{t("tiles.hours")}</Term>}
           value={formatNumber(contract?.total_hours ?? "0", locale)}
         />
         <Tile
-          label={t("tiles.lineCount")}
+          label={<Term term="projects" onOpen={setTerm}>{t("tiles.lineCount")}</Term>}
           value={String(contract?.line_count ?? 0)}
         />
       </div>
@@ -442,20 +454,23 @@ export function ContractDetailPage() {
             </div>
           </div>
           <dl className="detail-field-grid">
-            <Field label={t("fields.contractNo")} value={contract.contract_no} />
             <Field
-              label={t("fields.customer")}
+              label={<Term term="contractNo" onOpen={setTerm}>{t("fields.contractNo")}</Term>}
+              value={contract.contract_no}
+            />
+            <Field
+              label={<Term term="customer" onOpen={setTerm}>{t("fields.customer")}</Term>}
               value={
                 <Link to={`/admin/customers/${contract.customer}`}>
-                  {contract.customer_name ?? "—"}
+                  {contract.customer_name ?? ""}
                 </Link>
               }
             />
             <Field
-              label={t("fields.locations")}
+              label={<Term term="locations" onOpen={setTerm}>{t("fields.locations")}</Term>}
               value={
                 contract.buildings.length === 0 ? (
-                  "—"
+                  t("sentence.no_locations")
                 ) : (
                   // Scrollable rather than unbounded: a contract can
                   // legitimately cover dozens of locations, and this is
@@ -479,28 +494,27 @@ export function ContractDetailPage() {
                 )
               }
             />
+            {/* P-3 §C.3 — an unset fact is absent, never a dash. */}
+            {contract.contract_type_name && (
+              <Field
+                label={<Term term="type" onOpen={setTerm}>{t("fields.type")}</Term>}
+                value={contractTypeLabel(
+                  contract.contract_type_name,
+                  contract.contract_type_standard_slot,
+                  t,
+                )}
+              />
+            )}
             <Field
-              label={t("fields.type")}
-              value={
-                contract.contract_type_name
-                  ? contractTypeLabel(
-                      contract.contract_type_name,
-                      contract.contract_type_standard_slot,
-                      t,
-                    )
-                  : "—"
-              }
-            />
-            <Field
-              label={t("fields.status")}
+              label={<Term term="status" onOpen={setTerm}>{t("fields.status")}</Term>}
               value={t(`status.${contract.status}`)}
             />
             <Field
-              label={t("fields.startDate")}
+              label={<Term term="startDate" onOpen={setTerm}>{t("fields.startDate")}</Term>}
               value={formatDate(contract.start_date, locale)}
             />
             <Field
-              label={t("fields.endDate")}
+              label={<Term term="endDate" onOpen={setTerm}>{t("fields.endDate")}</Term>}
               value={
                 contract.end_date
                   ? formatDate(contract.end_date, locale)
@@ -508,7 +522,7 @@ export function ContractDetailPage() {
               }
             />
             <Field
-              label={t("fields.hoursPerYear")}
+              label={<Term term="hoursPerYear" onOpen={setTerm}>{t("fields.hoursPerYear")}</Term>}
               value={formatNumber(
                 Number(contract.total_hours) *
                   (contract.billing_period === "MONTHLY"
@@ -519,11 +533,10 @@ export function ContractDetailPage() {
                 locale,
               )}
             />
-            <Field
-              label={t("fields.description")}
-              value={contract.description || "—"}
-            />
-            <Field label={t("fields.notes")} value={contract.notes || "—"} />
+            {contract.description && (
+              <Field label={t("fields.description")} value={contract.description} />
+            )}
+            {contract.notes && <Field label={t("fields.notes")} value={contract.notes} />}
           </dl>
         </section>
       )}
@@ -613,19 +626,21 @@ export function ContractDetailPage() {
                     {group.lines.map((line) => (
                   <tr key={line.id}>
                     <td>{line.name}</td>
-                    <td>{line.building_name ?? "—"}</td>
+                    <td>{line.building_name ?? t("projects.wholeContract")}</td>
                     {!isRegister && (
                       <>
-                        <td>{(line as PlannedLine).department_name ?? "—"}</td>
-                        <td className="contract-num">
-                          {(line as PlannedLine).frequency_per_year ?? "—"}
+                        <td>
+                          {(line as PlannedLine).department_name ?? t("projects.noDepartment")}
                         </td>
-                        <td>{(line as PlannedLine).norm || "—"}</td>
+                        <td className="contract-num">
+                          {(line as PlannedLine).frequency_per_year ?? ""}
+                        </td>
+                        <td>{(line as PlannedLine).norm || ""}</td>
                       </>
                     )}
                     <td className="contract-num">{formatNumber(line.hours, locale)}</td>
                     <td className="contract-num">
-                      {line.area_m2 ? formatNumber(line.area_m2, locale) : "—"}
+                      {line.area_m2 ? formatNumber(line.area_m2, locale) : ""}
                     </td>
                     <td className="contract-num">{formatMoney(line.amount, locale)}</td>
                     <td className="contract-num">{formatNumber(line.vat_pct, locale)}%</td>
@@ -733,29 +748,29 @@ export function ContractDetailPage() {
           )}
           <dl className="detail-field-grid">
             <Field
-              label={t("fields.billingPeriod")}
+              label={<Term term="billingPeriod" onOpen={setTerm}>{t("fields.billingPeriod")}</Term>}
               value={t(`billingPeriod.${contract.billing_period}`)}
             />
             <Field
-              label={t("fields.billingDay")}
+              label={<Term term="billingDay" onOpen={setTerm}>{t("fields.billingDay")}</Term>}
               value={String(contract.billing_day)}
             />
             <Field
-              label={t("fields.billingType")}
+              label={<Term term="billingType" onOpen={setTerm}>{t("fields.billingType")}</Term>}
               value={t(`billingType.${contract.billing_type}`)}
             />
             <Field
-              label={t("fields.paymentTerms")}
+              label={<Term term="paymentTerms" onOpen={setTerm}>{t("fields.paymentTerms")}</Term>}
               value={t("fields.days", { count: contract.payment_terms_days })}
             />
             <Field
-              label={t("fields.proration")}
+              label={<Term term="proration" onOpen={setTerm}>{t("fields.proration")}</Term>}
               value={
                 contract.start_proration ? t("fields.on") : t("fields.off")
               }
             />
           </dl>
-          <ContractInvoicePreview contractId={contract.id} />
+          <ContractInvoicePreview contractId={contract.id} onTerm={setTerm} />
         </section>
       )}
 
@@ -779,15 +794,15 @@ export function ContractDetailPage() {
           {activeRevision && (
             <div className="summary-grid" data-testid="contract-current-status">
               <Tile
-                label={t("revisions.activeRevision")}
+                label={<Term term="revision" onOpen={setTerm}>{t("revisions.activeRevision")}</Term>}
                 value={activeRevision.label}
               />
               <Tile
-                label={t("revisions.effectiveSince")}
+                label={<Term term="revisionState" onOpen={setTerm}>{t("revisions.effectiveSince")}</Term>}
                 value={formatDate(activeRevision.effective_from, locale)}
               />
               <Tile
-                label={t("revisions.currentMonthly")}
+                label={<Term term="monthly" onOpen={setTerm}>{t("revisions.currentMonthly")}</Term>}
                 value={formatMoney(contract?.monthly_amount ?? "0", locale)}
                 /* Sprint 177 §9 — the figure is the amount the revision in
                    force TODAY bills per month. It is neither a
@@ -809,12 +824,14 @@ export function ContractDetailPage() {
               <table className="data-table data-table-dense">
                 <thead>
                   <tr>
-                    <th>{t("revisions.label")}</th>
+                    <th><Term term="revision" onOpen={setTerm}>{t("revisions.label")}</Term></th>
                     <th>{t("revisions.effectiveFrom")}</th>
                     <th className="contract-num">{t("revisions.amount")}</th>
-                    <th className="contract-num">{t("revisions.lines")}</th>
+                    <th className="contract-num">
+                      <Term term="projects" onOpen={setTerm}>{t("revisions.lines")}</Term>
+                    </th>
                     <th>{t("revisions.author")}</th>
-                    <th>{t("revisions.state")}</th>
+                    <th><Term term="revisionState" onOpen={setTerm}>{t("revisions.state")}</Term></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -826,7 +843,7 @@ export function ContractDetailPage() {
                         {formatMoney(revision.amount, locale)}
                       </td>
                       <td className="contract-num">{revision.line_count}</td>
-                      <td>{revision.created_by_name ?? "—"}</td>
+                      <td>{revision.created_by_name ?? ""}</td>
                       <td>
                         {revision.is_active && (
                           <span className="cell-tag cell-tag-open">
@@ -903,6 +920,14 @@ export function ContractDetailPage() {
           reload();
         }}
       />
+
+      {/* P-3 §C.2 — every term teaches on click, with THIS contract's
+          own numbers. Rendered unconditionally, driven through its ref. */}
+      <ContractTermDialog
+        term={term}
+        context={{ contract, revisions, forecast }}
+        onClose={() => setTerm(null)}
+      />
     </div>
   );
 }
@@ -912,7 +937,7 @@ function Tile({
   value,
   hint,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   /** Sprint 177 §9 — what the figure MEASURES, when the label alone
    *  cannot say it. "Current monthly" is a correct number that a reader
@@ -933,7 +958,7 @@ function Field({
   label,
   value,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: React.ReactNode;
 }) {
   return (

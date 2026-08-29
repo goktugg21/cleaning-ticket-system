@@ -17,8 +17,10 @@ type Kind = "ew" | "ticket";
 /** Which visual tone a phase carries. "action" = the viewer must act. */
 function toneOf(phase: string): "action" | "progress" | "done" | "bad" {
   switch (phase) {
+    // P-3 — WAITING_MANAGER_CHECK: the manager's own check is THEIR action.
     case "WAITING_YOUR_APPROVAL":
     case "WAITING_COMPLETION_APPROVAL":
+    case "WAITING_MANAGER_CHECK":
       return "action";
     case "DONE":
     case "INVOICED":

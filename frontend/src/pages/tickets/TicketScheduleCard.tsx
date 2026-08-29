@@ -43,6 +43,7 @@ import axios from "axios";
 import { getApiError } from "../../api/client";
 import { setTicketSchedule, clearTicketSchedule } from "../../api/admin";
 import { formatDate, formatDateTime } from "../../lib/intl";
+import { plannedDayIso } from "../../lib/isoWeek";
 import type { TicketDetail, TicketStatus } from "../../api/types";
 import { CollapsibleCard } from "../../components/CollapsibleCard";
 
@@ -62,43 +63,27 @@ const TERMINAL_SCHEDULE_STATUSES: ReadonlySet<TicketStatus> = new Set<
 // throughout, mirroring StaffAssignmentSection's round-trip: the day the
 // operator picked is the day stored and the day read back.
 // ---------------------------------------------------------------------
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function isoToDateInput(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function isoToTimeInput(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  // Midnight is what a date with no time looks like once it is stored
-  // in a datetime column, so it reads back as an empty time box rather
-  // than as "00:00" — which would be a time nobody typed.
-  if (d.getHours() === 0 && d.getMinutes() === 0) return "";
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+/* P-3 §A.3 — THE SERVER OWNS THE DAY AND THE CLOCK.
+   The card used to take both off the stored instant in the BROWSER's
+   zone: a date-only plan (stored as Amsterdam midnight) read as
+   "01:00" from a browser three hours east, and as the previous day
+   from one west of Greenwich. The detail now carries the day
+   (`scheduled_start_day`, ISO) and the clock (`scheduled_start_time`,
+   "HH:MM" or null) as the server states them, and the dialog sends a
+   NAIVE local datetime back (`plannedDayIso`), which the server reads
+   in its own zone. No `Date` arithmetic on either side. */
 
 function inputsToIso(date: string, time: string): string | null {
   if (!date) return null;
-  const d = new Date(`${date}T${time || "00:00"}:00`);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return plannedDayIso(date, time);
 }
 
-/** A stored datetime shows its time only when somebody set one. */
-function formatMoment(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.getHours() === 0 && d.getMinutes() === 0
-    ? formatDate(iso)
-    : formatDateTime(iso);
+/** "27 aug 2026" or "27 aug 2026 09:30": a day, plus its clock only
+ *  when the server says one exists. */
+function momentText(day: string | null, clock: string | null): string {
+  if (!day) return "";
+  const date = formatPlainDate(day);
+  return clock ? `${date} ${clock}` : date;
 }
 
 /** A plain ISO date ("2026-09-03") as the reader's date. */
@@ -183,10 +168,10 @@ export function TicketScheduleCard({
   }
 
   function openModal() {
-    setStartDate(isoToDateInput(ticket.scheduled_start_at));
-    setStartTime(isoToTimeInput(ticket.scheduled_start_at));
-    setEndDate(isoToDateInput(ticket.scheduled_end_at));
-    setEndTime(isoToTimeInput(ticket.scheduled_end_at));
+    setStartDate(ticket.scheduled_start_day ?? "");
+    setStartTime(ticket.scheduled_start_time ?? "");
+    setEndDate(ticket.scheduled_end_day ?? "");
+    setEndTime(ticket.scheduled_end_time ?? "");
     setReason("");
     setError(null);
     setResult(null);
@@ -221,7 +206,10 @@ export function TicketScheduleCard({
       setError(t("schedule.error_reason_required"));
       return;
     }
-    const movedFrom = ticket.scheduled_start_at;
+    const movedFrom = momentText(
+      ticket.scheduled_start_day,
+      ticket.scheduled_start_time,
+    );
     setBusy(true);
     setError(null);
     try {
@@ -234,20 +222,14 @@ export function TicketScheduleCard({
         reschedule_reason: isPlanned ? reason.trim() : "",
       });
       setOpen(false);
+      const toText = momentText(startDate, startTime.trim() || null);
+      const endText = momentText(endDate || null, endTime.trim() || null);
       setResult(
         isPlanned && movedFrom
-          ? t("schedule.result_moved", {
-              from: formatMoment(movedFrom),
-              to: formatMoment(startIso),
-            })
+          ? t("schedule.result_moved", { from: movedFrom, to: toText })
           : endIso
-            ? t("schedule.result_planned", {
-                from: formatMoment(startIso),
-                to: formatMoment(endIso),
-              })
-            : t("schedule.result_planned_single", {
-                from: formatMoment(startIso),
-              }),
+            ? t("schedule.result_planned", { from: toText, to: endText })
+            : t("schedule.result_planned_single", { from: toText }),
       );
       await onChanged();
     } catch (err) {
@@ -385,13 +367,13 @@ export function TicketScheduleCard({
     <CollapsibleCard
       title={t("schedule.card_title")}
       meta={
-        ticket.scheduled_start_at
-          ? ticket.scheduled_end_at
+        ticket.scheduled_start_day
+          ? ticket.scheduled_end_day
             ? t("schedule.range", {
-                from: formatMoment(ticket.scheduled_start_at),
-                to: formatMoment(ticket.scheduled_end_at),
+                from: momentText(ticket.scheduled_start_day, ticket.scheduled_start_time),
+                to: momentText(ticket.scheduled_end_day, ticket.scheduled_end_time),
               })
-            : formatMoment(ticket.scheduled_start_at)
+            : momentText(ticket.scheduled_start_day, ticket.scheduled_start_time)
           : t("schedule.not_scheduled")
       }
       // #110 Part A — default COLLAPSED like the other right-column
@@ -413,18 +395,30 @@ export function TicketScheduleCard({
             </span>
             <span className="detail-kv-val" data-testid="ticket-schedule-date">
               <CalendarClock size={14} strokeWidth={2} />
-              {ticket.scheduled_start_at
-                ? formatMoment(ticket.scheduled_start_at)
+              {ticket.scheduled_start_day
+                ? momentText(ticket.scheduled_start_day, ticket.scheduled_start_time)
                 : t("schedule.not_scheduled")}
             </span>
           </div>
+          {/* P-3 §A.5 — the plan's last day is past the deadline: stated,
+              in the same tone the after-deadline commitment uses. */}
+          {ticket.planned_after_deadline && (
+            <div className="detail-kv-row">
+              <span
+                className="detail-kv-val ew-hours-tone-over"
+                data-testid="ticket-schedule-planned-after-deadline"
+              >
+                {t("facts.planned_after_deadline")}
+              </span>
+            </div>
+          )}
           {ticket.scheduled_end_at && (
             <div className="detail-kv-row">
               <span className="detail-kv-label">
                 {t("schedule.ends_label")}
               </span>
               <span className="detail-kv-val" data-testid="ticket-schedule-end">
-                {formatMoment(ticket.scheduled_end_at)}
+                {momentText(ticket.scheduled_end_day, ticket.scheduled_end_time)}
               </span>
             </div>
           )}
@@ -468,7 +462,7 @@ export function TicketScheduleCard({
                 className="detail-kv-val"
                 data-testid="ticket-schedule-moved-from"
               >
-                {formatMoment(ticket.rescheduled_from)}
+                {formatDate(ticket.rescheduled_from)}
               </span>
             </div>
           )}
@@ -692,6 +686,22 @@ export function TicketScheduleCard({
                     />
                   </div>
                 </div>
+
+                {/* P-3 §A.5 — PLAN-AFTER-DEADLINE WARNS, in plain words,
+                    the moment the chosen day passes the deadline. Nothing
+                    is blocked: the operator may know better, and the card
+                    and the detail will say "planned after the deadline". */}
+                {deadline && (endDate || startDate) > deadline && (
+                  <div
+                    className="alert-info"
+                    role="status"
+                    data-testid="ticket-schedule-deadline-warning"
+                  >
+                    {t("schedule.after_deadline_warning", {
+                      date: formatPlainDate(deadline),
+                    })}
+                  </div>
+                )}
 
                 {isPlanned && (
                   <div className="field">

@@ -13,6 +13,7 @@ import { useAuth } from "../../../auth/AuthContext";
 import { canManageContracts } from "../../../auth/permissions";
 import { ContractFormDialog } from "../contracts/ContractFormDialog";
 import { formatDate, formatMoney } from "../contracts/contractTables";
+import { contractSentence } from "../../../components/contracts/contractSentence";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 import { ExtraWorkRegisterSection } from "./ExtraWorkRegisterSection";
 
@@ -141,19 +142,20 @@ export function CustomerContractsPage() {
                     <Link to={`/admin/contracts/${row.id}`}>
                       {row.contract_no}
                     </Link>
+                    {/* P-3 §C.1 — the sentence, wherever a contract is listed. */}
+                    <span
+                      className="contract-sentence"
+                      data-testid={`customer-contract-sentence-${row.id}`}
+                    >
+                      {contractSentence(row, t, locale)}
+                    </span>
                   </td>
                   <td>
-                    {row.buildings.length === 0 ? (
-                      <span className="muted-empty">—</span>
-                    ) : (
-                      row.buildings.map((b) => b.name).join(", ")
-                    )}
+                    {row.buildings.length === 0
+                      ? t("sentence.no_locations")
+                      : row.buildings.map((b) => b.name).join(", ")}
                   </td>
-                  <td>
-                    {row.contract_type_name ?? (
-                      <span className="muted-empty">—</span>
-                    )}
-                  </td>
+                  <td>{row.contract_type_name ?? ""}</td>
                   <td className="contract-num">
                     {formatMoney(row.monthly_amount, locale)}
                   </td>

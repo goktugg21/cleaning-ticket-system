@@ -61,6 +61,17 @@ def ticket_kind(ticket) -> str:
     return KIND_TICKET
 
 
+def _planned_after_deadline(ticket, has_real_plan: bool) -> bool:
+    if not has_real_plan:
+        return False
+    start, end = job_window(ticket)
+    window_end = end or start
+    deadline = job_deadline(ticket)
+    if window_end is None or deadline is None:
+        return False
+    return window_end > deadline
+
+
 def ticket_due(ticket, today: datetime.date) -> dict:
     """The due facts for the fact block: `due_date`, `due_kind`,
     `days_until_due`, `unplanned_age_days`, `settled_at`,
@@ -104,6 +115,12 @@ def ticket_due(ticket, today: datetime.date) -> dict:
         "unplanned_age_days": None,
         "settled_at": settled_at.isoformat() if settled_at else None,
         "settled_days_after_due": None,
+        # P-3 §A.5 — a REAL plan whose last day is past the deadline.
+        # The same rule the card reads (`views_work_plan.planned_after_
+        # deadline`), so card and detail cannot disagree.
+        "planned_after_deadline": _planned_after_deadline(
+            ticket, provenance.has_real_plan
+        ),
     }
     if due is None:
         if live and job_window(ticket)[0] is None:

@@ -11852,12 +11852,11 @@ details[open] > .ew-department-tree-summary::before {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  /* Generous and FIXED: the week keeps its shape whatever the load, and
-     a heavy day scrolls inside its own column rather than stretching
-     the row it sits in. */
+  /* A generous floor, and NO ceiling: P-3 §A.7 — the column grows with
+     its load and folds past six cards behind "Toon er nog N"
+     (`WorkPlanDayColumn`). The 420px cap with an inner scrollbar hid
+     the bottom of a busy day behind a scrollbar that Chrome fades out. */
   min-height: 170px;
-  max-height: 420px;
-  overflow-y: auto;
 }
 /* An empty day is a muted ICON, not a sentence.
    The page printed "Nothing planned" in every empty column. On the live
@@ -15981,3 +15980,80 @@ table.assign-table { min-width: 0; width: 100%; }
    toast is up. */
 body[data-toast-rail] .page-canvas { padding-bottom: 220px; }
 
+
+/* ===================================================================
+   P-3 — schedule truth pass.
+   =================================================================== */
+/* §A.2 — the card's ONE status line. A block so the badge, the marker
+   and the settled sentence all sit in the same slot of the card. */
+.wp-card-status { display: flex; min-width: 0; }
+.wp-card-status:empty { display: none; }
+/* §A.7 — the column's fold: one full-width ghost button under the cards. */
+.wp-day-more { width: 100%; justify-content: center; margin-top: 4px; }
+/* §A.1 — the "Wacht op klant" door: its own CALM colour, distinct from
+   settled grey (nothing to do), review amber (you must act) and late
+   red (something is wrong). Blue reads as "with somebody else". */
+.wp-waiting-toggle-row { margin-bottom: 14px; }
+.wp-waiting-toggle.btn {
+  border-color: #c5d5ee;
+  background: #e9f0fa;
+  color: #2f5fa8;
+}
+.wp-waiting-toggle.btn:hover { background: #dce8f8; }
+.wp-wait[data-waiting="customer"] {
+  background: #e9f0fa;
+  color: #2f5fa8;
+}
+
+/* P-3 §C — contracts clarity: a term that teaches on click, and the
+   dialog that shows the word with this contract's own numbers. */
+.term-link {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--text-faint);
+}
+.term-link:hover,
+.term-link:focus-visible {
+  text-decoration-color: var(--text);
+  outline: none;
+}
+.term-dialog {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-width: 560px;
+  width: min(92vw, 560px);
+  background: var(--surface);
+  color: var(--text);
+}
+.term-dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+.term-dialog-body { padding: 20px 22px 18px; }
+.term-dialog-title { margin: 0 0 10px; font-size: 16px; font-weight: 700; }
+.term-dialog-lines {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.term-dialog-note { margin: 0 0 14px; font-size: 12.5px; color: var(--text-muted); }
+/* The sentence a contract reads as, under its number in a list row. */
+.contract-sentence {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-top: 2px;
+}

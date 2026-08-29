@@ -137,3 +137,19 @@ export function sumDecimalStrings(values: string[]): string {
   }, 0);
   return (hundredths / 100).toFixed(2);
 }
+
+/**
+ * P-3 §A.3 — a planned DAY as the schedule endpoint should receive it.
+ *
+ * A naive local datetime at midnight, no zone suffix. DRF reads a naive
+ * datetime in the SERVER's zone (Europe/Amsterdam), so the day that was
+ * picked is the day that is stored, whatever zone the browser runs in —
+ * `toISOString()` converted the browser's midnight to UTC first, which
+ * from a browser east of Amsterdam filed the plan under the previous
+ * evening. Midnight is the convention every reader treats as "a day,
+ * not a time": the schedule card shows no clock for it and the server
+ * answers `start_time: null`.
+ */
+export function plannedDayIso(day: string, time?: string): string {
+  return `${day}T${time && time.trim() ? time : "00:00"}:00`;
+}

@@ -138,6 +138,13 @@ export interface WorkPlanEntry {
   due_date: string | null;
   scheduled_start_at: string | null;
   scheduled_end_at: string | null;
+  /** P-3 §A.3 — the clock, decided by the SERVER in its own zone
+   *  ("09:30"), or null when the plan is a DAY and not a time. A card
+   *  prints a clock from these and never from the raw instant above:
+   *  a date-only plan stored as Amsterdam midnight rendered as
+   *  "01:00 AM" in a browser three hours east. */
+  start_time: string | null;
+  end_time: string | null;
   time_window_label: string | null;
   assignment_note: string | null;
   completion_note: string | null;
@@ -195,6 +202,9 @@ export interface WorkPlanEntry {
    *  "unable" and nobody is assigned any more). Set on the rows of
    *  `stuck_entries`, null everywhere else. */
   stuck_age_days: number | null;
+  /** P-3 §A.5 — a REAL plan whose last day is past the deadline. Said
+   *  on the card and the detail; nothing is blocked. */
+  planned_after_deadline: boolean;
   assignee_names: string[];
   assignee_count: number;
   /** W-N1 §3 — the parts of this ticket THIS entry's person holds.
@@ -225,6 +235,8 @@ export interface WorkPlanCounts {
   late: number;
   /** WP-1 G1 — stuck jobs (blocked with nobody assigned), whole scope. */
   stuck: number;
+  /** P-3 §A.1 — jobs waiting on the customer, whole scope. */
+  waiting_customer: number;
 }
 
 export interface WorkPlanWeek {
@@ -262,6 +274,10 @@ export interface WorkPlanResponse {
    *  whose ticket ended blocked). A row leaves only when a human
    *  reschedules, reassigns or cancels through the existing actions. */
   stuck_entries: WorkPlanEntry[];
+  /** P-3 §A.1 — work sent to the customer and waiting on their answer.
+   *  In the current week these rows are in NO day column; they live
+   *  behind the "Wacht op klant" chip, whole scope. */
+  waiting_customer_entries: WorkPlanEntry[];
   limits: {
     entries: number;
     overdue_entries: number;
@@ -269,6 +285,7 @@ export interface WorkPlanResponse {
     undated_entries: number;
     late_entries: number;
     stuck_entries: number;
+    waiting_customer_entries: number;
   };
   truncated: {
     entries: boolean;
@@ -277,6 +294,7 @@ export interface WorkPlanResponse {
     undated_entries: boolean;
     late_entries: boolean;
     stuck_entries: boolean;
+    waiting_customer_entries: boolean;
   };
 }
 

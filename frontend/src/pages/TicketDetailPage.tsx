@@ -2772,13 +2772,19 @@ export function TicketDetailPage() {
   // customer-visible explanations the spawn also appends do not match
   // the pattern and stay. Non-EW tickets render their description
   // untouched.
-  const headerDescription = ticket.extra_work_origin
+  const headerDescriptionRaw = ticket.extra_work_origin
     ? ticket.description
         .split("\n")
         .filter((line) => !/^.+ × \d+([.,]\d+)?$/.test(line.trim()))
         .join("\n")
         .trim()
     : ticket.description;
+  // P-3 §A.6 — a description that only repeats the title is not a
+  // subtitle; the page said "final test" twice, one under the other.
+  const headerDescription =
+    headerDescriptionRaw.trim().toLowerCase() === ticket.title.trim().toLowerCase()
+      ? ""
+      : headerDescriptionRaw;
 
   /* W-TABS Task 4 — which tabs exist for THIS viewer on THIS ticket.
      Money is a property of the ticket (an extra-work origin) AND the
@@ -3437,7 +3443,11 @@ export function TicketDetailPage() {
                               data-testid="ticket-customer-contact-row"
                             >
                               <b>{contact.full_name}</b>
-                              {contact.role_label ? ` · ${contact.role_label}` : ""}
+                              {/* P-3 §A.10 — "veli · A · +31…" said nothing
+                                  about what "A" was; the row says it. */}
+                              {contact.role_label
+                                ? ` · ${t("facts.contact_role", { role: contact.role_label })}`
+                                : ""}
                               {contact.phone ? ` · ${contact.phone}` : ""}
                               {contact.email ? ` · ${contact.email}` : ""}
                             </li>
@@ -3452,7 +3462,9 @@ export function TicketDetailPage() {
                             data-testid="ticket-customer-contact-row"
                           >
                             <b>{contact.full_name}</b>
-                            {contact.role_label ? ` · ${contact.role_label}` : ""}
+                            {contact.role_label
+                              ? ` · ${t("facts.contact_role", { role: contact.role_label })}`
+                              : ""}
                             {contact.phone ? ` · ${contact.phone}` : ""}
                           </li>
                         ))}
@@ -3490,20 +3502,42 @@ export function TicketDetailPage() {
                     <date>" / "Aangemaakt op <date> door <name> — nog niet
                     ingepland · al N dagen". */}
                 <div className="ew-ctx-strong" data-testid="ticket-fact-planned">
-                  {ticket.has_real_plan && ticket.scheduled_start_at
-                    ? ticket.scheduled_end_at &&
-                      ticket.scheduled_end_at !== ticket.scheduled_start_at
+                  {/* P-3 §A.3 — the DAY as the server states it (its own
+                      zone), never the instant read in the browser's. */}
+                  {ticket.has_real_plan && ticket.scheduled_start_day
+                    ? ticket.scheduled_end_day &&
+                      ticket.scheduled_end_day !== ticket.scheduled_start_day
                       ? t("facts.planned_for_range", {
-                          from: formatDate(ticket.scheduled_start_at),
-                          to: formatDate(ticket.scheduled_end_at),
+                          from: formatDay(`${ticket.scheduled_start_day}T00:00:00`),
+                          to: formatDay(`${ticket.scheduled_end_day}T00:00:00`),
                         })
-                      : t("facts.planned_for", { date: formatDate(ticket.scheduled_start_at) })
+                      : t("facts.planned_for", {
+                          date: formatDay(`${ticket.scheduled_start_day}T00:00:00`),
+                        })
                     : ticket.has_real_plan && ticket.due_date
                       ? t("facts.planned_for", { date: formatDay(ticket.due_date) })
                       : t("schedule.not_scheduled")}
                 </div>
+                {ticket.has_real_plan && ticket.scheduled_start_time && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-clock">
+                    {ticket.scheduled_end_time
+                      ? `${ticket.scheduled_start_time}–${ticket.scheduled_end_time}`
+                      : ticket.scheduled_start_time}
+                  </div>
+                )}
                 {ticket.has_real_plan && ticket.time_window_label && (
                   <div className="ew-ctx-sub">{ticket.time_window_label}</div>
+                )}
+                {/* P-3 §A.5 — a real plan past the deadline says so; the
+                    dialog warned before the save, nothing is blocked. */}
+                {ticket.planned_after_deadline && (
+                  <div
+                    className="facts-line ew-hours-tone-over"
+                    data-testid="ticket-fact-after-deadline"
+                  >
+                    <CalendarClock size={12} strokeWidth={2.4} aria-hidden="true" />
+                    {t("facts.planned_after_deadline")}
+                  </div>
                 )}
                 {ticket.has_real_plan && ticket.planned_at && (
                   <div className="ew-ctx-sub" data-testid="ticket-fact-planned-by">
@@ -4389,7 +4423,9 @@ export function TicketDetailPage() {
                 <p className="workflow-upcoming" data-testid="workflow-upcoming">
                   <Clock size={14} strokeWidth={2.4} aria-hidden="true" />
                   {t("workflow_upcoming", {
-                    when: formatDateTime(ticket.scheduled_start_at as string),
+                    when: ticket.scheduled_start_time
+                      ? `${formatDay(`${ticket.scheduled_start_day}T00:00:00`)} ${ticket.scheduled_start_time}`
+                      : formatDay(`${ticket.scheduled_start_day}T00:00:00`),
                   })}
                 </p>
               )}

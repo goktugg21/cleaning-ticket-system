@@ -89,6 +89,10 @@ export interface Me {
   id: number;
   email: string;
   full_name: string;
+  /** P-3 §D — the account's own first name (may be empty). The
+   *  greeting reads it and falls back to the whole display name; it
+   *  never splits "Super Admin" into "Super". */
+  first_name: string;
   role: Role;
   language: string;
   is_active: boolean;
@@ -275,6 +279,10 @@ export type TicketDisplayPhase =
   | "IN_EXECUTION"
   | "WAITING_YOUR_APPROVAL"
   | "WAITING_CUSTOMER_APPROVAL"
+  /** P-3 — the provider's own truth for WAITING_MANAGER_REVIEW: the
+   *  worker reported it done, the manager has not checked it. The
+   *  customer reads IN_EXECUTION for the same status. */
+  | "WAITING_MANAGER_CHECK"
   | "DONE"
   | "REJECTED"
   | "CONVERTED";
@@ -680,6 +688,15 @@ export interface TicketDetail extends TicketList {
   // null (the current date/window + schedule_status stay visible).
   scheduled_start_at: string | null;
   scheduled_end_at: string | null;
+  /** P-3 §A.3 — the clock of the plan, decided by the SERVER in its own
+   *  zone ("09:30"); null when the plan is a day and not a time. */
+  scheduled_start_time: string | null;
+  scheduled_end_time: string | null;
+  /** ...and the DAY ("YYYY-MM-DD") in the server's zone. */
+  scheduled_start_day: string | null;
+  scheduled_end_day: string | null;
+  /** P-3 §A.5 — a real plan whose last day is past the deadline. */
+  planned_after_deadline: boolean;
   time_window_label: string;
   schedule_status: TicketScheduleStatus;
   rescheduled_from: string | null;

@@ -195,6 +195,12 @@ LATE_LIMIT = 200
 #: WP-1 G1 (Addendum D §D.11.2) — the "Vastgelopen — actie nodig" list.
 #: Same bound as its flat-list siblings, for the same reason.
 STUCK_LIMIT = 100
+#: P-3 §A.1 — the "Wacht op klant" list: work sent to the customer and
+#: waiting on their answer. In the current week those rows leave the
+#: seven columns (a finished job sitting calm in Tuesday's column read
+#: as "something is wrong with Tuesday" — the owner needed three days
+#: to see why) and live behind ONE chip, like the undated lane.
+WAITING_LIMIT = 100
 
 #: How many names a card carries before it just says how many more.
 ASSIGNEE_NAMES_SHOWN = 5
@@ -357,6 +363,12 @@ def _ew_rolled_q(today: datetime.date) -> Q:
     return _EW_LIVE_Q & _ew_window_end_q("lt", today)
 
 
+def _slot_waiting_customer_q() -> Q:
+    """P-3 §A.1 — SQL twin of rule 9 for a slot: the job it is on has been
+    sent to the customer and waits on their answer."""
+    return Q(ticket__status=TicketStatus.WAITING_CUSTOMER_APPROVAL)
+
+
 def _slot_board_q(
     week_start: datetime.date, week_end: datetime.date, today: datetime.date
 ) -> Q:
@@ -368,10 +380,14 @@ def _slot_board_q(
     scope, whichever week it was planned in, because it sits on today.
     The Python twin is the roll branch of `WorkPlanView._build`; the
     parity test asserts the two agree over the same rows.
+
+    P-3 rule 9 — in the current week, a row waiting on the customer is
+    not in any column: it is behind the "Wacht op klant" chip. Past and
+    future weeks keep rule 1, as history.
     """
     board = _slot_week_q(week_start, week_end, today) & ~_slot_rolled_q(today)
     if week_start <= today <= week_end:
-        board = board | _slot_rolled_q(today)
+        board = (board | _slot_rolled_q(today)) & ~_slot_waiting_customer_q()
     return board
 
 
@@ -662,14 +678,35 @@ def _ticket_review_q() -> Q:
     )
 
 
+def _ticket_waiting_customer_q() -> Q:
+    """P-3 §A.1 — rule 9: sent to the customer, waiting on their answer.
+
+    Neither pending (the provider side is done) nor over (the customer
+    has not answered). Before this the board read it as settled and
+    left the calm card in the column of its planned day; on the
+    CURRENT week that is a finished-looking card in a past column, and
+    the owner — the system's own designer — needed three days to work
+    out why it sat there. In the current week such a job is in no
+    column: it is one row behind the "Wacht op klant" chip, next to
+    "Nog niet gepland". Past and future weeks keep rule 1: browsed as
+    history, the week shows what it held.
+    """
+    # The status alone: an archived ticket still waiting on the customer
+    # is still waiting on the customer (archive is housekeeping).
+    return Q(status=TicketStatus.WAITING_CUSTOMER_APPROVAL)
+
+
 def _ticket_board_q(
     week_start: datetime.date, week_end: datetime.date, today: datetime.date
 ) -> Q:
     board = _ticket_week_q(week_start, week_end) & ~_ticket_rolled_q(today)
     if week_start <= today <= week_end:
         # Rule 5's rolled rows and rule 8's review rows both sit on
-        # today, whichever week they were planned in.
-        board = board | _ticket_rolled_q(today) | _ticket_review_q()
+        # today, whichever week they were planned in. Rule 9's waiting
+        # rows sit nowhere on the board.
+        board = (
+            board | _ticket_rolled_q(today) | _ticket_review_q()
+        ) & ~_ticket_waiting_customer_q()
     return board
 
 
@@ -856,6 +893,32 @@ def _local_date(value) -> datetime.date | None:
     if value is None:
         return None
     return timezone.localtime(value).date()
+
+
+def _clock(value) -> str | None:
+    """P-3 §A.3 — the clock time of a planned moment, in the SERVER's
+    zone, or None when the plan is a DAY and not a time.
+
+    The convention every writer already follows: a date-only plan is
+    stored as local midnight (`TicketScheduleCard` sends the day with
+    `00:00`; `set_schedule` stores it as given), and the schedule card
+    reads midnight back as "no time". The board printed the raw instant
+    instead — `2026-08-26 22:00Z` (27 August, 00:00 Amsterdam) rendered
+    as "01:00 AM" in a browser three hours east of Greenwich, the
+    owner's. So the SERVER says whether a time exists, in ITS zone, and
+    a card prints a clock only when this is not None.
+    """
+    if value is None:
+        return None
+    local = timezone.localtime(value)
+    if local.hour == 0 and local.minute == 0:
+        return None
+    return local.strftime("%H:%M")
+
+
+def _ticket_waiting_customer(ticket) -> bool:
+    """Python twin of `_ticket_waiting_customer_q`."""
+    return ticket.status == TicketStatus.WAITING_CUSTOMER_APPROVAL
 
 
 def _ticket_live(ticket) -> bool:
@@ -1183,6 +1246,14 @@ def _fe4_facts(
       planned_by_name / planned_at   who, and when they did
       created_by_name         who opened the record; the plain fact
                               every card and detail states
+
+    P-3 §A.5 adds:
+
+      planned_after_deadline  a REAL plan whose last day falls after the
+                              deadline. Nothing is blocked (the operator
+                              may well know better); the card and the
+                              detail simply say so, and the plan dialog
+                              warns before the save.
     """
     due_kind = None
     if job.due is not None:
@@ -1204,7 +1275,19 @@ def _fe4_facts(
         "due_kind": due_kind,
         "settled_at": settled_at,
         "settled_days_after_due": settled_after,
+        "planned_after_deadline": planned_after_deadline(
+            job.window_end, deadline, provenance.has_real_plan
+        ),
     }
+
+
+def planned_after_deadline(window_end, deadline, has_real_plan) -> bool:
+    """P-3 §A.5 — is the plan's last day past the deadline? Only a REAL
+    plan can be (a phantom is no plan), and only against a real
+    deadline (a planned day is never its own deadline)."""
+    if not has_real_plan or window_end is None or deadline is None:
+        return False
+    return window_end > deadline
 
 
 def _ticket_settled_at(ticket):
@@ -1294,6 +1377,10 @@ def _entry_from_slot(
         "stuck_age_days": None,
         "scheduled_start_at": slot.scheduled_start_at,
         "scheduled_end_at": slot.scheduled_end_at,
+        # P-3 §A.3 — the clock, decided by the server in its own zone;
+        # null when the plan is a day and not a time.
+        "start_time": _clock(slot.scheduled_start_at),
+        "end_time": _clock(slot.scheduled_end_at),
         "time_window_label": slot.time_window_label,
         "assignment_note": slot.assignment_note,
         "completion_note": slot.completion_note,
@@ -1410,6 +1497,8 @@ def _entry_from_extra_work(
         # rather than absent: one entry shape, whatever the source.
         "scheduled_start_at": None,
         "scheduled_end_at": None,
+        "start_time": None,
+        "end_time": None,
         "time_window_label": None,
         "assignment_note": None,
         "completion_note": None,
@@ -1498,6 +1587,8 @@ def _entry_from_ticket(
         ),
         "scheduled_start_at": ticket.scheduled_start_at,
         "scheduled_end_at": ticket.scheduled_end_at,
+        "start_time": _clock(ticket.scheduled_start_at),
+        "end_time": _clock(ticket.scheduled_end_at),
         "time_window_label": None,
         "assignment_note": None,
         "completion_note": None,
@@ -1845,6 +1936,26 @@ class WorkPlanView(APIView):
             team=team,
             viewer=user,
         )
+        # P-3 §A.1 — the "Wacht op klant" rows: whole scope, like the
+        # undated lane, because a job sent to the customer in July is
+        # still waiting in August. Tickets only — no extra-work state
+        # means "the customer is checking finished work" (a price
+        # awaiting the customer's decision is a commercial wait, and
+        # such a request has nobody assigned to it; by design).
+        waiting_q = (
+            _ticket_waiting_customer_q() if team else _slot_waiting_customer_q()
+        )
+        waiting_entries, waiting_truncated = self._flat_entries(
+            jobs.filter(waiting_q),
+            extra_work.none(),
+            week_start,
+            week_end,
+            today,
+            limit=WAITING_LIMIT,
+            team=team,
+            viewer=user,
+            fallback_placement=PLACEMENT_PLANNED,
+        )
         counts = self._counts(
             jobs, extra_work, week_start, week_end, today, team=team
         )
@@ -1887,6 +1998,8 @@ class WorkPlanView(APIView):
                 "late_entries": late_entries,
                 # WP-1 G1 — the follow-up list's rows.
                 "stuck_entries": stuck_entries,
+                # P-3 §A.1 — the "Wacht op klant" chip's rows.
+                "waiting_customer_entries": waiting_entries,
                 "limits": {
                     "entries": ENTRY_LIMIT,
                     "overdue_entries": OVERDUE_LIMIT,
@@ -1894,6 +2007,7 @@ class WorkPlanView(APIView):
                     "undated_entries": UNDATED_LIMIT,
                     "late_entries": LATE_LIMIT,
                     "stuck_entries": STUCK_LIMIT,
+                    "waiting_customer_entries": WAITING_LIMIT,
                 },
                 "truncated": {
                     "entries": truncated,
@@ -1902,6 +2016,7 @@ class WorkPlanView(APIView):
                     "undated_entries": undated_truncated,
                     "late_entries": late_truncated,
                     "stuck_entries": stuck_truncated,
+                    "waiting_customer_entries": waiting_truncated,
                 },
             },
             status=status.HTTP_200_OK,
@@ -2098,6 +2213,16 @@ class WorkPlanView(APIView):
         placement = placement_for(job, week_start, week_end, today)
         day = None
         rolled_from = rolled = None
+        # Rule 9 (P-3 §A.1) — waiting on the customer: in the current
+        # week, in NO column. The Python twin of `_ticket_board_q`'s
+        # exclusion; the chip's own list is built with a fallback
+        # placement and is not affected.
+        if (
+            fallback_placement is None
+            and today_in_week
+            and _ticket_waiting_customer(ticket)
+        ):
+            return []
         # Rule 8 (P-1 §3) — waiting for a manager: on today's column of
         # the current week, marked. Any other week keeps rule 1, so the
         # week the worker finished it still shows it, settled, at home.
@@ -2162,6 +2287,14 @@ class WorkPlanView(APIView):
         placement = placement_for(job, week_start, week_end, today)
         day = None
         rolled_from = rolled = None
+        # Rule 9 (P-3 §A.1) — the slot's job waits on the customer: in
+        # the current week it is in no column (twin of `_slot_board_q`).
+        if (
+            fallback_placement is None
+            and today_in_week
+            and _ticket_waiting_customer(slot.ticket)
+        ):
+            return []
         if fallback_placement is None and rolls_forward(job, today):
             if not today_in_week:
                 return []
@@ -2537,12 +2670,14 @@ class WorkPlanView(APIView):
             overdue_q = _ticket_overdue_q(today)
             upcoming_q = _ticket_upcoming_q(week_end)
             undated_q = _ticket_undated_q()
+            waiting_q = _ticket_waiting_customer_q()
         else:
             board_q = _slot_board_q(week_start, week_end, today)
             state_q = _SLOT_STATE_Q
             overdue_q = _slot_overdue_q(today)
             upcoming_q = _slot_upcoming_q(week_end)
             undated_q = _slot_undated_q()
+            waiting_q = _slot_waiting_customer_q()
 
         # W-PLANTRUTH §1b — the chips describe THE BOARD: what the seven
         # columns hold, rolled rows included, past-and-pending excluded.
@@ -2576,6 +2711,8 @@ class WorkPlanView(APIView):
             overdue_all=Count("id", filter=overdue_q),
             upcoming=Count("id", filter=upcoming_q),
             undated=Count("id", filter=undated_q),
+            # P-3 §A.1 — the "Wacht op klant" chip's number, whole scope.
+            waiting_customer=Count("id", filter=waiting_q),
         )
         ew_other = extra_work.aggregate(
             overdue_all=Count("id", filter=_ew_overdue_q(today)),
@@ -2587,9 +2724,11 @@ class WorkPlanView(APIView):
             key: job_week_counts[key] + ew_week_counts[key]
             for key in job_week_counts
         }
+        # No extra-work state is "the customer checks finished work", so
+        # `waiting_customer` has no extra-work half to add.
         counts.update(
             {
-                key: job_other[key] + ew_other[key] for key in job_other
+                key: job_other[key] + ew_other.get(key, 0) for key in job_other
             }
         )
         return counts
@@ -2607,5 +2746,6 @@ __all__ = [
     "STUCK_LIMIT",
     "UNDATED_LIMIT",
     "UPCOMING_LIMIT",
+    "WAITING_LIMIT",
     "WorkPlanView",
 ]

@@ -563,8 +563,10 @@ class TheDeadlineWindowTests(_Fixture):
         self.assertTrue(card["is_overdue"])
 
     def test_a_job_sitting_with_the_customer_reads_calm(self):
-        """§5 — the manager sent it and is waiting on an answer. Still on
-        the board (they may withdraw it); no longer shouting."""
+        """§5 — the manager sent it and is waiting on an answer. No
+        longer shouting — and, since P-3 rule 9, in the CURRENT week it
+        is behind the "Wacht op klant" chip rather than in a column; a
+        past week keeps it at home, calm."""
         ticket = self.make_ticket(
             "With the customer",
             TicketStatus.WAITING_CUSTOMER_APPROVAL,
@@ -573,11 +575,14 @@ class TheDeadlineWindowTests(_Fixture):
         self.make_slot(ticket, days=None)
 
         payload = self._company_plan(week=self.week_of(-4))
-        card = self.entry(payload, f"ticket-{ticket.id}")
+        card = self.entry(payload, f"ticket-{ticket.id}") or self.entry(
+            payload, f"ticket-{ticket.id}", "waiting_customer_entries"
+        )
 
         self.assertIsNotNone(card)
         self.assertTrue(card["viewer_settled"])
         self.assertEqual(payload["counts"]["late"], 0)
+        self.assertEqual(payload["counts"]["waiting_customer"], 1)
 
     def test_a_worker_who_finished_their_own_slot_reads_calm(self):
         ticket = self.make_ticket("Half of it is mine", scheduled=-6)

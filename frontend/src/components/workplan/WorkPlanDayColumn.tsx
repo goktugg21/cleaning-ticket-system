@@ -1,3 +1,4 @@
+import { Children, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -24,7 +25,18 @@ import "./workplan-day.css";
  *   - the empty state has an accessible NAME. The reference shows a
  *     bare muted icon; a screen reader would read nothing at all, so
  *     the icon carries the sentence the column used to print.
+ *
+ * P-3 §A.7 — NO INNER SCROLLBAR. The body used to be capped at 420px
+ * and scroll inside itself, which hid the bottom of a busy day behind
+ * a scrollbar nobody saw (Chrome paints overlay scrollbars that fade).
+ * The column now GROWS with its load, and past `FOLD` cards it folds
+ * the rest behind one "Toon er nog N" button — the reader sees that
+ * there is more, and how much, instead of a clean edge that lies.
  */
+
+/** How many cards a column shows before it folds the rest. */
+const FOLD = 6;
+
 export function WorkPlanDayColumn({
   iso,
   isToday,
@@ -45,6 +57,10 @@ export function WorkPlanDayColumn({
 }) {
   const { t } = useTranslation("staff_slots");
   const locale = useLocaleCode();
+  const [expanded, setExpanded] = useState(false);
+  const cards = Children.toArray(children);
+  const hidden = expanded ? 0 : Math.max(0, cards.length - FOLD);
+  const shown = hidden > 0 ? cards.slice(0, FOLD) : cards;
   // Explicit midnight: a bare date string parses as UTC, which anywhere
   // east of Greenwich renders the previous day.
   const date = new Date(`${iso}T00:00:00`);
@@ -114,8 +130,21 @@ export function WorkPlanDayColumn({
               gap: 8,
             }}
           >
-            {children}
+            {shown}
           </ul>
+        )}
+        {cards.length > FOLD && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm wp-day-more"
+            onClick={() => setExpanded((open) => !open)}
+            aria-expanded={expanded}
+            data-testid="agenda-day-more"
+          >
+            {hidden > 0
+              ? t("agenda.show_more", { count: hidden })
+              : t("agenda.show_less")}
+          </button>
         )}
       </div>
     </section>

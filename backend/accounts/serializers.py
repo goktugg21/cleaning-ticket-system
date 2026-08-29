@@ -123,6 +123,9 @@ class MeSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "full_name",
+            # P-3 §D — the greeting reads the account's own first name and
+            # falls back to the whole display name; never a split of it.
+            "first_name",
             "phone",
             "role",
             "language",

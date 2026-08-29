@@ -390,5 +390,8 @@
   "facts.planned_on_date": "op {{date}}",
   "facts.created_by_on": "Aangemaakt op {{date}} door {{name}}",
   "facts.not_planned_yet_age_one": "nog niet ingepland · al {{count}} dag",
-  "facts.not_planned_yet_age_other": "nog niet ingepland · al {{count}} dagen"
+  "facts.not_planned_yet_age_other": "nog niet ingepland · al {{count}} dagen",
+  "facts.planned_after_deadline": "Gepland na de deadline",
+  "facts.contact_role": "functie: {{role}}",
+  "schedule.after_deadline_warning": "Deze dag is na de deadline ({{date}}). Opslaan kan; het werk is dan te laat."
 }

@@ -13,7 +13,7 @@ import { canAccessExtraWork } from "../../auth/permissions";
 import { BoundedList } from "../BoundedList";
 import { RejectReasonDialog } from "../RejectReasonDialog";
 import { useToast } from "../ToastProvider";
-import { toDateString } from "../../lib/isoWeek";
+import { plannedDayIso, toDateString } from "../../lib/isoWeek";
 import { detailPath, formatDay } from "./entryHelpers";
 import {
   LATE_GROUPS,
@@ -543,13 +543,14 @@ function RescheduleDialog({
     setError("");
     try {
       if (isTicket && entry.ticket_id !== null) {
-        // Local noon, for the reason the undated lane's "plan for today"
-        // gives: midnight is the one value that lands on the previous
-        // day once it is stored in UTC.
-        const [year, month, day] = date.split("-").map(Number);
-        const at = new Date(year, month - 1, day, 12, 0, 0, 0);
+        // P-3 §A.3 — a DAY, not a moment. Sent as a naive local
+        // datetime at midnight (`plannedDayIso`): the server reads it in
+        // ITS zone, so the day is the day whatever zone the browser is
+        // in, and midnight is the convention every reader treats as
+        // "no time" — noon here used to hand every rescheduled job a
+        // 12:00 clock nobody chose.
         await setTicketSchedule(entry.ticket_id, {
-          scheduled_start_at: at.toISOString(),
+          scheduled_start_at: plannedDayIso(date),
           reschedule_reason: reason.trim(),
           apply_to_slots: true,
         });

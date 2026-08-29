@@ -810,6 +810,55 @@ class TicketDetailSerializer(
     def get_settled_days_after_due(self, obj):
         return self._due_facts(obj)["settled_days_after_due"]
 
+    # P-3 §A.5 — a real plan whose last day is past the deadline; the
+    # detail states it ("Gepland na de deadline"), the dialog warns.
+    planned_after_deadline = serializers.SerializerMethodField()
+
+    def get_planned_after_deadline(self, obj) -> bool:
+        return self._due_facts(obj)["planned_after_deadline"]
+
+    # P-3 §A.3 — the clock of the plan, decided by the SERVER in its own
+    # zone; null when the plan is a day and not a time (stored as local
+    # midnight). The browser used to print the raw instant in its own
+    # zone, which is where "01:00 AM" came from on a date-only plan.
+    scheduled_start_time = serializers.SerializerMethodField()
+    scheduled_end_time = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _clock(value):
+        if value is None:
+            return None
+        from django.utils import timezone as _tz
+        local = _tz.localtime(value)
+        if local.hour == 0 and local.minute == 0:
+            return None
+        return local.strftime("%H:%M")
+
+    def get_scheduled_start_time(self, obj):
+        return self._clock(obj.scheduled_start_at)
+
+    def get_scheduled_end_time(self, obj):
+        return self._clock(obj.scheduled_end_at)
+
+    # ...and the DAY, in the server's zone, as a plain ISO date. The
+    # browser used to take the day off the instant in ITS zone, which
+    # west of Amsterdam files a midnight plan under the previous day.
+    scheduled_start_day = serializers.SerializerMethodField()
+    scheduled_end_day = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _day(value):
+        if value is None:
+            return None
+        from django.utils import timezone as _tz
+        return _tz.localtime(value).date().isoformat()
+
+    def get_scheduled_start_day(self, obj):
+        return self._day(obj.scheduled_start_at)
+
+    def get_scheduled_end_day(self, obj):
+        return self._day(obj.scheduled_end_at)
+
     schedule_planned_by_name = serializers.SerializerMethodField()
     schedule_planned_at = serializers.SerializerMethodField()
     allowed_next_statuses = serializers.SerializerMethodField()
@@ -936,6 +985,13 @@ class TicketDetailSerializer(
             # sees ticket detail.
             "scheduled_start_at",
             "scheduled_end_at",
+            # P-3 §A.3 — the server-decided clock (null on a day-only plan).
+            "scheduled_start_time",
+            "scheduled_end_time",
+            "scheduled_start_day",
+            "scheduled_end_day",
+            # P-3 §A.5 — the plan's last day is past the deadline.
+            "planned_after_deadline",
             "time_window_label",
             "schedule_status",
             "rescheduled_from",

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BadgeEuro,
@@ -84,6 +84,11 @@ interface AppShellProps {
   children?: ReactNode;
 }
 
+/** P-3 §B — the sidebar's scroll position, kept across the shell's
+ *  remounts (one per route guard). A module variable: it outlives the
+ *  component and needs no storage. */
+let sidebarScrollTop = 0;
+
 export function AppShell({ children }: AppShellProps) {
   const { me } = useAuth();
   const location = useLocation();
@@ -135,6 +140,47 @@ export function AppShell({ children }: AppShellProps) {
   // into an overlay. Auto-close on route navigation so a tap on a
   // nav-item dismisses the menu.
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // P-3 §B — THE SIDEBAR STAYS PUT. Every route guard mounts its own
+  // `AppShell`, so a navigation remounts the sidebar and its scroll
+  // position went back to the top: a person who had scrolled down to
+  // "Contracten" lost their place on every click. The position is kept
+  // in a module variable (it outlives the component and needs no
+  // storage) and restored before the first paint of the next shell.
+  const sidebarNavRef = useRef<HTMLElement | null>(null);
+  // Measured (Playwright, 1440x900): the OLD shell's nav fires one
+  // scroll-to-0 as it is torn down, so a position saved from scroll
+  // events was overwritten with 0 a few milliseconds before the new
+  // shell restored it. The position is therefore captured at the moment
+  // the person acts on the nav (click or key, capture phase) and at
+  // unmount while the node is still intact — never from scroll events.
+  // The restore is re-applied on every resize of the nav for a short
+  // window, because the nav is shorter at first paint (the inbox and
+  // staff-request badges arrive later) and a single write gets clamped.
+  const remember = () => {
+    const nav = sidebarNavRef.current;
+    if (nav && nav.isConnected && nav.scrollTop > 0) sidebarScrollTop = nav.scrollTop;
+  };
+  useLayoutEffect(() => {
+    const nav = sidebarNavRef.current;
+    if (!nav) return;
+    const wanted = sidebarScrollTop;
+    let observer: ResizeObserver | null = null;
+    let stop = 0;
+    if (wanted > 0) {
+      nav.scrollTop = wanted;
+      observer = new ResizeObserver(() => {
+        if (Math.abs(nav.scrollTop - wanted) > 1) nav.scrollTop = wanted;
+      });
+      observer.observe(nav);
+      for (const child of Array.from(nav.children)) observer.observe(child);
+      stop = window.setTimeout(() => observer?.disconnect(), 1500);
+    }
+    return () => {
+      observer?.disconnect();
+      window.clearTimeout(stop);
+      remember();
+    };
+  }, []);
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
@@ -215,7 +261,13 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Main navigation">
+        <nav
+          className="sidebar-nav"
+          aria-label="Main navigation"
+          ref={sidebarNavRef}
+          onClickCapture={remember}
+          onKeyDownCapture={remember}
+        >
           {isCustomer ? (
             // ---------------------------------------------------------
             // FE-1 §D.3.1 — the CUSTOMER PORTAL nav: six entries, fixed

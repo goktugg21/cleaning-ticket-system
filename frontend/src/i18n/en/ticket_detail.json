@@ -390,5 +390,8 @@
   "facts.planned_on_date": "on {{date}}",
   "facts.created_by_on": "Created {{date}} by {{name}}",
   "facts.not_planned_yet_age_one": "not planned yet · {{count}} day now",
-  "facts.not_planned_yet_age_other": "not planned yet · {{count}} days now"
+  "facts.not_planned_yet_age_other": "not planned yet · {{count}} days now",
+  "facts.planned_after_deadline": "Planned after the deadline",
+  "facts.contact_role": "role: {{role}}",
+  "schedule.after_deadline_warning": "This day is after the deadline ({{date}}). You can save; the work will then be late."
 }

@@ -19,7 +19,6 @@ import { SlotStatusBadge } from "../SlotStatusBadge";
 import { StatusBadge } from "../StatusBadge";
 import { formatPlannedWindow } from "../../lib/plannedWindow";
 import { detailPath, formatDay, formatPlannedDay } from "./entryHelpers";
-import { latenessOf } from "./lateness";
 import { PartChips } from "./PartChips";
 
 /**
@@ -32,29 +31,25 @@ import { PartChips } from "./PartChips";
  * job, which is why four of them filled a column and the week read as a
  * wall.
  *
- * What each line had to earn:
+ * P-3 §A.2 — ONE CARD, ONE VOICE. After FE-4 and P-1 a card could still
+ * carry a placement marker, a due chip, a never-done note AND a status
+ * badge in its foot — four things saying "where this stands", in four
+ * vocabularies, on a 210px card. The owner's own screenshot of the
+ * "final test" ticket showed three of them at once. So the card now
+ * has exactly:
  *
- *   kind tag    kept, and now on BOTH kinds. Tagging only extra work
- *               left "no tag" meaning ticket, and an absence is not a
- *               label.
- *   title       kept. It is the card.
- *   where       `building · customer`. The reference prints
- *               `building · department`; this payload carries no
- *               department, and a cleaning operator reads the customer.
- *   status      kept, through the app's existing badges.
- *   time        kept, but only when there IS one. A slot with no clock
- *               window used to print "No time", which is a sentence
- *               saying nothing.
- *   why         kept as a MARKER — see `PlacementMarker`. §12B requires
- *               a card outside its planned week to say why; it does not
- *               require a banner.
- *   assignees   kept only when there is more than one, as before.
- *   notes       DROPPED from the card. An assignment note, a completion
- *               note and an unable-reason are three more paragraphs on
- *               a card in a 230px column, and all three are on the
- *               detail page one click away. The card is a plan, not a
- *               record.
- *   actions     kept, and only for the person holding the slot.
+ *   ONE STATUS LINE   `StatusLine`: the settled sentence, or the reason
+ *                     it is a visitor on this column, or — for a live
+ *                     card at home — the plain status badge. Never two.
+ *   AT MOST ONE       `TimeChip`: a clock (only when a REAL time exists
+ *   TIME CHIP         — the server says so through `start_time`), else
+ *                     "planned after the deadline", else the deadline
+ *                     countdown, else the planned window. Never two.
+ *
+ * The couldn't-complete reason is not on the card at all: the card says
+ * "Niet gelukt op 26 aug", the reason lives on the detail. The
+ * never-done hours moved to the late strip's own modal, where the rung
+ * is explained.
  */
 
 /**
@@ -130,8 +125,8 @@ export function PlacementMarker({
   }
 
   if (entry.placement === "REVIEW") {
-    // P-1 §3 — finished by the worker, waiting for THIS reader to
-    // confirm it. Not late, not settled: it asks, with its waiting age.
+    // P-1 §3 / P-3 §A.4 — the worker reported it done; THIS reader has
+    // to check it. The manager reads the truth, with the waiting age.
     return (
       <div className="wp-why wp-why-review" data-testid="agenda-card-why">
         <ClipboardCheck size={11} strokeWidth={2.5} />
@@ -179,9 +174,15 @@ export function PlacementMarker({
  * finish came after the due date, as history. Work sitting with the
  * customer or with the manager wears a neutral "waiting" chip: it is
  * settled for THIS reader, and never late-styled against them.
+ *
+ * P-3 §A.9 (the matrix) — every closed shape has its OWN words now. A
+ * rejected ticket used to read "Afgerond op", a converted one and a
+ * cancelled extra work "Niet gelukt", and a slot somebody was taken off
+ * "Niet gelukt" too. The words are the app's existing phase and slot
+ * vocabulary, not a second set.
  */
 export function SettledLine({ entry }: { entry: WorkPlanEntry }) {
-  const { t } = useTranslation("staff_slots");
+  const { t } = useTranslation(["staff_slots", "common"]);
   if (entry.ticket_status === "WAITING_CUSTOMER_APPROVAL") {
     return (
       <span className="wp-wait" data-testid="agenda-card-waiting" data-waiting="customer">
@@ -196,12 +197,43 @@ export function SettledLine({ entry }: { entry: WorkPlanEntry }) {
       </span>
     );
   }
-  if (entry.state === "BLOCKED" && !entry.settled_at) {
+  if (entry.kind === "TICKET_SLOT" && entry.status === "CANCELLED") {
+    return (
+      <span className="wp-wait" data-testid="agenda-card-waiting" data-waiting="cancelled">
+        {t("agenda.slot_cancelled")}
+      </span>
+    );
+  }
+  if (entry.state === "BLOCKED") {
+    const closedWord =
+      entry.kind === "EXTRA_WORK"
+        ? entry.status === "CANCELLED"
+          ? t("common:phase.ew.CANCELLED")
+          : entry.status === "CUSTOMER_REJECTED"
+            ? t("common:phase.ew.REJECTED")
+            : null
+        : entry.ticket_status === "REJECTED"
+          ? t("common:phase.ticket.REJECTED")
+          : entry.ticket_status === "CONVERTED_TO_EXTRA_WORK"
+            ? t("common:phase.ticket.CONVERTED")
+            : null;
+    if (closedWord) {
+      return (
+        <span className="wp-wait" data-testid="agenda-card-waiting" data-waiting="closed">
+          {closedWord}
+        </span>
+      );
+    }
     // "Unable to complete" is not finished: the stuck list carries the
-    // pressure; the card says what happened, in the chip's own words.
+    // pressure; the card says WHEN it could not be done — the day the
+    // slot was for — and nothing more. The reason is on the detail.
+    const failedOn =
+      entry.settled_at?.slice(0, 10) ?? entry.planned_end ?? entry.planned_start;
     return (
       <span className="wp-wait" data-testid="agenda-card-waiting" data-waiting="blocked">
-        {t("agenda.chip_blocked")}
+        {failedOn
+          ? t("agenda.blocked_on", { date: formatDay(failedOn) })
+          : t("agenda.chip_blocked")}
       </span>
     );
   }
@@ -302,17 +334,135 @@ export function DueChipCore({
   );
 }
 
+/** P-3 §A.5 — a real plan whose last day is past the deadline. Said in
+ *  the deadline chip's own shape and tone; the plan dialog warned before
+ *  the save, and the detail states the same fact. */
+export function AfterDeadlineChip() {
+  const { t } = useTranslation("staff_slots");
+  return (
+    <span className="wp-due wp-due-over" data-testid="agenda-card-after-deadline">
+      <Hourglass size={11} strokeWidth={2.5} />
+      {t("agenda.planned_after_deadline")}
+    </span>
+  );
+}
+
+/** The clock window as the server states it ("09:30–12:00"), else the
+ *  slot's free-text window label; empty when the plan is a day and not
+ *  a time. Never derived from the raw instant — see `start_time`. */
+function clockText(entry: WorkPlanEntry): string {
+  const parts: string[] = [];
+  if (entry.start_time) {
+    parts.push(
+      entry.end_time ? `${entry.start_time}–${entry.end_time}` : entry.start_time,
+    );
+  }
+  if (entry.kind === "TICKET_SLOT" && entry.time_window_label) {
+    parts.push(entry.time_window_label);
+  }
+  return parts.join(" · ");
+}
+
+/** The planned DAY window, for a card whose plan is days rather than a
+ *  time: a customer's wish is captioned as one; a multi-day window says
+ *  where it ends. Empty for a one-day plan — the column IS the day. */
+function dayWindowText(
+  entry: WorkPlanEntry,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  if (entry.plan_source === "CUSTOMER_WISH" && entry.planned_start) {
+    return t("agenda.wished_on", { date: formatDay(entry.planned_start) });
+  }
+  if (entry.planned_end && entry.planned_end !== entry.planned_start) {
+    return formatPlannedWindow(entry.planned_start, entry.planned_end, formatDay, {
+      empty: "",
+      endOnly: (end) => t("agenda.until_date", { date: end }),
+    });
+  }
+  return "";
+}
+
+/**
+ * P-3 §A.2 — AT MOST ONE TIME CHIP.
+ *
+ * For the person holding a slot the clock is what they need ("09:00 –
+ * 12:00"), so it wins. For a job or an extra work on a manager's board
+ * the promise wins: "planned after the deadline" first (it is the fact
+ * that needs a decision), then the deadline countdown, then a day
+ * window when the plan spans days. A settled card carries none — its
+ * settled line already holds its date.
+ */
+function TimeChip({ entry }: { entry: WorkPlanEntry }) {
+  const { t } = useTranslation("staff_slots");
+  if (entry.viewer_settled) return null;
+  const clock = clockText(entry);
+  const isSlot = entry.kind === "TICKET_SLOT";
+  const order: (() => React.ReactNode)[] = isSlot
+    ? [
+        () => clock && <ClockChip text={clock} />,
+        () => entry.planned_after_deadline && <AfterDeadlineChip />,
+        () => <DueChip entry={entry} />,
+      ]
+    : [
+        () => entry.planned_after_deadline && <AfterDeadlineChip />,
+        () => <DueChip entry={entry} />,
+        () => clock && <ClockChip text={clock} />,
+        () => {
+          const window = dayWindowText(entry, t);
+          return window && <ClockChip text={window} />;
+        },
+      ];
+  for (const pick of order) {
+    const node = pick();
+    if (node) return <>{node}</>;
+  }
+  return null;
+}
+
+function ClockChip({ text }: { text: string }) {
+  return (
+    <span className="wp-card-time" data-testid="agenda-card-time">
+      <CalendarClock size={11} strokeWidth={2} />
+      {text}
+    </span>
+  );
+}
+
+/**
+ * P-3 §A.2 — THE ONE STATUS LINE.
+ *
+ * Settled: the past-tense sentence. A visitor on this column: the reason
+ * it is here (the placement marker). A live card at home: the plain
+ * status badge. Exactly one of the three, never a badge under a marker.
+ */
+function StatusLine({ entry }: { entry: WorkPlanEntry }) {
+  if (entry.viewer_settled) return <SettledLine entry={entry} />;
+  if (entry.placement !== "PLANNED") {
+    return (
+      <PlacementMarker
+        entry={entry}
+        deadlineIsHeadline={entry.due_kind === "DEADLINE" && entry.days_until_due !== null}
+      />
+    );
+  }
+  if (entry.kind === "EXTRA_WORK") {
+    return <StatusBadge status={{ kind: "extra-work", value: entry.status }} variant="cell" />;
+  }
+  if (entry.kind === "TICKET") {
+    return <StatusBadge status={{ kind: "ticket", value: entry.status }} variant="cell" />;
+  }
+  return <SlotStatusBadge status={entry.status as SlotStatus} />;
+}
+
 export function WorkPlanCard({
   entry,
   role,
-  locale,
   onComplete,
   onUnable,
   hostParts,
 }: {
   entry: WorkPlanEntry;
   role: Role | null;
-  locale: string;
   onComplete: () => void;
   onUnable: () => void;
   /** W-LATE §3b — when set, this is a HOST card: the ticket's heading
@@ -324,68 +474,11 @@ export function WorkPlanCard({
   const { t } = useTranslation(["staff_slots", "common"]);
   const to = detailPath(entry, role);
   const isExtraWork = entry.kind === "EXTRA_WORK";
-  // W-VIEWER — the JOB card. One per ticket, carrying a TICKET status
-  // and the ticket's own scheduled window; never a staff slot's clock.
-  const isJob = entry.kind === "TICKET";
   const isHost = hostParts !== undefined;
-
-  function timeOnly(iso: string | null): string {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
-  }
-
-  /** The clock window for a slot; the planned DAY window for extra work,
-   *  which has no dated slot and never has had one. Empty string when
-   *  there is nothing to say — the caller renders nothing rather than a
-   *  line reading "No time". */
-  function windowText(): string {
-    if (isJob) {
-      // The TICKET's own scheduled window — the fact that placed this
-      // card. §3 of the ruling: the general board does not re-publish
-      // each staff member's working hours; the ticket's Scheduling
-      // section does, to anybody who opens it.
-      if (!entry.scheduled_start_at) {
-        // FE-4 — a window borrowed from the customer's WISH is a wish,
-        // and the foot says so instead of printing it as a plan.
-        if (entry.plan_source === "CUSTOMER_WISH" && entry.planned_start) {
-          return t("agenda.wished_on", { date: formatDay(entry.planned_start) });
-        }
-        return formatPlannedWindow(entry.planned_start, entry.planned_end, formatDay, {
-          empty: "",
-          endOnly: (end) => t("agenda.until_date", { date: end }),
-        });
-      }
-      return entry.scheduled_end_at
-        ? `${timeOnly(entry.scheduled_start_at)}–${timeOnly(entry.scheduled_end_at)}`
-        : timeOnly(entry.scheduled_start_at);
-    }
-    if (isExtraWork) {
-      return formatPlannedWindow(entry.planned_start, entry.planned_end, formatDay, {
-        empty: "",
-        endOnly: (end) => t("agenda.until_date", { date: end }),
-      });
-    }
-    const parts: string[] = [];
-    if (entry.scheduled_start_at) {
-      parts.push(
-        entry.scheduled_end_at
-          ? `${timeOnly(entry.scheduled_start_at)}–${timeOnly(entry.scheduled_end_at)}`
-          : timeOnly(entry.scheduled_start_at),
-      );
-    }
-    if (entry.time_window_label) parts.push(entry.time_window_label);
-    return parts.join(" · ");
-  }
 
   const where = [entry.building_name, entry.customer_name]
     .filter(Boolean)
     .join(" · ");
-  const window = windowText();
-  // W-LATE §1b — the same rung the strip shows, on the week card, so a
-  // job on Tuesday's column and its card in the strip agree.
-  const late = latenessOf(entry);
   const heading = (
     <>
       {entry.ticket_no ? `${entry.ticket_no} · ` : ""}
@@ -445,65 +538,20 @@ export function WorkPlanCard({
 
       {where && <span className="wp-card-where">{where}</span>}
 
-      {/* FE-4 (Addendum D §D.12 items 3-4) — ONE HEADLINE LATENESS, AND
-          NONE ON SETTLED WORK.
-          Live card: the deadline when one exists (the due chip), else
-          the planned day (the placement marker's "Gepland <day> — N
-          dagen te laat"). Never both as alarms: with a deadline the
-          marker says only where the card came from. Every other
-          time-fact is secondary and says what it is: the never-done
-          fact ("87 dagen zonder gewerkte uren") is a quiet note under
-          the facts, not a second red badge.
-          Settled card: past tense, neutral, nothing implying action. */}
-      {entry.viewer_settled ? (
-        <SettledLine entry={entry} />
-      ) : (
-        <>
-          <PlacementMarker
-            entry={entry}
-            deadlineIsHeadline={entry.due_kind === "DEADLINE" && entry.days_until_due !== null}
-          />
-          <DueChip entry={entry} />
-          {late && late.level === 3 && late.anchorDays !== null && (
-            <span className="wp-card-note" data-testid="agenda-card-never-done">
-              {t("agenda.never_done_hours", { count: late.anchorDays })}
-            </span>
-          )}
-        </>
-      )}
+      <div className="wp-card-status" data-testid="agenda-card-status">
+        <StatusLine entry={entry} />
+      </div>
 
       {/* W-N1 §3 — WHICH half of the job is this person's. Reuses the
           Assignment section's own `.parts-chip` pair rather than a
-          second chip style: it is the same fact in a smaller place, and
-          two chip vocabularies for one concept is how a design language
-          stops being one. Extra work carries an empty list, so this
-          renders nothing there without a `kind` check.
-          W-LATE §3b — through `PartChips`, which also carries each
-          part's state (done / last day / missed). */}
+          second chip style. Extra work carries an empty list, so this
+          renders nothing there without a `kind` check. */}
       {entry.parts.length > 0 && (
         <PartChips parts={entry.parts} testId="agenda-card-part" />
       )}
 
       <div className="wp-card-foot">
-        {isExtraWork ? (
-          <StatusBadge
-            status={{ kind: "extra-work", value: entry.status }}
-            variant="cell"
-          />
-        ) : isJob ? (
-          <StatusBadge
-            status={{ kind: "ticket", value: entry.status }}
-            variant="cell"
-          />
-        ) : (
-          <SlotStatusBadge status={entry.status as SlotStatus} />
-        )}
-        {window && (
-          <span className="wp-card-time">
-            <CalendarClock size={11} strokeWidth={2} />
-            {window}
-          </span>
-        )}
+        <TimeChip entry={entry} />
         {entry.assignee_count > 1 && (
           <span className="wp-card-time" data-testid="agenda-card-assignees">
             <Users size={11} strokeWidth={2} />

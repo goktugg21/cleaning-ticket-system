@@ -87,6 +87,21 @@ is confirmed. A worker's own completed slot is unchanged.
        column for readers who can review it, marked with how long it
        has waited. Past and future weeks keep rule 1.
 
+P-3 §A.1 (2026-08-29) — WORK WAITING ON THE CUSTOMER IS NOT IN A DAY
+COLUMN. A ticket in WAITING_CUSTOMER_APPROVAL is over for the provider
+side and not over for the record, and the board read it as settled:
+the calm card sat in the column of its planned day. On the CURRENT
+week that is a finished-looking card in a past column with nothing
+left to do on it, and the owner — the system's own designer — needed
+three days to understand why it was there. `views_work_plan.py` owns
+the predicate (`_ticket_waiting_customer_q` and its slot twin) because
+it is a ticket-status fact, not a date fact this module can express.
+
+    9. In the current week, a job waiting on the customer is in no
+       column: it is one row behind the "Wacht op klant" chip, whole
+       scope, like the undated lane. Past and future weeks keep rule 1
+       as history.
+
 **Why a normalised `Job` instead of two copies of the rule.** The two
 sources are a dated ticket slot (`TicketStaffAssignment`) and an extra
 work request (`ExtraWorkRequest`). They share no model, no state machine

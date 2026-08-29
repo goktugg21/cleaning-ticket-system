@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../../api/client";
 import { getContractForecast } from "../../../api/contracts";
 import type { ContractForecast } from "../../../api/contracts.types";
+import { Term } from "../../../components/contracts/ContractTerms";
+import type { ContractTerm } from "../../../components/contracts/ContractTerms";
 import { formatDate, formatMoney, formatPeriod } from "./contractTables";
 
 /**
@@ -26,7 +28,14 @@ import { formatDate, formatMoney, formatPeriod } from "./contractTables";
  *    is the larger of the two and why it is not monthly x 12 whenever
  *    a part period has been prorated.
  */
-export function ContractInvoicePreview({ contractId }: { contractId: number }) {
+export function ContractInvoicePreview({
+  contractId,
+  onTerm,
+}: {
+  contractId: number;
+  /** P-3 §C.2 — the page's term dialog; every term here teaches. */
+  onTerm: (term: ContractTerm) => void;
+}) {
   const { t, i18n } = useTranslation("contracts");
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [forecast, setForecast] = useState<ContractForecast | null>(null);
@@ -63,7 +72,7 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
   return (
     <section className="contract-forecast" data-testid="contract-forecast">
       <header className="contract-forecast-header">
-        <h3>{t("forecast.title")}</h3>
+        <h3><Term term="forecast" onOpen={onTerm}>{t("forecast.title")}</Term></h3>
         <div className="contract-year-stepper" role="group" aria-label={t("forecast.year")}>
           <button
             type="button"
@@ -127,16 +136,11 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
                 <td>
                   {formatPeriod(row.period_start, locale)}
                   {row.is_prorated && (
-                    <span
-                      className="cell-tag cell-tag-muted"
-                      style={{ marginLeft: 6 }}
-                      title={t("forecast.proratedTitle", {
-                        covered: row.covered_days,
-                        total: row.period_days,
-                      })}
-                    >
-                      {t("forecast.prorated")}
-                    </span>
+                    <Term term="prorated" onOpen={onTerm}>
+                      <span className="cell-tag cell-tag-muted" style={{ marginLeft: 6 }}>
+                        {t("forecast.prorated")}
+                      </span>
+                    </Term>
                   )}
                 </td>
                 <td className="contract-num">{formatMoney(row.amount, locale)}</td>
@@ -166,21 +170,22 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
             it was the label that was missing. Where nothing is in force
             yet the card says so rather than showing a zero. */}
         <SummaryItem
-          label={t("forecast.monthlyAmount")}
+          label={<Term term="monthly" onOpen={onTerm}>{t("forecast.monthlyAmount")}</Term>}
           value={
-            Number(forecast?.monthly_amount ?? 0) === 0
-              ? t("forecast.noneInForce")
-              : formatMoney(forecast?.monthly_amount ?? "0", locale)
+            Number(forecast?.monthly_amount ?? 0) === 0 ? (
+              <Term term="noneInForce" onOpen={onTerm}>{t("forecast.noneInForce")}</Term>
+            ) : (
+              formatMoney(forecast?.monthly_amount ?? "0", locale)
+            )
           }
           hint={t("forecast.asOfToday")}
         />
         <SummaryItem
-          label={t("forecast.yearlyAmount")}
+          label={<Term term="yearly" onOpen={onTerm}>{t("forecast.yearlyAmount")}</Term>}
           value={formatMoney(forecast?.yearly_amount ?? "0", locale)}
-          hint={t("forecast.yearlyHint")}
         />
         <SummaryItem
-          label={t("forecast.invoicesPerYear")}
+          label={<Term term="invoicesPerYear" onOpen={onTerm}>{t("forecast.invoicesPerYear")}</Term>}
           value={String(forecast?.invoices_per_year ?? 0)}
         />
       </div>
@@ -193,8 +198,8 @@ function SummaryItem({
   value,
   hint,
 }: {
-  label: string;
-  value: string;
+  label: React.ReactNode;
+  value: React.ReactNode;
   hint?: string;
 }) {
   return (

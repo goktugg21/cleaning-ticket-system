@@ -36,6 +36,7 @@ import {
   CalendarRange,
   ChevronLeft,
   ChevronRight,
+  Hourglass,
   Lock,
   Ticket,
   Info,
@@ -87,7 +88,7 @@ import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { SlotStatusBadge } from "../components/SlotStatusBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { formatDate, useLocaleCode } from "../lib/intl";
+import { formatDate } from "../lib/intl";
 import {
   currentIsoWeek,
   formatIsoWeek,
@@ -95,6 +96,7 @@ import {
   isoWeekDays,
   isoWeekStart,
   parseIsoWeek,
+  plannedDayIso,
   shiftIsoWeek,
   toDateString,
 } from "../lib/isoWeek";
@@ -319,7 +321,6 @@ function WorkPlanWeek() {
   const { t } = useTranslation(["staff_slots", "common", "create_ticket"]);
   const { me } = useAuth();
   const { push } = useToast();
-  const locale = useLocaleCode();
   const role = me?.role ?? null;
   const teamWeek = agendaShowsTeamWeek(role);
 
@@ -395,6 +396,9 @@ function WorkPlanWeek() {
    *  age BUTTON that opens the drawer; closed by default so it does not
    *  dominate the page. */
   const [undatedOpen, setUndatedOpen] = useState(false);
+  /** P-3 §A.1 — the "Wacht op klant" drawer, the same door pattern as
+   *  "Nog niet gepland": closed by default, one chip with the count. */
+  const [waitingOpen, setWaitingOpen] = useState(false);
 
   const weekParam = formatIsoWeek(week);
 
@@ -452,15 +456,13 @@ function WorkPlanWeek() {
     setPlanningKey(entry.key);
     setPlanError("");
     try {
-      // Local noon: a bare midnight is the value most likely to fall
-      // into the previous day once the server converts to UTC, which is
-      // the bug `extra_work.billing.billing_month` had to be taught
-      // about. Noon is safe in every timezone this app runs in.
       const today = new Date();
-      today.setHours(12, 0, 0, 0);
       if (entry.ticket_id !== null) {
+        // P-3 §A.3 — a DAY, not a moment: a naive local midnight the
+        // server reads in ITS zone (`plannedDayIso`). Noon used to hand
+        // every job planned from here a "12:00" clock nobody chose.
         await setTicketSchedule(entry.ticket_id, {
-          scheduled_start_at: today.toISOString(),
+          scheduled_start_at: plannedDayIso(toDateString(today)),
         });
       } else if (entry.extra_work_id !== null) {
         // A DATE, not a timestamp: `provider_planned_date` is a DateField
@@ -518,6 +520,18 @@ function WorkPlanWeek() {
     () => (data ? dedupeByJob(data.stuck_entries) : []),
     [data],
   );
+  /** P-3 §A.1 — work sent to the customer, one row per job. In the
+   *  current week these are in NO column (rule 9); the chip is where
+   *  they live. Browsing a past week they sit in their columns as
+   *  history, so the chip is only offered on the working board. */
+  const waitingJobs = useMemo(
+    () => (data ? dedupeByJob(data.waiting_customer_entries) : []),
+    [data],
+  );
+  const waitingShown =
+    data && !data.truncated.waiting_customer_entries
+      ? waitingJobs.length
+      : (data?.counts.waiting_customer ?? 0);
 
   /** Mon-Sun of the loaded week, ALWAYS all seven — a week with nothing
    *  on Thursday must show an empty Thursday, not silently close the
@@ -959,6 +973,67 @@ function WorkPlanWeek() {
         </section>
       )}
 
+      {/* P-3 §A.1 — "Wacht op klant". Sent to the customer, waiting on
+          their answer: nothing for this reader to do, so not in a day
+          column of the working week (a calm card in Tuesday's column
+          read as "something is wrong with Tuesday"). One chip in its
+          own calm colour, the same door as "Nog niet gepland". */}
+      {data && data.week.is_current && waitingJobs.length > 0 && (
+        <div className="wp-waiting-toggle-row" data-testid="agenda-waiting-toggle-row">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm wp-waiting-toggle"
+            aria-expanded={waitingOpen}
+            onClick={() => setWaitingOpen((open) => !open)}
+            data-testid="agenda-waiting-toggle"
+          >
+            <Hourglass size={14} strokeWidth={2.5} />
+            {t("agenda.waiting_toggle", { count: waitingShown })}
+          </button>
+        </div>
+      )}
+      {data && data.week.is_current && waitingJobs.length > 0 && waitingOpen && (
+        <section
+          className="card"
+          data-testid="agenda-waiting-lane"
+          style={{ marginBottom: 18, padding: "16px 18px" }}
+        >
+          <div className="section-head" style={{ marginBottom: 4 }}>
+            <div className="section-head-title">{t("agenda.waiting_title")}</div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setWaitingOpen(false)}
+              data-testid="agenda-waiting-hide"
+            >
+              {t("agenda.waiting_hide")}
+            </button>
+          </div>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            {t("agenda.waiting_desc")}
+          </p>
+          <BoundedList
+            size="lg"
+            count={waitingJobs.length}
+            ariaLabel={t("agenda.waiting_title")}
+            testIdPrefix="agenda-waiting"
+          >
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {waitingJobs.map((entry) => (
+                <WaitingRow key={entry.key} entry={entry} role={role} />
+              ))}
+            </ul>
+          </BoundedList>
+          {data.truncated.waiting_customer_entries && (
+            <p className="wp-notice" role="status">
+              {t("agenda.truncated_note", {
+                count: data.limits.waiting_customer_entries,
+              })}
+            </p>
+          )}
+        </section>
+      )}
+
       {/* WP-1 G1 — "Vastgelopen — actie nodig". Work that stopped
           without being done: somebody said "unable" and nobody is
           assigned any more, or an extra work whose ticket ended
@@ -1015,9 +1090,10 @@ function WorkPlanWeek() {
             <Info size={14} strokeWidth={2.4} aria-hidden="true" />
             {t("agenda.info_toggle")}
           </summary>
+          {/* P-3 §C.4 — ONE teaching line; the late strip's own sentence
+              is its tooltip, not a second paragraph here. */}
           <div className="wp-info-body">
             <p>{t("agenda.job_board_hint")}</p>
-            <p>{t("late.strip_desc")}</p>
           </div>
         </details>
       )}
@@ -1077,7 +1153,6 @@ function WorkPlanWeek() {
                   key={entry.key}
                   entry={entry}
                   role={role}
-                  locale={locale}
                   onComplete={() => setCompletionTarget(entry)}
                   onUnable={() => setUnableTarget(entry)}
                 />
@@ -1087,7 +1162,6 @@ function WorkPlanWeek() {
                   key={`host-${host.entry.key}`}
                   entry={host.entry}
                   role={role}
-                  locale={locale}
                   onComplete={() => setCompletionTarget(host.entry)}
                   onUnable={() => setUnableTarget(host.entry)}
                   hostParts={host.parts}
@@ -1309,13 +1383,9 @@ function StuckRow({
       <div className="wp-undated-row-main">
         {to ? <Link to={to}>{heading}</Link> : <span>{heading}</span>}
         <span className="muted small">{where}</span>
-        {entry.unable_to_complete_reason && (
-          <span className="muted small">
-            {t("agenda.stuck_reason", {
-              reason: entry.unable_to_complete_reason,
-            })}
-          </span>
-        )}
+        {/* P-3 §A.2 — the couldn't-complete reason is on the detail the
+            title opens, not on the row: a raw "rrr" beside the job told
+            the reader nothing and looked like a defect. */}
       </div>
       <span
         className="wp-stuck-age"
@@ -1324,6 +1394,41 @@ function StuckRow({
         {age === 0
           ? t("agenda.stuck_age_today")
           : t("agenda.stuck_age", { count: age })}
+      </span>
+    </li>
+  );
+}
+
+/** P-3 §A.1 — one job waiting on the customer. A READ row: what it is,
+ *  where, when it went to the customer. The customer's answer is the
+ *  only thing that moves it, and that is not this reader's button. */
+function WaitingRow({
+  entry,
+  role,
+}: {
+  entry: WorkPlanEntry;
+  role: Role | null;
+}) {
+  const { t } = useTranslation(["staff_slots", "common"]);
+  const to = detailPath(entry, role);
+  const where = [entry.building_name, entry.customer_name]
+    .filter(Boolean)
+    .join(" · ");
+  const heading = `${entry.ticket_no ? `${entry.ticket_no} · ` : ""}${entry.title}`;
+  const since = entry.settled_at?.slice(0, 10) ?? entry.planned_end ?? entry.planned_start;
+  return (
+    <li className="wp-undated-row" data-testid={`agenda-waiting-row-${entry.key}`}>
+      <div className="wp-undated-row-main">
+        {to ? <Link to={to}>{heading}</Link> : <span>{heading}</span>}
+        <span className="muted small">{where}</span>
+        {since && (
+          <span className="muted small" data-testid={`agenda-waiting-since-${entry.key}`}>
+            {t("agenda.waiting_since", { date: formatDay(since) })}
+          </span>
+        )}
+      </div>
+      <span className="wp-wait" data-waiting="customer">
+        {t("agenda.waiting_customer")}
       </span>
     </li>
   );

@@ -793,3 +793,79 @@ are permanent and win over any older text.
    with what the ugly data showed (CLAUDE.md, Frontend redesign
    rules). The owner's three named tickets were P-1's acceptance test.
 
+
+## D.15 Schedule truth and contracts clarity — the P-3 rulings (2026-08-29)
+
+The owner — the system's own designer — needed three days to understand
+why tickets waiting on the customer sat in past day columns of the
+working week. That is the bar failing: design must teach, paragraphs do
+not. P-3 is the schedule truth pass that follows, plus a words-and-layout
+pass over contracts. The rulings below are permanent and win over any
+older text.
+
+1. **Work waiting on the customer is not in a day column.** Rule 9 of
+   `tickets/work_plan.py` (predicate in `views_work_plan.py`,
+   `_ticket_waiting_customer_q` and its slot twin): in the CURRENT week a
+   ticket in WAITING_CUSTOMER_APPROVAL is in no column. It is one row
+   behind its own chip — "Wacht op klant: N" / "Waiting for customer: N"
+   — in its own calm blue, distinct from settled grey, review amber and
+   late red, opening the same drawer as "Nog niet gepland"
+   (`waiting_customer_entries`, `counts.waiting_customer`, whole scope).
+   Past and future weeks keep placement as history.
+2. **One card, one voice.** A work-plan card carries exactly ONE status
+   line (the settled sentence, or the reason it is a visitor on this
+   column, or — at home and live — the plain status badge) and AT MOST
+   ONE time chip (a real clock, else "Gepland na de deadline", else the
+   deadline countdown, else the day window). The couldn't-complete
+   reason is never on a card or a list row: the card says "Niet gelukt
+   op 26 aug", the reason lives on the detail. Every closed shape has
+   its own words (rejected, converted, cancelled, taken off the job) —
+   the app's existing phase and slot vocabulary, never a second set.
+3. **A clock renders only when a real time exists, and the SERVER
+   decides.** A date-only plan is stored as local midnight; the browser
+   used to print that instant in its own zone, which is where "01:00 AM"
+   came from (`2026-08-26 22:00Z` read three hours east of Greenwich).
+   Every work-plan entry now carries `start_time` / `end_time` and the
+   ticket detail `scheduled_start_time` / `scheduled_end_time` plus the
+   day (`scheduled_start_day`), all in `TIME_ZONE`; a card and the
+   schedule card print a clock from those and never from the raw
+   instant. Writers send a plan as a NAIVE local datetime
+   (`lib/isoWeek.ts::plannedDayIso`), which DRF reads in the server's
+   zone: the day picked is the day stored whatever zone the browser is
+   in, and "plan for today" / "reschedule" no longer hand a job a 12:00
+   clock nobody chose.
+4. **The manager sees the truth.** WAITING_MANAGER_REVIEW has a
+   provider-facing phase of its own, `WAITING_MANAGER_CHECK` — "Gemeld
+   als klaar — wacht op uw controle" / "Reported done — waiting for your
+   check" — on the banner and on the card; the customer keeps "wordt
+   uitgevoerd" for the same status through the existing per-viewer
+   mechanism (`tickets/display_phase.py`).
+5. **Plan-after-deadline warns, never blocks.** The schedule dialog says
+   in plain words when the chosen day passes the deadline; the card and
+   the detail state "Gepland na de deadline" (`planned_after_deadline`,
+   computed once for both from a REAL plan against a REAL deadline).
+6. **The numbers reconcile, and the matrix is complete.**
+   `tickets/tests/test_p3_schedule_truth.py` asserts that every count on
+   the payload equals the list it describes (total = open + in progress
+   + done + blocked = the cards on the board; late = its three rungs;
+   undated, overdue, upcoming, stuck and waiting each equal their list;
+   nothing is in two places), and places every TicketStatus, every slot
+   status and every extra-work status on a pinned Wednesday. The
+   remaining "by design" holes are recorded in the P-3 sprint report.
+7. **No inner scrollbars on the board.** A day column grows with its
+   load and folds past six cards behind "Toon er nog N"; the 420px cap
+   with an inner scrollbar is gone. The sidebar keeps its scroll position
+   across route changes.
+8. **Contracts: words, layout and self-teaching modals only.** A
+   contract, wherever listed, reads as a sentence ("B Amsterdam — € 850
+   per maand voor B1 + B2 — sinds jan 2026 — volgende periode: sep");
+   every term teaches on click by SHOWING it with that contract's own
+   numbers ("Versie 2 — geldig vanaf 1 sep — wat veranderde: € 800 →
+   € 850 per maand"); an unset fact is absent, never a dash. **The
+   contracts functional revision awaits the owner's meeting
+   (2026-08-30); until then no rule, field, calculation or endpoint
+   changes.** The contracts model was carried over from the reference
+   system and its rules are not P-3's to touch.
+9. **One teaching line per surface.** Any surface with more than one
+   short teaching line is cut to one — including P-2's invoices sentence
+   — and structure carries the rest.
