@@ -3078,7 +3078,9 @@ export function DashboardPage({
             {/* FE-6 (§D.7) — the by-building and focus panels moved to
                 Rapporten. Linked, not rebuilt. */}
             <p className="muted small" data-testid="tickets-analytics-link">
-              <Link to="/reports">{t("analytics_link")}</Link>
+              <Link to="/reports#per-gebouw" className="btn btn-ghost btn-sm">
+                {t("analytics_link")}
+              </Link>
             </p>
           </section>
           </>

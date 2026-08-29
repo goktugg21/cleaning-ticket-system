@@ -3,6 +3,7 @@ import { Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { api, getApiError } from "../../api/client";
+import { BoundedList } from "../../components/BoundedList";
 import { hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { currentIsoWeek } from "../../lib/isoWeek";
 
@@ -106,6 +107,10 @@ export function WorkerHoursView() {
   const [firstWeek, setFirstWeek] = useState(Math.max(1, start.isoWeek - 3));
   const [weekCount, setWeekCount] = useState(4);
   const [activeWeek, setActiveWeek] = useState<number | "">("");
+  // FE-7 (§D.6.12) — the reference layout carries nine columns this
+  // system holds no data for. Compact by default; the accountant's
+  // layout one click away, and only then is its empty-columns note shown.
+  const [referenceLayout, setReferenceLayout] = useState(false);
   const [payload, setPayload] = useState<Payload | null>(null);
   const [error, setError] = useState("");
 
@@ -220,6 +225,17 @@ export function WorkerHoursView() {
         <div className="filter-actions">
           <button
             type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setReferenceLayout((v) => !v)}
+            aria-pressed={referenceLayout}
+            data-testid="worker-hours-layout-toggle"
+          >
+            {referenceLayout
+              ? t("worker_hours.columns_compact")
+              : t("worker_hours.columns_reference")}
+          </button>
+          <button
+            type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => void download("csv")}
             disabled={loading}
@@ -285,36 +301,61 @@ export function WorkerHoursView() {
             onClick={() => setActiveWeek(week)}
             data-testid={`worker-hours-week-${week}`}
           >
-            W{week}
+            {t("common:week_short", { n: week })}
           </button>
         ))}
       </div>
 
       {loading && (
-        <div className="loading-bar" style={{ margin: 0 }}>
-          <div className="loading-bar-fill" />
+        <div
+          className="skeleton-table"
+          aria-hidden="true"
+          data-testid="worker-hours-skeleton"
+        >
+          {[0, 1, 2, 3].map((row) => (
+            <div className="skeleton-row" key={row}>
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+            </div>
+          ))}
         </div>
       )}
 
+      <BoundedList
+        size="lg"
+        count={Math.max(1, rows.length)}
+        ariaLabel={t("worker_hours.title")}
+        testIdPrefix="worker-hours"
+      >
       <div className="table-wrap admin-list-wrap">
         <table className="data-table data-table-dense hours-comparison-table">
           <thead>
             <tr>
               <th>{t("worker_hours.col_week")}</th>
               <th>{t("worker_hours.col_source")}</th>
-              <th>{t("worker_hours.col_personnel")}</th>
+              {referenceLayout && <th>{t("worker_hours.col_personnel")}</th>}
               <th>{t("worker_hours.col_worker")}</th>
-              <th>{t("worker_hours.col_cost_centre")}</th>
-              <th>{t("worker_hours.col_cost_code")}</th>
-              <th>{t("worker_hours.col_order")}</th>
-              <th>{t("worker_hours.col_place")}</th>
-              <th>{t("worker_hours.col_action")}</th>
-              <th>{t("worker_hours.col_debtor")}</th>
-              <th>{t("worker_hours.col_hour_code")}</th>
+              {referenceLayout && (
+                <>
+                  <th>{t("worker_hours.col_cost_centre")}</th>
+                  <th>{t("worker_hours.col_cost_code")}</th>
+                  <th>{t("worker_hours.col_order")}</th>
+                  <th>{t("worker_hours.col_place")}</th>
+                  <th>{t("worker_hours.col_action")}</th>
+                  <th>{t("worker_hours.col_debtor")}</th>
+                  <th>{t("worker_hours.col_hour_code")}</th>
+                </>
+              )}
               <th>{t("worker_hours.col_hour_type")}</th>
-              <th className="contract-num">
-                {t("worker_hours.col_contracted")}
-              </th>
+              {referenceLayout && (
+                <th className="contract-num">
+                  {t("worker_hours.col_contracted")}
+                </th>
+              )}
               {DAYS.map((day) => (
                 <th key={day} className="contract-num">
                   {t(`common:contract_hours.day_${day}`)}
@@ -329,21 +370,25 @@ export function WorkerHoursView() {
                 key={`${row.iso_week}:${row.employee_id}:${row.building_id ?? 0}:${row.hour_type_id}`}
                 data-testid="worker-hours-row"
               >
-                <td>W{row.iso_week}</td>
+                <td>{t("common:week_short", { n: row.iso_week })}</td>
                 {/* Sprint 173 §1 — WHERE the hour came from. A ticket
                     or extra work that no longer resolves shows its type
                     and number rather than a blank, and an hour nobody
                     attributed shows an em dash. */}
                 <td>{dash(row.source_label)}</td>
-                <td>{dash(row.personnel_number)}</td>
+                {referenceLayout && <td>{dash(row.personnel_number)}</td>}
                 <td className="td-subject">{row.employee_name}</td>
-                <td>{dash(row.cost_centre_name)}</td>
-                <td>{dash(row.cost_centre_code)}</td>
-                <td>{dash(row.order_number)}</td>
-                <td>{dash(row.place)}</td>
-                <td>{dash(row.action)}</td>
-                <td>{dash(row.debtor)}</td>
-                <td>{dash(row.hour_type_code)}</td>
+                {referenceLayout && (
+                  <>
+                    <td>{dash(row.cost_centre_name)}</td>
+                    <td>{dash(row.cost_centre_code)}</td>
+                    <td>{dash(row.order_number)}</td>
+                    <td>{dash(row.place)}</td>
+                    <td>{dash(row.action)}</td>
+                    <td>{dash(row.debtor)}</td>
+                    <td>{dash(row.hour_type_code)}</td>
+                  </>
+                )}
                 <td>
                   {hourTypeLabelFrom(
                     row.hour_type_name,
@@ -351,7 +396,9 @@ export function WorkerHoursView() {
                     t,
                   )}
                 </td>
-                <td className="contract-num">{dash(row.contracted_hours)}</td>
+                {referenceLayout && (
+                  <td className="contract-num">{dash(row.contracted_hours)}</td>
+                )}
                 {DAYS.map((day) => (
                   <td key={day} className="contract-num">
                     {row[day]}
@@ -364,21 +411,29 @@ export function WorkerHoursView() {
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={21} className="muted">
-                  {t("worker_hours.empty")}
+                <td colSpan={referenceLayout ? 21 : 12}>
+                  <div className="empty-state" data-testid="worker-hours-empty">
+                    <div className="empty-title">
+                      {t("worker_hours.empty_title")}
+                    </div>
+                    <p className="empty-sub">{t("worker_hours.empty")}</p>
+                  </div>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      </BoundedList>
 
       {/* Stated on screen, not only in a sprint report: the reference
           carries columns we hold no data for, and an empty column that
           looks like data is worse than an absent one. */}
-      <p className="muted small" data-testid="worker-hours-missing-note">
-        {t("worker_hours.missing_columns")}
-      </p>
+      {referenceLayout && (
+        <p className="muted small" data-testid="worker-hours-missing-note">
+          {t("worker_hours.missing_columns")}
+        </p>
+      )}
     </div>
   );
 }

@@ -250,8 +250,11 @@ function parseHours(raw: string): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-function formatTotal(value: number): string {
-  return value.toFixed(2).replace(/\.00$/, "");
+function formatTotal(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 export function HoursWeekGrid({
@@ -600,12 +603,14 @@ export function HoursWeekGrid({
   const grandTotal = rows.reduce((sum, row) => sum + rowTotal(row), 0);
 
   const hourTypeName = (id: number | "") =>
-    hourTypes.find((h) => h.id === id)?.name ?? String(id);
+    hourTypes.find((h) => h.id === id)?.name ??
+    t("my_hours.field_hour_type_empty");
 
   const buildingName = (id: number | "") =>
     id === ""
       ? t("hours_week_grid.no_building")
-      : (buildings.find((b) => b.id === id)?.name ?? String(id));
+      : (buildings.find((b) => b.id === id)?.name ??
+        t("hours_week_grid.no_building"));
 
   /** Sprint 179B §2 — which JOB a row belongs to, in words. The rule
    *  itself is in `lib/hourSourceLabel`, because the My hours list needs
@@ -1346,7 +1351,7 @@ export function HoursWeekGrid({
                       style={{ textAlign: "right", fontWeight: 700 }}
                       data-testid={`hours-week-row-total-${row.id}`}
                     >
-                      {formatTotal(rowTotal(row))}
+                      {formatTotal(rowTotal(row), i18n.language)}
                     </td>
                     <td>
                       {/* An added-but-unsaved row can be dropped; a row
@@ -1377,7 +1382,6 @@ export function HoursWeekGrid({
                           {t("hours_week_grid.remove_row")}
                         </button>
                       )}
-                      {dayRowIndex < 0 && null}
                     </td>
                   </tr>
                 ))}
@@ -1406,6 +1410,7 @@ export function HoursWeekGrid({
                   >
                     {formatTotal(
                       block.rows.reduce((sum, row) => sum + rowTotal(row), 0),
+                      i18n.language,
                     )}
                   </td>
                   <td />
@@ -1429,7 +1434,7 @@ export function HoursWeekGrid({
       >
         <span className="hours-week-grand-total" data-testid="hours-week-total">
           {t("hours_week_grid.grand_total", {
-            hours: formatTotal(grandTotal),
+            hours: formatTotal(grandTotal, i18n.language),
             count: employees.length,
           })}
         </span>

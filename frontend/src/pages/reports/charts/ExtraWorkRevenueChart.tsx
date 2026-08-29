@@ -15,6 +15,7 @@ import type { ExtraWorkRevenueState } from "../../../api/reports.types";
 import { useReport } from "../../../hooks/useReport";
 import { formatDate, formatMoney } from "../../../lib/intl";
 import { ExportButtons } from "./ExportButtons";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -87,9 +88,7 @@ export function ExtraWorkRevenueChart({ filters, refreshKey }: ChartProps) {
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -204,7 +203,7 @@ export function ExtraWorkRevenueChart({ filters, refreshKey }: ChartProps) {
                   t("ew_revenue_tooltip_amount"),
                 ]}
               />
-              <Bar dataKey="total">
+              <Bar isAnimationActive={false} dataKey="total">
                 {rows.map((row) => (
                   <Cell key={row.state} fill={STATE_COLOR[row.state]} />
                 ))}

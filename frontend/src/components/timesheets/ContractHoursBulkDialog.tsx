@@ -31,6 +31,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
 import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
@@ -342,9 +343,6 @@ export function ContractHoursBulkDialog({
                 {t("contract_hours.bulk_valid_from_required")}
               </p>
             )}
-            <p className="muted small" style={{ margin: "6px 0 0" }}>
-              {t("contract_hours.bulk_week_hint")}
-            </p>
           </div>
 
           {/* Under the dates, because it is a statement ABOUT the
@@ -362,6 +360,9 @@ export function ContractHoursBulkDialog({
               />
               <span>{t("contract_hours.auto_fill_label")}</span>
             </label>
+            <p className="muted small" style={{ margin: "4px 0 0" }}>
+              {t("contract_hours.auto_fill_hint")}
+            </p>
           </div>
 
           <div className="field">
@@ -391,7 +392,9 @@ export function ContractHoursBulkDialog({
             </select>
             {workTypes.length === 0 && (
               <p className="muted small" data-testid="bulk-no-work-types">
-                {t("work_types.none_yet")}
+                <Link to="/admin/services-catalogs/catalogs">
+                  {t("work_types.none_yet")}
+                </Link>
               </p>
             )}
             <p

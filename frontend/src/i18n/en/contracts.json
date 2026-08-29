@@ -205,7 +205,7 @@
     "activeRevision": "Active revision",
     "effectiveSince": "Effective since",
     "currentMonthly": "Current monthly",
-    "empty": "No revisions yet — scope changes will be tracked here.",
+    "empty": "No revisions yet — changes to the agreed work will be tracked here.",
     "currentMonthlyAsOf": "As at today ({{date}}), on the revision now in force"
   },
   "forecast": {
@@ -318,5 +318,6 @@
   "planning.line_head": "Contract line",
   "planning.none_linked": "No recurring work linked yet.",
   "planning.unlinked_one": "{{count}} more line with no linked work.",
-  "planning.unlinked_other": "{{count}} more lines with no linked work."
+  "planning.unlinked_other": "{{count}} more lines with no linked work.",
+  "planning.cell_title": "{{year}}, week {{week}}"
 }

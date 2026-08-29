@@ -11,6 +11,7 @@ import type { ReportFilters } from "../../../api/reports";
 import { fetchSLADistribution } from "../../../api/reports";
 import type { SLADisplayState } from "../../../api/reports.types";
 import { useReport } from "../../../hooks/useReport";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -56,7 +57,7 @@ export function SLADistributionChart({ filters, refreshKey }: ChartProps) {
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
-              <Pie
+              <Pie isAnimationActive={false}
                 data={data.buckets}
                 dataKey="count"
                 nameKey="label"
@@ -98,13 +99,6 @@ export function SLADistributionChart({ filters, refreshKey }: ChartProps) {
   );
 }
 
-function ChartSkeleton() {
-  return (
-    <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-      <div className="loading-bar-fill" />
-    </div>
-  );
-}
 
 function ChartError({
   message,

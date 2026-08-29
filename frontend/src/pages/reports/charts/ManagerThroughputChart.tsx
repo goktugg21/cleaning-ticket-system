@@ -11,6 +11,8 @@ import { useTranslation } from "react-i18next";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchManagerThroughput } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
+import { ChartSkeleton } from "./ChartSkeleton";
+import { BoundedList } from "../../../components/BoundedList";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -46,9 +48,7 @@ export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -78,6 +78,7 @@ export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
             {t("manager_throughput_empty")}
           </div>
         ) : (
+          <BoundedList size="lg" count={chartData.length} ariaLabel={t("manager_throughput_title")} testIdPrefix="manager-throughput">
           <ResponsiveContainer
             width="100%"
             height={Math.max(160, chartData.length * 36)}
@@ -105,9 +106,10 @@ export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
                   return `${row.full_name} — ${row.email}`;
                 }}
               />
-              <Bar dataKey="resolved_count" fill="#10b981" />
+              <Bar isAnimationActive={false} dataKey="resolved_count" fill="#10b981" />
             </BarChart>
           </ResponsiveContainer>
+          </BoundedList>
         )
       )}
     </section>

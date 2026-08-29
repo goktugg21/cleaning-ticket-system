@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { api, getApiError } from "../../api/client";
+import { BoundedList } from "../../components/BoundedList";
 
 interface EmployeeRow {
   employee_id: number;
@@ -57,7 +59,7 @@ interface ComparisonPayload {
  * hard to find.
  */
 export function HoursComparisonView() {
-  const { t } = useTranslation(["reports", "common"]);
+  const { t, i18n } = useTranslation(["reports", "common"]);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -96,11 +98,12 @@ export function HoursComparisonView() {
     () =>
       Array.from({ length: 12 }, (_, index) => ({
         value: index + 1,
-        label: new Date(2000, index, 1).toLocaleDateString(undefined, {
-          month: "long",
-        }),
+        label: new Date(2000, index, 1).toLocaleDateString(
+          i18n.language === "nl" ? "nl-NL" : "en-US",
+          { month: "long" },
+        ),
       })),
-    [],
+    [i18n.language],
   );
 
   const rows = payload?.rows ?? [];
@@ -182,11 +185,30 @@ export function HoursComparisonView() {
 
       <div className="card" style={{ overflow: "hidden" }}>
         {loading && (
-          <div className="loading-bar" style={{ margin: 0 }}>
-            <div className="loading-bar-fill" />
+          <div
+            className="skeleton-table"
+            aria-hidden="true"
+            data-testid="hours-comparison-skeleton"
+          >
+            {[0, 1, 2].map((row) => (
+              <div className="skeleton-row" key={row}>
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+                <span className="skeleton-line" />
+              </div>
+            ))}
           </div>
         )}
 
+        <BoundedList
+          size="lg"
+          count={Math.max(1, rows.length)}
+          ariaLabel={t("hours_comparison.title")}
+          testIdPrefix="hours-comparison"
+        >
         <div className="table-wrap admin-list-wrap">
           <table className="data-table data-table-dense hours-comparison-table">
             <thead>
@@ -210,8 +232,8 @@ export function HoursComparisonView() {
                 const open = expanded.includes(key);
                 const tag = deltaTag(row.difference);
                 return (
-                  <>
-                    <tr key={`b-${key}`}>
+                  <Fragment key={`b-${key}`}>
+                    <tr>
                       <td className="td-subject">
                         {row.employees.length > 0 ? (
                           <button
@@ -272,13 +294,27 @@ export function HoursComparisonView() {
                           <td />
                         </tr>
                       ))}
-                  </>
+                  </Fragment>
                 );
               })}
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="muted">
-                    {t("hours_comparison.empty")}
+                  <td colSpan={5}>
+                    <div
+                      className="empty-state"
+                      data-testid="hours-comparison-empty"
+                    >
+                      <div className="empty-title">
+                        {t("hours_comparison.empty_title")}
+                      </div>
+                      <p className="empty-sub">{t("hours_comparison.empty")}</p>
+                      <Link
+                        to="/admin/hours?tab=schedule"
+                        className="btn btn-secondary btn-sm"
+                      >
+                        {t("hours_comparison.open_schedule")}
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -305,6 +341,7 @@ export function HoursComparisonView() {
             </tbody>
           </table>
         </div>
+        </BoundedList>
       </div>
     </div>
   );

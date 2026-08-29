@@ -11,6 +11,7 @@ import type { ReportFilters } from "../../../api/reports";
 import { fetchStatusDistribution } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
 import { ticketStatusLabelKey } from "../../../lib/enumLabels";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -59,7 +60,7 @@ export function StatusDistributionChart({ filters, refreshKey }: ChartProps) {
               {/* Sprint 184 §2 — the slice names come from the status
                   CODE through the app's one status vocabulary, not from
                   an English label the server used to send. */}
-              <Pie
+              <Pie isAnimationActive={false}
                 data={data.buckets.map((bucket) => ({
                   ...bucket,
                   name: t(ticketStatusLabelKey(bucket.status), {
@@ -98,13 +99,6 @@ export function StatusDistributionChart({ filters, refreshKey }: ChartProps) {
   );
 }
 
-function ChartSkeleton() {
-  return (
-    <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-      <div className="loading-bar-fill" />
-    </div>
-  );
-}
 
 function ChartError({
   message,

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 
 import { api, getApiError } from "../../api/client";
+import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EditModeToggle } from "../../components/EditModeToggle";
@@ -148,7 +149,19 @@ export function ContractHoursTab({
   employees: TimesheetEmployee[];
   hourTypes: HourType[];
 }) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+  const formatDay = (value: string) =>
+    new Date(`${value}T00:00:00`).toLocaleDateString(dateLocale, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  const formatHours = (value: number) =>
+    new Intl.NumberFormat(i18n.language, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(value);
   const [rows, setRows] = useState<ContractHoursRow[]>([]);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -367,15 +380,17 @@ export function ContractHoursTab({
             onToggle={edit.toggleMode}
             testId="contract-hours-edit-toggle"
           />
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => setBulkOpen(true)}
-            data-testid="contract-hours-bulk-open"
-          >
-            <Plus size={14} strokeWidth={2.5} />
-            {t("contract_hours.bulk_open")}
-          </button>
+          {!edit.editMode && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setBulkOpen(true)}
+              data-testid="contract-hours-bulk-open"
+            >
+              <Plus size={14} strokeWidth={2.5} />
+              {t("contract_hours.bulk_open")}
+            </button>
+          )}
         </div>
       </div>
 
@@ -474,11 +489,30 @@ export function ContractHoursTab({
       </form>
 
       {loading && (
-        <div className="loading-bar" style={{ margin: 0 }}>
-          <div className="loading-bar-fill" />
+        <div
+          className="skeleton-table"
+          aria-hidden="true"
+          data-testid="contract-hours-skeleton"
+        >
+          {[0, 1, 2, 3].map((row) => (
+            <div className="skeleton-row" key={row}>
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+            </div>
+          ))}
         </div>
       )}
 
+      <BoundedList
+        size="lg"
+        count={Math.max(1, rows.length)}
+        ariaLabel={t("contract_hours.tab")}
+        testIdPrefix="contract-hours"
+      >
       <div className="table-wrap admin-list-wrap">
         <table className="data-table data-table-dense hours-week-grid-table">
           <thead>
@@ -517,7 +551,14 @@ export function ContractHoursTab({
                   )}
                 </td>
                 <td className="td-date">
-                  {row.valid_from} → {row.valid_to ?? "…"}
+                  {row.valid_to
+                    ? t("contract_hours.validity_range", {
+                        from: formatDay(row.valid_from),
+                        to: formatDay(row.valid_to),
+                      })
+                    : t("contract_hours.validity_open", {
+                        from: formatDay(row.valid_from),
+                      })}
                 </td>
                 <td>
                   <span className="cell-tag cell-tag-normal">
@@ -540,13 +581,13 @@ export function ContractHoursTab({
                          rather than letting the server refuse a change
                          the operator has already typed. */
                       disabled={!edit.editMode || row.is_locked || busy}
-                      aria-label={`${row.employee_name} ${day}`}
+                      aria-label={`${row.employee_name} ${t(`contract_hours.day_${day}`)}`}
                       data-testid={`contract-hours-cell-${row.id}-${day}`}
                     />
                   </td>
                 ))}
                 <td className="contract-num">
-                  <strong>{rowTotal(row).toFixed(2)}</strong>
+                  <strong>{formatHours(rowTotal(row))}</strong>
                 </td>
                 {/* A plain column. It was a whole tab's worth of
                     ceremony for a value that is read off this row and
@@ -584,7 +625,7 @@ export function ContractHoursTab({
                     disabled={row.is_locked || busy}
                     onChange={() => void toggleAutoFill(row)}
                     aria-label={t("contract_hours.auto_fill_label")}
-                    title={t("contract_hours.auto_fill_label")}
+                    title={t("contract_hours.auto_fill_hint")}
                     data-testid={`contract-hours-auto-fill-${row.id}`}
                   />
                 </td>
@@ -630,14 +671,27 @@ export function ContractHoursTab({
             ))}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={16} className="muted">
-                  {t("contract_hours.empty")}
+                <td colSpan={16}>
+                  <div className="empty-state" data-testid="contract-hours-empty">
+                    <div className="empty-title">{t("contract_hours.empty")}</div>
+                    {!edit.editMode && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setBulkOpen(true)}
+                        data-testid="contract-hours-empty-bulk-open"
+                      >
+                        {t("contract_hours.bulk_open")}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      </BoundedList>
 
       {bulkOpen && (
         <ContractHoursBulkDialog

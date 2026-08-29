@@ -341,6 +341,7 @@ export function HoursAdminPage() {
   // has touched, so "what changed" is the map itself and no diffing of
   // the whole page is needed.
   const [editing, setEditing] = useState(false);
+  const [periodToggle, setPeriodToggle] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, EntryDraft>>({});
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -566,6 +567,11 @@ export function HoursAdminPage() {
     };
   }, [tab, companyPending, week, company, weekStatusKey]);
 
+  const weekRange = weekFilters(week);
+  const periodOpen =
+    periodToggle ||
+    filters.date_from !== weekRange.date_from ||
+    filters.date_to !== weekRange.date_to;
   const weekStatusLoading = weekStatusLoadedKey !== weekStatusKey;
   const weekClosed = weekStatus?.is_closed ?? false;
 
@@ -857,7 +863,7 @@ export function HoursAdminPage() {
         title={t("hours_admin.title")}
         subtitle={t("hours_admin.subtitle")}
         actions={
-          tab === "worked" ? (
+          tab === "worked" && !editing ? (
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -980,11 +986,17 @@ export function HoursAdminPage() {
               data-testid="hours-week-status"
               data-closed={weekClosed ? "true" : "false"}
             >
-              {weekStatusLoading
-                ? t("weeks.status_loading")
-                : weekClosed
-                  ? t("weeks.status_closed")
-                  : t("weeks.status_open")}
+              {weekStatusLoading ? (
+                <span
+                  className="skeleton-line"
+                  style={{ width: 54, height: 10, display: "inline-block" }}
+                  aria-hidden="true"
+                />
+              ) : weekClosed ? (
+                t("weeks.status_closed")
+              ) : (
+                t("weeks.status_open")
+              )}
             </span>
             {weekClosed && weekStatus?.lock && (
               <span className="muted small" data-testid="hours-week-closed-by">
@@ -1021,7 +1033,7 @@ export function HoursAdminPage() {
               ) : (
                 <button
                   type="button"
-                  className="btn btn-primary btn-sm"
+                  className="btn btn-secondary btn-sm"
                   data-testid="hours-week-close"
                   onClick={() => {
                     setConfirmError("");
@@ -1107,7 +1119,11 @@ export function HoursAdminPage() {
             />
 
             {/* Van / Tot: what the week bar resolved to, and the only
-                way to ask for a range that is not one week. */}
+                way to ask for a range that is not one week. FE-7
+                (§D.6.4): folded — the week bar owns the period; the
+                pair unfolds on request or when a range is in force. */}
+            {periodOpen && (
+            <>
             <div className="filter-field">
               <span className="filter-label">
                 {t("hours_admin.filter_date_from")}
@@ -1139,8 +1155,21 @@ export function HoursAdminPage() {
                 data-testid="hours-filter-date-to"
               />
             </div>
+            </>
+            )}
 
             <div className="filter-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                data-testid="hours-filters-period-toggle"
+                aria-expanded={periodOpen}
+                onClick={() => setPeriodToggle((v) => !v)}
+              >
+                {periodOpen
+                  ? t("hours_admin.period_toggle_close")
+                  : t("hours_admin.period_toggle_open")}
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -1152,6 +1181,7 @@ export function HoursAdminPage() {
                   // every hour the company has ever filed.
                   setFilters(weekFilters(week));
                   setPage(1);
+                  setPeriodToggle(false);
                   cancelEditing();
                 }}
               >
@@ -1171,8 +1201,21 @@ export function HoursAdminPage() {
           )}
 
           {loading ? (
-            <div className="loading-bar">
-              <div className="loading-bar-fill" />
+            <div
+              className="card skeleton-table"
+              aria-hidden="true"
+              data-testid="hours-entries-skeleton"
+            >
+              {[0, 1, 2, 3, 4, 5].map((row) => (
+                <div className="skeleton-row" key={row}>
+                  <span className="skeleton-line" />
+                  <span className="skeleton-line" />
+                  <span className="skeleton-line" />
+                  <span className="skeleton-line" />
+                  <span className="skeleton-line" />
+                  <span className="skeleton-line" />
+                </div>
+              ))}
             </div>
           ) : (
             <div className="card" data-testid="hours-entries-list">
@@ -1377,8 +1420,10 @@ export function HoursAdminPage() {
                             )}
                           </td>
                           <td className="muted small">
-                            {entry.iso_year}-W
-                            {String(entry.iso_week).padStart(2, "0")}
+                            {formatIsoWeek({
+                              isoYear: entry.iso_year,
+                              isoWeek: entry.iso_week,
+                            })}
                             {entry.is_locked && (
                               <span
                                 className="badge badge-closed"
@@ -1417,7 +1462,9 @@ export function HoursAdminPage() {
                                 aria-label={t("hours_admin.col_source")}
                                 data-testid={`hours-entry-source-${entry.id}`}
                               >
-                                <option value="">—</option>
+                                <option value="">
+                                  {t("my_hours.field_job_empty")}
+                                </option>
                                 {/* The row's CURRENT source stays
                                     offerable even if the job has since
                                     closed and left the picker: otherwise
@@ -1432,7 +1479,16 @@ export function HoursAdminPage() {
                                       ) === draft.source,
                                   ) && (
                                     <option value={draft.source}>
-                                      {draft.source}
+                                      {(() => {
+                                        const src = decodeSource(draft.source);
+                                        return hourSourceLabel(
+                                          src.source_type,
+                                          src.source_id,
+                                          sourceOptions,
+                                          t,
+                                          t("hours_week_grid.no_source"),
+                                        );
+                                      })()}
                                     </option>
                                   )}
                                 {sourceOptions.map((option) => (
@@ -1519,8 +1575,11 @@ export function HoursAdminPage() {
                                 </option>
                                 {activeHourTypes.map((hourType) => (
                                   <option key={hourType.id} value={hourType.id}>
-                                    {hourTypeLabel(hourType, t)} (x
-                                    {hourType.multiplier})
+                                    {hourTypeLabel(hourType, t)} (
+                                    {t("hour_types.multiplier_note", {
+                                      n: hourType.multiplier,
+                                    })}
+                                    )
                                   </option>
                                 ))}
                               </select>
@@ -1659,8 +1718,9 @@ export function HoursAdminPage() {
                           {summary.total_weighted_hours}
                         </td>
                         <td colSpan={editing ? 3 : 2} className="muted small">
-                          {t("hours_admin.tile_entries")}{" "}
-                          {summary.total_entries}
+                          {t("hours_admin.entries_total", {
+                            count: summary.total_entries,
+                          })}
                         </td>
                       </tr>
                     </tfoot>
@@ -1679,6 +1739,17 @@ export function HoursAdminPage() {
                   <p className="muted" style={{ margin: 0 }}>
                     {t("hours_admin.empty_description")}
                   </p>
+                  {!editing && activeHourTypes.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginTop: 14 }}
+                      onClick={() => setWeekModalOpen(true)}
+                      data-testid="hours-empty-enter-week"
+                    >
+                      {t("hours_admin.enter_week_button")}
+                    </button>
+                  )}
                 </div>
               )}
 

@@ -631,7 +631,7 @@ export function MyHoursPage() {
         actions={
           <button
             type="button"
-            className="btn btn-primary btn-sm"
+            className="btn btn-secondary btn-sm"
             data-testid="my-hours-add-button"
             onClick={() => openCreate()}
             disabled={weekClosed || loading || hourTypes.length === 0}
@@ -734,8 +734,17 @@ export function MyHoursPage() {
       )}
 
       {loading ? (
-        <div className="loading-bar">
-          <div className="loading-bar-fill" />
+        <div className="card skeleton-table" aria-hidden="true" data-testid="my-hours-skeleton">
+          {[0, 1, 2, 3].map((row) => (
+            <div className="skeleton-row" key={row}>
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line" />
+            </div>
+          ))}
         </div>
       ) : (
         <>
@@ -1100,7 +1109,7 @@ export function MyHoursPage() {
                 <option value="">{t("my_hours.field_hour_type_empty")}</option>
                 {hourTypes.map((hourType) => (
                   <option key={hourType.id} value={hourType.id}>
-                    {hourTypeLabel(hourType, t)} (x{hourType.multiplier})
+                    {hourTypeLabel(hourType, t)} ({t("hour_types.multiplier_note", { n: hourType.multiplier })})
                   </option>
                 ))}
               </select>

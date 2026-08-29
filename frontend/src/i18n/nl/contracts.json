@@ -318,5 +318,6 @@
   "planning.line_head": "Contractregel",
   "planning.none_linked": "Nog geen terugkerend werk gekoppeld.",
   "planning.unlinked_one": "Nog {{count}} regel zonder gekoppeld werk.",
-  "planning.unlinked_other": "Nog {{count}} regels zonder gekoppeld werk."
+  "planning.unlinked_other": "Nog {{count}} regels zonder gekoppeld werk.",
+  "planning.cell_title": "{{year}}, week {{week}}"
 }

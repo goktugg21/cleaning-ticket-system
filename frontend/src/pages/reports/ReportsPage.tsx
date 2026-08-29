@@ -257,6 +257,18 @@ export function ReportsPage() {
   const { filters, setFilter, setRangePreset } = useReportsFilters();
 
   const [refreshKey, setRefreshKey] = useState(0);
+  // FE-7 (§D.6.4) — the custom date pair unfolds on request (or when a
+  // custom range is already in force); the three presets are the bar.
+  const [customOpen, setCustomOpen] = useState(false);
+  const showCustomDates = customOpen || filters.preset === "custom";
+
+  // FE-7 — the dashboard links here with an anchor ("#per-gebouw");
+  // the router does not scroll to hashes on its own.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  }, []);
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
@@ -425,16 +437,21 @@ export function ReportsPage() {
                   </button>
                 );
               })}
-              <span
+              <button
+                type="button"
                 className={`btn btn-sm ${filters.preset === "custom" ? "btn-primary" : "btn-secondary"}`}
-                style={{ cursor: "default" }}
                 aria-pressed={filters.preset === "custom"}
+                aria-expanded={showCustomDates}
+                onClick={() => setCustomOpen((v) => !v)}
+                data-testid="range-preset-custom"
               >
                 {t("preset_custom")}
-              </span>
+              </button>
             </div>
           </div>
 
+          {showCustomDates && (
+          <>
           <div className="filter-field">
             <span className="filter-label">{t("filter_from")}</span>
             <input
@@ -453,6 +470,8 @@ export function ReportsPage() {
               onChange={(event) => setFilter("to", event.target.value)}
             />
           </div>
+          </>
+          )}
 
           {isSuperAdmin && (
             <div className="filter-field">
@@ -549,7 +568,7 @@ export function ReportsPage() {
                 onClick={() => setComparisonOpen(false)}
                 data-testid="hours-comparison-close"
               >
-                {t("common:cancel")}
+                {t("close_report")}
               </button>
             </div>
             <HoursComparisonView />
@@ -598,7 +617,7 @@ export function ReportsPage() {
                 onClick={() => setWorkerHoursOpen(false)}
                 data-testid="worker-hours-close"
               >
-                {t("common:cancel")}
+                {t("close_report")}
               </button>
             </div>
             <WorkerHoursView />
@@ -609,6 +628,9 @@ export function ReportsPage() {
       {/* Extra Work revenue is its own report (SoT §7.2), not a generic
           ticket count — render it FIRST and full-width, above the grid of
           ticket-count charts. */}
+      <h3 className="section-title" style={{ marginBottom: 10 }}>
+        {t("section_meerwerk")}
+      </h3>
       <ExtraWorkRevenueChart filters={apiFilters} refreshKey={refreshKey} />
 
       {/* Extra Work by building / by customer — origin="EXTRA_WORK" narrows
@@ -638,6 +660,18 @@ export function ReportsPage() {
         />
       </div>
 
+      {/* FE-7 — the tickets-list panels FE-6 removed point here: a named
+          section with an anchor, per building first. */}
+      <h3
+        className="section-title"
+        id="per-gebouw"
+        style={{ marginBottom: 2, scrollMarginTop: 16 }}
+      >
+        {t("section_tickets")}
+      </h3>
+      <p className="muted small" style={{ marginBottom: 10 }}>
+        {t("section_tickets_sub")}
+      </p>
       <div
         // Sprint 20 follow-up: the previous template `minmax(420px, 1fr)`
         // forced every card to be at least 420px wide, which on a
@@ -654,6 +688,7 @@ export function ReportsPage() {
           gap: 16,
         }}
       >
+        <TicketsByBuildingChart filters={apiFilters} refreshKey={refreshKey} />
         <StatusDistributionChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsOverTimeChart filters={apiFilters} refreshKey={refreshKey} />
         <ManagerThroughputChart filters={apiFilters} refreshKey={refreshKey} />
@@ -663,7 +698,20 @@ export function ReportsPage() {
         <TicketsByTypeChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByOriginChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByCustomerChart filters={apiFilters} refreshKey={refreshKey} />
-        <TicketsByBuildingChart filters={apiFilters} refreshKey={refreshKey} />
+      </div>
+
+      <h3 className="section-title" style={{ margin: "16px 0 10px" }}>
+        {t("section_hours")}
+      </h3>
+      <div
+        className="reports-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(min(420px, 100%), 1fr))",
+          gap: 16,
+        }}
+      >
         <HoursComparisonChart
           refreshKey={refreshKey}
           onOpen={() => setComparisonOpen(true)}
@@ -773,6 +821,19 @@ export function ReportsPage() {
                   style={{ marginTop: 0 }}
                 >
                   {t(card.emptyKey)}
+                  {filters.preset !== "last_90" && (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setRangePreset("last_90")}
+                        data-testid={`widen-${card.testId}`}
+                      >
+                        {t("widen_period")}
+                      </button>
+                    </>
+                  )}
                 </p>
               )}
               <div style={{ marginTop: 10 }}>
@@ -846,7 +907,7 @@ export function ReportsPage() {
                   onClick={() => setOpenReport(null)}
                   data-testid={`${card.testId}-close`}
                 >
-                  {t("common:cancel")}
+                  {t("close_report")}
                 </button>
               </div>
               {/* Sprint 180 §1 — the page's own company, building and

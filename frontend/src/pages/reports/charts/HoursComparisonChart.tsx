@@ -12,6 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { api, getApiError } from "../../../api/client";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 interface ComparisonRow {
   building: number | null;
@@ -130,9 +131,7 @@ export function HoursComparisonChart({
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -179,12 +178,12 @@ export function HoursComparisonChart({
                 }
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar
+              <Bar isAnimationActive={false}
                 dataKey="contracted"
                 name={t("hours_comparison.col_contracted")}
                 fill="#2563eb"
               />
-              <Bar
+              <Bar isAnimationActive={false}
                 dataKey="worked"
                 name={t("hours_comparison.col_worked")}
                 fill="#f59e0b"

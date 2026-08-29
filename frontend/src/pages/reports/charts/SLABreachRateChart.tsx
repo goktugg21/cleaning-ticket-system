@@ -12,6 +12,7 @@ import type { Granularity } from "../../../api/reports.types";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchSLABreachRateOverTime } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -85,9 +86,7 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
       )}
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -144,7 +143,7 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
                   ];
                 }}
               />
-              <Line
+              <Line isAnimationActive={false}
                 type="monotone"
                 dataKey="rate_pct"
                 stroke="#C0392B"

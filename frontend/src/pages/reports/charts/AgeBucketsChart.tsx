@@ -13,6 +13,7 @@ import type { ReportFilters } from "../../../api/reports";
 import { ticketStatusLabelKey } from "../../../lib/enumLabels";
 import { fetchAgeBuckets } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
+import { ChartSkeleton } from "./ChartSkeleton";
 
 export interface ChartProps {
   filters: ReportFilters;
@@ -55,9 +56,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
       </p>
 
       {loading && (
-        <div className="loading-bar" style={{ marginTop: 12, height: 240 }}>
-          <div className="loading-bar-fill" />
-        </div>
+        <ChartSkeleton />
       )}
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
@@ -98,7 +97,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
               <Tooltip
                 formatter={(value: number) => [value, t("age_buckets_tooltip_label")]}
               />
-              <Bar dataKey="count">
+              <Bar isAnimationActive={false} dataKey="count">
                 {data.buckets.map((bucket, idx) => (
                   <Cell
                     key={bucket.key}

@@ -112,7 +112,11 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
                 {t("planning.line_head")}
               </th>
               {weekNumbers.map((week) => (
-                <th key={week} className="contract-planning-week-head">
+                <th
+                  key={week}
+                  className="contract-planning-week-head"
+                  abbr={t("planning.cell_title", { year, week })}
+                >
                   {week}
                 </th>
               ))}
@@ -122,6 +126,16 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
             </tr>
           </thead>
           <tbody>
+            {planning === null && (
+              <tr aria-hidden="true" data-testid="contract-planning-skeleton">
+                <td colSpan={totalColumns} className="contract-planning-state">
+                  <div className="skeleton-lines" style={{ padding: "6px 0" }}>
+                    <span className="skeleton-line" />
+                    <span className="skeleton-line short" />
+                  </div>
+                </td>
+              </tr>
+            )}
             {linkedLines.map((line) => {
               const byWeek = new Map(line.weeks.map((w) => [w.week, w]));
               const rowJob = line.job_ids[0];
@@ -155,7 +169,11 @@ export function ContractPlanningGrid({ contractId }: { contractId: number }) {
                             ? `contract-planning-cell-${line.line_id}-${week}`
                             : undefined
                         }
-                        title={cell ? `${year} W${week}` : undefined}
+                        title={
+                          cell
+                            ? t("planning.cell_title", { year, week })
+                            : undefined
+                        }
                         onClick={
                           cell
                             ? () => navigate(`/planned-work/${cell.job_id}`)

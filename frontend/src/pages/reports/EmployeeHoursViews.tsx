@@ -6,6 +6,7 @@ import { hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { PeriodReportView } from "./PeriodReportView";
 import type { PeriodPayload } from "./PeriodReportView";
 import type { ReportFilters } from "../../api/reports";
+import { BoundedList } from "../../components/BoundedList";
 
 /**
  * Sprint 178 §2 — the three employee-hours reports and the ticket report.
@@ -57,6 +58,12 @@ export function EmployeeHoursByBuildingView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.buildings.length)}
+          ariaLabel={t("employee_hours_building_title")}
+          testIdPrefix="employee-hours-building"
+        >
         <div className="table-wrap">
           {payload.buildings.map((bucket) => (
             <div key={bucket.building ?? "none"} style={{ marginBottom: 16 }}>
@@ -88,6 +95,7 @@ export function EmployeeHoursByBuildingView({ filters }: ReportViewProps) {
             {t("grand_total")}: {payload.total}
           </p>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );
@@ -130,6 +138,12 @@ export function EmployeeHoursWeeklyView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.weeks.length)}
+          ariaLabel={t("employee_hours_weekly_title")}
+          testIdPrefix="employee-hours-weekly"
+        >
         <div className="table-wrap">
           {payload.weeks.map((week) => (
             <div
@@ -183,9 +197,6 @@ export function EmployeeHoursWeeklyView({ filters }: ReportViewProps) {
                           <td />
                           <td className="muted small">
                             {hourTypeLabelFrom(bucket.hour_type_name, undefined, t)}
-                            {bucket.hour_type_code
-                              ? ` (${bucket.hour_type_code})`
-                              : ""}
                           </td>
                           {DAYS.map((day) => (
                             <td key={day} className="contract-num muted small">
@@ -224,6 +235,7 @@ export function EmployeeHoursWeeklyView({ filters }: ReportViewProps) {
             {t("grand_total")}: {payload.total}
           </p>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );
@@ -253,11 +265,17 @@ export function EmployeeHoursByExtraWorkView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.extra_work.length)}
+          ariaLabel={t("employee_hours_extra_work_title")}
+          testIdPrefix="employee-hours-extra-work"
+        >
         <div className="table-wrap">
           {payload.extra_work.map((job) => (
             <div key={job.source_id} style={{ marginBottom: 16 }}>
               <div className="form-section-title report-group-title">
-                {job.title ?? `#${job.source_id}`} — {job.total}
+                {job.title ?? t("common:hours_week_grid.no_source")} — {job.total}
               </div>
               <table className="data-table data-table-dense">
                 <thead>
@@ -281,6 +299,7 @@ export function EmployeeHoursByExtraWorkView({ filters }: ReportViewProps) {
             {t("grand_total")}: {payload.total}
           </p>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );
@@ -313,6 +332,12 @@ export function TicketReportView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.rows.length)}
+          ariaLabel={t("ticket_report_title")}
+          testIdPrefix="ticket-report"
+        >
         <div className="table-wrap">
           {/* Sprint 179B §4 — this line sat flush against the table it
               summarises. Same breathing room the group titles now get. */}
@@ -360,6 +385,7 @@ export function TicketReportView({ filters }: ReportViewProps) {
             </tbody>
           </table>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );
@@ -434,6 +460,12 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
       filters={filters}
     >
       {(payload) => (
+        <BoundedList
+          size="lg"
+          count={Math.max(1, payload.categories.length + payload.buildings.length)}
+          ariaLabel={t("meldingen_category_title")}
+          testIdPrefix="meldingen-category"
+        >
         <div className="table-wrap">
           {/* W13 — the groups, before the buildings. */}
           {payload.categories.length > 0 && (
@@ -518,6 +550,7 @@ export function MeldingenByCategoryView({ filters }: ReportViewProps) {
             : {payload.uncategorised}
           </p>
         </div>
+        </BoundedList>
       )}
     </PeriodReportView>
   );

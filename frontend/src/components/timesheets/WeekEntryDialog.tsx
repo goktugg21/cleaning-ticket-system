@@ -604,11 +604,17 @@ export function WeekEntryDialog({
                 data-testid="week-setup-lock"
                 data-closed={weekClosed ? "true" : "false"}
               >
-                {lockLoading
-                  ? t("weeks.status_loading")
-                  : weekClosed
-                    ? t("weeks.status_closed")
-                    : t("weeks.status_open")}
+                {lockLoading ? (
+                  <span
+                    className="skeleton-line"
+                    style={{ width: 54, height: 10, display: "inline-block" }}
+                    aria-hidden="true"
+                  />
+                ) : weekClosed ? (
+                  t("weeks.status_closed")
+                ) : (
+                  t("weeks.status_open")
+                )}
               </span>
             </div>
             {/* Sprint 179B §3 — the lock, said where the week is chosen,
@@ -629,6 +635,7 @@ export function WeekEntryDialog({
               className="week-setup-summary"
               data-testid="week-setup-summary"
               role="status"
+              title={t("week_setup.summary_hint")}
             >
               {employeeIds.length === 0 || buildingIds.length === 0
                 ? t("week_setup.pairs_none")
@@ -656,9 +663,6 @@ export function WeekEntryDialog({
             )}
             {/* Sprint 179B §3 — the reconciliation rule, said once and
                 where the count is. */}
-            <p className="muted small week-setup-summary-hint">
-              {t("week_setup.summary_hint")}
-            </p>
           </div>
         </div>
 
@@ -669,7 +673,7 @@ export function WeekEntryDialog({
             style={{ marginBottom: 12 }}
             data-testid="week-setup-assignments-error"
           >
-            {t("week_setup.assignments_error")} {assignmentsError}
+            {t("week_setup.assignments_error", { detail: assignmentsError })}
           </div>
         )}
 
