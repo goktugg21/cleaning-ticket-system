@@ -36,7 +36,6 @@
   "empty_no_tickets_sub": "Create the first ticket to start tracking requests, complaints, and reports.",
   "clear_filters": "Clear filters",
   "create_ticket_cta": "Create ticket",
-  "ticket_row_extra_work_origin_title": "Created from an extra-work request — open it",
   "pagination_info": "Showing {{visible}} of {{count}} tickets · Page {{page}} of {{pages}}",
   "loading": "Loading…",
   "last_updated_just_now": "Just updated",
@@ -98,9 +97,9 @@
   "tickets_tabs.open": "Open",
   "tickets_tabs.busy": "In progress",
   "tickets_tabs.waiting_customer": "Waiting on customer",
-  "tickets_tabs.done": "Done",
+  "tickets_tabs.done": "Settled",
   "tickets_tabs.all": "Everything",
   "tickets_tabs.reopened": "Reopened",
   "filters.status_all": "All statuses",
-  "analytics_link": "Figures per building and the rest of the analysis live under Reports."
+  "analytics_link": "Figures per building live under Reports."
 }

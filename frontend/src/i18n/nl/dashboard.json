@@ -36,7 +36,6 @@
   "empty_no_tickets_sub": "Maak het eerste ticket aan om verzoeken, klachten en meldingen vast te leggen.",
   "clear_filters": "Filters wissen",
   "create_ticket_cta": "Ticket aanmaken",
-  "ticket_row_extra_work_origin_title": "Voortgekomen uit een aanvraag voor meerwerk — open deze",
   "pagination_info": "{{visible}} van {{count}} tickets · pagina {{page}} van {{pages}}",
   "loading": "Laden…",
   "last_updated_just_now": "Zojuist bijgewerkt",
@@ -98,9 +97,9 @@
   "tickets_tabs.open": "Open",
   "tickets_tabs.busy": "Bezig",
   "tickets_tabs.waiting_customer": "Wacht op klant",
-  "tickets_tabs.done": "Afgerond",
+  "tickets_tabs.done": "Afgehandeld",
   "tickets_tabs.all": "Alles",
   "tickets_tabs.reopened": "Heropend",
   "filters.status_all": "Alle statussen",
-  "analytics_link": "Cijfers per gebouw en de rest van de analyse staan onder Rapporten."
+  "analytics_link": "Cijfers per gebouw staan onder Rapporten."
 }
