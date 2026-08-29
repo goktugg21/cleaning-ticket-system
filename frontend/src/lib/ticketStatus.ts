@@ -183,3 +183,46 @@ export function visibleTicketTotal(stats: TicketStats | null): number {
   );
   return stats.total - hidden;
 }
+
+/**
+ * FE-6 (Addendum D §D.7) — the ticket list's FOUR primary tabs.
+ *
+ * Open / Bezig / Wacht op klant / Afgerond; every other status is a
+ * precise filter inside the filter bar. A `Record` over the union, so
+ * a new status has to say which tab it belongs to (or `null`: not on
+ * the working list at all) before anything compiles.
+ */
+export type TicketTabKey = "open" | "busy" | "waiting_customer" | "done";
+
+const TICKET_TAB_OF: Record<TicketStatus, TicketTabKey | null> = {
+  OPEN: "open",
+  ACKNOWLEDGED: "open",
+  REOPENED_BY_ADMIN: "open",
+  IN_PROGRESS: "busy",
+  ON_HOLD: "busy",
+  WAITING_MANAGER_REVIEW: "busy",
+  WAITING_CUSTOMER_APPROVAL: "waiting_customer",
+  APPROVED: "done",
+  REJECTED: "done",
+  CLOSED: "done",
+  CONVERTED_TO_EXTRA_WORK: null,
+};
+
+export const TICKET_TABS: readonly TicketTabKey[] = [
+  "open",
+  "busy",
+  "waiting_customer",
+  "done",
+];
+
+/** The statuses one tab shows, in render order. */
+export function ticketTabStatuses(tab: TicketTabKey): TicketStatus[] {
+  return TICKET_STATUS_ORDER.filter(
+    (status) => TICKET_TAB_OF[status] === tab,
+  );
+}
+
+/** The tab a single status lives on (null: not on the working list). */
+export function ticketTabOf(status: TicketStatus): TicketTabKey | null {
+  return TICKET_TAB_OF[status];
+}

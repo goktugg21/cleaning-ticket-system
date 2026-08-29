@@ -5555,9 +5555,13 @@ a.attn-row:hover {
   display: none;
 }
 
-@media (max-width: 600px) {
-  /* Hide the desktop ticket table on phones — the parallel mobile
-     card list below carries the same data in a tap-friendly shape. */
+/* FE-6 (§D.8.4) — the breakpoint is where the NINE-column table stops
+   fitting, not where a phone starts: measured, the row needs ~900px
+   before a cell has to clip or the wrap has to scroll sideways. Below
+   that the rows are cards. */
+@media (max-width: 900px) {
+  /* Hide the desktop ticket table — the parallel card list below
+     carries the same data in a tap-friendly shape. */
   .ticket-list-wrap {
     display: none;
   }
@@ -15768,3 +15772,23 @@ table.assign-table { min-width: 0; width: 100%; }
 .skeleton-row .skeleton-line { height: 11px; }
 @keyframes skeleton-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .skeleton-line { animation: none; } }
+
+/* FE-6 — the tickets list's four primary tabs beside the optional
+   "Heropend" chip; the tiles themselves are the shared status tiles. */
+.ticket-tabs-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.ticket-tabs-row .ticket-tabs {
+  flex: 1 1 auto;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+.ticket-tabs-row > .btn { flex: 0 0 auto; margin-top: 6px; }
+@media (max-width: 900px) {
+  .ticket-tabs-row { flex-wrap: wrap; }
+  .ticket-tabs-row .ticket-tabs { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+}
+.skeleton-table { padding-bottom: 6px; }

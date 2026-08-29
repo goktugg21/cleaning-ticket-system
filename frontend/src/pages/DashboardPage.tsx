@@ -21,8 +21,6 @@ import type {
   PaginatedResponse,
   TicketList,
   TicketStats,
-  TicketStatsByBuildingResponse,
-  TicketStatsByBuildingRow,
   TicketStatus,
   TicketCategory,
 } from "../api/types";
@@ -54,11 +52,14 @@ import { ticketStatusLabelKey } from "../lib/enumLabels";
 import {
   TICKET_ARCHIVE_STATUSES,
   TICKET_LIST_STATUSES,
+  TICKET_TABS,
   archivedTicketTotal,
   ticketArchiveStatusParam,
   ticketListStatusParam,
-  visibleTicketTotal,
+  ticketTabOf,
+  ticketTabStatuses,
 } from "../lib/ticketStatus";
+import type { TicketTabKey } from "../lib/ticketStatus";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
 import { currentIsoWeek, formatIsoWeek } from "../lib/isoWeek";
 import { StatusBadge } from "../components/StatusBadge";
@@ -461,9 +462,6 @@ export function DashboardPage({
   const [loading, setLoading] = useState(false);
 
   const [stats, setStats] = useState<TicketStats | null>(null);
-  const [byBuilding, setByBuilding] = useState<TicketStatsByBuildingRow[] | null>(
-    null,
-  );
   const [extraWorkStats, setExtraWorkStats] = useState<ExtraWorkStats | null>(
     null,
   );
@@ -505,7 +503,28 @@ export function DashboardPage({
     if (raw && (TICKET_LIST_STATUSES as readonly string[]).includes(raw)) {
       return raw as TicketStatus;
     }
-    return variant === "tickets-page" ? "OPEN" : "";
+    return "";
+  });
+  /** FE-6 (§D.7) — which of the four primary tabs is open. "" is
+   *  "everything on the working list". The Tickets page opens on Open
+   *  (Sprint 158 §2's rule, now a tab); a `?status=` deep link lands on
+   *  the tab that status lives on with the precise filter set; `?tab=`
+   *  opens a tab outright. */
+  const [statusTab, setStatusTab] = useState<TicketTabKey | "">(() => {
+    const params = new URLSearchParams(window.location.search);
+    const rawStatus = params.get("status");
+    if (rawStatus === "ALL") return "";
+    if (
+      rawStatus &&
+      (TICKET_LIST_STATUSES as readonly string[]).includes(rawStatus)
+    ) {
+      return ticketTabOf(rawStatus as TicketStatus) ?? "";
+    }
+    const rawTab = params.get("tab");
+    if (rawTab && (TICKET_TABS as readonly string[]).includes(rawTab)) {
+      return rawTab as TicketTabKey;
+    }
+    return variant === "tickets-page" ? "open" : "";
   });
   /**
    * Sprint 183 §1 — `?work=tickets`, URL-backed so the view survives a
@@ -765,7 +784,9 @@ export function DashboardPage({
     else if (isTicketsPage) {
       params.status__in = showArchive
         ? ticketArchiveStatusParam()
-        : ticketListStatusParam();
+        : statusTab
+          ? ticketTabStatuses(statusTab).join(",")
+          : ticketListStatusParam();
     }
     if (priorityFilter) params.priority = priorityFilter;
     // Sprint 185 E §1 — server-side, so it survives pagination instead
@@ -826,6 +847,7 @@ export function DashboardPage({
     customerId,
     page,
     statusFilter,
+    statusTab,
     priorityFilter,
     categoryFilter,
     searchActive,
@@ -1098,22 +1120,6 @@ export function DashboardPage({
     }
   }, [statsParamsKey]);
 
-  // M6.3 — "my work" summary counts (provider-management only). Each
-  // count is the PaginatedResponse.count for a created_by=me query;
-  // page_size:1 keeps the payload minimal (count is the full total).
-  const loadStatsByBuilding = useCallback(async () => {
-    // The by-building side panel renders on the Tickets page only.
-    if (!isTicketsPage) return;
-    try {
-      const response = await api.get<TicketStatsByBuildingResponse>(
-        "/tickets/stats/by-building/",
-      );
-      setByBuilding(response.data);
-    } catch {
-      // Card empties out if the endpoint fails.
-    }
-  }, [isTicketsPage]);
-
   const loadExtraWorkStats = useCallback(async () => {
     try {
       const data = await getExtraWorkStats();
@@ -1244,14 +1250,12 @@ export function DashboardPage({
     // The by-building loader is Tickets-page-gated; the attention
     // loader is dashboard-gated.
     loadStats();
-    loadStatsByBuilding();
     loadExtraWorkStats();
     loadAttention();
     loadGuardCounts();
     loadWidgets();
   }, [
     loadStats,
-    loadStatsByBuilding,
     loadExtraWorkStats,
     loadAttention,
     loadGuardCounts,
@@ -1262,7 +1266,6 @@ export function DashboardPage({
     const handle = window.setInterval(() => {
       loadTickets();
       loadStats();
-      loadStatsByBuilding();
       loadExtraWorkStats();
       loadAttention();
       loadWidgets();
@@ -1273,7 +1276,6 @@ export function DashboardPage({
   }, [
     loadTickets,
     loadStats,
-    loadStatsByBuilding,
     loadExtraWorkStats,
     loadAttention,
     loadWidgets,
@@ -1318,6 +1320,7 @@ export function DashboardPage({
   function clearFilters() {
     setPage(1);
     setStatusFilter("");
+    setStatusTab("");
     setCategoryFilter("");
     setPriorityFilter("");
     setSearchInput("");
@@ -1471,20 +1474,6 @@ export function DashboardPage({
       ? "attn-count attn-count-warn"
       : "attn-count";
 
-  const focusItems = useMemo(
-    () =>
-      tickets
-        .filter((t) => t.priority === "URGENT" || t.priority === "HIGH")
-        .filter(
-          (t) =>
-            t.status !== "CLOSED" &&
-            t.status !== "APPROVED" &&
-            t.status !== "REJECTED",
-        )
-        .slice(0, 4),
-    [tickets],
-  );
-
   return (
     <div>
       {!hideHeader && (
@@ -1527,8 +1516,8 @@ export function DashboardPage({
                   {t("pointer.extra_work")}
                 </Link>
               </>
-            ) : loading ? (
-              t("loading_data")
+            ) : loading && tickets.length === 0 ? (
+              ""
             ) : (
               t("subtitle_counts", {
                 count,
@@ -1952,6 +1941,7 @@ export function DashboardPage({
               onClick={() => {
                 setShowArchive(false);
                 setPage(1);
+                setStatusTab("open");
                 // W14 §2 — the two piles do not share a status axis, so
                 // a chip selected in one must not survive into the
                 // other. Carrying `CLOSED` back into the working list is
@@ -1975,6 +1965,7 @@ export function DashboardPage({
               onClick={() => {
                 setShowArchive(true);
                 setPage(1);
+                setStatusTab("");
                 // See the sibling above. The tickets page opens on
                 // `OPEN`, so without this every first press of Archive
                 // showed an empty archive.
@@ -1999,46 +1990,106 @@ export function DashboardPage({
             only ever read 0. Measured on crmtest with `?archived=true`:
             `by_status` came back `{}` for all ten.
             One axis, chosen by which pile is open. */}
-        <StatusTiles
-          tiles={(showArchive
-            ? TICKET_ARCHIVE_STATUSES
-            : TICKET_LIST_STATUSES
-          )
-            // FE-1 (Addendum D §D.2) — "Reopened by admin" stops being
-            // a PERMANENT tab. The chip appears only while there IS
-            // reopened work (or while the filter is on, so the state
-            // can always be cleared); the rows themselves never hide,
-            // the status stays a URL-addressable filter, and the badge
-            // on each row keeps saying it. Machinery earns a chip when
-            // it has something to say, not a standing seat.
-            .filter(
-              (value) =>
-                value !== "REOPENED_BY_ADMIN" ||
-                statusFilter === "REOPENED_BY_ADMIN" ||
-                (stats ? (stats.by_status[value] ?? 0) > 0 : false),
-            )
-            .map((value) => ({
+        {showArchive ? (
+          <StatusTiles
+            tiles={TICKET_ARCHIVE_STATUSES.map((value) => ({
               value,
               label: tStatus(value),
               count: stats ? (stats.by_status[value] ?? 0) : -1,
             }))}
-          active={statusFilter}
-          onChange={(value: string) => {
-            setStatusFilter(value as TicketStatus | "");
-            setPage(1);
-            setSelectedIds(new Set<number>());
-          }}
-          totalCount={
-            showArchive ? archivedTicketTotal(stats) : visibleTicketTotal(stats)
-          }
-          showCounts={!statsAreBlind}
-          testIdPrefix="tickets-status"
-        />
+            active={statusFilter}
+            onChange={(value: string) => {
+              setStatusFilter(value as TicketStatus | "");
+              setPage(1);
+              setSelectedIds(new Set<number>());
+            }}
+            totalCount={archivedTicketTotal(stats)}
+            showCounts={!statsAreBlind}
+            testIdPrefix="tickets-status"
+          />
+        ) : (
+          /* FE-6 (§D.7) — FOUR primary tabs. Each counts the statuses
+             it holds (from the same `/tickets/stats/` response the
+             chips read, blind when the list carries a narrowing the
+             count endpoint cannot follow); every other status is the
+             precise filter in the bar below. The FE-1 "Reopened" chip
+             behaviour stays: it appears only while there IS reopened
+             work, or while it is the filter, so it can be cleared. */
+          <div className="ticket-tabs-row" data-testid="tickets-tabs">
+            <div className="status-tile-row ticket-tabs" role="tablist">
+              {([...TICKET_TABS, ""] as (TicketTabKey | "")[]).map((tab) => {
+                const statuses = tab ? ticketTabStatuses(tab) : TICKET_LIST_STATUSES;
+                const count =
+                  stats && !statsAreBlind
+                    ? statuses.reduce(
+                        (sum, value) => sum + (stats.by_status[value] ?? 0),
+                        0,
+                      )
+                    : null;
+                const active = statusTab === tab;
+                return (
+                  <button
+                    key={tab || "all"}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className={`status-tile${active ? " status-tile-active" : ""}`}
+                    data-testid={`tickets-tab-${tab || "all"}`}
+                    onClick={() => {
+                      setStatusTab(tab);
+                      // A precise status that is not on the new tab
+                      // would leave an empty list with no chip lit.
+                      setStatusFilter((current) =>
+                        current &&
+                        (tab === "" || ticketTabOf(current) === tab)
+                          ? current
+                          : "",
+                      );
+                      setPage(1);
+                      setSelectedIds(new Set<number>());
+                    }}
+                  >
+                    <span className="status-tile-label">
+                      {t(`tickets_tabs.${tab || "all"}`)}
+                    </span>
+                    <span className="status-tile-count">
+                      {count === null ? "—" : count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {(statusFilter === "REOPENED_BY_ADMIN" ||
+              (stats ? (stats.by_status.REOPENED_BY_ADMIN ?? 0) > 0 : false)) && (
+              <button
+                type="button"
+                className={`btn btn-sm ${
+                  statusFilter === "REOPENED_BY_ADMIN"
+                    ? "btn-primary"
+                    : "btn-secondary"
+                }`}
+                aria-pressed={statusFilter === "REOPENED_BY_ADMIN"}
+                data-testid="tickets-status-REOPENED_BY_ADMIN"
+                onClick={() => {
+                  const on = statusFilter === "REOPENED_BY_ADMIN";
+                  setStatusFilter(on ? "" : "REOPENED_BY_ADMIN");
+                  if (!on) setStatusTab("open");
+                  setPage(1);
+                  setSelectedIds(new Set<number>());
+                }}
+              >
+                {t("tickets_tabs.reopened")}
+                {stats && !statsAreBlind && (
+                  <span className="pricing-chip-count">
+                    {stats.by_status.REOPENED_BY_ADMIN ?? 0}
+                  </span>
+                )}
+              </button>
+            )}
+          </div>
+        )}
 
-          <section
-            className="work-layout"
-            data-testid="dashboard-tickets-section"
-          >
+          <section data-testid="dashboard-tickets-section">
             <div className="dash-main">
               <div className="card" style={{ overflow: "hidden" }}>
                 {/* W7 DESIGN 3 + DESIGN 7 — the head says what this list
@@ -2172,12 +2223,37 @@ export function DashboardPage({
                       </select>
                     </div>
                   )}
-                  {/* W8 BUG 3 — the Status dropdown is gone. The tile
-                      row above the list is the status control: it
-                      already selects, already clears, and already shows
-                      which status is on. Two controls for one question
-                      is how a person ends up unable to say what either
-                      of them does. */}
+                  {/* FE-6 — the PRECISE status, inside the filter: the
+                      statuses the open tab holds (every working-list
+                      status when no tab is on). The tabs are the
+                      coarse control; this is the fine one. */}
+                  {!showArchive && (
+                    <div className="filter-field">
+                      <span className="filter-label">{t("common:status")}</span>
+                      <select
+                        className="filter-control"
+                        value={statusFilter}
+                        data-testid="tickets-filter-status"
+                        onChange={(event) => {
+                          const value = event.target.value as TicketStatus | "";
+                          setStatusFilter(value);
+                          if (value) setStatusTab(ticketTabOf(value) ?? "");
+                          setPage(1);
+                          setSelectedIds(new Set<number>());
+                        }}
+                      >
+                        <option value="">{t("filters.status_all")}</option>
+                        {(statusTab
+                          ? ticketTabStatuses(statusTab)
+                          : TICKET_LIST_STATUSES
+                        ).map((value) => (
+                          <option key={value} value={value}>
+                            {tStatus(value)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="filter-field">
                     <span className="filter-label">{t("common:priority")}</span>
                     <select
@@ -2381,8 +2457,8 @@ export function DashboardPage({
                   aria-live="polite"
                 >
                   <span className="list-summary-count">
-                    {loading
-                      ? t("loading")
+                    {loading && tickets.length === 0
+                      ? ""
                       : t("filter_summary.count", {
                           visible: tickets.length,
                           count,
@@ -2463,13 +2539,38 @@ export function DashboardPage({
                   </div>
                 )}
 
-                {loading && (
+                {loading && tickets.length > 0 && (
                   <div className="loading-bar" style={{ margin: 0 }}>
                     <div className="loading-bar-fill" />
                   </div>
                 )}
+                {/* §D.6.10 / §D.8.2 — the first load is DESIGNED: rows
+                    the shape of the table, never "Loading…" text over
+                    an empty console. A refresh with rows on screen
+                    keeps the rows and shows the thin bar above. */}
+                {loading && tickets.length === 0 && (
+                  <div
+                    className="skeleton-table"
+                    aria-hidden="true"
+                    data-testid="tickets-skeleton"
+                  >
+                    {[0, 1, 2, 3, 4, 5].map((row) => (
+                      <div className="skeleton-row" key={row}>
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line short" />
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line short" />
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-                <div className="table-wrap ticket-list-wrap">
+                <div
+                  className="table-wrap ticket-list-wrap"
+                  hidden={loading && tickets.length === 0}
+                >
                   {/* Sprint 188 — Chargeable work carries two columns the
                       tickets page does not (Extra work + Route, in place of
                       its single Priority), so at the same cell padding the
@@ -2974,165 +3075,11 @@ export function DashboardPage({
               </div>
             </div>
 
-            <div className="dash-side">
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("ops_byb_tickets_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("section_byb_sub")}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "var(--text-faint)",
-                      letterSpacing: "0.04em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {byBuilding ? t("byb_sites", { count: byBuilding.length }) : ""}
-                  </span>
-                </div>
-                <div style={{ padding: "16px 20px 18px" }}>
-                  {byBuilding === null ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : byBuilding.length === 0 ? (
-                    <p className="muted small">{t("byb_no_buildings")}</p>
-                  ) : (
-                    <div className="bld-list">
-                      {byBuilding.slice(0, 5).map((row) => {
-                        const active =
-                          row.open +
-                          row.in_progress +
-                          row.waiting_customer_approval;
-                        const total = Math.max(active, 1);
-                        return (
-                          <div key={row.building_id}>
-                            <div className="bld-row-head">
-                              <span className="bld-row-name">
-                                {row.building_name}
-                              </span>
-                              <span className="bld-row-count">
-                                {t("byb_active_count", { count: active })}
-                              </span>
-                            </div>
-                            <div className="bld-bar">
-                              {row.open > 0 && (
-                                <div
-                                  className="bld-bar-seg no"
-                                  style={{
-                                    width: `${(row.open / total) * 100}%`,
-                                  }}
-                                />
-                              )}
-                              {row.in_progress > 0 && (
-                                <div
-                                  className="bld-bar-seg hi"
-                                  style={{
-                                    width: `${(row.in_progress / total) * 100}%`,
-                                  }}
-                                />
-                              )}
-                              {row.waiting_customer_approval > 0 && (
-                                <div
-                                  className="bld-bar-seg urg"
-                                  style={{
-                                    width: `${
-                                      (row.waiting_customer_approval / total) *
-                                      100
-                                    }%`,
-                                  }}
-                                />
-                              )}
-                            </div>
-                            <div className="bld-row-foot">
-                              {row.open > 0 && (
-                                <span className="no">
-                                  {t("byb_open", { count: row.open })}
-                                </span>
-                              )}
-                              {row.in_progress > 0 && (
-                                <span className="hi">
-                                  {t("byb_in_progress", {
-                                    count: row.in_progress,
-                                  })}
-                                </span>
-                              )}
-                              {row.waiting_customer_approval > 0 && (
-                                <span className="urg">
-                                  {t("byb_awaiting_customer", {
-                                    count: row.waiting_customer_approval,
-                                  })}
-                                </span>
-                              )}
-                              {row.urgent > 0 && (
-                                <span className="urg">
-                                  {t("byb_urgent", { count: row.urgent })}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* W8 BUG 2 + BUG 3 — the "Status breakdown" card is
-                  gone. It listed the same eight numbers from the same
-                  `/tickets/stats/` response as the tile row directly
-                  above the list, so the page counted its statuses twice
-                  and had two places to be wrong; and it was the only
-                  home of the paragraph that apologised for the em
-                  dashes. The tiles are the status count and the status
-                  filter, and there is one of them. */}
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("section_focus_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("section_focus_sub")}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 13,
-                      fontWeight: 800,
-                      color: "var(--red)",
-                    }}
-                  >
-                    {focusItems.length}
-                  </span>
-                </div>
-                <div className="focus-list">
-                  {focusItems.length > 0 ? (
-                    focusItems.map((ticket) => (
-                      <Link
-                        key={ticket.id}
-                        to={`/tickets/${ticket.id}`}
-                        className="focus-item"
-                      >
-                        <span className="focus-item-title">{ticket.title}</span>
-                        <span className="focus-item-meta">
-                          {ticket.building_name} · {tStatus(ticket.status)}
-                        </span>
-                      </Link>
-                    ))
-                  ) : (
-                    <p className="focus-empty">{t("focus_empty")}</p>
-                  )}
-                </div>
-              </div>
-            </div>
+            {/* FE-6 (§D.7) — the by-building and focus panels moved to
+                Rapporten. Linked, not rebuilt. */}
+            <p className="muted small" data-testid="tickets-analytics-link">
+              <Link to="/reports">{t("analytics_link")}</Link>
+            </p>
           </section>
           </>
         )}
