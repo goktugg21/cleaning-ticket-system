@@ -1137,6 +1137,24 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
 # Extra Work — detail (role-aware)
 # ---------------------------------------------------------------------------
 class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
+    # FE-3 (Addendum D SS D.11 G3) -- the deadline chip's number, with the
+    # SAME rule `is_overdue` uses (no deadline / finished work -> None),
+    # so the chip and the late badge can never disagree. Read-only,
+    # presentation only, zero storage.
+    days_until_due = serializers.SerializerMethodField()
+
+    def get_days_until_due(self, obj):
+        from django.utils import timezone as _tz
+        if obj.deadline is None:
+            return None
+        if obj.status in {
+            ExtraWorkStatus.COMPLETED,
+            ExtraWorkStatus.CANCELLED,
+            ExtraWorkStatus.CUSTOMER_REJECTED,
+        }:
+            return None
+        return (obj.deadline - _tz.localdate()).days
+
     """
     Role-aware detail serializer. Provider operators see every
     field. CUSTOMER_USER never sees `manager_note`,
@@ -1261,6 +1279,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "customer_requires_note",
             "deadline",
             "is_overdue",
+            "days_until_due",
             "started_before_plan",
             "status",
             "display_phase",

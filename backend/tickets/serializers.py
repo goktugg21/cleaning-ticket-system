@@ -738,6 +738,37 @@ class TicketDetailSerializer(
             status=obj.status, viewer_is_customer=viewer_is_customer
         )
 
+    # FE-3 (Addendum D SS D.4 / SS D.11) -- the fact block's two missing
+    # facts: what KIND of work this is, and how it stands against its
+    # due date. Pure functions in `detail_facts.py`; read-only,
+    # presentation only, zero storage.
+    kind = serializers.SerializerMethodField()
+    due_date = serializers.SerializerMethodField()
+    due_kind = serializers.SerializerMethodField()
+    days_until_due = serializers.SerializerMethodField()
+
+    def get_kind(self, obj) -> str:
+        from .detail_facts import ticket_kind
+        return ticket_kind(obj)
+
+    def _due_facts(self, obj) -> dict:
+        cached = getattr(obj, "_fe3_due_facts", None)
+        if cached is None:
+            from django.utils import timezone as _tz
+            from .detail_facts import ticket_due
+            cached = ticket_due(obj, _tz.localdate())
+            obj._fe3_due_facts = cached
+        return cached
+
+    def get_due_date(self, obj):
+        return self._due_facts(obj)["due_date"]
+
+    def get_due_kind(self, obj):
+        return self._due_facts(obj)["due_kind"]
+
+    def get_days_until_due(self, obj):
+        return self._due_facts(obj)["days_until_due"]
+
     schedule_planned_by_name = serializers.SerializerMethodField()
     schedule_planned_at = serializers.SerializerMethodField()
     allowed_next_statuses = serializers.SerializerMethodField()
@@ -802,6 +833,11 @@ class TicketDetailSerializer(
             "priority",
             "status",
             "display_phase",
+            # FE-3 -- the fact block's kind pill and its SS D.11 chip.
+            "kind",
+            "due_date",
+            "due_kind",
+            "days_until_due",
             "company",
             "company_name",
             "building",
