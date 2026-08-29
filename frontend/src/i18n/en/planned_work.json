@@ -173,7 +173,6 @@
   "detail.field_work_type": "Work type",
   "detail.field_category": "Category",
   "detail.field_description": "Description",
-  "detail.next_up": "Next up",
   "money.billed_via": "Billed via contract:",
   "money.not_linked": "No contract line linked — link one to bill through the contract",
   "money.pick": "Link a contract line…",
@@ -211,5 +210,13 @@
   "form.price_none": "Not linked to a contract line",
   "form.crew_summary_one": "{{count}} person",
   "form.crew_summary_other": "{{count}} people",
-  "form.crew_summary_none": "nobody fixed — assigning later is always possible"
+  "form.crew_summary_none": "nobody fixed — assigning later is always possible",
+  "detail.rule_weekly": "Every {{days}}",
+  "detail.rule_biweekly": "Every other week on {{days}}",
+  "detail.rule_monthly": "Every month",
+  "detail.rule_window": "{{rule}}, {{window}}",
+  "detail.rule_next": "{{rule}} — next visit: {{next}}",
+  "detail.rule_no_next": "{{rule}} — no next visit planned yet",
+  "detail.next_visits": "Next visits",
+  "detail.next_visits_none": "No visits planned yet."
 }

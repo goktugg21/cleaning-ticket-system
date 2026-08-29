@@ -8,7 +8,7 @@ import {
 } from "react-router-dom";
 // Sprint 180 §3 — `CSSProperties` and `Layers` left with
 // `ExtraWorkOriginPill`; they were only ever used by it.
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw , SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { getExtraWorkStats, listAllExtraWork } from "../api/extraWork";
@@ -41,7 +41,6 @@ import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { FinancialStrip } from "../components/extra-work/FinancialStrip";
 import { SLABadge } from "../components/sla/SLABadge";
 import { StatusTiles } from "../components/StatusTiles";
-import { listScope } from "../lib/listScope";
 import { PeriodFilter } from "../components/PeriodFilter";
 import { periodParams, periodState } from "../lib/period";
 import type { PeriodState } from "../lib/period";
@@ -889,19 +888,6 @@ export function DashboardPage({
     );
   }, [queryParams]);
 
-  /* W10 — see `lib/listScope`. Built from the SAME three inputs the
-     query uses, never from the route name, so a page that changes its
-     defaults cannot start lying about them. */
-  const scope = useMemo(
-    () =>
-      listScope({
-        work: workTypeFilter,
-        status: statusFilter,
-        hidesFinished: hideFinishedExtraWork,
-      }),
-    [workTypeFilter, statusFilter, hideFinishedExtraWork],
-  );
-
   const statsAreBlind = useMemo(
     () =>
       Object.keys(queryParams).some(
@@ -1474,25 +1460,108 @@ export function DashboardPage({
       ? "attn-count attn-count-warn"
       : "attn-count";
 
+  // P-2 §2 — the attention rows, hoisted so the greeting and the list
+  // count the same thing. A row with nothing to say does not render
+  // (no "—", no eight rows of mostly nothing); with every row silent
+  // the list says so in one sentence.
+  const allAttentionRows = [
+    {
+      key: "review",
+      to: `/tickets?${queueSearch("review")}`,
+      label: t("queue.review.title"),
+      value: attnReview?.count ?? null,
+      actionable: true,
+    },
+    {
+      key: "unassigned",
+      to: `/tickets?${queueSearch("unassigned")}`,
+      label: t("queue.unassigned.title"),
+      value: attnUnassigned?.count ?? null,
+      actionable: true,
+    },
+    {
+      key: "approval-overdue",
+      to: `/tickets?${queueSearch("approval_overdue")}`,
+      label: t("queue.approval_overdue.title", {
+        days: STALLED_APPROVAL_DAYS,
+      }),
+      value: attnStalledApproval?.count ?? null,
+      actionable: true,
+    },
+    {
+      key: "awaiting-pricing",
+      to: "/extra-work?status=UNDER_REVIEW",
+      label: t("attention.awaiting_pricing_title"),
+      value: extraWorkStats?.awaiting_pricing ?? null,
+      actionable: true,
+    },
+    {
+      key: "awaiting-customer",
+      to: "/extra-work?status=PRICING_PROPOSED",
+      label: t("attention.awaiting_customer_title"),
+      value:
+        extraWorkStats?.awaiting_customer_approval ?? null,
+      actionable: false,
+    },
+    {
+      key: "stuck",
+      to: "/agenda",
+      label: t("attention.stuck_title"),
+      value: attnStuck,
+      actionable: true,
+    },
+    {
+      key: "unplanned",
+      to: "/agenda",
+      label: t("attention.unplanned_title"),
+      value: attnUnplanned,
+      actionable: true,
+    },
+    {
+      key: "at-risk",
+      to: "/invoices",
+      label: t("attention.at_risk_title"),
+      value: attnAtRisk,
+      actionable: true,
+    },
+  ] as const
+  const attentionRows = allAttentionRows.filter((row) => (row.value ?? 0) > 0);
+  const needsYouCount = allAttentionRows
+    .filter((row) => row.actionable)
+    .reduce((sum, row) => sum + (row.value ?? 0), 0);
+  // P-2 §3 — what the Filter fold is narrowing by, as chips on its
+  // summary. Labels, not values: the value is one click away inside.
+  const activeFilterLabels = [
+    categoryFilter !== "" ? t("common:ticket_categories.field_label") : null,
+    statusFilter ? t("common:status") : null,
+    priorityFilter ? t("common:priority") : null,
+    slaFilter ? t("common:sla") : null,
+    assignedFilter ? t("filters.assigned") : null,
+    showArchive ? t("archive.show") : null,
+  ].filter((label): label is string => Boolean(label));
+  const greetingHour = new Date().getHours();
+  const greetingKey =
+    greetingHour < 12 ? "greeting.morning" : greetingHour < 18 ? "greeting.afternoon" : "greeting.evening";
+  const greetingName = (me?.full_name || "").trim().split(" ")[0] || me?.email || "";
+
   return (
     <div>
       {!hideHeader && (
       <div className="page-header">
         <div>
-          <nav className="breadcrumb" aria-label="Breadcrumb">
-            <span>{t("breadcrumb_site")}</span>
-            <span className="breadcrumb-sep">›</span>
-            <span>{t("breadcrumb_operations")}</span>
-            <span className="breadcrumb-sep">›</span>
-            <span className="breadcrumb-current">
-              {isTicketsPage
-                ? t("tickets_page.breadcrumb_current")
-                : t("breadcrumb_current")}
-            </span>
-          </nav>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {isTicketsPage ? t("tickets_page.eyebrow") : t("eyebrow")}
-          </div>
+          {isTicketsPage ? (
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              {t("tickets_page.eyebrow")}
+            </div>
+          ) : (
+            <p className="dash-greeting" data-testid="dashboard-greeting">
+              {t(greetingKey, { name: greetingName })}
+              {" — "}
+              {needsYouCount > 0
+                ? t("greeting.count", { count: needsYouCount })
+                : t("greeting.clear")}
+            </p>
+          )}
           <h2 className="page-title">
             {isChargeableWork
               ? t("common:chargeable_work.pill")
@@ -1645,7 +1714,7 @@ export function DashboardPage({
                   <div className="kpi-value">
                     {billingMonthTotals
                       ? formatMoney(billingMonthTotals.openTotal)
-                      : "—"}
+                      : t("hero.month_none")}
                   </div>
                 </div>
                 <div className="kpi-meta">
@@ -1700,70 +1769,13 @@ export function DashboardPage({
                     {t("attention_panel.title")}
                   </span>
                 </div>
+                {attentionRows.length === 0 ? (
+                  <p className="muted attn-clear" data-testid="attention-all-clear">
+                    {t("attention.all_clear")}
+                  </p>
+                ) : (
                 <ul className="attn-list">
-                  {(
-                    [
-                      {
-                        key: "review",
-                        to: `/tickets?${queueSearch("review")}`,
-                        label: t("queue.review.title"),
-                        value: attnReview?.count ?? null,
-                        actionable: true,
-                      },
-                      {
-                        key: "unassigned",
-                        to: `/tickets?${queueSearch("unassigned")}`,
-                        label: t("queue.unassigned.title"),
-                        value: attnUnassigned?.count ?? null,
-                        actionable: true,
-                      },
-                      {
-                        key: "approval-overdue",
-                        to: `/tickets?${queueSearch("approval_overdue")}`,
-                        label: t("queue.approval_overdue.title", {
-                          days: STALLED_APPROVAL_DAYS,
-                        }),
-                        value: attnStalledApproval?.count ?? null,
-                        actionable: true,
-                      },
-                      {
-                        key: "awaiting-pricing",
-                        to: "/extra-work?status=UNDER_REVIEW",
-                        label: t("attention.awaiting_pricing_title"),
-                        value: extraWorkStats?.awaiting_pricing ?? null,
-                        actionable: true,
-                      },
-                      {
-                        key: "awaiting-customer",
-                        to: "/extra-work?status=PRICING_PROPOSED",
-                        label: t("attention.awaiting_customer_title"),
-                        value:
-                          extraWorkStats?.awaiting_customer_approval ?? null,
-                        actionable: false,
-                      },
-                      {
-                        key: "stuck",
-                        to: "/agenda",
-                        label: t("attention.stuck_title"),
-                        value: attnStuck,
-                        actionable: true,
-                      },
-                      {
-                        key: "unplanned",
-                        to: "/agenda",
-                        label: t("attention.unplanned_title"),
-                        value: attnUnplanned,
-                        actionable: true,
-                      },
-                      {
-                        key: "at-risk",
-                        to: "/invoices",
-                        label: t("attention.at_risk_title"),
-                        value: attnAtRisk,
-                        actionable: true,
-                      },
-                    ] as const
-                  ).map((row) => (
+                  {attentionRows.map((row) => (
                     <li className="attn-item" key={row.key}>
                       <Link
                         to={row.to}
@@ -1778,6 +1790,7 @@ export function DashboardPage({
                     </li>
                   ))}
                 </ul>
+                )}
               </div>
 
               {/* The billing summary: this month, per building. */}
@@ -1923,62 +1936,6 @@ export function DashboardPage({
             Two controls, no prose. "Working list / Archive" is a pair
             of states, not a verb, so it reads as a place you are rather
             than a thing you do. */}
-        <div className="list-scope-row" data-testid="tickets-scope-row">
-          <PeriodFilter
-            idPrefix="tickets"
-            value={period}
-            onChange={(next) => {
-              setPeriod(next);
-              setPage(1);
-            }}
-          />
-          <div className="composer-toggle" role="tablist" aria-label={t("period.label")}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={!showArchive}
-              className={`composer-toggle-btn ${!showArchive ? "active" : ""}`}
-              onClick={() => {
-                setShowArchive(false);
-                setPage(1);
-                setStatusTab("open");
-                // W14 §2 — the two piles do not share a status axis, so
-                // a chip selected in one must not survive into the
-                // other. Carrying `CLOSED` back into the working list is
-                // harmless; carrying `OPEN` into the archive is not — it
-                // narrows the rows to a status the archive cannot hold
-                // and leaves an empty list with no chip lit to explain
-                // it. Cleared in BOTH directions so the rule is one rule.
-                setStatusFilter((current) =>
-                  keepStatusFilter(current, TICKET_LIST_STATUSES),
-                );
-              }}
-              data-testid="tickets-show-working"
-            >
-              {t("archive.show_working")}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={showArchive}
-              className={`composer-toggle-btn ${showArchive ? "active" : ""}`}
-              onClick={() => {
-                setShowArchive(true);
-                setPage(1);
-                setStatusTab("");
-                // See the sibling above. The tickets page opens on
-                // `OPEN`, so without this every first press of Archive
-                // showed an empty archive.
-                setStatusFilter((current) =>
-                  keepStatusFilter(current, TICKET_ARCHIVE_STATUSES),
-                );
-              }}
-              data-testid="tickets-show-archive"
-            >
-              {t("archive.show")}
-            </button>
-          </div>
-        </div>
         {/* W14 §2 — THE CHIPS BELONG TO THE PILE THAT IS OPEN.
             The archive gate (`filters.apply_archived`) was clean and the
             counts followed it, but the row above the list went on
@@ -2053,7 +2010,11 @@ export function DashboardPage({
                       {t(`tickets_tabs.${tab || "all"}`)}
                     </span>
                     <span className="status-tile-count">
-                      {count === null ? "—" : count}
+                      {count === null ? (
+                        <span className="skeleton-line skeleton-inline" aria-hidden="true" />
+                      ) : (
+                        count
+                      )}
                     </span>
                   </button>
                 );
@@ -2122,19 +2083,19 @@ export function DashboardPage({
                         describe a different list than the one below.
                         A dashboard queue keeps its own wording: it is
                         more specific than anything derivable here. */}
-                    <div
-                      className="section-head-sub"
-                      data-testid="tickets-scope-sentence"
-                    >
-                      {activeQueue ? (
-                        t(`queue.${activeQueue.key}.why`)
-                      ) : (
-                        <>
-                          {t(scope.key)}
-                          {scope.hiddenKey ? ` ${t(scope.hiddenKey)}` : ""}
-                        </>
-                      )}
-                    </div>
+                    {/* P-2 §3 — the generic scope caption ("Ordinary
+                        tickets. Work that came from Extra work shows
+                        behind the work filter above.") is gone: the
+                        Filter fold explains itself where it is. A
+                        dashboard queue keeps its own one-line why. */}
+                    {activeQueue && (
+                      <div
+                        className="section-head-sub"
+                        data-testid="tickets-scope-sentence"
+                      >
+                        {t(`queue.${activeQueue.key}.why`)}
+                      </div>
+                    )}
                   </div>
                   {isProviderManagementRole(userRole) &&
                     (activeQueue?.assigns && !edit.editMode ? (
@@ -2164,6 +2125,89 @@ export function DashboardPage({
                 </div>
 
                 <form className="filter-bar" onSubmit={handleSearchSubmit}>
+                  {/* P-2 §3 — the seven always-open controls fold behind
+                      ONE "Filter" button; the period and the working /
+                      archive pair live inside it too (the tabs above are
+                      the primary choice). The summary names what is
+                      active, so a narrowed list never looks like a short
+                      one. */}
+                  <details
+                    className="filter-fold"
+                    open={activeFilterLabels.length > 0}
+                    data-testid="tickets-filter-fold"
+                  >
+                    <summary className="filter-fold-summary" data-testid="tickets-filter-toggle">
+                      <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+                      {t("filters.fold_label")}
+                      {activeFilterLabels.length > 0 && (
+                        <span className="filter-fold-count">
+                          {t("filters.fold_active", { count: activeFilterLabels.length })}
+                        </span>
+                      )}
+                      {activeFilterLabels.map((label) => (
+                        <span className="filter-fold-chip" key={label}>
+                          {label}
+                        </span>
+                      ))}
+                    </summary>
+                    <div className="filter-fold-body">
+                  <div className="list-scope-row" data-testid="tickets-scope-row">
+                    <PeriodFilter
+                      idPrefix="tickets"
+                      value={period}
+                      onChange={(next) => {
+                        setPeriod(next);
+                        setPage(1);
+                      }}
+                    />
+                    <div className="composer-toggle" role="tablist" aria-label={t("period.label")}>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={!showArchive}
+                        className={`composer-toggle-btn ${!showArchive ? "active" : ""}`}
+                        onClick={() => {
+                          setShowArchive(false);
+                          setPage(1);
+                          setStatusTab("open");
+                          // W14 §2 — the two piles do not share a status axis, so
+                          // a chip selected in one must not survive into the
+                          // other. Carrying `CLOSED` back into the working list is
+                          // harmless; carrying `OPEN` into the archive is not — it
+                          // narrows the rows to a status the archive cannot hold
+                          // and leaves an empty list with no chip lit to explain
+                          // it. Cleared in BOTH directions so the rule is one rule.
+                          setStatusFilter((current) =>
+                            keepStatusFilter(current, TICKET_LIST_STATUSES),
+                          );
+                        }}
+                        data-testid="tickets-show-working"
+                      >
+                        {t("archive.show_working")}
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={showArchive}
+                        className={`composer-toggle-btn ${showArchive ? "active" : ""}`}
+                        onClick={() => {
+                          setShowArchive(true);
+                          setPage(1);
+                          setStatusTab("");
+                          // See the sibling above. The tickets page opens on
+                          // `OPEN`, so without this every first press of Archive
+                          // showed an empty archive.
+                          setStatusFilter((current) =>
+                            keepStatusFilter(current, TICKET_ARCHIVE_STATUSES),
+                          );
+                        }}
+                        data-testid="tickets-show-archive"
+                      >
+                        {t("archive.show")}
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Sprint 185 E §1 — WHICH KIND OF WORK. Rendered only
                       when the company has a catalog: an empty dropdown is
                       a control that looks broken, and the Catalogs tab's
@@ -2404,6 +2448,8 @@ export function DashboardPage({
                       </option>
                     </select>
                   </div>
+                    </div>
+                  </details>
                   <div className="filter-field search">
                     <span className="filter-label">{t("common:search")}</span>
                     <input

@@ -319,5 +319,7 @@
   "planning.none_linked": "Nog geen terugkerend werk gekoppeld.",
   "planning.unlinked_one": "Nog {{count}} regel zonder gekoppeld werk.",
   "planning.unlinked_other": "Nog {{count}} regels zonder gekoppeld werk.",
-  "planning.cell_title": "{{year}}, week {{week}}"
+  "planning.cell_title": "{{year}}, week {{week}}",
+  "empty.title": "U heeft nog geen contracten",
+  "empty.desc": "Een contract is uw afspraak met een klant: wat de vaste schoonmaak per periode kost. Zodra er een contract is, ziet u hier de tellers, de filters en de lijst."
 }

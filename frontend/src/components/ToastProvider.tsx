@@ -196,6 +196,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const plainToasts = toasts.filter((toast) => !isSeverityToast(toast));
   const visible = [...severityToasts, ...plainToasts.slice(0, MAX_VISIBLE_PLAIN)];
   const hiddenCount = Math.max(0, plainToasts.length - MAX_VISIBLE_PLAIN);
+  // P-2 §8 (rule 2) — toasts never cover list rows: while any toast is
+  // up, the page canvas reserves a rail at the bottom the stack sits
+  // in, so the last rows scroll above it instead of under it.
+  const railOn = visible.length > 0;
+  useEffect(() => {
+    document.body.toggleAttribute("data-toast-rail", railOn);
+    return () => {
+      document.body.removeAttribute("data-toast-rail");
+    };
+  }, [railOn]);
 
   return (
     <ToastContext.Provider value={value}>

@@ -15912,3 +15912,72 @@ table.assign-table { min-width: 0; width: 100%; }
    and the table's auto layout was handing this cell 100px. The table
    scrolls inside its wrap when it must; the diff no longer spills. */
 .audit-changes-cell { min-width: 260px; }
+
+/* ==================================================================
+   P-2 — the guidance round
+   ================================================================== */
+/* §1 My schedule: the explainer is one line + a popover; empty day
+   columns say words. */
+.wp-info { margin: 0 0 12px; }
+.wp-info-summary {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  list-style: none; font-size: var(--font-sm); color: var(--text-muted);
+  padding: 4px 0;
+}
+.wp-info-summary::-webkit-details-marker { display: none; }
+.wp-info[open] .wp-info-summary { color: var(--text-2); }
+.wp-info-body {
+  max-width: 720px; margin: 6px 0 0; padding: 12px 14px;
+  border: 1px solid var(--border-soft); border-radius: 10px;
+  background: var(--surface-2); font-size: var(--font-sm); color: var(--text-2);
+}
+.wp-info-body p { margin: 0 0 8px; }
+.wp-info-body p:last-child { margin-bottom: 0; }
+.wp-day-empty {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 72px; font-size: 12px; color: var(--text-faint);
+}
+/* §2 Dashboard: the greeting, the all-clear line, a skeleton count. */
+.dash-greeting {
+  margin: 0 0 8px; font-size: var(--font-md, 15px); color: var(--text-2);
+}
+.attn-clear { margin: 6px 0 0; padding: 10px 4px; }
+.skeleton-inline {
+  display: inline-block; width: 28px; height: 14px; vertical-align: middle;
+}
+/* §3 Tickets: the Filter fold on the filter bar. */
+.filter-fold { flex: 1 1 100%; min-width: 0; }
+.filter-fold-summary {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  cursor: pointer; list-style: none; padding: 7px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  font-size: var(--font-sm); font-weight: 600; color: var(--text-2);
+}
+.filter-fold-summary::-webkit-details-marker { display: none; }
+.filter-fold[open] > .filter-fold-summary { border-color: var(--border-strong, var(--border)); }
+.filter-fold-count { font-weight: 500; color: var(--text-muted); }
+.filter-fold-chip {
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  background: var(--green-soft); color: var(--green);
+}
+.filter-fold-body {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-soft);
+}
+.filter-fold-body .list-scope-row { flex: 1 1 100%; margin: 0 0 4px; }
+/* §4 Invoices: the guard says it is clear. */
+.facturen-clear {
+  display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px;
+  padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: 10px;
+  background: var(--surface); color: var(--green); font-size: var(--font-sm);
+}
+.facturen-clear .muted { color: var(--text-muted); }
+/* §6 Recurring work: the rule sentence. */
+.pw-rule {
+  margin: 0 0 10px; font-family: var(--f-head); font-size: 18px; font-weight: 700;
+  color: var(--text-1, var(--text));
+}
+/* §8 Toasts never cover list rows: the canvas reserves a rail while a
+   toast is up. */
+body[data-toast-rail] .page-canvas { padding-bottom: 220px; }
+

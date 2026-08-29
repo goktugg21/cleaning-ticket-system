@@ -37,7 +37,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BadgeEuro } from "lucide-react";
+import { BadgeEuro, CheckCircle2 } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
@@ -145,7 +145,8 @@ function parseMonth(value: string): { year: number; month: number } | null {
 }
 
 function formatPeriod(year: number | null, month: number | null): string {
-  if (!year || !month) return "—";
+  // P-2 — no dash: the caller prints words when there is no period.
+  if (!year || !month) return "";
   return `${String(month).padStart(2, "0")}-${year}`;
 }
 
@@ -612,6 +613,17 @@ export function FacturenPage({
       )}
 
       {/* ---- WP-1 G4: the billing-month guard ---- */}
+      {/* P-2 §4 — when nothing is at risk the guard SAYS so: the owner
+          must see it exists. */}
+      {atRiskGroups.length === 0 && (
+        <p className="facturen-clear" data-testid="facturen-at-risk-clear">
+          <CheckCircle2 size={16} strokeWidth={2.4} aria-hidden="true" />
+          <span>
+            <strong>{t("facturen.at_risk_clear_title")}</strong>{" "}
+            <span className="muted">{t("facturen.at_risk_clear_sub")}</span>
+          </span>
+        </p>
+      )}
       {atRiskGroups.length > 0 && (
         <section
           className="card"
@@ -711,9 +723,16 @@ export function FacturenPage({
                 scheduled customers — so the page says which it is and
                 where the schedule is set, instead of a "nothing due"
                 that reads as a broken screen. */}
-            {customerScoped
-              ? t("facturen.due_empty_customer")
-              : t("facturen.due_empty")}
+            {customerScoped ? (
+              t("facturen.due_empty_customer")
+            ) : (
+              <>
+                {t("facturen.due_empty")}{" "}
+                <Link to="/admin/customers" className="page-sub-link">
+                  {t("facturen.due_empty_link")}
+                </Link>
+              </>
+            )}
           </p>
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -770,7 +789,7 @@ export function FacturenPage({
                           ? t("facturatie.day_first")
                           : row.invoice_day_rule === "LAST_OF_MONTH"
                             ? t("facturatie.day_last")
-                            : "—"}
+                            : t("facturen.no_schedule")}
                     </td>
                     <td style={{ textAlign: "right" }}>
                       {row.unbilled_count}
@@ -1218,7 +1237,7 @@ export function FacturenPage({
                     {formatInvoiceGroupLabel(
                       customerLabelName(inv.department_name, t),
                       customerLabelName(inv.work_type_name, t),
-                    ) || "—"}
+                    ) || t("facturen.no_period")}
                   </td>
                   <td className="muted small">
                     {formatPeriod(inv.period_year, inv.period_month)}

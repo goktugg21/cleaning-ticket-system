@@ -319,5 +319,7 @@
   "planning.none_linked": "No recurring work linked yet.",
   "planning.unlinked_one": "{{count}} more line with no linked work.",
   "planning.unlinked_other": "{{count}} more lines with no linked work.",
-  "planning.cell_title": "{{year}}, week {{week}}"
+  "planning.cell_title": "{{year}}, week {{week}}",
+  "empty.title": "You have no contracts yet",
+  "empty.desc": "A contract is your agreement with a customer: what the regular cleaning costs per period. Once there is one, the counts, the filters and the list appear here."
 }

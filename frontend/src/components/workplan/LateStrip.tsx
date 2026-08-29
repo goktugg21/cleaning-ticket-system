@@ -110,7 +110,9 @@ export function LateStrip({
             {t("late.count", { count: sorted.length })}
           </span>
         </span>
-        <span className="muted small">{t("late.strip_desc")}</span>
+        {/* P-2 — the sentence lives in the board's "How does this board
+            work?" popover (AgendaPage); here it is the count's tooltip. */}
+        <span className="visually-hidden">{t("late.strip_desc")}</span>
       </div>
 
       {/* The three severity chips. Ascending severity, left to right —

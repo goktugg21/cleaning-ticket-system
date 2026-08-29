@@ -310,5 +310,7 @@
   "agenda.why_review_one": "Waiting for review — {{count}} day now",
   "agenda.why_review_other": "Waiting for review — {{count}} days now",
   "agenda.created_by_on": "Created {{date}} by {{name}}",
-  "agenda.planned_by_on": "Planned by {{name}}"
+  "agenda.planned_by_on": "Planned by {{name}}",
+  "agenda.info_toggle": "How does this board work?",
+  "agenda.info_close": "Close"
 }

@@ -173,7 +173,6 @@
   "detail.field_work_type": "Werksoort",
   "detail.field_category": "Categorie",
   "detail.field_description": "Omschrijving",
-  "detail.next_up": "Eerstvolgend",
   "money.billed_via": "Gefactureerd via contract:",
   "money.not_linked": "Geen contractregel gekoppeld — koppel er een om via het contract te factureren",
   "money.pick": "Contractregel koppelen…",
@@ -211,5 +210,13 @@
   "form.price_none": "Niet aan een contractregel gekoppeld",
   "form.crew_summary_one": "{{count}} persoon",
   "form.crew_summary_other": "{{count}} personen",
-  "form.crew_summary_none": "niemand vast — later toewijzen kan altijd"
+  "form.crew_summary_none": "niemand vast — later toewijzen kan altijd",
+  "detail.rule_weekly": "Elke {{days}}",
+  "detail.rule_biweekly": "Om de week op {{days}}",
+  "detail.rule_monthly": "Elke maand",
+  "detail.rule_window": "{{rule}}, {{window}}",
+  "detail.rule_next": "{{rule}} — volgend bezoek: {{next}}",
+  "detail.rule_no_next": "{{rule}} — nog geen volgend bezoek gepland",
+  "detail.next_visits": "Eerstvolgende bezoeken",
+  "detail.next_visits_none": "Nog geen bezoeken gepland."
 }

@@ -44,6 +44,7 @@ const TOAST_BURST_CAP = 2;
 // sessionStorage so a mid-session reload doesn't re-flood; a fresh tab (new
 // login) greets again.
 const GREETED_KEY = "cleanops.notifGreeted";
+const GREETED_MAX_KEY = "cleanops.notifGreetedMaxId";
 
 export function NotificationBell() {
   const { t } = useTranslation("common");
@@ -171,16 +172,36 @@ export function NotificationBell() {
             // stay silent rather than risk re-flooding on every load.
             greeted = true;
           }
-          if (!greeted && data.unread_count > 0) {
+          // P-2 §8 — the greeting was re-firing on every fresh tab (a
+          // tab-session mark), and it led with the seeded L1 warning
+          // toasts. Now: the mark is per browser and per high-water id
+          // (a reload or a new tab greets only with items newer than the
+          // last greeting), and time-driven warnings are never part of
+          // the greeting — the bell badge and the Warnings page carry
+          // them; a toast is for something that just happened.
+          let greetedMax = 0;
+          try {
+            greetedMax = Number(localStorage.getItem(GREETED_MAX_KEY) || "0") || 0;
+          } catch {
+            greetedMax = Number.MAX_SAFE_INTEGER;
+          }
+          const fresh = feed.filter(
+            (x) =>
+              !x.is_read &&
+              x.id > greetedMax &&
+              !isSlaWarningEvent(x.event_type) &&
+              !notificationToastSeverity(x),
+          ); // newest-first
+          if (!greeted && fresh.length > 0) {
             try {
               sessionStorage.setItem(GREETED_KEY, "1");
+              localStorage.setItem(GREETED_MAX_KEY, String(maxId ?? 0));
             } catch {
               // Best-effort: still show this single greeting.
             }
-            const unreadItems = feed.filter((x) => !x.is_read); // newest-first
-            const shown = unreadItems.slice(0, TOAST_BURST_CAP);
+            const shown = fresh.slice(0, TOAST_BURST_CAP);
             shown.forEach((x) => push(notificationToastInput(x)));
-            const more = data.unread_count - shown.length;
+            const more = fresh.length - shown.length;
             if (more > 0) {
               push({
                 variant: "success",

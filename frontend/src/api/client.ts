@@ -183,8 +183,10 @@ function statusFallback(status: number): string {
   if (status === 401) return i18n.t("api_error.session_expired");
   if (status === 403) return i18n.t("api_error.not_allowed");
   if (status === 404) return i18n.t("api_error.not_found");
+  if (status === 409) return i18n.t("api_error.conflict");
   if (status === 429) return i18n.t("api_error.too_many_requests");
   if (status >= 500) return i18n.t("api_error.server_unavailable");
+  if (status === 400 || status === 422) return i18n.t("api_error.rejected_input");
   if (status >= 400) return i18n.t("api_error.invalid_input");
   return i18n.t("api_error.unexpected");
 }
@@ -203,33 +205,17 @@ export function getApiError(error: unknown): string {
     // full debug page into the customer surface and confuses operators.
     // Detect an HTML prefix (whitespace-tolerant) and drop to the
     // status-aware fallback below.
-    if (typeof data === "string" && data.trim().length > 0) {
-      const trimmed = data.trimStart();
-      const looksLikeHtml =
-        trimmed.startsWith("<!DOCTYPE") ||
-        trimmed.startsWith("<!doctype") ||
-        trimmed.startsWith("<html") ||
-        trimmed.startsWith("<HTML");
-      if (!looksLikeHtml) return data;
-      // Fall through to statusFallback(status) below.
+    // P-2 §8 — THE PERSON GETS WORDS, THE CONSOLE GETS THE SERVER.
+    // A DRF `detail` ("Invalid token.", "A reschedule reason is
+    // required when changing an existing schedule.") is precise for a
+    // developer and English for everybody; it used to reach the screen
+    // verbatim from ~20 call sites. The raw body is logged for whoever
+    // debugs; the screen gets one human sentence per status. Callers
+    // that read `error.response.data.code` keep their own specific
+    // sentences and never come here for them.
+    if (data !== undefined && data !== null && data !== "") {
+      console.warn("[api]", status, typeof data === "string" ? data.slice(0, 500) : data);
     }
-    if (data && typeof data === "object") {
-      const record = data as Record<string, unknown>;
-      if (typeof record.detail === "string" && record.detail.trim().length > 0) {
-        return record.detail;
-      }
-      const firstKey = Object.keys(record)[0];
-      const firstValue = firstKey ? record[firstKey] : null;
-      if (Array.isArray(firstValue) && firstValue.length > 0) {
-        return String(firstValue[0]);
-      }
-      if (typeof firstValue === "string" && firstValue.trim().length > 0) {
-        return firstValue;
-      }
-    }
-
-    // No useful body — fall back to a status-aware sentence. Better
-    // than echoing "Network Error" or "Request failed with status 403".
     if (typeof status === "number") return statusFallback(status);
 
     // No response at all (network error / CORS / DNS).

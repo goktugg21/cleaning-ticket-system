@@ -25,7 +25,6 @@ import {
   Receipt,
   Settings,
   Siren,
-  Sparkles,
   Ticket,
   Timer,
   UserCog,
@@ -709,15 +708,10 @@ export function AppShell({ children }: AppShellProps) {
               <Menu size={18} strokeWidth={2.2} />
             )}
           </button>
-          <div className="topbar-context">
-            <span className="topbar-context-icon" aria-hidden="true">
-              <Sparkles size={16} strokeWidth={2.2} />
-            </span>
-            <div className="topbar-context-text">
-              <span className="topbar-context-eyebrow">{tagline}</span>
-              <span className="topbar-context-name">{t("brand.name")}</span>
-            </div>
-          </div>
+          {/* P-2 §2 — the brand is on the sidebar already; the top bar
+              no longer repeats "Operations console / CleanOps" above a
+              page that states its own name. */}
+          <div className="topbar-context" aria-hidden="true" />
           <div className="topbar-right">
             <NotificationBell />
             <UserMenu />

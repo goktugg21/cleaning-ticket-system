@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { CalendarOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useLocaleCode } from "../../lib/intl";
@@ -99,14 +98,10 @@ export function WorkPlanDayColumn({
       )}
       <div className="wp-day-body">
         {count === 0 ? (
-          <div
-            className="wp-day-empty"
-            data-testid="agenda-day-empty"
-            role="img"
-            aria-label={t("agenda.day_empty")}
-            title={t("agenda.day_empty")}
-          >
-            <CalendarOff size={22} strokeWidth={1.75} />
+          <div className="wp-day-empty" data-testid="agenda-day-empty">
+            {/* P-2 — words, not a crossed-out calendar that reads as a
+                broken image. */}
+            {t("agenda.day_empty")}
           </div>
         ) : (
           <ul

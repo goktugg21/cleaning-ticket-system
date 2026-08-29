@@ -28,7 +28,7 @@
 // its planned week SAYS WHY, with its planned date on it — a card that
 // turns up somewhere unexpected without explaining itself is worse than
 // one that does not turn up.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   AlarmClock,
@@ -38,6 +38,7 @@ import {
   ChevronRight,
   Lock,
   Ticket,
+  Info,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -549,6 +550,21 @@ function WorkPlanWeek() {
   const counts = data?.counts ?? null;
   const todayKey = data?.today ?? toDateString(new Date());
 
+  // P-2 §1 — TODAY IS ON SCREEN. The grid is 1530px wide and scrolls
+  // inside its wrap; on a Saturday the viewport showed Mon-Fri and every
+  // carried late job hung on the invisible Saturday column. After each
+  // load of the current week the wrap scrolls so today's column is in
+  // view (centred when the wrap is narrower than the week).
+  const weekScrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const wrap = weekScrollRef.current;
+    if (!wrap || !data) return;
+    const today = wrap.querySelector<HTMLElement>('[data-testid="agenda-day-today"]');
+    if (!today) return;
+    const left = today.offsetLeft - Math.max(0, (wrap.clientWidth - today.offsetWidth) / 2);
+    wrap.scrollTo({ left: Math.max(0, left), behavior: "auto" });
+  }, [data, todayKey]);
+
   const filtered = useMemo(
     () =>
       entries.filter((entry) => {
@@ -991,14 +1007,19 @@ function WorkPlanWeek() {
           those days are real — they are just not this board's subject.
           Saying so here is what stops the next reader concluding the
           board has lost somebody's assignment. */}
+      {/* P-2 §1 — ONE short line is the page subtitle; the rest is one
+          click away in a popover, not three stacked paragraphs. */}
       {teamWeek && (
-        <p
-          className="wp-notice wp-notice-hint"
-          role="note"
-          data-testid="agenda-job-board-hint"
-        >
-          {t("agenda.job_board_hint")}
-        </p>
+        <details className="wp-info" data-testid="agenda-job-board-hint">
+          <summary className="wp-info-summary">
+            <Info size={14} strokeWidth={2.4} aria-hidden="true" />
+            {t("agenda.info_toggle")}
+          </summary>
+          <div className="wp-info-body">
+            <p>{t("agenda.job_board_hint")}</p>
+            <p>{t("late.strip_desc")}</p>
+          </div>
+        </details>
       )}
 
       {/* A list that silently stops is the same defect as a count that
@@ -1037,7 +1058,7 @@ function WorkPlanWeek() {
           testId="agenda-empty"
         />
       ) : (
-        <div className="agenda-week-scroll">
+        <div className="agenda-week-scroll" ref={weekScrollRef}>
           <div className="agenda-week-grid" data-testid="agenda-week-grid">
           {groups.map((group) => (
             <WorkPlanDayColumn

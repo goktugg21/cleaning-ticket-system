@@ -28,6 +28,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useLocaleCode } from "../../lib/intl";
 
 import {
   archiveRecurringJob,
@@ -100,6 +101,7 @@ export function RecurringJobDetailPage() {
   const { push } = useToast();
   const { me } = useAuth();
   const { t } = useTranslation(["planned_work", "common"]);
+  const locale = useLocaleCode();
 
   const [job, setJob] = useState<RecurringJob | null>(null);
   const [occurrences, setOccurrences] = useState<PlannedOccurrence[]>([]);
@@ -425,6 +427,47 @@ export function RecurringJobDetailPage() {
     return `${days} · ${freq}`;
   }, [job, t]);
 
+  // P-2 §6 — THE RULE, AS ONE HUMAN SENTENCE, with the next visit in
+  // it: "Every Monday and Thursday, morning — next visit: Tue 2 Sep".
+  // Day names come from the locale, the window from the first named
+  // one, the next visit from the same list the "next visits" block
+  // prints below the sentence.
+  const ruleSentence = useMemo(() => {
+    if (!job) return "";
+    const dayNames = [...job.weekdays]
+      .sort((a, b) => a - b)
+      .map((d) =>
+        new Date(2024, 0, d).toLocaleDateString(locale, { weekday: "long" }),
+      );
+    const daysText =
+      dayNames.length > 1
+        ? `${dayNames.slice(0, -1).join(", ")} ${t("common:and")} ${dayNames[dayNames.length - 1]}`
+        : dayNames[0] || "";
+    let rule: string;
+    if (job.frequency === "WEEKLY" && daysText) {
+      rule = t("detail.rule_weekly", { days: daysText });
+    } else if (job.frequency === "BIWEEKLY" && daysText) {
+      rule = t("detail.rule_biweekly", { days: daysText });
+    } else if (job.frequency === "MONTHLY") {
+      rule = t("detail.rule_monthly");
+    } else {
+      rule = t(`frequency.${job.frequency}`);
+    }
+    const window = job.windows.map((w) => formatWindow(w)).filter(Boolean)[0];
+    if (window) rule = t("detail.rule_window", { rule, window });
+    const next = nextUp[0];
+    return next
+      ? t("detail.rule_next", {
+          rule,
+          next: new Date(`${next.planned_date}T00:00:00`).toLocaleDateString(locale, {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+          }),
+        })
+      : t("detail.rule_no_next", { rule });
+  }, [job, nextUp, locale, t]);
+
   const periodText = useMemo(() => {
     if (!job) return "";
     return job.end_date
@@ -594,6 +637,39 @@ export function RecurringJobDetailPage() {
           of reading and says nothing. Company, the windows and the
           counts are always true of a job, so they always show. */}
       <div className="pw-agreement" data-testid="recurring-job-agreement">
+        {/* P-2 §6 — the page opens with the rule in one sentence and the
+            next few visits; the machinery (facts, calendar, money)
+            follows. */}
+        <p className="pw-rule" data-testid="recurring-job-rule">
+          {ruleSentence}
+        </p>
+        <div className="pw-nextup" data-testid="recurring-job-next-up">
+          <span className="pw-money-label">{t("detail.next_visits")}</span>
+          {nextUp.length === 0 && (
+            <span className="muted small">{t("detail.next_visits_none")}</span>
+          )}
+          {nextUp.map((occ) => (
+            <span
+              key={occ.id}
+              className="pw-nextup-item"
+              data-testid="recurring-job-next-up-item"
+            >
+              {new Date(`${occ.planned_date}T00:00:00`).toLocaleDateString(locale, {
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+              })}
+              <OccurrenceStatusBadge status={occ.status} />
+            </span>
+          ))}
+          {occCount > occurrences.length && (
+            <span className="muted small">
+              {t("detail.occurrences_truncated", {
+                count: occurrences.length,
+              })}
+            </span>
+          )}
+        </div>
         <p className="pw-agreement-line">
           <span
             className="pw-agreement-pattern"
@@ -691,28 +767,6 @@ export function RecurringJobDetailPage() {
         minDate={job.start_date}
       />
 
-      {nextUp.length > 0 && (
-        <div className="pw-nextup" data-testid="recurring-job-next-up">
-          <span className="pw-money-label">{t("detail.next_up")}</span>
-          {nextUp.map((occ) => (
-            <span
-              key={occ.id}
-              className="pw-nextup-item"
-              data-testid="recurring-job-next-up-item"
-            >
-              {formatDate(occ.planned_date)}
-              <OccurrenceStatusBadge status={occ.status} />
-            </span>
-          ))}
-          {occCount > occurrences.length && (
-            <span className="muted small">
-              {t("detail.occurrences_truncated", {
-                count: occurrences.length,
-              })}
-            </span>
-          )}
-        </div>
-      )}
 
       {/* ---- 3. THE MONEY ----------------------------------------------
           One line. Linked: the line's name, and the way to the contract's

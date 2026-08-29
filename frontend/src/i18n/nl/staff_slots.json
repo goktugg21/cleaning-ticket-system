@@ -310,5 +310,7 @@
   "agenda.why_review_one": "Wacht op controle — al {{count}} dag",
   "agenda.why_review_other": "Wacht op controle — al {{count}} dagen",
   "agenda.created_by_on": "Aangemaakt {{date}} door {{name}}",
-  "agenda.planned_by_on": "Ingepland door {{name}}"
+  "agenda.planned_by_on": "Ingepland door {{name}}",
+  "agenda.info_toggle": "Hoe werkt dit bord?",
+  "agenda.info_close": "Sluiten"
 }

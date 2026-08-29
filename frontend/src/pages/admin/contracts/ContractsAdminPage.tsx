@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, RefreshCw } from "lucide-react";
+import { FileSignature, Plus, RefreshCw } from "lucide-react";
+import { EmptyState } from "../../../components/EmptyState";
 import { useTranslation } from "react-i18next";
 
 import { listAllCompanies } from "../../../api/admin";
@@ -307,6 +308,9 @@ export function ContractsAdminPage() {
     customerFilter !== "" ||
     buildingFilter !== "" ||
     typeFilter !== "";
+  // P-2 §5 — nothing at all (not "nothing matches"): the one card.
+  const showEmptyCard =
+    !loading && !error && !filtersActive && (stats?.total ?? contracts.length) === 0;
 
   const clearFilters = () => {
     setSearchInput("");
@@ -421,10 +425,34 @@ export function ContractsAdminPage() {
           `hidden` rather than unmounted: the list owns the page's reads
           and its filter state, and tearing all of that down to look at
           a catalog would refetch everything on the way back. */}
+      {/* P-2 §5 — with no contracts at all, ONE card that says what a
+          contract is and offers the one obvious action; the tiles, the
+          filters, the pills and the table appear only once one exists. */}
+      {pageTab === "list" && showEmptyCard && (
+        <EmptyState
+          icon={FileSignature}
+          title={t("empty.title")}
+          description={t("empty.desc")}
+          testId="contracts-empty"
+          action={
+            canManage ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setFormOpen(true)}
+                data-testid="contracts-empty-new"
+              >
+                <Plus size={14} strokeWidth={2.5} />
+                {t("actions.newContract")}
+              </button>
+            ) : undefined
+          }
+        />
+      )}
       <div
         className="card"
         style={{ overflow: "hidden" }}
-        hidden={pageTab !== "list"}
+        hidden={pageTab !== "list" || showEmptyCard}
       >
         {/* W12 — SEVEN tiles, ONE row.
 

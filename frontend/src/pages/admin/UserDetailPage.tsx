@@ -738,7 +738,10 @@ export function UserDetailPage() {
                     </BoundedList>
                   </div>
                 )}
-                {buildings.length > 0 && (
+                {/* P-2 §7 — for field staff the "Buildings this staff can
+                    work in" card below lists the same buildings with what
+                    they may do there; one list, not two. */}
+                {buildings.length > 0 && user.role !== "STAFF" && (
                   <div className="user-detail-membership-group">
                     <div className="user-detail-membership-group-title">
                       {t("user_detail.memberships.buildings_title")}
@@ -1215,27 +1218,23 @@ function StaffProfileReadOnlyCard({ userId }: { userId: number }) {
           <div className="section-head-sub">{tCred("detail.read_only_hint")}</div>
         </div>
       </div>
-      <div className="detail-field-row">
-        <div className="detail-field-label">{t("staff_admin.field_phone")}</div>
-        <div
-          className={`detail-field-value${profile.phone ? "" : " muted-empty"}`}
-        >
-          {profile.phone || "—"}
+      {/* P-2 §7 — a fact that is not set is absent, not a dash. */}
+      {profile.phone && (
+        <div className="detail-field-row">
+          <div className="detail-field-label">{t("staff_admin.field_phone")}</div>
+          <div className="detail-field-value">{profile.phone}</div>
         </div>
-      </div>
-      <div className="detail-field-row">
-        <div className="detail-field-label">
-          {t("staff_admin.field_internal_note")}
+      )}
+      {profile.internal_note && (
+        <div className="detail-field-row">
+          <div className="detail-field-label">
+            {t("staff_admin.field_internal_note")}
+          </div>
+          <div className="detail-field-value" style={{ whiteSpace: "pre-wrap" }}>
+            {profile.internal_note}
+          </div>
         </div>
-        <div
-          className={`detail-field-value${
-            profile.internal_note ? "" : " muted-empty"
-          }`}
-          style={{ whiteSpace: "pre-wrap" }}
-        >
-          {profile.internal_note || "—"}
-        </div>
-      </div>
+      )}
       <div className="detail-field-row">
         <div className="detail-field-label">
           {t("staff_admin.field_can_request_assignment")}
