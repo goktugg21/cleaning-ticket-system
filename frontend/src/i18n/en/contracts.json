@@ -407,7 +407,6 @@
   "teach.proration.note": "Part period = a part of a billing period, pro rata by days.",
   "teach.revision.line": "Revision {{n}} — \"{{label}}\" — valid from {{date}} — {{amount}} per {{period}}",
   "teach.revision.in_force": "in force now",
-  "teach.revision.planned": "not in force yet, still editable",
   "teach.revision.changed": "what changed: {{from}} → {{to}} per {{period}}",
   "teach.revision.note": "A revision records what was agreed from a date onwards; what has already been invoiced stays.",
   "teach.revisionState.active": "the revision in force now",
@@ -421,5 +420,7 @@
   "teach.invoicesPerYear.line": "{{count}} invoices per year at one per {{period}}.",
   "teach.period_noun.MONTHLY": "month",
   "teach.period_noun.QUARTERLY": "quarter",
-  "teach.period_noun.YEARLY": "year"
+  "teach.period_noun.YEARLY": "year",
+  "teach.revision.editable": "still editable",
+  "teach.revision.replaced": "replaced by a later revision"
 }

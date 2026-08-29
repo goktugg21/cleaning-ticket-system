@@ -331,7 +331,8 @@ function teach(
           period: periodWord,
         });
         if (rev.is_active) line += ` — ${t("teach.revision.in_force")}`;
-        else if (!rev.is_locked) line += ` — ${t("teach.revision.planned")}`;
+        else if (!rev.is_locked) line += ` — ${t("teach.revision.editable")}`;
+        else line += ` — ${t("teach.revision.replaced")}`;
         lines.push(line);
         if (prev && prev.amount !== rev.amount) {
           lines.push(

@@ -407,7 +407,6 @@
   "teach.proration.note": "Deelperiode = een deel van een factuurperiode, naar rato van de dagen.",
   "teach.revision.line": "Versie {{n}} — \"{{label}}\" — geldig vanaf {{date}} — {{amount}} per {{period}}",
   "teach.revision.in_force": "nu geldig",
-  "teach.revision.planned": "gaat nog in, nog te wijzigen",
   "teach.revision.changed": "wat veranderde: {{from}} → {{to}} per {{period}}",
   "teach.revision.note": "Een versie legt vast wat er vanaf een datum is afgesproken; wat al gefactureerd is, blijft.",
   "teach.revisionState.active": "de versie die nu geldt",
@@ -421,5 +420,7 @@
   "teach.invoicesPerYear.line": "{{count}} facturen per jaar bij één per {{period}}.",
   "teach.period_noun.MONTHLY": "maand",
   "teach.period_noun.QUARTERLY": "kwartaal",
-  "teach.period_noun.YEARLY": "jaar"
+  "teach.period_noun.YEARLY": "jaar",
+  "teach.revision.editable": "nog te wijzigen",
+  "teach.revision.replaced": "vervangen door een latere versie"
 }
