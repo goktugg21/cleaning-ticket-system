@@ -614,3 +614,131 @@ this Addendum, the owner wins. Implemented as sprint **FE-4**.
    session; the language switch is plainly visible for every role; the
    SA and provider-admin demo accounts review in English.
 
+
+---
+
+## D.13 Notification localization — decision memo (FE-7, 2026-08-29)
+
+Written, not built (FE-7 closes the redesign plan; this is the one item
+it hands to the owner as a decision). Facts below are from the code on
+`feat/fe-7-final-audit`; nothing in this section changes behaviour.
+
+### D.13.1 Where we stand
+
+- **Every notification is composed as finished text and stored as
+  text.** `NotificationLog` (email audit) holds `subject` + `body`;
+  `Notification` (the bell feed) holds a `summary` string. Neither row
+  carries a template key, a parameter payload or a language column
+  (`backend/notifications/models.py`).
+- **One chokepoint, ten composers.** `send_logged_email(recipient,
+  subject, body)` (`notifications/services.py:775`) is the only email
+  door, but it receives strings already rendered by ten call sites
+  (ticket created / status changed / assigned / unassigned / slot
+  unable, password reset, invitation, invoice sent, the monthly invoice
+  run, and the WP-1 billing-month digest that reuses
+  `INVOICE_RUN_COMPLETED` and deduplicates on
+  `subject__startswith`). About eighteen more sites write the bell
+  `summary`.
+- **Language is hardcoded per site, not resolved per recipient.** The
+  ten email composers and the SLA L1 warnings write Dutch; the deadline
+  reminder, the staff part-assignment and the extra-work lifecycle bell
+  lines write English. Exactly one pipeline, the W-LATE escalation
+  ladder (`tickets/escalations.py`), resolves `user.language` per
+  recipient — by hand, with a dict of the two languages, not with
+  gettext.
+- **Django i18n is on but empty.** `USE_I18N = True`, `LANGUAGE_CODE =
+  "nl"`, two `LANGUAGES`, no `LOCALE_PATHS`, no `locale/` directory, no
+  `.po` files, zero `gettext` calls, zero templates. The
+  `UserLanguageMiddleware` activates the user's language, but it runs
+  before JWT authentication and is a no-op for `/api/`; Celery tasks
+  have no request at all. No notification is emitted under an active
+  per-user locale today.
+- **The frontend is a hybrid.** The bell renders a translated title from
+  `event_type` for the SLA kinds (`t("notifications.sla.<kind>")`) and
+  prints the stored `summary` verbatim underneath; non-SLA rows show
+  only the stored text. `sla/warnings.py` deliberately keeps its
+  summary to facts (numbers, names, dates) because "a server-side Dutch
+  string in a translated interface is a string nobody can translate".
+- **Copy is pinned by tests.** Fifteen backend tests assert literal
+  subject/body fragments ("Status gewijzigd", "Wacht op beheerder",
+  "facturatiedatum"); the escalation tests assert both languages; one
+  test pins the backend's status-label mirror byte-for-byte to
+  `frontend/src/i18n/nl/common.json`.
+- **The user's language exists and is already respected by the UI.**
+  `User.language` (`nl` default, `en`), written from the user menu,
+  read by `useLanguageSync`. The precedent for server-side per-reader
+  resolution is `TicketCategory.label_for(language)` (dual
+  `label_nl` / `label_en` columns, one resolved `label` in the API).
+
+### D.13.2 The two options
+
+**Option A — store keys + params, render per reader.** A notification
+row stores `template_key` + a JSON `params` payload (ticket number,
+names, dates, amounts) and no text. Email renders at send time in the
+recipient's language; the bell feed renders at read time in the
+viewer's language (the API resolves it, the SPA never composes copy
+from parts — SoT §11.1 holds). Changing the wording of a notification
+later re-renders history; a user who switches language sees their old
+bell rows switch too.
+
+- Cost: additive migration (`template_key`, `params` JSON, keep
+  `subject`/`body`/`summary` as the rendered cache); a small backend
+  catalogue of ~25 kinds × 2 languages; every one of the ~28 composer
+  sites rewired to emit `(key, params)` instead of text; the bell
+  serializer resolves per viewer; the fifteen copy tests move to the
+  catalogue; the digest's `subject__startswith` dedupe becomes a
+  key-based dedupe. Roughly one backend sprint plus a small frontend
+  one (the bell drops its client-side SLA title map).
+- Risk: params must be stable across re-renders (store names, not ids
+  that may be deleted); the rendered cache must still be written for
+  the NotificationLog audit rows (what was actually sent, verbatim, in
+  the language it was sent in).
+
+**Option B — resolve the language at creation, store rendered text.**
+Keep the tables as they are. Each composer site resolves
+`recipient.language` and renders once, in that language, as the
+escalation ladder already does; the stored text is what the reader
+sees, forever. The bell stays "print what is stored".
+
+- Cost: the same ~28 composer sites each gain a language switch (a
+  `dict[lang]` or a gettext catalogue — with gettext, add
+  `LOCALE_PATHS`, a `locale/` tree and `translation.override(lang)`
+  around each render); the fifteen copy tests double to cover EN; no
+  migration; the bell's client-side SLA title map becomes redundant
+  and is removed. Roughly half a backend sprint.
+- Risk: history is frozen in the language the recipient had at the
+  time (acceptable for email — that is the audit record — and mildly
+  odd for the bell after a language switch); a copy fix does not
+  reach rows already written; multi-recipient events render the
+  same body N times (cheap).
+
+### D.13.3 Recommendation
+
+**Option B for email, Option A's read-time resolution for the bell —
+but built as ONE mechanism: a keyed catalogue rendered server-side.**
+Concretely: introduce the catalogue (`notifications/copy.py`, keyed,
+two languages, one `render(key, params, lang)`), make every composer
+site call it with the recipient's language (email: rendered once at
+send and stored, exactly as today's rows are — the audit record stays
+verbatim), and store `template_key` + `params` on `Notification` only
+(additive, nullable) so the bell endpoint can re-render per viewer
+while old rows keep their stored `summary`. This gets the customer's
+inbox and the customer's bell into their own language in one sprint,
+keeps NotificationLog honest, and leaves the door open to full Option
+A later without a second rewrite. Migration cost: one additive
+migration on `Notification`, no data backfill (old rows render from
+`summary`), the composer rewiring above, and the copy tests moved to
+the catalogue.
+
+What it does not do, and should be said out loud: Turkish stays
+parked (§D.12.8) — the catalogue makes adding a third language a copy
+task, not a code task, which is the point.
+
+**Owner decision required:** A, B, or the hybrid above; and whether the
+customer-facing emails should carry the provider's brand voice per
+company (they do not today; every company sends the same Dutch text).
+Until decided, nothing changes: new notification copy keeps following
+the existing per-site language (Dutch for email, Dutch or English for
+the bell as the site dictates), and every new composer must at least
+route through `send_logged_email` so the eventual rewiring has one
+door to find.

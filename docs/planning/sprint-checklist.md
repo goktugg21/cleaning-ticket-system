@@ -13,9 +13,12 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/ew-gap-closing`. Sprints 153–189 land as ONE PR into
-`main` — a fast-forward, and the first time CI runs on any of it. The
-owner opens and merges it.
+**Branch:** `feat/fe-7-final-audit` — the head of the Addendum D
+redesign train (WP-1 → FE-1 → … → FE-7), each sprint stacked on the
+previous one and deployed to crmtest; nothing is merged into `main`
+until the owner says "merge". Below it, `feat/ew-gap-closing` still
+holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
+first time CI runs on any of it. The owner opens and merges both.
 
 Sprint 189 runs as THREE parallel Claude Code chats on this one branch,
 on disjoint file sets: chat 1 the two detail pages, chat 2 the backend,
@@ -35,6 +38,201 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — FE-7: reports + hours, mobile, the e2e repair and the full §D.6 audit (Addendum D §D.6 / §D.7 / §D.13, 2026-08-29) — THE REDESIGN PLAN CLOSES HERE
+
+Branch `feat/fe-7-final-audit`, stacked on FE-6 (the train; main
+untouched). Zero migrations, zero backend changes. The last sprint of
+the Addendum D plan: WP-1, FE-1, FE-2, FE-3, FE-4, FE-5, FE-6 and FE-7
+are all SHIPPED to crmtest; what the audit could not close inside the
+sprint is listed in the open ledger below, each with a one-line
+proposal.
+
+- **(1) Rapporten + Uren — the last two R-verdicts.** Data and
+  calculations untouched. Rapporten: three named sections (Meerwerk /
+  Meldingen en tickets / Uren en periodeoverzichten), "Per gebouw"
+  first in its section with an anchor the tickets list links to
+  (`/reports#per-gebouw`; the FE-6 footnote copy narrowed to what is
+  actually there); the fake "Aangepast" chip is a real button that
+  unfolds the date pair (8 visible filter controls → 6); the seven
+  report modals close with "Sluiten", not "Annuleren"; chart cards
+  load as chart-shaped skeletons, never a 3px bar, and the fourteen
+  Recharts series no longer animate on mount (rule 1); the five
+  charts that grew without bound are inside `BoundedList`; card and
+  report empty states carry "Verruim de periode"; four empty states
+  said "scope", one said "Granulariteit", two said "extra-werk" — all
+  rewritten. Uren: one primary per screen state (Mijn uren's header
+  button demoted, the week's Save is the primary; "Week afsluiten" is
+  secondary; the admin header primary hides while editing; the
+  contract-hours "Rooster toewijzen" hides while editing and shows in
+  the empty state instead); the admin filter bar folds the date pair
+  behind "Andere periode"; every table loads as skeleton rows, the
+  "Laden…" status chip is a skeleton chip; the raw `TICKET:41` source
+  string in the edit dropdown reads as the job's label; ISO dates,
+  `x1.50` multipliers, `7.5` totals and `2026-W35` read in the
+  session's locale; the contract-hours, week-grid, comparison and
+  worker tables are bounded; the worker-hours report opens compact
+  (12 columns) with the accountant's reference layout one click away,
+  and its nine always-empty columns and the note about them only
+  render in that layout; the formula strings ("3 medewerkers x 2
+  gebouwen = 6 rijen", "(s)/(en)" plurals) read as sentences.
+- **(2) One word, owner-flagged.** The tickets list's settled tab is
+  **"Afgehandeld" (nl) / "Settled" (en)** — it holds rejections as well
+  as approvals. One key per locale (`dashboard.json:tickets_tabs.done`).
+  Confirm or revert on sight.
+- **(3) Playwright e2e repair.** Every spec describes the app that
+  exists: FE-6's People page and customer tabs, the four tickets tabs,
+  FE-3's ticket detail, FE-4's Werkplanning chips, FE-2/FE-5's
+  meerwerk flows. Still a non-gate. The verbatim result of the one
+  full run against the dev stack is under "Gates" below.
+- **(4) Mobile pass (base SoT §3.5).** At 390: no page in the customer
+  portal or the staff surface scrolls sideways; Mijn meldingen and
+  Medewerkers collapse to cards (a shared `table-cards` class, the
+  invitations pattern); the ticket detail's tab pills and the
+  "Geavanceerd" fold reach 36px tap height; `<html lang>` follows the
+  session. At 768 (admin, cheap fixes only): the Terugkerend werk
+  table was clipped inside its card with no scroller — it scrolls in
+  its wrap; header actions wrap under the title up to 900px. Reported,
+  not fixed: at 768 the sidebar stays pinned (the phone breakpoint is
+  760px), so every 860px table scrolls inside its wrap.
+- **(5) The full §D.6 audit** — the table below, every surface, rules
+  1–12, measured at 1280 (and 1440 for the console) with the FE-6
+  overflow-audit recipe plus copy probes (banned words, raw keys,
+  "Loading" text, header button counts) and read by eye per role.
+- **(6) Ledger + docs.** 185 i18n keys nothing renders removed from
+  both bundles (lockstep kept; `chargeable_work.*` is NOT dead — the
+  origin pill renders it as "Meerwerk"); §D.13 written into the
+  addendum (notification localization: A vs B, a hybrid
+  recommendation, migration cost — owner decides); the role-visibility
+  matrix re-derived from the three navigations and the customer tabs,
+  banner gone; this section closes the plan.
+
+#### The §D.6 audit table (the plan's exit document)
+
+Legend: **pass** — holds; **fixed** — fixed in this sprint (screenshot
+in the report); **open** — reported with a one-line proposal. Rules:
+1 scroll, 2 actions-where-clicked/toasts, 3 one primary, 4 ≤5–7
+choices, 5 facts first, 7 no machinery words, 8 nothing overflows +
+bounded lists, 9 one language, 10 designed mid-states, 11 the Advanced
+layer, 12 talks like a person. Rule 6 (the child test) was written per
+flow in FE-2/FE-4/FE-5 and re-walked at 390 in this sprint.
+
+| Surface | Verdict per rule | Open items → proposal |
+|---|---|---|
+| Login / invite / reset | pass 1–12 | — |
+| Dashboard (provider) | pass 1,3,4,5,7,8,9,10,12 · **open 2** | the seeded L1 warning toast ("1 more unread") overlays the attention rows at load → a reserved bottom rail (the toast stack keeps a `padding-bottom` on `.page-canvas` while visible) or fold the L1 batch into one inline line under the KPI tiles |
+| Start (customer) | pass 1–12 | — |
+| Tickets list | pass 1,2,3,5,7,8,9,10,12 · **open 4** | Period + Working/Archive + 5 tabs + 7 filter selects + search = 15 visible choices; FE-6 kept the density for admins (rule 12) → fold Category/Priority/Deadline/Assigned behind "Meer filters" in a later craft pass |
+| Ticket create (provider) / Melding maken (customer) | pass 1–12 | the native file input ("Choose Files") is the browser's own control; a styled drop zone is cosmetic |
+| Ticket detail (all roles) | pass 1,2,3,4,5,7,8,9,10,11,12 · **fixed** (tap targets at 390) | the settled tab word is the owner's call (item 2) |
+| Meerwerk list (provider) / tracker (customer) | pass 1–12 | seed titles contain "extra werkzaamheden" (data, not copy) |
+| Meerwerk create (provider, staged) / flow (customer, 4 steps) | pass 1–12 | — |
+| Meerwerk detail (provider) / customer approval | pass 1,2,3,4,5,8,9,10,11,12 · **fixed 7** ("Proposed" → "Quote sent"/"Quoted") | — |
+| Terugkerend werk list / detail / form | pass 1,2,3,4,5,7,9,10,11,12 · **fixed 8** (768 clip) | — |
+| Werkplanning (staff, BM, admin) | pass 1–12 | each card carries its own primary by design (the pattern reference); "op slot" in a seeded reason is Dutch, not the banned word |
+| Mijn uren | **fixed 3,9,10** · pass rest | week-nav (4 controls) + 7 day chips: at the limit, left as designed |
+| Uren (admin) — worked hours | **fixed 3,4,7,9,10,12** · pass rest | the per-row job/hour-type/building `<option>` lists repeat per row (DOM weight, not visual) → a shared `<datalist>` |
+| Uren (admin) — rooster (contract hours) | **fixed 3,7,8,9,10** · pass rest · **open 4,8** | up to 3 action buttons per row → `OverflowMenu`; 16 columns scroll inside the wrap below ~1100px → card row with the seven days as a ribbon |
+| Week-entry dialog / bulk rooster dialog | **fixed 7,9,10,12** · pass rest · **open 2** | both dialogs are viewport-centred, not anchored to their trigger → anchor to the header button's rect (the `usePickerReserve` pattern) |
+| Rapporten | **fixed 1,3,4,5,7,8,10** · pass rest · **open 3** | 18 equal-weight "Open"/"Export" secondaries and no page primary; the modals are viewport-centred → per-card primary "Open", exports in a per-card menu; anchor modals |
+| Period report modals (5) | **fixed 7,9,10** · pass rest · **open 12** (weekly view) | the weekly report is 13 stacked 11-column tables on a 90-day span → one table with a week selector |
+| Worker hours report | **fixed 7,8,9,10,12** · pass rest | the reference layout stays one click away because the owner asked for the accountant's columns |
+| Hours comparison | **fixed 8,9,10** · pass rest | — |
+| Facturen / invoice detail | pass 1–12 (K/R, close already) | at 768 the invoices table and the at-risk panel scroll inside their wraps |
+| Contracten / contract detail / planning grid | pass 1,2,3,4,5,7,9,11,12 · **fixed 10** (planning skeleton) · **fixed 7** (EN "scope changes") · **open 8** | the 54-column planning grid has no card fallback below 900px → one card per line with a compact week ribbon |
+| Klanten list + customer page (10 tabs) | pass 1–12 | at 768 the tab row scrolls inside itself |
+| Prijzen | pass 1–12 (FE-6) | — |
+| Permissies | pass 1–12 (the pattern reference) | — |
+| Gebouwen / building detail | pass 1–12 | — |
+| Mensen (users / employees / invitations) | **fixed 7** ("Scope" column → "Toegang"/"Access"; invitation copy) · pass rest | — |
+| User detail / edit | **fixed 7** (memberships copy) · pass rest | — |
+| Diensten & catalogi | **fixed 8** (header actions wrap ≤900) · pass rest | — |
+| Bedrijven / Auditlog / Waarschuwingen / Medewerker-aanvragen | pass 1–12 | the audit log's diff grid scrolls inside its wrap by design |
+| Berichten / Notificaties | pass 1–12 | notification body text is server-composed in one language (§D.13, owner decision) |
+| Instellingen | pass 1–12 | — |
+| Customer: Facturen / Medewerkers / Documenten | **fixed 8** (Medewerkers cards at 390) · pass rest | — |
+
+#### Gates
+
+Measured at the branch tip, in `node:22-alpine` / the Playwright
+1.59.1 image; verbatim result lines.
+
+- `tsc --noEmit -p tsconfig.app.json` — clean (no output, exit 0).
+- `node scripts/i18n_audit.mjs` — `MISSING (absent from every bound
+  namespace): 0`; nl/en key sets identical after the 185-key removal.
+- `npm run build` — `✓ built in 5.80s`.
+- `eslint .` — `✖ 39 problems (38 errors, 1 warning)` — exactly the
+  baseline; the one warning is `hooks/useSavedBanner.ts:28`. The four
+  hits inside touched files are the pre-existing setState-in-effect
+  sites (ReportsPage line 297 at HEAD, now 308; three in DashboardPage
+  untouched by this sprint).
+- Backend tests: none — zero backend files changed.
+- **Playwright e2e (non-gate), the one full run** against the dev stack
+  (build served through a Host-rewriting vite preview; a second
+  `runserver` with `DEBUG=True`, `CONN_MAX_AGE=0` and the login throttle
+  lifted; `PLAYWRIGHT_BASE_URL` and `PLAYWRIGHT_API_BASE_URL` both on the
+  preview): `400 tests` → `49 failed · 4 skipped · 347 passed (50.3m)`.
+  The 49 were diagnosed (seeding without `company` — the backend now
+  requires it with more than one provider company; the Permissions page
+  fold; paginated scope assertions; a hardcoded backend host; the
+  customer's legitimate Advanced fold; cross-spec state leaks) and
+  repaired in a second round; the re-run of those 24 files: `265 tests`
+  → `21 failed · 4 skipped · 240 passed (30.0m)`. Two fix iterations is
+  the bound (§D.10); the 21 still failing are listed in the ledger as
+  open, with the run's own words, and are NOT forced green:
+  `cross_company_isolation` ×2, `scope` ×5 (the count-endpoint rewrite
+  disagrees with the seeded data), `sprint27f` ×2 (COMPANY_ADMIN
+  override reason flow), `sprint28_services` ×3, `sprint28_batch15_2`
+  ×1 (override radio draft), `sprint29_batch29_8` J1/J3/J4 (a provider
+  can no longer reach a spawned request's page — a retired surface, see
+  ledger 11), `sprint30` K2, `workflow` ×1 (BM on a WCA ticket),
+  `mobile_layout` ×2, `routes` "/django-admin/login/" (the proxied
+  harness serves the SPA there; passes on the real nginx).
+  Net: 379 of 400 tests describe the app and pass; 21 need a third look.
+- Screenshots (design evidence): the scratchpad `shots3/` set — 102
+  console/customer/staff pages at 1280, 26 customer/staff pages at 390,
+  57 console pages at 768 — plus the crmtest live walk (`walk/`).
+  Measured with the FE-6 overflow recipe: `scrollWidth − clientWidth`
+  is 0 on every page at every width after the fixes.
+
+#### The open ledger at the close of the redesign plan
+
+1. **Notification localization** — §D.13 written; the owner decides A /
+   B / hybrid. Until then email stays Dutch and the bell stays
+   per-site.
+2. **Turkish locale** — parked until after FE-7 (§D.12.8); the §D.13
+   catalogue would make it a copy task.
+3. **Toasts vs list rows** (rule 2) — the bottom-centre stack no longer
+   covers header actions (FE-3) but overlays list rows on long pages;
+   the seeded L1 warnings fire on every load.
+4. **Tablet (768)** — the sidebar stays pinned; every 860px table
+   scrolls in its wrap; proposal: collapse the sidebar at ≤900px (the
+   same breakpoint the tables collapse at) and drop the global 860px
+   floor to per-table minimums.
+5. **Rapporten structure** — no page primary, 18 secondaries, modals
+   not anchored; the weekly report's stacked tables; a rebuilt "focus"
+   worklist has no home on Rapporten (FE-6 removed it from the tickets
+   list; the link copy now promises only the per-building figures).
+6. **Rooster (contract hours) rows** — per-row action buttons and the
+   16-column layout below 1100px.
+7. **Tickets list filter density** (rule 4) — 15 visible choices kept
+   for admin efficiency; a "Meer filters" fold is the proposal.
+8. **Planning grid on a phone** — no card fallback for 54 columns.
+9. **Server error strings reach the screen verbatim** (~20 sites in
+   reports/hours) → map known codes to `t()` keys in `getApiError`.
+10. **Werkplanning behaviour items** carried from WP-1's own list:
+    an undated extra work cannot be planned in one action; unassigned
+    extra work never reaches the week view (already in NEXT §7–§8).
+11. **A spawned meerwerk has no provider-reachable request page.**
+    Once a request has spawned work, `/extra-work/:id` redirects the
+    provider to the job and the Meerwerk list hides the request; its
+    cancel dialog and its own status badge have no surface. Product
+    question: may a provider cancel a running request at all, and
+    where does its operational status show? (Found by the e2e repair,
+    `sprint29_batch29_8` J1/J3/J4.)
+12. **21 e2e tests still failing after two rounds** — see Gates; each
+    needs a third, individual look (spec or product) before the suite
+    can become a gate.
 
 ### Done — FE-6: admin console density (Addendum D §D.3.4 / §D.7 / §D.8.2–5, 2026-08-29)
 
@@ -3379,8 +3577,10 @@ still listed as open, and all of them had shipped.
 
 Raised but not decided. Listed so they are not re-discovered as new.
 
-- **Mobile UI polish.** The phone card lists exist everywhere the tables
-  do, but they have never had a pass of their own.
+- **Mobile UI polish.** FE-7 (2026-08-29) walked the customer portal
+  and the staff surface at 390 and the console at 768; what it left
+  open is in FE-7's ledger (the pinned sidebar at 768, the planning
+  grid on a phone).
 - **Refactoring.** `accounts/` carries four overlapping permission
   modules (CLAUDE.md §7), all live and all imported.
 - **A light / advanced mode split**, so an operator who wants six fields
