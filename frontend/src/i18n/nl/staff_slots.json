@@ -275,7 +275,6 @@
   "subtasks.edit": "Bewerken",
   "subtasks.empty_slots": "Nog geen werkblokken in dit onderdeel.",
   "subtasks.field_description_placeholder": "Optionele details voor dit onderdeel",
-  "subtasks.field_title_placeholder": "bijv. Ramen 3e verdieping schoonmaken",
   "subtasks.remove": "Verwijderen",
   "subtasks.section_title": "Onderdelen",
   "subtasks.slot_count_one": "{{count}} werkblok",

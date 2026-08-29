@@ -26,8 +26,6 @@
   "password_saving": "Saving…",
   "notifications_title": "Notification preferences",
   "notifications_helper": "Choose which events trigger an email to you and whether messages also appear in Notifications. Security and onboarding emails are always sent.",
-  "notifications_on": "On",
-  "notifications_off": "Off",
   "event_ticket_created": "Ticket created",
   "event_ticket_status_changed": "Ticket status changed",
   "event_ticket_assigned": "Ticket assigned",
