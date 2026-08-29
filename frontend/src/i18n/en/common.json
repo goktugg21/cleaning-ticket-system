@@ -974,8 +974,8 @@
   "customer_pricing.delete_confirm_body": "This contract price will be removed. Future extra-work requests will fall back to the quote phase until a new price is created.",
   "customer_pricing.cancel": "Cancel",
   "customer_pricing.save": "Save",
-  "customer_pricing.empty_title": "No contract prices yet",
-  "customer_pricing.empty_description": "Add the first contract price to unlock the instant-ticket path for this customer.",
+  "customer_pricing.empty_title": "No prices agreed yet",
+  "customer_pricing.empty_description": "Add a price, or copy the catalog's default prices from the menu at the top right.",
   "customer_pricing.col_service": "Service",
   "customer_pricing.col_unit_price": "Unit price",
   "customer_pricing.col_default_price": "Default price",
@@ -2723,5 +2723,13 @@
   "customer_view.overview.users_count_one": "{{count}} user",
   "customer_view.overview.users_count_other": "{{count}} users",
   "nav.people": "People",
-  "nav.services_catalogs": "Services & catalogs"
+  "nav.services_catalogs": "Services & catalogs",
+  "customer_pricing.more_actions": "More actions",
+  "customer_pricing.filter_all": "All",
+  "customer_pricing.search_placeholder": "Search a price…",
+  "customer_pricing.rows_label": "Agreed prices",
+  "customer_pricing.no_match": "No price matches. Change the search or the folder.",
+  "customer_pricing.field_folder": "Folder",
+  "customer_pricing.field_folder_new": "New folder…",
+  "customer_pricing.field_folder_new_name": "Name of the new folder"
 }

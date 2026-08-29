@@ -15705,3 +15705,51 @@ table.assign-table { min-width: 0; width: 100%; }
    its actions, without a second title under the surface's own. */
 .page-header-embedded { margin-bottom: 12px; }
 .page-header-embedded .page-sub { margin-top: 0; }
+/* The overflow menu (FE-6): one trigger, a list anchored under it. */
+.overflow-menu { position: relative; display: inline-flex; }
+.overflow-menu-trigger { padding-left: 8px; padding-right: 8px; }
+.overflow-menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 220px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.overflow-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: var(--font-sm);
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+.overflow-menu-item:hover:not(:disabled) { background: var(--surface-2); }
+.overflow-menu-item:disabled { color: var(--text-faint); cursor: default; }
+.overflow-menu-item.destructive { color: var(--red); }
+.overflow-menu-item[aria-pressed="true"]::before { content: "\2713\00a0"; }
+
+/* Pricing page (FE-6): the rows FIRST, folders as filter chips beside
+   a search box, on one line that wraps. */
+.pricing-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.pricing-toolbar-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.pricing-toolbar-search { flex: 0 1 260px; min-width: 160px; }
+.pricing-chip-count { margin-left: 6px; opacity: 0.7; font-weight: 500; }

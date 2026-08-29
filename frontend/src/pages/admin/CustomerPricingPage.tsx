@@ -1,7 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
@@ -46,6 +45,8 @@ import { useToast } from "../../components/ToastProvider";
 import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 import { Toggle } from "../../components/Toggle";
 import { CustomerSubPageHeader } from "./customer/CustomerSubPageHeader";
+import { BoundedList } from "../../components/BoundedList";
+import { OverflowMenu } from "../../components/OverflowMenu";
 
 /**
  * Sprint 28 Batch 5 — Per-customer contract pricing.
@@ -78,6 +79,11 @@ import { CustomerSubPageHeader } from "./customer/CustomerSubPageHeader";
  */
 const CUSTOM_SERVICE_SENTINEL = "__custom__" as const;
 
+/** FE-6 — the folder select's "make a new one" option. Creating a
+ *  folder lives INSIDE the add/edit flow now: pick it, name it, save. */
+const NEW_FOLDER_SENTINEL = "__new_folder__" as const;
+type FolderSelection = number | "" | typeof NEW_FOLDER_SENTINEL;
+
 type ServiceSelection = number | "" | typeof CUSTOM_SERVICE_SENTINEL;
 
 /**
@@ -98,6 +104,9 @@ interface PriceFormState {
   valid_from: string;
   valid_to: string; // empty string = open-ended
   is_active: boolean;
+  /** FE-6 — the folder the row files under; "" = no folder. */
+  folder: FolderSelection;
+  new_folder_name: string;
 }
 
 /**
@@ -155,6 +164,8 @@ function buildEmptyForm(): PriceFormState {
     valid_from: todayISO(),
     valid_to: "",
     is_active: true,
+    folder: "",
+    new_folder_name: "",
   };
 }
 
@@ -241,6 +252,8 @@ export function CustomerPricingPage() {
   // Sprint 137 item 2 — off by default: a deleted (soft-archived) price
   // must not come back unasked. Flipping it refetches both price lists.
   const [showArchived, setShowArchived] = useState(false);
+  // FE-6 — the rows are searchable; the folder chips narrow them.
+  const [search, setSearch] = useState("");
 
   // RF-2 — one selection / modal / delete-dialog for both price kinds.
   const [selected, setSelected] = useState<PricingRow | null>(null);
@@ -439,6 +452,8 @@ export function CustomerPricingPage() {
       service: first ? first.id : "",
       unit_price: first ? first.default_unit_price : "0.00",
       vat_pct: first ? first.default_vat_pct : "21.00",
+      // The folder chip that is on is what the operator meant.
+      folder: typeof activeCategory === "number" ? activeCategory : "",
     });
     setFormError("");
   }
@@ -459,6 +474,7 @@ export function CustomerPricingPage() {
         valid_from: price.valid_from,
         valid_to: price.valid_to ?? "",
         is_active: price.is_active,
+        folder: price.folder ?? "",
       });
     } else {
       const price = entry.row;
@@ -470,6 +486,7 @@ export function CustomerPricingPage() {
         valid_from: price.valid_from,
         valid_to: price.valid_to ?? "",
         is_active: price.is_active,
+        folder: price.folder ?? "",
       });
     }
     setFormError("");
@@ -527,6 +544,13 @@ export function CustomerPricingPage() {
       setFormError(t("customer_pricing.error_valid_to_before_valid_from"));
       return;
     }
+    if (
+      form.folder === NEW_FOLDER_SENTINEL &&
+      !form.new_folder_name.trim()
+    ) {
+      setFormError(t("customer_pricing.folder_error_name_required"));
+      return;
+    }
     setFormBusy(true);
     setFormError("");
     // Shared across both payload shapes — these fields were already
@@ -538,13 +562,19 @@ export function CustomerPricingPage() {
       valid_to: form.valid_to === "" ? null : form.valid_to,
       is_active: form.is_active,
     };
-    // Sprint 143 §3 — the folder a NEW row lands in: the one the
-    // operator is currently inside, or none when they are on the index
-    // or in a sentinel bucket (folderless / custom / unknown), where
-    // "no folder" is the honest answer.
-    const creatingInFolderId =
-      typeof activeCategory === "number" ? activeCategory : null;
     try {
+      // FE-6 — the folder the row files under, from the form itself:
+      // an existing one, none, or a NEW one made right here. The folder
+      // is created first; if that fails nothing else is written.
+      let folderId: number | null =
+        typeof form.folder === "number" ? form.folder : null;
+      if (form.folder === NEW_FOLDER_SENTINEL) {
+        const created = await createCustomerPriceFolder(numericId, {
+          name: form.new_folder_name.trim(),
+        });
+        folderId = created.id;
+      }
+      const creatingInFolderId = folderId;
       if (isCustom) {
         const payload: CustomerCustomPriceCreatePayload = {
           ...shared,
@@ -571,7 +601,7 @@ export function CustomerPricingPage() {
           const updated = await updateCustomerCustomPrice(
             numericId,
             selected.row.id,
-            payload,
+            { ...payload, folder: folderId },
           );
           await refreshPricingRows(numericId);
           setSelected({ kind: "custom", row: updated });
@@ -593,7 +623,7 @@ export function CustomerPricingPage() {
           const updated = await updateCustomerPrice(
             numericId,
             selected.row.id,
-            payload,
+            { ...payload, folder: folderId },
           );
           await refreshPricingRows(numericId);
           setSelected({ kind: "contract", row: updated });
@@ -1171,8 +1201,18 @@ export function CustomerPricingPage() {
   // emptied out (e.g. the archived rows were just hidden again)
   // degrades to an empty category page with a working breadcrumb
   // rather than a crash or a silent bounce back to the index.
-  const visibleRows =
-    activeCategory === null ? [] : (rowsByCategory.get(activeCategory) ?? []);
+  // FE-6 — the list opens on EVERY row; a chip narrows to one folder
+  // (or one sentinel bucket), the search box narrows by name. No
+  // category door: the rows are the page.
+  const searchTerm = search.trim().toLowerCase();
+  const visibleRows = (
+    activeCategory === null
+      ? unifiedRows
+      : (rowsByCategory.get(activeCategory) ?? [])
+  ).filter(
+    (entry) =>
+      !searchTerm || resolveRowName(entry).toLowerCase().includes(searchTerm),
+  );
 
   // Sprint 138 §3 — the rows edit mode may act on. Archived price rows
   // are read-only records, so they are excluded from selection entirely
@@ -1245,14 +1285,6 @@ export function CustomerPricingPage() {
       !copyFilterTerm || service.name.toLowerCase().includes(copyFilterTerm),
     fallbackName: t("customer_pricing.category_unknown"),
   });
-
-  const activeCategoryLabel =
-    activeCategory === null
-      ? ""
-      : (categoryCards.find((card) => card.key === activeCategory)?.label ??
-        (typeof activeCategory === "number"
-          ? (folders.find((f) => f.id === activeCategory)?.name ?? "")
-          : ""));
 
   // Navigating between the index and a category clears the row detail
   // panel — a selected row from another category must not linger under
@@ -1515,55 +1547,71 @@ export function CustomerPricingPage() {
         tab="pricing"
         actions={
           <>
-          <button
-            type="button"
-            className={
-              showArchived ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm"
-            }
-            data-testid="customer-pricing-show-archived-toggle"
-            aria-pressed={showArchived}
-            onClick={() => setShowArchived((current) => !current)}
-            disabled={loading || numericId === null}
-          >
-            {/* Sprint 138 §4 — the label reflects STATE. It used to
-                read "Show archived" whether or not archived rows were
-                already showing, so hiding them meant pressing a button
-                that said "show". */}
-            {showArchived
-              ? t("customer_pricing.hide_archived_toggle")
-              : t("customer_pricing.show_archived_toggle")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            data-testid="customer-pricing-copy-default-button"
-            onClick={openCopyDefault}
-            disabled={loading || numericId === null}
-          >
-            {t("customer_pricing.copy_from_default_button")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            data-testid="customer-pricing-bulk-raise-button"
-            onClick={openBulkRaise}
-            disabled={loading || numericId === null}
-          >
-            {t("customer_pricing.bulk_raise_button")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            data-testid="customer-pricing-add-button"
-            onClick={openCreateModal}
-            // RF-2 — no longer gated on the catalog having services: the
-            // "Other / Custom…" option is always available, so an empty
-            // catalog must not block adding a custom price line.
-            disabled={loading || numericId === null}
-          >
-            {t("customer_pricing.add_button")}
-          </button>
-                  </>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              data-testid="customer-pricing-add-button"
+              onClick={openCreateModal}
+              disabled={loading || numericId === null}
+            >
+              {t("customer_pricing.add_button")}
+            </button>
+            {/* Rule 3: everything that is not THE action folds. */}
+            <OverflowMenu
+              label={t("customer_pricing.more_actions")}
+              testIdPrefix="customer-pricing"
+              items={[
+                {
+                  key: "copy-default",
+                  label: t("customer_pricing.copy_from_default_button"),
+                  onClick: openCopyDefault,
+                  disabled: loading || numericId === null,
+                },
+                {
+                  key: "from-category",
+                  label: t("customer_pricing.folder_from_category_button"),
+                  onClick: openFromCategory,
+                  disabled: loading || numericId === null,
+                },
+                {
+                  key: "adjust",
+                  label: t("customer_pricing.bulk_raise_button"),
+                  onClick: openBulkRaise,
+                  disabled: loading || numericId === null,
+                },
+                {
+                  key: "new-folder",
+                  label: t("customer_pricing.folder_new_button"),
+                  onClick: openCreateFolder,
+                  disabled: loading || numericId === null,
+                },
+                ...(activeFolder
+                  ? [
+                      {
+                        key: "rename-folder",
+                        label: t("customer_pricing.folder_rename_button"),
+                        onClick: () => openRenameFolder(activeFolder),
+                      },
+                      {
+                        key: "delete-folder",
+                        label: t("customer_pricing.folder_delete_button"),
+                        onClick: () => setFolderDeleteTarget(activeFolder),
+                        destructive: true,
+                      },
+                    ]
+                  : []),
+                {
+                  key: "archived",
+                  label: showArchived
+                    ? t("customer_pricing.hide_archived_toggle")
+                    : t("customer_pricing.show_archived_toggle"),
+                  onClick: () => setShowArchived((current) => !current),
+                  pressed: showArchived,
+                  disabled: loading || numericId === null,
+                },
+              ]}
+            />
+          </>
         }
       />
 
@@ -1579,186 +1627,73 @@ export function CustomerPricingPage() {
         </div>
       ) : (
         <>
-          {/* Sprint 137 item 4 — category index. The flat one-table
-              page became unreadable at real contract sizes; this
-              mirrors the shape of the owner's reference tool: pick a
-              category, drill in, breadcrumb back. */}
-          {activeCategory === null && (
-            <div className="card" data-testid="customer-pricing-categories">
-              {/* Sprint 143 §3 — the two ways to create a folder. Always
-                  offered, including on a brand-new customer's empty page,
-                  which is where they matter most: a new customer opens
-                  with no folders and no prices (there is no fallback to
-                  company defaults — `resolve_price` has none), so these
-                  buttons are the whole starting point. */}
-              <div
-                className="page-header-actions"
-                style={{ padding: "14px 20px 0", justifyContent: "flex-end" }}
-              >
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  data-testid="customer-pricing-new-folder"
-                  onClick={openCreateFolder}
-                >
-                  {t("customer_pricing.folder_new_button")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  data-testid="customer-pricing-folder-from-category"
-                  onClick={openFromCategory}
-                >
-                  {t("customer_pricing.folder_from_category_button")}
-                </button>
-              </div>
-              {categoryCards.length === 0 ? (
-                <div
-                  style={{ padding: "32px 24px", textAlign: "center" }}
-                  data-testid="customer-pricing-empty"
-                >
-                  <h3 className="empty-title" style={{ marginBottom: 8 }}>
-                    {t("customer_pricing.empty_title")}
-                  </h3>
-                  <p className="muted" style={{ margin: 0 }}>
-                    {t("customer_pricing.empty_description")}
-                  </p>
-                </div>
-              ) : (
-                <div style={{ padding: "18px 20px" }}>
-                  <div className="muted small" style={{ marginBottom: 12 }}>
-                    {t("customer_pricing.folders_helper")}
-                  </div>
-                  <div className="pricing-category-grid">
-                    {categoryCards.map((card) => (
-                      <button
-                        type="button"
-                        key={String(card.key)}
-                        className="pricing-category-card"
-                        data-testid="customer-pricing-category-card"
-                        data-category-key={String(card.key)}
-                        data-category-count={card.count}
-                        onClick={() => openCategory(card.key)}
-                      >
-                        <span className="pricing-category-card-name">
-                          {card.label}
-                          {!card.isActive && (
-                            <span
-                              className="badge badge-muted"
-                              style={{ marginLeft: 8 }}
-                            >
-                              {t("admin.status_inactive")}
-                            </span>
-                          )}
-                        </span>
-                        {/* Sprint 154 §L.2 — the count is the card's
-                            headline figure now, not a muted sub-line. */}
-                        <span className="pricing-category-card-count">
-                          {card.count}
-                        </span>
-                        <span className="pricing-category-card-count-label">
-                          {card.count === 0
-                            ? t("customer_pricing.category_card_empty")
-                            : t("customer_pricing.category_card_count", {
-                                count: card.count,
-                              })}
-                        </span>
-                      </button>
-                    ))}
-                    {/* Sprint 154 §L.2 — a large "+" tile at the end of
-                        the grid, opening the EXISTING create-folder flow.
-                        Styled as a card so the grid reads as one row of
-                        tiles rather than a row plus a stray button. */}
-                    <button
-                      type="button"
-                      className="pricing-category-card pricing-category-card-add"
-                      data-testid="customer-pricing-category-add-card"
-                      onClick={openCreateFolder}
-                    >
-                      <span
-                        className="pricing-category-card-add-plus"
-                        aria-hidden="true"
-                      >
-                        +
-                      </span>
-                      <span className="pricing-category-card-name">
-                        {t("customer_pricing.folder_new_button")}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeCategory !== null && (
           <div className="card" data-testid="customer-pricing-list">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "14px 20px",
-                borderBottom: "1px solid var(--border)",
-              }}
-            >
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                data-testid="customer-pricing-category-back"
-                onClick={backToCategories}
+            {/* FE-6 — the toolbar: the folder chips (the customer's own
+                folders, then the buckets that hold rows), the search
+                box, and Edit. The rows below are always on screen. */}
+            <div className="pricing-toolbar">
+              <div
+                className="pricing-toolbar-chips"
+                role="group"
+                aria-label={t("customer_pricing.folders_helper")}
+                data-testid="customer-pricing-folder-chips"
               >
-                <ChevronLeft size={14} strokeWidth={2.5} />
-                {t("customer_pricing.breadcrumb_all")}
-              </button>
-              <span
-                className="section-title"
-                style={{ margin: 0 }}
-                data-testid="customer-pricing-category-title"
-              >
-                {activeCategoryLabel}
-              </span>
-              {/* Sprint 143 §3 — a real folder can be renamed or
-                  deleted; the sentinel buckets (folderless / custom /
-                  unknown) are not folders and get neither. */}
-              {activeFolder && (
-                <>
+                <button
+                  type="button"
+                  className={
+                    activeCategory === null
+                      ? "btn btn-primary btn-sm"
+                      : "btn btn-secondary btn-sm"
+                  }
+                  aria-pressed={activeCategory === null}
+                  onClick={backToCategories}
+                  data-testid="customer-pricing-chip-all"
+                >
+                  {t("customer_pricing.filter_all")}
+                  <span className="pricing-chip-count">{unifiedRows.length}</span>
+                </button>
+                {categoryCards.map((card) => (
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm"
-                    style={{ marginLeft: "auto" }}
-                    data-testid="customer-pricing-folder-rename"
-                    onClick={() => openRenameFolder(activeFolder)}
+                    key={String(card.key)}
+                    className={
+                      activeCategory === card.key
+                        ? "btn btn-primary btn-sm"
+                        : "btn btn-secondary btn-sm"
+                    }
+                    aria-pressed={activeCategory === card.key}
+                    data-testid="customer-pricing-category-card"
+                    data-category-key={String(card.key)}
+                    data-category-count={card.count}
+                    onClick={() =>
+                      activeCategory === card.key
+                        ? backToCategories()
+                        : openCategory(card.key)
+                    }
                   >
-                    {t("customer_pricing.folder_rename_button")}
+                    {card.label}
+                    {!card.isActive && (
+                      <span className="badge badge-muted" style={{ marginLeft: 6 }}>
+                        {t("admin.status_inactive")}
+                      </span>
+                    )}
+                    <span className="pricing-chip-count">{card.count}</span>
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="customer-pricing-folder-delete"
-                    onClick={() => setFolderDeleteTarget(activeFolder)}
-                  >
-                    {t("customer_pricing.folder_delete_button")}
-                  </button>
-                </>
-              )}
-              {/* Sprint 137 item 7 — Edit / Done. Outside edit mode the
-                  table below looks exactly as it did before.
-
-                  Sprint 143 §7 — HIDDEN, not disabled, when there is
-                  nothing it could act on. Sprint 142 fixed the GATE
-                  (`selectableRows`, not `visibleRows` — the latter
-                  includes archived rows, which are read-only and carry
-                  no checkbox) but left the button on screen greyed out
-                  with a tooltip. The running theme of Sprints 138-141 is
-                  that a control which cannot work should not be offered
-                  at all: a disabled button still asks the operator to
-                  hover it to find out why. */}
+                ))}
+              </div>
+              <input
+                type="search"
+                className="field-input pricing-toolbar-search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("customer_pricing.search_placeholder")}
+                aria-label={t("customer_pricing.search_placeholder")}
+                data-testid="customer-pricing-search"
+              />
               {selectableRows.length > 0 && (
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  style={activeFolder ? undefined : { marginLeft: "auto" }}
                   data-testid="customer-pricing-edit-mode-toggle"
                   aria-pressed={editMode}
                   onClick={() =>
@@ -1874,16 +1809,34 @@ export function CustomerPricingPage() {
               </div>
             )}
 
-            {visibleRows.length === 0 ? (
+            {unifiedRows.length === 0 ? (
+              <div
+                style={{ padding: "32px 24px", textAlign: "center" }}
+                data-testid="customer-pricing-empty"
+              >
+                <h3 className="empty-title" style={{ marginBottom: 8 }}>
+                  {t("customer_pricing.empty_title")}
+                </h3>
+                <p className="muted" style={{ margin: 0 }}>
+                  {t("customer_pricing.empty_description")}
+                </p>
+              </div>
+            ) : visibleRows.length === 0 ? (
               <div
                 style={{ padding: "32px 24px", textAlign: "center" }}
                 data-testid="customer-pricing-category-empty"
               >
                 <p className="muted" style={{ margin: 0 }}>
-                  {t("customer_pricing.category_drill_empty")}
+                  {t("customer_pricing.no_match")}
                 </p>
               </div>
             ) : (
+              <BoundedList
+                size="lg"
+                count={visibleRows.length}
+                ariaLabel={t("customer_pricing.rows_label")}
+                testIdPrefix="customer-pricing-rows"
+              >
               <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -2010,9 +1963,9 @@ export function CustomerPricingPage() {
                   </tbody>
                 </table>
               </div>
+              </BoundedList>
             )}
           </div>
-          )}
 
           {selected && (
             <section
@@ -2446,6 +2399,62 @@ export function CustomerPricingPage() {
                   {t("customer_pricing.field_valid_to_hint")}
                 </div>
               </div>
+            </div>
+
+            {/* FE-6 — the folder, chosen (or made) right here. */}
+            <div className="field">
+              <label className="field-label" htmlFor="price-folder">
+                {t("customer_pricing.field_folder")}
+              </label>
+              <select
+                id="price-folder"
+                className="field-select"
+                value={form.folder === "" ? "" : String(form.folder)}
+                onChange={(event) => {
+                  const v = event.target.value;
+                  setForm((prev) => ({
+                    ...prev,
+                    folder:
+                      v === ""
+                        ? ""
+                        : v === NEW_FOLDER_SENTINEL
+                          ? NEW_FOLDER_SENTINEL
+                          : Number(v),
+                  }));
+                }}
+                data-testid="customer-pricing-input-folder"
+                disabled={formBusy}
+              >
+                <option value="">{t("customer_pricing.folder_none")}</option>
+                {folders
+                  .filter((f) => f.is_active || f.id === form.folder)
+                  .map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                <option value={NEW_FOLDER_SENTINEL}>
+                  {t("customer_pricing.field_folder_new")}
+                </option>
+              </select>
+              {form.folder === NEW_FOLDER_SENTINEL && (
+                <input
+                  className="field-input"
+                  style={{ marginTop: 6 }}
+                  value={form.new_folder_name}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      new_folder_name: event.target.value,
+                    }))
+                  }
+                  placeholder={t("customer_pricing.field_folder_new_name")}
+                  aria-label={t("customer_pricing.field_folder_new_name")}
+                  data-testid="customer-pricing-input-new-folder-name"
+                  autoFocus
+                  disabled={formBusy}
+                />
+              )}
             </div>
 
             <div className="field">

@@ -974,8 +974,8 @@
   "customer_pricing.delete_confirm_body": "Deze contractprijs wordt verwijderd. Toekomstige extra-werk-aanvragen vallen terug op de offertefase totdat er een nieuwe prijs is aangemaakt.",
   "customer_pricing.cancel": "Annuleren",
   "customer_pricing.save": "Opslaan",
-  "customer_pricing.empty_title": "Nog geen contractprijzen",
-  "customer_pricing.empty_description": "Voeg de eerste contractprijs toe om de instant-ticket-route voor deze klant te activeren.",
+  "customer_pricing.empty_title": "Nog geen prijzen afgesproken",
+  "customer_pricing.empty_description": "Voeg een prijs toe, of kopieer de standaardprijzen uit de catalogus via het menu rechtsboven.",
   "customer_pricing.col_service": "Dienst",
   "customer_pricing.col_unit_price": "Eenheidsprijs",
   "customer_pricing.col_default_price": "Standaardprijs",
@@ -2723,5 +2723,13 @@
   "customer_view.overview.users_count_one": "{{count}} gebruiker",
   "customer_view.overview.users_count_other": "{{count}} gebruikers",
   "nav.people": "Mensen",
-  "nav.services_catalogs": "Diensten & catalogi"
+  "nav.services_catalogs": "Diensten & catalogi",
+  "customer_pricing.more_actions": "Meer acties",
+  "customer_pricing.filter_all": "Alle",
+  "customer_pricing.search_placeholder": "Zoek een prijs…",
+  "customer_pricing.rows_label": "Prijsafspraken",
+  "customer_pricing.no_match": "Geen prijs gevonden. Pas het zoekwoord of de map aan.",
+  "customer_pricing.field_folder": "Map",
+  "customer_pricing.field_folder_new": "Nieuwe map…",
+  "customer_pricing.field_folder_new_name": "Naam van de nieuwe map"
 }
