@@ -1277,7 +1277,12 @@ export function CreateExtraWorkPage() {
             <div className="form-section-title">{t("create.s_urgency")}</div>
             <label
               className="field"
-              style={{ display: "flex", alignItems: "center", gap: 10 }}
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+              }}
             >
               <input
                 type="checkbox"

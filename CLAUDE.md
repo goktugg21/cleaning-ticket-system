@@ -139,9 +139,12 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   the SMTP transport.
 - **Frontend gate** (all three, in `node:22-alpine`):
   `tsc --noEmit -p tsconfig.app.json` + `eslint .` + `npm run build`.
-  **ESLint baseline is EXACTLY 42 (41 errors, 1 warning)** as measured
-  on origin on 2026-08-23 (twice, independently; re-confirmed at W18
-  `edce230`). The one warning, `react-hooks/exhaustive-deps`, is
+  **ESLint baseline is EXACTLY 39 (38 errors, 1 warning)** as measured
+  on `feat/fe-5-provider-forms` on 2026-08-29 (FE-5 replaced the
+  provider ticket form's three setState-in-effect resyncs with
+  derivations; before that it was 42 (41 errors, 1 warning), measured
+  on origin on 2026-08-23 twice and re-confirmed at W18 `edce230`).
+  The one warning, `react-hooks/exhaustive-deps`, is
   `hooks/useSavedBanner.ts:28` (missing `flagMap` — omitted on purpose,
   it changes identity every render). The previously documented "44
   (42 errors, 2 warnings) as of `4823b17`" was stale. Re-measure with

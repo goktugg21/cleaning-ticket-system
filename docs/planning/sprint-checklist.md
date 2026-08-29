@@ -36,6 +36,62 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — FE-5: provider forms (Addendum D §D.5.2 / §D.6 rule 12 / §D.7, 2026-08-29)
+
+Branch `feat/fe-5-provider-forms`, stacked on FE-4 (the train; main
+untouched). Zero migrations; no state-machine, permission or endpoint
+contract changes — the forms submit to the existing endpoints with the
+existing fields. Backend limited to one additive read-only boolean.
+
+- **Step 0 (own commit):** the Werkplanning payload carries `can_plan`
+  (the provider-management rule the two schedule endpoints enforce);
+  the undated lane renders "Plan vandaag" only when it is true and its
+  caption stops inviting a viewer who cannot plan
+  (`tickets.tests.test_fe5_can_plan`).
+- **Provider meerwerk create** (`/extra-work/new`): ONE staged page —
+  Voor wie (customer + building; afdeling / werktype / invoice target
+  fill in from the customer's defaults as facts with a pencil) → Wat
+  (the SAME cart as the customer flow: agreed prices with amounts,
+  "iets anders" lines with "prijs volgt", a note per line; the price
+  folder is a filter inside the picker; title + notes fold and derive
+  from the cart when empty) → Wanneer (one wished date; planned end,
+  deadline, the multi-day series and the completion proof behind
+  "Planning") → Urgentie (one "spoed" control) → the cart as created,
+  the sums, and the server's own sentence about what happens next; a
+  choice renders only when `allowed_intents` holds more than one (for a
+  provider actor SoT §5.3 never yields two, so the sentence stands
+  alone). Visible decisions before any fold: 4 empty, 5 with a customer
+  chosen (the cart is one).
+- **"Request a quote" folded in:** route redirects to `/extra-work/new`;
+  the customer nav child, the New-door answer and the list chooser's
+  option are gone; the intent is derived at the bottom of the form.
+- **Shared cart pieces:** `components/meerwerk/` (cart helpers, priced
+  picker — bounded, searchable, folder chips —, custom lines editor,
+  confirm list, outcome sentence) now render on both the customer flow
+  and the provider page. The customer flow's behaviour and test ids are
+  unchanged; `lib/meldingTitle.ts` is the one title mapping for both
+  ticket forms.
+- **Recurring job form:** Wat (customer, building, title; notes +
+  labels fold) → Wanneer (how often, on which days, from, until) →
+  Bezoeken per dag (one sentence; the default single visit is a fact
+  with a pencil, the editor opens on request) → Prijs (the contract
+  line, defaulted when the customer has exactly one; W-PW1 left no
+  per-window pricing to fold) → Ploeg (collapsed, summary line).
+  Visible decisions: 7 empty; 8 once a customer with several contract
+  lines is chosen.
+- **Ticket create (provider):** Voor wie, one description (first line =
+  title), Type / room / wished date behind "Meer details" (opens by
+  itself when `/new` pre-answered the type), priority cards, photos;
+  the side column keeps three lines. Visible decisions: 4 (+ the
+  optional photo drop zone). The three inherited setState-in-effect
+  resyncs became derivations; the ESLint baseline is now 39.
+- **Voice pass:** every label/caption on the three forms rewritten in
+  nl/en lockstep; 88 dead `extra_work` keys and the quote keys removed.
+- **Not done / open:** none of the three forms reached a state the
+  §D.10 fix loop could not close; the "intent choice visible" screenshot
+  is the customer flow's auto-start choice (FE-2 surface), because the
+  provider actor is never offered two intents.
+
 ### Done — FE-4: schedule clarity, the owner's first-round feedback (Addendum D §D.12, 2026-08-29)
 
 Branch `feat/fe-4-schedule-clarity`, stacked on FE-3 (the train; main
