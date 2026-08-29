@@ -216,7 +216,7 @@ export function AppShell({ children }: AppShellProps) {
   const isCustomer = isCustomerUser(me?.role);
   const isStaffOnly = me?.role === "STAFF";
 
-  // Werkqueue lights on the list and a ticket, never on a sibling page.
+  // Tickets (the work queue) lights on the list and a ticket, never on a sibling page.
   const ticketsActive = /^\/tickets(\/\d+(\/.*)?)?$/.test(location.pathname);
   // Meerwerk (the commercial pipeline, /extra-work) lights across its
   // own subtree — the list, both create forms and every detail page.
@@ -709,7 +709,7 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.new_work")}
               </NavLink>
-              {/* §D.3.4 — the WERKQUEUE: tickets and meerwerk-execution
+              {/* §D.3.4 — the work queue, labelled "Tickets" (owner decision 2026-08-29): tickets and meerwerk-execution
                   on one list, told apart by the type pill. The separate
                   "Chargeable work" entries are gone; the meerwerk-only
                   view is the list's own work filter. */}

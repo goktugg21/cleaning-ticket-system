@@ -155,9 +155,11 @@ read-only reachable from customer context, not top-level (**DECISION**).
 
 Four groups, entries collapsed from ~21 to ~12:
 
-- **Werk:** Dashboard, Werkqueue (tickets + meerwerk-execution with type
-  pills; "Chargeable work" becomes a saved filter), Meerwerk (commercial
-  pipeline: quotes/pricing/approvals), Terugkerend werk.
+- **Werk:** Dashboard, **Tickets** (the work queue: tickets +
+  meerwerk-execution with type pills; "Chargeable work" becomes a saved
+  filter — **owner decision 2026-08-29: the queue keeps Ramazan's word
+  "Tickets" in BOTH locales, never "Werkqueue" / "Work queue"**), Meerwerk
+  (commercial pipeline: quotes/pricing/approvals), Terugkerend werk.
 - **Financieel:** Facturen, Contracten, Uren.
 - **Klanten & mensen:** Klanten, Gebouwen, **Mensen** (Users + Employees +
   Invitations merged into one surface with tabs — **DECISION**),
