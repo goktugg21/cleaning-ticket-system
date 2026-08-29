@@ -85,6 +85,23 @@ async function resolveCustomerId(
   return match!.id;
 }
 
+
+/**
+ * Sprint 142 — a catalog row is per provider COMPANY, and `company` is
+ * REQUIRED on create as soon as more than one company exists (the dev
+ * database now holds four). Seed everything under "Osius Demo".
+ */
+async function resolveOsiusCompanyId(api: APIRequestContext): Promise<number> {
+  const response = await api.get("/api/companies/?page_size=50");
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    results: Array<{ id: number; name: string }>;
+  };
+  const match = body.results.find((c) => c.name === "Osius Demo");
+  expect(match, 'company "Osius Demo" present').toBeTruthy();
+  return match!.id;
+}
+
 interface CategoryRow {
   id: number;
   name: string;
@@ -109,11 +126,12 @@ async function ensureSeedService(
   // collide. Each invocation creates its own category + service pair so
   // we can clean up without affecting other suites.
   const ts = Date.now();
+  const companyId = await resolveOsiusCompanyId(api);
   const categoryName = `Pricing Cat ${ts} ${Math.random()
     .toString(36)
     .slice(2, 7)}`;
   const catResponse = await api.post("/api/services/categories/", {
-    data: { name: categoryName, description: "", is_active: true },
+    data: { company: companyId, name: categoryName, description: "", is_active: true },
   });
   expect(catResponse.status()).toBe(201);
   const cat = (await catResponse.json()) as CategoryRow;
@@ -123,6 +141,7 @@ async function ensureSeedService(
     .slice(2, 7)}`;
   const svcResponse = await api.post("/api/services/", {
     data: {
+      company: companyId,
       category: cat.id,
       name: serviceName,
       description: "",

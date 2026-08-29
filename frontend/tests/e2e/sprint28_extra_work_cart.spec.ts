@@ -112,6 +112,23 @@ async function resolveBuildingId(
   return match!.id;
 }
 
+
+/**
+ * Sprint 142 — a catalog row is per provider COMPANY, and `company` is
+ * REQUIRED on create as soon as more than one company exists (the dev
+ * database now holds four). Seed everything under "Osius Demo".
+ */
+async function resolveOsiusCompanyId(api: APIRequestContext): Promise<number> {
+  const response = await api.get("/api/companies/?page_size=50");
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    results: Array<{ id: number; name: string }>;
+  };
+  const match = body.results.find((c) => c.name === "Osius Demo");
+  expect(match, 'company "Osius Demo" present').toBeTruthy();
+  return match!.id;
+}
+
 interface CategoryRow {
   id: number;
   name: string;
@@ -147,9 +164,11 @@ async function ensureSeedService(
   suffix: string,
 ): Promise<{ category: CategoryRow; service: ServiceRow }> {
   const ts = Date.now();
+  const companyId = await resolveOsiusCompanyId(api);
   const tag = `${suffix}-${ts}-${Math.random().toString(36).slice(2, 7)}`;
   const catResponse = await api.post("/api/services/categories/", {
     data: {
+      company: companyId,
       name: `B6 Cat ${tag}`,
       description: "",
       is_active: true,
@@ -160,6 +179,7 @@ async function ensureSeedService(
 
   const svcResponse = await api.post("/api/services/", {
     data: {
+      company: companyId,
       category: cat.id,
       name: `B6 Svc ${tag}`,
       description: "",

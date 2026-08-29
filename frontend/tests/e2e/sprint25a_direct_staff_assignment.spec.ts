@@ -13,7 +13,9 @@ import { openTicketTab } from "./fixtures/tickets";
  *   API gate
  *     - COMPANY_ADMIN can add and remove a STAFF assignment via the
  *       new endpoint without any staff-initiated request.
- *     - Add is idempotent (re-POST returns 200, no duplicate row).
+ *     - W26.3 — ONE PERSON, ONE SLOT PER LEVEL: a re-POST for the same
+ *       person on the same ticket is rejected (400), never a second
+ *       base slot.
  *     - Cross-company COMPANY_ADMIN cannot add (404 via queryset).
  *     - CUSTOMER_USER cannot add (403).
  *     - STAFF cannot add (403).
@@ -174,15 +176,13 @@ test.describe("Sprint 25A → direct staff assignment API gate", () => {
       expect(addBody.user_id).toBe(staffId);
       const slotId = addBody.id as number;
 
-      // Multi-slot per staff — a re-POST is NO LONGER idempotent: it
-      // creates a SECOND slot row (201) for the same staff.
+      // W26.3 — one person, one slot per level: the same staff on the
+      // same ticket again is refused at the chokepoint.
       const dup = await admin.post(
         `/api/tickets/${ticketId}/staff-assignments/`,
         { data: { user_id: staffId } },
       );
-      expect(dup.status()).toBe(201);
-      const dupBody = await dup.json();
-      expect(dupBody.id).not.toBe(slotId);
+      expect(dup.status()).toBe(400);
 
       // Detail reflects the assignment.
       const detail = await admin.get(`/api/tickets/${ticketId}/`);
@@ -193,13 +193,11 @@ test.describe("Sprint 25A → direct staff assignment API gate", () => {
         .map((e) => (e as { id: number }).id);
       expect(assignedIds).toContain(staffId);
 
-      // Cleanup — remove BOTH slots, now keyed by the slot id.
-      for (const id of [slotId, dupBody.id as number]) {
-        const remove = await admin.delete(
-          `/api/tickets/${ticketId}/staff-assignments/${id}/`,
-        );
-        expect(remove.status()).toBe(204);
-      }
+      // Cleanup — remove the slot, keyed by the slot id.
+      const remove = await admin.delete(
+        `/api/tickets/${ticketId}/staff-assignments/${slotId}/`,
+      );
+      expect(remove.status()).toBe(204);
     } finally {
       await admin.dispose();
     }
@@ -329,10 +327,10 @@ test.describe("Sprint 25A → ticket detail staff-assignment section", () => {
     // Open the Assign dialog (the "assign first" and "assign more"
     // buttons share one testid) and tick Ahmet by his user id.
     await section.locator('[data-testid="staff-assignment-assign"]').first().click();
-    const dialog = page.locator('[data-testid="staff-assignment-list-modal"]');
+    const dialog = page.locator('[data-testid="assign-staff-modal"]');
     await expect(dialog).toBeVisible({ timeout: 10_000 });
     const person = dialog.locator(
-      `[data-testid="staff-assignment-list-person"][data-user-id="${staffId}"]`,
+      `[data-testid="assign-staff-person"][data-user-id="${staffId}"]`,
     );
     await expect(person).toBeVisible({ timeout: 10_000 });
     await person.check();
@@ -343,7 +341,7 @@ test.describe("Sprint 25A → ticket detail staff-assignment section", () => {
         r.request().method() === "POST",
       { timeout: 15_000 },
     );
-    await dialog.locator('[data-testid="staff-assignment-list-confirm"]').click();
+    await dialog.locator('[data-testid="assign-staff-confirm"]').click();
     const addResponse = await addPromise;
     expect([200, 201]).toContain(addResponse.status());
 
@@ -391,7 +389,7 @@ test.describe("Sprint 25A → ticket detail staff-assignment section", () => {
     await expect(section).toBeVisible({ timeout: 15_000 });
     await section.locator('[data-testid="staff-assignment-assign"]').first().click();
     await expect(
-      page.locator('[data-testid="staff-assignment-list-modal"]'),
+      page.locator('[data-testid="assign-staff-modal"]'),
     ).toBeVisible({ timeout: 10_000 });
     // i18next returns the KEY when a lookup misses; a key literal has
     // the shape `namespace:group.key` or `group.key` with an underscore
@@ -407,6 +405,6 @@ test.describe("Sprint 25A → ticket detail staff-assignment section", () => {
         `Raw i18n key matching ${pattern} leaked into rendered text — check src/i18n/{en,nl}/`,
       ).not.toMatch(pattern);
     }
-    await page.locator('[data-testid="staff-assignment-list-cancel"]').click();
+    await page.locator('[data-testid="assign-staff-cancel"]').click();
   });
 });

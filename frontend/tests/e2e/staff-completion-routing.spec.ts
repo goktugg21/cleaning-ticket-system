@@ -258,16 +258,14 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
       page.getByTestId("staff-details-section"),
     ).toBeVisible({ timeout: 15_000 });
 
+    // The switch's testid sits on a visually hidden checkbox input; the
+    // `.toggle-switch` label around it is the click target.
     const checkboxTestid = `staff-completion-routes-to-customer-${targetRow.building_id}`;
     const checkbox = page.getByTestId(checkboxTestid);
-    await expect(checkbox).toBeVisible({ timeout: 10_000 });
+    await expect(checkbox).toBeAttached({ timeout: 10_000 });
 
     // The initial UI state must mirror the API state.
-    if (initial) {
-      await expect(checkbox).toBeChecked();
-    } else {
-      await expect(checkbox).not.toBeChecked();
-    }
+    expect(await checkbox.isChecked()).toBe(initial);
 
     // Toggle to the inverse value.
     await Promise.all([
@@ -280,19 +278,15 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
             ) && r.request().method() === "PATCH",
         { timeout: 15_000 },
       ),
-      checkbox.click(),
+      checkbox.locator("xpath=..").click(),
     ]);
 
     // Reload the page to confirm the flag persisted server-side.
     await page.reload();
     await page.waitForLoadState("networkidle");
     const reloadedCheckbox = page.getByTestId(checkboxTestid);
-    await expect(reloadedCheckbox).toBeVisible({ timeout: 10_000 });
-    if (initial) {
-      await expect(reloadedCheckbox).not.toBeChecked();
-    } else {
-      await expect(reloadedCheckbox).toBeChecked();
-    }
+    await expect(reloadedCheckbox).toBeAttached({ timeout: 10_000 });
+    expect(await reloadedCheckbox.isChecked()).toBe(!initial);
 
     // Restore initial state so subsequent runs start from a known
     // baseline.

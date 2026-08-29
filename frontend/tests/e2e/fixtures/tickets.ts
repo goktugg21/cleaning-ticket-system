@@ -1,5 +1,8 @@
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
+
+import { apiAs } from "./apiAs";
+import { DEMO_USERS } from "./demoUsers";
 
 /**
  * Sprint 30 Batch 30.1.2 Phase F — demo-ticket fixture lookups.
@@ -107,7 +110,11 @@ export async function resolveDemoTicketId(
         "resolveDemoTicketId: no accessToken in localStorage; call loginAs first",
       );
     }
-    const url = `http://localhost:8000/api/tickets/?search=${encodeURIComponent(
+    // FE-7 — the page's own origin proxies /api in every harness (the
+    // Vite dev server, vite preview, the prod nginx); a hardcoded
+    // backend host fails CORS/ALLOWED_HOSTS the moment the frontend is
+    // served through a proxy.
+    const url = `/api/tickets/?search=${encodeURIComponent(
       searchTitle,
     )}&page_size=20`;
     const response = await fetch(url, {
@@ -130,4 +137,104 @@ export async function resolveDemoTicketId(
     return match.id;
   }, title);
   return id;
+}
+
+/**
+ * GET a backend path from inside the page context with the signed-in
+ * actor's own token (the same trick as `resolveDemoTicketId`): scope
+ * assertions read what the API tells THIS actor, without a second
+ * login and regardless of how the harness proxies the API.
+ */
+export async function pageApiGet<T>(page: Page, path: string): Promise<T> {
+  return page.evaluate(async (apiPath: string) => {
+    const token = localStorage.getItem("accessToken");
+    if (!token) {
+      throw new Error("pageApiGet: no accessToken in localStorage; call loginAs first");
+    }
+    const response = await fetch(`http://localhost:8000${apiPath}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      throw new Error(`pageApiGet: GET ${apiPath} → ${response.status}`);
+    }
+    return (await response.json()) as T;
+  }, path) as Promise<T>;
+}
+
+/** The building id for a seeded building name, as seen by the actor. */
+export async function resolveBuildingIdForPage(
+  page: Page,
+  buildingName: string,
+): Promise<number | null> {
+  const body = await pageApiGet<{ results: Array<{ id: number; name: string }> }>(
+    page,
+    "/api/buildings/?page_size=200",
+  );
+  return body.results.find((b) => b.name === buildingName)?.id ?? null;
+}
+
+/**
+ * FE-6 — the tickets list is paginated (25 newest first), so "every
+ * building in scope appears on page 1" is not a claim the page can
+ * make. The count endpoint with the list's own `building` filter is:
+ * how many tickets THIS actor may see at that building, every page.
+ */
+export async function ticketCountAtBuilding(
+  page: Page,
+  buildingName: string,
+): Promise<number> {
+  const buildingId = await resolveBuildingIdForPage(page, buildingName);
+  if (buildingId === null) return 0;
+  const body = await pageApiGet<{ count: number }>(
+    page,
+    `/api/tickets/?building=${buildingId}&page_size=1`,
+  );
+  return body.count;
+}
+
+/**
+ * Sprint 27F's mutating spec drives "[DEMO] Pantry zeepdispenser" from
+ * WAITING_CUSTOMER_APPROVAL to APPROVED, and every later spec that
+ * needs Amanda's Approve / Reject then finds a settled ticket. Walk it
+ * back as SUPER_ADMIN along the state machine's own path
+ * (APPROVED -> CLOSED -> REOPENED_BY_ADMIN -> IN_PROGRESS ->
+ * WAITING_CUSTOMER_APPROVAL) so the fixture is what the seed made it.
+ * Best-effort: a step the machine refuses simply ends the walk.
+ */
+export async function restorePantryToWaitingCustomerApproval(): Promise<void> {
+  const sa: APIRequestContext = await apiAs(DEMO_USERS.super.email);
+  try {
+    const list = await sa.get(
+      `/api/tickets/?search=${encodeURIComponent(DEMO_TICKET_TITLES.pantry_wca)}&page_size=20`,
+    );
+    if (list.status() !== 200) return;
+    const body = (await list.json()) as {
+      results: Array<{ id: number; title: string; status: string }>;
+    };
+    const ticket = body.results.find((t) => t.title === DEMO_TICKET_TITLES.pantry_wca);
+    if (!ticket || ticket.status === "WAITING_CUSTOMER_APPROVAL") return;
+    const path: Record<string, string> = {
+      APPROVED: "CLOSED",
+      REJECTED: "IN_PROGRESS",
+      CLOSED: "REOPENED_BY_ADMIN",
+      REOPENED_BY_ADMIN: "IN_PROGRESS",
+      IN_PROGRESS: "WAITING_CUSTOMER_APPROVAL",
+    };
+    let status = ticket.status;
+    for (let step = 0; step < 6 && status !== "WAITING_CUSTOMER_APPROVAL"; step++) {
+      const next = path[status];
+      if (!next) return;
+      const response = await sa.post(`/api/tickets/${ticket.id}/status/`, {
+        data: {
+          to_status: next,
+          note: "e2e fixture reset",
+          override_reason: "e2e fixture reset",
+        },
+      });
+      if (response.status() !== 200) return;
+      status = next;
+    }
+  } finally {
+    await sa.dispose();
+  }
 }

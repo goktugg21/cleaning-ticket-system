@@ -51,6 +51,33 @@ async function resolveFirstMembershipUserId(
   return body.results[0].user_id;
 }
 
+/**
+ * The permissions matrix has one row per (user, building) ACCESS row,
+ * so a focus target must be a member who holds at least one; a
+ * company-wide admin with no building rows has nothing to scroll to.
+ */
+async function resolveMemberWithAccessRows(
+  api: APIRequestContext,
+  customerId: number,
+): Promise<number | null> {
+  const response = await api.get(
+    `/api/customers/${customerId}/users/?page_size=50`,
+  );
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    results: Array<{ user_id: number }>;
+  };
+  for (const member of body.results) {
+    const access = await api.get(
+      `/api/customers/${customerId}/users/${member.user_id}/access/`,
+    );
+    if (access.status() !== 200) continue;
+    const rows = (await access.json()) as { results: unknown[] };
+    if (rows.results.length > 0) return member.user_id;
+  }
+  return null;
+}
+
 test.describe("Sprint 29 Batch 29.2 — Edit Basics dedup", () => {
   test("deleted sections are absent on Edit Basics", async ({ page }) => {
     const sa = await apiAs(DEMO_USERS.super.email);
@@ -126,11 +153,11 @@ test.describe("Sprint 29 Batch 29.2 — Edit Basics dedup", () => {
   }) => {
     const sa = await apiAs(DEMO_USERS.super.email);
     const customerId = await resolveFirstCustomerId(sa);
-    const userId = await resolveFirstMembershipUserId(sa, customerId);
+    const userId = await resolveMemberWithAccessRows(sa, customerId);
     await sa.dispose();
     test.skip(
       userId === null,
-      "No customer memberships in seed for this customer.",
+      "No customer member with building access rows in seed for this customer.",
     );
 
     await loginAs(page, DEMO_USERS.super);

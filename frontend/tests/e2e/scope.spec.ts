@@ -2,7 +2,12 @@ import { expect, test } from "@playwright/test";
 
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs, logoutFromTopbar } from "./fixtures/login";
-import { TICKETS_LIST_ALL } from "./fixtures/tickets";
+import {
+  DEMO_TICKET_TITLES,
+  pageApiGet,
+  TICKETS_LIST_ALL,
+  ticketCountAtBuilding,
+} from "./fixtures/tickets";
 
 /**
  * Sprint 16 — visibility scope smoke.
@@ -31,9 +36,33 @@ import { TICKETS_LIST_ALL } from "./fixtures/tickets";
  *     the control is a fixed line (`melding-building-fixed`), with
  *     several it is a `<select data-testid="melding-building">`.
  *
+ * The list is paginated (25 newest first), so "every in-scope building
+ * appears on page 1" is not a claim it can make: the positive half of
+ * a scope assertion reads the list's own `building` filter through the
+ * count endpoint (`ticketCountAtBuilding`), the negative half ("no
+ * out-of-scope building ever appears") reads the rows.
+ *
  * The tests rely on `seed_demo_data` having run, which produces one
  * ticket per building.
  */
+
+interface ApiTicketRow {
+  id: number;
+  title: string;
+  building_name?: string;
+  created_by_email?: string | null;
+}
+
+/** Every ticket the signed-in actor may see, through their own token. */
+async function visibleTicketsForPage(
+  page: import("@playwright/test").Page,
+): Promise<ApiTicketRow[]> {
+  const body = await pageApiGet<{ results: ApiTicketRow[] }>(
+    page,
+    "/api/tickets/?page_size=100",
+  );
+  return body.results;
+}
 
 async function customerRowTexts(
   page: import("@playwright/test").Page,
@@ -117,9 +146,26 @@ test("Building dropdown on /tickets/new respects manager scope", async ({
 }) => {
   await loginAs(page, DEMO_USERS.managerB1);
   await page.goto("/tickets/new");
-  // Wait for the building <select> to render at least one option.
+  // The building <select> fills after the customer pick (a manager of
+  // one customer gets it preselected, the options land async): wait
+  // for a real option past the placeholder before reading them.
   const select = page.locator("#f-building");
   await expect(select).toBeVisible({ timeout: 10_000 });
+  const customerSelect = page.locator("#f-customer");
+  if (
+    (await customerSelect.count()) > 0 &&
+    (await customerSelect.locator("option:not([disabled])").count()) > 0 &&
+    !(await customerSelect.inputValue())
+  ) {
+    const firstCustomer = await customerSelect
+      .locator("option:not([disabled])")
+      .first()
+      .getAttribute("value");
+    if (firstCustomer) await customerSelect.selectOption(firstCustomer);
+  }
+  await expect
+    .poll(async () => select.locator("option").count(), { timeout: 10_000 })
+    .toBeGreaterThan(1);
   const optionLabels = await select.locator("option").allTextContents();
   // At least the placeholder + B1. No B2 or B3 should leak in.
   expect(optionLabels.some((t) => t.includes("B1 Amsterdam"))).toBe(true);
@@ -167,8 +213,9 @@ test("Super admin sees all 3 demo buildings in the ticket list", async ({
 }) => {
   await loginAs(page, DEMO_USERS.super);
   const cells = await listFacilityCells(page);
+  expect(cells.length).toBeGreaterThan(0);
   for (const b of DEMO_BUILDINGS) {
-    expect(cells.some((c) => c.includes(b))).toBe(true);
+    expect(await ticketCountAtBuilding(page, b)).toBeGreaterThan(0);
   }
 });
 
@@ -177,16 +224,24 @@ test("Company admin sees all 3 demo buildings in the ticket list", async ({
 }) => {
   await loginAs(page, DEMO_USERS.companyAdmin);
   const cells = await listFacilityCells(page);
+  expect(cells.length).toBeGreaterThan(0);
   for (const b of DEMO_BUILDINGS) {
-    expect(cells.some((c) => c.includes(b))).toBe(true);
+    expect(await ticketCountAtBuilding(page, b)).toBeGreaterThan(0);
+  }
+  for (const c of cells) {
+    expect(c).not.toContain("Rotterdam");
   }
 });
 
 test("Gokhan (manager B1+B2+B3) sees all 3 buildings", async ({ page }) => {
   await loginAs(page, DEMO_USERS.managerAll);
   const cells = await listFacilityCells(page);
+  expect(cells.length).toBeGreaterThan(0);
   for (const b of DEMO_BUILDINGS) {
-    expect(cells.some((c) => c.includes(b))).toBe(true);
+    expect(await ticketCountAtBuilding(page, b)).toBeGreaterThan(0);
+  }
+  for (const c of cells) {
+    expect(c).not.toContain("Rotterdam");
   }
 });
 
@@ -213,23 +268,42 @@ test("Tom (plain CUSTOMER_USER, view_own) sees only tickets he created", async (
   // per-building access_role to CUSTOMER_LOCATION_MANAGER (Sprint 23C)
   // is what unlocks the broader visibility — covered by
   // sprint23c_access_role_editor.spec.ts.
+  //
+  // The demo data has since grown Tom's own work beyond B1 (his
+  // meerwerk-born tickets at B2), so the claim is asserted the way the
+  // seed states it: every ticket Tom may see was created by Tom, and
+  // the other customers' seeded tickets (Iris' B2, Amanda's B3) are
+  // never among his rows.
   await loginAs(page, DEMO_USERS.customerAll);
   const rows = await customerRowTexts(page);
   expect(rows.length).toBeGreaterThan(0);
   for (const row of rows) {
-    expect(row).toContain("B1 Amsterdam");
+    expect(row).not.toContain(DEMO_TICKET_TITLES.pantry_wca);
+    expect(row).not.toContain("[DEMO] In progress hallway scuff");
   }
-  expect(rows.some((c) => c.includes("B2 Amsterdam"))).toBe(false);
-  expect(rows.some((c) => c.includes("B3 Amsterdam"))).toBe(false);
+  const visible = await visibleTicketsForPage(page);
+  expect(visible.length).toBeGreaterThan(0);
+  for (const ticket of visible) {
+    expect(ticket.created_by_email).toBe(DEMO_USERS.customerAll.email);
+  }
 });
 
 test("Iris (customer B1+B2 only) sees no B3 tickets", async ({ page }) => {
+  // Iris' seeded ticket is a REQUEST, and `/my/meldingen` lists REPORT
+  // meldingen only, so her list may legitimately be empty: the scope
+  // claim is read from her own ticket API (every ticket she may see)
+  // and from whatever rows the page does show.
   await loginAs(page, DEMO_USERS.customerB1B2);
   const rows = await customerRowTexts(page);
-  expect(rows.length).toBeGreaterThan(0);
   for (const row of rows) {
     expect(row).not.toContain("B3 Amsterdam");
   }
+  const visible = await visibleTicketsForPage(page);
+  for (const ticket of visible) {
+    expect(ticket.building_name ?? "").not.toContain("B3 Amsterdam");
+    expect(ticket.title).not.toBe(DEMO_TICKET_TITLES.pantry_wca);
+  }
+  expect(await ticketCountAtBuilding(page, "B3 Amsterdam")).toBe(0);
 });
 
 test("Customer melding form for Amanda is fixed to B3", async ({ page }) => {

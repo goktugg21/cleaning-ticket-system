@@ -103,6 +103,9 @@ test.describe("Employees directory", () => {
     // the edit affordance must be absent.
     await loginAs(page, DEMO_USERS.customerB1B2);
 
+    // FE-6 — the customer nav folds its secondary entries (messages,
+    // employees, documents, settings) behind "Meer"; open it first.
+    await page.locator('[data-testid="sidebar-meer-toggle"]').click();
     const navEntry = page.locator('[data-testid="sidebar-my-employees"]');
     await expect(navEntry).toBeVisible({ timeout: 10_000 });
     await navEntry.click();
@@ -162,14 +165,17 @@ test.describe("Employees directory", () => {
     page,
   }) => {
     // Setup (via API as SUPER_ADMIN): in Amanda's customer, make Amanda a
-    // CUSTOMER_COMPANY_ADMIN and force ONE other user to a plain
-    // CUSTOMER_USER on all their buildings. Then, filtering Amanda's
+    // CUSTOMER_COMPANY_ADMIN (SoT Addendum A.1: company-wide, through the
+    // company-admin endpoint — a per-building access_role can no longer
+    // carry it) and force ONE other user to a plain CUSTOMER_USER on all
+    // their buildings. Then, filtering Amanda's
     // directory by CUSTOMER_USER drops Amanda's own (CCA) row — which is
     // exactly the case the Codex #1 bug regressed (canEdit was derived
     // from the filtered list, so the edit affordance vanished). The fix
     // derives canEdit from the viewer's own role independently of the
     // filter, so the affordance must remain.
     const ccaEmail = DEMO_USERS.customerB3.email; // Amanda
+    let ccaCleanup: { customerId: number; userId: number } | undefined;
     const sa = await apiAs(DEMO_USERS.super.email);
     try {
       const customers =
@@ -214,7 +220,11 @@ test.describe("Employees directory", () => {
         }
         return rows.length;
       };
-      await setAllAccess(amandaId as number, "CUSTOMER_COMPANY_ADMIN");
+      const makeAdmin = await sa.post(
+        `/api/customers/${customerId}/users/${amandaId}/company-admin/`,
+      );
+      expect([200, 201]).toContain(makeAdmin.status());
+      ccaCleanup = { customerId: customerId as number, userId: amandaId as number };
       const otherCount = await setAllAccess(otherId as number, "CUSTOMER_USER");
       expect(otherCount).toBeGreaterThan(0);
     } finally {
@@ -246,5 +256,18 @@ test.describe("Employees directory", () => {
         .locator('[data-testid="customer-employee-edit-access-role"]')
         .first(),
     ).toBeVisible();
+
+    // Restore: Amanda goes back to a plain member so later specs (and
+    // reruns) start from the seeded baseline.
+    if (ccaCleanup) {
+      const restore = await apiAs(DEMO_USERS.super.email);
+      try {
+        await restore.delete(
+          `/api/customers/${ccaCleanup.customerId}/users/${ccaCleanup.userId}/company-admin/`,
+        );
+      } finally {
+        await restore.dispose();
+      }
+    }
   });
 });

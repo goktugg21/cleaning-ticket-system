@@ -328,6 +328,9 @@ test.describe("Sprint 30 Batch 30.1 — post-approval workflow", () => {
       page.locator('[data-testid="extra-work-detail-page"]'),
     ).toBeVisible({ timeout: 10_000 });
 
+    // FE-3 — the repair lives in the "Geavanceerd" fold with the other
+    // corrections; open it first.
+    await page.locator('[data-testid="extra-work-advanced-toggle"]').click();
     const retryButton = page.locator(
       '[data-testid="extra-work-retry-spawn"]',
     );

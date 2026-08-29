@@ -6,6 +6,7 @@ import {
   DEMO_TICKET_TITLES,
   openWorkflowFolds,
   resolveDemoTicketId,
+  restorePantryToWaitingCustomerApproval,
 } from "./fixtures/tickets";
 
 /**
@@ -150,10 +151,18 @@ test("CUSTOMER_USER — Approve/Reject buttons do not open the override modal", 
   await expect(
     page.locator("[data-testid='workflow-move-REJECTED']"),
   ).toHaveCount(1);
-  // No Advanced fold for a customer: the override surface is
-  // provider-only.
+  // The customer may well have an Advanced fold (their own backward
+  // steps live there); what they never get is the OVERRIDE surface:
+  // no reason prompt, no admin decision buttons under the fold.
+  await openWorkflowFolds(page);
   await expect(
-    page.locator("[data-testid='workflow-corrections-toggle']"),
+    page.locator("[data-testid='ticket-advanced'] [data-testid='workflow-move-APPROVED']"),
+  ).toHaveCount(0);
+  await expect(
+    page.locator("[data-testid='ticket-advanced'] [data-testid='workflow-move-REJECTED']"),
+  ).toHaveCount(0);
+  await expect(
+    page.locator("[data-testid='ticket-override-reason']"),
   ).toHaveCount(0);
 
   // Hover/inspect only — do NOT click. Clicking would mutate the
@@ -218,14 +227,17 @@ test("COMPANY_ADMIN — typed reason confirms override and tags the timeline", a
   await page.locator("[data-testid='ticket-override-submit']").click();
   const statusResponse = await statusPostPromise;
 
-  // Verify the request body carried is_override=true + the reason.
+  // Verify the request body carried the reason. W10 §4 — `is_override`
+  // is the BACKEND's call (coerced on a provider-driven customer
+  // decision), so the client sends the reason and never the flag.
   const requestBody = statusResponse.request().postDataJSON() as {
     to_status: string;
     is_override?: boolean;
     override_reason?: string;
   };
-  expect(requestBody.is_override).toBe(true);
+  expect(requestBody.to_status).toBe("APPROVED");
   expect(requestBody.override_reason).toBe(REASON);
+  expect([undefined, true]).toContain(requestBody.is_override);
 
   // Modal closes after success and the page reloads the ticket.
   await expect(modal).toBeHidden({ timeout: 10_000 });
@@ -252,4 +264,11 @@ test("COMPANY_ADMIN — typed reason confirms override and tags the timeline", a
   const badgeText = (await overrideBadges.first().textContent()) ?? "";
   expect(badgeText).toMatch(/Override|Overrule/);
   expect(badgeText).toContain(REASON);
+});
+
+// The mutating test above leaves the fixture APPROVED; every later spec
+// that needs Amanda's Approve / Reject (workflow.spec runs after this
+// file alphabetically) would find a settled ticket. Walk it back.
+test.afterAll(async () => {
+  await restorePantryToWaitingCustomerApproval();
 });

@@ -1,7 +1,29 @@
 import { expect, test } from "@playwright/test";
 
+import { apiAs } from "./fixtures/apiAs";
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+
+/** Ahmet's (staffOsius) user id via the admin users list, through the
+ *  shared API fixture (PLAYWRIGHT_API_BASE_URL-aware — a hardcoded
+ *  host returns the SPA's HTML behind a proxied harness). */
+async function resolveAhmetId(): Promise<number> {
+  const sa = await apiAs(DEMO_USERS.super.email);
+  try {
+    const response = await sa.get(
+      `/api/users/?search=${encodeURIComponent(DEMO_USERS.staffOsius.email)}&page_size=10`,
+    );
+    expect(response.ok()).toBeTruthy();
+    const body = (await response.json()) as {
+      results: Array<{ id: number; email: string }>;
+    };
+    const match = body.results.find((u) => u.email === DEMO_USERS.staffOsius.email);
+    expect(match, "Ahmet (staffOsius) must exist in seeded data").toBeDefined();
+    return match!.id;
+  } finally {
+    await sa.dispose();
+  }
+}
 
 /**
  * Sprint 28 Batch 10 — Staff per-building visibility selector.
@@ -37,34 +59,17 @@ import { loginAs } from "./fixtures/login";
 test.describe("Sprint 28 Batch 10 — Staff per-building visibility selector", () => {
   test("SUPER_ADMIN sees the visibility-level dropdown on a STAFF user's building rows", async ({
     page,
-    request,
   }) => {
-    await loginAs(page, DEMO_USERS.super);
-
     // Resolve Ahmet (staffOsius) by email via the admin users list so
     // the spec does not hard-code a numeric ID that may shift when
     // seed_demo_data is reordered.
-    const accessToken = await page.evaluate(() =>
-      localStorage.getItem("accessToken"),
-    );
-    expect(accessToken, "super admin must have access token").toBeTruthy();
-
-    const usersResponse = await request.get(
-      `http://localhost:8000/api/users/?search=${encodeURIComponent(
-        DEMO_USERS.staffOsius.email,
-      )}&page_size=10`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-    );
-    expect(usersResponse.ok()).toBeTruthy();
-    const usersBody = await usersResponse.json();
-    const match = (usersBody.results as Array<{ id: number; email: string }>)
-      .find((u) => u.email === DEMO_USERS.staffOsius.email);
-    expect(match, "Ahmet (staffOsius) must exist in seeded data").toBeDefined();
+    const ahmetId = await resolveAhmetId();
+    await loginAs(page, DEMO_USERS.super);
 
     // Sprint 29 Batch 29.6 — `/admin/users/:id` is the read-only
     // detail page; the BuildingStaffVisibility editor lives on the
     // form at /edit.
-    await page.goto(`/admin/users/${match!.id}/edit`);
+    await page.goto(`/admin/users/${ahmetId}/edit`);
     await page.waitForLoadState("networkidle");
 
     // The staff-details section is only rendered for STAFF users.
@@ -84,28 +89,14 @@ test.describe("Sprint 28 Batch 10 — Staff per-building visibility selector", (
 
   test("dropdown lists all three visibility levels", async ({
     page,
-    request,
   }) => {
+    const ahmetId = await resolveAhmetId();
     await loginAs(page, DEMO_USERS.super);
-
-    const accessToken = await page.evaluate(() =>
-      localStorage.getItem("accessToken"),
-    );
-    const usersResponse = await request.get(
-      `http://localhost:8000/api/users/?search=${encodeURIComponent(
-        DEMO_USERS.staffOsius.email,
-      )}&page_size=10`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-    );
-    const usersBody = await usersResponse.json();
-    const match = (usersBody.results as Array<{ id: number; email: string }>)
-      .find((u) => u.email === DEMO_USERS.staffOsius.email);
-    expect(match).toBeDefined();
 
     // Sprint 29 Batch 29.6 — `/admin/users/:id` is the read-only
     // detail page; the BuildingStaffVisibility editor lives on the
     // form at /edit.
-    await page.goto(`/admin/users/${match!.id}/edit`);
+    await page.goto(`/admin/users/${ahmetId}/edit`);
     await page.waitForLoadState("networkidle");
 
     const selector = page

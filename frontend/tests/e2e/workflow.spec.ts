@@ -6,6 +6,7 @@ import {
   DEMO_TICKET_TITLES,
   openWorkflowFolds,
   resolveDemoTicketId,
+  restorePantryToWaitingCustomerApproval,
 } from "./fixtures/tickets";
 
 /**
@@ -37,6 +38,12 @@ import {
  */
 
 const MOVE_BUTTONS = '[data-testid^="workflow-move-"]';
+
+// sprint27f's mutating test approves the pantry ticket; make sure the
+// fixture is back in WAITING_CUSTOMER_APPROVAL before reading it here.
+test.beforeAll(async () => {
+  await restorePantryToWaitingCustomerApproval();
+});
 
 test("Amanda sees Approve/Reject on the B3 waiting ticket", async ({
   page,

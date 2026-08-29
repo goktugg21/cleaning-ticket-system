@@ -44,8 +44,11 @@ test("Staff (company-admin) sees the private-note toggle on a ticket", async ({
 }) => {
   await loginAs(page, DEMO_USERS.companyAdmin);
   await openDemoTicket(page);
-  // The switch's `data-testid` sits on the (visually hidden) checkbox
-  // input; the label around it is the visible control.
+  // The composer expands on focus ("click into the field to pick people
+  // or make the message private"); the private switch is part of the
+  // expanded block. Its `data-testid` sits on the (visually hidden)
+  // checkbox input; the label around it is the visible control.
+  await page.locator(".notes-textarea").click();
   await expect(page.locator("label.composer-private-toggle")).toBeVisible({
     timeout: 10_000,
   });
@@ -64,6 +67,11 @@ test("Customer-user (Amanda) does NOT see the private-note toggle", async ({
   await expect(page.locator(".notes-textarea")).toBeVisible({
     timeout: 10_000,
   });
+  await page.locator(".notes-textarea").click();
+  await expect(page.locator('[data-testid="ticket-composer"]')).toHaveAttribute(
+    "data-expanded",
+    "true",
+  );
   await expect(page.locator("label.composer-private-toggle")).toHaveCount(0);
   await expect(
     page.locator('[data-testid="composer-private-toggle"]'),

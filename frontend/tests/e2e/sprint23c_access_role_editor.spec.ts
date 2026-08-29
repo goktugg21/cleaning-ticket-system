@@ -405,10 +405,13 @@ test.describe("Sprint 23C → Permissions page role editor renders", () => {
         /Location manager|Locatiebeheerder/i.test(o),
       ),
     ).toBe(true);
+    // SoT Addendum A.1 — Customer Company Admin is company-wide
+    // (`is_company_admin` via the company-admin endpoint), never a
+    // per-building access role, so it is NOT an option here.
     expect(
       options.some((o) =>
-        /Company admin|Bedrijfsbeheerder/i.test(o),
+        /Company admin|Bedrijfsbeheerder|Klantbeheerder/i.test(o),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

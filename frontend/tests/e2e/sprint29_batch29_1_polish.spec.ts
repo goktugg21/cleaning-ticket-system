@@ -90,15 +90,18 @@ test.describe("Sprint 29 Batch 29.1 — polish & papercuts", () => {
     const toggle = page.locator('[data-testid="show-technical-keys-toggle"]');
     await expect(toggle).toBeVisible();
 
-    // Reset to OFF to make the test deterministic regardless of
-    // any persisted localStorage state from earlier runs.
+    // The switch's checkbox input is visually hidden; its `.toggle-switch`
+    // label is the click target. Reset to OFF to make the test
+    // deterministic regardless of any persisted localStorage state.
     const checkbox = toggle.locator('input[type="checkbox"]');
+    const switchLabel = checkbox.locator("xpath=..");
     if (await checkbox.isChecked()) {
-      await checkbox.uncheck();
+      await switchLabel.click();
     }
     await expect(page.locator(".policy-toggle-card-affects")).toHaveCount(0);
 
-    await checkbox.check();
+    await switchLabel.click();
+    expect(await checkbox.isChecked()).toBe(true);
     await expect(
       page.locator(".policy-toggle-card-affects").first(),
     ).toBeVisible();
@@ -108,7 +111,7 @@ test.describe("Sprint 29 Batch 29.1 — polish & papercuts", () => {
       .textContent();
     expect(firstAffects).toMatch(/customer\.(ticket|extra_work)\./);
 
-    await checkbox.uncheck();
+    await switchLabel.click();
     await expect(page.locator(".policy-toggle-card-affects")).toHaveCount(0);
   });
 

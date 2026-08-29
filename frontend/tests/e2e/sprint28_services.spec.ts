@@ -69,6 +69,23 @@ async function apiAs(
   throw new Error(`apiAs(${email}) exhausted attempts`);
 }
 
+
+/**
+ * Sprint 142 — a catalog row is per provider COMPANY, and `company` is
+ * REQUIRED on create as soon as more than one company exists (the dev
+ * database now holds four). Seed everything under "Osius Demo".
+ */
+async function resolveOsiusCompanyId(api: APIRequestContext): Promise<number> {
+  const response = await api.get("/api/companies/?page_size=50");
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    results: Array<{ id: number; name: string }>;
+  };
+  const match = body.results.find((c) => c.name === "Osius Demo");
+  expect(match, 'company "Osius Demo" present').toBeTruthy();
+  return match!.id;
+}
+
 interface CategoryRow {
   id: number;
   name: string;
@@ -201,12 +218,13 @@ test("Sprint 28 B5 — Add service modal: save shows row on Services tab", async
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
+  const companyId = await resolveOsiusCompanyId(sa);
 
   // Make sure at least one category exists; create one for the
   // test so the spec is self-contained.
   const categoryName = `Cat For Service ${Date.now()}`;
   const createCatResponse = await sa.post("/api/services/categories/", {
-    data: { name: categoryName, description: "", is_active: true },
+    data: { company: companyId, name: categoryName, description: "", is_active: true },
   });
   expect(createCatResponse.status()).toBe(201);
   const createdCat = (await createCatResponse.json()) as { id: number };
@@ -263,11 +281,12 @@ test("Sprint 28 B5 — Edit service: change name, list reflects new name", async
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
+  const companyId = await resolveOsiusCompanyId(sa);
 
   // Seed via API so the test does not depend on prior test ordering.
   const categoryName = `Cat Edit ${Date.now()}`;
   const createCatResponse = await sa.post("/api/services/categories/", {
-    data: { name: categoryName, description: "", is_active: true },
+    data: { company: companyId, name: categoryName, description: "", is_active: true },
   });
   expect(createCatResponse.status()).toBe(201);
   const createdCat = (await createCatResponse.json()) as { id: number };
@@ -275,6 +294,7 @@ test("Sprint 28 B5 — Edit service: change name, list reflects new name", async
   const initialName = `Svc Edit Init ${Date.now()}`;
   const createSvcResponse = await sa.post("/api/services/", {
     data: {
+      company: companyId,
       category: createdCat.id,
       name: initialName,
       description: "",
@@ -341,10 +361,11 @@ test("Sprint 28 B5 — Deleting a category with services attached fails graceful
   baseURL,
 }) => {
   const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
+  const companyId = await resolveOsiusCompanyId(sa);
 
   const categoryName = `Cat Protected ${Date.now()}`;
   const createCatResponse = await sa.post("/api/services/categories/", {
-    data: { name: categoryName, description: "", is_active: true },
+    data: { company: companyId, name: categoryName, description: "", is_active: true },
   });
   expect(createCatResponse.status()).toBe(201);
   const createdCat = (await createCatResponse.json()) as { id: number };
@@ -353,6 +374,7 @@ test("Sprint 28 B5 — Deleting a category with services attached fails graceful
   const serviceName = `Svc Protect ${Date.now()}`;
   const createSvcResponse = await sa.post("/api/services/", {
     data: {
+      company: companyId,
       category: createdCat.id,
       name: serviceName,
       description: "",

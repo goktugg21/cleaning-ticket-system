@@ -52,6 +52,14 @@ test("demo card click fills the login form", async ({ page }) => {
     return;
   }
   await card.click();
+  // The quick-fill sits behind a thin unlock gate (LoginPage's
+  // DEMO_UNLOCK_PASSWORD — a build-time constant, not a secret); the
+  // first card click opens it, unlocking fills the pending card.
+  const gate = page.locator('[data-testid="demo-gate"]');
+  if ((await gate.count()) > 0) {
+    await gate.locator("#demo-gate-input").fill("Goktug999!!");
+    await gate.locator(".qa-gate-btn").click();
+  }
   await expect(page.locator("#login-email")).toHaveValue(
     "amanda-customer-b-amsterdam@b-amsterdam.demo",
   );

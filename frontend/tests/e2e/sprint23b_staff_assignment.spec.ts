@@ -145,6 +145,53 @@ async function ensurePendingStaffRequest(
   }
 }
 
+/**
+ * An Osius ticket Ahmet has neither a PENDING request on nor an
+ * assignment to: the "Request assignment" CTA only renders when he is
+ * not yet on the job (a slot already holds him on the seed's first
+ * ticket, which is why `firstOsiusTicketId` alone no longer works).
+ */
+async function freshOsiusTicketIdForAhmet(baseURL: string): Promise<number> {
+  const sa = await apiAs(baseURL, DEMO_USERS.super.email);
+  try {
+    const listResponse = await sa.get("/api/tickets/?page_size=50");
+    expect(listResponse.status()).toBe(200);
+    const list = (await listResponse.json()) as {
+      results: Array<{ id: number; building_name?: string }>;
+    };
+    const tickets = list.results.filter((t) => /Amsterdam/i.test(t.building_name ?? ""));
+    const usersResponse = await sa.get(
+      `/api/users/?search=${encodeURIComponent(DEMO_USERS.staffOsius.email)}&page_size=50`,
+    );
+    const users = (await usersResponse.json()) as {
+      results: Array<{ id: number; email: string }>;
+    };
+    const staffId = users.results.find((u) => u.email === DEMO_USERS.staffOsius.email)!.id;
+    const pendingResponse = await sa.get(
+      `/api/staff-assignment-requests/?staff=${staffId}&status=PENDING&page_size=200`,
+    );
+    const pending = (await pendingResponse.json()) as { results: Array<{ ticket: number }> };
+    const blocked = new Set(pending.results.map((r) => r.ticket));
+    for (const t of tickets) {
+      if (blocked.has(t.id)) continue;
+      const detail = await sa.get(`/api/tickets/${t.id}/`);
+      if (detail.status() !== 200) continue;
+      const body = (await detail.json()) as {
+        status: string;
+        assigned_staff?: Array<{ id?: number }>;
+      };
+      if (["APPROVED", "CLOSED", "REJECTED"].includes(body.status)) continue;
+      if ((body.assigned_staff ?? []).some((e) => "id" in e && e.id === staffId)) continue;
+      return t.id;
+    }
+    throw new Error(
+      "Sprint 23B: no Osius ticket left without an Ahmet assignment — run `seed_demo_data --reset-tickets`.",
+    );
+  } finally {
+    await sa.dispose();
+  }
+}
+
 // =====================================================================
 // Sidebar nav gating
 // =====================================================================
@@ -281,9 +328,7 @@ test.describe("Sprint 23B → ticket detail STAFF flow", () => {
     page,
     baseURL,
   }) => {
-    const api = await apiAs(baseURL!, DEMO_USERS.super.email);
-    const ticketId = await firstOsiusTicketId(api);
-    await api.dispose();
+    const ticketId = await freshOsiusTicketIdForAhmet(baseURL!);
 
     await loginAs(page, DEMO_USERS.staffOsius);
     await page.goto(`/tickets/${ticketId}`);

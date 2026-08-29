@@ -8,7 +8,7 @@ import {
   DEMO_USERS,
 } from "./fixtures/demoUsers";
 import { loginAs, logoutFromTopbar } from "./fixtures/login";
-import { TICKETS_LIST_ALL } from "./fixtures/tickets";
+import { TICKETS_LIST_ALL, ticketCountAtBuilding } from "./fixtures/tickets";
 
 /**
  * Sprint 21 — cross-company isolation suite.
@@ -62,17 +62,52 @@ test("Super admin sees tickets from both demo companies", async ({ page }) => {
   await loginAs(page, DEMO_USERS.super);
   await page.goto(TICKETS_LIST_ALL);
   const cells = await listFacilityCells(page);
-  // At least one ticket from a Company A building AND at least one
-  // from a Company B building must appear.
-  const seesCompanyA = COMPANY_A_BUILDINGS.some((b) =>
-    cells.some((c) => c.includes(b)),
-  );
-  const seesCompanyB = COMPANY_B_BUILDINGS.some((b) =>
-    cells.some((c) => c.includes(b)),
-  );
+  // FE-6 — the list is paginated (25, newest first), so "both companies
+  // on page 1" is not a claim the page can make. The page shows rows
+  // (from either company), and the list's own building filter, asked
+  // through the count endpoint, must hold tickets at a Company A AND a
+  // Company B building for this actor.
+  expect(cells.length).toBeGreaterThan(0);
+  let seesCompanyA = false;
+  for (const b of COMPANY_A_BUILDINGS) {
+    if ((await ticketCountAtBuilding(page, b)) > 0) seesCompanyA = true;
+  }
+  let seesCompanyB = false;
+  for (const b of COMPANY_B_BUILDINGS) {
+    if ((await ticketCountAtBuilding(page, b)) > 0) seesCompanyB = true;
+  }
   expect(seesCompanyA).toBe(true);
   expect(seesCompanyB).toBe(true);
 });
+
+/**
+ * A Company B ticket id, discovered with the super-admin token through
+ * the list's `building` filter (the unfiltered first page is 25 newest
+ * tickets and may hold none of Bright's).
+ */
+async function discoverCompanyBTicketId(
+  request: import("@playwright/test").APIRequestContext,
+  superToken: string,
+): Promise<number> {
+  const headers = { Authorization: `Bearer ${superToken}` };
+  const buildingsResp = await request.get("/api/buildings/?page_size=200", { headers });
+  expect(buildingsResp.ok()).toBe(true);
+  const buildings = (await buildingsResp.json()) as {
+    results: Array<{ id: number; name: string }>;
+  };
+  for (const name of COMPANY_B_BUILDINGS) {
+    const building = buildings.results.find((b) => b.name === name);
+    if (!building) continue;
+    const ticketsResp = await request.get(
+      `/api/tickets/?building=${building.id}&page_size=1`,
+      { headers },
+    );
+    expect(ticketsResp.ok()).toBe(true);
+    const body = (await ticketsResp.json()) as { results: Array<{ id: number }> };
+    if (body.results.length > 0) return body.results[0].id;
+  }
+  throw new Error("cross_company_isolation: no Company B ticket in the seed");
+}
 
 test("Company A admin sees only Company A buildings on /tickets", async ({
   page,
@@ -148,23 +183,7 @@ test("Cross-company ticket detail API access returns 404 for Company A admin", a
     localStorage.getItem("accessToken"),
   );
   expect(superToken).toBeTruthy();
-  const ticketsResp = await request.get("/api/tickets/", {
-    headers: { Authorization: `Bearer ${superToken}` },
-  });
-  expect(ticketsResp.ok()).toBe(true);
-  const ticketsBody = (await ticketsResp.json()) as {
-    results: Array<{
-      id: number;
-      building: { name?: string } | null;
-      building_name?: string;
-    }>;
-  };
-  const isR1Or = (t: (typeof ticketsBody.results)[number]): boolean => {
-    const name = t.building?.name ?? t.building_name ?? "";
-    return COMPANY_B_BUILDINGS.some((b) => name.includes(b));
-  };
-  const companyBTicket = ticketsBody.results.find(isR1Or);
-  expect(companyBTicket).toBeTruthy();
+  const companyBTicketId = await discoverCompanyBTicketId(request, superToken!);
 
   // Step 2: log in as Company A admin and try to fetch that ticket.
   // The backend must respond with 404 (or 403). The SPA's detail page
@@ -177,7 +196,7 @@ test("Cross-company ticket detail API access returns 404 for Company A admin", a
   );
   expect(adminAToken).toBeTruthy();
   const detailResp = await request.get(
-    `/api/tickets/${companyBTicket!.id}/`,
+    `/api/tickets/${companyBTicketId}/`,
     { headers: { Authorization: `Bearer ${adminAToken}` } },
   );
   expect([403, 404]).toContain(detailResp.status());
@@ -193,25 +212,12 @@ test("Cross-company ticket detail URL renders not-found for Company A admin", as
   const superToken = await page.evaluate(() =>
     localStorage.getItem("accessToken"),
   );
-  const ticketsResp = await request.get("/api/tickets/", {
-    headers: { Authorization: `Bearer ${superToken}` },
-  });
-  const ticketsBody = (await ticketsResp.json()) as {
-    results: Array<{
-      id: number;
-      building: { name?: string } | null;
-      building_name?: string;
-    }>;
-  };
-  const companyBTicket = ticketsBody.results.find((t) => {
-    const name = t.building?.name ?? t.building_name ?? "";
-    return COMPANY_B_BUILDINGS.some((b) => name.includes(b));
-  });
-  expect(companyBTicket).toBeTruthy();
+  expect(superToken).toBeTruthy();
+  const companyBTicketId = await discoverCompanyBTicketId(request, superToken!);
 
   await logoutFromTopbar(page);
   await loginAs(page, DEMO_USERS.companyAdmin);
-  await page.goto(`/tickets/${companyBTicket!.id}`);
+  await page.goto(`/tickets/${companyBTicketId}`);
   await expect(
     page.locator(".alert-error, .empty-state, .detail-not-found").first(),
   ).toBeVisible({ timeout: 10_000 });

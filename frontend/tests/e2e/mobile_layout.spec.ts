@@ -496,11 +496,12 @@ test("admin/buildings: Edit button still works alongside row-click", async ({
     })
     .first();
   await expect(row).toBeVisible({ timeout: 10_000 });
-  // Click the explicit Edit button; React Router fires a navigate
-  // and the row's onClick handler also fires (same destination), so
-  // the URL should still settle on the edit page exactly once.
-  await row.getByRole("link", { name: /edit/i }).click();
-  await page.waitForURL(/\/admin\/buildings\/\d+$/, { timeout: 10_000 });
+  // Click the explicit Edit control (a <button> in the Actions cell
+  // now, not a link); it navigates to the building's edit form while
+  // the row's own handler targets the detail page — either way the URL
+  // settles on that building.
+  await row.getByRole("button", { name: /edit/i }).click();
+  await page.waitForURL(/\/admin\/buildings\/\d+(\/edit)?$/, { timeout: 10_000 });
 });
 
 test("admin/people/users: clicking a row navigates to the detail page", async ({

@@ -438,11 +438,13 @@ test.describe("Sprint 24A → UserFormPage Staff details UI", () => {
       .filter({ hasText: "B1 Amsterdam" })
       .first();
     await expect(row).toBeVisible({ timeout: 15_000 });
+    // The switch's testid sits on a visually hidden checkbox input; the
+    // `.toggle-switch` label around it is the click target.
     const checkbox = row.locator(
       '[data-testid="staff-visibility-can-request"]',
     );
-    await expect(checkbox).toBeVisible();
-    await expect(checkbox).toBeChecked({ checked: originalCanRequest });
+    await expect(checkbox).toBeAttached();
+    expect(await checkbox.isChecked()).toBe(originalCanRequest);
 
     // Flip via the UI and wait for the PATCH to round-trip.
     const patchPromise = page.waitForResponse(
@@ -451,7 +453,7 @@ test.describe("Sprint 24A → UserFormPage Staff details UI", () => {
         r.request().method() === "PATCH",
       { timeout: 10_000 },
     );
-    await checkbox.click();
+    await checkbox.locator("xpath=..").click();
     const patchResponse = await patchPromise;
     expect(patchResponse.status()).toBe(200);
 

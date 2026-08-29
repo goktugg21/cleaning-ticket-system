@@ -27,7 +27,11 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
   const THROTTLE_BACKOFF_MS = 35_000;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    await page.goto("/login");
+    // `commit` rather than the default `load`: the form fill below waits
+    // for `#login-email` itself, and a proxied preview whose `load`
+    // event trails on an idle asset must not burn the whole test budget
+    // on the navigation alone.
+    await page.goto("/login", { waitUntil: "commit" });
 
     // Sprint 18-3: when a previous loginAs in the same test left a
     // valid session in localStorage, /login bounces to / via the
@@ -43,7 +47,7 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
       return had;
     });
     if (hasStaleSession) {
-      await page.goto("/login");
+      await page.goto("/login", { waitUntil: "commit" });
     }
 
     // Arm the response listener BEFORE the click so we never miss

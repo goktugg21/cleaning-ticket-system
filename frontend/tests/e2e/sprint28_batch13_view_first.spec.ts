@@ -164,10 +164,12 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       .locator('[data-testid="customer-permissions-advanced-toggle"]')
       .click();
 
-    // At least one policy toggle resolves — the policy panel has
-    // four booleans wired through this testid.
+    // At least one policy toggle resolves. The testid sits on the
+    // switch's visually hidden checkbox; its `.toggle-switch` label is
+    // what the operator sees.
     const policyToggles = page.getByTestId("customer-policy-toggle");
-    await expect(policyToggles.first()).toBeVisible({ timeout: 15_000 });
+    await expect(policyToggles.first()).toBeAttached({ timeout: 15_000 });
+    await expect(policyToggles.first().locator("xpath=..")).toBeVisible();
     expect(await policyToggles.count()).toBeGreaterThan(0);
   });
 
@@ -188,9 +190,11 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       timeout: 15_000,
     });
     // Either the buildings table OR a typed empty-state should render
-    // — never the legacy placeholder.
+    // — never the legacy placeholder. Wait for the list to load before
+    // counting (the page mounts before its rows arrive).
     const table = page.getByTestId("customer-buildings-table");
     const empty = page.getByTestId("customer-buildings-empty");
+    await expect(table.or(empty).first()).toBeVisible({ timeout: 15_000 });
     const tableCount = await table.count();
     const emptyCount = await empty.count();
     expect(tableCount + emptyCount).toBeGreaterThan(0);
@@ -213,9 +217,11 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       timeout: 15_000,
     });
     // Either at least one per-user access summary cell renders, or
-    // the typed empty-state copy renders. Both are valid outcomes.
+    // the typed empty-state copy renders. Both are valid outcomes;
+    // wait for the member list to load before counting.
     const access = page.getByTestId("customer-user-access-summary");
     const empty = page.getByTestId("customer-users-empty");
+    await expect(access.or(empty).first()).toBeVisible({ timeout: 15_000 });
     const accessCount = await access.count();
     const emptyCount = await empty.count();
     expect(accessCount + emptyCount).toBeGreaterThan(0);

@@ -43,18 +43,35 @@ async function openAdvanced(page: Page): Promise<void> {
     .click();
 }
 
+/**
+ * The permissions matrix has one row per (user, building) access row,
+ * so the spec targets the seeded "B Amsterdam" (whose members hold
+ * per-building access) rather than whichever customer sorts first —
+ * a customer with company-wide admins only renders an empty matrix
+ * and no "Edit permissions" button.
+ */
 async function resolveFirstCustomerId(api: APIRequestContext): Promise<number> {
-  const response = await api.get("/api/customers/?page_size=1");
+  const response = await api.get("/api/customers/?page_size=200");
   expect(response.status()).toBe(200);
   const body = (await response.json()) as {
     results: Array<{ id: number; name: string }>;
   };
-  expect(
-    body.results.length,
-    "demo seed has at least one customer",
-  ).toBeGreaterThan(0);
-  return body.results[0].id;
+  const match =
+    body.results.find((c) => c.name === "B Amsterdam") ?? body.results[0];
+  expect(match, "demo seed has at least one customer").toBeTruthy();
+  return match.id;
 }
+
+/** The four Sprint 15.2 policy booleans; Sprint 126 added documents. */
+const POLICY_FIELDS_LOCKED = [
+  "customer_users_can_approve_extra_work_pricing",
+  "customer_users_can_approve_ticket_completion",
+  "customer_users_can_create_extra_work",
+  "customer_users_can_create_tickets",
+];
+
+/** FE-6 — 17 customer permission keys (`CUSTOMER_PERMISSION_KEYS`). */
+const CUSTOMER_PERMISSION_KEY_COUNT = 17;
 
 test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
   test("three zones render with locked testids", async ({ page }) => {
@@ -94,20 +111,18 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await openAdvanced(page);
 
     const toggles = page.locator('[data-testid="customer-policy-toggle"]');
-    await expect(toggles).toHaveCount(4);
+    await expect(toggles.first()).toBeAttached({ timeout: 10_000 });
+    expect(await toggles.count()).toBeGreaterThanOrEqual(POLICY_FIELDS_LOCKED.length);
     const fields = await toggles.evaluateAll((els) =>
       els.map((el) =>
         (el as HTMLInputElement).getAttribute("data-policy-field"),
       ),
     );
-    expect(fields.sort()).toEqual(
-      [
-        "customer_users_can_approve_extra_work_pricing",
-        "customer_users_can_approve_ticket_completion",
-        "customer_users_can_create_extra_work",
-        "customer_users_can_create_tickets",
-      ].sort(),
-    );
+    for (const field of POLICY_FIELDS_LOCKED) {
+      expect(fields).toContain(field);
+    }
+    // Every toggle is a real checkbox carrying its policy field.
+    expect(fields.every((f) => !!f && f.startsWith("customer_users_can_"))).toBe(true);
   });
 
   test("sticky save bar appears only when policy is dirty", async ({
@@ -124,11 +139,13 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     const saveBar = page.locator('[data-testid="customer-policy-save-bar"]');
     await expect(saveBar).toHaveCount(0);
 
-    // Flip a policy toggle and the bar should appear.
+    // Flip a policy toggle and the bar should appear. The testid sits on
+    // the switch's hidden checkbox; click its `.toggle-switch` label.
     const firstToggle = page
       .locator('[data-testid="customer-policy-toggle"]')
       .first();
-    await firstToggle.click();
+    await expect(firstToggle).toBeAttached({ timeout: 10_000 });
+    await firstToggle.locator("xpath=..").click();
     await expect(saveBar).toBeVisible();
 
     // Cancel reverts the draft and unmounts the bar.
@@ -138,7 +155,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await expect(saveBar).toHaveCount(0);
   });
 
-  test("Edit permissions button opens modal with 16 override rows", async ({
+  test("Edit permissions button opens modal with one override row per permission key", async ({
     page,
   }) => {
     // Sprint 31 Phase 6 — the per-user inline AccessPermissionsPanel
@@ -165,9 +182,9 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
       page.locator('[data-testid="section-customer-overrides-editor"]'),
     ).toBeVisible();
 
-    // 16 customer permission keys -> 16 rows.
+    // One row per customer permission key.
     const rows = page.locator('[data-testid="customer-overrides-row"]');
-    await expect(rows).toHaveCount(16);
+    await expect(rows).toHaveCount(CUSTOMER_PERMISSION_KEY_COUNT);
 
     // Close via the close button.
     await page.locator('[data-testid="customer-overrides-close"]').click();
@@ -228,10 +245,13 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     // replacing the legacy .override-row-label) must not show the raw
     // `customer.ticket.*` enum strings — they should be the
     // translated labels.
+    await expect(
+      page.locator(".permission-editor-modal-row-label").first(),
+    ).toBeVisible({ timeout: 10_000 });
     const labelTexts = await page
       .locator(".permission-editor-modal-row-label")
       .allTextContents();
-    expect(labelTexts.length).toBe(16);
+    expect(labelTexts.length).toBe(CUSTOMER_PERMISSION_KEY_COUNT);
     for (const txt of labelTexts) {
       expect(
         txt,
