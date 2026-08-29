@@ -2702,5 +2702,18 @@
   "start.meldingen_title": "Your reports in progress",
   "start.meldingen_empty": "No open reports.",
   "start.meldingen_all": "View all reports",
-  "start.unread_title": "Unread messages"
+  "start.unread_title": "Unread messages",
+  "back_to.schedule": "Back to My schedule",
+  "back_to.my_meldingen": "Back to My reports",
+  "back_to.tickets": "Back to Tickets",
+  "back_to.extra_work": "Back to Extra work",
+  "back_to.start": "Back to Start",
+  "back_to.inbox": "Back to Messages",
+  "back_to.customer": "Back to customer",
+  "back_to.dashboard": "Back to dashboard",
+  "meerwerk_flow.other_add": "Add something else",
+  "meerwerk_flow.other_note_label": "Note (optional)",
+  "meerwerk_flow.other_note_placeholder": "Note (optional)",
+  "meerwerk_flow.other_remove": "Remove line",
+  "meerwerk_tracker.filter_all": "All"
 }

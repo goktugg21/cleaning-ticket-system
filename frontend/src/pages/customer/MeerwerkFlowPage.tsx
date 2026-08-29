@@ -61,6 +61,8 @@ interface CartLine {
   unitPrice: string | null;
   quantity: number;
   otherText: string;
+  /** FE-4 — the optional note on a custom line. */
+  note?: string;
 }
 
 const STEP_KEYS = ["where", "what", "when", "confirm"] as const;
@@ -77,7 +79,14 @@ export function MeerwerkFlowPage() {
   const [step, setStep] = useState<Step>(0);
   const [building, setBuilding] = useState<number | "">("");
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [otherText, setOtherText] = useState("");
+  /** FE-4 (Addendum D §D.12 item 6) — "Iets anders" is a real cart line,
+   *  and there can be several: each with its own title and an optional
+   *  note, rendered like a priced line with "prijs volgt" in the price
+   *  slot. One empty row is always offered; "Nog iets anders toevoegen"
+   *  adds another. */
+  const [others, setOthers] = useState<{ key: string; text: string; note: string }[]>([
+    { key: "other-1", text: "", note: "" },
+  ]);
   const [wishDate, setWishDate] = useState("");
   const [autoStart, setAutoStart] = useState(false);
 
@@ -146,21 +155,38 @@ export function MeerwerkFlowPage() {
   }, [customer]);
 
   const cartWithOther = useMemo(() => {
-    const text = otherText.trim();
-    if (!text) return cart;
-    return [
-      ...cart,
-      {
-        key: "other",
+    const customLines: CartLine[] = others
+      .filter((row) => row.text.trim())
+      .map((row) => ({
+        key: row.key,
         kind: "other" as const,
         id: null,
-        label: text,
+        label: row.text.trim(),
         unitPrice: null,
         quantity: 1,
-        otherText: text,
-      },
-    ];
-  }, [cart, otherText]);
+        otherText: row.text.trim(),
+        note: row.note.trim(),
+      }));
+    return [...cart, ...customLines];
+  }, [cart, others]);
+
+  function setOther(key: string, patch: Partial<{ text: string; note: string }>) {
+    setOthers((prev) =>
+      prev.map((row) => (row.key === key ? { ...row, ...patch } : row)),
+    );
+  }
+  function addOther() {
+    setOthers((prev) => [
+      ...prev,
+      { key: `other-${prev.length + 1}-${Date.now().toString(36)}`, text: "", note: "" },
+    ]);
+  }
+  function removeOther(key: string) {
+    setOthers((prev) => {
+      const next = prev.filter((row) => row.key !== key);
+      return next.length === 0 ? [{ key: "other-1", text: "", note: "" }] : next;
+    });
+  }
 
   function lineItemsPayload() {
     return cartWithOther.map((line) => {
@@ -173,7 +199,11 @@ export function MeerwerkFlowPage() {
           quantity: String(line.quantity),
         };
       }
-      return { custom_description: line.otherText, quantity: "1" };
+      return {
+        custom_description: line.otherText,
+        quantity: "1",
+        ...(line.note ? { customer_note: line.note } : {}),
+      };
     });
   }
 
@@ -491,21 +521,64 @@ export function MeerwerkFlowPage() {
                 );
               })}
             </ul>
-            <div className="field" style={{ marginTop: 14 }}>
-              <label className="field-label" htmlFor="meerwerk-other">
-                {t("meerwerk_flow.other_label")}
-              </label>
-              <input
-                id="meerwerk-other"
-                className="field-input"
-                value={otherText}
-                onChange={(event) => setOtherText(event.target.value)}
-                placeholder={t("meerwerk_flow.other_placeholder")}
-                data-testid="meerwerk-other"
-              />
-              <p className="muted small" style={{ marginTop: 6 }}>
+            <div className="field" style={{ marginTop: 14 }} data-testid="meerwerk-others">
+              <div className="field-label">{t("meerwerk_flow.other_label")}</div>
+              <p className="muted small" style={{ marginTop: 0 }}>
                 {t("meerwerk_flow.other_helper")}
               </p>
+              {/* FE-4 — every custom line is a CART LINE like the priced
+                  ones above: a title, an optional note, and "prijs volgt"
+                  where a price would stand. Never a description field. */}
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {others.map((row, index) => (
+                  <li key={row.key} className="wp-undated-row" data-testid="meerwerk-other-row">
+                    <div className="wp-undated-row-main" style={{ flex: 1 }}>
+                      <input
+                        className="field-input"
+                        value={row.text}
+                        onChange={(event) => setOther(row.key, { text: event.target.value })}
+                        placeholder={t("meerwerk_flow.other_placeholder")}
+                        aria-label={t("meerwerk_flow.other_label")}
+                        data-testid={index === 0 ? "meerwerk-other" : `meerwerk-other-${index + 1}`}
+                      />
+                      <input
+                        className="field-input"
+                        value={row.note}
+                        onChange={(event) => setOther(row.key, { note: event.target.value })}
+                        placeholder={t("meerwerk_flow.other_note_placeholder")}
+                        aria-label={t("meerwerk_flow.other_note_label")}
+                        style={{ marginTop: 6 }}
+                        data-testid={`meerwerk-other-note-${index + 1}`}
+                      />
+                    </div>
+                    <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <span className="phase-badge phase-badge-action">
+                        {t("meerwerk_flow.price_follows")}
+                      </span>
+                      {others.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => removeOther(row.key)}
+                          aria-label={t("meerwerk_flow.other_remove")}
+                          data-testid={`meerwerk-other-remove-${index + 1}`}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ marginTop: 8 }}
+                onClick={addOther}
+                data-testid="meerwerk-other-add"
+              >
+                {t("meerwerk_flow.other_add")}
+              </button>
             </div>
           </>
         )}
@@ -536,15 +609,18 @@ export function MeerwerkFlowPage() {
             </div>
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {cartWithOther.map((line) => (
-                <li key={line.key} className="wp-undated-row">
-                  <span>
-                    {line.kind === "other"
-                      ? `${t("meerwerk_flow.other_prefix")}: ${line.label}`
-                      : `${line.quantity} × ${line.label}`}
-                  </span>
-                  <span className="muted small">
-                    {line.unitPrice ? formatMoney(line.unitPrice) : t("meerwerk_flow.price_follows")}
-                  </span>
+                <li key={line.key} className="wp-undated-row" data-testid="meerwerk-confirm-line" data-kind={line.kind}>
+                  <div className="wp-undated-row-main">
+                    <span>{`${line.quantity} × ${line.label}`}</span>
+                    {line.note && <span className="muted small">{line.note}</span>}
+                  </div>
+                  {line.unitPrice ? (
+                    <span className="muted small">{formatMoney(line.unitPrice)}</span>
+                  ) : (
+                    <span className="phase-badge phase-badge-action">
+                      {t("meerwerk_flow.price_follows")}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

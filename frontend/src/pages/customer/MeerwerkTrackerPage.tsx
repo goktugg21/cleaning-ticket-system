@@ -42,6 +42,9 @@ export function MeerwerkTrackerPage() {
   const { t } = useTranslation("common");
   const [rows, setRows] = useState<ExtraWorkRequestList[] | null>(null);
   const [error, setError] = useState("");
+  /** FE-4 (Addendum D §D.12 item 6) — one chip per phase present, plus
+   *  "Alles"; the groups below narrow to the chosen phase. */
+  const [phaseFilter, setPhaseFilter] = useState<ExtraWorkDisplayPhase | "">("");
 
   useEffect(() => {
     let cancelled = false;
@@ -57,13 +60,16 @@ export function MeerwerkTrackerPage() {
     };
   }, []);
 
-  const groups =
+  const allGroups =
     rows === null
       ? []
       : PHASE_ORDER.map((phase) => ({
           phase,
           items: rows.filter((row) => row.display_phase === phase),
         })).filter((group) => group.items.length > 0);
+  const groups = allGroups.filter(
+    (group) => phaseFilter === "" || group.phase === phaseFilter,
+  );
 
   return (
     <div data-testid="meerwerk-tracker-page">
@@ -100,7 +106,35 @@ export function MeerwerkTrackerPage() {
           </p>
         </section>
       ) : (
-        groups.map((group) => (
+        <>
+        <div className="wp-strip" data-testid="meerwerk-tracker-chips" style={{ marginBottom: 14 }}>
+          <button
+            type="button"
+            className={`status-tile${phaseFilter === "" ? " status-tile-active" : ""}`}
+            aria-pressed={phaseFilter === ""}
+            onClick={() => setPhaseFilter("")}
+            data-testid="meerwerk-tracker-chip-all"
+          >
+            <span className="status-tile-label">{t("meerwerk_tracker.filter_all")}</span>
+            <span className="status-tile-count">{rows.length}</span>
+          </button>
+          {allGroups.map((group) => (
+            <button
+              key={group.phase}
+              type="button"
+              className={`status-tile${phaseFilter === group.phase ? " status-tile-active" : ""}`}
+              aria-pressed={phaseFilter === group.phase}
+              onClick={() =>
+                setPhaseFilter(phaseFilter === group.phase ? "" : group.phase)
+              }
+              data-testid={`meerwerk-tracker-chip-${group.phase}`}
+            >
+              <span className="status-tile-label">{t(`phase.ew.${group.phase}`)}</span>
+              <span className="status-tile-count">{group.items.length}</span>
+            </button>
+          ))}
+        </div>
+        {groups.map((group) => (
           <section
             key={group.phase}
             className="card"
@@ -150,7 +184,8 @@ export function MeerwerkTrackerPage() {
               </ul>
             </BoundedList>
           </section>
-        ))
+        ))}
+        </>
       )}
     </div>
   );

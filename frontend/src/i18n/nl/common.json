@@ -2702,5 +2702,18 @@
   "start.meldingen_title": "Uw meldingen in behandeling",
   "start.meldingen_empty": "Geen openstaande meldingen.",
   "start.meldingen_all": "Alle meldingen bekijken",
-  "start.unread_title": "Ongelezen berichten"
+  "start.unread_title": "Ongelezen berichten",
+  "back_to.schedule": "Terug naar Werkplanning",
+  "back_to.my_meldingen": "Terug naar Mijn meldingen",
+  "back_to.tickets": "Terug naar Tickets",
+  "back_to.extra_work": "Terug naar Meerwerk",
+  "back_to.start": "Terug naar Start",
+  "back_to.inbox": "Terug naar Berichten",
+  "back_to.customer": "Terug naar klant",
+  "back_to.dashboard": "Terug naar dashboard",
+  "meerwerk_flow.other_add": "Nog iets anders toevoegen",
+  "meerwerk_flow.other_note_label": "Toelichting (optioneel)",
+  "meerwerk_flow.other_note_placeholder": "Toelichting (optioneel)",
+  "meerwerk_flow.other_remove": "Regel verwijderen",
+  "meerwerk_tracker.filter_all": "Alles"
 }

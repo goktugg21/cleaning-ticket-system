@@ -19,7 +19,6 @@ import { StatusBadge } from "../StatusBadge";
 import { formatPlannedWindow } from "../../lib/plannedWindow";
 import { detailPath, formatDay, formatPlannedDay } from "./entryHelpers";
 import { latenessOf } from "./lateness";
-import { LateBadge } from "./LateStrip";
 import { PartChips } from "./PartChips";
 
 /**
@@ -78,45 +77,66 @@ import { PartChips } from "./PartChips";
  * window has not (a colleague works it on Friday), so the card rolls
  * while the JOB is not yet late. Two different questions, two fields.
  */
-export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
+export function PlacementMarker({
+  entry,
+  deadlineIsHeadline = false,
+}: {
+  entry: WorkPlanEntry;
+  /** FE-4 — a real deadline is the ONE headline (the due chip); the
+   *  marker then says only where the card came from, without a second
+   *  "te laat" count. */
+  deadlineIsHeadline?: boolean;
+}) {
   const { t } = useTranslation("staff_slots");
   if (entry.placement === "PLANNED") return null;
 
+  /* FE-4 (Addendum D §D.12 item 2) — HONEST DATE WORDS. "Gepland <date>"
+     only when somebody planned it (`plan_source` TICKET / PROVIDER_PLAN);
+     a customer's wish says it is a wish; a card with no window at all
+     says when it was created and that it is not planned yet. */
+  const originDate = entry.rolled_from ?? entry.planned_start;
+  const origin = (count: number | null) => {
+    if (entry.plan_source === "CUSTOMER_WISH" && originDate) {
+      return t("agenda.wished_on", { date: formatPlannedDay(originDate) });
+    }
+    if (entry.plan_source === null || !originDate) {
+      return entry.created_at
+        ? `${t("agenda.created_on", { date: formatDay(entry.created_at.slice(0, 10)) })} · ${t("agenda.not_planned_yet")}`
+        : t("agenda.not_planned_yet");
+    }
+    if (deadlineIsHeadline || count === null) {
+      return t("agenda.planned_on", { date: formatPlannedDay(originDate) });
+    }
+    return t("agenda.why_rolled", { date: formatPlannedDay(originDate), count });
+  };
+
   if (entry.placement === "ROLLED") {
     return (
-      <div className="wp-why wp-why-rolled" data-testid="agenda-card-why">
+      <div
+        className={deadlineIsHeadline ? "wp-why wp-why-origin" : "wp-why wp-why-rolled"}
+        data-testid="agenda-card-why"
+      >
         <History size={11} strokeWidth={2.5} />
-        {entry.rolled_from
-          ? t("agenda.why_rolled", {
-              date: formatPlannedDay(entry.rolled_from),
-              count: entry.rolled_days ?? 0,
-            })
-          : t("agenda.why_rolled_undated")}
+        {origin(entry.rolled_days)}
       </div>
     );
   }
 
   if (entry.placement === "OVERDUE") {
-    // WP-1 G0 — the same-week carry. An overdue-and-open job whose
-    // planned window still covers the current week is a marked visitor
-    // on today's column, and the marker says the same two facts the
-    // rolled marker says: the day it was PLANNED for, and how late it
-    // is. Only where no planned day exists does the deadline itself
-    // have to carry the sentence.
+    // WP-1 G0 — the same-week carry: the card is a marked visitor on
+    // today's column. With a real deadline the due chip is the alarm and
+    // this line is only the origin; without one, this line is the alarm.
     return (
-      <div className="wp-why wp-why-overdue" data-testid="agenda-card-why">
+      <div
+        className={deadlineIsHeadline ? "wp-why wp-why-origin" : "wp-why wp-why-overdue"}
+        data-testid="agenda-card-why"
+      >
         <AlarmClock size={11} strokeWidth={2.5} />
-        {entry.planned_start
-          ? t("agenda.why_overdue_planned", {
-              date: formatPlannedDay(entry.planned_start),
-              count: entry.overdue_days ?? 0,
-            })
-          : entry.due_date
+        {entry.plan_source !== null && originDate
+          ? origin(entry.overdue_days)
+          : entry.due_date && !deadlineIsHeadline
             ? t("agenda.why_overdue", { date: formatDay(entry.due_date) })
-            : t("agenda.why_overdue_undated")}
-        {!entry.planned_start && entry.overdue_days !== null && (
-          <span>{t("agenda.overdue_days", { count: entry.overdue_days })}</span>
-        )}
+            : origin(null)}
       </div>
     );
   }
@@ -130,6 +150,61 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
         ? t(`agenda.${key}`, { date: formatDay(entry.planned_start) })
         : t("agenda.why_started_undated")}
     </div>
+  );
+}
+
+/**
+ * FE-4 (Addendum D §D.12 item 4) — WORK THAT IS OVER, IN THE PAST TENSE.
+ *
+ * A settled card applies no pressure: no red, no "te laat", nothing that
+ * implies action. It says when it was finished and — quietly — that the
+ * finish came after the due date, as history. Work sitting with the
+ * customer or with the manager wears a neutral "waiting" chip: it is
+ * settled for THIS reader, and never late-styled against them.
+ */
+export function SettledLine({ entry }: { entry: WorkPlanEntry }) {
+  const { t } = useTranslation("staff_slots");
+  if (entry.ticket_status === "WAITING_CUSTOMER_APPROVAL") {
+    return (
+      <span className="wp-wait" data-testid="agenda-card-waiting" data-waiting="customer">
+        {t("agenda.waiting_customer")}
+      </span>
+    );
+  }
+  if (entry.ticket_status === "WAITING_MANAGER_REVIEW") {
+    return (
+      <span className="wp-wait" data-testid="agenda-card-waiting" data-waiting="review">
+        {t("agenda.waiting_review")}
+      </span>
+    );
+  }
+  if (entry.state === "BLOCKED" && !entry.settled_at) {
+    // "Unable to complete" is not finished: the stuck list carries the
+    // pressure; the card says what happened, in the chip's own words.
+    return (
+      <span className="wp-wait" data-testid="agenda-card-waiting" data-waiting="blocked">
+        {t("agenda.chip_blocked")}
+      </span>
+    );
+  }
+  const after = entry.settled_days_after_due;
+  return (
+    <span className="wp-settled" data-testid="agenda-card-settled">
+      {entry.settled_at
+        ? t("agenda.settled_on", { date: formatDay(entry.settled_at.slice(0, 10)) })
+        : t("agenda.settled_plain")}
+      {after !== null && after > 0 && (
+        <span className="wp-settled-after">
+          {" "}
+          {t(
+            entry.due_kind === "DEADLINE"
+              ? "agenda.settled_after_deadline"
+              : "agenda.settled_after_plan",
+            { count: after },
+          )}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -158,7 +233,9 @@ export function PlacementMarker({ entry }: { entry: WorkPlanEntry }) {
 export function DueChip({ entry }: { entry: WorkPlanEntry }) {
   const days = entry.days_until_due;
   if (days === null) return null;
-  const hasDeadline = entry.lateness.deadline !== null;
+  // FE-4 — the SERVER's word for what the number counts against; the
+  // detail page reads the same field, so card and detail agree.
+  const hasDeadline = entry.due_kind === "DEADLINE";
   // WP-1 G0 — an OVERDUE-placed card's marker already prints
   // "Gepland <day> — N dagen te laat"; without a real deadline the chip
   // would be that same fact a second time, exactly like on ROLLED.
@@ -252,6 +329,11 @@ export function WorkPlanCard({
       // each staff member's working hours; the ticket's Scheduling
       // section does, to anybody who opens it.
       if (!entry.scheduled_start_at) {
+        // FE-4 — a window borrowed from the customer's WISH is a wish,
+        // and the foot says so instead of printing it as a plan.
+        if (entry.plan_source === "CUSTOMER_WISH" && entry.planned_start) {
+          return t("agenda.wished_on", { date: formatDay(entry.planned_start) });
+        }
         return formatPlannedWindow(entry.planned_start, entry.planned_end, formatDay, {
           empty: "",
           endOnly: (end) => t("agenda.until_date", { date: end }),
@@ -345,32 +427,32 @@ export function WorkPlanCard({
 
       {where && <span className="wp-card-where">{where}</span>}
 
-      {/* §12B — a card shown outside its planned week SAYS WHY, with its
-          planned date on it. */}
-      <PlacementMarker entry={entry} />
-      {/* W-VIEWER — the marker above ALREADY printed "Planned <date> —
-          N days late" on a rolled card, and that is word for word what
-          this badge's first line says. `omitPlanned` hands the planned
-          line to whichever of the two is already showing it; the badge
-          keeps what it alone can add (the deadline line, the never-done
-          line) and renders nothing when that is empty. */}
-      {late && !entry.viewer_settled && (
-        <LateBadge
-          facts={late}
-          testId="agenda-card-late"
-          // WP-1 G0 — the OVERDUE marker now prints the planned line
-          // too, so both carried placements hand it over.
-          omitPlanned={
-            entry.placement === "ROLLED" ||
-            (entry.placement === "OVERDUE" && entry.planned_start !== null)
-          }
-        />
+      {/* FE-4 (Addendum D §D.12 items 3-4) — ONE HEADLINE LATENESS, AND
+          NONE ON SETTLED WORK.
+          Live card: the deadline when one exists (the due chip), else
+          the planned day (the placement marker's "Gepland <day> — N
+          dagen te laat"). Never both as alarms: with a deadline the
+          marker says only where the card came from. Every other
+          time-fact is secondary and says what it is: the never-done
+          fact ("87 dagen zonder gewerkte uren") is a quiet note under
+          the facts, not a second red badge.
+          Settled card: past tense, neutral, nothing implying action. */}
+      {entry.viewer_settled ? (
+        <SettledLine entry={entry} />
+      ) : (
+        <>
+          <PlacementMarker
+            entry={entry}
+            deadlineIsHeadline={entry.due_kind === "DEADLINE" && entry.days_until_due !== null}
+          />
+          <DueChip entry={entry} />
+          {late && late.level === 3 && late.anchorDays !== null && (
+            <span className="wp-card-note" data-testid="agenda-card-never-done">
+              {t("agenda.never_done_hours", { count: late.anchorDays })}
+            </span>
+          )}
+        </>
       )}
-      {/* W-VIEWER §5 — the countdown, on every card that has a promise
-          to count against. It sits beside the rung rather than replacing
-          it: one says how bad it already is, the other how long is
-          left. */}
-      <DueChip entry={entry} />
 
       {/* W-N1 §3 — WHICH half of the job is this person's. Reuses the
           Assignment section's own `.parts-chip` pair rather than a

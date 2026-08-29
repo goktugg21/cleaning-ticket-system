@@ -163,6 +163,18 @@ export interface WorkPlanEntry {
    *  their answer, which they may still withdraw. Visible either way;
    *  just not shouting. */
   viewer_settled: boolean;
+  /** FE-4 (Addendum D §D.12) — the honest-date facts. `created_at` is
+   *  when the record was created and is NEVER dressed as a plan;
+   *  `plan_source` says whether the window came from the ticket's own
+   *  schedule, the provider's commitment, or the customer's WISH (a
+   *  wish is captioned as one); `due_kind` is what the headline
+   *  lateness counts against; `settled_at` / `settled_days_after_due`
+   *  are the past-tense facts of work that is over. */
+  created_at: string | null;
+  plan_source: "TICKET" | "PROVIDER_PLAN" | "CUSTOMER_WISH" | null;
+  due_kind: "DEADLINE" | "PLANNED_DAY" | null;
+  settled_at: string | null;
+  settled_days_after_due: number | null;
   /** WP-1 G2 — whole days this job has sat with NO planned date at
    *  all. Null on every dated entry. The "Nog niet gepland" lane
    *  prints it past a threshold so dateless work still nags. */

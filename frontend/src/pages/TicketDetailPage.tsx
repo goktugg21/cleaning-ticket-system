@@ -109,7 +109,7 @@ import {
 } from "../api/uploadVisibility";
 import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
-import { useBackLink } from "../hooks/useBackLink";
+import { useOriginBackLink } from "../hooks/useBackLink";
 import {
   canAccessExtraWork,
   canManageTimesheets,
@@ -658,7 +658,6 @@ export function TicketDetailPage() {
     if (!raw.startsWith("/") || raw.startsWith("//")) return null;
     return raw;
   })();
-  const backToTickets = useBackLink(chargeableFrom ?? "/tickets");
 
   /* W-TABS Task 4 — the tab, from the URL, the EW page's exact rule:
      absence IS overview, so the plain /tickets/<id> every existing link
@@ -683,6 +682,10 @@ export function TicketDetailPage() {
     );
   };
   const { me } = useAuth();
+  // FE-4 (Addendum D §D.12 item 1) — back goes where the reader came
+  // from: My Schedule (week and filters intact), Mijn meldingen, Tickets
+  // with its query; the role's home list when there is no in-app origin.
+  const backToTickets = useOriginBackLink(me?.role, { override: chargeableFrom });
   // W-VIEWER §8 — `staff_slots` joins the list because the worker's own
   // parts card now sits on THIS page's overview tab and its title and
   // count line are that bundle's strings. Adding the namespace rather
@@ -693,7 +696,7 @@ export function TicketDetailPage() {
   // that already owns the phrase.
   const backToTicketsLabel = chargeableFrom
     ? t("extra_work:back_to_chargeable_work")
-    : t("back_to_tickets");
+    : backToTickets.label;
   // M2 P5 — type / customer-facing labels for the resolver-gated
   // credential summaries on assigned-staff entries (reuses the P4
   // namespace; keys are NOT duplicated here).
@@ -3494,6 +3497,36 @@ export function TicketDetailPage() {
                 {ticket.time_window_label && (
                   <div className="ew-ctx-sub">{ticket.time_window_label}</div>
                 )}
+                {/* FE-4 (Addendum D §D.12 item 2) — the honest words for
+                    an unplanned job, with the SAME age the Werkplanning's
+                    row prints (`unplanned_age_days`, server-computed). */}
+                {!ticket.scheduled_start_at && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-created">
+                    {t("facts.created_on", { date: formatDate(ticket.created_at) })}
+                    {ticket.unplanned_age_days !== null && ticket.unplanned_age_days > 0
+                      ? ` · ${t("facts.unplanned_age", { count: ticket.unplanned_age_days })}`
+                      : ""}
+                  </div>
+                )}
+                {/* FE-4 (§D.12 item 4) — work that is over reads in the
+                    past tense, with the after-deadline fact as quiet
+                    history: no chip, no "te laat". */}
+                {ticket.settled_at && (
+                  <div className="ew-ctx-sub" data-testid="ticket-fact-settled">
+                    {t("facts.settled_on", { date: formatDate(ticket.settled_at) })}
+                    {ticket.settled_days_after_due !== null && (
+                      <span className="muted">
+                        {" "}
+                        {t(
+                          ticket.due_kind === "DEADLINE"
+                            ? "facts.settled_after_deadline"
+                            : "facts.settled_after_plan",
+                          { count: ticket.settled_days_after_due },
+                        )}
+                      </span>
+                    )}
+                  </div>
+                )}
                 {/* §D.11 G3 — ONE chip: days left, today, or days over;
                     the server decides the number AND whether the date is
                     a real deadline or only the planned day, so a planned
@@ -3523,6 +3556,11 @@ export function TicketDetailPage() {
                     second "must be done by" from the melding SLA rule
                     would be two promises for one job. */}
                 {ticket.kind !== "MEERWERK" &&
+                  // FE-4 (§D.12 item 3) — ONE alarm: with a due countdown
+                  // on screen the SLA clock would be a second headline.
+                  ticket.days_until_due === null &&
+                  // ...and never on work that is over (§D.12 item 4).
+                  !ticket.settled_at &&
                   ticket.sla_display_state !== "HISTORICAL" &&
                   ticket.sla_display_state !== "COMPLETED" &&
                   ticket.sla_due_at && (

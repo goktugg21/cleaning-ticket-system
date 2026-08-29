@@ -53,6 +53,11 @@ export interface ToastInput {
 
 interface ToastInstance extends ToastInput {
   id: string;
+  /** FE-4 (Addendum D §D.12) — how many identical pushes this toast
+   *  stands for. Repeats collapse into one card with a count instead of
+   *  stacking (the seeded W-LATE ladder pushed the same title three
+   *  times and covered a third of the page). */
+  count: number;
 }
 
 interface ToastContextValue {
@@ -116,14 +121,47 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const push = useCallback(
     (input: ToastInput) => {
-      const id = nextId();
       // W-LATE — L2/L3 stay until dismissed; the provider already had a
       // sticky mode (0), so persistence is a default here, not a new
       // mechanism.
       const sticky = input.severity === "L2" || input.severity === "L3";
       const duration =
         input.durationMs ?? (sticky ? 0 : DEFAULT_DURATION[input.variant]);
-      setToasts((prev) => [...prev, { ...input, id }]);
+      // FE-4 — a repeat of a toast already on screen (same variant, same
+      // title, same severity) bumps that toast's count and restarts its
+      // clock rather than adding a card. The newest description wins.
+      let collapsedInto: string | null = null;
+      setToasts((prev) => {
+        const existing = prev.find(
+          (toast) =>
+            toast.variant === input.variant &&
+            toast.title === input.title &&
+            (toast.severity ?? null) === (input.severity ?? null),
+        );
+        if (existing) {
+          collapsedInto = existing.id;
+          return prev.map((toast) =>
+            toast.id === existing.id
+              ? {
+                  ...toast,
+                  count: toast.count + 1,
+                  description: input.description ?? toast.description,
+                  onClick: input.onClick ?? toast.onClick,
+                }
+              : toast,
+          );
+        }
+        return prev;
+      });
+      const id = collapsedInto ?? nextId();
+      if (collapsedInto === null) {
+        setToasts((prev) => [...prev, { ...input, id, count: 1 }]);
+      }
+      const previousTimer = timers.current.get(id);
+      if (previousTimer !== undefined) {
+        window.clearTimeout(previousTimer);
+        timers.current.delete(id);
+      }
       if (duration > 0) {
         const handle = window.setTimeout(() => dismiss(id), duration);
         timers.current.set(id, handle);
@@ -202,7 +240,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 {variantIcon(toast.variant)}
               </span>
               <div className="toast-text">
-                <div className="toast-title">{toast.title}</div>
+                <div className="toast-title">
+                  {toast.title}
+                  {toast.count > 1 && (
+                    <span className="toast-count" data-testid="toast-count">
+                      {" "}
+                      ×{toast.count}
+                    </span>
+                  )}
+                </div>
                 {toast.description && (
                   <div className="toast-desc">{toast.description}</div>
                 )}

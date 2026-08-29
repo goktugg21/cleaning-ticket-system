@@ -107,8 +107,7 @@
   "workflow_rejection_reason_placeholder": "Leg uit waarom u dit ticket afwijst",
   "workflow_admin_override_approved": "Normaal moet de klant dit ticket goedkeuren. Klik nogmaals om als beheerder goed te keuren.",
   "workflow_admin_override_rejected": "Normaal moet de klant dit ticket afwijzen en uitleggen waarom. Klik nogmaals om als beheerder af te wijzen.",
-  "workflow_customer_reject_warning": "Als u dit ticket afwijst, schrijf dan eerst de reden in het statusnotitieveld.",
-  "workflow_customer_rejection_required": "Schrijf eerst de afwijzingsreden in het statusnotitieveld.",
+  "workflow_customer_rejection_required": "Geef in de toelichting aan waarom u dit afwijst.",
   "workflow_move_to": "Wijzig naar {{status}}",
   "workflow_action.OPEN": "Weer openzetten",
   "workflow_action.ACKNOWLEDGED": "Markeer als gezien en ingepland",
@@ -428,5 +427,14 @@
   "actions.raw_status": "Werkstroomstatus",
   "actions.raw_kind": "Soort",
   "composer.tier_label": "Soort bericht",
-  "composer.fold_hint": "Klik in het veld om personen te kiezen of het bericht privé te maken."
+  "composer.fold_hint": "Klik in het veld om personen te kiezen of het bericht privé te maken.",
+  "facts.created_on": "Aangemaakt {{date}}",
+  "facts.not_planned_yet": "nog niet ingepland",
+  "facts.unplanned_age_one": "staat al {{count}} dag zonder planning",
+  "facts.unplanned_age_other": "staat al {{count}} dagen zonder planning",
+  "facts.settled_on": "Afgerond op {{date}}",
+  "facts.settled_after_deadline_one": "({{count}} dag na de deadline)",
+  "facts.settled_after_deadline_other": "({{count}} dagen na de deadline)",
+  "facts.settled_after_plan_one": "({{count}} dag na de geplande dag)",
+  "facts.settled_after_plan_other": "({{count}} dagen na de geplande dag)"
 }

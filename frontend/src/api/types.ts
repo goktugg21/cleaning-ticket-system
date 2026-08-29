@@ -595,6 +595,15 @@ export interface TicketDetail extends TicketList {
   /** Signed whole days: left when positive, over when negative, today
    *  at zero. Null when there is no due date OR the work is over. */
   days_until_due: number | null;
+  /** FE-4 (§D.12) — the SAME age the Werkplanning's "Nog niet gepland"
+   *  row prints: whole days since creation on a live job with no window
+   *  at all; null otherwise. */
+  unplanned_age_days: number | null;
+  /** FE-4 (§D.12 item 4) — when the work was over (past tense), and
+   *  how many days after its due date that came (quiet history). Null
+   *  while the ticket is live / when it was on time. */
+  settled_at: string | null;
+  settled_days_after_due: number | null;
   room_label: string;
   created_by: number;
   created_by_email: string;

@@ -83,6 +83,7 @@ import {
   type ExtraWorkTimelineEntry,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
+import { useOriginBackLink } from "../hooks/useBackLink";
 import { ActualHoursPanel } from "../components/extra-work/ActualHoursPanel";
 import {
   actualHoursPanelKey,
@@ -912,6 +913,12 @@ export function ExtraWorkDetailPage() {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
   const messageLocale = useLocaleCode();
+  // FE-4 (Addendum D §D.12 item 1) — back goes where the reader came
+  // from; the meerwerk list when there is no in-app origin.
+  const originBack = useOriginBackLink(me?.role, {
+    fallbackTo: "/extra-work",
+    fallbackLabelKey: "back_to.extra_work",
+  });
 
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
   // Sprint 177 §2 — the dates editor is opened from a trigger that sits
@@ -1698,7 +1705,7 @@ export function ExtraWorkDetailPage() {
     return (
       <div>
         <PageHeader
-          backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
+          backLink={{ to: originBack.to, label: originBack.label }}
           title={t("detail.not_found")}
         />
         <EmptyState
@@ -2750,7 +2757,7 @@ export function ExtraWorkDetailPage() {
   return (
     <div data-testid="extra-work-detail-page">
       <PageHeader
-        backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
+        backLink={{ to: originBack.to, label: originBack.label }}
         title={ew.title}
       />
 

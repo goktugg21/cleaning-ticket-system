@@ -29,7 +29,7 @@
 // turns up somewhere unexpected without explaining itself is worse than
 // one that does not turn up.
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   AlarmClock,
   CalendarClock,
@@ -73,7 +73,7 @@ import {
   formatDay,
   partHostDays,
 } from "../components/workplan/entryHelpers";
-import { matchesChip } from "../components/workplan/chips";
+import { CHIPS, FOLDED_KEYS, matchesChip } from "../components/workplan/chips";
 import { latenessOf, sortLate } from "../components/workplan/lateness";
 import { LateBadge, LateStrip } from "../components/workplan/LateStrip";
 import { PartChips } from "../components/workplan/PartChips";
@@ -93,6 +93,7 @@ import {
   fromDateString,
   isoWeekDays,
   isoWeekStart,
+  parseIsoWeek,
   shiftIsoWeek,
   toDateString,
 } from "../lib/isoWeek";
@@ -321,14 +322,46 @@ function WorkPlanWeek() {
   const role = me?.role ?? null;
   const teamWeek = agendaShowsTeamWeek(role);
 
-  const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
+  /* FE-4 (Addendum D §D.12 item 1) — THE WEEK AND THE FILTERS ARE PART
+     OF THE ADDRESS. "Back" from a ticket steps the history to this page,
+     and a week or a filter kept in component state would be gone by
+     then; in the URL (`?week=2026-W35&status=open&show=TICKET_SLOT&q=`)
+     the page comes back exactly as it was left. `replace: true`, so
+     flipping through weeks does not fill the history. */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const setParam = (key: string, value: string) => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (value) params.set(key, value);
+        else params.delete(key);
+        return params;
+      },
+      { replace: true },
+    );
+  };
+  const week: IsoWeek = useMemo(
+    () => parseIsoWeek(searchParams.get("week") ?? "") ?? currentIsoWeek(),
+    [searchParams],
+  );
+  const setWeek = (next: IsoWeek | ((w: IsoWeek) => IsoWeek)) => {
+    const value = typeof next === "function" ? next(week) : next;
+    setParam("week", formatIsoWeek(value));
+  };
   const [data, setData] = useState<WorkPlanResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const [chip, setChip] = useState<ChipKey>("");
-  const [kindFilter, setKindFilter] = useState<"" | WorkPlanKind>("");
+  const chipParam = searchParams.get("status") ?? "";
+  const chip: ChipKey = CHIPS.some((c) => c.key === chipParam)
+    ? (chipParam as ChipKey)
+    : "";
+  const setChip = (next: ChipKey) => setParam("status", next);
+  const kindParam = searchParams.get("show") ?? "";
+  const kindFilter: "" | WorkPlanKind =
+    kindParam === "TICKET_SLOT" || kindParam === "EXTRA_WORK" ? kindParam : "";
+  const setKindFilter = (next: "" | WorkPlanKind) => setParam("show", next);
   /** Sprint 183 §4 — the reference's "search by title or description".
    *
    *  Client-side, and honestly so: the week's entries are a BOUNDED,
@@ -337,7 +370,8 @@ function WorkPlanWeek() {
    *  CHIPS stay server counts — they describe the whole scope, which no
    *  amount of client filtering can know. A search box that quietly
    *  moved the chip numbers would be the defect Sprint 179A removed. */
-  const [search, setSearch] = useState("");
+  const search = searchParams.get("q") ?? "";
+  const setSearch = (next: string) => setParam("q", next);
   const [overdueOpen, setOverdueOpen] = useState(false);
   /** T2-3 — the "YYYY-MM-DD" whose day is open full-width, or null. The
    *  DAY KEY rather than the group object: `groups` is rebuilt whenever a
@@ -356,6 +390,10 @@ function WorkPlanWeek() {
   // only the pressed button goes busy.
   const [planningKey, setPlanningKey] = useState<string | null>(null);
   const [planError, setPlanError] = useState("");
+  /** FE-4 (Addendum D §D.12 item 5) — "Nog niet gepland" is a count-with-
+   *  age BUTTON that opens the drawer; closed by default so it does not
+   *  dominate the page. */
+  const [undatedOpen, setUndatedOpen] = useState(false);
 
   const weekParam = formatIsoWeek(week);
 
@@ -453,9 +491,17 @@ function WorkPlanWeek() {
    *  lane must not: its one action writes the ticket's schedule, so the
    *  second row is the same button against the same record. */
   const undatedJobs = useMemo(
-    () => (data ? dedupeByJob(data.undated_entries) : []),
+    () =>
+      data
+        ? // FE-4 — oldest first: the row that has waited longest is the
+          // one to deal with first.
+          [...dedupeByJob(data.undated_entries)].sort(
+            (a, b) => (b.unplanned_age_days ?? 0) - (a.unplanned_age_days ?? 0),
+          )
+        : [],
     [data],
   );
+  const undatedOldest = undatedJobs[0]?.unplanned_age_days ?? null;
 
   /** What the overview line says. The deduped count once the lane holds
    *  every row; the server's own count while the lane is bounded. */
@@ -781,13 +827,36 @@ function WorkPlanWeek() {
           <span className="filter-label">{t("agenda.filter_source")}</span>
           <select
             className="filter-control"
-            value={kindFilter}
-            onChange={(e) => setKindFilter(e.target.value as "" | WorkPlanKind)}
+            // FE-4 — the three status buckets that left the strip live
+            // here, beside the source. One control: a status pick clears
+            // the source and vice versa, and the strip's own three tiles
+            // keep their server counts.
+            value={
+              FOLDED_KEYS.includes(chip) ? `status:${chip}` : kindFilter
+            }
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value.startsWith("status:")) {
+                setKindFilter("");
+                setChip(value.slice("status:".length) as ChipKey);
+              } else {
+                if (FOLDED_KEYS.includes(chip)) setChip("");
+                setKindFilter(value as "" | WorkPlanKind);
+              }
+            }}
             data-testid="agenda-filter-kind"
           >
             <option value="">{t("agenda.all_sources")}</option>
             <option value="TICKET_SLOT">{t("agenda.source_ticket")}</option>
             <option value="EXTRA_WORK">{t("agenda.source_extra_work")}</option>
+            <optgroup label={t("agenda.filter_status_group")}>
+              {CHIPS.filter((c) => FOLDED_KEYS.includes(c.key)).map((c) => (
+                <option key={c.key} value={`status:${c.key}`}>
+                  {t(`agenda.${c.label}`)}
+                  {counts ? ` (${c.count(counts)})` : ""}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </div>
       </form>
@@ -802,13 +871,41 @@ function WorkPlanWeek() {
           with before you read a plan, and the action that moves a row
           out of here and into the week is on the row itself. */}
       {data && undatedJobs.length > 0 && (
+        <div className="wp-undated-toggle-row" data-testid="agenda-undated-toggle-row">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            aria-expanded={undatedOpen}
+            onClick={() => setUndatedOpen((open) => !open)}
+            data-testid="agenda-undated-toggle"
+          >
+            <CalendarClock size={14} strokeWidth={2.5} />
+            {t("agenda.undated_toggle", { count: undatedShown })}
+            {undatedOldest !== null && undatedOldest >= UNPLANNED_AGE_THRESHOLD_DAYS && (
+              <span className="wp-undated-toggle-age">
+                {" · "}
+                {t("agenda.undated_oldest", { count: undatedOldest })}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+      {data && undatedJobs.length > 0 && undatedOpen && (
         <section
           className="card"
           data-testid="agenda-undated-lane"
           style={{ marginBottom: 18, padding: "16px 18px" }}
         >
-          <div className="section-head-title" style={{ marginBottom: 4 }}>
-            {t("agenda.undated_title")}
+          <div className="section-head" style={{ marginBottom: 4 }}>
+            <div className="section-head-title">{t("agenda.undated_title")}</div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setUndatedOpen(false)}
+              data-testid="agenda-undated-hide"
+            >
+              {t("agenda.undated_hide")}
+            </button>
           </div>
           <p className="muted small" style={{ marginTop: 0 }}>
             {t("agenda.undated_desc")}
@@ -1115,6 +1212,15 @@ function UndatedRow({
             .filter(Boolean)
             .join(" · ")}
         </span>
+        {/* FE-4 (Addendum D §D.12 item 2) — the honest words: when it was
+            created, and that it is not planned yet. Never "Gepland". */}
+        {entry.created_at && (
+          <span className="muted small" data-testid={`agenda-undated-created-${entry.key}`}>
+            {t("agenda.created_on", { date: formatDay(entry.created_at.slice(0, 10)) })}
+            {" · "}
+            {t("agenda.not_planned_yet")}
+          </span>
+        )}
         {/* WP-1 G2 — dateless work never becomes overdue by design, so
             this is its only nag: how long it has sat here, said out
             loud once it is older than the threshold. */}

@@ -107,8 +107,7 @@
   "workflow_rejection_reason_placeholder": "Explain why you reject this ticket",
   "workflow_admin_override_approved": "Normally the customer should approve this ticket. Click the button again to approve it as admin override.",
   "workflow_admin_override_rejected": "Normally the customer should reject this ticket and explain why. Click the button again to reject it as admin override.",
-  "workflow_customer_reject_warning": "If you reject this ticket, please write the reason in the status note field first.",
-  "workflow_customer_rejection_required": "Please write the rejection reason in the status note field first.",
+  "workflow_customer_rejection_required": "Say why you are rejecting this in the note.",
   "workflow_move_to": "Move to {{status}}",
   "workflow_action.OPEN": "Reopen it",
   "workflow_action.ACKNOWLEDGED": "Mark as seen and planned",
@@ -428,5 +427,14 @@
   "actions.raw_status": "Workflow status",
   "actions.raw_kind": "Kind",
   "composer.tier_label": "Message type",
-  "composer.fold_hint": "Click into the field to pick people or make the message private."
+  "composer.fold_hint": "Click into the field to pick people or make the message private.",
+  "facts.created_on": "Created {{date}}",
+  "facts.not_planned_yet": "not planned yet",
+  "facts.unplanned_age_one": "waiting {{count}} day for a plan",
+  "facts.unplanned_age_other": "waiting {{count}} days for a plan",
+  "facts.settled_on": "Finished on {{date}}",
+  "facts.settled_after_deadline_one": "({{count}} day after the deadline)",
+  "facts.settled_after_deadline_other": "({{count}} days after the deadline)",
+  "facts.settled_after_plan_one": "({{count}} day after the planned day)",
+  "facts.settled_after_plan_other": "({{count}} days after the planned day)"
 }

@@ -300,11 +300,18 @@ export default function App() {
               inside it. Same ProtectedRoute gate as the dashboard — scoping
               stays backend-side. Defined ABOVE /tickets/new and /tickets/:id
               (exact static path; RRv6 ranks it correctly regardless). */}
+          {/* FE-4 (Addendum D §D.12 item 1) — the legacy tickets list is
+              NOT a customer surface: a customer role reaching it lands on
+              Mijn meldingen. Single-ticket deep links (/tickets/:id) are
+              untouched. */}
           <Route
             path="/tickets"
             element={
               <ProtectedRoute>
-                <DashboardPage key="tickets-page" variant="tickets-page" />
+                <ByCustomer
+                  customer={<Navigate to="/my/meldingen" replace />}
+                  other={<DashboardPage key="tickets-page" variant="tickets-page" />}
+                />
               </ProtectedRoute>
             }
           />

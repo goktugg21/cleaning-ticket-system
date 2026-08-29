@@ -15544,3 +15544,26 @@ table.assign-table { min-width: 0; width: 100%; }
    recipients (only while the composer has focus or holds text). */
 .composer-tier-select { max-width: 280px; }
 .composer-fold-hint { font-size: var(--font-xs); color: var(--text-faint); margin: 0 22px 8px; }
+
+
+/* ====================================================================
+   FE-4 (Addendum D §D.12) — honest words on the plan.
+   ==================================================================== */
+/* The origin line on a card whose ALARM is the deadline chip: says where
+   the card came from, in the muted tone — no second "te laat". */
+.wp-why-origin { color: var(--text-muted); font-weight: 500; }
+/* Settled work, past tense: neutral, quiet. */
+.wp-settled { font-size: 11px; color: var(--text-muted); align-self: flex-start; }
+.wp-settled-after { color: var(--text-faint); }
+/* Waiting on somebody else: a neutral chip, never late-styled. */
+.wp-wait {
+  display: inline-flex; align-items: center; align-self: flex-start;
+  padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: var(--surface-2); color: var(--text-muted);
+}
+/* A secondary time-fact under the facts (the never-done hours). */
+.wp-card-note { font-size: 11px; color: var(--text-faint); }
+/* The collapsed "Nog niet gepland" door. */
+.wp-undated-toggle-row { margin-bottom: 14px; }
+.wp-undated-toggle-age { color: var(--text-muted); font-weight: 500; }
+.toast-count { font-weight: 600; color: var(--text-muted); }

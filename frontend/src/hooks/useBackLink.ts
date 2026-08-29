@@ -27,8 +27,11 @@
  * `preventDefault` there would break open-in-new-tab.
  */
 import type { MouseEvent } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
+import type { Role } from "../api/types";
 import { previousPath, samePage } from "../lib/navHistory";
 
 export interface BackLinkProps {
@@ -54,4 +57,74 @@ export function useBackLink(to: string): BackLinkProps {
       navigate(-1);
     },
   };
+}
+
+/**
+ * FE-4 (Addendum D §D.12 item 1) — BACK GOES WHERE YOU CAME FROM.
+ *
+ * The owner: "back" on a detail page must return to the surface the
+ * reader actually came from — My Schedule with its week and filters,
+ * Mijn meldingen, Tickets with its query — not to a fixed list.
+ *
+ * The in-app origin is `navHistory.previousPath()`, read ONCE when the
+ * detail mounts (a detail that navigates to a sibling detail stays
+ * mounted, and its origin does not change under it). When that path is
+ * one of the surfaces below, the link points at it — the FULL path,
+ * query included, so the week and the filters ride along — and a plain
+ * click steps the history back (`useBackLink`), which is what restores
+ * scroll and state rather than remounting the list. When there is no
+ * in-app origin (a deep link, a fresh tab, a notification), the role's
+ * own home list is the honest default: staff and building managers
+ * live on My Schedule, customers on Mijn meldingen, provider admins on
+ * Tickets.
+ */
+const ORIGINS: { test: RegExp; labelKey: string }[] = [
+  { test: /^\/agenda(?:[/?#]|$)/, labelKey: "back_to.schedule" },
+  { test: /^\/my\/meldingen(?:[/?#]|$)/, labelKey: "back_to.my_meldingen" },
+  { test: /^\/tickets(?:[?#]|$)/, labelKey: "back_to.tickets" },
+  { test: /^\/extra-work(?:[?#]|$)/, labelKey: "back_to.extra_work" },
+  { test: /^\/start(?:[/?#]|$)/, labelKey: "back_to.start" },
+  { test: /^\/inbox(?:[/?#]|$)/, labelKey: "back_to.inbox" },
+  { test: /^\/admin\/customers\/\d+/, labelKey: "back_to.customer" },
+  { test: /^\/(?:[?#]|$)/, labelKey: "back_to.dashboard" },
+];
+
+function roleHome(role: Role | null | undefined): { to: string; labelKey: string } {
+  if (role === "STAFF" || role === "BUILDING_MANAGER") {
+    return { to: "/agenda", labelKey: "back_to.schedule" };
+  }
+  if (role === "CUSTOMER_USER") {
+    return { to: "/my/meldingen", labelKey: "back_to.my_meldingen" };
+  }
+  return { to: "/tickets", labelKey: "back_to.tickets" };
+}
+
+export interface OriginBackLink extends BackLinkProps {
+  label: string;
+}
+
+export function useOriginBackLink(
+  role: Role | null | undefined,
+  options: {
+    /** An explicit origin the caller was handed (router state), which
+     *  outranks the recorded history. */
+    override?: string | null;
+    /** The default when there is no in-app origin, instead of the role's
+     *  home (a meerwerk detail defaults to the meerwerk list). */
+    fallbackTo?: string;
+    fallbackLabelKey?: string;
+  } = {},
+): OriginBackLink {
+  const { t } = useTranslation("common");
+  // Read once, at mount: the origin is where the reader CAME from.
+  const [origin] = useState<string | null>(() => options.override ?? previousPath());
+  const known = origin ? ORIGINS.find((o) => o.test.test(origin)) : undefined;
+  const home = roleHome(role);
+  const target = known && origin
+    ? { to: origin, labelKey: known.labelKey }
+    : options.fallbackTo
+      ? { to: options.fallbackTo, labelKey: options.fallbackLabelKey ?? home.labelKey }
+      : home;
+  const link = useBackLink(target.to);
+  return { ...link, label: t(target.labelKey) };
 }

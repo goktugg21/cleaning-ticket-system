@@ -30,6 +30,8 @@ import type {
   Proposal,
   ProposalDetail,
 } from "../../api/types";
+import { useAuth } from "../../auth/AuthContext";
+import { useOriginBackLink } from "../../hooks/useBackLink";
 import { PageHeader } from "../../components/PageHeader";
 import { RejectReasonDialog } from "../../components/RejectReasonDialog";
 import { PhaseBanner } from "../../components/customer/PhaseBadge";
@@ -39,6 +41,13 @@ import { formatDate, formatMoney } from "../../lib/intl";
 export function MeerwerkDetailPage() {
   const { t } = useTranslation("common");
   const { id } = useParams<{ id: string }>();
+  const { me } = useAuth();
+  // FE-4 (Addendum D §D.12 item 1) — back goes where the reader came
+  // from (Start, the tracker, Mijn meldingen); the tracker otherwise.
+  const originBack = useOriginBackLink(me?.role, {
+    fallbackTo: "/extra-work",
+    fallbackLabelKey: "back_to.extra_work",
+  });
 
   const [detail, setDetail] = useState<ExtraWorkRequestDetail | null>(null);
   const [timeline, setTimeline] = useState<ExtraWorkTimelineEntry[]>([]);
@@ -149,9 +158,9 @@ export function MeerwerkDetailPage() {
           .filter(Boolean)
           .join(" · ")}
         actions={
-          <Link to="/extra-work" className="btn btn-ghost btn-sm">
+          <Link {...originBack} className="btn btn-ghost btn-sm" data-testid="meerwerk-detail-back">
             <ChevronLeft size={14} strokeWidth={2} />
-            {t("meerwerk_detail.back")}
+            {originBack.label}
           </Link>
         }
       />
