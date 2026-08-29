@@ -15753,3 +15753,18 @@ table.assign-table { min-width: 0; width: 100%; }
 .pricing-toolbar-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; min-width: 0; }
 .pricing-toolbar-search { flex: 0 1 260px; min-width: 160px; }
 .pricing-chip-count { margin-left: 6px; opacity: 0.7; font-weight: 500; }
+/* §D.6.10 — designed mid-states: skeleton lines, never "Loading…" text. */
+.skeleton-lines { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px 18px; }
+.skeleton-line {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--border-soft) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.skeleton-line.short { width: 55%; }
+.skeleton-row { display: grid; grid-template-columns: 90px 2fr 1fr 1fr 1fr 1fr; gap: 14px; padding: 14px var(--cell-x-edge, 20px); border-bottom: 1px solid var(--border-soft); }
+.skeleton-row .skeleton-line { height: 11px; }
+@keyframes skeleton-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-line { animation: none; } }

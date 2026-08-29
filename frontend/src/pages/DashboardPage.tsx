@@ -11,21 +11,13 @@ import {
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
-import { getMySlots } from "../api/admin";
-import {
-  getExtraWorkStats,
-  listAllExtraWork,
-  listExtraWork,
-} from "../api/extraWork";
-import { getInboxUnreadCount } from "../api/inbox";
+import { getExtraWorkStats, listAllExtraWork } from "../api/extraWork";
 import { getBillingMonthAtRisk } from "../api/invoices";
-import { listNotifications, notificationHref } from "../api/notifications";
 import { getWorkPlan } from "../api/workPlan";
 import type {
   AssignmentCandidate,
   ExtraWorkRequestList,
   ExtraWorkStats,
-  Notification,
   PaginatedResponse,
   TicketList,
   TicketStats,
@@ -43,9 +35,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import {
   canAccessBilling,
-  canAccessExtraWork,
   isProviderManagementRole,
-  isStaffRole,
 } from "../auth/permissions";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
 import { EditModeToggle } from "../components/EditModeToggle";
@@ -1155,9 +1145,6 @@ export function DashboardPage({
     count: number;
     rows: TicketList[];
   } | null>(null);
-  const [attnActivity, setAttnActivity] = useState<Notification[] | null>(
-    null,
-  );
   // WP-1 — the three guard counts. Server-computed over the whole
   // scope (the work-plan counts block and the at-risk endpoint); the
   // dashboard only repeats them. Null = not loaded, renders "—".
@@ -1168,7 +1155,6 @@ export function DashboardPage({
   // RF-18 (#107) — info-widget data (dashboard variant only). One fetch
   // per widget on mount (+ the shared auto-refresh); role-ineligible
   // widgets never fetch; failures keep the "—" placeholder.
-  const [inboxUnread, setInboxUnread] = useState<number | null>(null);
   const [billingMonthTotals, setBillingMonthTotals] = useState<{
     openTotal: number;
     invoicedTotal: number;
@@ -1179,83 +1165,49 @@ export function DashboardPage({
   const [billingRows, setBillingRows] = useState<
     ExtraWorkRequestList[] | null
   >(null);
-  const [todaySlotCount, setTodaySlotCount] = useState<number | null>(null);
   // #109 Part G — most-recent tickets + extra work for the "Laatste
   // tickets / extra werk" panel (fetched in parallel inside the
   // existing attention loader — no new waterfall).
-  const [recentTickets, setRecentTickets] = useState<TicketList[] | null>(
-    null,
-  );
-  const [recentExtraWork, setRecentExtraWork] = useState<
-    ExtraWorkRequestList[] | null
-  >(null);
 
+  // FE-6 — the one widget fetch left: this month's billing rows, for
+  // the KPI tile and the per-building summary. Management only (the
+  // endpoint refuses everyone else); a failure keeps the em dash.
   const loadWidgets = useCallback(async () => {
-    if (isTicketsPage) return;
-    const localDateKey = (iso: string | null): string | null => {
-      if (!iso) return null;
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return null;
-      const pad = (n: number) => String(n).padStart(2, "0");
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    };
-    const [inbox, billing, slots] = await Promise.allSettled([
-      getInboxUnreadCount(),
-      // Sprint 120 — this used to request page_size=500, but DRF's
-      // max_page_size (config/pagination.py) silently clamps that to 200,
-      // so any month with more than 200 matching EW rows was undercounted
-      // with no error. listAllExtraWork pages exhaustively instead.
-      canAccessBilling(userRole)
-        ? listAllExtraWork({ billing_period: currentMonth() })
-        : Promise.resolve(null),
-      isStaffRole(userRole) ? getMySlots() : Promise.resolve(null),
-    ]);
-    if (inbox.status === "fulfilled") setInboxUnread(inbox.value);
-    if (billing.status === "fulfilled" && billing.value !== null) {
-      setBillingMonthTotals(splitOpenInvoiced(billing.value));
-      setBillingRows(billing.value);
-    }
-    if (slots.status === "fulfilled" && slots.value !== null) {
-      const today = localDateKey(new Date().toISOString());
-      setTodaySlotCount(
-        slots.value.filter(
-          (s) => localDateKey(s.scheduled_start_at) === today,
-        ).length,
-      );
+    if (isTicketsPage || !canAccessBilling(userRole)) return;
+    try {
+      // Sprint 120 — pages exhaustively; DRF clamps page_size at 200.
+      const rows = await listAllExtraWork({ billing_period: currentMonth() });
+      setBillingMonthTotals(splitOpenInvoiced(rows));
+      setBillingRows(rows);
+    } catch {
+      /* the tile and the summary keep their placeholders */
     }
   }, [isTicketsPage, userRole]);
 
+  // FE-6 — the attention list's three ticket counts. COUNTS, not rows:
+  // each row of the list is a link to the queue that holds the work,
+  // and the queue page is where the rows are read (page_size 1 keeps
+  // the payload to the count).
   const loadAttention = useCallback(async () => {
     if (isTicketsPage) return;
     try {
-      const [rev, una, stalled, act, recentTk, recentEw] = await Promise.all([
+      const [rev, una, stalled] = await Promise.all([
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { status: "WAITING_MANAGER_REVIEW", page_size: 3 },
+          params: { status: "WAITING_MANAGER_REVIEW", page_size: 1 },
         }),
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: {
             status: "OPEN",
             assigned_to__isnull: "true",
-            page_size: 3,
+            page_size: 1,
           },
         }),
-        // Sprint 180 §1 — the approval-overdue queue. The backend
-        // filter already narrows to WAITING_CUSTOMER_APPROVAL, so no
-        // status param is needed here.
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: {
             awaiting_customer_approval_days: STALLED_APPROVAL_DAYS,
-            page_size: 3,
+            page_size: 1,
           },
         }),
-        listNotifications({ page: 1 }),
-        // #109 Part G — most-recent 5 across the caller's scope (the
-        // backend scopes /tickets/ + /extra-work/ already; default
-        // ordering is newest-first). Parallel with the batch above.
-        api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { page_size: 5 },
-        }),
-        listExtraWork({ page_size: 5 }),
       ]);
       setAttnReview({ count: rev.data.count, rows: rev.data.results });
       setAttnUnassigned({ count: una.data.count, rows: una.data.results });
@@ -1263,11 +1215,8 @@ export function DashboardPage({
         count: stalled.data.count,
         rows: stalled.data.results,
       });
-      setAttnActivity(act.results.slice(0, 3));
-      setRecentTickets(recentTk.data.results.slice(0, 5));
-      setRecentExtraWork(recentEw.results.slice(0, 5));
     } catch {
-      // Cards keep their "—" placeholders on failure (mirrors loadStats).
+      // Rows keep their "—" placeholders on failure (mirrors loadStats).
     }
   }, [isTicketsPage]);
 
@@ -1747,6 +1696,12 @@ export function DashboardPage({
               className="attention-layout"
               data-testid="dashboard-attention"
             >
+              {/* FE-6 (§D.7) — ONE "needs attention" list. Every row is
+                  a count and a link to the queue that holds the work;
+                  the WP-1 guard rows, the unassigned queue and the two
+                  meerwerk waits sit in the same list. Rows waiting on
+                  the customer stay neutral; rows the provider must act
+                  on tint as soon as the count is positive. */}
               <div
                 className="card attention-card"
                 data-testid="attention-needed"
@@ -1757,296 +1712,86 @@ export function DashboardPage({
                   </span>
                 </div>
                 <ul className="attn-list">
-                  <li className="attn-item">
-                    <Link
-                      to={`/tickets?${queueSearch("review")}`}
-                      className="attn-row"
-                      data-testid="attention-review"
-                    >
-                      <span className="attn-row-label">
-                        {t("queue.review.title")}
-                      </span>
-                      <span
-                        className={attnBadge(
-                          stats?.by_status?.WAITING_MANAGER_REVIEW ?? null,
-                          true,
-                        )}
-                      >
-                        {fmt(stats?.by_status?.WAITING_MANAGER_REVIEW ?? null)}
-                      </span>
-                    </Link>
-                  </li>
-                  <li className="attn-item">
-                    <Link
-                      to={`/tickets?${queueSearch("unassigned")}`}
-                      className="attn-row"
-                      data-testid="attention-unassigned"
-                    >
-                      <span className="attn-row-label">
-                        {t("queue.unassigned.title")}
-                      </span>
-                      <span
-                        className={attnBadge(
-                          attnUnassigned?.count ?? null,
-                          true,
-                        )}
-                      >
-                        {fmt(attnUnassigned?.count ?? null)}
-                      </span>
-                    </Link>
-                    {(attnUnassigned?.rows ?? []).length > 0 && (
-                      <ul className="attn-sublist">
-                        {(attnUnassigned?.rows ?? []).slice(0, 3).map(
-                          (ticket) => (
-                            <li key={ticket.id}>
-                              <Link
-                                to={`/tickets/${ticket.id}`}
-                                className="attention-row"
-                              >
-                                <span className="attention-row-title">
-                                  {ticket.title}
-                                </span>
-                                <span className="muted small">
-                                  {formatDate(ticket.created_at)}
-                                </span>
-                              </Link>
-                            </li>
-                          ),
-                        )}
-                      </ul>
-                    )}
-                  </li>
-                  {/* Sprint 180 §1 — finished work the customer never
-                      answered on. Unlike the row below it, this one IS
-                      provider-actionable (chase the customer, or record
-                      the approval on their behalf through the existing
-                      reasoned override), and unlike the rest of the
-                      list it is money: none of it can be invoiced until
-                      it closes. So it gets the warning tint. */}
-                  <li className="attn-item">
-                    <Link
-                      to={`/tickets?${queueSearch("approval_overdue")}`}
-                      className="attn-row"
-                      data-testid="attention-approval-overdue"
-                    >
-                      <span className="attn-row-label">
-                        {t("queue.approval_overdue.title", {
+                  {(
+                    [
+                      {
+                        key: "review",
+                        to: `/tickets?${queueSearch("review")}`,
+                        label: t("queue.review.title"),
+                        value: attnReview?.count ?? null,
+                        actionable: true,
+                      },
+                      {
+                        key: "unassigned",
+                        to: `/tickets?${queueSearch("unassigned")}`,
+                        label: t("queue.unassigned.title"),
+                        value: attnUnassigned?.count ?? null,
+                        actionable: true,
+                      },
+                      {
+                        key: "approval-overdue",
+                        to: `/tickets?${queueSearch("approval_overdue")}`,
+                        label: t("queue.approval_overdue.title", {
                           days: STALLED_APPROVAL_DAYS,
-                        })}
-                      </span>
-                      <span
-                        className={attnBadge(
-                          attnStalledApproval?.count ?? null,
-                          true,
-                        )}
-                      >
-                        {fmt(attnStalledApproval?.count ?? null)}
-                      </span>
-                    </Link>
-                    {(attnStalledApproval?.rows ?? []).length > 0 && (
-                      <ul className="attn-sublist">
-                        {(attnStalledApproval?.rows ?? [])
-                          .slice(0, 3)
-                          .map((ticket) => (
-                            <li key={ticket.id}>
-                              <Link
-                                to={`/tickets/${ticket.id}`}
-                                className="attention-row"
-                              >
-                                <span className="attention-row-title">
-                                  {ticket.title}
-                                </span>
-                                <span className="muted small">
-                                  {formatDate(ticket.created_at)}
-                                </span>
-                              </Link>
-                            </li>
-                          ))}
-                      </ul>
-                    )}
-                  </li>
-                  <li className="attn-item">
-                    <Link
-                      to="/extra-work?status=UNDER_REVIEW"
-                      className="attn-row"
-                      data-testid="attention-awaiting-pricing"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.awaiting_pricing_title")}
-                      </span>
-                      <span
-                        className={attnBadge(
-                          extraWorkStats?.awaiting_pricing ?? null,
-                          true,
-                        )}
-                      >
-                        {fmt(extraWorkStats?.awaiting_pricing ?? null)}
-                      </span>
-                    </Link>
-                  </li>
-                  <li className="attn-item">
-                    <Link
-                      to="/extra-work?status=PRICING_PROPOSED"
-                      className="attn-row"
-                      data-testid="attention-awaiting-customer"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.awaiting_customer_title")}
-                      </span>
-                      {/* Waiting on the CUSTOMER — not provider-actionable,
-                          so this row never gets the warning tint. */}
-                      <span className="attn-count">
-                        {fmt(
+                        }),
+                        value: attnStalledApproval?.count ?? null,
+                        actionable: true,
+                      },
+                      {
+                        key: "awaiting-pricing",
+                        to: "/extra-work?status=UNDER_REVIEW",
+                        label: t("attention.awaiting_pricing_title"),
+                        value: extraWorkStats?.awaiting_pricing ?? null,
+                        actionable: true,
+                      },
+                      {
+                        key: "awaiting-customer",
+                        to: "/extra-work?status=PRICING_PROPOSED",
+                        label: t("attention.awaiting_customer_title"),
+                        value:
                           extraWorkStats?.awaiting_customer_approval ?? null,
-                        )}
-                      </span>
-                    </Link>
-                  </li>
-                  {/* WP-1 G1 — work that stopped without being done. */}
-                  <li className="attn-item">
-                    <Link
-                      to="/agenda"
-                      className="attn-row"
-                      data-testid="attention-stuck"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.stuck_title")}
-                      </span>
-                      <span className={attnBadge(attnStuck, true)}>
-                        {fmt(attnStuck)}
-                      </span>
-                    </Link>
-                  </li>
-                  {/* WP-1 G2 — dateless work, counted where a manager
-                      looks. */}
-                  <li className="attn-item">
-                    <Link
-                      to="/agenda"
-                      className="attn-row"
-                      data-testid="attention-unplanned"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.unplanned_title")}
-                      </span>
-                      <span className={attnBadge(attnUnplanned, true)}>
-                        {fmt(attnUnplanned)}
-                      </span>
-                    </Link>
-                  </li>
-                  {/* WP-1 G4 — the billing-month guard's count. */}
-                  <li className="attn-item">
-                    <Link
-                      to="/invoices"
-                      className="attn-row"
-                      data-testid="attention-at-risk"
-                    >
-                      <span className="attn-row-label">
-                        {t("attention.at_risk_title")}
-                      </span>
-                      <span className={attnBadge(attnAtRisk, true)}>
-                        {fmt(attnAtRisk)}
-                      </span>
-                    </Link>
-                  </li>
+                        actionable: false,
+                      },
+                      {
+                        key: "stuck",
+                        to: "/agenda",
+                        label: t("attention.stuck_title"),
+                        value: attnStuck,
+                        actionable: true,
+                      },
+                      {
+                        key: "unplanned",
+                        to: "/agenda",
+                        label: t("attention.unplanned_title"),
+                        value: attnUnplanned,
+                        actionable: true,
+                      },
+                      {
+                        key: "at-risk",
+                        to: "/invoices",
+                        label: t("attention.at_risk_title"),
+                        value: attnAtRisk,
+                        actionable: true,
+                      },
+                    ] as const
+                  ).map((row) => (
+                    <li className="attn-item" key={row.key}>
+                      <Link
+                        to={row.to}
+                        className="attn-row"
+                        data-testid={`attention-${row.key}`}
+                      >
+                        <span className="attn-row-label">{row.label}</span>
+                        <span className={attnBadge(row.value, row.actionable)}>
+                          {fmt(row.value)}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
                 </ul>
               </div>
 
-              <div
-                className="card attention-card"
-                data-testid="dashboard-today"
-              >
-                <div className="attention-card-head">
-                  <span className="attention-card-title">
-                    {t("today.title")}
-                  </span>
-                </div>
-                <ul className="attn-list">
-                  <li className="attn-item">
-                    <Link
-                      to="/agenda"
-                      className="attn-row"
-                      data-testid="today-slots"
-                    >
-                      <span className="attn-row-label">{t("today.slots")}</span>
-                      <span className="attn-count">{fmt(todaySlotCount)}</span>
-                    </Link>
-                  </li>
-                  <li className="attn-item">
-                    <Link
-                      to="/inbox"
-                      className="attn-row"
-                      data-testid="today-inbox"
-                    >
-                      <span className="attn-row-label">
-                        {t("widgets.inbox")}
-                      </span>
-                      <span className="attn-count">{fmt(inboxUnread)}</span>
-                    </Link>
-                  </li>
-                </ul>
-                <div className="attention-card-head">
-                  <span className="attention-card-title">
-                    {t("attention.activity_title")}
-                  </span>
-                </div>
-                <ul
-                  className="attention-card-list"
-                  data-testid="attention-activity"
-                >
-                  {(attnActivity ?? []).map((item) => {
-                    const href = notificationHref(item);
-                    const body = (
-                      <>
-                        <span className="attention-row-title">
-                          {item.summary}
-                        </span>
-                        <span className="muted small">
-                          {formatDate(item.created_at)}
-                        </span>
-                      </>
-                    );
-                    return (
-                      <li key={item.id}>
-                        {href ? (
-                          <Link to={href} className="attention-row">
-                            {body}
-                          </Link>
-                        ) : (
-                          <span className="attention-row">{body}</span>
-                        )}
-                      </li>
-                    );
-                  })}
-                  {attnActivity !== null && attnActivity.length === 0 && (
-                    <li className="muted small">{t("attention.empty")}</li>
-                  )}
-                </ul>
-                <Link
-                  to="/notifications"
-                  className="attention-card-link"
-                  data-testid="attention-activity-link"
-                >
-                  {t("attention.view_all")}
-                </Link>
-              </div>
-            </section>
-
-            {/* #109 Part G — bottom density band (management view only):
-                a Facturatie mini per-building panel + a compact
-                Laatste-tickets/extra-werk list. Both reuse
-                already-loaded data / the existing parallel loaders. */}
-            <section
-              className="dashboard-bottom-band"
-              data-testid="dashboard-bottom-band"
-            >
-              {/* W-HK1 §3 — the billing panel sizes to ITS OWN content.
-                  `.dashboard-bottom-band` sets `align-items: stretch` so
-                  the two cards end on one line (W7 DESIGN 4); with a
-                  handful of buildings on the left and a long activity
-                  list on the right, that rule was spending the bottom
-                  two-thirds of this card on nothing. `align-self: start`
-                  opts THIS card out and leaves the band rule — and the
-                  card beside it — untouched. Content is unchanged. */}
+              {/* The billing summary: this month, per building. */}
               <div
                 className="card attention-card dashboard-billing-card"
                 data-testid="dashboard-billing-panel"
@@ -2064,7 +1809,11 @@ export function DashboardPage({
                   </Link>
                 </div>
                 {billingByBuilding === null ? (
-                  <p className="muted small">{t("loading")}</p>
+                  <div className="skeleton-lines" aria-hidden="true">
+                    <span className="skeleton-line" />
+                    <span className="skeleton-line" />
+                    <span className="skeleton-line short" />
+                  </div>
                 ) : billingByBuilding.length === 0 ? (
                   <p className="muted small">{t("bottom.billing_empty")}</p>
                 ) : (
@@ -2087,287 +1836,7 @@ export function DashboardPage({
                   </table>
                 )}
               </div>
-
-              <div
-                className="card attention-card"
-                data-testid="dashboard-recent-panel"
-              >
-                <div className="attention-card-head">
-                  <span className="attention-card-title">
-                    {t("bottom.recent_title")}
-                  </span>
-                </div>
-                <ul className="attention-card-list">
-                  {(recentTickets ?? []).map((tk) => (
-                    <li key={`t-${tk.id}`}>
-                      <Link
-                        to={`/tickets/${tk.id}`}
-                        className="attention-row"
-                      >
-                        <span className="attention-row-title">
-                          {tk.ticket_no} · {tk.title}
-                        </span>
-                        <span className="muted small">
-                          {formatDate(tk.created_at)}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                  {(recentExtraWork ?? []).map((ew) => (
-                    <li key={`e-${ew.id}`}>
-                      <Link
-                        to={`/extra-work/${ew.id}`}
-                        className="attention-row"
-                      >
-                        <span className="attention-row-title">
-                          {t("ops_type_extra_work")} · {ew.title}
-                        </span>
-                        <span className="muted small">
-                          {ew.building_name}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                  {recentTickets !== null &&
-                    recentExtraWork !== null &&
-                    recentTickets.length === 0 &&
-                    recentExtraWork.length === 0 && (
-                      <li className="muted small">{t("attention.empty")}</li>
-                    )}
-                </ul>
-              </div>
             </section>
-          </>
-        )}
-
-        {/* The STAFF + customer dashboard at "/" is preserved as-is —
-            #108 rebuilt only the provider-management view above. (The
-            management-only billing widget and "Mijn werk" cards never
-            rendered for these roles, so they are absent here.) */}
-        {!isTicketsPage && !isProviderManagementRole(userRole) && (
-          <>
-        {/* Top KPI strip — five cards, single visual block. Derived
-            from existing stats endpoints; never aggregated from a
-            single page of /tickets/ results. */}
-        <div
-          className="operations-kpi-grid"
-          data-testid="dashboard-ops-kpi-row"
-        >
-          <div className="kpi-card" data-testid="dashboard-ops-kpi-total">
-            <div className="kpi-label">{t("ops_kpi_total_open_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.totalOpen)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_total_open_meta")}</div>
-          </div>
-          <div className="kpi-card" data-testid="dashboard-ops-kpi-tickets">
-            <div className="kpi-label">{t("ops_kpi_tickets_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.ticketsActive)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_tickets_meta")}</div>
-          </div>
-          <div className="kpi-card" data-testid="dashboard-ops-kpi-extra-work">
-            <div className="kpi-label">{t("ops_kpi_extra_work_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.ewActive)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_extra_work_meta")}</div>
-          </div>
-          <div className="kpi-card" data-testid="dashboard-ops-kpi-awaiting">
-            <div className="kpi-label">{t("ops_kpi_awaiting_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.awaiting)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_awaiting_meta")}</div>
-          </div>
-          <div
-            className="kpi-card kpi-urgent"
-            data-testid="dashboard-ops-kpi-urgent"
-          >
-            <div className="kpi-label">{t("ops_kpi_urgent_label")}</div>
-            <div className="kpi-row-2">
-              <div className="kpi-value">{fmt(opsKpis.urgent)}</div>
-            </div>
-            <div className="kpi-meta">{t("ops_kpi_urgent_meta")}</div>
-          </div>
-        </div>
-
-        {/* RF-18 (#107) — compact info widgets: count/euro + label +
-            deep link with the right preset. Role-aware (a widget the
-            role cannot act on never renders or fetches); complements
-            the KPI hero and attention cards. */}
-        <section
-          className="widget-row"
-          data-testid="dashboard-widget-row"
-          style={{ marginTop: 12 }}
-        >
-          <Link to="/inbox" className="info-widget" data-testid="widget-inbox">
-            <span className="info-widget-value">{fmt(inboxUnread)}</span>
-            <span className="info-widget-label">{t("widgets.inbox")}</span>
-          </Link>
-          {canAccessExtraWork(userRole) && (
-            <Link
-              to="/extra-work?status=UNDER_REVIEW"
-              className="info-widget"
-              data-testid="widget-awaiting-pricing"
-            >
-              <span className="info-widget-value">
-                {fmt(extraWorkStats?.awaiting_pricing ?? null)}
-              </span>
-              <span className="info-widget-label">
-                {t("widgets.awaiting_pricing")}
-              </span>
-            </Link>
-          )}
-          {canAccessExtraWork(userRole) && (
-            <Link
-              to="/extra-work?status=PRICING_PROPOSED"
-              className="info-widget"
-              data-testid="widget-awaiting-customer"
-            >
-              <span className="info-widget-value">
-                {fmt(extraWorkStats?.awaiting_customer_approval ?? null)}
-              </span>
-              <span className="info-widget-label">
-                {t("widgets.awaiting_customer")}
-              </span>
-            </Link>
-          )}
-          {isStaffRole(userRole) && (
-            <Link
-              to="/agenda"
-              className="info-widget"
-              data-testid="widget-today-slots"
-            >
-              <span className="info-widget-value">{fmt(todaySlotCount)}</span>
-              <span className="info-widget-label">
-                {t("widgets.today_slots")}
-              </span>
-            </Link>
-          )}
-        </section>
-
-        {/* RF-16 (#106) — attention cards replace the dashboard's big
-            lists (which now live exclusively on the Tickets / Extra
-            Work pages). Each card: count + top rows + a deep link into
-            the full page with the right preset applied. */}
-        <section
-          className="attention-grid"
-          data-testid="dashboard-attention"
-          style={{ marginTop: 12 }}
-        >
-          <div className="card attention-card" data-testid="attention-review">
-            <div className="attention-card-head">
-              <span className="attention-card-title">
-                {t("queue.review.title")}
-              </span>
-              <span className="attention-card-count">
-                {fmt(stats?.by_status?.WAITING_MANAGER_REVIEW ?? null)}
-              </span>
-            </div>
-            <ul className="attention-card-list">
-              {(attnReview?.rows ?? []).map((ticket) => (
-                <li key={ticket.id}>
-                  <Link to={`/tickets/${ticket.id}`} className="attention-row">
-                    <span className="attention-row-title">{ticket.title}</span>
-                    <span className="muted small">
-                      {formatDate(ticket.created_at)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-              {attnReview !== null && attnReview.rows.length === 0 && (
-                <li className="muted small">{t("attention.empty")}</li>
-              )}
-            </ul>
-            <Link
-              to="/tickets?status=WAITING_MANAGER_REVIEW"
-              className="attention-card-link"
-              data-testid="attention-review-link"
-            >
-              {t("attention.view_all")}
-            </Link>
-          </div>
-
-          <div
-            className="card attention-card"
-            data-testid="attention-unassigned"
-          >
-            <div className="attention-card-head">
-              <span className="attention-card-title">
-                {t("queue.unassigned.title")}
-              </span>
-              <span className="attention-card-count">
-                {attnUnassigned === null ? "—" : attnUnassigned.count}
-              </span>
-            </div>
-            <ul className="attention-card-list">
-              {(attnUnassigned?.rows ?? []).map((ticket) => (
-                <li key={ticket.id}>
-                  <Link to={`/tickets/${ticket.id}`} className="attention-row">
-                    <span className="attention-row-title">{ticket.title}</span>
-                    <span className="muted small">
-                      {formatDate(ticket.created_at)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-              {attnUnassigned !== null && attnUnassigned.rows.length === 0 && (
-                <li className="muted small">{t("attention.empty")}</li>
-              )}
-            </ul>
-            <Link
-              to={`/tickets?${queueSearch("unassigned")}`}
-              className="attention-card-link"
-              data-testid="attention-unassigned-link"
-            >
-              {t("attention.view_all")}
-            </Link>
-          </div>
-
-          <div className="card attention-card" data-testid="attention-activity">
-            <div className="attention-card-head">
-              <span className="attention-card-title">
-                {t("attention.activity_title")}
-              </span>
-            </div>
-            <ul className="attention-card-list">
-              {(attnActivity ?? []).map((item) => {
-                const href = notificationHref(item);
-                const body = (
-                  <>
-                    <span className="attention-row-title">{item.summary}</span>
-                    <span className="muted small">
-                      {formatDate(item.created_at)}
-                    </span>
-                  </>
-                );
-                return (
-                  <li key={item.id}>
-                    {href ? (
-                      <Link to={href} className="attention-row">
-                        {body}
-                      </Link>
-                    ) : (
-                      <span className="attention-row">{body}</span>
-                    )}
-                  </li>
-                );
-              })}
-              {attnActivity !== null && attnActivity.length === 0 && (
-                <li className="muted small">{t("attention.empty")}</li>
-              )}
-            </ul>
-            <Link
-              to="/notifications"
-              className="attention-card-link"
-              data-testid="attention-activity-link"
-            >
-              {t("attention.view_all")}
-            </Link>
-          </div>
-        </section>
           </>
         )}
 
