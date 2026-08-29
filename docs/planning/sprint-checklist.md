@@ -13,10 +13,10 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/fe-7-final-audit` — the head of the Addendum D
-redesign train (WP-1 → FE-1 → … → FE-7), each sprint stacked on the
-previous one and deployed to crmtest; nothing is merged into `main`
-until the owner says "merge". Below it, `feat/ew-gap-closing` still
+**Branch:** `feat/p1-honest-dates` — stacked on `feat/fe-7-final-audit`,
+the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 →
+P-1), each sprint stacked on the previous one and deployed to crmtest;
+nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
 
@@ -38,6 +38,73 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-1: honest dates on REAL data (Addendum D §D.14, 2026-08-29)
+
+Branch `feat/p1-honest-dates`, stacked on FE-7. Zero migrations. The
+owner reported the "Planned" bug a second time: FE-4's fix passed on
+clean fixtures and failed on crmtest's June tickets. The acceptance
+test was the owner's three named tickets, walked live on crmtest before
+and after.
+
+- **What the ugly data showed.** 43 of crmtest's 54 extra-work tickets
+  carried a `scheduled_start_at` nobody set: the Sprint 9B spawn seed
+  (`extra_work/instant_tickets.py`, `proposal_tickets.py` x2) copied
+  the cart's `requested_date` into the schedule column, and the create
+  serializer defaults that date to the day of entry. TCK-2026-000209
+  ("ggtg", 3 June) read "Planned Jun 3 — 87 days late" on the board
+  and "87 days past plan" on the detail. "VERIFY simple 20260607" is
+  recurring job #3's occurrences — a REAL plan (the recurring pattern),
+  correctly rolled. No plain (non-extra-work, non-occurrence) ticket on
+  crmtest had a phantom. "Dinite Cleaning" matches nothing on crmtest
+  under any spelling; the "I need cleaning" tickets 212/217, born the
+  same minute as 209 with the same phantom, are the nearest records.
+- **(1) A date is a plan only if a person made it.** New
+  `tickets/plan_provenance.py`; `job_dates.job_window` and its SQL twin
+  read the ticket's own column only behind a schedule row, an
+  occurrence, or the extra work's commitment — so the board, the
+  ladder, the counts and the detail stop at the same fact. The seed is
+  stopped: a spawned ticket is born UNPLANNED (`_UNPLANNED`). Additive
+  fields `has_real_plan` / `plan_source` / `planned_by_name` /
+  `planned_at` / `created_by_name` on the ticket detail, the extra-work
+  detail and every work-plan entry. Existing rows untouched.
+- **(2) The words.** Detail: "Ingepland voor <date>" + "door <name>, op
+  <date>"; else "Nog niet ingepland" + "Aangemaakt op <date> door <name>
+  — nog niet ingepland · al N dagen". Every ticket and meerwerk detail
+  states who created it. Cards: the undated words carry the creator;
+  "Gepland" only behind `has_real_plan`.
+- **(3) Work waiting for a manager carries to today.** Rule 8
+  (`work_plan.py`): WAITING_MANAGER_REVIEW jobs hang on today's column
+  of the manager's board, `placement: REVIEW`, "Wacht op controle — al
+  N dagen", not settled, not late; their home week keeps them settled;
+  the worker's completed slot is unchanged. The owner was seeing them
+  settled on the day the worker finished because the board read "not
+  pending" as "over".
+- **(4) The two reported visual bugs.** The plan dialog's subtitle sat
+  10px INTO its title (measured on /extra-work/88: the framed head has
+  no flex gap for the subtitle's `-10px` to pull back) — the head owns
+  its gap now, and the numbered sections get 26px of air with a rule
+  between them. The meerwerk create form's Planning fold: the
+  completion-proof checkboxes LEFT the form (they live in the plan
+  dialog), the date pair and the series switch get a rhythm, the switch
+  one clear line of air.
+- **(5) Meerwerk detail catches up.** "Accepted but no work was created
+  yet" carries its repair as the banner's primary ("Werk aanmaken");
+  the Details card renders only with a plan or contacts (no bare
+  header, no "Contacts 0"); "Gepland: —" reads "nog niet ingepland" and,
+  once planned, who planned it; "Goes on: follows the customer's
+  setting" is one sentence.
+- **Tests.** `tickets/tests/test_p1_honest_dates.py` (phantom fixture:
+  card == detail, no "late"; a person's plan carries a name; a
+  customer's wish stays a wish; the provider's commitment is a plan;
+  a recurring occurrence is a plan; a spawned ticket is born unplanned;
+  the review carry in the current week, at home in its own week, the
+  worker's slot unchanged, gone once confirmed). `test_utils.record_plan`
+  lets the FE-4 / W-PLANTRUTH / 179A fixtures state that a person
+  planned their tickets.
+- **Method (CLAUDE.md).** §D.10 verification walks the OLDEST real
+  records on crmtest, not only fixtures; every sprint report leads
+  with what the ugly data showed.
 
 ### Done — FE-7: reports + hours, mobile, the e2e repair and the full §D.6 audit (Addendum D §D.6 / §D.7 / §D.13, 2026-08-29) — THE REDESIGN PLAN CLOSES HERE
 

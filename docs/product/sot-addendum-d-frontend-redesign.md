@@ -742,3 +742,54 @@ the existing per-site language (Dutch for email, Dutch or English for
 the bell as the site dictates), and every new composer must at least
 route through `send_logged_email` so the eventual rewiring has one
 door to find.
+
+---
+
+## D.14 Honest dates on real data — the P-1 rulings (2026-08-29)
+
+The owner reported the "Planned" bug (§D.12 item 2) a SECOND time after
+FE-4 shipped. FE-4's fix passed on fixtures whose planned dates were all
+real; on crmtest, TCK-2026-000209 ("ggtg", created 3 June, never
+planned) still read "Planned 3 Jun — 87 days late". The rulings below
+are permanent and win over any older text.
+
+1. **A date is a plan only if a person made it.** `scheduled_start_at`
+   is read as a plan only behind a schedule annotation row (a person
+   scheduled it), a recurring occurrence (the plan-of-record), or the
+   extra work's `provider_planned_date` (the provider's commitment).
+   A date in the column with none of those behind it is a PHANTOM: the
+   Sprint 9B spawn seed copied the cart's `requested_date` — which the
+   create serializer defaults to the day of entry — into the schedule
+   column of 43 of crmtest's 54 extra-work tickets. The seed is stopped
+   (a spawned ticket is born UNPLANNED); the existing rows stay in the
+   database and are handled by presentation. Backend:
+   `tickets/plan_provenance.py`, read by `tickets/job_dates.py` so the
+   board, the ladder, the counts and the detail all stop at the same
+   fact. Additive read-only fields: `has_real_plan`, `plan_source`,
+   `planned_by_name`, `planned_at`, `created_by_name` on the ticket
+   detail, the extra-work detail and every work-plan entry.
+2. **The words.** Real plan: "Ingepland voor <date> — door <name>, op
+   <date>". No real plan: "Aangemaakt op <date> door <name> — nog niet
+   ingepland · al N dagen" — never "te laat" against a plan that does
+   not exist, never the word gepland. Deadline lateness keeps its own
+   words (§D.11 G3). EVERY ticket and meerwerk detail states
+   "Aangemaakt op … door …" as a plain fact; nobody guesses who opened
+   a ticket. The card and the detail print the same numbers (FE-4's
+   rule), now tested against a phantom-planned fixture
+   (`tickets/tests/test_p1_honest_dates.py`).
+3. **Work waiting for a manager does not rot in the past.** A ticket in
+   WAITING_MANAGER_REVIEW is neither pending nor over, and the board
+   read "not pending" as "settled": the card sat calm on the day the
+   worker finished and slid into last week while the billing chain
+   (§D.11 G4) stayed broken at the manager. Rule 8 of
+   `tickets/work_plan.py`: in the current week such a job hangs on
+   today's column of the MANAGER's board (`placement: REVIEW`,
+   "Wacht op controle — al N dagen", `stuck_age_days` from
+   `manager_review_at`), not settled, not late, until it is confirmed.
+   Past and future weeks keep rule 1. A worker's own completed slot is
+   unchanged: it stays settled on its own day.
+4. **Method.** §D.10 verification walks the OLDEST real records on
+   crmtest (read-only), not only fixtures; every sprint report leads
+   with what the ugly data showed (CLAUDE.md, Frontend redesign
+   rules). The owner's three named tickets were P-1's acceptance test.
+
