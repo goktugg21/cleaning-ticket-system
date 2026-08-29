@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p1-honest-dates` — stacked on `feat/fe-7-final-audit`,
-the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 →
-P-1), each sprint stacked on the previous one and deployed to crmtest;
+**Branch:** `feat/p2-guidance` — stacked on `feat/p1-honest-dates`, the
+head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1 →
+P-2), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,62 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-2: the guidance round (Addendum D §D.6 rule 12 / §D.2, 2026-08-29)
+
+Branch `feat/p2-guidance`, stacked on P-1. Zero migrations; the backend
+change is one presentation phase. The owner's instruction: walk the
+system as a person who does not know computers and make every page
+guide that person the way the ticket detail, the melding form and the
+meerwerk flow already do. Web-Claude's naive walk of the FE-7 build
+named the failures; this sprint fixed them and re-walked the same way.
+
+- **(0) Two rulings from P-1's verification.** `WAITING_PLANNING` — an
+  approved meerwerk nobody has planned reads "Nog in te plannen" /
+  "Goedgekeurd — wordt ingepland" (customer) instead of "Ingepland"
+  (`extra_work/display_phase.py`, P-1's provenance decides;
+  exhaustiveness test extended). The stale red W-FIX1 test flipped to
+  the owner's G0 rule; the module ends OK.
+- **(1) My schedule — today is on screen.** The week grid scrolls so
+  today's column is in view on every load (on a Saturday the viewport
+  showed Mon–Fri and every carried late job hung on the invisible
+  Saturday column). Empty columns say "Niets gepland"; the three
+  explainer paragraphs became one subtitle line plus a "Hoe werkt dit
+  bord?" popover.
+- **(2) Dashboard greets and counts.** "Goedemorgen, Ramazan — 3 dingen
+  hebben u nodig vandaag" from the same counts as the list; attention
+  rows with nothing to say do not render, and with all silent the list
+  says "Niets heeft u nu nodig."; the month tile says "Nog geen bedrag"
+  rather than "—"; the breadcrumb and the top bar's repeated
+  "Operations console / CleanOps" are gone.
+- **(3) Tickets — filters fold.** The seven controls, the period and
+  the working/archive pair sit behind ONE "Filter" button whose summary
+  carries chips for what is active; the grey scope caption is gone.
+- **(4) Invoices teach.** One plain sentence under the title on how
+  invoicing works; "no customers with a billing schedule" says what a
+  schedule is and links to the customers; the guard says "Niets loopt
+  risico deze factuurmaand" when it is clear; the empty list says what
+  will appear and how.
+- **(5) Contracts — the empty state only.** Zero contracts renders ONE
+  card ("U heeft nog geen contracten… [Nieuw contract]"); the tiles,
+  filters, pills and table appear only when a contract exists (P-3
+  owns the rest).
+- **(6) Recurring work detail narrates the rule.** "Elke maandag en
+  donderdag, ochtend — volgend bezoek: di 2 sep" opens the page, the
+  next visits follow, then the facts and the calendar.
+- **(7) People detail — voice pass.** One buildings list for field
+  staff (the "Access" copy dropped in favour of the card that says what
+  they may do there); "All building tickets (read) · Can request
+  assignment" became "Sees every ticket in this building · May ask to
+  be put on a job"; unset facts are absent, not dashes.
+- **(8) System-wide small honesty.** `getApiError` no longer puts a
+  server sentence on the screen: the person gets one human sentence per
+  status (400/422 "That was not accepted…", 409 "…something changed in
+  the meantime…") and the raw body goes to the console — every one of
+  the ~20 call sites at once; toasts reserve a rail at the bottom of
+  the canvas (`body[data-toast-rail]`) so they never cover list rows;
+  the notification greeting never bursts time-driven warnings and
+  never repeats for the same items (a per-browser high-water id).
 
 ### Done — P-1: honest dates on REAL data (Addendum D §D.14, 2026-08-29)
 
