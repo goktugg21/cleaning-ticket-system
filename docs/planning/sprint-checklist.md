@@ -36,6 +36,56 @@ chain with zero conflicts. 188 is the owner's closing round.
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
 
+### Done — FE-6: admin console density (Addendum D §D.3.4 / §D.7 / §D.8.2–5, 2026-08-29)
+
+Branch `feat/fe-6-admin-console`, stacked on FE-5 (the train; main
+untouched). Zero migrations, zero backend changes, no permission
+changes: merged surfaces gate per tab with the exact predicate each
+page's route always checked. Six commits, one per area.
+
+- **(1) The customer scoped mode is gone.** The global nav stays
+  (Klanten lit across the subtree); a customer is a page with a header
+  and one row of tabs — Overzicht / Gebouwen / Mensen / Permissies /
+  Prijzen / Contracten / Werk / Facturen / Documenten / Instellingen
+  (`CustomerSubPageHeader`, `CUSTOMER_TABS`), grouped tabs carrying a
+  second toggle (Mensen = users + contacts, Werk = tickets + meerwerk,
+  Facturen = invoices + report, Instellingen = settings + labels). Every
+  old route renders as before (each page names its tab); a building
+  manager sees exactly the three pages the old submenu gave them. The
+  "Beperkt tot" chip, the swapped menu and the escape hatch are gone.
+- **(2) Mensen + Diensten & catalogi.** `/admin/people/:tab` hosts
+  users / employees / invitations, `/admin/services-catalogs/:tab`
+  hosts services / catalogs; each tab is the page it always was in
+  `embedded` mode behind its own predicate; the old list addresses
+  redirect; five nav entries become two. "Medewerker-aanvragen" renders
+  only while a PENDING request exists (count on the badge, from the
+  existing list endpoint).
+- **(3) Pricing, prices first.** The rows in a bounded, searchable
+  table with the customer's folders as filter chips; one primary action
+  + an overflow menu (`OverflowMenu`); new folders are made inside the
+  add/edit form's folder select.
+- **(4) Dashboard.** Four KPI tiles, ONE attention list (eight rows,
+  each a count and a link), the per-building billing summary; the
+  Vandaag / activity / latest-work panels and the dead non-management
+  branch are gone.
+- **(5) Tickets list.** Four primary tabs (Open / Bezig / Wacht op klant
+  / Afgerond, from `TICKET_TAB_OF` in `lib/ticketStatus`), the precise
+  status inside the filter bar, the "Heropend" chip as before; skeleton
+  rows on first load; the by-building / focus panels moved to
+  Rapporten (linked); the table takes the full width and collapses to
+  cards below 900px.
+- **(6) Craft.** Measured overflow audit at 1280/1440 over 38 console
+  pages (`scrollWidth`, every element past the viewport, every scrolling
+  `.table-wrap`): fixed the dashboard/my-hours billing mini-table (the
+  `table.data-table` 860px floor), the audit log's diff grid and its
+  changes cell, the users, extra-work and contracts tables
+  (`data-table-fit` / dense). Left as designed: the Werkplanning week
+  grid and the contracts register scroll INSIDE their own containers.
+- **Not done:** nothing in scope was left open; the "Medewerker-
+  aanvragen visible" screenshot used the pending request already in the
+  dev DB (creating a second one as the demo staff user was refused with
+  "Already assigned to this ticket").
+
 ### Done — FE-5: provider forms (Addendum D §D.5.2 / §D.6 rule 12 / §D.7, 2026-08-29)
 
 Branch `feat/fe-5-provider-forms`, stacked on FE-4 (the train; main
