@@ -9,14 +9,12 @@ import {
   CalendarCheck,
   CalendarClock,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   ClipboardList,
   Contact,
   Files,
   FileText,
   LayoutGrid,
-  Mail,
   MailPlus,
   MapPin,
   Megaphone,
@@ -28,11 +26,8 @@ import {
   PlusCircle,
   Receipt,
   Settings,
-  ShieldCheck,
   Siren,
   Sparkles,
-  Tag,
-  Tags,
   Ticket,
   Timer,
   UserCog,
@@ -62,16 +57,7 @@ import { useLanguageSync } from "../i18n/useLanguageSync";
 import { UserMenu } from "../components/UserMenu";
 import { NotificationBell } from "../components/NotificationBell";
 import { InboxNavBadge } from "../components/InboxNavBadge";
-import { getCompany, getCustomer } from "../api/admin";
 import { getInitials } from "../lib/initials";
-
-// Sprint 28 Batch 3 — sidebar mode is URL-derived (not React state)
-// so a browser refresh on a customer-scoped route preserves the
-// customer-scoped sidebar. The regex matches
-// `/admin/customers/:id` and `/admin/customers/:id/<anything>`
-// where :id is a positive integer; it deliberately does NOT match
-// `/admin/customers` (the list page) or `/admin/customers/new`.
-const CUSTOMER_SCOPED_PATH = /^\/admin\/customers\/(\d+)(?:\/.*)?$/;
 
 // FE-1 (Addendum D §D.3.1) — the customer "Meer" group's own routes.
 // Same membership-list idea the old ADMIN fold used: the group opens
@@ -85,19 +71,6 @@ const MEER_PATHS = [
   "/settings",
 ] as const;
 
-interface SidebarModeState {
-  mode: "top-level" | "customer-scoped";
-  customerId: string | null;
-}
-
-function deriveSidebarMode(pathname: string): SidebarModeState {
-  const match = CUSTOMER_SCOPED_PATH.exec(pathname);
-  if (match) {
-    return { mode: "customer-scoped", customerId: match[1] };
-  }
-  return { mode: "top-level", customerId: null };
-}
-
 function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? "nav-item active" : "nav-item";
 }
@@ -107,80 +80,6 @@ function navClass({ isActive }: { isActive: boolean }) {
 // next hover/active tweak, and the only difference is the indent.
 function navChildClass({ isActive }: { isActive: boolean }) {
   return isActive ? "nav-item nav-item-child active" : "nav-item nav-item-child";
-}
-
-/**
- * Sprint 28 Batch 15.5 — sidebar customer-context chip.
- *
- * Renders inside the customer-scoped sidebar branch only. Shows the
- * customer name and, when resolvable, the provider company name so
- * an operator deep-linking to `/admin/customers/:id/…` immediately
- * sees which customer the submenu is scoped to.
- *
- * The chip fetches `getCustomer(id)` and then `getCompany(customer.company)`.
- * `CustomerAdmin` does not currently carry `company_name`, and we
- * deliberately don't add it to the customer serializer in this
- * batch (the backend slot is owned by the parallel scope_summary
- * work). The two REST calls together are tiny and only fire when
- * the sidebar mode is `customer-scoped`, so they're a non-issue
- * for top-level routes.
- */
-function CustomerContextChip({ customerId }: { customerId: string }) {
-  const { t } = useTranslation("common");
-  const [name, setName] = useState<string | null>(null);
-  const [companyName, setCompanyName] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const numericId = Number.parseInt(customerId, 10);
-    // Bail without touching state: the initial values are already
-    // null and triggering a setState in an effect's synchronous body
-    // earns a react-hooks/set-state-in-effect lint error. The chip
-    // simply shows the loading placeholder for the unreachable
-    // non-numeric route which is fine because the URL regex in
-    // deriveSidebarMode only matches positive integers anyway.
-    if (!Number.isFinite(numericId)) {
-      return;
-    }
-    getCustomer(numericId)
-      .then(async (customer) => {
-        if (cancelled) return;
-        setName(customer.name);
-        // Best-effort company-name resolve. Failure here must not
-        // break the chip — the customer name is the primary content.
-        try {
-          const company = await getCompany(customer.company);
-          if (cancelled) return;
-          setCompanyName(company.name);
-        } catch {
-          if (!cancelled) setCompanyName(null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setName(null);
-          setCompanyName(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [customerId]);
-
-  return (
-    <div
-      className="sidebar-customer-chip"
-      data-testid="sidebar-customer-context-chip"
-    >
-      <div className="sidebar-customer-chip-eyebrow">
-        {t("nav.customer_submenu.scoped_to")}
-      </div>
-      <div className="sidebar-customer-chip-name">{name ?? "…"}</div>
-      {companyName && (
-        <div className="sidebar-customer-chip-company">{companyName}</div>
-      )}
-    </div>
-  );
 }
 
 interface AppShellProps {
@@ -193,10 +92,10 @@ export function AppShell({ children }: AppShellProps) {
   const { t } = useTranslation("common");
   useLanguageSync();
 
-  // Sprint 28 Batch 3 — derive sidebar mode from the current URL.
-  // No useState: the mode is a pure function of pathname so it
-  // survives a hard refresh / deep-link entry.
-  const sidebar = deriveSidebarMode(location.pathname);
+  // FE-6 (§D.3.4) — there is no customer-scoped sidebar mode any more.
+  // A customer is a page with tabs; the Klanten entry simply stays lit
+  // across its subtree.
+  const customersActive = /^\/admin\/customers(\/.*)?$/.test(location.pathname);
 
   // Sprint 12 — mobile sidebar toggle. The sidebar is `position: fixed`
   // and hidden by default below the mobile breakpoint via CSS; the
@@ -285,211 +184,7 @@ export function AppShell({ children }: AppShellProps) {
         </div>
 
         <nav className="sidebar-nav" aria-label="Main navigation">
-          {sidebar.mode === "customer-scoped" && sidebar.customerId ? (
-            // Sprint 28 Batch 3 — customer-scoped submenu. The
-            // surrounding `AdminRoute` gate (see `App.tsx`) means
-            // only SUPER_ADMIN / COMPANY_ADMIN ever reach this
-            // branch; we therefore do not duplicate the role
-            // filter here. The "Back" entry is a real route
-            // navigation (not history.back) so deep-link entries
-            // still have a sane home target.
-            <>
-              {/* Sprint 28 Batch 15.5 — customer-context chip. */}
-              <CustomerContextChip customerId={sidebar.customerId} />
-              <NavLink
-                to="/admin/customers"
-                end
-                className={navClass}
-                data-testid="sidebar-customer-back"
-              >
-                <span className="nav-icon">
-                  <ChevronLeft size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.back")}
-              </NavLink>
-              <div className="nav-group-label">
-                {t("nav.customers")}
-              </div>
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}`}
-                end
-                className={navClass}
-                data-testid="sidebar-customer-overview"
-              >
-                <span className="nav-icon">
-                  <LayoutGrid size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.overview")}
-              </NavLink>
-              {/* Sprint 28 Batch 12 — BM-trimmed customer-scoped
-                  submenu. BUILDING_MANAGER only has read-only access
-                  to Overview + Contacts. The other entries
-                  (Buildings, Users, Permissions, Pricing, Extra
-                  Work, Settings) are admin-only edit surfaces and
-                  hiding them keeps the role's surface area
-                  consistent with the route guards. */}
-              {!isBuildingManager(me?.role) && (
-                <>
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/buildings`}
-                    className={navClass}
-                    data-testid="sidebar-customer-buildings"
-                  >
-                    <span className="nav-icon">
-                      <MapPin size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.buildings")}
-                  </NavLink>
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/users`}
-                    className={navClass}
-                    data-testid="sidebar-customer-users"
-                  >
-                    <span className="nav-icon">
-                      <UserCog size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.users")}
-                  </NavLink>
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/permissions`}
-                    className={navClass}
-                    data-testid="sidebar-customer-permissions"
-                  >
-                    <span className="nav-icon">
-                      <ShieldCheck size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.permissions")}
-                  </NavLink>
-                  {/* Sprint 28 Batch 5 — per-customer pricing. */}
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/pricing`}
-                    className={navClass}
-                    data-testid="sidebar-customer-pricing"
-                  >
-                    <span className="nav-icon">
-                      <Tag size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.pricing")}
-                  </NavLink>
-                  {/* Sprint 166 §5 — Contracts. The page and its route
-                      have existed since Sprint 162 and there was NO way
-                      to reach them: no sidebar entry, so only a typed
-                      URL. Placed next to Pricing and Extra Work because
-                      all three are the customer's money. Gated the same
-                      way the page is — provider-side only; a contract
-                      carries negotiated prices. */}
-                  {canAccessContracts(me?.role) && (
-                    <NavLink
-                      to={`/admin/customers/${sidebar.customerId}/contracts`}
-                      className={navClass}
-                      data-testid="sidebar-customer-contracts"
-                    >
-                      <span className="nav-icon">
-                        <FileText size={16} strokeWidth={2} />
-                      </span>
-                      {t("nav.customer_submenu.contracts")}
-                    </NavLink>
-                  )}
-                  {/* FE-1 — the "Chargeable work" child entry is gone
-                      (§D.2: the standalone name dies). The route
-                      redirects to the customer's ticket list with the
-                      meerwerk narrowing preselected; the list's type
-                      pill carries the relationship the child entry used
-                      to state. */}
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/tickets`}
-                    className={navClass}
-                    data-testid="sidebar-customer-tickets"
-                  >
-                    <span className="nav-icon">
-                      <Ticket size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.tickets")}
-                  </NavLink>
-                  {/* IA 2026-06-25 — Meldingen and Offerteaanvragen merged
-                      into these two as filter chips (4 content tabs -> 2). */}
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/extra-work`}
-                    className={navClass}
-                    data-testid="sidebar-customer-extra-work"
-                  >
-                    <span className="nav-icon">
-                      <Receipt size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.extra_work")}
-                  </NavLink>
-                  {/* #108 Part E — customer-scoped Invoices + Reports. */}
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/invoices`}
-                    className={navClass}
-                    data-testid="sidebar-customer-invoices"
-                  >
-                    <span className="nav-icon">
-                      <BadgeEuro size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.invoices")}
-                  </NavLink>
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/reports`}
-                    className={navClass}
-                    data-testid="sidebar-customer-reports"
-                  >
-                    <span className="nav-icon">
-                      <BarChart3 size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.reports")}
-                  </NavLink>
-                  {/* Sprint 126 — customer Documents (SA/CA only; BM is
-                      already excluded from this block). */}
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/documents`}
-                    className={navClass}
-                    data-testid="sidebar-customer-documents"
-                  >
-                    <span className="nav-icon">
-                      <Files size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.documents")}
-                  </NavLink>
-                </>
-              )}
-              {/* Sprint 128 — Extra Work label management (Afdelingen +
-                  Werktypes). OUTSIDE the !isBuildingManager block: BM reads it
-                  read-only (they hold the relabel action), SA/CA manage. */}
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}/labels`}
-                className={navClass}
-                data-testid="sidebar-customer-labels"
-              >
-                <span className="nav-icon">
-                  <Tags size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.labels")}
-              </NavLink>
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}/contacts`}
-                className={navClass}
-                data-testid="sidebar-customer-contacts"
-              >
-                <span className="nav-icon">
-                  <Mail size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.contacts")}
-              </NavLink>
-              {!isBuildingManager(me?.role) && (
-                <NavLink
-                  to={`/admin/customers/${sidebar.customerId}/settings`}
-                  className={navClass}
-                  data-testid="sidebar-customer-settings"
-                >
-                  <span className="nav-icon">
-                    <Settings size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.customer_submenu.settings")}
-                </NavLink>
-              )}
-            </>
-          ) : isCustomer ? (
+          {isCustomer ? (
             // ---------------------------------------------------------
             // FE-1 §D.3.1 — the CUSTOMER PORTAL nav: six entries, fixed
             // order, with everything occasional folded under "Meer".
@@ -843,7 +538,11 @@ export function AppShell({ children }: AppShellProps) {
               )}
               {canAccessAdminArea(me?.role) && (
                 <>
-                  <NavLink to="/admin/customers" className={navClass}>
+                  <NavLink
+                    to="/admin/customers"
+                    className={() => navClass({ isActive: customersActive })}
+                    data-testid="sidebar-customers"
+                  >
                     <span className="nav-icon">
                       <Users size={16} strokeWidth={2} />
                     </span>

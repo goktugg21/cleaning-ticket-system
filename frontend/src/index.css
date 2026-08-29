@@ -15667,3 +15667,41 @@ table.assign-table { min-width: 0; width: 100%; }
 
 /* The ticket form's one small side card: three lines, nothing else. */
 .create-side-tips { padding: 14px 16px 16px; }
+
+/* ===================================================================
+   FE-6 — the admin console (Addendum D §D.3.4 / §D.7).
+   =================================================================== */
+/* The customer's in-page tab row. One line, scrolls sideways on a
+   narrow viewport instead of wrapping or pushing the page wider. */
+.customer-tabs {
+  display: flex;
+  gap: 2px;
+  margin: -6px 0 18px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.customer-tabs::-webkit-scrollbar { display: none; }
+.customer-tab {
+  flex: 0 0 auto;
+  padding: 9px 12px 10px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.customer-tab:hover { color: var(--text); }
+.customer-tab.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+.customer-subtabs { margin: -6px 0 16px; }
+.customer-subtabs .composer-toggle-btn { text-decoration: none; }
+/* A page rendered as a TAB of a merged surface keeps its count line and
+   its actions, without a second title under the surface's own. */
+.page-header-embedded { margin-bottom: 12px; }
+.page-header-embedded .page-sub { margin-top: 0; }

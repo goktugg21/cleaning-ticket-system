@@ -307,7 +307,7 @@ export function CustomerOverviewPage() {
 
   return (
     <div data-testid="customer-overview-page">
-      <CustomerSubPageHeader
+      <CustomerSubPageHeader tab="overview"
         customerName={customerName}
         isActive={isActive}
         actions={headerActions}

@@ -161,7 +161,7 @@ export function CustomerSettingsPage() {
 
   return (
     <div data-testid="customer-settings-page">
-      <CustomerSubPageHeader
+      <CustomerSubPageHeader tab="settings" subTab="settings"
         customerName={customerName}
         isActive={isActive}
       />

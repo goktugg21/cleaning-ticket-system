@@ -4,7 +4,6 @@
 // the shared explorer in provider mode.
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useTranslation } from "react-i18next";
 
 import { getCustomer } from "../../../api/admin";
 import type { CustomerAdmin } from "../../../api/types";
@@ -12,7 +11,6 @@ import { DocumentsExplorer } from "../../../components/documents/DocumentsExplor
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 export function CustomerDocumentsPage() {
-  const { t } = useTranslation("common");
   const { id } = useParams();
   const numericId = Number(id);
   const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
@@ -34,10 +32,9 @@ export function CustomerDocumentsPage() {
 
   return (
     <div className="page">
-      <CustomerSubPageHeader
+      <CustomerSubPageHeader tab="documents"
         customerName={customer?.name ?? ""}
         isActive={customer?.is_active ?? true}
-        eyebrow={t("nav.customer_submenu.documents")}
       />
       <DocumentsExplorer customerId={numericId} side="provider" />
     </div>

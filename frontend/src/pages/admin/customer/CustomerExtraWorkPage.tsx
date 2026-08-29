@@ -57,7 +57,7 @@ export function CustomerExtraWorkPage() {
 
   return (
     <div data-testid="customer-extra-work-page">
-      <CustomerSubPageHeader customerName={customerName} isActive={isActive} />
+      <CustomerSubPageHeader tab="work" subTab="extra_work" customerName={customerName} isActive={isActive} />
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">

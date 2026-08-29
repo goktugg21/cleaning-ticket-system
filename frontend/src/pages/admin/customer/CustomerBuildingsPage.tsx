@@ -208,7 +208,7 @@ export function CustomerBuildingsPage() {
 
   return (
     <div data-testid="customer-buildings-page">
-      <CustomerSubPageHeader
+      <CustomerSubPageHeader tab="buildings"
         customerName={customerName}
         isActive={isActive}
       />

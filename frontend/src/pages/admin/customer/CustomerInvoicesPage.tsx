@@ -66,10 +66,9 @@ export function CustomerInvoicesPage() {
 
   return (
     <div data-testid="customer-invoices-page">
-      <CustomerSubPageHeader
+      <CustomerSubPageHeader tab="invoices" subTab="invoices"
         customerName={customer?.name ?? ""}
         isActive={customer?.is_active ?? true}
-        eyebrow={t("nav.customer_submenu.invoices")}
       />
       {error && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>

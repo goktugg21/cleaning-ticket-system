@@ -596,7 +596,7 @@ export function CustomerPermissionsPage() {
 
   return (
     <div data-testid="customer-permissions-page">
-      <CustomerSubPageHeader customerName={customerName} isActive={isActive} />
+      <CustomerSubPageHeader tab="permissions" customerName={customerName} isActive={isActive} />
 
       {loadError && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>

@@ -1,7 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import axios from "axios";
@@ -28,6 +27,7 @@ import { Toggle } from "../../components/Toggle";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { CustomerSubPageHeader } from "./customer/CustomerSubPageHeader";
 import { accessRoleLabelKey } from "../../lib/enumLabels";
 import { ContactPermissionsPanel } from "./ContactPermissionsPanel";
 
@@ -502,27 +502,13 @@ export function CustomerContactsPage() {
 
   return (
     <div data-testid="customer-contacts-page">
-      <Link
-        to={`/admin/customers/${numericId ?? ""}`}
-        className="link-back"
-        data-testid="customer-contacts-back"
-      >
-        <ChevronLeft size={14} strokeWidth={2.5} />
-        {t("customer_form.back")}
-      </Link>
-
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">
-            {customerName
-              ? `${customerName} · ${t("customer_contacts.page_title")}`
-              : t("customer_contacts.page_title")}
-          </h2>
-        </div>
-        <div className="page-header-actions">
+      <CustomerSubPageHeader
+        customerName={customerName}
+        isActive={customer?.is_active ?? true}
+        tab="people"
+        subTab="contacts"
+        actions={
+          <>
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -532,8 +518,9 @@ export function CustomerContactsPage() {
           >
             {t("customer_contacts.add_button")}
           </button>
-        </div>
-      </div>
+                  </>
+        }
+      />
 
       {loadError && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">

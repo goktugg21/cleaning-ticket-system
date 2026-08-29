@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -45,6 +45,7 @@ import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { useToast } from "../../components/ToastProvider";
 import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 import { Toggle } from "../../components/Toggle";
+import { CustomerSubPageHeader } from "./customer/CustomerSubPageHeader";
 
 /**
  * Sprint 28 Batch 5 — Per-customer contract pricing.
@@ -1508,27 +1509,12 @@ export function CustomerPricingPage() {
 
   return (
     <div data-testid="customer-pricing-page">
-      <Link
-        to={`/admin/customers/${numericId ?? ""}`}
-        className="link-back"
-        data-testid="customer-pricing-back"
-      >
-        <ChevronLeft size={14} strokeWidth={2.5} />
-        {t("customer_form.back")}
-      </Link>
-
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">
-            {customerName
-              ? `${customerName} · ${t("customer_pricing.page_title")}`
-              : t("customer_pricing.page_title")}
-          </h2>
-        </div>
-        <div className="page-header-actions">
+      <CustomerSubPageHeader
+        customerName={customerName}
+        isActive={customer?.is_active ?? true}
+        tab="pricing"
+        actions={
+          <>
           <button
             type="button"
             className={
@@ -1577,8 +1563,9 @@ export function CustomerPricingPage() {
           >
             {t("customer_pricing.add_button")}
           </button>
-        </div>
-      </div>
+                  </>
+        }
+      />
 
       {loadError && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>

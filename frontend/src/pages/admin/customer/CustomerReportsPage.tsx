@@ -162,10 +162,9 @@ export function CustomerReportsPage() {
 
   return (
     <div data-testid="customer-reports-page">
-      <CustomerSubPageHeader
+      <CustomerSubPageHeader tab="invoices" subTab="reports"
         customerName={customer?.name ?? ""}
         isActive={customer?.is_active ?? true}
-        eyebrow={t("nav.customer_submenu.reports")}
       />
 
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>

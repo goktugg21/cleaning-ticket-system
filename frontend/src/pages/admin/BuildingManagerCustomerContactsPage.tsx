@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import { getCustomer, listCustomerContacts } from "../../api/admin";
-import { PageHeader } from "../../components/PageHeader";
+import { CustomerSubPageHeader } from "./customer/CustomerSubPageHeader";
 import type { Contact, CustomerAdmin } from "../../api/types";
 
 /**
@@ -85,17 +85,12 @@ export function BuildingManagerCustomerContactsPage() {
           building-manager pages. The back link is conditional here (it
           needs the customer's name), which `PageHeader` supports by
           taking `backLink` as an optional prop. */}
-      <PageHeader
-        backLink={
-          customer
-            ? {
-                to: `/admin/customers/${customer.id}`,
-                label: t("bm_customer_contacts.back", { name: customer.name }),
-              }
-            : undefined
-        }
-        title={t("bm_customer_contacts.title")}
-        subtitle={
+      <CustomerSubPageHeader
+        customerName={customer ? customer.name : ""}
+        isActive={customer?.is_active ?? true}
+        tab="people"
+        subTab="contacts"
+        facts={
           <span data-testid="bm-customer-contacts-readonly-hint">
             {t("bm_customer_contacts.readonly_hint")}
           </span>

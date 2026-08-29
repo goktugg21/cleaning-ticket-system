@@ -106,8 +106,6 @@
   "nav.my_meldingen": "Mijn meldingen",
   "nav.invitations": "Uitnodigingen",
   "nav.audit_logs": "Auditlog",
-  "nav.customer_submenu.back": "Terug naar klanten",
-  "nav.customer_submenu.scoped_to": "Beperkt tot",
   "nav.customer_submenu.overview": "Overzicht",
   "nav.customer_submenu.buildings": "Gebouwen",
   "nav.customer_submenu.users": "Gebruikers",
@@ -1110,7 +1108,7 @@
   "bm_customer_contacts.readonly_hint": "Alleen-lezen — klik op een rij om de details van het contact te zien.",
   "bm_customer_contacts.empty": "Er zijn nog geen contactpersonen geregistreerd voor deze klant.",
   "bm_customer_contacts.notes_label": "Notities",
-  "customer_view.back": "Terug naar klanten",
+  "customer_view.back": "Alle klanten",
   "customer_view.overview.title_active": "Klantoverzicht",
   "customer_view.overview.title_inactive_suffix": " (inactief)",
   "customer_view.overview.edit_basics": "Bewerk basisgegevens",
@@ -2719,5 +2717,11 @@
   "meerwerk_cart.no_match": "Geen dienst gevonden.",
   "meerwerk_flow.outcome_instant_provider": "Alles heeft een afgesproken prijs: dit werk wordt direct ingepland.",
   "meerwerk_flow.outcome_quote_provider": "Er zit werk zonder afgesproken prijs bij: de klant ontvangt eerst een prijs om goed te keuren.",
-  "meerwerk_flow.outcome_auto_start_provider": "Er zit werk zonder afgesproken prijs bij: zodra u de prijs heeft ingevuld start het werk direct, zonder akkoord van de klant."
+  "meerwerk_flow.outcome_auto_start_provider": "Er zit werk zonder afgesproken prijs bij: zodra u de prijs heeft ingevuld start het werk direct, zonder akkoord van de klant.",
+  "nav.customer_submenu.people": "Mensen",
+  "nav.customer_submenu.work": "Werk",
+  "customer_view.overview.users_count_one": "{{count}} gebruiker",
+  "customer_view.overview.users_count_other": "{{count}} gebruikers",
+  "nav.people": "Mensen",
+  "nav.services_catalogs": "Diensten & catalogi"
 }

@@ -106,8 +106,6 @@
   "nav.my_meldingen": "My reports",
   "nav.invitations": "Invitations",
   "nav.audit_logs": "Audit log",
-  "nav.customer_submenu.back": "Back to customers",
-  "nav.customer_submenu.scoped_to": "Scoped to",
   "nav.customer_submenu.overview": "Overview",
   "nav.customer_submenu.buildings": "Buildings",
   "nav.customer_submenu.users": "Users",
@@ -1110,7 +1108,7 @@
   "bm_customer_contacts.readonly_hint": "Read-only — click a row to see the contact's details.",
   "bm_customer_contacts.empty": "No contacts have been registered for this customer.",
   "bm_customer_contacts.notes_label": "Notes",
-  "customer_view.back": "Back to customers",
+  "customer_view.back": "All customers",
   "customer_view.overview.title_active": "Customer overview",
   "customer_view.overview.title_inactive_suffix": " (inactive)",
   "customer_view.overview.edit_basics": "Edit basics",
@@ -2719,5 +2717,11 @@
   "meerwerk_cart.no_match": "No service matches.",
   "meerwerk_flow.outcome_instant_provider": "Everything has an agreed price: this work goes straight to planning.",
   "meerwerk_flow.outcome_quote_provider": "Some work has no agreed price yet: the customer receives a price to approve first.",
-  "meerwerk_flow.outcome_auto_start_provider": "Some work has no agreed price yet: as soon as you fill in the price the work starts, without the customer's approval."
+  "meerwerk_flow.outcome_auto_start_provider": "Some work has no agreed price yet: as soon as you fill in the price the work starts, without the customer's approval.",
+  "nav.customer_submenu.people": "People",
+  "nav.customer_submenu.work": "Work",
+  "customer_view.overview.users_count_one": "{{count}} user",
+  "customer_view.overview.users_count_other": "{{count}} users",
+  "nav.people": "People",
+  "nav.services_catalogs": "Services & catalogs"
 }
