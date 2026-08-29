@@ -908,7 +908,7 @@ function WorkPlanWeek() {
             </button>
           </div>
           <p className="muted small" style={{ marginTop: 0 }}>
-            {t("agenda.undated_desc")}
+            {t(data.can_plan ? "agenda.undated_desc" : "agenda.undated_desc_readonly")}
           </p>
           <BoundedList
             size="lg"
@@ -922,6 +922,7 @@ function WorkPlanWeek() {
                   key={entry.key}
                   entry={entry}
                   busy={planningKey === entry.key}
+                  canPlan={data.can_plan}
                   onPlanToday={() => planForToday(entry)}
                 />
               ))}
@@ -1183,10 +1184,15 @@ function WorkPlanWeek() {
 function UndatedRow({
   entry,
   busy,
+  canPlan,
   onPlanToday,
 }: {
   entry: WorkPlanEntry;
   busy: boolean;
+  /** FE-5 step 0 — the server's `can_plan`. A viewer the schedule
+   *  endpoints would refuse gets no button: a refusal in raw backend
+   *  English can no longer be clicked into existence. */
+  canPlan: boolean;
   onPlanToday: () => void;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
@@ -1239,15 +1245,17 @@ function UndatedRow({
       {/* Sprint 182 §3 — the SAME action on both kinds. A ticket writes
           its schedule, an extra work writes the provider's planned day;
           the row does not make the reader care which. */}
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        onClick={onPlanToday}
-        disabled={busy}
-        data-testid={`agenda-undated-plan-${entry.key}`}
-      >
-        {busy ? t("agenda.undated_planning") : t("agenda.undated_plan_today")}
-      </button>
+      {canPlan && (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={onPlanToday}
+          disabled={busy}
+          data-testid={`agenda-undated-plan-${entry.key}`}
+        >
+          {busy ? t("agenda.undated_planning") : t("agenda.undated_plan_today")}
+        </button>
+      )}
     </li>
   );
 }

@@ -75,6 +75,7 @@
   "agenda.undated": "Nog geen datum",
   "agenda.undated_count": "{{count}} taak/taken zonder geplande datum — die staan in geen enkele week.",
   "agenda.undated_desc": "Nog in geen week — plan het vandaag of kies een datum.",
+  "agenda.undated_desc_readonly": "Nog in geen week. Een planner zet het op een dag.",
   "agenda.undated_plan_today": "Plan vandaag",
   "agenda.undated_planned": "Vandaag ingepland.",
   "agenda.undated_planning": "Bezig...",

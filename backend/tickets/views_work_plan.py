@@ -1772,6 +1772,15 @@ class WorkPlanView(APIView):
                 },
                 "today": _iso(today),
                 "scope": "company" if team else "own",
+                # FE-5 step 0 — whether THIS viewer may put undated work
+                # on a day. The two write endpoints the lane's one action
+                # uses (`POST /tickets/<id>/schedule/` and
+                # `POST /extra-work/bulk-dates/`) both admit exactly the
+                # provider-management roles and refuse everyone else with
+                # a 403, so the lane reads the same answer here and shows
+                # the button only when pressing it can work. Read-only,
+                # additive; no migration.
+                "can_plan": is_provider_management_role(user),
                 "counts": counts,
                 "entries": entries,
                 "overdue_entries": overdue_entries,

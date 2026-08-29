@@ -228,6 +228,10 @@ export interface WorkPlanResponse {
   week: WorkPlanWeek;
   today: string;
   scope: "own" | "company";
+  /** FE-5 step 0 — whether this viewer may put undated work on a day.
+   *  The server's answer, from the same role rule its two schedule
+   *  endpoints enforce; the lane shows "Plan vandaag" only when true. */
+  can_plan: boolean;
   counts: WorkPlanCounts;
   entries: WorkPlanEntry[];
   overdue_entries: WorkPlanEntry[];

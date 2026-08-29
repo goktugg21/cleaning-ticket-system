@@ -75,6 +75,7 @@
   "agenda.undated": "No date yet",
   "agenda.undated_count": "{{count}} job(s) with no planned date — they belong to no week.",
   "agenda.undated_desc": "Not in a week yet — plan it for today or pick a date.",
+  "agenda.undated_desc_readonly": "Not in any week yet. A planner puts it on a day.",
   "agenda.undated_plan_today": "Plan for today",
   "agenda.undated_planned": "Planned for today.",
   "agenda.undated_planning": "Planning...",
