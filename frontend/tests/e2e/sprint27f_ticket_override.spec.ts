@@ -4,6 +4,7 @@ import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
 import {
   DEMO_TICKET_TITLES,
+  openWorkflowFolds,
   resolveDemoTicketId,
 } from "./fixtures/tickets";
 
@@ -35,6 +36,15 @@ import {
  * calls. The ID is resolved at the start of each test by calling
  * `/api/tickets/?search=<title>` so the spec stays robust under
  * `--reset-tickets` autoincrement churn.
+ *
+ * FE-3 — the provider's override of a customer decision is a
+ * correction, so it sits behind the workflow card's "Geavanceerd" /
+ * "Advanced" fold (`workflow-corrections-toggle` → `ticket-advanced`);
+ * the buttons keep their `workflow-move-<STATUS>` testids. The
+ * customer's own Approve / Reject are the primary action in the phase
+ * banner (no fold). The header status chip is gone; the workflow card
+ * body carries `data-status`, and the activity timeline (with the
+ * override badge) is folded behind `ticket-activity-toggle`.
  */
 
 test("COMPANY_ADMIN — empty reason blocks override submission", async ({
@@ -60,11 +70,15 @@ test("COMPANY_ADMIN — empty reason blocks override submission", async ({
   await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
 
-  // Click the first override-target status button. Both APPROVED
-  // and REJECTED transitions are admin-coerced overrides per
-  // state_machine.py; we pick the Approved button.
+  // Both APPROVED and REJECTED transitions are admin-coerced
+  // overrides per state_machine.py; they live behind the Advanced
+  // fold. Open it and pick the Approved button.
+  await expect(page.locator("[data-testid='side-card-workflow']")).toBeVisible({
+    timeout: 10_000,
+  });
+  await openWorkflowFolds(page);
   const approveButton = page
-    .locator(".status-actions .status-btn", { hasText: /Approved|Goedgekeurd/i })
+    .locator("[data-testid='ticket-advanced'] [data-testid='workflow-move-APPROVED']")
     .first();
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
   await approveButton.click();
@@ -126,20 +140,21 @@ test("CUSTOMER_USER — Approve/Reject buttons do not open the override modal", 
   await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
 
-  const buttons = page.locator(".status-actions .status-btn");
+  // The customer's two decisions are the primary action in the phase
+  // banner — nothing to unfold.
+  const buttons = page.locator("[data-testid^='workflow-move-']");
   await expect(buttons).toHaveCount(2, { timeout: 10_000 });
-
-  // Click Approve. For a CUSTOMER_USER the click should fire the
-  // normal transition path (which will trigger a network request)
-  // and NOT open the override modal. We assert the modal is not
-  // present immediately after the click. Note: we do NOT actually
-  // wait for the network round-trip — the modal mount happens
-  // synchronously on click, so if it were going to open it would
-  // be visible by the next microtask.
-  const approveButton = buttons.filter({
-    hasText: /Approved|Goedgekeurd/i,
-  });
-  await expect(approveButton).toHaveCount(1);
+  await expect(
+    page.locator("[data-testid='workflow-move-APPROVED']"),
+  ).toHaveCount(1);
+  await expect(
+    page.locator("[data-testid='workflow-move-REJECTED']"),
+  ).toHaveCount(1);
+  // No Advanced fold for a customer: the override surface is
+  // provider-only.
+  await expect(
+    page.locator("[data-testid='workflow-corrections-toggle']"),
+  ).toHaveCount(0);
 
   // Hover/inspect only — do NOT click. Clicking would mutate the
   // ticket out of WCA and break the third test in this file when
@@ -173,8 +188,12 @@ test("COMPANY_ADMIN — typed reason confirms override and tags the timeline", a
   await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
 
+  await expect(page.locator("[data-testid='side-card-workflow']")).toBeVisible({
+    timeout: 10_000,
+  });
+  await openWorkflowFolds(page);
   const approveButton = page
-    .locator(".status-actions .status-btn", { hasText: /Approved|Goedgekeurd/i })
+    .locator("[data-testid='ticket-advanced'] [data-testid='workflow-move-APPROVED']")
     .first();
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
   await approveButton.click();
@@ -211,15 +230,21 @@ test("COMPANY_ADMIN — typed reason confirms override and tags the timeline", a
   // Modal closes after success and the page reloads the ticket.
   await expect(modal).toBeHidden({ timeout: 10_000 });
 
-  // Status header reflects APPROVED.
-  // W14 §1 — the header status is no longer an 11px chip in the meta
-  // row; it is its own block at the head of the band, left of Location
-  // and Customer. Same assertion, new home.
+  // The workflow card reflects APPROVED.
+  // FE-3 — the header status chip is gone (the phase banner states
+  // the phase in words); the workflow card body carries the raw
+  // status as `data-status`. Same assertion, new home.
   await expect(
-    page.locator("[data-testid='ticket-header-status']"),
+    page.locator("[data-testid='side-card-workflow'] [data-status]").first(),
   ).toHaveAttribute("data-status", "APPROVED", { timeout: 10_000 });
 
-  // The new timeline row carries the override badge + the reason.
+  // The new timeline row carries the override badge + the reason. The
+  // activity timeline is folded by default — open it.
+  const activityToggle = page.locator("[data-testid='ticket-activity-toggle']");
+  await expect(activityToggle).toBeVisible({ timeout: 10_000 });
+  if ((await activityToggle.getAttribute("aria-expanded")) !== "true") {
+    await activityToggle.click();
+  }
   const overrideBadges = page.locator(
     "[data-testid='timeline-override-badge']",
   );

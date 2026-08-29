@@ -9,8 +9,8 @@ import { loginAs } from "./fixtures/login";
  *
  * Two surfaces are exercised here:
  *
- *   1. UI affordance gating on /admin/{companies,buildings,customers,
- *      users,invitations}. We do NOT mutate any data — the test only
+ *   1. UI affordance gating on /admin/{companies,buildings,customers}
+ *      and the People page tabs /admin/people/{users,invitations}. We do NOT mutate any data — the test only
  *      asserts which buttons / rows / scope-filtered lists each role
  *      sees on the listing pages, plus the SUPER_ADMIN-only reactivate
  *      affordance on /admin/users/:id when the user happens to be
@@ -197,15 +197,20 @@ test.describe("admin → /admin/customers", () => {
 });
 
 // ===========================================================================
-// /admin/users — scope and SUPER_ADMIN-only reactivate visibility
+// /admin/people/users — scope and SUPER_ADMIN-only reactivate visibility
+//
+// FE-6 — Users, Employees and Invitations are three tabs of ONE People
+// page (`/admin/people/:tab`). The old `/admin/users` and
+// `/admin/invitations` URLs still redirect there, but the specs land on
+// the tab directly so the URL assertions describe the page that exists.
 // ===========================================================================
 
-test.describe("admin → /admin/users", () => {
+test.describe("admin → /admin/people/users", () => {
   test("SUPER_ADMIN sees the demo super-admin in the user list", async ({
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     await expect(page.locator(".data-table tbody tr").first()).toBeVisible({
       timeout: 10_000,
     });
@@ -218,7 +223,7 @@ test.describe("admin → /admin/users", () => {
     page,
   }) => {
     await loginAs(page, DEMO_USERS.companyAdmin);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     await expect(page.locator(".data-table tbody tr").first()).toBeVisible({
       timeout: 10_000,
     });
@@ -237,19 +242,19 @@ test.describe("admin → /admin/users", () => {
     await expect(tableBody).not.toContainText("superadmin@cleanops.demo");
   });
 
-  test("Invite link to /admin/invitations is shown for both staff roles", async ({
+  test("Invite link to the Invitations tab is shown for both staff roles", async ({
     page,
   }) => {
     for (const roleKey of ["super", "companyAdmin"] as const) {
       await loginAs(page, DEMO_USERS[roleKey]);
-      await page.goto("/admin/users");
-      // Both the page-header CTA and the sidebar nav link point at
-      // /admin/invitations, so the unscoped selector resolves to >=2
-      // elements. Scope to the page-header-actions, which is the
-      // role-relevant CTA for "I want to invite a user".
+      await page.goto("/admin/people/users");
+      // FE-6 — the sidebar no longer carries an Invitations entry (it
+      // is a tab of the People page). The Users tab's page-header CTA
+      // is the one affordance for "I want to invite a user" and it
+      // points at the Invitations tab.
       await expect(
         page.locator(
-          '.page-header-actions a[href="/admin/invitations"]',
+          '.page-header-actions a[href="/admin/people/invitations"]',
         ),
       ).toBeVisible({ timeout: 10_000 });
     }
@@ -257,13 +262,13 @@ test.describe("admin → /admin/users", () => {
 });
 
 // ===========================================================================
-// /admin/invitations — direct URL access matrix
+// /admin/people/invitations — direct URL access matrix
 // ===========================================================================
 
-test.describe("admin → /admin/invitations", () => {
-  test("SUPER_ADMIN reaches the invitations page", async ({ page }) => {
+test.describe("admin → /admin/people/invitations", () => {
+  test("SUPER_ADMIN reaches the invitations tab", async ({ page }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/invitations");
+    await page.goto("/admin/people/invitations");
     // Sprint 20 follow-up #5: when there are no invitations the page
     // renders an empty-state directly inside the Activity card and
     // skips the `invitations-table` element. Accept either branch as
@@ -277,9 +282,9 @@ test.describe("admin → /admin/invitations", () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test("COMPANY_ADMIN reaches the invitations page", async ({ page }) => {
+  test("COMPANY_ADMIN reaches the invitations tab", async ({ page }) => {
     await loginAs(page, DEMO_USERS.companyAdmin);
-    await page.goto("/admin/invitations");
+    await page.goto("/admin/people/invitations");
     await expect(
       page
         .locator(
@@ -294,8 +299,13 @@ test.describe("admin → /admin/invitations", () => {
   }) => {
     for (const roleKey of ["managerAll", "customerAll"] as const) {
       await loginAs(page, DEMO_USERS[roleKey]);
-      await page.goto("/admin/invitations");
+      await page.goto("/admin/people/invitations");
       await page.waitForLoadState("networkidle");
+      // A BUILDING_MANAGER may open the People page (its Employees tab
+      // is a reader surface) but never the Invitations tab: the page
+      // lands them on the first tab their gate allows. A CUSTOMER_USER
+      // is bounced off the whole admin area.
+      expect(new URL(page.url()).pathname).not.toBe("/admin/people/invitations");
       expect(new URL(page.url()).pathname).not.toBe("/admin/invitations");
       await expect(
         page.locator('[data-testid="invitations-table"]'),

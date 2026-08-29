@@ -9,7 +9,9 @@ import { loginAs } from "./fixtures/login";
  *
  * Closes the frontend half of Batch 11:
  *   - TicketDetailPage now renders a "Complete work" button for an
- *     assigned STAFF user on an IN_PROGRESS ticket. The button opens
+ *     assigned STAFF user on an IN_PROGRESS ticket (FE-3: it IS the
+ *     page's one primary action, in the phase banner; no generic
+ *     "move to" buttons are offered next to it). The button opens
  *     a modal that resolves the destination via
  *     `GET /api/tickets/<id>/staff-completion-route/` and submits the
  *     corresponding status transition.
@@ -163,30 +165,17 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
     const completeBtn = page.getByTestId("ticket-staff-complete-button");
     await expect(completeBtn).toBeVisible({ timeout: 15_000 });
 
-    // Sprint 28 Batch 11 UX hotfix — the Workflow card must show the
-    // dedicated "Complete your assigned work" subtitle AND must NOT
-    // expose any of the generic next-status UI for STAFF. The card
-    // subtitle is rendered via `card_workflow_subtitle_staff_complete`
-    // which the testid below anchors stably across locales.
+    // FE-3 — "Complete work" is THE primary action: it sits in the
+    // phase banner at the head of the page, and the page must NOT
+    // offer the generic next-status buttons (`workflow-move-*`) to
+    // STAFF alongside it. The generic buttons are what a manager gets;
+    // for the assigned STAFF the completion modal is the only door.
     await expect(
-      page.getByTestId("ticket-staff-complete-card-subtitle"),
+      page.locator('[data-testid="ticket-facts"]'),
     ).toBeVisible();
-
-    // No generic Status-note input. The workflow card uses
-    // id="status-note" for that input; getByRole + name is fragile
-    // across locales, so we anchor on the stable DOM id instead.
-    await expect(page.locator("#status-note")).toHaveCount(0);
-
-    // No generic "Move to X" buttons. They are rendered via
-    // `workflow_move_to` in both locales; their EN/NL labels both
-    // contain the string "Move" / "Verplaats" respectively, but the
-    // structural assertion is "the workflow card contains exactly
-    // one status-btn — the Complete work CTA". We verify by counting
-    // `.status-btn` elements inside the workflow card.
-    const workflowCard = page
-      .locator(`xpath=//*[@data-testid="ticket-staff-complete-button"]/ancestor::div[contains(@class, "card")][1]`);
-    await expect(workflowCard).toBeVisible();
-    await expect(workflowCard.locator(".status-btn")).toHaveCount(1);
+    await expect(
+      page.locator('[data-testid^="workflow-move-"]'),
+    ).toHaveCount(0);
 
     // Open the modal.
     await completeBtn.click();

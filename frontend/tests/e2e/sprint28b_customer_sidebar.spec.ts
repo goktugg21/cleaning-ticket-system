@@ -5,30 +5,31 @@ import { DEMO_PASSWORD, DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
 
 /**
- * Sprint 28 Batch 3 — sidebar refactor foundation.
+ * Sprint 28 Batch 3 — customer navigation foundation.
+ * FE-6 (Addendum D §D.3.4) — REWRITTEN for the replacement surface.
  *
- * Validates the URL-derived "customer-scoped" sidebar mode and the
- * Back-to-top-level affordance. Three cases:
+ * The Batch 3 "customer-scoped sidebar" (the global nav swapped out for
+ * a Back link + submenu whenever the URL was under /admin/customers/:id)
+ * is gone. A customer is now a PAGE: the global nav stays where it is,
+ * and the customer page carries a header with a back link plus ONE row
+ * of tabs (`customer-tabs`). Three cases, same intent as before:
  *
- *   1. Customer deep link shows the customer-scoped sidebar.
- *      Navigate directly to `/admin/customers/<id>`; assert the
- *      Back link + a submenu entry (Permissions) are visible AND
- *      the top-level entries (New ticket, Reports) are NOT.
+ *   1. Customer deep link shows the customer tab row.
+ *      Navigate directly to `/admin/customers/<id>`; assert the tab
+ *      row + its Permissions / Buildings / People tabs are visible AND
+ *      the global nav is still there (you never left).
  *
- *   2. Back returns to top-level.
- *      Click the Back link; assert the URL becomes
- *      `/admin/customers` and the top-level entries are visible
- *      again.
+ *   2. Back returns to the customers list.
+ *      Click the header's back link; assert the URL becomes
+ *      `/admin/customers` and the tab row is gone.
  *
- *   3. Non-customer admin route shows top-level sidebar.
- *      Navigate to `/admin/buildings`; assert the top-level
- *      entries are visible AND the customer-scoped submenu is
- *      NOT (no `data-testid="sidebar-customer-permissions"`).
+ *   3. Non-customer admin route shows no customer tab row.
+ *      Navigate to `/admin/buildings`; assert the global nav entries
+ *      are visible AND no `customer-tabs` is rendered.
  *
  * Auth: COMPANY_ADMIN (Ramazan @ Osius Demo) — the AdminRoute
  * guard admits SUPER_ADMIN + COMPANY_ADMIN, and the spec uses the
- * narrower role so it also locks in that COMPANY_ADMIN sees the
- * submenu.
+ * narrower role so it also locks in that COMPANY_ADMIN sees the tabs.
  *
  * Customer id resolution: the demo seed creates "B Amsterdam"
  * under Osius Demo. We resolve its id via the customers list API
@@ -93,7 +94,7 @@ async function resolveCustomerId(
   return match!.id;
 }
 
-test("Sprint 28 B3 — customer deep link shows customer-scoped sidebar", async ({
+test("FE-6 — customer deep link shows the customer tab row, global nav stays", async ({
   page,
   baseURL,
 }) => {
@@ -105,35 +106,30 @@ test("Sprint 28 B3 — customer deep link shows customer-scoped sidebar", async 
   await page.goto(`/admin/customers/${customerId}`);
   await page.waitForLoadState("networkidle");
 
-  // Customer-scoped submenu entries are visible.
+  // The customer page's own header + tab row are visible.
   await expect(
-    page.locator("[data-testid='sidebar-customer-back']"),
+    page.locator("[data-testid='customer-page-header']"),
   ).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("[data-testid='customer-tabs']")).toBeVisible();
   await expect(
-    page.locator("[data-testid='sidebar-customer-permissions']"),
+    page.locator("[data-testid='customer-tab-permissions']"),
   ).toBeVisible();
   await expect(
-    page.locator("[data-testid='sidebar-customer-buildings']"),
+    page.locator("[data-testid='customer-tab-buildings']"),
   ).toBeVisible();
-  await expect(
-    page.locator("[data-testid='sidebar-customer-contacts']"),
-  ).toBeVisible();
+  await expect(page.locator("[data-testid='customer-tab-people']")).toBeVisible();
 
-  // Top-level entries are NOT rendered. The customer-scoped mode
-  // replaces (not appends after) the operations group.
+  // The global nav is NOT replaced: the top-level entries stay put.
+  await expect(page.locator("[data-testid='sidebar-new']")).toBeVisible();
+  await expect(page.locator("[data-testid='sidebar-tickets']")).toBeVisible();
   await expect(
-    page.locator(".sidebar-nav a[href='/tickets/new']"),
-  ).toHaveCount(0);
-  await expect(page.locator(".sidebar-nav a[href='/reports']")).toHaveCount(0);
-  // The customers list link itself only appears as the "Back"
-  // target in this mode, so direct `/admin/customers` link in the
-  // admin group should not be present.
-  await expect(
-    page.locator(".sidebar-nav a.nav-item[href='/admin/buildings']"),
-  ).toHaveCount(0);
+    page.locator(".sidebar-nav a[href='/admin/buildings']"),
+  ).toBeVisible();
+  // ...and the old scoped submenu never renders.
+  await expect(page.locator("[data-testid^='sidebar-customer-']")).toHaveCount(0);
 });
 
-test("Sprint 28 B3 — Back link returns to top-level sidebar", async ({
+test("FE-6 — the header's back link returns to the customers list", async ({
   page,
   baseURL,
 }) => {
@@ -145,32 +141,30 @@ test("Sprint 28 B3 — Back link returns to top-level sidebar", async ({
   await page.goto(`/admin/customers/${customerId}`);
   await page.waitForLoadState("networkidle");
 
-  const backLink = page.locator("[data-testid='sidebar-customer-back']");
-  await expect(backLink).toBeVisible({ timeout: 10_000 });
+  const header = page.locator("[data-testid='customer-page-header']");
+  await expect(header).toBeVisible({ timeout: 10_000 });
+  const backLink = header.locator("a[href='/admin/customers']").first();
+  await expect(backLink).toBeVisible();
   await backLink.click();
 
   // URL becomes the customers list page.
   await page.waitForURL(/\/admin\/customers$/, { timeout: 10_000 });
   expect(new URL(page.url()).pathname).toBe("/admin/customers");
 
-  // Top-level entries are back.
-  await expect(
-    page.locator(".sidebar-nav a[href='/tickets/new']"),
-  ).toBeVisible();
+  // Top-level entries are (still) there.
+  await expect(page.locator("[data-testid='sidebar-new']")).toBeVisible();
   await expect(
     page.locator(".sidebar-nav a[href='/admin/buildings']"),
   ).toBeVisible();
 
-  // Customer-scoped submenu is gone.
+  // The customer tab row is gone with the customer page.
+  await expect(page.locator("[data-testid='customer-tabs']")).toHaveCount(0);
   await expect(
-    page.locator("[data-testid='sidebar-customer-permissions']"),
-  ).toHaveCount(0);
-  await expect(
-    page.locator("[data-testid='sidebar-customer-back']"),
+    page.locator("[data-testid='customer-page-header']"),
   ).toHaveCount(0);
 });
 
-test("Sprint 28 B3 — non-customer admin route shows top-level sidebar", async ({
+test("FE-6 — non-customer admin route renders no customer tab row", async ({
   page,
 }) => {
   await loginAs(page, DEMO_USERS.companyAdmin);
@@ -178,19 +172,14 @@ test("Sprint 28 B3 — non-customer admin route shows top-level sidebar", async 
   await page.waitForLoadState("networkidle");
 
   // Top-level entries present.
-  await expect(
-    page.locator(".sidebar-nav a[href='/tickets/new']"),
-  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("[data-testid='sidebar-new']")).toBeVisible({
+    timeout: 10_000,
+  });
   await expect(
     page.locator(".sidebar-nav a[href='/admin/customers']"),
   ).toBeVisible();
 
-  // Customer-scoped submenu absent — `/admin/buildings` matches
-  // the top-level branch, not the customer-scoped pattern.
-  await expect(
-    page.locator("[data-testid='sidebar-customer-permissions']"),
-  ).toHaveCount(0);
-  await expect(
-    page.locator("[data-testid='sidebar-customer-back']"),
-  ).toHaveCount(0);
+  // Customer tab row absent — `/admin/buildings` is not a customer page.
+  await expect(page.locator("[data-testid='customer-tabs']")).toHaveCount(0);
+  await expect(page.locator("[data-testid^='sidebar-customer-']")).toHaveCount(0);
 });

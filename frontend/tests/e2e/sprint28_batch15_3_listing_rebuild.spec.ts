@@ -5,23 +5,29 @@ import { loginAs } from "./fixtures/login";
 /**
  * Sprint 28 Batch 15.3 — Extra Work list rebuild + Users page
  * grouping + Audit log readable diff.
+ *
+ * FE-1 / W24 — the four-card KPI strip above the Meerwerk list is
+ * gone; the list opens with the status TILES (one per quote-track
+ * chip plus "all", `extra-work-status-tile-*`) and the list total
+ * (`extra-work-list-total`) is the one money figure. Users live on
+ * the People page (`/admin/people/users`).
  */
 
 test.describe("Sprint 28 Batch 15.3 — Extra Work list rebuild", () => {
-  test("KPI strip renders four cards", async ({ page }) => {
+  test("status tiles render above the list", async ({ page }) => {
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/extra-work");
     await expect(
       page.locator('[data-testid="extra-work-list-page"]'),
     ).toBeVisible();
     await expect(
-      page.locator('[data-testid="extra-work-list-kpi-row"]'),
+      page.locator('[data-testid="extra-work-status-tiles"]'),
     ).toBeVisible();
     for (const id of [
-      "extra-work-list-kpi-open",
-      "extra-work-list-kpi-awaiting",
-      "extra-work-list-kpi-approved",
-      "extra-work-list-kpi-value",
+      "extra-work-status-tile-all",
+      "extra-work-status-tile-AWAITING_PRICING",
+      "extra-work-status-tile-PRICING_PROPOSED",
+      "extra-work-status-tile-CUSTOMER_APPROVED",
     ]) {
       await expect(page.locator(`[data-testid="${id}"]`)).toBeVisible();
     }
@@ -35,17 +41,14 @@ test.describe("Sprint 28 Batch 15.3 — Extra Work list rebuild", () => {
       '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
       { timeout: 10_000 },
     );
-    const valueCard = page.locator(
-      '[data-testid="extra-work-list-kpi-value"]',
-    );
-    const valueText = await valueCard
-      .locator(".ew-kpi-card-value")
-      .textContent();
+    const total = page.locator('[data-testid="extra-work-list-total"]');
+    await expect(total).toBeVisible({ timeout: 10_000 });
+    const valueText = (await total.locator("strong").textContent()) ?? "";
     // Either "—" (no rows, formatMoney returns the dash for empty)
     // or contains the euro sign + a digit.
     expect(
-      valueText,
-      "kpi value should be a formatted money string",
+      valueText.trim(),
+      "list total should be a formatted money string",
     ).toMatch(/^(—|.*€.*\d.*)$/);
   });
 
@@ -80,12 +83,10 @@ test.describe("Sprint 28 Batch 15.3 — Extra Work list rebuild", () => {
       '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
       { timeout: 10_000 },
     );
-    // The first select inside the filter bar is the status filter
-    // (search input precedes it as a different element type).
-    const statusSelect = page
-      .locator('[data-testid="extra-work-list-filters"] select')
-      .first();
-    await statusSelect.selectOption("CANCELLED");
+    // Sprint 181 §2 — the status <select> in the filter bar is gone;
+    // the status tiles above the list ARE the status filter.
+    await page.locator('[data-testid="extra-work-status-tile-CANCELLED"]').click();
+    await page.waitForLoadState("networkidle");
     // Either zero rows + filtered empty state, or every visible row
     // shows the localised "cancelled" label inside its status badge.
     const rows = page.locator('[data-testid="extra-work-row"]');
@@ -114,7 +115,7 @@ test.describe("Sprint 28 Batch 15.3 — Users grouping", () => {
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     // The demo seed has both provider and customer users (super-admin
     // sees all five roles). Both group headers should resolve.
     await expect(
@@ -127,7 +128,7 @@ test.describe("Sprint 28 Batch 15.3 — Users grouping", () => {
 
   test("role cells use RoleBadge with side classifier", async ({ page }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     // RoleBadge renders a .role-badge wrapper with either
     // .role-badge-provider or .role-badge-customer modifier.
     const providerBadges = page.locator(".role-badge-provider");

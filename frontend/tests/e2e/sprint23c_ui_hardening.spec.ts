@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import { apiAs } from "./fixtures/apiAs";
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import { openTicketTab } from "./fixtures/tickets";
 
 /**
  * Sprint 23C UI hardening tests.
@@ -26,6 +28,13 @@ import { loginAs } from "./fixtures/login";
  *
  * Both tests are focused — they do not snapshot the whole page or
  * assert on copy beyond the presence/absence of the raw key strings.
+ *
+ * FE-3 / FE-6 — the dashboard no longer carries a ticket table (and a
+ * STAFF user's home is the agenda), so each ticket-detail test resolves
+ * a ticket id through the API of the actor under test and opens it
+ * directly. The staffing surfaces live on the ticket's People tab: the
+ * staff-assignment table for provider managers, the read-only
+ * assigned-staff card for STAFF.
  */
 
 const MOBILE_390 = { width: 390, height: 844 };
@@ -40,6 +49,20 @@ async function expectNoBodyHorizontalOverflow(
     () => document.documentElement.scrollWidth,
   );
   expect(scrollWidth).toBeLessThanOrEqual(viewportWidth + 1);
+}
+
+/** The first ticket the given actor may see, via the list API. */
+async function firstVisibleTicketId(email: string): Promise<number> {
+  const api = await apiAs(email);
+  try {
+    const response = await api.get("/api/tickets/?page_size=1");
+    expect(response.status()).toBe(200);
+    const body = (await response.json()) as { results: Array<{ id: number }> };
+    expect(body.results.length, `${email} sees at least one ticket`).toBeGreaterThan(0);
+    return body.results[0].id;
+  } finally {
+    await api.dispose();
+  }
 }
 
 // =====================================================================
@@ -117,17 +140,16 @@ const RAW_I18N_KEYS = [
 test("Ticket detail does not render raw assigned_staff_* keys (SUPER_ADMIN view)", async ({
   page,
 }) => {
-  // Super admin sees every ticket and the full assigned_staff card.
-  // Navigate to the dashboard, click the first ticket, then scan
-  // the rendered body text for any of the raw key tokens. A real
+  // Super admin sees every ticket and, on the People tab, the full
+  // staff-assignment table. Open the first ticket the API lists and
+  // scan the rendered body text for any of the raw key tokens. A real
   // translation must NOT contain the snake_case key literal.
+  const ticketId = await firstVisibleTicketId(DEMO_USERS.super.email);
   await loginAs(page, DEMO_USERS.super);
-  await page.waitForLoadState("networkidle");
-  const firstRow = page.locator(".data-table tbody tr").first();
-  await expect(firstRow).toBeVisible({ timeout: 10_000 });
-  await firstRow.locator("a.td-id").click();
+  await page.goto(`/tickets/${ticketId}`);
+  await openTicketTab(page, "people");
   await expect(
-    page.locator('[data-testid="assigned-staff-card"]'),
+    page.locator('[data-testid="staff-assignment-section"]'),
   ).toBeVisible({ timeout: 10_000 });
   const bodyText = (await page.locator("body").textContent()) ?? "";
   for (const key of RAW_I18N_KEYS) {
@@ -142,20 +164,16 @@ test("Ticket detail does not render raw assigned_staff_* keys (SUPER_ADMIN view)
 
 test("Ticket detail does not render raw assigned_staff_* keys (STAFF view, with Request assignment block)", async ({
   page,
-  baseURL,
 }) => {
   // Staff sees the Request-assignment button — exercises 4 more keys
   // (request_assignment{,_hint,_success,_already_pending} +
-  // requesting_assignment). Use the SUPER_ADMIN session via API
-  // discovery to find a ticket in Ahmet's visibility (Osius
-  // buildings), then sign in as Ahmet and navigate.
-  void baseURL;
+  // requesting_assignment). Resolve a ticket in Ahmet's visibility
+  // (Osius buildings) through his own list API, then sign in as Ahmet
+  // and open it. His home is the agenda, not a ticket table.
+  const ticketId = await firstVisibleTicketId(DEMO_USERS.staffOsius.email);
   await loginAs(page, DEMO_USERS.staffOsius);
-  await page.waitForLoadState("networkidle");
-  // STAFF dashboard shows the tickets they see. Open the first one.
-  const firstRow = page.locator(".data-table tbody tr").first();
-  await expect(firstRow).toBeVisible({ timeout: 10_000 });
-  await firstRow.locator("a.td-id").click();
+  await page.goto(`/tickets/${ticketId}`);
+  await openTicketTab(page, "people");
   await expect(
     page.locator('[data-testid="assigned-staff-card"]'),
   ).toBeVisible({ timeout: 10_000 });

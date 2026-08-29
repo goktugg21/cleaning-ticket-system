@@ -18,8 +18,8 @@ import { loginAs } from "./fixtures/login";
  * This spec asserts:
  *   1. The two deleted sections do not render on /admin/customers/:id.
  *   2. The new "Manage permissions" deep-link routes correctly.
- *   3. The Permissions page consumes focus_user and scrolls the
- *      matching UserAccessCard into view.
+ *   3. The Permissions page consumes focus_user, opens its Advanced
+ *      card and scrolls the matching permissions-matrix row into view.
  *   4. The Extra Work pricing add-form carries the new wrapper class
  *      that drives the 29.2 spacing rules.
  */
@@ -121,7 +121,7 @@ test.describe("Sprint 29 Batch 29.2 — Edit Basics dedup", () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test("focus_user scrolls the matching card and consumes the param", async ({
+  test("focus_user scrolls the matching matrix row and consumes the param", async ({
     page,
   }) => {
     const sa = await apiAs(DEMO_USERS.super.email);
@@ -138,9 +138,15 @@ test.describe("Sprint 29 Batch 29.2 — Edit Basics dedup", () => {
       `/admin/customers/${customerId}/permissions?focus_user=${userId}`,
     );
 
-    // The card with id=user-access-card-<userId> must be present.
-    const card = page.locator(`#user-access-card-${userId}`);
-    await expect(card).toBeVisible({ timeout: 10_000 });
+    // Sprint 31 Phase 6 / Sprint 130 — the per-user card became one
+    // matrix row per access (`permissions-matrix-row` + data-user-id);
+    // a focus_user deep link opens the collapsed Advanced card by
+    // itself and scrolls the user's first row into view.
+    const row = page
+      .locator(`[data-testid="permissions-matrix-row"][data-user-id="${userId}"]`)
+      .first();
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await expect(row).toBeInViewport();
 
     // The focus_user param must be consumed (replaceState) after the
     // effect runs; the URL no longer carries it.
@@ -170,16 +176,22 @@ test.describe("Sprint 29 Batch 29.2 — Edit Basics dedup", () => {
     await page
       .waitForLoadState("networkidle", { timeout: 10_000 })
       .catch(() => {});
+    // FE-3 — the proposal builder lives on the request's Money tab.
+    await expect(page.locator('[data-testid="extra-work-detail-page"]')).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.locator('[data-testid="extra-work-tab-money"]').click();
 
     // Only the provider side renders the add-pricing-item form. The
     // demo seeds super_admin as provider; the form must carry the
-    // wrapper class that drives the 29.2 spacing CSS.
-    const addForm = page.locator("form.ew-pricing-add-form");
+    // wrapper class that drives the 29.2 spacing CSS (it is a <div>
+    // wrapper inside the ProposalBuilder now, not a <form>).
+    const addForm = page.locator(".ew-pricing-add-form");
     const addFormCount = await addForm.count();
     test.skip(
       addFormCount === 0,
       "Add-pricing-item form not visible on this EW (workflow state).",
     );
-    await expect(addForm).toBeVisible();
+    await expect(addForm.first()).toBeVisible();
   });
 });

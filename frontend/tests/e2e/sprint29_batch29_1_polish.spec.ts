@@ -17,7 +17,7 @@ import { loginAs } from "./fixtures/login";
 test.describe("Sprint 29 Batch 29.1 — polish & papercuts", () => {
   test("scope chip pluralizes count correctly", async ({ page }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     await page.waitForSelector('[data-testid="users-scope-chip"]', {
       timeout: 10_000,
     });
@@ -50,6 +50,11 @@ test.describe("Sprint 29 Batch 29.1 — polish & papercuts", () => {
     await page
       .waitForLoadState("networkidle", { timeout: 10_000 })
       .catch(() => {});
+    // FE-3 — the pricing table lives on the request's Money tab.
+    await expect(page.locator('[data-testid="extra-work-detail-page"]')).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.locator('[data-testid="extra-work-tab-money"]').click();
     const totalsRow = page.locator(".ew-pricing-totals-row");
     const totalsCount = await totalsRow.count();
     test.skip(totalsCount === 0, "No pricing totals row on this EW.");

@@ -1,3 +1,4 @@
+import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 /**
@@ -19,6 +20,14 @@ import type { Page } from "@playwright/test";
  * `localStorage`. This avoids burning a second `/api/auth/token/`
  * call per test and keeps the spec under the auth-endpoint rate
  * limit when the bundle runs hot.
+ *
+ * FE-6 (Addendum D) — the tickets list at `/tickets` opens on the
+ * "Open" tab and on the current month. Every spec that wants to see
+ * a specific seeded row (a WAITING_CUSTOMER_APPROVAL ticket lives on
+ * the "Wacht op klant" tab, a CLOSED one on "Afgehandeld") either
+ * selects the tab or deep-links with `TICKETS_LIST_ALL` which clears
+ * both the tab and the period narrowing. The dashboard at `/` no
+ * longer carries a ticket table at all.
  */
 
 export const DEMO_TICKET_TITLES = {
@@ -32,6 +41,51 @@ export const DEMO_TICKET_TITLES = {
   // polish specs. Walks through 4 transitions during seed.
   kitchen_closed: "[DEMO] Closed kitchen tap",
 } as const;
+
+/**
+ * FE-6 — the tickets list with no tab pin and no period pin. `status=ALL`
+ * parses to "no status filter" (every tab), `period=all_time` lifts the
+ * default this-month window, so every seeded ticket the actor may see
+ * is on the first page regardless of when the seed ran.
+ */
+export const TICKETS_LIST_ALL = "/tickets?status=ALL&period=all_time";
+
+/**
+ * FE-3 — the ticket detail page is tabbed (`?tab=`). The assignment
+ * surfaces (responsible managers, staff assignment, the STAFF
+ * "request assignment" block) live under the People tab; the fact
+ * block, the primary action and the messages composer are on
+ * Overview. Click the tab button so the tabbed section mounts.
+ */
+export async function openTicketTab(
+  page: Page,
+  tab: "overview" | "people" | "plan" | "money" | "messages",
+): Promise<void> {
+  const button = page.locator(`[data-testid="ticket-tab-${tab}"]`);
+  await expect(button).toBeVisible({ timeout: 10_000 });
+  await button.click();
+}
+
+/**
+ * FE-3 — corrections and provider overrides sit behind the
+ * "Geavanceerd" / "Advanced" fold of the workflow card, and the
+ * non-primary forward steps behind the "other steps" fold. Open
+ * whichever folds exist so every `workflow-move-*` button is in the
+ * DOM before a spec counts or clicks them. Both toggles are optional:
+ * a ticket with nothing to fold renders neither.
+ */
+export async function openWorkflowFolds(page: Page): Promise<void> {
+  for (const testId of [
+    "ticket-other-steps-toggle",
+    "workflow-corrections-toggle",
+  ]) {
+    const toggle = page.locator(`[data-testid="${testId}"]`);
+    if ((await toggle.count()) > 0) {
+      const expanded = await toggle.first().getAttribute("aria-expanded");
+      if (expanded !== "true") await toggle.first().click();
+    }
+  }
+}
 
 /**
  * Resolves the numeric ticket ID for a given demo title via the

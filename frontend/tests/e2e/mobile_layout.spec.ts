@@ -2,6 +2,12 @@ import { expect, test } from "@playwright/test";
 
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import {
+  DEMO_TICKET_TITLES,
+  openTicketTab,
+  resolveDemoTicketId,
+  TICKETS_LIST_ALL,
+} from "./fixtures/tickets";
 
 /**
  * Sprint 20 — mobile UI polish coverage.
@@ -19,6 +25,15 @@ import { loginAs } from "./fixtures/login";
  * stay tappable, dense tables scroll horizontally inside their wrap
  * (not the whole page) — rather than pixel-perfect screenshots, so
  * future skin tweaks do not break the suite.
+ *
+ * FE-6 — the surfaces moved:
+ *   - the mobile ticket CARD LIST lives on `/tickets` (the table
+ *     collapses to cards below 900px); the dashboard at `/` is four
+ *     KPI tiles, one attention list and the billing panel.
+ *   - Users / Invitations are tabs of the People page
+ *     (`/admin/people/users`, `/admin/people/invitations`).
+ *   - the ticket page is tabbed; assignment lives under People and
+ *     the workflow buttons carry `workflow-move-<STATUS>`.
  */
 
 const MOBILE_360 = { width: 360, height: 640 };
@@ -133,13 +148,14 @@ test.describe("app shell at phone widths", () => {
     }, { timeout: 5_000 }).toBeLessThanOrEqual(0);
   });
 
-  test("390px: dashboard renders the mobile ticket card list, no body overflow", async ({
+  test("390px: /tickets renders the mobile ticket card list, no body overflow", async ({
     page,
   }) => {
     await page.setViewportSize(MOBILE_390);
     await loginAs(page, DEMO_USERS.companyAdmin);
-    // Sprint 22 final polish: below 600px we hide the desktop
-    // `.ticket-list-wrap` table and render a card list instead.
+    await page.goto(TICKETS_LIST_ALL);
+    // FE-6: below 900px the tickets list hides the desktop
+    // `.ticket-list-wrap` table and renders a card list instead.
     // The card list must be present, contain at least one card,
     // and not push the page itself into horizontal scroll.
     const cardList = page.locator('[data-testid="ticket-card-list"]');
@@ -159,6 +175,7 @@ test.describe("app shell at phone widths", () => {
   }) => {
     await page.setViewportSize(MOBILE_430);
     await loginAs(page, DEMO_USERS.companyAdmin);
+    await page.goto(TICKETS_LIST_ALL);
     const cards = page.locator(
       '[data-testid="ticket-card-list"] .ticket-card-link',
     );
@@ -173,11 +190,12 @@ test.describe("app shell at phone widths", () => {
     await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
   });
 
-  test("360px: dashboard ticket card list does not horizontally overflow", async ({
+  test("360px: /tickets card list does not horizontally overflow", async ({
     page,
   }) => {
     await page.setViewportSize(MOBILE_360);
     await loginAs(page, DEMO_USERS.companyAdmin);
+    await page.goto(TICKETS_LIST_ALL);
     const cardList = page.locator('[data-testid="ticket-card-list"]');
     await expect(cardList).toBeVisible({ timeout: 10_000 });
     // The card list itself must fit inside the viewport (its
@@ -205,18 +223,16 @@ test("390px: ticket detail page workflow buttons are tappable", async ({
   // shows Approve + Reject. Use her so the detail page exercises
   // the "render workflow buttons" path instead of a blank one.
   await loginAs(page, DEMO_USERS.customerB3);
-  await page.waitForLoadState("networkidle");
-  // Sprint 22 final polish: at 390px the dashboard renders the
-  // `[data-testid="ticket-card-list"]` card list, not the desktop
-  // table. Find the right card by its title text and tap it.
-  const card = page
-    .locator('[data-testid="ticket-card-list"] .ticket-card', {
-      hasText: "Pantry zeepdispenser",
-    })
-    .first();
-  await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.locator(".ticket-card-link").click();
-  const buttons = page.locator(".status-actions .status-btn");
+  // FE-4: a customer's home is the Start page (no ticket cards); open
+  // the seeded ticket by id via the API fixture instead.
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
+  await page.goto(`/tickets/${ticketId}`);
+  // FE-3: Approve / Reject are the primary action in the phase banner
+  // and carry `workflow-move-<STATUS>` testids.
+  const buttons = page.locator('[data-testid^="workflow-move-"]');
   await expect(buttons.first()).toBeVisible({ timeout: 10_000 });
   // Each workflow button must have a tap target of at least 36px on
   // mobile (the existing `.btn-sm` rule under `@media (max-width:
@@ -239,7 +255,7 @@ test("390px: admin users page is readable for SUPER_ADMIN", async ({
 }) => {
   await page.setViewportSize(MOBILE_390);
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/users");
+  await page.goto("/admin/people/users");
   // Sprint 22 final mobile + copy polish: below 600px the desktop
   // `.data-table` is `display: none` and the parallel
   // `[data-testid="admin-card-list"]` of `.admin-card` items is
@@ -274,13 +290,14 @@ test("390px: /admin/audit-logs renders for SUPER_ADMIN without page overflow", a
 // so we know the SPA route guards still fire under the mobile layout).
 // ---------------------------------------------------------------------------
 
-test("360px: customer-user hitting /admin/users still redirects away", async ({
+test("360px: customer-user hitting /admin/people/users still redirects away", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_360);
   await loginAs(page, DEMO_USERS.customerAll);
-  await page.goto("/admin/users");
+  await page.goto("/admin/people/users");
   await page.waitForLoadState("networkidle");
+  expect(new URL(page.url()).pathname).not.toBe("/admin/people/users");
   expect(new URL(page.url()).pathname).not.toBe("/admin/users");
   await expectNoBodyHorizontalOverflow(page, MOBILE_360.width);
 });
@@ -290,20 +307,22 @@ test("360px: customer-user hitting /admin/users still redirects away", async ({
 // where the layout switches from desktop to single-column).
 // ---------------------------------------------------------------------------
 
-test("768px: ticket detail renders the assignment side panel without overflow", async ({
+test("768px: ticket detail renders the People tab's assignment section without overflow", async ({
   page,
 }) => {
   await page.setViewportSize(TABLET_768);
   await loginAs(page, DEMO_USERS.companyAdmin);
-  await page.waitForLoadState("networkidle");
-  const row = page
-    .locator(".data-table tbody tr", { hasText: "Pantry zeepdispenser" })
-    .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
-  await expect(page.locator(".assign-select")).toBeVisible({
-    timeout: 10_000,
-  });
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
+  await page.goto(`/tickets/${ticketId}`);
+  // FE-3: assignment moved off the side panel onto the People tab —
+  // the staff-assignment section is the provider manager's surface.
+  await openTicketTab(page, "people");
+  await expect(
+    page.locator('[data-testid="staff-assignment-section"]'),
+  ).toBeVisible({ timeout: 10_000 });
   await expectNoBodyHorizontalOverflow(page, TABLET_768.width);
 });
 
@@ -316,7 +335,7 @@ test("768px: sidebar shows on tablet (not the mobile overlay)", async ({
 }) => {
   await page.setViewportSize(TABLET_768);
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/users");
+  await page.goto("/admin/people/users");
   // 768px is at the @media (max-width: 760px) boundary; the rule
   // applies STRICTLY below 760, so 768 keeps the persistent sidebar.
   // Hamburger button must therefore be hidden.
@@ -399,12 +418,12 @@ test("reports at 360px: page can scroll to bottom (last chart reachable)", async
   await loginAs(page, DEMO_USERS.super);
   await page.goto("/reports");
   await page.waitForLoadState("networkidle");
-  // tickets-by-building is the last chart in ReportsPage.tsx. Scroll
-  // it into view and confirm we can — i.e. the workspace did not
-  // clip its bottom under the URL bar / safe area.
-  const last = page.locator(
-    '[data-testid="chart-card-tickets-by-building"]',
-  );
+  // Whatever chart card ReportsPage renders LAST — scroll it into
+  // view and confirm we can, i.e. the workspace did not clip its
+  // bottom under the URL bar / safe area. Anchored on the card prefix
+  // rather than one card's name so a re-ordered report set cannot
+  // silently turn this into a no-op.
+  const last = page.locator('[data-testid^="chart-card-"]').last();
   await last.scrollIntoViewIfNeeded({ timeout: 10_000 });
   await expect(last).toBeInViewport({ timeout: 10_000 });
 });
@@ -484,11 +503,11 @@ test("admin/buildings: Edit button still works alongside row-click", async ({
   await page.waitForURL(/\/admin\/buildings\/\d+$/, { timeout: 10_000 });
 });
 
-test("admin/users: clicking a row navigates to the edit page", async ({
+test("admin/people/users: clicking a row navigates to the detail page", async ({
   page,
 }) => {
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/users");
+  await page.goto("/admin/people/users");
   const row = page
     .locator(".data-table tbody tr.admin-row-clickable", {
       hasText: "superadmin@cleanops.demo",
@@ -580,22 +599,27 @@ async function scrollDocumentToBottom(
 }
 
 for (const vp of [MOBILE_360, MOBILE_430]) {
-  test(`dashboard at ${vp.width}px: last "Load by building" row is fully visible after scrolling to bottom`, async ({
+  test(`dashboard at ${vp.width}px: last billing-panel row is fully visible after scrolling to bottom`, async ({
     page,
   }) => {
     await page.setViewportSize(vp);
-    // Use a role that sees the by-building card. companyAdmin sees
-    // all 3 demo buildings.
+    // Use a provider management role: the billing panel is theirs.
     await loginAs(page, DEMO_USERS.companyAdmin);
     await page.waitForLoadState("networkidle");
-    // The dashboard's "Load by building" sidebar card collapses below
-    // the main card on mobile and is the LAST visible card. Wait for
-    // its rows to render.
-    const lastBldRow = page.locator(".bld-list .bld-row-head").last();
-    await expect(lastBldRow).toBeAttached({ timeout: 10_000 });
+    // FE-6: the dashboard is four tiles, one attention list and the
+    // billing panel (this month, per building) — the LAST card on the
+    // page. Its final row (or its empty-state line) must clear the
+    // bottom after a hard scroll.
+    const panel = page.locator('[data-testid="dashboard-billing-panel"]');
+    await expect(panel).toBeVisible({ timeout: 10_000 });
+    await expect(panel.locator(".skeleton-lines")).toHaveCount(0, {
+      timeout: 10_000,
+    });
+    const lastRow = panel.locator("tbody tr, p.muted").last();
+    await expect(lastRow).toBeAttached({ timeout: 10_000 });
     await scrollDocumentToBottom(page);
     // The full row must be in viewport (ratio 1 = no clipping).
-    await expect(lastBldRow).toBeInViewport({ ratio: 1, timeout: 5_000 });
+    await expect(lastRow).toBeInViewport({ ratio: 1, timeout: 5_000 });
     await expectNoBodyHorizontalOverflow(page, vp.width);
   });
 }
@@ -608,9 +632,7 @@ for (const vp of [MOBILE_360, MOBILE_430]) {
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/reports");
     await page.waitForLoadState("networkidle");
-    const last = page.locator(
-      '[data-testid="chart-card-tickets-by-building"]',
-    );
+    const last = page.locator('[data-testid^="chart-card-"]').last();
     await expect(last).toBeAttached({ timeout: 10_000 });
     await scrollDocumentToBottom(page);
     await expect(last).toBeInViewport({ ratio: 1, timeout: 5_000 });
@@ -641,12 +663,12 @@ for (const vp of [MOBILE_360, MOBILE_430]) {
 }
 
 for (const vp of [MOBILE_360, MOBILE_430]) {
-  test(`/admin/users at ${vp.width}px: pagination row is fully visible after scrolling to bottom`, async ({
+  test(`/admin/people/users at ${vp.width}px: pagination row is fully visible after scrolling to bottom`, async ({
     page,
   }) => {
     await page.setViewportSize(vp);
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/users");
+    await page.goto("/admin/people/users");
     await page.waitForLoadState("networkidle");
     // The /admin/users table renders the demo users (≥7 rows) plus
     // any legacy users; the pagination is below the table when there
@@ -701,12 +723,12 @@ async function measureInvitationsActivityOverflow(
   });
 }
 
-test("/admin/invitations at 430x932: Activity card has no internal horizontal overflow", async ({
+test("/admin/people/invitations at 430x932: Activity card has no internal horizontal overflow", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_430);
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/invitations");
+  await page.goto("/admin/people/invitations");
   await page.waitForLoadState("networkidle");
   // Send invitation submit must be visible (rendered + mid-page).
   const submit = page.locator('[data-testid="invite-submit"]');
@@ -728,12 +750,12 @@ test("/admin/invitations at 430x932: Activity card has no internal horizontal ov
   await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
 });
 
-test("/admin/invitations at 430x932: empty state has no orphan table header", async ({
+test("/admin/people/invitations at 430x932: empty state has no orphan table header", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_430);
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/invitations");
+  await page.goto("/admin/people/invitations");
   await page.waitForLoadState("networkidle");
   const m = await measureInvitationsActivityOverflow(page);
   // The demo seed has no pending invitations by default, so the
@@ -747,12 +769,12 @@ test("/admin/invitations at 430x932: empty state has no orphan table header", as
   }
 });
 
-test("/admin/invitations at 430px: page bottom is reachable after scroll", async ({
+test("/admin/people/invitations at 430px: page bottom is reachable after scroll", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_430);
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/invitations");
+  await page.goto("/admin/people/invitations");
   await page.waitForLoadState("networkidle");
   // The Activity card is the last block on the page. After the
   // mobile margin-top tightening (16 → 10 px on ≤480), it should
@@ -769,12 +791,12 @@ test("/admin/invitations at 430px: page bottom is reachable after scroll", async
   await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
 });
 
-test("/admin/invitations at 360px: status tabs row stays inside the viewport", async ({
+test("/admin/people/invitations at 360px: status tabs row stays inside the viewport", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_360);
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/invitations");
+  await page.goto("/admin/people/invitations");
   await page.waitForLoadState("networkidle");
   const tabs = page.locator(".status-tabs");
   await expect(tabs).toBeVisible({ timeout: 10_000 });
@@ -788,12 +810,12 @@ test("/admin/invitations at 360px: status tabs row stays inside the viewport", a
   await expectNoBodyHorizontalOverflow(page, MOBILE_360.width);
 });
 
-test("/admin/invitations at 360x640: page may scroll but Activity is reachable AND has no horizontal overflow", async ({
+test("/admin/people/invitations at 360x640: page may scroll but Activity is reachable AND has no horizontal overflow", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_360);
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/invitations");
+  await page.goto("/admin/people/invitations");
   await page.waitForLoadState("networkidle");
   // 360x640 is much shorter than the form + activity stack — the
   // page WILL scroll vertically. What we assert is:
@@ -813,12 +835,12 @@ test("/admin/invitations at 360x640: page may scroll but Activity is reachable A
   }
 });
 
-test("/admin/invitations at 768x1024: desktop table layout still renders (no mobile card transform)", async ({
+test("/admin/people/invitations at 768x1024: desktop table layout still renders (no mobile card transform)", async ({
   page,
 }) => {
   await page.setViewportSize(TABLET_768);
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/admin/invitations");
+  await page.goto("/admin/people/invitations");
   await page.waitForLoadState("networkidle");
   // The @media (max-width: 480px) mobile card transform must NOT
   // fire at 768px — the column header row (thead) must still

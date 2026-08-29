@@ -8,16 +8,30 @@
  * CUSTOMER_REJECTED) are landing in parallel; some assertions are
  * skip-gated when the seed lacks data so the run stays green even
  * before the backend deploys.
+ *
+ * FE-3 / FE-2 — where the asserted surfaces live now:
+ *   - The EW detail opens on the PHASE BANNER (`extra-work-phase-banner`)
+ *     with the next-step sentence and the one primary action; the
+ *     badge strip under the title (`.ew-detail-header-meta`) is gone.
+ *     Raw status / routing decision sit behind the "Geavanceerd" fold
+ *     (`extra-work-advanced-toggle` -> `extra-work-raw-values`).
+ *   - The page is tabbed (`extra-work-tab-*`): contacts and the
+ *     spawned-tickets panel are on Overview, the cart line items and
+ *     the proposal on Money.
+ *   - A CUSTOMER_USER never sees the provider list/detail: `/extra-work`
+ *     is the Meerwerk tracker (`meerwerk-row-<id>`) and `/extra-work/:id`
+ *     the customer detail (`meerwerk-detail-page`, `meerwerk-reject`).
  */
 import { expect, test } from "@playwright/test";
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import { TICKETS_LIST_ALL } from "./fixtures/tickets";
 
 // ---------------------------------------------------------------------------
-// EW detail page — two-column layout + locked testids
+// EW detail page — phase banner + tabs + locked testids
 // ---------------------------------------------------------------------------
 test.describe("Sprint 28 Batch 15.4 — Extra Work detail two-column", () => {
-  test("two-column layout renders with status + route badges in header", async ({
+  test("detail opens on the phase banner with the actions column", async ({
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
@@ -40,21 +54,31 @@ test.describe("Sprint 28 Batch 15.4 — Extra Work detail two-column", () => {
       page.locator('[data-testid="extra-work-detail-page"]'),
     ).toBeVisible();
 
-    // The header now carries one StatusBadge AND one RouteBadge in
-    // the meta strip under the title row.
-    const headerMeta = page.locator(".ew-detail-header-meta");
-    await expect(headerMeta).toBeVisible();
-    await expect(headerMeta.locator(".badge").first()).toBeVisible();
+    // The phase banner states the phase + the next step in words.
     await expect(
-      headerMeta.locator('[data-testid="extra-work-list-route-badge"]'),
+      page.locator('[data-testid="extra-work-phase-banner"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-testid="extra-work-next-sentence"]'),
     ).toBeVisible();
 
-    // The right-column actions container exists on every detail
-    // load (it's the sticky aside; some sub-cards only render
-    // conditionally on role + status).
+    // The actions container exists on every detail load (some
+    // sub-cards only render conditionally on role + status).
     await expect(
       page.locator('[data-testid="extra-work-detail-actions"]'),
     ).toBeVisible();
+
+    // The raw status badge + the routing decision (a sentence plus the
+    // raw enum in <code>) live behind the Advanced fold.
+    await page.locator('[data-testid="extra-work-advanced-toggle"]').click();
+    const raw = page.locator('[data-testid="extra-work-raw-values"]');
+    await expect(raw).toBeVisible();
+    await expect(
+      raw.locator('[data-testid="extra-work-header-status"]'),
+    ).toBeVisible();
+    await expect(
+      raw.locator('[data-testid="extra-work-detail-routing-decision"] code'),
+    ).toHaveText(/^(INSTANT|PROPOSAL)$/);
   });
 
   test("locked testids from prior sprints all persist", async ({ page }) => {
@@ -74,11 +98,7 @@ test.describe("Sprint 28 Batch 15.4 — Extra Work detail two-column", () => {
     await expect(
       page.locator('[data-testid="extra-work-detail-page"]'),
     ).toBeVisible();
-    // Routing decision field testid (lives inside the details card).
-    await expect(
-      page.locator('[data-testid="extra-work-detail-routing-decision"]'),
-    ).toBeVisible();
-    // Customer Contacts panel (super admin can see it).
+    // Customer Contacts panel (super admin can see it) — Overview.
     await expect(
       page.locator('[data-testid="extra-work-customer-contacts-panel"]'),
     ).toBeVisible();
@@ -90,12 +110,17 @@ test.describe("Sprint 28 Batch 15.4 — Extra Work detail two-column", () => {
       .locator('[data-testid="extra-work-customer-contacts-empty"]')
       .count();
     expect(contactRows + contactsEmpty).toBeGreaterThan(0);
-    // Cart line-items card (always rendered, even when empty).
+    // Routing decision field testid (behind the Advanced fold).
+    await page.locator('[data-testid="extra-work-advanced-toggle"]').click();
     await expect(
-      page.locator('[data-testid="extra-work-detail-line-items"]'),
+      page.locator('[data-testid="extra-work-detail-routing-decision"]'),
     ).toBeVisible();
-    const lineItemRows = await page
-      .locator('[data-testid="extra-work-detail-line-item-row"]')
+    // Cart line-items card (always rendered, even when empty) — Money.
+    await page.locator('[data-testid="extra-work-tab-money"]').click();
+    const lineItems = page.locator('[data-testid="extra-work-detail-line-items"]');
+    await expect(lineItems).toBeVisible();
+    const lineItemRows = await lineItems
+      .locator(".ew-pricing-table tbody tr")
       .count();
     const lineItemsEmpty = await page
       .locator('[data-testid="extra-work-detail-line-items-empty"]')
@@ -136,7 +161,7 @@ test.describe("Sprint 28 Batch 15.4 — Route badge on list", () => {
       expect(tableBadges).toBe(tableRowCount);
     }
 
-    // The new Route column header is rendered.
+    // The Route column header is rendered.
     await expect(
       page.locator('table.data-table thead th', { hasText: /Route/i }),
     ).toBeVisible();
@@ -149,9 +174,13 @@ test.describe("Sprint 28 Batch 15.4 — Route badge on list", () => {
 test.describe("Sprint 28 Batch 15.4 — Customer reject-reason flow", () => {
   test("reject dialog opens, requires reason, submits", async ({ page }) => {
     await loginAs(page, DEMO_USERS.customerAll);
+    // FE-2 — the customer's list is the Meerwerk tracker.
     await page.goto("/extra-work");
+    await expect(
+      page.locator('[data-testid="meerwerk-tracker-page"]'),
+    ).toBeVisible({ timeout: 10_000 });
     await page.waitForSelector(
-      '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
+      '[data-testid^="meerwerk-row-"], [data-testid="meerwerk-tracker-empty"]',
       { timeout: 10_000 },
     );
 
@@ -159,23 +188,19 @@ test.describe("Sprint 28 Batch 15.4 — Customer reject-reason flow", () => {
     // walking visible rows and opening each until a Reject button
     // appears (PRICING_PROPOSED + allowed_next_statuses includes
     // CUSTOMER_REJECTED for this user). If none qualifies, skip.
-    const rowCount = await page
-      .locator('[data-testid="extra-work-row"]')
-      .count();
+    const rowCount = await page.locator('[data-testid^="meerwerk-row-"]').count();
     test.skip(rowCount === 0, "No Extra Work rows visible to customer.");
 
     let foundRejectable = false;
     for (let i = 0; i < rowCount; i++) {
       await page.goto("/extra-work");
-      await page.waitForSelector('[data-testid="extra-work-row"]');
-      const rows = page.locator('[data-testid="extra-work-row"]');
+      await page.waitForSelector('[data-testid^="meerwerk-row-"]');
+      const rows = page.locator('[data-testid^="meerwerk-row-"]');
       await rows.nth(i).click();
-      await page.waitForSelector('[data-testid="extra-work-detail-page"]', {
+      await page.waitForSelector('[data-testid="meerwerk-detail-page"]', {
         timeout: 8_000,
       });
-      const rejectBtn = page.locator(
-        '[data-testid="extra-work-customer-reject"]',
-      );
+      const rejectBtn = page.locator('[data-testid="meerwerk-reject"]');
       if (await rejectBtn.count()) {
         foundRejectable = true;
         await rejectBtn.click();
@@ -210,13 +235,14 @@ test.describe("Sprint 28 Batch 15.4 — Ticket EW origin link", () => {
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
-    // The dashboard typically lists tickets; iterate and open each
-    // looking for the optional spawned-from anchor. If no ticket in
-    // the seed carries an EW origin, the assertion path is skipped.
-    await page.goto("/");
+    // FE-6 — the dashboard carries no ticket list; walk the tickets
+    // page (every status, every period) looking for the optional
+    // spawned-from anchor. If no ticket in the seed carries an EW
+    // origin, the assertion path is skipped.
+    await page.goto(TICKETS_LIST_ALL);
     await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(
       () => {
-        /* dashboard may have ongoing polls; ignore timeout */
+        /* the list may have ongoing polls; ignore timeout */
       },
     );
 

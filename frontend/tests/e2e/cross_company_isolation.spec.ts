@@ -8,6 +8,7 @@ import {
   DEMO_USERS,
 } from "./fixtures/demoUsers";
 import { loginAs, logoutFromTopbar } from "./fixtures/login";
+import { TICKETS_LIST_ALL } from "./fixtures/tickets";
 
 /**
  * Sprint 21 — cross-company isolation suite.
@@ -26,6 +27,13 @@ import { loginAs, logoutFromTopbar } from "./fixtures/login";
  *   5. The reports page (`/reports`) renders disjoint data for the
  *      two companies — there is no cross-tenant data leak in the
  *      backend report aggregations.
+ *
+ * FE-6 — `/tickets` opens on the Open tab for the current month, so
+ * the list specs deep-link with `TICKETS_LIST_ALL` (no tab pin, no
+ * period pin) to see every seeded ticket the actor may see. The
+ * customer create form is the Melding flow: its building control is
+ * a `<select data-testid="melding-building">` when the customer has
+ * more than one building (Lotte has R1 + R2).
  *
  * The tests rely on the canonical `seed_demo_data` having run
  * against the target stack (the prod-shaped demo stack the rest of
@@ -52,7 +60,7 @@ async function listFacilityCells(
 
 test("Super admin sees tickets from both demo companies", async ({ page }) => {
   await loginAs(page, DEMO_USERS.super);
-  await page.goto("/tickets");
+  await page.goto(TICKETS_LIST_ALL);
   const cells = await listFacilityCells(page);
   // At least one ticket from a Company A building AND at least one
   // from a Company B building must appear.
@@ -70,7 +78,7 @@ test("Company A admin sees only Company A buildings on /tickets", async ({
   page,
 }) => {
   await loginAs(page, DEMO_USERS.companyAdmin);
-  await page.goto("/tickets");
+  await page.goto(TICKETS_LIST_ALL);
   const cells = await listFacilityCells(page);
   expect(cells.length).toBeGreaterThan(0);
   for (const c of cells) {
@@ -84,7 +92,7 @@ test("Company B admin sees only Company B buildings on /tickets", async ({
   page,
 }) => {
   await loginAs(page, DEMO_USERS.companyAdminB);
-  await page.goto("/tickets");
+  await page.goto(TICKETS_LIST_ALL);
   const cells = await listFacilityCells(page);
   expect(cells.length).toBeGreaterThan(0);
   for (const c of cells) {
@@ -98,7 +106,7 @@ test("Company B manager only sees R1/R2 buildings on /tickets", async ({
   page,
 }) => {
   await loginAs(page, DEMO_USERS.managerB);
-  await page.goto("/tickets");
+  await page.goto(TICKETS_LIST_ALL);
   const cells = await listFacilityCells(page);
   expect(cells.length).toBeGreaterThan(0);
   for (const c of cells) {
@@ -116,7 +124,7 @@ test("Company B customer's /tickets/new building dropdown lists only R1/R2", asy
 }) => {
   await loginAs(page, DEMO_USERS.customerBCo);
   await page.goto("/tickets/new");
-  const select = page.locator("#f-building");
+  const select = page.locator('[data-testid="melding-building"]');
   await expect(select).toBeVisible({ timeout: 10_000 });
   const optionLabels = await select.locator("option").allTextContents();
   for (const b of COMPANY_B_BUILDINGS) {

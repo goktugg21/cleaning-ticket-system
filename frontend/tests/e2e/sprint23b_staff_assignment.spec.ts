@@ -3,6 +3,7 @@ import type { APIRequestContext } from "@playwright/test";
 
 import { DEMO_PASSWORD, DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import { openTicketTab } from "./fixtures/tickets";
 
 /**
  * Sprint 23B end-to-end checks for the new admin staff-assignment UI
@@ -23,6 +24,13 @@ import { loginAs } from "./fixtures/login";
  * Cross-company isolation for staff is verified at the API layer with
  * a forged token: an Osius STAFF user cannot reach a Bright ticket and
  * vice versa.
+ *
+ * FE-6 — the sidebar's review-queue entry (`sidebar-staff-requests`)
+ * is rendered ONLY while a PENDING request exists, so the nav tests
+ * first make sure one does (creating a temporary request as Ahmet
+ * when the seed's own pending row has been reviewed by another spec,
+ * and cancelling it afterwards). FE-3 — the STAFF "Request assignment"
+ * block lives on the ticket's People tab.
  */
 
 async function apiAs(
@@ -95,45 +103,107 @@ async function firstOsiusTicketId(api: APIRequestContext): Promise<number> {
   return osius!.id;
 }
 
+/**
+ * FE-6 — guarantee a PENDING request exists while a nav test runs.
+ * Returns a cleanup that cancels the temporary row (no-op when the
+ * seed already had a pending one).
+ */
+async function ensurePendingStaffRequest(
+  baseURL: string,
+): Promise<() => Promise<void>> {
+  const sa = await apiAs(baseURL, DEMO_USERS.super.email);
+  try {
+    const pending = await sa.get(
+      "/api/staff-assignment-requests/?status=PENDING&page_size=1",
+    );
+    expect(pending.status()).toBe(200);
+    const body = (await pending.json()) as { results: Array<{ id: number }> };
+    if (body.results.length > 0) {
+      return async () => {};
+    }
+    const ticketId = await firstOsiusTicketId(sa);
+    const ahmet = await apiAs(baseURL, DEMO_USERS.staffOsius.email);
+    try {
+      const created = await ahmet.post("/api/staff-assignment-requests/", {
+        data: { ticket: ticketId },
+      });
+      expect(created.status()).toBe(201);
+      const row = (await created.json()) as { id: number };
+      return async () => {
+        const cleanup = await apiAs(baseURL, DEMO_USERS.staffOsius.email);
+        try {
+          await cleanup.post(`/api/staff-assignment-requests/${row.id}/cancel/`);
+        } finally {
+          await cleanup.dispose();
+        }
+      };
+    } finally {
+      await ahmet.dispose();
+    }
+  } finally {
+    await sa.dispose();
+  }
+}
+
 // =====================================================================
 // Sidebar nav gating
 // =====================================================================
 
 test.describe("Sprint 23B → sidebar review-queue link", () => {
-  test("SUPER_ADMIN sees the review-queue link", async ({ page }) => {
-    await loginAs(page, DEMO_USERS.super);
-    await page.goto("/");
-    await expect(
-      page.locator(
-        '.sidebar-nav a[href="/admin/staff-assignment-requests"]',
-      ),
-    ).toBeVisible({ timeout: 10_000 });
+  test("SUPER_ADMIN sees the review-queue link", async ({ page, baseURL }) => {
+    const cleanup = await ensurePendingStaffRequest(baseURL!);
+    try {
+      await loginAs(page, DEMO_USERS.super);
+      await page.goto("/");
+      await expect(
+        page.locator(
+          '.sidebar-nav a[href="/admin/staff-assignment-requests"]',
+        ),
+      ).toBeVisible({ timeout: 10_000 });
+    } finally {
+      await cleanup();
+    }
   });
 
-  test("COMPANY_ADMIN sees the review-queue link", async ({ page }) => {
-    await loginAs(page, DEMO_USERS.companyAdmin);
-    await page.goto("/");
-    await expect(
-      page.locator(
-        '.sidebar-nav a[href="/admin/staff-assignment-requests"]',
-      ),
-    ).toBeVisible({ timeout: 10_000 });
+  test("COMPANY_ADMIN sees the review-queue link", async ({ page, baseURL }) => {
+    const cleanup = await ensurePendingStaffRequest(baseURL!);
+    try {
+      await loginAs(page, DEMO_USERS.companyAdmin);
+      await page.goto("/");
+      await expect(
+        page.locator(
+          '.sidebar-nav a[href="/admin/staff-assignment-requests"]',
+        ),
+      ).toBeVisible({ timeout: 10_000 });
+    } finally {
+      await cleanup();
+    }
   });
 
-  test("BUILDING_MANAGER sees the review-queue link (only nav for them)", async ({
+  test("BUILDING_MANAGER sees the review-queue link (no admin links)", async ({
     page,
+    baseURL,
   }) => {
-    await loginAs(page, DEMO_USERS.managerAll);
-    await page.goto("/");
-    await expect(
-      page.locator(
-        '.sidebar-nav a[href="/admin/staff-assignment-requests"]',
-      ),
-    ).toBeVisible({ timeout: 10_000 });
-    // …but no other admin links.
-    await expect(
-      page.locator('.sidebar-nav a[href="/admin/companies"]'),
-    ).toHaveCount(0);
+    const cleanup = await ensurePendingStaffRequest(baseURL!);
+    try {
+      await loginAs(page, DEMO_USERS.managerAll);
+      await page.goto("/");
+      await expect(
+        page.locator(
+          '.sidebar-nav a[href="/admin/staff-assignment-requests"]',
+        ),
+      ).toBeVisible({ timeout: 10_000 });
+      // …but no other admin links (the People entry a BM sees is a
+      // reader surface, not the admin group).
+      await expect(
+        page.locator('.sidebar-nav a[href="/admin/companies"]'),
+      ).toHaveCount(0);
+      await expect(
+        page.locator('.sidebar-nav a[href="/admin/customers"]'),
+      ).toHaveCount(0);
+    } finally {
+      await cleanup();
+    }
   });
 
   test("CUSTOMER_USER NEVER sees the review-queue link", async ({ page }) => {
@@ -217,6 +287,7 @@ test.describe("Sprint 23B → ticket detail STAFF flow", () => {
 
     await loginAs(page, DEMO_USERS.staffOsius);
     await page.goto(`/tickets/${ticketId}`);
+    await openTicketTab(page, "people");
     await expect(
       page.locator('[data-testid="request-assignment-button"]').first(),
     ).toBeVisible({ timeout: 10_000 });
@@ -232,13 +303,21 @@ test.describe("Sprint 23B → ticket detail STAFF flow", () => {
 
     await loginAs(page, DEMO_USERS.customerAll);
     await page.goto(`/tickets/${ticketId}`);
-    // Wait for the page to mount before asserting absence.
+    // Wait for the page to mount before asserting absence — on the
+    // Overview AND on the People tab, where the block would live.
     await expect(page.locator(".page-canvas")).toBeVisible({
       timeout: 10_000,
     });
     await expect(
       page.locator('[data-testid="request-assignment-button"]'),
     ).toHaveCount(0);
+    const peopleTab = page.locator('[data-testid="ticket-tab-people"]');
+    if ((await peopleTab.count()) > 0) {
+      await peopleTab.click();
+      await expect(
+        page.locator('[data-testid="request-assignment-button"]'),
+      ).toHaveCount(0);
+    }
   });
 });
 

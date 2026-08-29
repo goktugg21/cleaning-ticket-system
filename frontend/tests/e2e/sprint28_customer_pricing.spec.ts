@@ -8,8 +8,8 @@ import { loginAs } from "./fixtures/login";
  * Sprint 28 Batch 5 — Per-customer pricing page.
  *
  * Coverage:
- *   1. Customer-scoped sidebar shows the "Pricing" entry on a
- *      customer deep link.
+ *   1. The customer page's tab row shows the "Pricing" tab on a
+ *      customer deep link (FE-6: tabs replaced the scoped sidebar).
  *   2. `/admin/customers/<id>/pricing` renders the real page; the
  *      list is empty initially for a customer with no pricing rows.
  *   3. Adding a price (service + unit_price + valid_from) makes
@@ -179,28 +179,24 @@ function todayISO(): string {
 }
 
 /**
- * Sprint 137 item 4 — the pricing page opens on a CATEGORY INDEX, not
- * on a flat table: pick a category, drill in, breadcrumb back. Every
- * assertion about a `customer-pricing-row` therefore has to drill into
- * the owning category first. The rows themselves are unchanged.
+ * FE-6 (3) — "prices first": the Sprint 137 category door is gone. The
+ * pricing page IS the price list (`customer-pricing-list` of
+ * `customer-pricing-row`s, folder chips + a search box above it), so
+ * a row is located directly by the service name.
  */
-async function openPricingCategory(
+async function pricingRow(
   page: import("@playwright/test").Page,
-  categoryName: string,
-): Promise<void> {
-  const card = page
-    .locator("[data-testid='customer-pricing-category-card']", {
-      hasText: categoryName,
-    })
-    .first();
-  await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.click();
+  serviceName: string,
+) {
   await expect(
-    page.locator("[data-testid='customer-pricing-category-title']"),
-  ).toContainText(categoryName, { timeout: 5_000 });
+    page.locator("[data-testid='customer-pricing-list']"),
+  ).toBeVisible({ timeout: 10_000 });
+  return page
+    .locator("[data-testid='customer-pricing-row']", { hasText: serviceName })
+    .first();
 }
 
-test("Sprint 28 B5 — Customer-scoped sidebar shows Pricing entry", async ({
+test("Sprint 28 B5 — Customer tab row shows the Pricing tab", async ({
   page,
   baseURL,
 }) => {
@@ -212,9 +208,12 @@ test("Sprint 28 B5 — Customer-scoped sidebar shows Pricing entry", async ({
   await page.goto(`/admin/customers/${customerId}`);
   await page.waitForLoadState("networkidle");
 
-  await expect(
-    page.locator("[data-testid='sidebar-customer-pricing']"),
-  ).toBeVisible({ timeout: 10_000 });
+  const tab = page.locator("[data-testid='customer-tab-pricing']");
+  await expect(tab).toBeVisible({ timeout: 10_000 });
+  await expect(tab).toHaveAttribute(
+    "href",
+    `/admin/customers/${customerId}/pricing`,
+  );
 });
 
 test("Sprint 28 B5 — /admin/customers/:id/pricing renders the page", async ({
@@ -276,15 +275,7 @@ test("Sprint 28 B5 — Add price: pick service, fill price, save, row appears", 
       .click();
     await expect(modal).toBeHidden({ timeout: 10_000 });
 
-    // Sprint 137 item 4 — drill into the seeded service's category
-    // before asserting on its row.
-    await openPricingCategory(page, category.name);
-
-    const newRow = page
-      .locator("[data-testid='customer-pricing-row']", {
-        hasText: service.name,
-      })
-      .first();
+    const newRow = await pricingRow(page, service.name);
     await expect(newRow).toBeVisible({ timeout: 10_000 });
     await expect(newRow).toContainText("42.00");
   } finally {
@@ -325,14 +316,7 @@ test("Sprint 28 B5 — Edit price: change unit_price, list reflects new value", 
     await page.goto(`/admin/customers/${customerId}/pricing`);
     await page.waitForLoadState("networkidle");
 
-    // Sprint 137 item 4 — rows live behind their category card now.
-    await openPricingCategory(page, category.name);
-
-    const row = page
-      .locator("[data-testid='customer-pricing-row']", {
-        hasText: service.name,
-      })
-      .first();
+    const row = await pricingRow(page, service.name);
     await expect(row).toBeVisible({ timeout: 10_000 });
     await row.click();
 

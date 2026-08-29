@@ -11,8 +11,11 @@
  *   3. BM contacts page renders the contact list with NO Add / Edit /
  *      Delete buttons.
  *   4. BM cannot reach the global admin pages (`/admin/companies`,
- *      `/admin/buildings`, `/admin/users`) — the `AdminRoute` wrapper
- *      bounces them back to the dashboard with `?admin_required=ok`.
+ *      `/admin/buildings`, `/admin/services-catalogs`, the customer
+ *      create form) — the `AdminRoute` wrapper bounces them back to
+ *      the dashboard with `?admin_required=ok`. FE-6: the Users tab of
+ *      the People page is likewise not theirs — the page lands a BM on
+ *      its Employees tab (the one reader surface they have) instead.
  *
  * Light assertions only — no count assertions (seed-data dependent),
  * no DOM-shape assertions. Anchors on `data-testid` and on the
@@ -127,7 +130,7 @@ test.describe("Sprint 28 Batch 12 — BM read-only customer/contact view", () =>
     await expect(contactsPage.locator("select")).toHaveCount(0);
   });
 
-  test("BM cannot reach global admin surfaces (Companies / Buildings / Users / Services)", async ({
+  test("BM cannot reach global admin surfaces (Companies / Buildings / Services); Users tab lands on Employees", async ({
     page,
   }) => {
     test.setTimeout(120_000);
@@ -139,13 +142,26 @@ test.describe("Sprint 28 Batch 12 — BM read-only customer/contact view", () =>
     for (const path of [
       "/admin/companies",
       "/admin/buildings",
-      "/admin/users",
       "/admin/services",
+      "/admin/services-catalogs/services",
       "/admin/customers/new",
     ]) {
       await page.goto(path);
       await page.waitForURL(/admin_required=ok/, { timeout: 10_000 });
       expect(page.url()).toContain("admin_required=ok");
+    }
+
+    // The People page's Users tab is admin-only; a BM is moved to the
+    // Employees tab of the same page, never onto the users list.
+    for (const path of ["/admin/users", "/admin/people/users"]) {
+      await page.goto(path);
+      await page.waitForURL(/\/admin\/people\/employees$/, { timeout: 10_000 });
+      await expect(
+        page.getByTestId("people-tab-users"),
+      ).toHaveCount(0);
+      await expect(page.getByTestId("employees-admin-page")).toBeVisible({
+        timeout: 10_000,
+      });
     }
   });
 });

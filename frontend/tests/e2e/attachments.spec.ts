@@ -2,6 +2,10 @@ import { expect, test } from "@playwright/test";
 
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import {
+  DEMO_TICKET_TITLES,
+  resolveDemoTicketId,
+} from "./fixtures/tickets";
 
 /**
  * Sprint 17 — attachment role gating in the UI.
@@ -15,18 +19,21 @@ import { loginAs } from "./fixtures/login";
  * We synthesise a tiny in-memory file via Playwright's `setInputFiles`
  * with a Buffer payload so the test does not need a checked-in
  * binary.
+ *
+ * FE-3 — the ticket is opened by id via the API fixture (the
+ * dashboard no longer carries a ticket table). The attachment strip
+ * lives on the ticket's Overview tab, which is where the page opens.
  */
 
-const DEMO_TICKET_TITLE = "Pantry zeepdispenser";
-
 async function openDemoTicket(page: import("@playwright/test").Page) {
-  await page.waitForLoadState("networkidle");
-  const row = page
-    .locator(".data-table tbody tr", { hasText: DEMO_TICKET_TITLE })
-    .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
-  await page.waitForLoadState("networkidle");
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
+  await page.goto(`/tickets/${ticketId}`);
+  await expect(page.locator('[data-testid="ticket-facts"]')).toBeVisible({
+    timeout: 10_000,
+  });
 }
 
 async function stageDummyFile(page: import("@playwright/test").Page) {

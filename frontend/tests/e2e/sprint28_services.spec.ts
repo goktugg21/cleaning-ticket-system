@@ -8,9 +8,11 @@ import { loginAs } from "./fixtures/login";
  * Sprint 28 Batch 5 — Provider-wide service catalog admin page.
  *
  * Coverage:
- *   1. Top-level sidebar shows the "Services" link for SUPER_ADMIN.
- *   2. `/admin/services` renders the real page; the Services tab is
- *      the default-active tab.
+ *   1. Top-level sidebar shows the "Services & catalogs" link for
+ *      SUPER_ADMIN (FE-6: one entry for both).
+ *   2. `/admin/services` redirects to
+ *      `/admin/services-catalogs/services`, which renders the real
+ *      page; the Services tab is the default-active tab.
  *   3. Adding a category via the modal makes it appear on the
  *      Categories tab.
  *   4. Adding a service via the modal makes it appear on the
@@ -114,7 +116,7 @@ async function deleteServiceById(
   expect([204, 404]).toContain(response.status());
 }
 
-test("Sprint 28 B5 — Top-level sidebar shows Services entry for SUPER_ADMIN", async ({
+test("Sprint 28 B5 — Top-level sidebar shows the Services & catalogs entry for SUPER_ADMIN", async ({
   page,
 }) => {
   await loginAs(page, DEMO_USERS.super);
@@ -122,9 +124,10 @@ test("Sprint 28 B5 — Top-level sidebar shows Services entry for SUPER_ADMIN", 
   await page.goto("/");
   await page.waitForLoadState("networkidle");
 
-  await expect(page.locator("[data-testid='sidebar-services']")).toBeVisible({
-    timeout: 10_000,
-  });
+  // FE-6 — services and catalogs share ONE sidebar entry.
+  await expect(
+    page.locator("[data-testid='sidebar-services-catalogs']"),
+  ).toBeVisible({ timeout: 10_000 });
 });
 
 test("Sprint 28 B5 — /admin/services renders, Services tab is the default", async ({
@@ -132,6 +135,9 @@ test("Sprint 28 B5 — /admin/services renders, Services tab is the default", as
 }) => {
   await loginAs(page, DEMO_USERS.super);
   await page.goto("/admin/services");
+  await page.waitForURL(/\/admin\/services-catalogs\/services$/, {
+    timeout: 10_000,
+  });
   await page.waitForLoadState("networkidle");
 
   await expect(

@@ -13,18 +13,19 @@ import { loginAs } from "./fixtures/login";
  * people-with-access surface; the standalone "People" page and the
  * customer-scoped "Employees" tab are DELETED. This spec asserts the
  * post-rework state:
- *   1. The customer-scoped sidebar no longer has the People or
- *      Employees tabs (`sidebar-customer-people` /
- *      `sidebar-customer-employees` count 0), while Users / Permissions
- *      / Contacts survive.
+ *   1. The customer page's tab row (FE-6: a customer is a page with
+ *      one row of tabs, no sidebar swap) has no Employees tab; the
+ *      People tab groups exactly Users + Contacts, and Permissions
+ *      survives as its own tab.
  *   2. The Users page drill-in modal is the single people-with-access
  *      surface: a "Manage" button opens the modal (no accordion);
  *      company-admin make → the access editor collapses to a
  *      company-wide note; remove → it returns to per-building. Gated on
  *      `actions.can_manage_customer_company_admins` (SUPER_ADMIN here).
  *   3. The Users access-role + building filters narrow the list.
- *   4. The Overview → Permissions contract still holds (the locked
- *      quicklink/stat testids never move).
+ *   4. The Overview → Permissions contract still holds: the overview's
+ *      stat strip carries one chip per destination, and the Permissions
+ *      chip routes to /permissions.
  *
  * Auth: SUPER_ADMIN so `can_manage_customer_company_admins` is true and
  * the make/remove company-admin controls are present.
@@ -111,7 +112,7 @@ async function resolveFirstMemberUserId(
   return (nonAdmin ?? body.results[0]).user_id;
 }
 
-test("People + Employees customer-scoped tabs are gone; Users / Permissions / Contacts survive", async ({
+test("People tab groups Users + Contacts; no Employees tab; Permissions survives", async ({
   page,
   baseURL,
 }) => {
@@ -123,38 +124,47 @@ test("People + Employees customer-scoped tabs are gone; Users / Permissions / Co
   await page.goto(`/admin/customers/${customerId}`);
   await page.waitForLoadState("networkidle");
 
-  // The customer-scoped sidebar is active (the Users tab proves we are
-  // in customer-scoped mode).
-  await expect(
-    page.locator("[data-testid='sidebar-customer-users']"),
-  ).toBeVisible({ timeout: 10_000 });
+  // FE-6 — the customer's in-page tab row is the navigation (the
+  // "Beperkt tot" sidebar swap is gone). People is the tab that groups
+  // Users + Contacts.
+  const tabs = page.locator("[data-testid='customer-tabs']");
+  await expect(tabs).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("[data-testid='customer-tab-people']")).toBeVisible();
 
   // The standalone People page tab + the customer-scoped Employees tab
-  // are DELETED — neither appears in the customer-scoped submenu.
-  await expect(
-    page.locator("[data-testid='sidebar-customer-people']"),
-  ).toHaveCount(0);
-  await expect(
-    page.locator("[data-testid='sidebar-customer-employees']"),
-  ).toHaveCount(0);
+  // are DELETED — neither appears in the tab row.
+  await expect(page.locator("[data-testid='customer-tab-employees']")).toHaveCount(0);
+  await expect(page.locator("[data-testid^='sidebar-customer-']")).toHaveCount(0);
 
   // The surviving people/permission surfaces are still present.
   await expect(
-    page.locator("[data-testid='sidebar-customer-permissions']"),
-  ).toBeVisible();
-  await expect(
-    page.locator("[data-testid='sidebar-customer-contacts']"),
+    page.locator("[data-testid='customer-tab-permissions']"),
   ).toBeVisible();
 
-  // The deleted routes redirect to the dashboard (catch-all), not a page.
+  // Opening People lands on Users and offers exactly the Users /
+  // Contacts sub-toggle.
+  await page.locator("[data-testid='customer-tab-people']").click();
+  await page.waitForURL(/\/admin\/customers\/\d+\/users$/, { timeout: 10_000 });
+  await expect(page.locator("[data-testid='customer-subtab-users']")).toBeVisible();
+  await expect(
+    page.locator("[data-testid='customer-subtab-contacts']"),
+  ).toBeVisible();
+  await expect(
+    page.locator("[data-testid='customer-subtab-employees']"),
+  ).toHaveCount(0);
+
+  // The deleted routes never render a page of their own: the SPA's
+  // catch-all bounces them off the customer path entirely.
   await page.goto(`/admin/customers/${customerId}/people`);
-  await expect(
-    page.locator("[data-testid='customer-people-page']"),
-  ).toHaveCount(0);
+  await page.waitForLoadState("networkidle");
+  expect(new URL(page.url()).pathname).not.toBe(
+    `/admin/customers/${customerId}/people`,
+  );
   await page.goto(`/admin/customers/${customerId}/employees`);
-  await expect(
-    page.locator("[data-testid='customer-employees-page']"),
-  ).toHaveCount(0);
+  await page.waitForLoadState("networkidle");
+  expect(new URL(page.url()).pathname).not.toBe(
+    `/admin/customers/${customerId}/employees`,
+  );
 });
 
 test("Users filters narrow the list (server-side access-role + building)", async ({
@@ -273,7 +283,7 @@ test("Users page drill-in replaces the accordion + company-admin round-trip", as
   ).toBeVisible({ timeout: 10_000 });
 });
 
-test("Overview → Permissions contract holds with the People page added", async ({
+test("Overview → Permissions contract holds via the stat strip", async ({
   page,
   baseURL,
 }) => {
@@ -285,13 +295,16 @@ test("Overview → Permissions contract holds with the People page added", async
   await page.goto(`/admin/customers/${customerId}`);
   await page.waitForLoadState("networkidle");
 
-  // Locked stat + quicklink testids still present.
+  // FE-6 — the overview's stat strip is one chip per destination (the
+  // separate quicklinks grid is gone; a destination appears exactly
+  // once). The stat chips keep their locked testids and Permissions
+  // joined them as a chip without a count.
   for (const testid of [
     "customer-overview-stat-buildings",
     "customer-overview-stat-users",
     "customer-overview-stat-contacts",
     "customer-overview-stat-pricing",
-    "customer-overview-quicklink-permissions",
+    "customer-overview-stat-permissions",
   ]) {
     await expect(page.locator(`[data-testid='${testid}']`)).toBeVisible({
       timeout: 10_000,
@@ -303,9 +316,9 @@ test("Overview → Permissions contract holds with the People page added", async
     page.locator("[data-testid='customer-overrides-radio']"),
   ).toHaveCount(0);
 
-  // The permissions quicklink still routes to /permissions.
+  // The permissions chip still routes to /permissions.
   await page
-    .locator("[data-testid='customer-overview-quicklink-permissions']")
+    .locator("[data-testid='customer-overview-stat-permissions']")
     .click();
   await page.waitForURL(/\/admin\/customers\/\d+\/permissions$/, {
     timeout: 10_000,

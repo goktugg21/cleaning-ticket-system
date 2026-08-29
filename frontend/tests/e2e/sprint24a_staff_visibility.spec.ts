@@ -521,7 +521,10 @@ test("UserFormPage Staff details: no horizontal body overflow at 430x932", async
 
   await page.setViewportSize({ width: 430, height: 932 });
   await loginAs(page, DEMO_USERS.companyAdmin);
-  await page.goto(`/admin/users/${staffId}`);
+  // Sprint 29 Batch 29.6 — `/admin/users/:id` is the read-only detail
+  // page; the Staff details + visibility editor (and its mobile card
+  // list) live on the form at /edit.
+  await page.goto(`/admin/users/${staffId}/edit`);
   await expect(
     page.locator('[data-testid="staff-details-section"]'),
   ).toBeVisible({ timeout: 15_000 });

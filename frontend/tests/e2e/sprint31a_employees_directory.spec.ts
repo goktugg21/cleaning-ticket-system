@@ -8,7 +8,9 @@ import { loginAs } from "./fixtures/login";
  * Employees directory (feature/employees-directory).
  *
  * Two surfaces over two backend endpoints:
- *   - Provider directory  GET /api/employees/         (/admin/employees)
+ *   - Provider directory  GET /api/employees/
+ *     (/admin/people/employees — FE-6: the Employees tab of the People
+ *     page; /admin/employees redirects there)
  *   - Customer directory  GET /api/customers/<cid>/employees/
  *                         (/admin/customers/:id/employees + /my/employees)
  *
@@ -17,7 +19,8 @@ import { loginAs } from "./fixtures/login";
  *      (navigate to the user account) + STAFF rows expose the inline
  *      employment-type pencil edit.
  *   2. BUILDING_MANAGER reaches the provider directory read-only (no edit
- *      affordance) via its own sidebar entry.
+ *      affordance) via the People sidebar entry, which lands them on
+ *      the Employees tab (the only People tab their gate allows).
  *   3. CUSTOMER_USER reaches /my/employees and sees the customer
  *      directory; a non-CCA customer user has NO edit affordance.
  *   4. SUPER_ADMIN reaches the customer-scoped directory via the customer
@@ -31,7 +34,7 @@ test.describe("Employees directory", () => {
     page,
   }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/admin/employees");
+    await page.goto("/admin/people/employees");
 
     await expect(
       page.locator('[data-testid="employees-admin-page"]'),
@@ -71,12 +74,14 @@ test.describe("Employees directory", () => {
   test("building manager reaches the directory read-only", async ({ page }) => {
     await loginAs(page, DEMO_USERS.managerAll);
 
-    // BM has its own sidebar entry (no admin group).
-    const navEntry = page.locator('[data-testid="sidebar-employees-bm"]');
+    // FE-6 — the BM sees the People entry; the People page lands them
+    // on its Employees tab (users / invitations are not theirs).
+    const navEntry = page.locator('[data-testid="sidebar-people"]');
     await expect(navEntry).toBeVisible({ timeout: 10_000 });
     await navEntry.click();
 
-    await page.waitForURL((url) => url.pathname === "/admin/employees");
+    await page.waitForURL((url) => url.pathname === "/admin/people/employees");
+    await expect(page.locator('[data-testid="people-tab-users"]')).toHaveCount(0);
     await expect(
       page.locator('[data-testid="employees-admin-page"]'),
     ).toBeVisible({ timeout: 10_000 });

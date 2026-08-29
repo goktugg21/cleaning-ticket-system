@@ -3,6 +3,7 @@ import type { APIRequestContext } from "@playwright/test";
 
 import { DEMO_PASSWORD, DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import { openTicketTab } from "./fixtures/tickets";
 
 /**
  * Sprint 24D — pending-request discovery hardening.
@@ -253,6 +254,8 @@ test.describe("Sprint 24D → ticket detail discovery survives a long history", 
       // UI check — Ahmet opens the ticket; the Cancel CTA renders.
       await loginAs(page, DEMO_USERS.staffOsius);
       await page.goto(`/tickets/${ticketId}`);
+      // FE-3 — the request-assignment block lives on the People tab.
+      await openTicketTab(page, "people");
       await expect(
         page.locator('[data-testid="request-assignment-pending"]'),
       ).toBeVisible({ timeout: 15_000 });

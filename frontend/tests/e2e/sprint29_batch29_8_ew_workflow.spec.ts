@@ -25,6 +25,13 @@ import { loginAs } from "./fixtures/login";
  * Seed discovery probes the API as SUPER_ADMIN — the demo seed has
  * a mix of EW states and the spec walks the list to find suitable
  * candidates rather than assuming a specific id.
+ *
+ * FE-3 — the detail opens on the phase banner; the badge strip under
+ * the title (`.ew-detail-header-meta`) is gone. The raw status badge
+ * (`extra-work-header-status`) lives in the "Geavanceerd" fold's raw
+ * values (`extra-work-advanced-toggle` -> `extra-work-raw-values`),
+ * which is where J4 reads it. The cancel button keeps its testid and
+ * still routes through the confirmation dialog.
  */
 
 const TERMINAL_TICKET_STATUSES = new Set([
@@ -301,6 +308,12 @@ test.describe("Sprint 29 Batch 29.8 — Extra Work operational segment", () => {
       page.locator('[data-testid="extra-work-detail-page"]'),
     ).toBeVisible({ timeout: 10_000 });
 
+    // FE-3 — cancelling is a correction: the button sits in the
+    // "Geavanceerd" fold's danger section. Open the fold first.
+    await page.locator('[data-testid="extra-work-advanced-toggle"]').click();
+    await expect(page.locator('[data-testid="extra-work-advanced"]')).toBeVisible({
+      timeout: 5_000,
+    });
     const cancelButton = page.locator(
       '[data-testid="extra-work-cancel-button"]',
     );
@@ -382,12 +395,13 @@ test.describe("Sprint 29 Batch 29.8 — Extra Work operational segment", () => {
       page.locator('[data-testid="extra-work-detail-page"]'),
     ).toBeVisible({ timeout: 10_000 });
 
-    // The status badge renders in the header meta slot. The locale
-    // is Dutch by default in the demo seed but EN labels are also
-    // accepted — both translate "IN_PROGRESS" to a human label
+    // The status badge renders in the Advanced fold's raw values. The
+    // locale is Dutch by default in the demo seed but EN labels are
+    // also accepted — both translate "IN_PROGRESS" to a human label
     // distinct from "Customer approved" / "Approved".
-    const headerMeta = page.locator(".ew-detail-header-meta");
-    await expect(headerMeta).toBeVisible();
+    await page.locator('[data-testid="extra-work-advanced-toggle"]').click();
+    const headerMeta = page.locator('[data-testid="extra-work-header-status"]');
+    await expect(headerMeta).toBeVisible({ timeout: 10_000 });
     const metaText = await headerMeta.innerText();
     const looksInProgress =
       /In progress|In uitvoering|Completed|Voltooid/i.test(metaText);
