@@ -2,8 +2,8 @@
  * FE-2 (Addendum D §D.5.2) — the customer's guided meerwerk flow.
  *
  * One decision per step: WAAR (pre-selected when there is exactly one
- * building) → WAT (the services with THEIR agreed prices, plus one
- * "iets anders" free-text line) → WANNEER (one date wish) →
+ * building) → WAT (the services with THEIR agreed prices, plus the
+ * "iets anders" free-text lines) → WANNEER (one date wish) →
  * BEVESTIGEN, where the SYSTEM states what happens next, derived from
  * the cart by the server's own preview (SoT §5 rules): all agreed
  * prices → scheduled right away; any custom line → a price comes
@@ -16,6 +16,10 @@
  * to the server, the provider corrects later. Submission goes through
  * the EXISTING create endpoint; title and description are derived from
  * the cart so the server contract is untouched.
+ *
+ * FE-5 — the cart pieces (picker, custom lines, confirm list, outcome
+ * sentence) moved to `components/meerwerk/` and are the same pieces the
+ * provider's create page renders.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -49,21 +53,21 @@ import type {
   ExtraWorkRequestDetail,
 } from "../../api/types";
 import { PageHeader } from "../../components/PageHeader";
-import { formatMoney } from "../../lib/intl";
+import {
+  cartLineItemsPayload,
+  derivedDescription,
+  derivedTitle,
+  emptyOtherLine,
+  otherLinesToCart,
+  type MeerwerkCartLine,
+  type OtherLineDraft,
+} from "../../components/meerwerk/cart";
+import { CartSummaryList } from "../../components/meerwerk/CartSummaryList";
+import { MeerwerkOutcome } from "../../components/meerwerk/MeerwerkOutcome";
+import { OtherLinesEditor } from "../../components/meerwerk/OtherLinesEditor";
+import { PricedServicePicker } from "../../components/meerwerk/PricedServicePicker";
 
 type Step = 0 | 1 | 2 | 3;
-
-interface CartLine {
-  key: string;
-  kind: "service" | "custom_price" | "other";
-  id: number | null;
-  label: string;
-  unitPrice: string | null;
-  quantity: number;
-  otherText: string;
-  /** FE-4 — the optional note on a custom line. */
-  note?: string;
-}
 
 const STEP_KEYS = ["where", "what", "when", "confirm"] as const;
 
@@ -78,15 +82,10 @@ export function MeerwerkFlowPage() {
 
   const [step, setStep] = useState<Step>(0);
   const [building, setBuilding] = useState<number | "">("");
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const [cart, setCart] = useState<MeerwerkCartLine[]>([]);
   /** FE-4 (Addendum D §D.12 item 6) — "Iets anders" is a real cart line,
-   *  and there can be several: each with its own title and an optional
-   *  note, rendered like a priced line with "prijs volgt" in the price
-   *  slot. One empty row is always offered; "Nog iets anders toevoegen"
-   *  adds another. */
-  const [others, setOthers] = useState<{ key: string; text: string; note: string }[]>([
-    { key: "other-1", text: "", note: "" },
-  ]);
+   *  and there can be several. One empty row is always offered. */
+  const [others, setOthers] = useState<OtherLineDraft[]>([emptyOtherLine(1)]);
   const [wishDate, setWishDate] = useState("");
   const [autoStart, setAutoStart] = useState(false);
 
@@ -154,23 +153,12 @@ export function MeerwerkFlowPage() {
     };
   }, [customer]);
 
-  const cartWithOther = useMemo(() => {
-    const customLines: CartLine[] = others
-      .filter((row) => row.text.trim())
-      .map((row) => ({
-        key: row.key,
-        kind: "other" as const,
-        id: null,
-        label: row.text.trim(),
-        unitPrice: null,
-        quantity: 1,
-        otherText: row.text.trim(),
-        note: row.note.trim(),
-      }));
-    return [...cart, ...customLines];
-  }, [cart, others]);
+  const cartWithOther = useMemo(
+    () => [...cart, ...otherLinesToCart(others)],
+    [cart, others],
+  );
 
-  function setOther(key: string, patch: Partial<{ text: string; note: string }>) {
+  function setOther(key: string, patch: Partial<Pick<OtherLineDraft, "text" | "note">>) {
     setOthers((prev) =>
       prev.map((row) => (row.key === key ? { ...row, ...patch } : row)),
     );
@@ -184,26 +172,7 @@ export function MeerwerkFlowPage() {
   function removeOther(key: string) {
     setOthers((prev) => {
       const next = prev.filter((row) => row.key !== key);
-      return next.length === 0 ? [{ key: "other-1", text: "", note: "" }] : next;
-    });
-  }
-
-  function lineItemsPayload() {
-    return cartWithOther.map((line) => {
-      if (line.kind === "service") {
-        return { service: Number(line.id), quantity: String(line.quantity) };
-      }
-      if (line.kind === "custom_price") {
-        return {
-          custom_price: Number(line.id),
-          quantity: String(line.quantity),
-        };
-      }
-      return {
-        custom_description: line.otherText,
-        quantity: "1",
-        ...(line.note ? { customer_note: line.note } : {}),
-      };
+      return next.length === 0 ? [emptyOtherLine(1)] : next;
     });
   }
 
@@ -223,7 +192,7 @@ export function MeerwerkFlowPage() {
         building: Number(effectiveBuilding),
         customer: customer.id,
         preferred_date: wishDate || undefined,
-        line_items: lineItemsPayload(),
+        line_items: cartLineItemsPayload(cartWithOther),
       });
       setPreview(data);
     } catch (err) {
@@ -233,46 +202,12 @@ export function MeerwerkFlowPage() {
     }
   }
 
-  function toggleAgreed(line: CustomerServicePrice) {
-    setCart((prev) => {
-      const key = `svc-${line.service}`;
-      if (prev.some((row) => row.key === key)) {
-        return prev.filter((row) => row.key !== key);
-      }
-      return [
-        ...prev,
-        {
-          key,
-          kind: "service",
-          id: line.service,
-          label: line.service_name,
-          unitPrice: line.unit_price,
-          quantity: 1,
-          otherText: "",
-        },
-      ];
-    });
-  }
-
-  function toggleCustomPrice(line: CustomerCustomPrice) {
-    setCart((prev) => {
-      const key = `cp-${line.id}`;
-      if (prev.some((row) => row.key === key)) {
-        return prev.filter((row) => row.key !== key);
-      }
-      return [
-        ...prev,
-        {
-          key,
-          kind: "custom_price",
-          id: line.id,
-          label: line.custom_name,
-          unitPrice: line.unit_price,
-          quantity: 1,
-          otherText: "",
-        },
-      ];
-    });
+  function toggleLine(line: MeerwerkCartLine) {
+    setCart((prev) =>
+      prev.some((row) => row.key === line.key)
+        ? prev.filter((row) => row.key !== line.key)
+        : [...prev, line],
+    );
   }
 
   function setQuantity(key: string, quantity: number) {
@@ -287,28 +222,21 @@ export function MeerwerkFlowPage() {
     if (submitting || !customer || effectiveBuilding === "") return;
     setSubmitting(true);
     setSubmitError("");
-    const names = cartWithOther.map((line) => line.label);
-    const title =
-      names.length === 1 ? names[0] : `${names[0]} +${names.length - 1}`;
-    const description = cartWithOther
-      .map((line) =>
-        line.kind === "other"
-          ? `${t("meerwerk_flow.other_prefix")}: ${line.otherText}`
-          : `${line.quantity} × ${line.label}`,
-      )
-      .join("\n");
     try {
       const detail = await createExtraWork({
         building: Number(effectiveBuilding),
         customer: customer.id,
-        title: title.slice(0, 255),
-        description,
+        title: derivedTitle(cartWithOther),
+        description: derivedDescription(
+          cartWithOther,
+          t("meerwerk_flow.other_prefix"),
+        ),
         preferred_date: wishDate || null,
         billed_to: null,
         // §D.5.2 — urgentie is not asked; the server default stands.
         urgency: "NORMAL",
         ...(autoStart ? { request_intent: "AUTO_START_AFTER_PRICING" } : {}),
-        line_items: lineItemsPayload(),
+        line_items: cartLineItemsPayload(cartWithOther),
       });
       setCreated(detail);
     } catch (err) {
@@ -435,151 +363,22 @@ export function MeerwerkFlowPage() {
             <div className="field-label" style={{ marginBottom: 8 }}>
               <Receipt size={14} strokeWidth={2} /> {t("meerwerk_flow.q_what")}
             </div>
-            {prices.length === 0 && customPrices.length === 0 && (
-              <p className="muted small">{t("meerwerk_flow.no_agreed_prices")}</p>
-            )}
-            <ul
-              style={{ listStyle: "none", margin: 0, padding: 0 }}
-              data-testid="meerwerk-services"
-            >
-              {prices.map((line) => {
-                const inCart = cart.find((row) => row.key === `svc-${line.service}`);
-                return (
-                  <li key={`svc-${line.service}`} className="wp-undated-row">
-                    <label
-                      style={{ display: "flex", gap: 10, alignItems: "center" }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={Boolean(inCart)}
-                        onChange={() => toggleAgreed(line)}
-                        data-testid={`meerwerk-service-${line.service}`}
-                      />
-                      <span>{line.service_name}</span>
-                    </label>
-                    <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      {inCart && (
-                        <input
-                          type="number"
-                          min={1}
-                          value={inCart.quantity}
-                          onChange={(event) =>
-                            setQuantity(
-                              inCart.key,
-                              Number(event.target.value) || 1,
-                            )
-                          }
-                          style={{ width: 64 }}
-                          className="field-input"
-                          aria-label={t("meerwerk_flow.quantity")}
-                        />
-                      )}
-                      <span className="muted small">
-                        {formatMoney(line.unit_price)}
-                      </span>
-                    </span>
-                  </li>
-                );
-              })}
-              {customPrices.map((line) => {
-                const inCart = cart.find((row) => row.key === `cp-${line.id}`);
-                return (
-                  <li key={`cp-${line.id}`} className="wp-undated-row">
-                    <label
-                      style={{ display: "flex", gap: 10, alignItems: "center" }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={Boolean(inCart)}
-                        onChange={() => toggleCustomPrice(line)}
-                        data-testid={`meerwerk-custom-price-${line.id}`}
-                      />
-                      <span>{line.custom_name}</span>
-                    </label>
-                    <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      {inCart && (
-                        <input
-                          type="number"
-                          min={1}
-                          value={inCart.quantity}
-                          onChange={(event) =>
-                            setQuantity(
-                              inCart.key,
-                              Number(event.target.value) || 1,
-                            )
-                          }
-                          style={{ width: 64 }}
-                          className="field-input"
-                          aria-label={t("meerwerk_flow.quantity")}
-                        />
-                      )}
-                      <span className="muted small">
-                        {formatMoney(line.unit_price)}
-                      </span>
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-            <div className="field" style={{ marginTop: 14 }} data-testid="meerwerk-others">
-              <div className="field-label">{t("meerwerk_flow.other_label")}</div>
-              <p className="muted small" style={{ marginTop: 0 }}>
-                {t("meerwerk_flow.other_helper")}
-              </p>
-              {/* FE-4 — every custom line is a CART LINE like the priced
-                  ones above: a title, an optional note, and "prijs volgt"
-                  where a price would stand. Never a description field. */}
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {others.map((row, index) => (
-                  <li key={row.key} className="wp-undated-row" data-testid="meerwerk-other-row">
-                    <div className="wp-undated-row-main" style={{ flex: 1 }}>
-                      <input
-                        className="field-input"
-                        value={row.text}
-                        onChange={(event) => setOther(row.key, { text: event.target.value })}
-                        placeholder={t("meerwerk_flow.other_placeholder")}
-                        aria-label={t("meerwerk_flow.other_label")}
-                        data-testid={index === 0 ? "meerwerk-other" : `meerwerk-other-${index + 1}`}
-                      />
-                      <input
-                        className="field-input"
-                        value={row.note}
-                        onChange={(event) => setOther(row.key, { note: event.target.value })}
-                        placeholder={t("meerwerk_flow.other_note_placeholder")}
-                        aria-label={t("meerwerk_flow.other_note_label")}
-                        style={{ marginTop: 6 }}
-                        data-testid={`meerwerk-other-note-${index + 1}`}
-                      />
-                    </div>
-                    <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <span className="phase-badge phase-badge-action">
-                        {t("meerwerk_flow.price_follows")}
-                      </span>
-                      {others.length > 1 && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => removeOther(row.key)}
-                          aria-label={t("meerwerk_flow.other_remove")}
-                          data-testid={`meerwerk-other-remove-${index + 1}`}
-                        >
-                          ×
-                        </button>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ marginTop: 8 }}
-                onClick={addOther}
-                data-testid="meerwerk-other-add"
-              >
-                {t("meerwerk_flow.other_add")}
-              </button>
-            </div>
+            <PricedServicePicker
+              prices={prices}
+              customPrices={customPrices}
+              cart={cart}
+              onToggle={toggleLine}
+              onQuantity={setQuantity}
+              emptyLabel={t("meerwerk_flow.no_agreed_prices")}
+              testIdPrefix="meerwerk"
+            />
+            <OtherLinesEditor
+              others={others}
+              onChange={setOther}
+              onAdd={addOther}
+              onRemove={removeOther}
+              testIdPrefix="meerwerk"
+            />
           </>
         )}
 
@@ -607,23 +406,7 @@ export function MeerwerkFlowPage() {
             <div className="section-head-title" style={{ marginBottom: 8 }}>
               {t("meerwerk_flow.confirm_title")}
             </div>
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {cartWithOther.map((line) => (
-                <li key={line.key} className="wp-undated-row" data-testid="meerwerk-confirm-line" data-kind={line.kind}>
-                  <div className="wp-undated-row-main">
-                    <span>{`${line.quantity} × ${line.label}`}</span>
-                    {line.note && <span className="muted small">{line.note}</span>}
-                  </div>
-                  {line.unitPrice ? (
-                    <span className="muted small">{formatMoney(line.unitPrice)}</span>
-                  ) : (
-                    <span className="phase-badge phase-badge-action">
-                      {t("meerwerk_flow.price_follows")}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <CartSummaryList lines={cartWithOther} testIdPrefix="meerwerk" />
             <p className="muted small">
               {t("meerwerk_flow.confirm_where_when", {
                 building:
@@ -638,17 +421,16 @@ export function MeerwerkFlowPage() {
               </div>
             ) : (
               preview && (
-                <p
-                  className={`meerwerk-outcome meerwerk-outcome-${allAgreed ? "instant" : "quote"}`}
-                  data-testid="meerwerk-outcome"
-                  role="status"
-                >
-                  {allAgreed
-                    ? t("meerwerk_flow.outcome_instant")
-                    : autoStart && autoStartOffered
-                      ? t("meerwerk_flow.outcome_auto_start")
-                      : t("meerwerk_flow.outcome_quote")}
-                </p>
+                <MeerwerkOutcome
+                  audience="customer"
+                  kind={
+                    allAgreed
+                      ? "instant"
+                      : autoStart && autoStartOffered
+                        ? "auto_start"
+                        : "quote"
+                  }
+                />
               )
             )}
             {/* SoT §5.3 — offered only when the server's allowed_intents

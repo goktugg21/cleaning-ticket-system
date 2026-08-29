@@ -26,16 +26,9 @@ import { api, getApiError } from "../../api/client";
 import { listAllBuildings, listAllCustomers } from "../../api/admin";
 import type { Building, Customer } from "../../api/types";
 import { PageHeader } from "../../components/PageHeader";
+import { titleFrom } from "../../lib/meldingTitle";
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-const TITLE_CLIP = 120;
-
-/** The one description's first line, clipped, as the ticket title. */
-function titleFrom(description: string): string {
-  const firstLine = description.trim().split("\n")[0].trim();
-  if (firstLine.length <= TITLE_CLIP) return firstLine;
-  return `${firstLine.slice(0, TITLE_CLIP - 1)}…`;
-}
 
 export function MeldingCreatePage() {
   const { t } = useTranslation("common");

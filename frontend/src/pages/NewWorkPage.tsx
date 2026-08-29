@@ -11,8 +11,7 @@
  *
  *     What is this about?      something is wrong / work needs doing
  *     Does it happen again?    once / it repeats
- *     Who pays for it?         the agreement / extra, order it
- *                              / extra, ask the price first
+ *     Who pays for it?         the agreement / extra work
  *
  * Nothing here is new behaviour. Each answer lands on a route that
  * already existed, with the form it already had, creating exactly what
@@ -45,7 +44,6 @@ import { Navigate, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   BadgeEuro,
-  CalendarClock,
   ClipboardList,
   FileText,
   Repeat,
@@ -86,7 +84,6 @@ export function NewWorkPage() {
     navigate(`/tickets/new?category=${categorySlug}`);
   const goRecurring = () => navigate("/planned-work/new");
   const goOrder = () => navigate("/extra-work/new");
-  const goQuote = () => navigate("/extra-work/request-quote");
 
   // When neither of the branching questions can branch, "New" has one
   // possible outcome and asking is theatre. `<Navigate>` rather than
@@ -143,19 +140,15 @@ export function NewWorkPage() {
       icon: FileText,
       onPick: () => goTicket("verzoek"),
     },
+    // FE-5 — "extra, ask the price first" is no longer a door: whether
+    // a price comes first is DERIVED from the cart on the meerwerk form
+    // (§D.5.2), so both extra-work answers were one destination.
     {
       key: "order",
       label: t("new_work.pays_order"),
       description: t("new_work.pays_order_desc"),
-      icon: CalendarClock,
-      onPick: goOrder,
-    },
-    {
-      key: "quote",
-      label: t("new_work.pays_quote"),
-      description: t("new_work.pays_quote_desc"),
       icon: BadgeEuro,
-      onPick: goQuote,
+      onPick: goOrder,
     },
   ];
 

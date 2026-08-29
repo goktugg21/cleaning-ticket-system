@@ -15567,3 +15567,103 @@ table.assign-table { min-width: 0; width: 100%; }
 .wp-undated-toggle-row { margin-bottom: 14px; }
 .wp-undated-toggle-age { color: var(--text-muted); font-weight: 500; }
 .toast-count { font-weight: 600; color: var(--text-muted); }
+
+/* ===================================================================
+   FE-5 — provider forms (Addendum D §D.6 rule 12).
+   The fold, the derived-fact row with its pencil, and the picker
+   chrome the meerwerk cart shares between the customer flow and the
+   provider create page.
+   =================================================================== */
+.form-fold {
+  margin: 0 0 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 0 12px;
+}
+.form-fold[open] { padding-bottom: 12px; }
+.form-fold-summary {
+  cursor: pointer;
+  padding: 10px 2px;
+  font-size: var(--font-sm);
+  font-weight: 650;
+  color: var(--text-2);
+  list-style: none;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.form-fold-summary::-webkit-details-marker { display: none; }
+.form-fold-summary::before {
+  content: "\25B8";
+  display: inline-block;
+  width: 1em;
+  color: var(--text-faint);
+}
+.form-fold[open] > .form-fold-summary::before { content: "\25BE"; }
+.form-fold-summary-value { font-weight: 500; color: var(--text-muted); }
+.form-fold-body > .field:first-child { margin-top: 4px; }
+
+/* The facts a choice filled in: "Afdeling: Algemeen" with a pencil.
+   A button, because pressing it opens the control that changes it. */
+.ew-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 10px;
+}
+.ew-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: inherit;
+  font-size: var(--font-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+.ew-fact-key { color: var(--text-muted); }
+.ew-fact-pencil { color: var(--text-faint); display: inline-flex; }
+.ew-fact:hover .ew-fact-pencil,
+.ew-fact:focus-visible .ew-fact-pencil { color: var(--green); }
+.ew-fact-editor { margin-top: 8px; }
+
+.meerwerk-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.meerwerk-picker-search { margin-bottom: 8px; }
+.meerwerk-line-amount { font-weight: 600; white-space: nowrap; }
+
+/* The provider's "what will happen" choice: each option IS the
+   sentence, selected one carries the outcome colour. */
+.meerwerk-intent-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 8px;
+  cursor: pointer;
+}
+.meerwerk-intent-option.selected {
+  border-color: rgba(11, 107, 66, 0.45);
+  background: var(--green-soft);
+}
+.meerwerk-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: baseline;
+  margin-top: 10px;
+  font-size: var(--font-sm);
+}
+.meerwerk-totals strong { font-size: 15px; }
+
+/* The ticket form's one small side card: three lines, nothing else. */
+.create-side-tips { padding: 14px 16px 16px; }

@@ -1163,12 +1163,6 @@ export function ExtraWorkList({
               onSelect: () => navigate("/extra-work/new"),
             },
             {
-              key: "quote",
-              label: t("list.create_chooser_quote"),
-              description: t("list.create_chooser_quote_desc"),
-              onSelect: () => navigate("/extra-work/request-quote"),
-            },
-            {
               key: "recurring",
               label: t("list.create_chooser_recurring"),
               description: t("list.create_chooser_recurring_desc"),

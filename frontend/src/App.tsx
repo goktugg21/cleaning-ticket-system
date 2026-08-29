@@ -481,21 +481,13 @@ export default function App() {
               </ExtraWorkRoute>
             }
           />
-          {/* M3 (SoT Addendum A.5) — dedicated quote-request page.
-              Defined ABOVE /extra-work/:id; React Router v6 ranks
-              static segments over dynamic params anyway, but the
-              explicit ordering keeps the intent obvious. Same gate as
-              /extra-work/new. */}
+          {/* FE-5 — the old "Request a quote" page folded into the
+              create page: the intent is derived at the bottom of the
+              form, never by which entry was clicked (§D.5.2). The
+              address keeps working. */}
           <Route
             path="/extra-work/request-quote"
-            element={
-              <ExtraWorkRoute>
-                <ByCustomer
-                  customer={<Navigate to="/extra-work/new" replace />}
-                  other={<CreateExtraWorkPage intentMode="quote" />}
-                />
-              </ExtraWorkRoute>
-            }
+            element={<Navigate to="/extra-work/new" replace />}
           />
           <Route
             path="/extra-work/:id"

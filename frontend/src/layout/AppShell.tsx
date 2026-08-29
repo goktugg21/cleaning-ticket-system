@@ -523,33 +523,22 @@ export function AppShell({ children }: AppShellProps) {
                 {t("nav.my_meldingen")}
               </NavLink>
               {/* Meerwerk: request + track, one word (§D.2). The list
-                  is today's /extra-work page; the request child is
-                  today's quote-request form. The FE-2 guided flow will
-                  replace the child, not this structure. Gate unchanged:
+                  is the /extra-work page; requesting is the FE-2 guided
+                  flow behind it. FE-5: the "request a quote" child is
+                  gone — a quote is a derived outcome of the request,
+                  not a place (§D.5.2). Gate unchanged:
                   canAccessExtraWork admits CUSTOMER_USER. */}
               {canAccessExtraWork(me?.role) && (
-                <>
-                  <NavLink
-                    to="/extra-work"
-                    className={() => navClass({ isActive: meerwerkActive })}
-                    data-testid="sidebar-meerwerk"
-                  >
-                    <span className="nav-icon">
-                      <Receipt size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.meerwerk")}
-                  </NavLink>
-                  <NavLink
-                    to="/extra-work/request-quote"
-                    className={navChildClass}
-                    data-testid="sidebar-request-quote"
-                  >
-                    <span className="nav-icon">
-                      <FileText size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.request_quote")}
-                  </NavLink>
-                </>
+                <NavLink
+                  to="/extra-work"
+                  className={() => navClass({ isActive: meerwerkActive })}
+                  data-testid="sidebar-meerwerk"
+                >
+                  <span className="nav-icon">
+                    <Receipt size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.meerwerk")}
+                </NavLink>
               )}
               <NavLink
                 to="/my/facturen"
