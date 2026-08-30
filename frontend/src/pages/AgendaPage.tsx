@@ -1224,12 +1224,17 @@ function WorkPlanWeek() {
         </section>
       )}
 
+      {/* P-8R E — the chip is GLOBAL across week browsing: the server
+          returns the waiting rows for the whole scope whatever week is
+          shown, and the reader's question ("who is waiting on a
+          customer?") does not change with the week they are looking at.
+          Past and future weeks keep the rows' placement as history. */}
       {/* P-3 §A.1 — "Wacht op klant". Sent to the customer, waiting on
           their answer: nothing for this reader to do, so not in a day
           column of the working week (a calm card in Tuesday's column
           read as "something is wrong with Tuesday"). One chip in its
           own calm colour, the same door as "Nog niet gepland". */}
-      {data && data.week.is_current && waitingJobs.length > 0 && (
+      {data && waitingJobs.length > 0 && (
         <div className="wp-waiting-toggle-row" data-testid="agenda-waiting-toggle-row">
           <button
             type="button"
@@ -1243,7 +1248,7 @@ function WorkPlanWeek() {
           </button>
         </div>
       )}
-      {data && data.week.is_current && waitingJobs.length > 0 && waitingOpen && (
+      {data && waitingJobs.length > 0 && waitingOpen && (
         <section
           className="card"
           data-testid="agenda-waiting-lane"
@@ -1775,7 +1780,14 @@ function WaitingRow({
     .filter(Boolean)
     .join(" · ");
   const heading = `${entry.ticket_no ? `${entry.ticket_no} · ` : ""}${entry.title}`;
-  const since = entry.settled_at?.slice(0, 10) ?? entry.planned_end ?? entry.planned_start;
+  // P-8R E — the day it was REPORTED done (server-computed from the
+  // status history), never the planned day: a job planned for tomorrow
+  // and reported done today used to read "klaar gemeld op <tomorrow>".
+  const since =
+    entry.reported_done_at?.slice(0, 10) ??
+    entry.settled_at?.slice(0, 10) ??
+    entry.planned_end ??
+    entry.planned_start;
   return (
     <li className="wp-undated-row" data-testid={`agenda-waiting-row-${entry.key}`}>
       <div className="wp-undated-row-main">

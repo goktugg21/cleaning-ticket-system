@@ -514,6 +514,11 @@ ENTRY_KEYS = {
     "created_by_name",
     "due_kind",
     "settled_at",
+    "reported_done_at",
+    # P-7 S8 — the reason a parked job was parked for (stamped on the
+    # parked list; null elsewhere). Added here by P-8R, which ran this
+    # module and found the key had never been listed.
+    "parked_reason",
     "settled_days_after_due",
     # P-3 §A.5 — a real plan whose last day is past the deadline.
     "planned_after_deadline",
@@ -576,6 +581,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 # (`counts.undated`), which is how two thirds of the
                 # work on crmtest came to live in one muted sentence.
                 "undated_entries",
+                "parked_entries",
                 # W-LATE §1a — the late strip's rows.
                 "late_entries",
                 # WP-1 G1 — the "Vastgelopen — actie nodig" rows.

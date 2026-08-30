@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p7-finish` — stacked on `feat/p6-visible`,
+**Branch:** `feat/p8-truth` — stacked on `feat/p7-finish`,
 the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,38 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-8R: the truth round, audit-driven (Addendum D §D.20, 2026-08-30)
+
+Web-Claude audited the P-7 deploy and found the Extra work list empty
+over a full server; the owner's standard ("the owner is not the first
+QA tester") went into CLAUDE.md §1. Shipped on `feat/p8-truth`:
+
+- **A1 — the list hides nothing.** Root cause: the W-NAV1.2 client
+  filter `!has_operational_ticket` plus chips counted over the
+  remainder. Rows = every server row; chips = `display_phase`,
+  exhaustive; a loaded-count guard line; the money tile never a dash.
+  Pinned by an e2e spec and a backend test.
+- **A2 — the plan door starts only on `start: true`.** Contract
+  inverted, every caller explicit, bulk switch off by default, zero
+  migrations, the audit's attack pinned.
+- **A3 — refusals in the reader's words at the control**
+  (`lib/extraWorkRefusal.ts`, 40+ sentences both locales, the two
+  doors "Plan aanvullen" / "Reden opgeven").
+- **A4 — ceremonies:** amber on-behalf decisions in the warning modal
+  on both doors, send-quote confirm with lines + total + customer,
+  start confirm naming the plan, PDF pair once per page.
+- **A5 — label truth** on the plan modal's hours.
+- **A6 — §5.1 verified** with a real agreed price (INSTANT, ticket,
+  WAITING_PLANNING) for customer and provider.
+- **B — the matrix** walked on crmtest with own fixtures (six types,
+  every phase, blocked attempts + findability at every step); two
+  findings fixed (proposal-door reject reason; hours-grid backbone),
+  three queued by name (§D.20 ruling 12).
+- **C / D / F** — hours modal on the pre-P-7 base; Settings designed;
+  Contracts + Invoices purpose lines and connected-facts links.
+- **E** — deadline chip with date + countdown; waiting rows count the
+  days; board caption states the card standard.
 
 ### Done — P-7: the finishing round (Addendum D §D.19, 2026-08-30)
 

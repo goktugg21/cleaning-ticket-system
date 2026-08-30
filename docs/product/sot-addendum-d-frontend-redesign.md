@@ -1250,3 +1250,145 @@ Every item was merge-blocking. Rulings recorded:
     panels share one shell and the bulk-raise panel is staged (which
     prices → how much, from when); the truncated job chip in the hours
     grid wraps to its full label.
+
+## D.20 The truth round — the P-8R rulings (2026-08-30)
+
+The owner's standard, now in CLAUDE.md §1: the owner is not the first
+QA tester. Web-Claude audits every deploy before the owner walks; a
+correct HTTP status is not a correct product — the screen must say
+the truth where the user clicked, and after every transition the work
+must be FINDABLE through normal navigation. P-8R (`feat/p8-truth`)
+fixed the audit's findings and walked the whole Extra Work matrix on
+crmtest with its own fixtures. Rulings:
+
+1. **The Extra work list hides nothing, and the chips are the
+   server's phases.** Since W-NAV1.2 the list filtered its fetched rows
+   down to "no operational ticket yet" and counted the chips over what
+   was left, so a tenant whose every request had become a ticket saw
+   zero rows under zero chips while the API returned all of them
+   (web-Claude's seed: 16 hidden of 16; crmtest: 67 hidden of 99).
+   Every row the server returns is now listed; the chips bucket rows
+   by `display_phase` (FE-2's one phase, exhaustively mapped — a new
+   phase fails to compile); the row badge is the same phase; a guard
+   line under the tiles says how many rows were loaded and refuses to
+   stay quiet if the chips do not add up
+   (`extra-work-list-loaded-count`, `extra-work-list-guard`;
+   `tests/e2e/p8_extra_work_list_guard.spec.ts`;
+   `extra_work/tests/test_p8_truth.py::ListNeverHidesAServerRowTests`).
+   Dashboard deep links with `?status=<ExtraWorkStatus>` land on the
+   phase chip that status normally sits in. The money tile never
+   prints a dash: "Laden…" while loading, "Nog geen prijs" when every
+   request behind it is unpriced.
+2. **The plan door does not start the work unless asked.**
+   `POST /extra-work/<id>/plan/` and bulk-plan used to read an absent
+   `start` as "plan AND start". Inverted: absent means do not start;
+   only `start: true` starts. Every caller sends the key explicitly
+   (the EW plan modal `false`, the ticket page's mirror `false`, the
+   bulk dialog its switch — now OFF by default). Zero migrations. The
+   audit's attack is pinned: an unpriced quote work with a crew and a
+   date does not start even with `start: true`
+   (`test_p8_truth.py::PlanDoorStartIsExplicitTests`).
+3. **Refusals render at the acting control, in the reader's words,
+   with their door.** `lib/extraWorkRefusal.ts` is the twin of P-5's
+   ticket describer for every meerwerk door: `plan_requirements_unmet`
+   names the missing pieces and offers "Plan aanvullen" (opens the plan
+   modal at the first gap); `override_reason_required` offers "Reden
+   opgeven" (opens the amber reason modal); every other stable code and
+   every DRF field validation has its own sentence; "That was not
+   accepted" survives only for a detail-less 5xx. The sentence renders
+   under the banner for the primary action, in the Acties card for the
+   folds, beside the proposal's buttons for the quote doors, and scrolls
+   into view.
+4. **The ceremonies.** A provider deciding a quote on the customer's
+   behalf is amber (never green) on both doors (the proposal card and
+   Geavanceerd) and confirms in the warning modal with the REQUIRED
+   reason (the drawer's `RejectReasonDialog tone="warning"`); the
+   inline reason form is gone. Send quote confirms with the lines, the
+   total and "Send this price to <customer>?" (on the no-approval
+   routes: "record this price and start the work"). Start the work
+   asks once, naming the plan (people · manager · dates · hours) or
+   the pieces it still misses. The Preview / Quote PDF pair appears
+   once per page: the lines card on the Money tab is its home; the
+   Andere-stappen fold offers it only while another tab shows.
+5. **Label truth.** The pricing gate needs hours above 0, satisfied by
+   the per-person hours OR the budget; the plan modal's hours block now
+   says so in one caption and the budget label says it is optional
+   BECAUSE the per-person hours count.
+6. **§5.1 verified with a real agreed price.** An agreed-only cart
+   routes INSTANT, lands CUSTOMER_APPROVED / WAITING_PLANNING with one
+   ticket, for the customer and for the provider creating on their
+   behalf; an unpriced line waits for a price
+   (`test_p8_truth.py::AgreedPriceRoutesInstantTests`; on crmtest T2
+   and T6 in the P-8R matrix). The create page reads agreed prices from
+   `GET /api/customers/<id>/pricing/` (`listCustomerPrices`), resolved
+   client-side on the cart date the way `pricing.resolve_price` does.
+   Web-Claude's seed landed REQUEST_QUOTE because its service had no
+   agreed price for that customer.
+7. **Findings of the matrix walk that landed in this sprint.** A
+   customer could reject a sent quote on the PROPOSAL door with no
+   reason while the request door refused it — the proposal door now
+   answers `rejection_note_required` (pinned). The P-7 hours modal had
+   lost its backbone: a person x building pair whose saved hours were
+   all on jobs had no standard row at all ("1 person x 2 buildings = 1
+   standard row"); an untagged seed now yields only to a saved
+   untagged or CONTRACT row, never to a job-linked one.
+8. **The hours modal is the pre-P-7 base plus three things.** Kept
+   from P-7 S1: the switch-week ask, the save math, the one count.
+   Restored: the coloured type/job labels, the explanatory count
+   ("2 people x 2 buildings = 4 standard rows (+2 job rows)", counted
+   in blocks so "+ Add type" cannot change the arithmetic), the
+   standard rows as the visible backbone; job-linked rows are
+   indented, labelled children ("on Ticket #374") under their person.
+   The fill tool is a normal toolbar row above the table; the dialog
+   is `min(96vw, 1240px)` with a fixed column layout, no sideways
+   scroll at 1440 (modal scrollWidth 1238 = clientWidth 1238).
+9. **Settings, designed.** Header band: avatar with a pencil upload,
+   name, email, role chip, one quiet meta row (member since · last
+   sign-in · access as "3 companies · 29 buildings · 4 customers").
+   Below: Profile / Password side by side, Notifications spanning —
+   `minmax(0,1fr) minmax(0,1fr)` at 1440 (555px + 555px measured), one
+   column under 1100px (820 measured 524px). No dead half.
+10. **My schedule card facts.** A real deadline prints its date AND its
+    countdown in one chip ("deadline Sep 1, 2026 — 2 days left"); a
+    row waiting for the customer says "Klaar gemeld op <date> — wacht
+    al N dagen op de klant", the date being the moment it was REPORTED
+    done (`reported_done_at`, server-computed from the status history —
+    the walk caught the row printing the planned day instead); the
+    "Wacht op klant" chip is GLOBAL across week browsing (the server
+    already returned the whole scope; the client hid the chip outside
+    the current week — §D.15 rule 1's "past and future weeks keep
+    placement as history" still holds for the columns); an unfinished
+    job planned earlier this week or last week rolls into today's
+    column with its "Gepland <day> — N dagen te laat" marker and shows
+    in its own historical week as history; the board's teaching line states the one
+    card standard (what and where · one status line · at most one time
+    chip: clock, else after-deadline, else deadline with countdown, else
+    the day window; without a plan: created on). Every lane reads the
+    same standard.
+11. **Pages that say what they are.** Contracts opens with "Wat er met
+    elke klant per locatie is afgesproken: bedragen, uren en looptijd."
+    and its rows link the customer and the buildings; Invoices opens
+    with "Facturen worden gevuld met afgerond meerwerk per klant en
+    maand, en met de vaste contractperiodes." (both feeds, truthfully)
+    and its rows link the customer.
+12. **Queued by name, not fixed here.** (a) A proposal line the
+    operator priced wears the source tag "Agreed price"
+    (`invoice_row.source.agreed_price` for any own unit price) — a
+    quoted price is not an agreed one; wording is the owner's call.
+    (b) A ticket spawned from an agreed-price cart starts with no crew
+    and no day of its own; the start refuses with
+    `transition_requirements_unmet` until both are set on the ticket
+    (the request's crew carries over only where one was assigned
+    before the spawn) — by design, but the Werkplanning is where the
+    operator learns it, not the request. (c) Settings' "last sign-in"
+    reads the JWT login only when the token door updates `last_login`.
+    (d) **An unfinished job planned in a PAST week is absent from that
+    week when browsed** (`views_work_plan.py`: a job that rolls forward
+    is dropped from any week that does not contain today — E3 on
+    crmtest, planned Wed 19 Aug, still open, shows on today's board and
+    nowhere in week 34). The P-8R walk contradicts the owner's "browsed
+    in its historical week" expectation, but placing it there reverses
+    FE-4/P-1's "one card, today's column" ruling that the §D.15 matrix
+    tests pin; it waits for the owner's word: a history card in its
+    original column ("Gepland hier — staat vandaag op het bord") or the
+    current rule.

@@ -1310,6 +1310,7 @@ def _fe4_facts(
     settled_at,
     provenance: PlanProvenance = NO_PLAN,
     created_by=None,
+    reported_done_at=None,
 ) -> dict:
     """FE-4 (Addendum D SS D.12 items 2-4) -- the honest-date facts every
     entry carries, whatever its source:
@@ -1359,6 +1360,7 @@ def _fe4_facts(
         "planned_at": provenance.planned_at,
         "due_kind": due_kind,
         "settled_at": settled_at,
+        "reported_done_at": reported_done_at,
         "settled_days_after_due": settled_after,
         "planned_after_deadline": planned_after_deadline(
             job.window_end, deadline, provenance.has_real_plan
@@ -1373,6 +1375,31 @@ def planned_after_deadline(window_end, deadline, has_real_plan) -> bool:
     if not has_real_plan or window_end is None or deadline is None:
         return False
     return window_end > deadline
+
+
+#: P-8R E — the statuses in which a job is waiting on somebody's check
+#: of finished work. The "reported done" moment is the latest history
+#: leg INTO one of them.
+_REPORTED_DONE_STATUSES = (
+    TicketStatus.WAITING_CUSTOMER_APPROVAL,
+    TicketStatus.WAITING_MANAGER_REVIEW,
+)
+
+
+def _ticket_reported_done_at(ticket):
+    """When the work was reported done — the moment it went to the
+    customer (or the manager) for a check. Server-computed from the
+    status history so the card and the waiting row cannot print the
+    planned day for it (P-8R E). Null unless the ticket is waiting on
+    that check right now; the past-tense card reads `settled_at`."""
+    if ticket.status not in _REPORTED_DONE_STATUSES:
+        return None
+    return (
+        ticket.status_history.filter(new_status__in=_REPORTED_DONE_STATUSES)
+        .order_by("-created_at", "-id")
+        .values_list("created_at", flat=True)
+        .first()
+    )
 
 
 def _ticket_settled_at(ticket):
@@ -1422,6 +1449,7 @@ def _entry_from_slot(
                 else NO_PLAN
             ),
             created_by=slot.ticket.created_by,
+            reported_done_at=_ticket_reported_done_at(slot.ticket),
             settled_at=(
                 slot.completed_at or _ticket_settled_at(slot.ticket)
                 if (
@@ -1648,6 +1676,7 @@ def _entry_from_ticket(
             deadline=job_deadline(ticket),
             plan_source=job_plan_source(ticket),
             settled_at=_ticket_settled_at(ticket),
+            reported_done_at=_ticket_reported_done_at(ticket),
             provenance=ticket_plan_provenance(ticket),
             created_by=ticket.created_by,
         ),

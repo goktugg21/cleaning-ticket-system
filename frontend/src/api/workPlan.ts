@@ -196,6 +196,10 @@ export interface WorkPlanEntry {
   created_by_name: string | null;
   due_kind: "DEADLINE" | "PLANNED_DAY" | null;
   settled_at: string | null;
+  /** P-8R E — when the work was reported done (the moment it went to
+   *  the customer / the manager for a check), server-computed from the
+   *  status history; null unless the ticket is waiting on that check. */
+  reported_done_at: string | null;
   settled_days_after_due: number | null;
   /** WP-1 G2 — whole days this job has sat with NO planned date at
    *  all. Null on every dated entry. The "Nog niet gepland" lane
