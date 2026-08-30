@@ -26,6 +26,8 @@ import {
 import axios from "axios";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
+import { pointAtMissingPiece } from "../lib/missingPiece";
+import { describeTransitionRefusal } from "../lib/transitionRefusal";
 // W-UX1-B — reuse, not redesign: the same viewer the invoice preview
 // opens, with its download button switched off.
 import { PdfPreviewDialog } from "../components/PdfPreviewDialog";
@@ -1097,17 +1099,19 @@ export function TicketDetailPage() {
    *  UTC instant and show an operator east of Greenwich the wrong hour —
    *  the mirror of the bug the modal's own confirm() comment warns about
    *  in the other direction. */
-  const currentScheduledStartLocal = useMemo(() => {
-    const raw = ticket?.scheduled_start_at;
-    if (!raw) return "";
-    const d = new Date(raw);
-    if (Number.isNaN(d.getTime())) return "";
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return (
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
-      `T${pad(d.getHours())}:${pad(d.getMinutes())}`
-    );
-  }, [ticket?.scheduled_start_at]);
+  // P-5 S1 — ONE PLAN, ONE DATE: the day the transition modal offers
+  // is the job's resolved window (`job_start_day`: the ticket's own,
+  // else the meerwerk plan's first work day). Server-decided day and
+  // clock (P-3 §A.3), no `Date` arithmetic in the browser's zone.
+  const currentStartDay = ticket?.scheduled_start_day ?? ticket?.job_start_day ?? "";
+  const currentStartTime = ticket?.scheduled_start_day
+    ? (ticket.scheduled_start_time ?? "")
+    : "";
+  const currentStartSource: "ticket" | "meerwerk" | null = ticket?.scheduled_start_day
+    ? "ticket"
+    : ticket?.job_start_day && ticket.plan_source === "PROVIDER_PLAN"
+      ? "meerwerk"
+      : null;
 
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
@@ -2317,12 +2321,16 @@ export function TicketDetailPage() {
       // arrived twice and the toast covered the modal it was about.
       // The modal is the surface the operator is looking at, so when one
       // is open it gets the refusal and the toast stays quiet.
-      setTransitionError(getApiError(err));
+      // P-5 S0 — the error-body law: the server named its reason, so
+      // the screen says THAT (mapped by code to our own words), and the
+      // generic "not accepted" is left for a truly detail-less failure.
+      const refusal = describeTransitionRefusal(err, t);
+      setTransitionError(refusal);
       if (transitionTarget === null) {
         toast.push({
           variant: "error",
           title: t("change.failed"),
-          description: getApiError(err),
+          description: refusal,
         });
       }
     } finally {
@@ -2789,13 +2797,33 @@ export function TicketDetailPage() {
   // customer-visible explanations the spawn also appends do not match
   // the pattern and stay. Non-EW tickets render their description
   // untouched.
+  // P-5 S1.5 — the execution header said the title THREE times: the
+  // title, the cart line ("1 × Extra werk regie uren") and the service
+  // line ("Extra werk regie uren"). Once, then the parts: cart lines in
+  // either order and any line that only repeats the title or the
+  // service name are dropped; what the customer actually wrote stays.
+  const repeatedLines = new Set(
+    [ticket.title, ticket.extra_work_origin?.service_name ?? ""]
+      .map((line) => line.trim().toLowerCase())
+      .filter(Boolean),
+  );
   const headerDescriptionRaw = ticket.extra_work_origin
     ? ticket.description
         .split("\n")
-        .filter((line) => !/^.+ × \d+([.,]\d+)?$/.test(line.trim()))
+        .filter((line) => {
+          const text = line.trim();
+          if (/^.+ × \d+([.,]\d+)?$/.test(text)) return false;
+          if (/^\d+([.,]\d+)? × .+$/.test(text)) return false;
+          return !repeatedLines.has(text.toLowerCase());
+        })
         .join("\n")
         .trim()
     : ticket.description;
+  // P-5 S1.4 — meerwerk surfaces never say "ticket": every sentence
+  // that names the record is looked up with i18next's context, so a
+  // `_meerwerk` variant wins on a meerwerk job and the base key
+  // elsewhere (nl/en lockstep, both variants).
+  const kindContext = ticket.kind === "MEERWERK" ? "meerwerk" : undefined;
   // P-3 §A.6 — a description that only repeats the title is not a
   // subtitle; the page said "final test" twice, one under the other.
   const headerDescription =
@@ -3230,7 +3258,11 @@ export function TicketDetailPage() {
             `tickets/detail_facts.py`), and how urgent it is. The status
             block that stood beside the title is the phase banner now. */}
         <div className="detail-header-meta">
-          <span className="detail-header-no">{ticket.ticket_no}</span>
+          {/* P-5 S1.4 — on a meerwerk job the TCK number is ticket
+              vocabulary; it lives behind Geavanceerd there. */}
+          {ticket.kind !== "MEERWERK" && (
+            <span className="detail-header-no">{ticket.ticket_no}</span>
+          )}
           <span
             className="cell-tag"
             data-testid="ticket-kind-pill"
@@ -3245,6 +3277,45 @@ export function TicketDetailPage() {
         <h1 className="detail-header-title">{ticket.title}</h1>
         {headerDescription && (
           <p className="detail-header-desc">{headerDescription}</p>
+        )}
+        {/* P-5 S7 — an occurrence ticket says its origin: part of which
+            contract's recurring work, which visit of this year. */}
+        {ticket.occurrence_origin && (
+          <div
+            className="ticket-extra-work-origin"
+            data-testid="ticket-occurrence-origin"
+          >
+            <span className="muted small">
+              {ticket.occurrence_origin.contract_id
+                ? t("detail.occurrence_origin_contract", {
+                    job: ticket.occurrence_origin.recurring_job_title,
+                    n: ticket.occurrence_origin.visit_index,
+                    total: ticket.occurrence_origin.visits_this_year,
+                  })
+                : t("detail.occurrence_origin_job", {
+                    job: ticket.occurrence_origin.recurring_job_title,
+                    n: ticket.occurrence_origin.visit_index,
+                    total: ticket.occurrence_origin.visits_this_year,
+                  })}
+            </span>{" "}
+            {ticket.occurrence_origin.contract_id && (
+              <Link
+                to={`/admin/customers/${ticket.customer}/contracts/${ticket.occurrence_origin.contract_id}`}
+                data-testid="ticket-occurrence-contract-link"
+              >
+                {ticket.occurrence_origin.contract_type_name
+                  ? `${ticket.occurrence_origin.contract_type_name} · ${ticket.occurrence_origin.contract_no}`
+                  : ticket.occurrence_origin.contract_no}
+              </Link>
+            )}
+            {" · "}
+            <Link
+              to={`/planned-work/${ticket.occurrence_origin.recurring_job_id}`}
+              data-testid="ticket-occurrence-job-link"
+            >
+              {t("detail.occurrence_open_job")}
+            </Link>
+          </div>
         )}
         {ticket.extra_work_origin && (
           <div
@@ -3310,7 +3381,7 @@ export function TicketDetailPage() {
       <div
         className="composer-toggle ew-detail-tabs"
         role="tablist"
-        aria-label={t("tabs_aria")}
+        aria-label={t("tabs_aria", { context: kindContext })}
       >
         {visibleTicketTabs.map((key) => (
           <button
@@ -3460,11 +3531,12 @@ export function TicketDetailPage() {
                               data-testid="ticket-customer-contact-row"
                             >
                               <b>{contact.full_name}</b>
-                              {/* P-3 §A.10 — "veli · A · +31…" said nothing
-                                  about what "A" was; the row says it. */}
-                              {contact.role_label
-                                ? ` · ${t("facts.contact_role", { role: contact.role_label })}`
-                                : ""}
+                              {/* P-3 §A.10 / P-5 S6.5 — "veli · role: A":
+                                  the label is free text the customer's
+                                  admin typed, and the system cannot say
+                                  what "A" is. It stays editable on the
+                                  Contacts page; this line names the
+                                  person and how to reach them. */}
                               {contact.phone ? ` · ${contact.phone}` : ""}
                               {contact.email ? ` · ${contact.email}` : ""}
                             </li>
@@ -3479,9 +3551,6 @@ export function TicketDetailPage() {
                             data-testid="ticket-customer-contact-row"
                           >
                             <b>{contact.full_name}</b>
-                            {contact.role_label
-                              ? ` · ${t("facts.contact_role", { role: contact.role_label })}`
-                              : ""}
                             {contact.phone ? ` · ${contact.phone}` : ""}
                           </li>
                         ))}
@@ -3812,7 +3881,7 @@ export function TicketDetailPage() {
                           ? t("directed.private_disabled_hint")
                           : effectivePrivate
                             ? t("directed.private_on_hint")
-                            : t("directed.private_off_hint")}
+                            : t("directed.private_off_hint", { context: kindContext })}
                       </p>
                     </>
                   )}
@@ -4261,7 +4330,7 @@ export function TicketDetailPage() {
                           </>
                         ) : (
                           <>
-                            {t("timeline_created_as")}
+                            {t("timeline_created_as", { context: kindContext })}
                             <span className="pill progress">
                               {tStatus(entry.new_status)}
                             </span>
@@ -4551,6 +4620,16 @@ export function TicketDetailPage() {
                         </>
                       )}
                       <dl className="action-fold-raw" data-testid="ticket-raw-values">
+                        {/* P-5 S1.4 — on a meerwerk job the TCK number
+                            is ticket vocabulary; it lives here. */}
+                        {ticket.kind === "MEERWERK" && (
+                          <>
+                            <dt>{t("actions.ticket_no_label")}</dt>
+                            <dd data-testid="ticket-raw-ticket-no">
+                              <code>{ticket.ticket_no}</code>
+                            </dd>
+                          </>
+                        )}
                         <dt>{t("actions.raw_status")}</dt>
                         <dd data-testid="ticket-header-status-text">
                           {t(`common:${ticketStatusLabelKey(ticket.status)}`)}
@@ -5631,7 +5710,7 @@ export function TicketDetailPage() {
                   lineHeight: 1.55,
                 }}
               >
-                {t("card_critical_body")}
+                {t("card_critical_body", { context: kindContext })}
               </p>
             </div>
           )}
@@ -5697,7 +5776,10 @@ export function TicketDetailPage() {
           // writes `TicketStaffAssignment` rows) — so carried people
           // arrive prefilled without the modal knowing they were carried.
           currentAssignees={currentAssignees}
-          currentScheduledStartAt={currentScheduledStartLocal}
+          currentStartDay={currentStartDay}
+          currentStartTime={currentStartTime}
+          startSource={currentStartSource}
+          kindContext={kindContext}
           busy={statusBusy !== null}
           error={transitionError}
           // W-LATE §3c — only the moves that mean "the work is done"
@@ -5707,6 +5789,15 @@ export function TicketDetailPage() {
           openParts={
             COMPLETION_TARGETS.has(transitionTarget) ? openParts : undefined
           }
+          onGoToActualHours={() => {
+            // P-5 S0/S2.4 — the missing-piece pointer: close, switch to
+            // the Money tab, land on the hours.
+            setTransitionTarget(null);
+            setTransitionReqs(null);
+            setTransitionError("");
+            setTicketTab("money");
+            pointAtMissingPiece("actual-hours");
+          }}
           // W-FIX2 — the proof photo, through the ticket's own attachment
           // endpoint. The gate reads non-hidden `TicketAttachment` rows
           // (`_ticket_has_visible_attachment`), so an ordinary upload

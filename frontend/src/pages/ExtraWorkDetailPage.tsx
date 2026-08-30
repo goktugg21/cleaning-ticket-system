@@ -99,6 +99,7 @@ import { PhaseBanner } from "../components/customer/PhaseBadge";
 import { DueChipCore } from "../components/workplan/WorkPlanCard";
 import { resolveNextStep } from "../components/extra-work/nextStep";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
+import type { PlanFocus } from "../components/extra-work/PlanWorkDialog";
 import { rowAmounts } from "../lib/billing";
 import { billingMonthWords } from "../lib/billingSentence";
 import {
@@ -849,9 +850,8 @@ function CustomerContactsPanel({ contacts }: { contacts: Contact[] }) {
               <span className="ew-contacts-field-name">
                 {contact.full_name}
               </span>
-              {contact.role_label && (
-                <span className="muted small">{contact.role_label}</span>
-              )}
+              {/* P-5 S6.5 — the free-text role label ("A") is not
+                  rendered on read-only lines; see TicketDetailPage. */}
               {contact.email && (
                 <span className="muted small">{contact.email}</span>
               )}
@@ -943,6 +943,8 @@ export function ExtraWorkDetailPage() {
   // has to be the crew as of the moment somebody plans, not as of the
   // last page load.
   const [planOpen, setPlanOpen] = useState(false);
+  // P-5 S2.4 — which part of the plan the modal opens on (see openPlan).
+  const [planFocus, setPlanFocus] = useState<PlanFocus | null>(null);
   /* W-PLAN — the pricing entry point states the plan, so the page has
      to KNOW the plan before the dialog is ever opened. Loaded for
      provider viewers on mount and re-read when the status moves (a
@@ -2198,7 +2200,16 @@ export function ExtraWorkDetailPage() {
     }
   }
 
-  async function openPlan() {
+  // P-5 S2.4 — the missing-piece pointer: "X is missing" opens the
+  // plan ON X, highlighted, saying what it needs.
+  const GATE_FOCUS: Record<string, PlanFocus> = {
+    plan_staff: "people",
+    plan_manager: "manager",
+    plan_start_date: "start",
+    plan_hours: "hours",
+  };
+  async function openPlan(focus: PlanFocus | null = null) {
+    setPlanFocus(focus);
     setPlanError("");
     setPlanAssignments([]);
     setPlanAssignmentsLoading(true);
@@ -3690,7 +3701,17 @@ export function ExtraWorkDetailPage() {
                       <ul className="muted small" style={{ margin: "4px 0 8px", paddingLeft: 18 }}>
                         {planGateMissing.map((key) => (
                           <li key={key} data-testid={`plan-gate-${key}`}>
-                            {t(`plan_gate.missing_${key.replace("plan_", "")}`)}
+                            {/* P-5 S2.4 — each missing piece is a door
+                                onto exactly that part of the plan. */}
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => void openPlan(GATE_FOCUS[key] ?? null)}
+                              title={t("plan_gate.point_at")}
+                              data-testid={`plan-gate-open-${key}`}
+                            >
+                              {t(`plan_gate.missing_${key.replace("plan_", "")}`)}
+                            </button>
                           </li>
                         ))}
                       </ul>
@@ -3701,7 +3722,9 @@ export function ExtraWorkDetailPage() {
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        onClick={() => void openPlan()}
+                        onClick={() =>
+                          void openPlan(GATE_FOCUS[planGateMissing[0]] ?? null)
+                        }
                         data-testid="extra-work-plan-gate-open-plan"
                       >
                         {t("plan_gate.open_plan")}
@@ -4081,6 +4104,7 @@ export function ExtraWorkDetailPage() {
             ew.planned_hours_total ?? ""
           }`}
           ew={ew}
+          initialFocus={planFocus}
           assignments={planAssignments}
           assignmentsLoading={planAssignmentsLoading}
           // R2 — the picker offers ONLY the rest. Filtered here rather

@@ -31,6 +31,7 @@ import { useTranslation } from "react-i18next";
 
 import { CollapsibleCard } from "../../components/CollapsibleCard";
 import { getApiError } from "../../api/client";
+import { useCurrentTicketKind } from "../../lib/currentTicketKind";
 import {
   addManagerAssignments,
   listManagerAssignments,
@@ -53,6 +54,8 @@ export function ResponsibleManagersSection({
   onChanged,
 }: Props) {
   const { t } = useTranslation(["ticket_detail", "common"]);
+  // P-5 S1.4 — meerwerk words on a meerwerk job.
+  const currentKind = useCurrentTicketKind();
   const [rows, setRows] = useState<TicketManagerAssignment[]>([]);
   const [hidden, setHidden] = useState(false);
   const [error, setError] = useState("");
@@ -98,7 +101,9 @@ export function ResponsibleManagersSection({
       err as { response?: { data?: { code?: string } } }
     )?.response?.data?.code;
     if (code === "manager_assignment_terminal") {
-      return t("resp_mgr.error_terminal");
+      return t("resp_mgr.error_terminal", {
+        context: currentKind?.kind === "MEERWERK" ? "meerwerk" : undefined,
+      });
     }
     if (
       code === "manager_not_eligible" ||

@@ -565,6 +565,56 @@ p { line-height: 1.6; }
   font-size: 13px;
   font-weight: 600;
 }
+/* P-5 S0 — a REQUIREMENT, not a failure. Neutral surface, plain text
+   weight; the red `.alert-error` is for a refusal that happened. */
+.alert-notice {
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0 0 8px;
+}
+/* P-5 S2.4 — a sentence that is also a door: plain text, underlined on
+   hover, no button chrome. */
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.link-button:hover { text-decoration-style: solid; }
+/* P-5 S1.3 — the transition modal asks for a DAY and an optional clock. */
+.transition-when-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+.transition-when-time {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* P-5 S2.4 — the missing-piece pointer's landing light. */
+.piece-highlight {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+  border-radius: var(--r);
+  transition: outline-color 0.6s ease;
+  animation: piece-highlight-fade 4s ease forwards;
+}
+@keyframes piece-highlight-fade {
+  0%, 70% { outline-color: var(--amber); }
+  100% { outline-color: transparent; }
+}
 .alert-info {
   padding: 12px 14px;
   border-radius: var(--r);
@@ -10456,11 +10506,24 @@ table.dashboard-mini-table {
   text-overflow: ellipsis;
 }
 .inbox-row-author { font-weight: 600; color: var(--text); }
+/* P-5 S4.3 — a receipt line is information, not an alarm: muted. */
 .inbox-row-receipts {
   margin-top: 5px;
   font-size: 11.5px;
-  color: var(--amber);
-  font-weight: 600;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+/* P-5 S4.3 (§D.6 rule 15) — a date that is not set must not look like
+   a value: faint until the reader chooses one. */
+.field-input.is-unset {
+  color: var(--text-faint);
+}
+/* P-5 S4.2 — a disabled header action and its reason, side by side. */
+.page-header-action-with-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .inbox-row-badge {
   align-self: center;
@@ -11302,6 +11365,17 @@ details[open] > .ew-department-tree-summary::before {
    is how two pages end up disagreeing about their own type scale. */
 
 /* The locations list inside a BoundedList on the detail page. */
+/* P-5 S7 — a connected fact: the link, then one muted line of context. */
+.contract-connected-line {
+  display: block;
+  margin-top: 2px;
+}
+.contract-connections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px 24px;
+  margin-top: 8px;
+}
 .contract-plain-list {
   list-style: none;
   margin: 0;
@@ -13694,6 +13768,30 @@ a.wp-card-title:hover { text-decoration: underline; }
   text-transform: uppercase;
   color: var(--text-muted);
 }
+/* P-5 S8 — the choices under a warning's numbers. */
+.sla-warning-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border-soft);
+}
+.sla-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+.sla-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.sla-check input[type="checkbox"] {
+  margin: 0;
+}
 .sla-warning-fields {
   display: flex;
   flex-wrap: wrap;
@@ -16077,6 +16175,11 @@ body[data-toast-rail] .page-canvas { padding-bottom: 220px; }
   align-items: center;
   gap: 8px;
   flex: none;
+}
+/* P-5 S3.1 — the chip sits ON its row (the pill's own `align-self:
+   flex-start` floated it above the button). */
+.wp-undated-row-actions .wp-wait {
+  align-self: center;
 }
 
 /* Part A — units where they are true. */

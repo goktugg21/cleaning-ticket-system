@@ -275,6 +275,19 @@ class PastDayLockTests(_Base):
     def _plan_url(self, ew):
         return f"/api/extra-work/{ew.id}/plan/"
 
+    def _ew(self):
+        """P-5 — a window that COVERS yesterday..tomorrow. Since P-4 (2)
+        `apply_plan` refuses a new dated row outside the first..last work
+        day (`planned_hours_outside_window`), and `make_plan_complete`
+        commits to today only; these tests are about the past-day lock,
+        so the window is widened here rather than the rule restated."""
+        ew = super()._ew()
+        today = timezone.localdate()
+        ew.provider_planned_date = today - timedelta(days=1)
+        ew.provider_planned_end_date = today + timedelta(days=1)
+        ew.save(update_fields=["provider_planned_date", "provider_planned_end_date"])
+        return ew
+
     def test_editing_a_past_day_without_reason_is_refused(self):
         ew = make_plan_complete(self._ew())
         yesterday = timezone.localdate() - timedelta(days=1)

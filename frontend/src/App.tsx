@@ -50,6 +50,7 @@ import { NotificationsPage } from "./pages/NotificationsPage";
 import { InboxPage } from "./pages/InboxPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
 import { AuditLogsAdminPage } from "./pages/admin/AuditLogsAdminPage";
 import { BuildingDetailPage } from "./pages/admin/BuildingDetailPage";
@@ -992,7 +993,16 @@ export default function App() {
               </BillingRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* P-5 S4.1 — an unknown address says so instead of quietly
+              rendering the Dashboard. */}
+          <Route
+            path="*"
+            element={
+              <ProtectedRoute>
+                <NotFoundPage />
+              </ProtectedRoute>
+            }
+          />
           </Routes>
         </BrowserRouter>
       </ToastProvider>

@@ -322,6 +322,13 @@ class ActualHoursFixtureMixin:
         if to_status == TicketStatus.IN_PROGRESS and ticket.assigned_to_id is None:
             ticket.assigned_to = self.admin
             ticket.save(update_fields=["assigned_to", "updated_at"])
+        # P-5 — and a start: since P-1 a spawned ticket carries no seeded
+        # date, and IN_PROGRESS needs WHEN as well as WHO.
+        if to_status == TicketStatus.IN_PROGRESS and ticket.scheduled_start_at is None:
+            from django.utils import timezone
+
+            ticket.scheduled_start_at = timezone.now()
+            ticket.save(update_fields=["scheduled_start_at", "updated_at"])
         return self._api(actor).post(
             f"/api/tickets/{ticket.id}/status/",
             {"to_status": to_status, "note": note},

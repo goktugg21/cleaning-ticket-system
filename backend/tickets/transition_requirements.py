@@ -90,6 +90,32 @@ REQ_COMPLETION_EVIDENCE = "completion_evidence"
 #: can already have (see `transition_needs_override_reason`), so it is
 #: reported unmet whenever it applies.
 REQ_OVERRIDE_REASON = "override_reason"
+#: P-5 S0 — the hours an HOURLY meerwerk line bills by. The machine has
+#: refused `-> WAITING_CUSTOMER_APPROVAL` on an EW ticket with an
+#: hourly line whose `actual_hours` is still empty since Sprint 8B
+#: (`actual_hours_required`), and this module never reported it, so the
+#: modal never asked and the operator met the refusal as a 400 the page
+#: could only call "not accepted". Measured on crmtest TCK-2026-000385:
+#: EW 89, line 105 (Extra werk regie uren, HOURS, actual_hours null),
+#: `transition-requirements` answered `unmet: []`, the POST answered
+#: `actual_hours_required`, the screen said nothing usable.
+REQ_ACTUAL_HOURS = "actual_hours"
+
+#: P-5 S0 — THE ERROR-BODY LAW: a refusal names its reason in words.
+#: One phrase per requirement key, used by the serializer's refusal
+#: sentence. The FRONTEND maps the keys to its own i18n; this text is
+#: for the console, the tests and any client without a bundle.
+REQUIREMENT_PHRASES = {
+    REQ_ASSIGNEE: "somebody doing the work",
+    REQ_SCHEDULE: "a start date",
+    REQ_COMPLETION_EVIDENCE: "proof the work is done (a note or a photo)",
+    REQ_OVERRIDE_REASON: "a reason for the override",
+    REQ_ACTUAL_HOURS: "the actual hours on every hourly line",
+}
+
+
+def phrase_for(key: str) -> str:
+    return REQUIREMENT_PHRASES.get(key, key.replace("_", " "))
 
 
 #: The forward moves into work. A rejection landing on IN_PROGRESS is a
@@ -195,6 +221,27 @@ def _is_system_actor(user) -> bool:
     return user is None
 
 
+def _has_actual_hours(ticket) -> bool:
+    """Every hourly line on the ticket's meerwerk has its actual hours.
+
+    The RULE is `extra_work.final_amounts.ew_has_unfinalized_hourly_lines`,
+    the same reader `state_machine.apply_transition` refuses on, so the
+    modal and the gate cannot disagree about which lines count. A
+    ticket with no meerwerk has no hourly lines and is trivially
+    satisfied; the caller only asks for EW tickets anyway.
+    """
+    ew_id = getattr(ticket, "extra_work_request_id", None)
+    if ew_id is None:
+        return True
+    from extra_work.final_amounts import ew_has_unfinalized_hourly_lines
+    from extra_work.models import ExtraWorkRequest
+
+    ew = ExtraWorkRequest.objects.filter(pk=ew_id).first()
+    if ew is None:
+        return True
+    return not ew_has_unfinalized_hourly_lines(ew)
+
+
 def requirements_for_transition(
     ticket, to_status, user=None, *, is_override: bool = False, note: str = ""
 ) -> list[Requirement]:
@@ -285,6 +332,22 @@ def requirements_for_transition(
     # Imported inside the function: `state_machine` imports nothing from
     # here, and a module-level import in the other direction would make
     # the pair circular the moment it did.
+    # P-5 S0 — THE HOURS, before it goes to the customer.
+    #
+    # Reported for every actor (the machine's gate binds every role)
+    # and for the move INTO WAITING_CUSTOMER_APPROVAL from anywhere,
+    # which is exactly the set `apply_transition` refuses on. Like the
+    # override reason it is reported here and NOT enforced by `unmet`:
+    # `apply_transition` already refuses it under its own stable code
+    # `actual_hours_required`, which the page branches on and Sprint 8B
+    # tests assert, and a second gate here would replace that precise
+    # refusal with the generic one.
+    if (
+        str(to_status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        and getattr(ticket, "extra_work_request_id", None) is not None
+    ):
+        reqs.append(Requirement(REQ_ACTUAL_HOURS, _has_actual_hours(ticket)))
+
     from .state_machine import transition_needs_override_reason
 
     if transition_needs_override_reason(ticket, to_status, user):
@@ -323,5 +386,5 @@ def unmet(
         for r in requirements_for_transition(
             ticket, to_status, user, is_override=is_override, note=note
         )
-        if not r.satisfied and r.key != REQ_OVERRIDE_REASON
+        if not r.satisfied and r.key not in (REQ_OVERRIDE_REASON, REQ_ACTUAL_HOURS)
     ]

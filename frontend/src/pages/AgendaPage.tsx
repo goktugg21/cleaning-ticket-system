@@ -1510,10 +1510,12 @@ function WaitingRow({
         <span className="wp-wait" data-waiting="customer">
           {t("agenda.waiting_customer")}
         </span>
+        {/* P-5 S3.1 — a BUTTON, not a second pill: the amber
+            `btn-warning` read as a status next to the waiting chip. */}
         {onApprove && (
           <button
             type="button"
-            className="btn btn-warning btn-sm"
+            className="btn btn-secondary btn-sm"
             onClick={() => onApprove(entry)}
             data-testid={`agenda-waiting-approve-${entry.key}`}
           >

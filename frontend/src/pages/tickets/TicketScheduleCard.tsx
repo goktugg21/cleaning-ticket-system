@@ -102,15 +102,6 @@ function formatPlainDate(value: string | null | undefined): string {
 }
 
 /** Whole calendar days from start to end, both counted. */
-function dayCount(startIso: string | null, endIso: string | null): number {
-  if (!startIso || !endIso) return 0;
-  const a = new Date(startIso);
-  const b = new Date(endIso);
-  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 0;
-  const day = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-  const diff = Math.round((day(b) - day(a)) / 86_400_000);
-  return diff < 0 ? 0 : diff + 1;
-}
 
 export function TicketScheduleCard({
   ticket,
@@ -141,7 +132,24 @@ export function TicketScheduleCard({
   const canEdit = canManage && !isTerminal;
 
   const origin = ticket.extra_work_origin;
-  const days = dayCount(ticket.scheduled_start_at, ticket.scheduled_end_at);
+  // P-5 S1.4 — meerwerk words on a meerwerk job.
+  const kindContext = ticket.kind === "MEERWERK" ? "meerwerk" : undefined;
+  // P-5 S1.2 — ONE STORY. The job's window is the resolved one
+  // (`job_start_day` / `job_end_day`: the ticket's own days when a
+  // person set them, else the meerwerk plan's first/last work day). A
+  // customer's WISH is not a plan, so with `plan_source` CUSTOMER_WISH
+  // the job reads "not planned yet" and the wish stays in "asked for".
+  const fromMeerwerkPlan =
+    !ticket.scheduled_start_day && ticket.plan_source === "PROVIDER_PLAN";
+  const planStart = fromMeerwerkPlan
+    ? ticket.job_start_day
+    : (ticket.scheduled_start_day ?? null);
+  const planEnd = fromMeerwerkPlan
+    ? ticket.job_end_day
+    : (ticket.scheduled_end_day ?? null);
+  const planStartTime = ticket.scheduled_start_day ? ticket.scheduled_start_time : null;
+  const planEndTime = ticket.scheduled_end_day ? ticket.scheduled_end_time : null;
+  const days = planStart && planEnd ? daysAfter(planStart, planEnd) + 1 : 0;
 
   // Map the backend's stable schedule error codes to friendly i18n
   // copy; fall back to the generic API error otherwise. We match the
@@ -153,11 +161,11 @@ export function TicketScheduleCard({
         case "reschedule_reason_required":
           return t("schedule.error_reason_required");
         case "schedule_not_allowed_terminal":
-          return t("schedule.error_terminal");
+          return t("schedule.error_terminal", { context: kindContext });
         case "schedule_forbidden_scope":
-          return t("schedule.error_forbidden_scope");
+          return t("schedule.error_forbidden_scope", { context: kindContext });
         case "schedule_forbidden_for_role":
-          return t("schedule.error_forbidden_role");
+          return t("schedule.error_forbidden_role", { context: kindContext });
         case "schedule_invalid":
           return t("schedule.error_invalid");
         default:
@@ -168,10 +176,13 @@ export function TicketScheduleCard({
   }
 
   function openModal() {
-    setStartDate(ticket.scheduled_start_day ?? "");
-    setStartTime(ticket.scheduled_start_time ?? "");
-    setEndDate(ticket.scheduled_end_day ?? "");
-    setEndTime(ticket.scheduled_end_time ?? "");
+    // P-5 S1.1 — editing the meerwerk-derived window edits the SAME
+    // plan: the dialog opens on it, and the save lands on both records
+    // (`tickets/schedule.py` mirrors the window onto the meerwerk).
+    setStartDate(planStart ?? "");
+    setStartTime(planStartTime ?? "");
+    setEndDate(planEnd ?? "");
+    setEndTime(planEndTime ?? "");
     setReason("");
     setError(null);
     setResult(null);
@@ -269,8 +280,19 @@ export function TicketScheduleCard({
   const deadline = origin?.deadline ?? null;
   const committedStart = origin?.provider_planned_date ?? null;
   const committedEnd = origin?.provider_planned_end_date ?? null;
+  // P-5 S1.2 — a fact that only repeats the plan is not a second fact.
+  // The wish and the requested period render only when they differ
+  // from the plan; the meerwerk's committed window only when THIS job
+  // holds a different date of its own (it kept it on a plan move) —
+  // then it says what it is, in words.
+  const sameAsPlan = (from: string | null, to: string | null) =>
+    !!planStart && from === planStart && (to ?? from) === (planEnd ?? planStart);
+  const showWanted = Boolean(wantedDate) && wantedDate !== planStart;
+  const showAskedWindow = Boolean(askedStart) && !sameAsPlan(askedStart, askedEnd);
+  const showCommitted =
+    Boolean(committedStart && origin) && !sameAsPlan(committedStart, committedEnd);
   const hasAsked = Boolean(
-    wantedDate || askedStart || askedEnd || deadline || committedStart,
+    showWanted || showAskedWindow || deadline || showCommitted,
   );
 
   // W21 §3 — every row STACKS: label on its own line, value on its own
@@ -292,7 +314,7 @@ export function TicketScheduleCard({
       <div className="plan-asked" data-testid={testId}>
         <div className="plan-asked-head">{t("schedule.asked_heading")}</div>
         <div className="detail-kv-list">
-          {wantedDate && (
+          {showWanted && (
             <div className="detail-kv-row" style={stackedRow}>
               <span className="detail-kv-label">
                 {t("schedule.asked_wanted_label")}
@@ -302,7 +324,7 @@ export function TicketScheduleCard({
               </span>
             </div>
           )}
-          {askedStart && (
+          {showAskedWindow && (
             <div className="detail-kv-row" style={stackedRow}>
               <span className="detail-kv-label">
                 {t("schedule.asked_window_label")}
@@ -327,10 +349,10 @@ export function TicketScheduleCard({
               </span>
             </div>
           )}
-          {committedStart && origin && (
+          {showCommitted && (
             <div className="detail-kv-row" style={stackedRow}>
               <span className="detail-kv-label">
-                {t("schedule.asked_committed_label")}
+                {t("schedule.meerwerk_plan_differs_label")}
               </span>
               <span
                 className="detail-kv-val"
@@ -347,16 +369,9 @@ export function TicketScheduleCard({
                   customer's deadline is allowed and FLAGGED, in the warn
                   tone; ticket 373 showed Aug 25–28 under "must be
                   finished by Aug 26" with nothing said. */}
-              {committedEnd && deadline && committedEnd > deadline && (
-                <span
-                  className="detail-kv-val ew-hours-tone-over"
-                  data-testid="ticket-schedule-after-deadline"
-                >
-                  {t("schedule.committed_after_deadline", {
-                    count: daysAfter(deadline, committedEnd),
-                  })}
-                </span>
-              )}
+              <span className="muted small">
+                {t("schedule.meerwerk_plan_differs_hint")}
+              </span>
             </div>
           )}
         </div>
@@ -367,13 +382,13 @@ export function TicketScheduleCard({
     <CollapsibleCard
       title={t("schedule.card_title")}
       meta={
-        ticket.scheduled_start_day
-          ? ticket.scheduled_end_day
+        planStart
+          ? planEnd
             ? t("schedule.range", {
-                from: momentText(ticket.scheduled_start_day, ticket.scheduled_start_time),
-                to: momentText(ticket.scheduled_end_day, ticket.scheduled_end_time),
+                from: momentText(planStart, planStartTime),
+                to: momentText(planEnd, planEndTime),
               })
-            : momentText(ticket.scheduled_start_day, ticket.scheduled_start_time)
+            : momentText(planStart, planStartTime)
           : t("schedule.not_scheduled")
       }
       // #110 Part A — default COLLAPSED like the other right-column
@@ -395,30 +410,48 @@ export function TicketScheduleCard({
             </span>
             <span className="detail-kv-val" data-testid="ticket-schedule-date">
               <CalendarClock size={14} strokeWidth={2} />
-              {ticket.scheduled_start_day
-                ? momentText(ticket.scheduled_start_day, ticket.scheduled_start_time)
+              {planStart
+                ? momentText(planStart, planStartTime)
                 : t("schedule.not_scheduled")}
             </span>
           </div>
+          {/* P-5 S1.2 — where the window came from, when it is not the
+              ticket's own: the meerwerk plan. One plan, said once. */}
+          {fromMeerwerkPlan && planStart && (
+            <div className="detail-kv-row">
+              <span
+                className="muted small"
+                data-testid="ticket-schedule-source-meerwerk"
+              >
+                {t("schedule.source_meerwerk_plan")}
+              </span>
+            </div>
+          )}
           {/* P-3 §A.5 — the plan's last day is past the deadline: stated,
               in the same tone the after-deadline commitment uses. */}
-          {ticket.planned_after_deadline && (
+          {(ticket.planned_after_deadline ||
+            (deadline && planEnd && planEnd > deadline)) && (
             <div className="detail-kv-row">
               <span
                 className="detail-kv-val ew-hours-tone-over"
                 data-testid="ticket-schedule-planned-after-deadline"
               >
                 {t("facts.planned_after_deadline")}
+                {deadline && planEnd && planEnd > deadline
+                  ? ` — ${t("schedule.committed_after_deadline", {
+                      count: daysAfter(deadline, planEnd),
+                    })}`
+                  : ""}
               </span>
             </div>
           )}
-          {ticket.scheduled_end_at && (
+          {planEnd && (
             <div className="detail-kv-row">
               <span className="detail-kv-label">
                 {t("schedule.ends_label")}
               </span>
               <span className="detail-kv-val" data-testid="ticket-schedule-end">
-                {momentText(ticket.scheduled_end_day, ticket.scheduled_end_time)}
+                {momentText(planEnd, planEndTime)}
               </span>
             </div>
           )}
@@ -453,16 +486,18 @@ export function TicketScheduleCard({
               </span>
             </div>
           )}
-          {ticket.rescheduled_from && (
+          {ticket.rescheduled_from_day && (
             <div className="detail-kv-row">
               <span className="detail-kv-label">
                 {t("schedule.moved_from_label")}
               </span>
+              {/* P-5 S9.2 — the DAY, as the server states it (P-3 §A.3);
+                  the raw instant read as the wrong day east of Greenwich. */}
               <span
                 className="detail-kv-val"
                 data-testid="ticket-schedule-moved-from"
               >
-                {formatDate(ticket.rescheduled_from)}
+                {formatPlainDate(ticket.rescheduled_from_day)}
               </span>
             </div>
           )}

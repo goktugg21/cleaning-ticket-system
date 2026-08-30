@@ -26,6 +26,7 @@ a test that passes only in August is a test that fails in September.
 from __future__ import annotations
 
 import datetime
+from unittest import mock
 
 from django.utils import timezone
 from rest_framework import status
@@ -53,10 +54,28 @@ from test_utils import TenantFixtureMixin
 URL = "/api/tickets/work-plan/"
 
 
+def _recent_wednesday() -> datetime.date:
+    """P-5 S9.1 — a FROZEN "today", mid-week.
+
+    Every date here is relative to today, and two tests failed every
+    Sunday since P-3 found them: on the last day of the ISO week the
+    "this week / next week" arithmetic lands on the boundary the tests
+    do not model. Pinning the clock to the most recent Wednesday keeps
+    the dates recent (past-day rules stay true) and never on an edge.
+    """
+    real = timezone.localdate()
+    return real - datetime.timedelta(days=(real.weekday() - 2) % 7)
+
+
 class _Fixture(TenantFixtureMixin, APITestCase):
     def setUp(self):
         super().setUp()
-        self.today = timezone.localdate()
+        self.today = _recent_wednesday()
+        patcher = mock.patch(
+            "django.utils.timezone.localdate", return_value=self.today
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.worker = self.make_user("plantruth-worker@example.com", UserRole.STAFF)
         BuildingStaffVisibility.objects.create(
             user=self.worker, building=self.building

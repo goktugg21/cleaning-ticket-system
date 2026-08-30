@@ -438,6 +438,9 @@ class ContractSerializer(serializers.ModelSerializer):
             "start_proration",
             "building_ids",
             "buildings",
+            # P-5 S7 — connected facts (detail only; null on the list).
+            "visits",
+            "invoice_trail",
             "active_revision",
             "monthly_amount",
             "yearly_amount",
@@ -501,14 +504,90 @@ class ContractSerializer(serializers.ModelSerializer):
         return obj.kind
 
     def get_buildings(self, obj):
-        # `.all()` with NO further queryset methods on purpose: the view
-        # prefetches `building_links__building`, and any additional
-        # `.select_related()` / `.filter()` here would bypass that cache
-        # and re-query PER ROW. That is exactly the per-row cost
-        # `tests/test_query_counts.py` exists to catch.
+        # P-5 S7 — THE CONNECTED FACTS. A building on a contract is a
+        # link with one line of context: when a cost split exists on
+        # it, the split is carried ("billed to the building — split
+        # B Amsterdam 60% / Sirket Test 40%"). Read only on the detail
+        # (`connected` in the context): the list has no room for it and
+        # would pay a query per building.
+        connected = bool(self.context.get("connected"))
+        out = []
+        for link in obj.building_links.all():
+            row = {"id": link.building_id, "name": link.building.name}
+            if connected:
+                from buildings.models import BuildingCostShare
+
+                row["cost_shares"] = [
+                    {
+                        "customer_id": share.customer_id,
+                        "customer_name": share.customer.name,
+                        "share_pct": str(share.share_pct),
+                    }
+                    for share in BuildingCostShare.objects.filter(
+                        building_id=link.building_id
+                    )
+                    .select_related("customer")
+                    .order_by("-share_pct", "customer__name")
+                ]
+            out.append(row)
+        return out
+
+    # P-5 S7 — what the contract FEEDS: the visits its recurring jobs run
+    # (occurrence tickets, recent and next) and the invoices it produced.
+    visits = serializers.SerializerMethodField()
+    invoice_trail = serializers.SerializerMethodField()
+
+    def get_visits(self, obj):
+        if not self.context.get("connected"):
+            return None
+        from django.utils import timezone
+
+        from planned_work.models import PlannedOccurrence
+
+        today = timezone.localdate()
+        base = PlannedOccurrence.objects.filter(
+            recurring_job__contract_line__revision__contract_id=obj.id
+        ).select_related("recurring_job", "ticket")
+
+        def row(occ):
+            ticket = getattr(occ, "ticket", None)
+            return {
+                "id": occ.id,
+                "planned_date": occ.planned_date.isoformat(),
+                "status": occ.status,
+                "recurring_job_id": occ.recurring_job_id,
+                "recurring_job_title": occ.recurring_job.title,
+                "ticket_id": ticket.id if ticket else None,
+                "ticket_no": ticket.ticket_no if ticket else None,
+            }
+
+        recent = [
+            row(o)
+            for o in base.filter(planned_date__lte=today).order_by("-planned_date", "-id")[:3]
+        ]
+        upcoming = [
+            row(o)
+            for o in base.filter(planned_date__gt=today).order_by("planned_date", "id")[:3]
+        ]
+        return {"recent": recent, "next": upcoming, "total": base.count()}
+
+    def get_invoice_trail(self, obj):
+        if not self.context.get("connected"):
+            return None
+        rows = obj.generated_invoices.select_related("invoice").order_by(
+            "-invoice_date", "-id"
+        )[:5]
         return [
-            {"id": link.building_id, "name": link.building.name}
-            for link in obj.building_links.all()
+            {
+                "invoice_id": link.invoice_id,
+                "number": link.invoice.number,
+                "status": link.invoice.status,
+                "period_start": link.period_start.isoformat(),
+                "period_end": link.period_end.isoformat(),
+                "invoice_date": link.invoice_date.isoformat(),
+                "total_amount": str(link.invoice.total_amount),
+            }
+            for link in rows
         ]
 
     def get_active_revision(self, obj):

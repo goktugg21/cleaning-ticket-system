@@ -829,14 +829,15 @@ export function CreateExtraWorkPage() {
 
   const factValue = (key: FactKey): string => {
     if (key === "department") {
+      // P-5 S9.3 (§D.2 dash ban) — a fact not chosen is said in a word.
       return effectiveDepartment
         ? customerLabelName(effectiveDepartment.name, t)
-        : "—";
+        : t("create.fact_not_chosen");
     }
     if (key === "work_type") {
       return effectiveWorkType
         ? customerLabelName(effectiveWorkType.name, t)
-        : "—";
+        : t("create.fact_not_chosen");
     }
     return selectedBilledTo === "BUILDING"
       ? t("create.fact_billed_building", {

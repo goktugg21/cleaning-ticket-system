@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { AssignableStaff } from "../../api/admin";
 import type { TransitionRequirements } from "../../api/types";
+import { plannedDayIso } from "../../lib/isoWeek";
 
 /**
  * W13-FIX §1 — THE TRANSITION MODAL.
@@ -67,18 +68,19 @@ export interface TransitionAnswers {
 }
 
 /** W-FIX1 B2 (audit F24) — the prefilled start is never in the past:
- *  the plan's start when it is still ahead, otherwise TODAY at the
- *  plan's wall-clock time. Ticket 373 opened on "yesterday 00:00". */
-function prefillStartsAt(current: string, now: Date = new Date()): string {
+ *  the plan's day when it is still ahead, otherwise TODAY. Ticket 373
+ *  opened on "yesterday". P-5 S1.3 — a DAY, never a clock the operator
+ *  did not choose: the old `datetime-local` input stamped the moment of
+ *  the press onto the plan ("starts 10 Sep 04:14"). */
+function prefillStartDay(current: string, today: string = localToday()): string {
   if (!current) return "";
-  const planned = new Date(current);
-  if (Number.isNaN(planned.getTime())) return "";
-  if (planned.getTime() >= now.getTime()) return current;
+  return current >= today ? current : today;
+}
+
+function localToday(): string {
+  const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
-    `T${pad(planned.getHours())}:${pad(planned.getMinutes())}`
-  );
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
 /** W-LATE §3c — a part that is still open when a completion move is
@@ -109,9 +111,18 @@ export interface TicketTransitionModalProps {
    *  spawn hands its workers to the ticket) arrive through this list,
    *  which is why the modal never has to know they were carried. */
   currentAssignees: { id: number; label: string }[];
-  /** R2 — the date the ticket already carries, "YYYY-MM-DDTHH:mm" in
-   *  LOCAL time, ready for `<input type="datetime-local">`, or "". */
-  currentScheduledStartAt: string;
+  /** R2 / P-5 S1 — the DAY the job already carries ("YYYY-MM-DD" in
+   *  the server's zone, or ""): the ticket's own, else the meerwerk
+   *  plan's first work day — so "When does it start?" comes
+   *  pre-filled from the ONE plan instead of asking again. */
+  currentStartDay: string;
+  /** The clock a person chose ("HH:MM"), or "" for a day-only plan. */
+  currentStartTime: string;
+  /** Where the prefilled day came from; the field says so. */
+  startSource?: "ticket" | "meerwerk" | null;
+  /** P-5 S1.4 — i18next context: "meerwerk" on a meerwerk job, so the
+   *  sentences never say "ticket" there. */
+  kindContext?: string;
   busy: boolean;
   error?: string;
   onCancel: () => void;
@@ -129,6 +140,9 @@ export interface TicketTransitionModalProps {
    *  the deliberate on-behalf close belongs on the parts modal, where a
    *  reason is asked for (§10). */
   openParts?: OpenPart[];
+  /** P-5 S0 — the hours this step needs are entered somewhere else.
+   *  Pressing the pointer closes this modal and lands on them. */
+  onGoToActualHours?: () => void;
 }
 
 export function TicketTransitionModal({
@@ -140,13 +154,17 @@ export function TicketTransitionModal({
   staff,
   staffError = "",
   currentAssignees,
-  currentScheduledStartAt,
+  currentStartDay,
+  currentStartTime,
+  startSource = null,
+  kindContext,
   busy,
   error,
   onCancel,
   onConfirm,
   onUploadProof,
   openParts,
+  onGoToActualHours,
 }: TicketTransitionModalProps) {
   const { t } = useTranslation(["ticket_detail", "common"]);
 
@@ -164,9 +182,8 @@ export function TicketTransitionModal({
   // here, so every seeded id was one the server would refuse. The crew
   // is rendered above as settled fact instead.
   const [picked, setPicked] = useState<number[]>([]);
-  const [startsAt, setStartsAt] = useState(() =>
-    prefillStartsAt(currentScheduledStartAt),
-  );
+  const [startDay, setStartDay] = useState(() => prefillStartDay(currentStartDay));
+  const [startTime, setStartTime] = useState(currentStartTime);
   const [reason, setReason] = useState("");
   /** W-UX1 §4 — the two-press bypass: pressing it once reveals the
    *  reason, and only a reason arms the move. */
@@ -208,6 +225,10 @@ export function TicketTransitionModal({
    *  does not carry it yet. R3: it says so INLINE, here, the moment it
    *  is unmet, rather than being met as a 400 after the press. */
   const needsProof = unmet.includes("completion_evidence");
+  /** P-5 S0 — an hourly meerwerk line still has no actual hours. Not
+   *  answerable here: the hours live on the Money tab, so this says so
+   *  and points there. The machine refuses the move until they are in. */
+  const needsActualHours = unmet.includes("actual_hours");
 
   // Every unmet requirement must have an answer before the move is
   // offered. This is the "DOES NOT TRANSITION until it is answered"
@@ -219,12 +240,13 @@ export function TicketTransitionModal({
    *  date differs from the one the ticket already has. */
   const movingSchedule =
     showSchedule &&
-    currentScheduledStartAt !== "" &&
-    startsAt !== "" &&
-    startsAt !== currentScheduledStartAt;
+    currentStartDay !== "" &&
+    startDay !== "" &&
+    (startDay !== currentStartDay || startTime !== currentStartTime);
   const answered =
+    !needsActualHours &&
     (!needsAssignee || picked.length > 0 || currentAssignees.length > 0) &&
-    (!needsSchedule || startsAt !== "") &&
+    (!needsSchedule || startDay !== "") &&
     (!movingSchedule || note.trim() !== "") &&
     (!needsReason || reason.trim() !== "") &&
     // Proof is answered by writing the note this step asks for, or by
@@ -248,12 +270,11 @@ export function TicketTransitionModal({
       answers.override_reason = reason.trim();
       answers.is_override = true;
     }
-    if (showSchedule && startsAt !== "") {
-      // <input type="datetime-local"> has no zone; the browser's own
-      // offset is the operator's intent, so build the instant locally
-      // and send ISO. Sending the naive string would be read as UTC by
-      // DRF and silently shift the start by the offset.
-      answers.scheduled_start_at = new Date(startsAt).toISOString();
+    if (showSchedule && startDay !== "") {
+      // P-3 §A.3 / P-5 S1.3 — a NAIVE local datetime, read by the
+      // server in its own zone (`plannedDayIso`); midnight when no
+      // clock was chosen, which the detail renders as a day only.
+      answers.scheduled_start_at = plannedDayIso(startDay, startTime || undefined);
     }
     onConfirm(answers);
   }
@@ -289,6 +310,26 @@ export function TicketTransitionModal({
                 state line. The note field below IS the answer, so the
                 warning points at it rather than at a 400 the operator
                 would otherwise meet after pressing. */}
+            {needsActualHours && (
+              <div
+                className="transition-field"
+                data-testid="transition-field-actual-hours"
+              >
+                <p className="alert-notice" role="status">
+                  {t("transition.hours_required")}
+                </p>
+                {onGoToActualHours && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={onGoToActualHours}
+                    data-testid="transition-go-actual-hours"
+                  >
+                    {t("transition.hours_go")}
+                  </button>
+                )}
+              </div>
+            )}
             {needsProof && (
               <div
                 className="transition-field"
@@ -297,8 +338,10 @@ export function TicketTransitionModal({
                 {/* R3 — and it CLEARS LIVE. The warning is about a
                     missing thing, so the moment either kind of proof is
                     present it has nothing to say. */}
+                {/* P-5 S0 — a requirement, not a failure: calm notice
+                    styling. The red is for a refusal that happened. */}
                 {note.trim() === "" && !proofUploaded && (
-                  <p className="alert-error" role="status">
+                  <p className="alert-notice" role="status">
                     {t("transition.proof_required")}
                   </p>
                 )}
@@ -494,15 +537,31 @@ export function TicketTransitionModal({
                 <label className="field-label" htmlFor="transition-starts-at">
                   {t("transition.when_label")}
                 </label>
-                <p className="muted small">{t("transition.when_hint")}</p>
-                <input
-                  id="transition-starts-at"
-                  type="datetime-local"
-                  className="filter-control"
-                  value={startsAt}
-                  onChange={(event) => setStartsAt(event.target.value)}
-                  data-testid="transition-starts-at"
-                />
+                <p className="muted small">
+                  {startSource === "meerwerk" && startDay === currentStartDay
+                    ? t("transition.when_from_plan")
+                    : t("transition.when_hint", { context: kindContext })}
+                </p>
+                <div className="transition-when-row">
+                  <input
+                    id="transition-starts-at"
+                    type="date"
+                    className="filter-control"
+                    value={startDay}
+                    onChange={(event) => setStartDay(event.target.value)}
+                    data-testid="transition-starts-at"
+                  />
+                  <label className="muted small transition-when-time">
+                    {t("transition.when_time_label")}
+                    <input
+                      type="time"
+                      className="filter-control"
+                      value={startTime}
+                      onChange={(event) => setStartTime(event.target.value)}
+                      data-testid="transition-starts-time"
+                    />
+                  </label>
+                </div>
               </div>
             )}
 
@@ -521,7 +580,9 @@ export function TicketTransitionModal({
                     a step the workflow offers" is the whole reason the
                     field is here and the operator cannot see the
                     transition table. */}
-                <p className="muted small">{t("transition.reason_hint")}</p>
+                <p className="muted small">
+                  {t("transition.reason_hint", { context: kindContext })}
+                </p>
                 <textarea
                   id="transition-override-reason"
                   className="filter-control"

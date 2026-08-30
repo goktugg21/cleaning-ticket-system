@@ -224,8 +224,12 @@ export function CustomerOverviewPage() {
 
   // A `null` count means the module is not readable by this operator —
   // render an em dash, never a zero. See `CustomerSummary` in types.ts.
+  // P-5 S4.4 (§D.2 dash ban) — a count the summary could not give is
+  // said in a word, never drawn as a dash.
   const chipValue = (value: number | null | undefined) =>
-    value === null || value === undefined ? "—" : value;
+    value === null || value === undefined
+      ? t("customer_view.overview.count_unavailable")
+      : value;
 
   // Sprint 154 §A — the six (now seven) destinations, ONCE. Driven off
   // one array so a chip cannot exist with a count but no description, or

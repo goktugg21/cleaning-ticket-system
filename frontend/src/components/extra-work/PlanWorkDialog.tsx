@@ -134,9 +134,19 @@ function splitKey(key: string): { userId: number; day: string; hourType: number 
 }
 
 /** Which fields the dialog can point an error at. */
-type FieldKey = "start" | "end" | "people" | "hours" | "move" | "past" | "budget";
+type FieldKey = "start" | "end" | "people" | "manager" | "hours" | "move" | "past" | "budget";
 
-const FIELD_ORDER: FieldKey[] = ["start", "end", "move", "people", "hours", "past", "budget"];
+const FIELD_ORDER: FieldKey[] = ["start", "end", "move", "people", "manager", "hours", "past", "budget"];
+
+/** P-5 S2.4 — the parts of the plan a "this is missing" pointer can
+ *  land on, and the sentence each one says when it does. */
+export type PlanFocus = "start" | "people" | "manager" | "hours";
+const FOCUS_NEEDS: Record<PlanFocus, string> = {
+  start: "plan_gate.missing_start_date",
+  people: "plan_gate.missing_staff",
+  manager: "plan_gate.missing_manager",
+  hours: "plan_gate.missing_hours",
+};
 
 /** Scroll the first field that has an error into view. Looks the field
  *  up by its `data-plan-field` attribute inside the open dialog. */
@@ -170,6 +180,7 @@ export function PlanWorkDialog({
   onRemovePerson,
   removeBusy = false,
   postSpawn = false,
+  initialFocus = null,
 }: {
   ew: ExtraWorkRequestDetail;
   assignments: ExtraWorkAssignment[];
@@ -198,6 +209,9 @@ export function PlanWorkDialog({
    *  submit says "Save the plan" because starting is the ticket's
    *  business now. */
   postSpawn?: boolean;
+  /** P-5 S2.4 — open scrolled to and highlighting this missing part,
+   *  which says what it needs. The missing-piece pointer pattern. */
+  initialFocus?: PlanFocus | null;
 }) {
   const { t, i18n } = useTranslation(["extra_work", "common"]);
   const locale = i18n.language || "nl";
@@ -211,6 +225,47 @@ export function PlanWorkDialog({
   }, [onCancel, busy]);
 
   // ---- stage 1: when ---------------------------------------------------
+  // P-5 S2.4 — land on the missing part once, after the first paint.
+  useEffect(() => {
+    if (!initialFocus) return;
+    const el = document.querySelector<HTMLElement>(
+      `[data-testid="extra-work-plan-dialog"] [data-plan-field="${initialFocus}"]`,
+    );
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.add("piece-highlight");
+    const timer = window.setTimeout(() => el.classList.remove("piece-highlight"), 4000);
+    return () => window.clearTimeout(timer);
+  }, [initialFocus]);
+  const focusNotice = (key: PlanFocus) =>
+    initialFocus === key ? (
+      <p className="alert-notice" role="status" data-testid={`extra-work-plan-needs-${key}`}>
+        {t("plan.piece_needed", { what: t(FOCUS_NEEDS[key]) })}
+      </p>
+    ) : null;
+  // P-5 S2.3 — an hours box COMMITS on blur / Enter: the value is
+  // normalised and the totals flash "counted" for a moment, so the
+  // operator sees the number land instead of wondering whether it did.
+  const [committedAt, setCommittedAt] = useState(0);
+  useEffect(() => {
+    if (!committedAt) return;
+    const timer = window.setTimeout(() => setCommittedAt(0), 900);
+    return () => window.clearTimeout(timer);
+  }, [committedAt]);
+  const commitHours = (key: string) => {
+    setHours((prev) => {
+      const raw = (prev[key] ?? "").trim().replace(",", ".");
+      if (raw === "") return prev;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) return prev;
+      const normalised = String(Math.round(n * 100) / 100);
+      return normalised === prev[key] ? prev : { ...prev, [key]: normalised };
+    });
+    // A counter, not `Date.now()`: the value only has to CHANGE to
+    // re-arm the flash, and a pure updater keeps the render pure.
+    setCommittedAt((tick) => tick + 1);
+  };
+  const committedClass = committedAt ? " is-committed" : "";
   const seededStart = ew.provider_planned_date ?? "";
   const [start, setStart] = useState(seededStart);
   const [end, setEnd] = useState(ew.provider_planned_end_date ?? "");
@@ -286,6 +341,9 @@ export function PlanWorkDialog({
 
   const workers = assignments.filter((a) => a.role !== "MANAGER");
   const managers = assignments.filter((a) => a.role === "MANAGER");
+  // P-5 S2.2 — managers plan hours too (they did before the rebuild;
+  // the server stores their rows like anyone's). Workers first.
+  const crew = useMemo(() => [...workers, ...managers], [workers, managers]);
   const personName = (a: ExtraWorkAssignment) => a.user_full_name || a.user_email;
 
   const linesFor = (userId: number): CrewLine[] => {
@@ -378,7 +436,7 @@ export function PlanWorkDialog({
   // ---- moving the plan --------------------------------------------------
   const [moveBaseline, setMoveBaseline] = useState(seededStart);
   const [moveDecision, setMoveDecision] = useState<"moved" | "kept" | null>(null);
-  const crewIds = useMemo(() => new Set(workers.map((a) => a.user_id)), [workers]);
+  const crewIds = useMemo(() => new Set(crew.map((a) => a.user_id)), [crew]);
   const datedKeys = useMemo(
     () =>
       Object.keys(hours).filter((key) => {
@@ -749,6 +807,7 @@ export function PlanWorkDialog({
             <div className="ew-plan-crew" data-testid="extra-work-plan-crew">
               <div className="ew-plan-crew-group" data-testid="extra-work-plan-people" {...bind("people")}>
                 <span className="field-label">{t("plan.people_label")}</span>
+                {focusNotice("people")}
                 <div className="ew-plan-manager-row">
                   {workers.map((a) => (
                     <span
@@ -795,8 +854,9 @@ export function PlanWorkDialog({
                 />
               </div>
 
-              <div className="ew-plan-crew-group" data-testid="extra-work-plan-manager">
+              <div className="ew-plan-crew-group" data-testid="extra-work-plan-manager" {...bind("manager")}>
                 <span className="field-label">{t("plan.manager_label")}</span>
+                {focusNotice("manager")}
                 <div className="ew-plan-manager-row">
                   {managers.map((a) => (
                     <span
@@ -846,7 +906,7 @@ export function PlanWorkDialog({
               <div className="loading-bar">
                 <div className="loading-bar-fill" />
               </div>
-            ) : workers.length === 0 ? (
+            ) : crew.length === 0 ? (
               <div className="ew-plan-empty" data-testid="extra-work-plan-no-crew">
                 <Users size={18} aria-hidden="true" />
                 <div>
@@ -924,7 +984,8 @@ export function PlanWorkDialog({
                   </div>
                 )}
 
-                {workers.map((a) => {
+                {focusNotice("hours")}
+                {crew.map((a) => {
                   const lines = linesFor(a.user_id);
                   const used = new Set(lines.map((l) => l.hourType).filter((id): id is number => id !== null));
                   const addable = hourTypes.filter((h) => !used.has(h.id));
@@ -938,10 +999,41 @@ export function PlanWorkDialog({
                       data-user-id={a.user_id}
                     >
                       <div className="ew-plan-person-head">
-                        <strong>{personName(a)}</strong>
-                        <span className="ew-plan-person-total" data-testid="extra-work-plan-row-total">
+                        <strong>
+                          {personName(a)}
+                          {a.role === "MANAGER" && (
+                            <span className="ew-plan-person-tag">{t("plan.manager_tag")}</span>
+                          )}
+                        </strong>
+                        <span
+                          className={`ew-plan-person-total${committedClass}`}
+                          data-testid="extra-work-plan-row-total"
+                        >
                           {t("plan.person_total", { hours: fmtHours(personTotal(a.user_id)) })}
+                          {committedAt > 0 && (
+                            <span className="ew-plan-committed-word">{t("plan.hours_committed")}</span>
+                          )}
                         </span>
+                        {/* P-5 S2.1 — removable AFTER add, from the row itself. */}
+                        {(a.role === "MANAGER" ? onRemoveManager : onRemovePerson) && (
+                          <button
+                            type="button"
+                            className="ew-plan-type-remove"
+                            disabled={removeBusy || assignBusy || managerBusy}
+                            onClick={() =>
+                              a.role === "MANAGER"
+                                ? onRemoveManager?.(a.user_id)
+                                : onRemovePerson?.(a.user_id)
+                            }
+                            aria-label={t(
+                              a.role === "MANAGER" ? "plan.manager_remove" : "plan.person_remove",
+                              { name: personName(a) },
+                            )}
+                            data-testid="extra-work-plan-row-remove"
+                          >
+                            <X size={12} aria-hidden="true" />
+                          </button>
+                        )}
                       </div>
 
                       {days.length === 0 ? (
@@ -1022,6 +1114,13 @@ export function PlanWorkDialog({
                                     className="field-input ew-plan-crew-hours"
                                     value={hours[key] ?? ""}
                                     onChange={(e) => setHours((prev) => ({ ...prev, [key]: e.target.value }))}
+                                    onBlur={() => commitHours(key)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.preventDefault();
+                                        commitHours(key);
+                                      }
+                                    }}
                                     aria-label={`${t("plan.hours_for", { name: personName(a) })} ${hourTypeName(line.hourType)} ${dayChipLabel(day)}`}
                                     data-testid="extra-work-plan-crew-hours"
                                     data-day={day}
@@ -1044,6 +1143,13 @@ export function PlanWorkDialog({
                               onChange={(e) =>
                                 setHours((prev) => ({ ...prev, [cellKey(a.user_id, "", line.hourType)]: e.target.value }))
                               }
+                              onBlur={() => commitHours(cellKey(a.user_id, "", line.hourType))}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  commitHours(cellKey(a.user_id, "", line.hourType));
+                                }
+                              }}
                               aria-label={`${t("plan.hours_for", { name: personName(a) })} ${hourTypeName(line.hourType)} ${t("plan.no_day_yet")}`}
                               data-testid="extra-work-plan-crew-hours"
                               data-day=""
@@ -1107,7 +1213,7 @@ export function PlanWorkDialog({
 
                 <div className="ew-plan-total" data-testid="extra-work-plan-total-line">
                   <span>{t("plan.grand_total_label")}</span>
-                  <strong data-testid="extra-work-plan-total">
+                  <strong data-testid="extra-work-plan-total" className={committedClass.trim()}>
                     {t("plan.hours_value", { hours: fmtHours(distributed) })}
                   </strong>
                 </div>

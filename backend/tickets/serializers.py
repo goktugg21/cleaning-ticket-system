@@ -43,6 +43,7 @@ from .serializers_ticket_categories import reader_language
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
 from .transition_requirements import (
     ERR_TRANSITION_REQUIREMENTS,
+    phrase_for,
     unmet as transition_unmet,
 )
 
@@ -514,6 +515,7 @@ class TicketListSerializer(
             "sla_remaining_business_seconds",
             "sla_display_state",
             "extra_work_origin",
+            "occurrence_origin",
             # Sprint 9B — scheduling fields on the list serializer too so
             # the agenda view can render them without a detail fetch.
             "scheduled_start_at",
@@ -542,6 +544,59 @@ class TicketListSerializer(
 
     def get_extra_work_origin(self, obj):
         return resolve_extra_work_origin_core(obj)
+
+    # P-5 S7 — THE OTHER ORIGIN: an occurrence ticket says which recurring
+    # job (and, through its contract line, which contract) it is a visit
+    # of, and which visit of this year's it is.
+    occurrence_origin = serializers.SerializerMethodField()
+
+    def get_occurrence_origin(self, obj):
+        occurrence_id = getattr(obj, "planned_occurrence_id", None)
+        if occurrence_id is None:
+            return None
+        from planned_work.models import PlannedOccurrence
+
+        occ = (
+            PlannedOccurrence.objects.select_related(
+                "recurring_job",
+                "recurring_job__contract_line",
+                "recurring_job__contract_line__revision",
+                "recurring_job__contract_line__revision__contract",
+                "recurring_job__contract_line__revision__contract__contract_type",
+            )
+            .filter(pk=occurrence_id)
+            .first()
+        )
+        if occ is None:
+            return None
+        job = occ.recurring_job
+        year = occ.planned_date.year
+        siblings = PlannedOccurrence.objects.filter(
+            recurring_job_id=job.id, planned_date__year=year
+        ).exclude(status__in=["CANCELLED", "SKIPPED"])
+        visit_index = siblings.filter(planned_date__lt=occ.planned_date).count() + (
+            siblings.filter(planned_date=occ.planned_date, id__lte=occ.id).count()
+        )
+        line = job.contract_line
+        contract = line.revision.contract if line is not None else None
+        return {
+            "occurrence_id": occ.id,
+            "planned_date": occ.planned_date.isoformat(),
+            "status": occ.status,
+            "recurring_job_id": job.id,
+            "recurring_job_title": job.title,
+            "frequency": job.frequency,
+            "visit_index": visit_index,
+            "visits_this_year": siblings.count(),
+            "contract_id": contract.id if contract else None,
+            "contract_no": contract.contract_no if contract else None,
+            "contract_type_name": (
+                contract.contract_type.name
+                if contract is not None and contract.contract_type_id
+                else None
+            ),
+            "contract_line_name": line.name if line is not None else None,
+        }
 
 
 # Sprint 4 — sub-task serializers.
@@ -813,6 +868,35 @@ class TicketDetailSerializer(
     def get_settled_days_after_due(self, obj):
         return self._due_facts(obj)["settled_days_after_due"]
 
+    # P-5 S1 — ONE PLAN, ONE DATE. The job's own window as
+    # `tickets/job_dates.job_window` resolves it: the ticket's own
+    # schedule when a person set one, else the meerwerk's committed
+    # window, else the customer's wish (`plan_source` says which). The
+    # page used to read only `scheduled_start_day` and so a meerwerk
+    # planned on the extra work looked unplanned on the ticket and asked
+    # the operator to plan AGAIN (TCK-2026-000385).
+    job_start_day = serializers.SerializerMethodField()
+    job_end_day = serializers.SerializerMethodField()
+
+    def get_job_start_day(self, obj):
+        from .job_dates import job_window
+
+        start, _end = job_window(obj)
+        return start.isoformat() if start else None
+
+    def get_job_end_day(self, obj):
+        from .job_dates import job_window
+
+        _start, end = job_window(obj)
+        return end.isoformat() if end else None
+
+    # P-5 S9.2 — the day a plan was moved FROM, decided by the server in
+    # its own zone (P-3 §A.3): the card printed the raw instant.
+    rescheduled_from_day = serializers.SerializerMethodField()
+
+    def get_rescheduled_from_day(self, obj):
+        return self._day(getattr(obj, "rescheduled_from", None))
+
     # P-3 §A.5 — a real plan whose last day is past the deadline; the
     # detail states it ("Gepland na de deadline"), the dialog warns.
     planned_after_deadline = serializers.SerializerMethodField()
@@ -982,6 +1066,7 @@ class TicketDetailSerializer(
             "sla_remaining_business_seconds",
             "sla_display_state",
             "extra_work_origin",
+            "occurrence_origin",
             # Sprint 9B — operational scheduling (read-only here; mutated
             # via the dedicated POST/DELETE schedule endpoint). These are
             # operational (no amounts), safe for every role that already
@@ -993,6 +1078,10 @@ class TicketDetailSerializer(
             "scheduled_end_time",
             "scheduled_start_day",
             "scheduled_end_day",
+            # P-5 S1 — the job's resolved window (own plan, else meerwerk).
+            "job_start_day",
+            "job_end_day",
+            "rescheduled_from_day",
             # P-3 §A.5 — the plan's last day is past the deadline.
             "planned_after_deadline",
             "time_window_label",
@@ -1057,6 +1146,7 @@ class TicketDetailSerializer(
         if getattr(viewer, "role", None) == UserRole.CUSTOMER_USER:
             data["reschedule_reason"] = ""
             data["rescheduled_from"] = None
+            data["rescheduled_from_day"] = None
             data["schedule_planned_by_name"] = None
             data["schedule_planned_at"] = None
             # P-1 — same gate: which employee planned it is internal.
@@ -2443,9 +2533,19 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                     note=self.validated_data.get("note", ""),
                 )
                 if missing:
-                    raise TransitionError(
-                        "This step still needs: " + ", ".join(missing) + ".",
-                        code=ERR_TRANSITION_REQUIREMENTS,
+                    # P-5 S0 — THE ERROR-BODY LAW. The refusal names
+                    # what is missing in words (`detail`), carries the
+                    # stable code, AND lists the keys (`unmet`) so the
+                    # page can put each one at its field in its own
+                    # language instead of showing "not accepted".
+                    raise serializers.ValidationError(
+                        {
+                            "detail": "This step still needs "
+                            + ", ".join(phrase_for(key) for key in missing)
+                            + ".",
+                            "code": ERR_TRANSITION_REQUIREMENTS,
+                            "unmet": list(missing),
+                        }
                     )
 
                 # W-PLANTRUTH §3b — PROCEEDING CLOSES THE OPEN PARTS.

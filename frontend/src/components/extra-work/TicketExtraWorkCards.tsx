@@ -55,6 +55,8 @@ import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
 import { StatusBadge } from "../StatusBadge";
 import { useToast } from "../ToastProvider";
 import { ActualHoursPanel } from "./ActualHoursPanel";
+import { useMissingPieceAnchor } from "../../lib/missingPiece";
+import { useCurrentTicketKind } from "../../lib/currentTicketKind";
 import {
   actualHoursPanelKey,
   deriveActiveHourlyLines,
@@ -100,6 +102,9 @@ export function TicketExtraWorkCards({
   onChanged?: () => void;
 }) {
   const { t } = useTranslation(["ticket_detail", "extra_work"]);
+  // P-5 S1.4 — meerwerk words on a meerwerk job.
+  const currentKind = useCurrentTicketKind();
+  const kindContext = currentKind?.kind === "MEERWERK" ? "meerwerk" : undefined;
   const { push: pushToast } = useToast();
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
   /* W-FIX1 C3 (audit F33) — a refused or failed read is a line, not a
@@ -133,6 +138,8 @@ export function TicketExtraWorkCards({
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelBusy, setCancelBusy] = useState(false);
+  // P-5 S0/S2.4 — where "enter the hours" lands.
+  const actualHoursAnchor = useMissingPieceAnchor("actual-hours");
   const [cancelError, setCancelError] = useState("");
 
   useEffect(() => {
@@ -190,7 +197,7 @@ export function TicketExtraWorkCards({
   if (!ew) {
     return ewLoadError ? (
       <p className="form-error" data-testid="ticket-extra-work-money-error">
-        {t("ew_money_unavailable")} {ewLoadError}
+        {t("ew_money_unavailable", { context: kindContext })} {ewLoadError}
       </p>
     ) : null;
   }
@@ -388,7 +395,10 @@ export function TicketExtraWorkCards({
       setEw(updated);
       setCancelOpen(false);
       setCancelReason("");
-      pushToast({ variant: "success", title: t("ew_cancel_done") });
+      pushToast({
+        variant: "success",
+        title: t("ew_cancel_done", { context: kindContext }),
+      });
       onChanged?.();
     } catch (err) {
       setCancelError(getApiError(err));
@@ -399,7 +409,11 @@ export function TicketExtraWorkCards({
 
   return (
     <>
-    <div className="card" data-testid="ticket-extra-work-money">
+    <div
+      className="card"
+      data-testid="ticket-extra-work-money"
+      ref={actualHoursAnchor}
+    >
       <div className="form-section">
         <div className="form-section-title">{t("ew_card_title")}</div>
         {activeHourlyLines.length > 0 && (

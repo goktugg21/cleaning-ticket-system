@@ -297,6 +297,8 @@ class ContractDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
+        # P-5 S7 — the detail carries the connected facts.
+        context["connected"] = True
         obj = getattr(self, "_contract", None)
         if obj is not None:
             context.update(contract_list_context([obj], self.request))

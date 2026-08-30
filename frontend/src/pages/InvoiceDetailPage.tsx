@@ -567,6 +567,28 @@ export function InvoiceDetailPage() {
             {invoice.building_name ?? t("invoice_detail.all_buildings")}
           </div>
         </div>
+        {/* P-5 S7 — the contract this invoice was generated for, as a
+            link with its period. */}
+        {invoice.contract && (
+          <div className="detail-field-row" data-testid="invoice-contract-row">
+            <div className="detail-field-label">
+              {t("invoice_detail.field_contract")}
+            </div>
+            <div className="detail-field-value">
+              <Link to={`/admin/customers/${invoice.customer}/contracts/${invoice.contract.id}`}>
+                {invoice.contract.contract_type_name
+                  ? `${invoice.contract.contract_type_name} · ${invoice.contract.contract_no}`
+                  : invoice.contract.contract_no}
+              </Link>{" "}
+              <span className="muted small">
+                {t("invoice_detail.contract_period", {
+                  from: formatDate(`${invoice.contract.period_start}T00:00:00`),
+                  to: formatDate(`${invoice.contract.period_end}T00:00:00`),
+                })}
+              </span>
+            </div>
+          </div>
+        )}
         {/* Sprint 132 — only for an invoice generated at PER_BUILDING_
             DEPARTMENT_WORK_TYPE granularity; the row is omitted entirely
             (not shown with a dash) for every other invoice, the same way
@@ -838,7 +860,26 @@ export function InvoiceDetailPage() {
                   </tr>
                 ) : (
                   <tr key={line.id} data-testid="invoice-line-row">
-                    <td>{line.description || "—"}</td>
+                    <td>
+                      {line.description || t("invoice_detail.line_no_description")}
+                      {/* P-5 S7 — the meerwerk and the building that
+                          produced this amount, as links. */}
+                      {line.extra_work !== null && (
+                        <div className="muted small" data-testid="invoice-line-source">
+                          <Link to={`/extra-work/${line.extra_work}`}>
+                            {t("invoice_detail.line_source_ew")}
+                          </Link>
+                          {line.building && line.building_name ? (
+                            <>
+                              {" · "}
+                              <Link to={`/admin/buildings/${line.building}`}>
+                                {line.building_name}
+                              </Link>
+                            </>
+                          ) : null}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ textAlign: "right" }}>{line.quantity}</td>
                     <td style={{ textAlign: "right" }}>
                       {formatMoney(line.unit_price)}

@@ -324,3 +324,28 @@
 .ew-plan-dialog--guided .ew-plan-budget {
   max-width: 280px;
 }
+
+/* P-5 S2.3 — an hours box commits on blur/Enter and the totals say so. */
+.ew-plan-person-total.is-committed,
+.ew-plan-total strong.is-committed {
+  animation: ew-plan-commit 0.9s ease;
+}
+.ew-plan-committed-word {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 600;
+}
+@keyframes ew-plan-commit {
+  0% { background: var(--green-faint); }
+  100% { background: transparent; }
+}
+/* P-5 S2.1 — the remove-X on a person's hours row. */
+.ew-plan-person-head .ew-plan-type-remove {
+  margin-left: auto;
+}
+.ew-plan-person-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 6px;
+}

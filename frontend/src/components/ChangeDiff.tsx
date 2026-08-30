@@ -87,8 +87,10 @@ interface ValueCellProps {
 }
 
 function ValueCell({ field, value, valueLabel }: ValueCellProps) {
+  const { t } = useTranslation("common");
+  // P-5 S6.4 (§D.2 dash ban) — an empty side says so in a word.
   if (value === undefined || value === null || value === "") {
-    return <span className="change-diff-empty">—</span>;
+    return <span className="change-diff-empty">{t("change_diff.empty")}</span>;
   }
 
   if (valueLabel) {
@@ -112,7 +114,7 @@ function ValueCell({ field, value, valueLabel }: ValueCellProps) {
 
   if (Array.isArray(value)) {
     if (value.length === 0) {
-      return <span className="change-diff-empty">—</span>;
+      return <span className="change-diff-empty">{t("change_diff.empty")}</span>;
     }
     if (value.every(isPrimitive)) {
       return <span>{value.map((v) => String(v)).join(", ")}</span>;

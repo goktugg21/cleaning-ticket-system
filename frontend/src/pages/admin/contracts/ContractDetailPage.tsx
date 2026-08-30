@@ -85,6 +85,8 @@ const TABS: Tab[] = ["general", "projects", "planning", "billing", "revisions"];
  * feature. If lines could be edited in place, last month's invoice
  * total would silently change when this month's price did.
  */
+const todayIso = new Date().toISOString().slice(0, 10);
+
 export function ContractDetailPage() {
   const { contractId } = useParams<{ contractId: string }>();
   const id = Number(contractId);
@@ -483,10 +485,34 @@ export function ContractDetailPage() {
                   >
                     <ul className="contract-plain-list">
                       {contract.buildings.map((building) => (
-                        <li key={building.id}>
+                        <li key={building.id} data-testid="contract-location-row">
                           <Link to={`/admin/buildings/${building.id}`}>
                             {building.name}
                           </Link>
+                          {/* P-5 S7 — the connected fact: how this
+                              building's bills are divided, linking to
+                              the split itself. */}
+                          <span className="muted small contract-connected-line">
+                            {building.cost_shares && building.cost_shares.length > 0 ? (
+                              <>
+                                {t("connections.billed_split", {
+                                  shares: building.cost_shares
+                                    .map((s) => `${s.customer_name} ${Number(s.share_pct)}%`)
+                                    .join(" / "),
+                                })}{" "}
+                                <Link
+                                  to={`/admin/buildings/${building.id}?piece=cost-share`}
+                                  data-testid="contract-location-split-link"
+                                >
+                                  {t("connections.open_split")}
+                                </Link>
+                              </>
+                            ) : (
+                              t("connections.billed_whole", {
+                                customer: contract.customer_name ?? "",
+                              })
+                            )}
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -716,6 +742,89 @@ export function ContractDetailPage() {
       {/* W23 — the year×week planning grid. Absent (not empty) on a
           register: the tab itself is filtered out above. A name and
           the grid; editing lives on the recurring job's calendar. */}
+      {tab === "general" && contract && (contract.visits || contract.invoice_trail) && (
+        <section className="card card-detail-pad" data-testid="contract-connections">
+          <header className="section-head">
+            <span className="section-head-title">{t("connections.title")}</span>
+          </header>
+          <p className="muted small" data-testid="contract-connections-intro">
+            {t("connections.intro")}
+          </p>
+          <div className="contract-connections-grid">
+            <div data-testid="contract-visits">
+              <div className="field-label">{t("connections.visits_title")}</div>
+              {contract.visits && contract.visits.total > 0 ? (
+                <ul className="contract-plain-list">
+                  {[...contract.visits.recent, ...contract.visits.next].map((visit) => (
+                    <li key={visit.id} data-testid="contract-visit-row">
+                      {visit.ticket_id ? (
+                        <Link to={`/tickets/${visit.ticket_id}`}>
+                          {visit.ticket_no ?? visit.recurring_job_title}
+                        </Link>
+                      ) : (
+                        <Link to={`/planned-work/${visit.recurring_job_id}`}>
+                          {visit.recurring_job_title}
+                        </Link>
+                      )}
+                      <span className="muted small contract-connected-line">
+                        {t(
+                          visit.planned_date > todayIso
+                            ? "connections.visit_next"
+                            : "connections.visit_recent",
+                          {
+                            date: formatDate(`${visit.planned_date}T00:00:00`, locale),
+                            job: visit.recurring_job_title,
+                          },
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                  {contract.visits.total >
+                    contract.visits.recent.length + contract.visits.next.length && (
+                    <li className="muted small">
+                      {t("connections.visits_more", {
+                        count:
+                          contract.visits.total -
+                          contract.visits.recent.length -
+                          contract.visits.next.length,
+                      })}
+                    </li>
+                  )}
+                </ul>
+              ) : (
+                <p className="muted small" data-testid="contract-visits-empty">
+                  {t("connections.visits_empty")}
+                </p>
+              )}
+            </div>
+            <div data-testid="contract-invoice-trail">
+              <div className="field-label">{t("connections.invoices_title")}</div>
+              {contract.invoice_trail && contract.invoice_trail.length > 0 ? (
+                <ul className="contract-plain-list">
+                  {contract.invoice_trail.map((row) => (
+                    <li key={row.invoice_id} data-testid="contract-invoice-row">
+                      <Link to={`/invoices/${row.invoice_id}`}>
+                        {row.number ?? t("connections.invoice_concept")}
+                      </Link>
+                      <span className="muted small contract-connected-line">
+                        {t("connections.invoice_line", {
+                          from: formatDate(`${row.period_start}T00:00:00`, locale),
+                          to: formatDate(`${row.period_end}T00:00:00`, locale),
+                          amount: formatMoney(row.total_amount, locale),
+                        })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted small" data-testid="contract-invoice-trail-empty">
+                  {t("connections.invoices_empty")}
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
       {tab === "planning" && contract && !isRegister && (
         <section className="card card-detail-pad" data-testid="contract-planning">
           <header className="section-head">

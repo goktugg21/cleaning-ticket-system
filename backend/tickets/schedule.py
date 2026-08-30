@@ -121,6 +121,11 @@ def set_schedule(
                 scheduled_end_at=scheduled_end_at,
                 time_window_label=time_window_label or "",
             )
+        mirror_window_onto_extra_work(
+            ticket,
+            scheduled_start_at=scheduled_start_at,
+            scheduled_end_at=scheduled_end_at,
+        )
 
         note = compose_schedule_note(
             action=history_action,
@@ -145,6 +150,64 @@ def set_schedule(
             override_reason="",
         )
     return history_action
+
+
+def mirror_window_onto_extra_work(
+    ticket,
+    *,
+    scheduled_start_at: datetime.datetime,
+    scheduled_end_at: datetime.datetime | None,
+) -> bool:
+    """P-5 S1 — ONE PLAN, ONE DATE: the ticket's window IS the
+    meerwerk's committed window, seen from the other end.
+
+    `extra_work/dates.py` already pushes `provider_planned_date` onto
+    the spawned tickets (Sprint 184 §1). This is the missing half: a
+    start set on the TICKET — the transition modal's "When does it
+    start?", the schedule card, the board's reschedule — lands on the
+    meerwerk too, so the plan tab never shows a ticket start beside a
+    different "committed" window (TCK-2026-000385: 10 Sep on the ticket,
+    11–25 Oct on the meerwerk, one job).
+
+    The days are the LOCAL calendar days of the instants. The end: the
+    ticket's end when it has one; else the meerwerk's own end when it
+    still lies after the new start (the plan modal keeps a last work
+    day the operator chose — P-4 (2)); else none. Only the two window
+    fields are written, straight onto the row: the ticket's own history
+    row already records who moved what, and the meerwerk's tracked
+    fields are audited by `audit.signals`. Never pushed back onto the
+    other spawned tickets — this door moves ONE job.
+
+    Returns True when the meerwerk changed.
+    """
+    extra_work = getattr(ticket, "extra_work_request", None)
+    if extra_work is None:
+        return False
+    from django.utils import timezone
+
+    start_day = timezone.localtime(scheduled_start_at).date()
+    if scheduled_end_at is not None:
+        end_day = timezone.localtime(scheduled_end_at).date()
+    else:
+        kept = extra_work.provider_planned_end_date
+        end_day = kept if kept is not None and kept > start_day else None
+    if end_day is not None and end_day <= start_day:
+        end_day = None
+    if (
+        extra_work.provider_planned_date == start_day
+        and extra_work.provider_planned_end_date == end_day
+    ):
+        return False
+    extra_work.provider_planned_date = start_day
+    extra_work.provider_planned_end_date = end_day
+    extra_work.save(
+        update_fields=[
+            "provider_planned_date",
+            "provider_planned_end_date",
+            "updated_at",
+        ]
+    )
+    return True
 
 
 def move_pending_slots(

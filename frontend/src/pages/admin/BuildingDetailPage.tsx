@@ -37,6 +37,8 @@ import { PageHeader } from "../../components/PageHeader";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 import { BuildingCostShareCard } from "./building/BuildingCostShareCard";
+import { formatMoney } from "../../lib/intl";
+import { pointAtMissingPiece } from "../../lib/missingPiece";
 import { BuildingRelationCard } from "./building/BuildingRelationCard";
 
 /**
@@ -148,6 +150,10 @@ export function BuildingDetailPage() {
       .then(async ([buildingData, membersResponse]) => {
         if (cancelled) return;
         setBuilding(buildingData);
+        // P-5 S7 — a link that names a part of this page ("?piece=
+        // cost-share") lands on it, lit, the missing-piece way.
+        const piece = new URLSearchParams(window.location.search).get("piece");
+        if (piece) pointAtMissingPiece(piece);
         setMembers(membersResponse.results);
         // Tier 2: resolve the FK company name. BuildingAdmin only
         // carries the company id; defensive .catch so an admin who
@@ -613,8 +619,54 @@ export function BuildingDetailPage() {
               building and it decides money. The customers offered are
               the ones linked below: the server accepts a share only for
               a customer that operates here. */}
+          {/* P-5 S7 — THE CONNECTED FACTS: the contracts covering this
+              building, each a link with one line of context. */}
+          {building.contracts && (
+            <section
+              className="card card-detail-pad"
+              style={{ marginBottom: 16 }}
+              data-testid="building-contracts-card"
+            >
+              <div className="section-head" style={{ marginBottom: 8 }}>
+                <div>
+                  <div className="section-head-title">{t("building_connections.title")}</div>
+                  <div className="section-head-sub">{t("building_connections.intro")}</div>
+                </div>
+              </div>
+              {building.contracts.length === 0 ? (
+                <p className="muted small" data-testid="building-contracts-empty">
+                  {t("building_connections.empty")}
+                </p>
+              ) : (
+                <ul className="contract-plain-list">
+                  {building.contracts.map((contract) => (
+                    <li key={contract.id} data-testid="building-contract-row">
+                      <Link to={`/admin/customers/${contract.customer_id}/contracts/${contract.id}`}>
+                        {contract.contract_type_name
+                          ? `${contract.contract_type_name} · ${contract.contract_no}`
+                          : contract.contract_no}
+                      </Link>
+                      <span className="muted small contract-connected-line">
+                        {t("building_connections.line", {
+                          customer: contract.customer_name ?? "",
+                          amount: contract.period_amount ? formatMoney(contract.period_amount) : "",
+                          period: t(`building_connections.period_${contract.billing_period.toLowerCase()}`, {
+                            defaultValue: contract.billing_period.toLowerCase(),
+                          }),
+                          status: t(`building_connections.status_${contract.lifecycle.toLowerCase()}`, {
+                            defaultValue: contract.lifecycle.toLowerCase(),
+                          }),
+                        })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           <BuildingCostShareCard
             buildingId={building.id}
+            contracts={building.contracts ?? []}
             customers={customerLinks.map((link) => ({
               id: link.customer,
               name: link.customer_name || String(link.customer),

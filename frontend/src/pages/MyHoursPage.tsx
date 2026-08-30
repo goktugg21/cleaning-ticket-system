@@ -623,21 +623,35 @@ export function MyHoursPage() {
   // Found by the Sprint 161 undefined-class gate while this file was
   // open for §1c. (The gate greps for class literals textually, so
   // naming the class here would make it report itself.)
+  const addDisabledReason = weekClosed
+    ? t("my_hours.add_disabled_closed")
+    : !loading && hourTypes.length === 0
+      ? t("my_hours.add_disabled_no_types")
+      : null;
   return (
     <div>
       <PageHeader
         title={t("my_hours.title")}
         subtitle={t("my_hours.subtitle")}
         actions={
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            data-testid="my-hours-add-button"
-            onClick={() => openCreate()}
-            disabled={weekClosed || loading || hourTypes.length === 0}
-          >
-            {t("my_hours.add_button")}
-          </button>
+          <span className="page-header-action-with-reason">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              data-testid="my-hours-add-button"
+              onClick={() => openCreate()}
+              disabled={weekClosed || loading || hourTypes.length === 0}
+              title={addDisabledReason ?? undefined}
+            >
+              {t("my_hours.add_button")}
+            </button>
+            {/* P-5 S4.2 (§D.6 rule 14) — a disabled control says why. */}
+            {addDisabledReason && (
+              <span className="muted small" data-testid="my-hours-add-disabled-reason">
+                {addDisabledReason}
+              </span>
+            )}
+          </span>
         }
       />
 

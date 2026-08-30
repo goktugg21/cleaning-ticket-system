@@ -115,21 +115,34 @@ def apply_planned_date_to_tickets(extra_work) -> dict:
         return result
 
     when = _local_midnight(planned)
+    # P-5 S1 — ONE PLAN, ONE DATE: the committed window's LAST day
+    # travels with its first. The ticket used to receive the start only,
+    # so TCK-2026-000385 read "starts 11 Oct" beside a meerwerk plan of
+    # 11–25 Oct with no end of its own — two stories for one job. A
+    # one-day plan (no end) clears the ticket's end for the same reason.
+    until = (
+        _local_midnight(extra_work.provider_planned_end_date)
+        if extra_work.provider_planned_end_date is not None
+        and extra_work.provider_planned_end_date > planned
+        else None
+    )
     for ticket in spawned_tickets_for(extra_work):
         if str(ticket.schedule_status) not in {
             str(s) for s in _MOVABLE_SCHEDULE_STATUSES
         }:
             result["kept_own_date"].append(ticket.id)
             continue
-        if ticket.scheduled_start_at == when:
+        if ticket.scheduled_start_at == when and ticket.scheduled_end_at == until:
             # Already there. Not reported as moved — an operator reading
             # "3 tickets moved" when nothing changed learns nothing.
             continue
         ticket.scheduled_start_at = when
+        ticket.scheduled_end_at = until
         ticket.schedule_status = TicketScheduleStatus.SCHEDULED
         ticket.save(
             update_fields=[
                 "scheduled_start_at",
+                "scheduled_end_at",
                 "schedule_status",
                 "updated_at",
             ]

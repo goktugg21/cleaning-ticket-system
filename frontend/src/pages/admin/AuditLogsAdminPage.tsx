@@ -2,6 +2,8 @@ import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+
+import { prettyEnum } from "../../lib/enumLabels";
 import { getApiError } from "../../api/client";
 import { listAuditLogs } from "../../api/admin";
 import type { AuditLogListParams } from "../../api/admin";
@@ -171,7 +173,14 @@ function isoEndOfDay(value: string): string {
 }
 
 export function AuditLogsAdminPage() {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  // P-5 S6.4 — technical, but the fields wear their human names: a
+  // known field reads its `audit_field.*` label, an unknown one is
+  // prettified from its column name. The raw name stays in the title.
+  const auditFieldLabel = (field: string) =>
+    i18n.exists(`common:audit_field.${field}`)
+      ? t(`audit_field.${field}`)
+      : prettyEnum(field);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -584,7 +593,11 @@ export function AuditLogsAdminPage() {
                         {t("audit_logs.changes_summary")}
                       </summary>
                       <div style={{ marginTop: 6 }}>
-                        <ChangeDiff changes={log.changes} valueLabel={auditValueLabel} />
+                        <ChangeDiff
+                          changes={log.changes}
+                          valueLabel={auditValueLabel}
+                          fieldLabel={auditFieldLabel}
+                        />
                       </div>
                     </details>
                   </td>

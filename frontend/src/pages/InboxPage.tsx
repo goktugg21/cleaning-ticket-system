@@ -237,7 +237,7 @@ export function InboxPage() {
           <span>{t("inbox.date_from")}</span>
           <input
             type="date"
-            className="field-input"
+            className={`field-input${dateFrom ? "" : " is-unset"}`}
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
             data-testid="inbox-date-from"
@@ -247,7 +247,7 @@ export function InboxPage() {
           <span>{t("inbox.date_to")}</span>
           <input
             type="date"
-            className="field-input"
+            className={`field-input${dateTo ? "" : " is-unset"}`}
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             data-testid="inbox-date-to"
@@ -351,7 +351,7 @@ function InboxRowItem({
             {last?.snippet ?? t("inbox.no_messages")}
           </div>
           {row.unread_by !== undefined && row.unread_by.length > 0 && (
-            <div className="inbox-row-receipts" data-testid="inbox-row-receipts">
+            <div className="inbox-row-receipts muted" data-testid="inbox-row-receipts">
               {t("inbox.unread_by")}{" "}
               {row.unread_by.map((u) => u.name).join(", ")}
             </div>

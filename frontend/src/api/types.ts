@@ -117,6 +117,21 @@ export interface Company {
   is_active: boolean;
 }
 
+/** P-5 S7 — a contract covering a building, with one line of context. */
+export interface BuildingContractRef {
+  id: number;
+  contract_no: string;
+  contract_type_name: string | null;
+  customer_id: number;
+  customer_name: string | null;
+  status: string;
+  lifecycle: string;
+  billing_period: string;
+  period_amount: string | null;
+  start_date: string | null;
+  end_date: string | null;
+}
+
 export interface Building {
   id: number;
   company: number;
@@ -126,6 +141,8 @@ export interface Building {
   country: string;
   postal_code: string;
   is_active: boolean;
+  /** P-5 S7 — the contracts covering this building (detail only). */
+  contracts?: BuildingContractRef[] | null;
 }
 
 // Mirrors backend `customers/serializers.py::compute_customer_actions`.
@@ -342,6 +359,9 @@ export interface TicketList {
   // renders a small "Extra Work" route badge that deep-links to the
   // parent EW. Mirrors backend `TicketListSerializer.extra_work_origin`.
   extra_work_origin: TicketExtraWorkOrigin | null;
+  /** P-5 S7 — an occurrence ticket's origin: its recurring job and,
+   *  through the contract line, the contract; which visit of the year. */
+  occurrence_origin: TicketOccurrenceOrigin | null;
 }
 
 export interface TicketStatusHistory {
@@ -392,6 +412,10 @@ export type TransitionRequirementKey =
   | "assignee"
   | "schedule"
   | "completion_evidence"
+  // P-5 S0 — the actual hours on every hourly meerwerk line, before the
+  // job goes to the customer. Reported so the modal can point at them;
+  // the machine refuses under `actual_hours_required`.
+  | "actual_hours"
   // W14 §4 — the justification an OVERRIDE carries, reported by
   // `state_machine.transition_needs_override_reason`. Unlike the other
   // three it can never arrive satisfied: a reason is written FOR the
@@ -594,6 +618,21 @@ export type TicketKind = "MELDING" | "MEERWERK" | "TICKET";
  *  never captioned "deadline". */
 export type TicketDueKind = "DEADLINE" | "PLANNED_DAY";
 
+export interface TicketOccurrenceOrigin {
+  occurrence_id: number;
+  planned_date: string;
+  status: string;
+  recurring_job_id: number;
+  recurring_job_title: string;
+  frequency: string;
+  visit_index: number;
+  visits_this_year: number;
+  contract_id: number | null;
+  contract_no: string | null;
+  contract_type_name: string | null;
+  contract_line_name: string | null;
+}
+
 export interface TicketDetail extends TicketList {
   description: string;
   kind: TicketKind;
@@ -695,11 +734,18 @@ export interface TicketDetail extends TicketList {
   /** ...and the DAY ("YYYY-MM-DD") in the server's zone. */
   scheduled_start_day: string | null;
   scheduled_end_day: string | null;
+  /** P-5 S1 — the job's RESOLVED window: the ticket's own days when a
+   *  person set them, else the meerwerk's committed window, else the
+   *  customer's wish (`plan_source` says which). One plan, one date. */
+  job_start_day: string | null;
+  job_end_day: string | null;
   /** P-3 §A.5 — a real plan whose last day is past the deadline. */
   planned_after_deadline: boolean;
   time_window_label: string;
   schedule_status: TicketScheduleStatus;
   rescheduled_from: string | null;
+  /** P-5 S9.2 — the day it was moved from, in the server's zone. */
+  rescheduled_from_day: string | null;
   reschedule_reason: string;
   // Sprint 4 (backend) / Sprint 5 (frontend) — the ticket's named sub-tasks
   // (each with its compact staff slots + a computed `is_done`) and the
@@ -894,6 +940,29 @@ export interface SlaThresholdRow {
   default: number;
 }
 
+/** P-5 S8.1 — the rings a warning may ALSO go to. */
+export type SlaAlsoNotify =
+  | "assigned_staff"
+  | "responsible_manager"
+  | "company_admins";
+
+export interface SlaWarningChoices {
+  also_notify: SlaAlsoNotify[];
+  extra_email: string;
+  /** S8.2 — the third step; null = off. */
+  final_escalate_days: number | null;
+}
+
+export type SlaWarningKey = "not_started" | "manager_review" | "approval_cutoff";
+
+/** P-5 S8 — the choices beside the numbers, defaults when no row. */
+export interface SlaChoices {
+  count_calendar_days: boolean;
+  weekly_summary_enabled: boolean;
+  warnings: Record<SlaWarningKey, SlaWarningChoices>;
+  also_notify_choices: SlaAlsoNotify[];
+}
+
 export interface SlaCompanyThresholds {
   company: number;
   company_name: string;
@@ -901,6 +970,7 @@ export interface SlaCompanyThresholds {
   updated_by_name: string | null;
   is_customized: boolean;
   thresholds: SlaThresholdRow[];
+  choices: SlaChoices;
 }
 
 export interface SlaBusinessWindow {
@@ -1155,6 +1225,8 @@ export interface BuildingAdmin {
   customer_names?: { names: string[]; total: number };
   created_at: string;
   updated_at: string;
+  /** P-5 S7 — the contracts covering this building (detail only). */
+  contracts?: BuildingContractRef[] | null;
 }
 
 /**
@@ -3485,6 +3557,10 @@ export interface InvoiceLine {
   description: string;
   // Source Extra Work id (NULL for a hand-added line).
   extra_work: number | null;
+  /** P-5 S7 — the meerwerk and building behind an extra-work line. */
+  extra_work_title?: string | null;
+  building?: number | null;
+  building_name?: string | null;
   quantity: string;
   unit_price: string;
   vat_pct: string;
@@ -3496,6 +3572,14 @@ export interface InvoiceLine {
   performed_on: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface InvoiceContractRef {
+  id: number;
+  contract_no: string;
+  contract_type_name: string | null;
+  period_start: string;
+  period_end: string;
 }
 
 export interface Invoice {
@@ -3513,6 +3597,8 @@ export interface Invoice {
   customer_name: string;
   building: number | null;
   building_name: string | null;
+  /** P-5 S7 — the contract period this invoice was generated for. */
+  contract?: InvoiceContractRef | null;
   // Sprint 132 — set only when generated at PER_BUILDING_DEPARTMENT_
   // WORK_TYPE granularity; null on every other invoice (mirrors building /
   // building_name's own null-when-unset shape). Compose the display label

@@ -32,9 +32,46 @@ export interface ContractType {
   updated_at: string;
 }
 
+/** P-5 S7 — one customer's share of a building's bills. */
+export interface ContractBuildingCostShare {
+  customer_id: number;
+  customer_name: string;
+  share_pct: string;
+}
+
 export interface ContractBuildingRef {
   id: number;
   name: string;
+  /** P-5 S7 — present on the detail only. */
+  cost_shares?: ContractBuildingCostShare[];
+}
+
+/** P-5 S7 — one visit of a contract's recurring work (an occurrence). */
+export interface ContractVisit {
+  id: number;
+  planned_date: string;
+  status: string;
+  recurring_job_id: number;
+  recurring_job_title: string;
+  ticket_id: number | null;
+  ticket_no: string | null;
+}
+
+export interface ContractVisits {
+  recent: ContractVisit[];
+  next: ContractVisit[];
+  total: number;
+}
+
+/** P-5 S7 — one invoice a contract produced. */
+export interface ContractInvoiceTrailRow {
+  invoice_id: number;
+  number: string | null;
+  status: string;
+  period_start: string;
+  period_end: string;
+  invoice_date: string;
+  total_amount: string;
 }
 
 /** One project on a revision. `amount` and `hours` are per BILLING
@@ -150,6 +187,9 @@ export interface Contract {
   payment_terms_days: number;
   start_proration: boolean;
   buildings: ContractBuildingRef[];
+  /** P-5 S7 — connected facts; null on the list. */
+  visits?: ContractVisits | null;
+  invoice_trail?: ContractInvoiceTrailRow[] | null;
   active_revision: ContractRevisionSummary | null;
   /** All four are DERIVED from the active revision's lines server-side
    *  and stored nowhere — never cache them into a second copy here. */
