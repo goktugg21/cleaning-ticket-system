@@ -1016,7 +1016,17 @@ export function HoursAdminPage() {
               </span>
             )}
 
-            <div style={{ marginLeft: "auto" }}>
+            <div style={{ marginLeft: "auto" }} className="hours-week-lock-actions">
+              {/* P-7 S4.2 — the consequence in one line BEFORE the press;
+                  the confirm dialog carries the long form. */}
+              {!weekClosed && (
+                <span
+                  className="muted small hours-week-close-consequence"
+                  data-testid="hours-week-close-consequence"
+                >
+                  {t("weeks.close_consequence", { week: week.isoWeek })}
+                </span>
+              )}
               {weekClosed ? (
                 <button
                   type="button"

@@ -564,16 +564,6 @@ function ProposalLineComposer({
             >
               {submitLabel}
             </button>
-            {form.description.trim() !== "" && !priceEntered(form) && (
-              /* W-FIX1 A3 — the reason, at the button: a line needs a
-                 deliberately entered price before it can be saved. */
-              <span
-                className="muted small"
-                data-testid={`${testIdPrefix}-price-required`}
-              >
-                {t("detail.pricing_form_unit_price_required")}
-              </span>
-            )}
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -585,6 +575,18 @@ function ProposalLineComposer({
           </div>
         }
       />
+      {form.description.trim() !== "" && !priceEntered(form) && (
+        /* W-FIX1 A3 — the reason a line cannot be saved yet. P-7 S3.2
+           — UNDER the row rather than inside the buttons' cell: as a
+           third flex child there it widened the actions column while
+           the operator typed, and the buttons walked sideways. */
+        <p
+          className="muted small proposal-addline-note"
+          data-testid={`${testIdPrefix}-price-required`}
+        >
+          {t("detail.pricing_form_unit_price_required")}
+        </p>
+      )}
     </div>
   );
 }

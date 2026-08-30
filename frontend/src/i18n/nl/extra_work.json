@@ -754,6 +754,12 @@
   "plan.stage_when": "Wanneer",
   "plan.stage_who": "Wie en hoeveel",
   "plan.stage_done": "Klaar betekent",
+  "plan.remove_title": "{{name}} van dit werk halen?",
+  "plan.remove_body": "{{name}} gaat van het werk af. Geplande uren van vandaag en later vervallen; gewerkte uren en het verleden blijven staan.",
+  "plan.remove_manager_body": "{{name}} is dan niet langer de verantwoordelijke manager van dit werk.",
+  "plan.remove_confirm": "Van het werk halen",
+  "plan.stage_who_waiting": "Kies eerst de eerste werkdag — dan verschijnen hier de mensen en de uren.",
+  "plan.stage_done_waiting": "Voeg eerst iemand toe — dan kiest u hier wat klaar betekent.",
   "plan.first_day_label": "Eerste werkdag",
   "plan.last_day_label": "Laatste werkdag",
   "plan.last_day_hint": "Leeg laten als het één dag is.",
@@ -793,7 +799,9 @@
   "create.series_sentence_one": "U maakt één meerwerk per gekozen dag — {{count}} dag = {{count}} meerwerk.",
   "create.series_sentence_other": "U maakt één meerwerk per gekozen dag — {{count}} dagen = {{count}} meerwerken.",
   "billing.completion_month_words": "de maand waarin het klaar is",
-  "billing.consequence_month": "Dit werk wordt gefactureerd in {{month}}: het verschijnt als nog niet gefactureerd werk op de factuur van {{customer}} voor {{month}}, op de pagina Facturen. Er wordt niets automatisch verstuurd.",
-  "billing.consequence_completion": "Dit werk wordt gefactureerd in de maand waarin het klaar is: het verschijnt dan als nog niet gefactureerd werk op de factuur van {{customer}} voor die maand, op de pagina Facturen. Er wordt niets automatisch verstuurd.",
-  "billing.hours_saved_where": "{{amount}} opgeslagen. U vindt het onder Facturen → {{customer}} → {{month}}, als nog niet gefactureerd werk."
+  "billing.consequence_month": "Dit werk wordt gefactureerd in {{month}} — het verschijnt op de factuur van {{customer}} voor {{month}}. Er wordt niets automatisch verstuurd.",
+  "billing.consequence_completion": "Dit werk wordt gefactureerd in de maand waarin het klaar is — het verschijnt dan op de factuur van {{customer}} voor die maand. Er wordt niets automatisch verstuurd.",
+  "billing.hours_saved_where": "{{amount}} opgeslagen. U vindt het onder Facturen → {{customer}} → {{month}}, als nog niet gefactureerd werk.",
+  "billing.save_consequence_month": "Opslaan zet dit bedrag klaar voor de factuur van {{customer}} voor {{month}}; er wordt niets verstuurd.",
+  "billing.save_consequence_completion": "Opslaan zet dit bedrag klaar voor de factuur van {{customer}} voor de maand waarin het werk klaar is; er wordt niets verstuurd."
 }

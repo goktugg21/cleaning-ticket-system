@@ -118,9 +118,11 @@ function parseMonth(value: string): { year: number; month: number } | null {
   return { year: y, month: m };
 }
 
+/** P-7 S4.1 — a billing month is WORDS everywhere: "augustus 2026",
+ *  never "08-2026". */
 function formatPeriod(year: number | null, month: number | null): string {
   if (!year || !month) return "";
-  return `${String(month).padStart(2, "0")}-${year}`;
+  return monthName(`${year}-${String(month).padStart(2, "0")}`);
 }
 
 /** "Augustus 2026" — the month as a word, capitalised for a heading. */

@@ -169,6 +169,9 @@
     "stage_when": "Wanneer",
     "stage_billing": "Facturatie",
     "stage_notes": "Omschrijving en notities",
+    "stage_when_waiting": "Kies eerst de klant en de locaties — dan kiest u hier wanneer het contract loopt.",
+    "stage_billing_waiting": "Kies eerst de startdatum — dan verschijnt hier de facturatie.",
+    "stage_notes_waiting": "Omschrijving en notities volgen na de facturatie.",
     "paymentTermsSentence": "De klant heeft {{days}} dagen om elke factuur te betalen."
   },
   "projects": {

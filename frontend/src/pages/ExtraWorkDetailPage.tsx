@@ -101,7 +101,7 @@ import { resolveNextStep } from "../components/extra-work/nextStep";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import type { PlanFocus } from "../components/extra-work/PlanWorkDialog";
 import { rowAmounts } from "../lib/billing";
-import { billingMonthWords, invoicesDestination } from "../lib/billingSentence";
+import { billingMonthWords, invoicesDestination, monthName } from "../lib/billingSentence";
 import {
   canSeeExtraWorkStaffing,
   isCustomerUser,
@@ -967,6 +967,8 @@ export function ExtraWorkDetailPage() {
   const [planCandidates, setPlanCandidates] = useState<AssignmentCandidate[]>([]);
   const [planCandidatesLoading, setPlanCandidatesLoading] = useState(false);
   const [planAssignBusy, setPlanAssignBusy] = useState(false);
+  /** P-7 S2.1 — the X in the plan modal: one unassign in flight. */
+  const [planRemoveBusy, setPlanRemoveBusy] = useState(false);
   const [planAssignError, setPlanAssignError] = useState("");
 
   const [loading, setLoading] = useState(true);
@@ -2246,6 +2248,38 @@ export function ExtraWorkDetailPage() {
     }
   }
 
+  /** P-7 S2.1 — the X on a person in the plan modal. ROOT CAUSE of
+   *  "cannot remove after Add": this page passed the dialog no remove
+   *  handler at all, so the dialog (which renders its X only when one
+   *  exists) never showed one here — the ticket page did. The EXISTING
+   *  unassign door, `bulk-assign` with `mode: "unassign"`, which now
+   *  also clears the person's open plan (the ticket-side ruling).
+   *  Both lists re-read from the server, as `assignPlanCrew` does. */
+  async function removePlanPerson(userId: number, role: "WORKER" | "MANAGER") {
+    if (ewId === null) return;
+    setPlanRemoveBusy(true);
+    setPlanAssignError("");
+    try {
+      await bulkAssignExtraWork({
+        requests: [ewId],
+        ...(role === "MANAGER" ? { managers: [userId] } : { workers: [userId] }),
+        mode: "unassign",
+      });
+      setPlanAssignments(await listExtraWorkAssignments(ewId));
+      if (role === "MANAGER") {
+        setManagerCandidates(
+          await listExtraWorkAssignmentCandidates(ewId, "MANAGER"),
+        );
+      } else {
+        await loadPlanCandidates();
+      }
+    } catch (err) {
+      setPlanAssignError(getApiError(err));
+    } finally {
+      setPlanRemoveBusy(false);
+    }
+  }
+
   /** One bulk call through the EXISTING endpoint, then both lists are
    *  re-read from the server rather than patched locally — the write is
    *  all-or-nothing server-side, so the only honest picture of what
@@ -2466,8 +2500,10 @@ export function ExtraWorkDetailPage() {
   // first. An absent invoice_date means the month follows completion,
   // which the label says in words rather than by the absence of a
   // badge.
+  // P-7 S4.1 — a billing month is WORDS ("oktober 2026"), never
+  // "2026-10": the same `monthName` the consequence sentence uses.
   const billingMonthLabel = ew?.invoice_date
-    ? ew.invoice_date.slice(0, 7)
+    ? monthName(ew.invoice_date)
     : t("detail.billing_follows_completion");
 
   async function saveBillingMonth() {
@@ -3210,9 +3246,13 @@ export function ExtraWorkDetailPage() {
                                the other, one of which approves on the
                                customer's behalf. Filled green and soft
                                red, never two outlines. */
+                            /* P-7 S3.1 — approving on the customer's
+                               behalf is AMBER here too: the one
+                               exceptional-act colour, the same as the
+                               agenda's button. */
                             className={
                               target === "CUSTOMER_APPROVED"
-                                ? "btn btn-primary btn-sm"
+                                ? "btn btn-warning btn-sm"
                                 : "btn btn-danger btn-sm"
                             }
                             onClick={() => {
@@ -3783,6 +3823,13 @@ export function ExtraWorkDetailPage() {
               finalTotalAmount={ew.final_total_amount}
               locked={finalAmountLocked}
               successPath={(detail) => invoicesDestination(detail)}
+              // P-7 S4.2 — the consequence BEFORE the press, in one line.
+              consequence={t(
+                ew.invoice_date
+                  ? "billing.save_consequence_month"
+                  : "billing.save_consequence_completion",
+                { customer: ew.customer_name, month: billingMonthWords(ew, t) },
+              )}
               // P-4 (Part C) — the save answers with the amount and the
               // destination: "€424 saved. You will find it under
               // Invoices → B Amsterdam → December, as unbilled work."
@@ -4118,6 +4165,9 @@ export function ExtraWorkDetailPage() {
           assignBusy={planAssignBusy}
           assignError={planAssignError}
           onAssign={(userIds) => void assignPlanCrew(userIds)}
+          onRemovePerson={(userId) => void removePlanPerson(userId, "WORKER")}
+          onRemoveManager={(userId) => void removePlanPerson(userId, "MANAGER")}
+          removeBusy={planRemoveBusy}
           managerCandidates={managerCandidates.filter(
             (c) =>
               !planAssignments.some(

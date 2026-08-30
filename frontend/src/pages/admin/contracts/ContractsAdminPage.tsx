@@ -328,6 +328,10 @@ export function ContractsAdminPage() {
       : "",
     buildingFilter !== "" ? t("filters.building") : "",
     typeFilter !== "" ? t("filters.type") : "",
+    // P-7 S5.2 — the two display choices live in the fold now; when
+    // they are off their default the fold's chips say so.
+    measure !== "prices" ? t("views.hours") : "",
+    timeframe !== "monthly" ? t("views.yearly") : "",
   ].filter(Boolean);
   // P-2 §5 — nothing at all (not "nothing matches"): the one card.
   const showEmptyCard =
@@ -340,6 +344,8 @@ export function ContractsAdminPage() {
     setCustomerFilter("");
     setBuildingFilter("");
     setTypeFilter("");
+    setMeasure("prices");
+    setTimeframe("monthly");
     setPage(1);
   };
 
@@ -672,6 +678,32 @@ export function ContractsAdminPage() {
               ))}
             </select>
           </div>
+          {/* P-7 S5.2 — the display choices, in the fold with the
+              filters: what the amounts mean and per what period. */}
+          <div className="filter-field">
+            <span className="filter-label">{t("views.measureLabel")}</span>
+            <select
+              className="filter-control"
+              value={measure}
+              onChange={(event) => setMeasure(event.target.value as Measure)}
+              data-testid="contracts-measure"
+            >
+              <option value="prices">{t("views.prices")}</option>
+              <option value="hours">{t("views.hours")}</option>
+            </select>
+          </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("views.timeframeLabel")}</span>
+            <select
+              className="filter-control"
+              value={timeframe}
+              onChange={(event) => setTimeframe(event.target.value as Timeframe)}
+              data-testid="contracts-timeframe"
+            >
+              <option value="monthly">{t("views.monthly")}</option>
+              <option value="yearly">{t("views.yearly")}</option>
+            </select>
+          </div>
           <div className="filter-field">
             <span className="filter-label">{t("filters.customer")}</span>
             <select
@@ -780,10 +812,14 @@ export function ContractsAdminPage() {
           </div>
         )}
 
-        {/* P-4 (Part F) — ONE hierarchy: the grouping is the tab row,
-            the measure and the timeframe are two small labelled pill
-            pairs under it. */}
-        <div className="contract-view-bar contract-view-bar--tiered">
+        {/* P-4 (Part F) tried "one hierarchy" with three pill rows in
+            one bar; the CSS it named (`--tiered`, `--small`) never
+            existed, so the three rows rendered as one flat wrap of
+            pills. P-7 S5.2 — ONE view control here (list / by customer
+            / by location); the measure (prices / hours) and the
+            timeframe (per month / per year) are two selects inside the
+            Filter fold, with chips when off their default. */}
+        <div className="contract-view-bar">
           <div className="status-tabs" role="group" aria-label={t("views.groupLabel")}>
             {(
               [
@@ -799,46 +835,6 @@ export function ContractsAdminPage() {
                 aria-pressed={value === groupBy}
                 onClick={() => setGroupBy(value)}
                 data-testid={`contracts-groupby-${value}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="muted small contract-view-label">{t("views.measureLabel")}</span>
-          <div className="status-tabs status-tabs--small" role="group" aria-label={t("views.measureLabel")}>
-            {(
-              [
-                ["prices", t("views.prices")],
-                ["hours", t("views.hours")],
-              ] as [Measure, string][]
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={value === measure ? "active" : ""}
-                aria-pressed={value === measure}
-                onClick={() => setMeasure(value)}
-                data-testid={`contracts-measure-${value}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="muted small contract-view-label">{t("views.timeframeLabel")}</span>
-          <div className="status-tabs status-tabs--small" role="group" aria-label={t("views.timeframeLabel")}>
-            {(
-              [
-                ["monthly", t("views.monthly")],
-                ["yearly", t("views.yearly")],
-              ] as [Timeframe, string][]
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                className={value === timeframe ? "active" : ""}
-                aria-pressed={value === timeframe}
-                onClick={() => setTimeframe(value)}
-                data-testid={`contracts-timeframe-${value}`}
               >
                 {label}
               </button>

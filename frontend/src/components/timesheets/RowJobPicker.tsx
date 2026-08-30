@@ -74,10 +74,12 @@ const NOTE_STYLE = { margin: 0, padding: "4px 8px 6px" } as const;
 /** Task 5 — the tag's label is clipped inside the person cell. */
 const TAG_LABEL_STYLE = {
   display: "inline-block",
-  maxWidth: "18ch",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+  /* P-7 S9 — 18ch clipped "Extra werk regie uren +1 (…"; the tag now
+     wraps to a second line inside the person cell instead. The full
+     label stays the tooltip. */
+  maxWidth: "100%",
+  whiteSpace: "normal",
+  overflowWrap: "anywhere",
   verticalAlign: "bottom",
 } as const;
 

@@ -48,7 +48,7 @@ import type {
 } from "../../api/types";
 import { isPriced, rowAmounts } from "../../lib/billing";
 import { formatDate, formatMoney, formatNumber } from "../../lib/intl";
-import { billingMonthWords, invoicesDestination } from "../../lib/billingSentence";
+import { billingMonthWords, invoicesDestination, monthName } from "../../lib/billingSentence";
 import { CollapsibleCard } from "../CollapsibleCard";
 import { PdfPreviewDialog } from "../PdfPreviewDialog";
 import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
@@ -374,7 +374,7 @@ export function TicketExtraWorkCards({
       pushToast({
         variant: "success",
         title: updated.invoice_date
-          ? t("ew_billing_saved", { month: updated.invoice_date.slice(0, 7) })
+          ? t("ew_billing_saved", { month: monthName(updated.invoice_date) })
           : t("ew_billing_cleared"),
       });
     } catch (err) {
@@ -449,6 +449,13 @@ export function TicketExtraWorkCards({
               })
             }
             successPath={(detail) => invoicesDestination(detail)}
+            // P-7 S4.2 — the consequence BEFORE the press, in one line.
+            consequence={t(
+              ew.invoice_date
+                ? "extra_work:billing.save_consequence_month"
+                : "extra_work:billing.save_consequence_completion",
+              { customer: ew.customer_name, month: billingMonthWords(ew, t) },
+            )}
             locked={finalAmountLocked}
             // W25 — the client-side math per line is a PREVIEW. The
             // saved subtotal comparison is only offered when these

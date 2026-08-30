@@ -355,5 +355,10 @@
   "agenda.triage_error_forbidden_transition": "deze stap is niet toegestaan voor uw rol",
   "agenda.triage_error_override_reason_required": "een reden is verplicht",
   "agenda.triage_error_generic": "niet gelukt",
-  "agenda.parked_tag": "Geparkeerd"
+  "agenda.parked_tag": "Geparkeerd",
+  "agenda.undated_none": "Alles is gepland — er wacht hier niets meer.",
+  "agenda.parked_title": "Geparkeerd ({{count}})",
+  "agenda.parked_hint": "bewust opzij gezet, met reden — telt niet mee als niet gepland",
+  "agenda.parked_reason": "Reden: {{reason}}",
+  "agenda.parked_no_reason": "Geen reden vastgelegd."
 }

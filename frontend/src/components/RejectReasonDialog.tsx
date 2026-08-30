@@ -26,6 +26,9 @@ export interface RejectReasonDialogProps {
   placeholder?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** P-7 S3.1 — "warning": an exceptional act (deciding on the
+   *  customer's behalf). Amber band and amber confirm, never red. */
+  tone?: "warning";
 }
 
 export function RejectReasonDialog({
@@ -37,6 +40,7 @@ export function RejectReasonDialog({
   placeholder,
   confirmLabel,
   cancelLabel,
+  tone,
 }: RejectReasonDialogProps) {
   const { t } = useTranslation("extra_work");
   const [reason, setReason] = useState("");
@@ -52,7 +56,10 @@ export function RejectReasonDialog({
       role="dialog"
       aria-modal="true"
     >
-      <div className="reject-modal">
+      <div
+        className={tone === "warning" ? "reject-modal reject-modal--warning" : "reject-modal"}
+        data-tone={tone}
+      >
         <h3 className="reject-modal-title">
           {title ?? t("detail.reject_dialog_title")}
         </h3>
@@ -82,7 +89,7 @@ export function RejectReasonDialog({
           </button>
           <button
             type="button"
-            className="btn btn-primary btn-sm reject-modal-confirm"
+            className={`btn ${tone === "warning" ? "btn-warning" : "btn-primary"} btn-sm reject-modal-confirm`}
             data-testid="reject-reason-confirm"
             disabled={disabled}
             onClick={() => {

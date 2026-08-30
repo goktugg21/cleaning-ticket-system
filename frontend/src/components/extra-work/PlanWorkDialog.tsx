@@ -62,7 +62,7 @@
  * A non-native overlay, conditionally mounted — CLAUDE.md's
  * render-it-unconditionally rule is about the native `<dialog>`.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Lock, Users, X } from "lucide-react";
 
@@ -79,6 +79,7 @@ import { readApiErrorDetail } from "../../lib/apiFieldErrors";
 import { formatDate } from "../../lib/intl";
 import { hourTypeLabel } from "../../lib/hourTypeLabel";
 import { ChipMultiSelect } from "../ChipMultiSelect";
+import { ConfirmDialog, type ConfirmDialogHandle } from "../ConfirmDialog";
 import { Toggle } from "../Toggle";
 import "./plan-crew.css";
 
@@ -396,6 +397,51 @@ export function PlanWorkDialog({
     onAssignManagers(userIds);
   };
 
+  // P-7 S2.1 — taking someone off, from the X. Adding is written the
+  // moment it happens (the crew lives server-side), so a removal is
+  // always a removal of a PERSISTED assignment: it asks once, in one
+  // sentence that says what goes (the open plan) and what stays (the
+  // past), then runs the page's EXISTING unassign. A native <dialog>,
+  // rendered unconditionally and driven through the ref (CLAUDE.md).
+  const removeDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [pendingRemove, setPendingRemove] = useState<{
+    userId: number;
+    name: string;
+    role: "WORKER" | "MANAGER";
+  } | null>(null);
+  const askRemove = (a: ExtraWorkAssignment) => {
+    setPendingRemove({
+      userId: a.user_id,
+      name: personName(a),
+      role: a.role === "MANAGER" ? "MANAGER" : "WORKER",
+    });
+    removeDialogRef.current?.open();
+  };
+  const confirmRemove = () => {
+    if (!pendingRemove) return;
+    const { userId, role } = pendingRemove;
+    removeDialogRef.current?.close();
+    setPendingRemove(null);
+    // Their typed, unsaved cells go with them, so a later Save cannot
+    // post hours for a person who is no longer on the crew.
+    setHours((prev) => {
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (splitKey(key).userId !== userId) next[key] = value;
+      }
+      return next;
+    });
+    setChosen((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const key of Object.keys(prev)) {
+        if (Number(key.split("|")[0]) !== userId) next[key] = true;
+      }
+      return next;
+    });
+    if (role === "MANAGER") onRemoveManager?.(userId);
+    else onRemovePerson?.(userId);
+  };
+
   // ---- the day chips ----------------------------------------------------
   const isChosen = (userId: number, day: string) => Boolean(chosen[`${userId}|${day}`]);
   const chooseDay = (userId: number, day: string) => {
@@ -581,8 +627,14 @@ export function PlanWorkDialog({
     };
   }, [rawError, error, t]);
 
+  // P-7 S2.2 — the last day before the first is refused AT the field
+  // the moment it happens, not at Save. Derived from the two values,
+  // so it appears and disappears with the typing.
+  const endBeforeStart = end !== "" && start !== "" && end < start;
   const fieldError = (key: FieldKey): string | undefined =>
-    clientErrors[key] ?? serverErrors.fields[key];
+    clientErrors[key] ??
+    serverErrors.fields[key] ??
+    (key === "end" && endBeforeStart ? t("plan.err_end_before_start") : undefined);
 
   // A past-day refusal opens the unlock prompt where the reason goes —
   // derived, not synced: the prompt is open while the server says so
@@ -602,6 +654,18 @@ export function PlanWorkDialog({
   }, [rawError, serverErrors]);
 
   const submitStarts = !postSpawn && ew.status === "CUSTOMER_APPROVED";
+  // P-7 S2.3 — one thing at a time, on the one page: the dates first;
+  // the people and hours appear once a first day exists (or once
+  // someone is already on the crew, or the caller pointed at that
+  // stage); "done means" appears once someone is on the crew. Nothing
+  // moves or resets — a stage only reveals, never hides again.
+  const stageWhoOpen =
+    start !== "" ||
+    assignments.length > 0 ||
+    initialFocus === "people" ||
+    initialFocus === "manager" ||
+    initialFocus === "hours";
+  const stageDoneOpen = stageWhoOpen && (workers.length > 0 || photoTouched || notesTouched);
   const startAfterDeadline = Boolean(start && ew.deadline && start > ew.deadline);
   const endAfterDeadline = Boolean(end && ew.deadline && end > ew.deadline);
 
@@ -803,6 +867,12 @@ export function PlanWorkDialog({
               <span className="ew-plan-step">2</span>
               {t("plan.stage_who")}
             </div>
+            {!stageWhoOpen && (
+              <p className="muted small ew-plan-section-waiting" data-testid="extra-work-plan-stage-who-waiting">
+                {t("plan.stage_who_waiting")}
+              </p>
+            )}
+            {stageWhoOpen && (<>
 
             <div className="ew-plan-crew" data-testid="extra-work-plan-crew">
               <div className="ew-plan-crew-group" data-testid="extra-work-plan-people" {...bind("people")}>
@@ -822,7 +892,7 @@ export function PlanWorkDialog({
                           type="button"
                           className="ew-plan-type-remove"
                           disabled={removeBusy || assignBusy}
-                          onClick={() => onRemovePerson(a.user_id)}
+                          onClick={() => askRemove(a)}
                           aria-label={t("plan.person_remove", { name: personName(a) })}
                           data-testid="extra-work-plan-person-remove"
                         >
@@ -871,7 +941,7 @@ export function PlanWorkDialog({
                           type="button"
                           className="ew-plan-type-remove"
                           disabled={managerBusy || removeBusy}
-                          onClick={() => onRemoveManager(a.user_id)}
+                          onClick={() => askRemove(a)}
                           aria-label={t("plan.manager_remove", { name: personName(a) })}
                           data-testid="extra-work-plan-manager-remove"
                         >
@@ -1020,11 +1090,7 @@ export function PlanWorkDialog({
                             type="button"
                             className="ew-plan-type-remove"
                             disabled={removeBusy || assignBusy || managerBusy}
-                            onClick={() =>
-                              a.role === "MANAGER"
-                                ? onRemoveManager?.(a.user_id)
-                                : onRemovePerson?.(a.user_id)
-                            }
+                            onClick={() => askRemove(a)}
                             aria-label={t(
                               a.role === "MANAGER" ? "plan.manager_remove" : "plan.person_remove",
                               { name: personName(a) },
@@ -1252,6 +1318,7 @@ export function PlanWorkDialog({
                 )}
               </div>
             )}
+            </>)}
           </div>
 
           {/* ---- 3. DONE MEANS ---- */}
@@ -1260,6 +1327,12 @@ export function PlanWorkDialog({
               <span className="ew-plan-step">3</span>
               {t("plan.stage_done")}
             </div>
+            {!stageDoneOpen && (
+              <p className="muted small ew-plan-section-waiting" data-testid="extra-work-plan-stage-done-waiting">
+                {t("plan.stage_done_waiting")}
+              </p>
+            )}
+            {stageDoneOpen && (<>
             <label className="ew-plan-switch">
               <Toggle
                 checked={photoRequired}
@@ -1282,6 +1355,7 @@ export function PlanWorkDialog({
               />
               <span>{t("plan.notes_required_label")}</span>
             </label>
+            </>)}
           </div>
         </div>
 
@@ -1313,6 +1387,18 @@ export function PlanWorkDialog({
             </button>
           </div>
         </div>
+        <ConfirmDialog
+          ref={removeDialogRef}
+          title={t("plan.remove_title", { name: pendingRemove?.name ?? "" })}
+          body={t(
+            pendingRemove?.role === "MANAGER" ? "plan.remove_manager_body" : "plan.remove_body",
+            { name: pendingRemove?.name ?? "" },
+          )}
+          confirmLabel={t("plan.remove_confirm")}
+          busy={removeBusy}
+          onConfirm={confirmRemove}
+          onCancel={() => setPendingRemove(null)}
+        />
       </div>
     </div>
   );

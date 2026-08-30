@@ -754,6 +754,12 @@
   "plan.stage_when": "When",
   "plan.stage_who": "Who and how much",
   "plan.stage_done": "Done means",
+  "plan.remove_title": "Take {{name}} off this job?",
+  "plan.remove_body": "{{name}} leaves the job. Planned hours from today on are cleared; worked hours and the past stay.",
+  "plan.remove_manager_body": "{{name}} will no longer be the responsible manager of this job.",
+  "plan.remove_confirm": "Take off the job",
+  "plan.stage_who_waiting": "Choose the first work day first — the people and hours appear here after that.",
+  "plan.stage_done_waiting": "Add someone first — then you choose here what done means.",
   "plan.first_day_label": "First work day",
   "plan.last_day_label": "Last work day",
   "plan.last_day_hint": "Leave empty when it is one day.",
@@ -793,7 +799,9 @@
   "create.series_sentence_one": "You are creating one meerwerk per chosen day — {{count}} day = {{count}} meerwerk.",
   "create.series_sentence_other": "You are creating one meerwerk per chosen day — {{count}} days = {{count}} meerwerken.",
   "billing.completion_month_words": "the month it is completed in",
-  "billing.consequence_month": "This work bills in {{month}}: it will appear as unbilled work on {{customer}}'s {{month}} invoice on the Invoices page. Nothing is sent automatically.",
-  "billing.consequence_completion": "This work bills in the month it is completed in: it will then appear as unbilled work on {{customer}}'s invoice for that month on the Invoices page. Nothing is sent automatically.",
-  "billing.hours_saved_where": "{{amount}} saved. You will find it under Invoices → {{customer}} → {{month}}, as unbilled work."
+  "billing.consequence_month": "This work bills in {{month}} — it appears on {{customer}}'s invoice for {{month}}. Nothing is sent automatically.",
+  "billing.consequence_completion": "This work bills in the month it is completed in — it then appears on {{customer}}'s invoice for that month. Nothing is sent automatically.",
+  "billing.hours_saved_where": "{{amount}} saved. You will find it under Invoices → {{customer}} → {{month}}, as unbilled work.",
+  "billing.save_consequence_month": "Saving readies this amount for {{customer}}'s invoice for {{month}}; nothing is sent.",
+  "billing.save_consequence_completion": "Saving readies this amount for {{customer}}'s invoice for the month the work is completed in; nothing is sent."
 }

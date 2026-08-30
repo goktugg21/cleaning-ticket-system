@@ -22,7 +22,6 @@
 //
 // Provider-only surface (the parent gates rendering on the recurring-job
 // detail page). Read-only when the job is archived.
-import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -379,8 +378,7 @@ export function RecurringJobCalendar({
 
   return (
     <div
-      className="card"
-      style={{ padding: "16px 18px", marginBottom: 16 }}
+      className="card rj-cal"
       data-testid="recurring-job-calendar"
     >
       <div className="section-head">
@@ -388,22 +386,13 @@ export function RecurringJobCalendar({
       </div>
 
       {!canManage && (
-        <p className="muted small" style={{ marginTop: 8 }}>
+        <p className="muted small rj-cal-readonly">
           {t("calendar.archived_readonly")}
         </p>
       )}
 
       {/* Month navigation */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          marginTop: 12,
-          marginBottom: 8,
-        }}
-      >
+      <div className="rj-cal-nav">
         <button
           type="button"
           className="btn btn-ghost btn-sm"
@@ -433,20 +422,9 @@ export function RecurringJobCalendar({
       </div>
 
       {/* Weekday header (Monday-first, ISO 1..7) */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
-          gap: 4,
-          marginBottom: 4,
-        }}
-      >
+      <div className="rj-cal-grid rj-cal-weekdays">
         {[1, 2, 3, 4, 5, 6, 7].map((iso) => (
-          <div
-            key={iso}
-            className="muted small"
-            style={{ textAlign: "center", fontWeight: 600 }}
-          >
+          <div key={iso} className="muted small rj-cal-weekday">
             {t(`weekday_short.${iso}`)}
           </div>
         ))}
@@ -454,11 +432,7 @@ export function RecurringJobCalendar({
 
       {/* Day grid */}
       <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
-          gap: 4,
-        }}
+        className="rj-cal-grid"
         data-testid="calendar-grid"
       >
         {cells.map((cell) => {
@@ -517,23 +491,14 @@ export function RecurringJobCalendar({
         </>
       )}
 
-      {/* Legend */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 14,
-          marginTop: 12,
-        }}
-      >
-        <LegendDot tone="var(--accent, #2563eb)" label={t("calendar.legend_rule")} />
-        <LegendDot tone="#7c3aed" label={t("calendar.legend_adhoc")} />
-        <LegendDot tone="var(--text-faint, #9ca3af)" label={t("calendar.legend_skipped")} />
-        <LegendDot tone="#16a34a" label={t("calendar.legend_done")} />
-        <LegendDot
-          tone="var(--text-faint, #9ca3af)"
-          label={t("calendar.legend_cancelled")}
-        />
+      {/* Legend — P-7 S9: DERIVED from the same tick list the cells
+          paint with, so the legend and the grid cannot drift; every
+          colour is a CSS class, and skipped / cancelled no longer share
+          one dot. */}
+      <div className="rj-cal-legend" data-testid="calendar-legend">
+        {LEGEND_TICKS.map(([tick, key]) => (
+          <LegendDot key={tick} tick={tick} label={t(key)} />
+        ))}
       </div>
     </div>
   );
@@ -626,54 +591,25 @@ function DayMenu({
   );
 }
 
-function LegendDot({ tone, label }: { tone: string; label: string }) {
+/** The legend's rows, in the order the eye reads them; each tick's
+ *  colour lives in `.rj-cal-cell--<tick>` / `.rj-cal-dot--<tick>` in
+ *  index.css — one place for the grid and the legend. */
+const LEGEND_TICKS: [DateTick, string][] = [
+  ["rule", "calendar.legend_rule"],
+  ["adhoc", "calendar.legend_adhoc"],
+  ["locked", "calendar.legend_done"],
+  ["skipped", "calendar.legend_skipped"],
+  ["cancelled", "calendar.legend_cancelled"],
+];
+
+function LegendDot({ tick, label }: { tick: DateTick; label: string }) {
   return (
-    <span
-      className="muted small"
-      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          width: 10,
-          height: 10,
-          borderRadius: 3,
-          background: tone,
-          display: "inline-block",
-        }}
-      />
+    <span className="muted small rj-cal-legend-item" data-tick={tick}>
+      <span aria-hidden="true" className={`rj-cal-dot rj-cal-dot--${tick}`} />
       {label}
     </span>
   );
 }
-
-const TICK_STYLE: Record<
-  DateTick,
-  { border: string; background: string; color: string }
-> = {
-  rule: {
-    border: "var(--accent, #2563eb)",
-    background: "var(--accent-soft, #eff6ff)",
-    color: "var(--accent, #2563eb)",
-  },
-  adhoc: { border: "#7c3aed", background: "#f5f3ff", color: "#7c3aed" },
-  skipped: {
-    border: "var(--border)",
-    background: "transparent",
-    color: "var(--text-faint, #9ca3af)",
-  },
-  locked: { border: "#16a34a", background: "#f0fdf4", color: "#16a34a" },
-  cancelled: {
-    border: "var(--border)",
-    background: "transparent",
-    color: "var(--text-faint, #9ca3af)",
-  },
-  empty: {
-    border: "var(--border)",
-    background: "transparent",
-    color: "var(--text, inherit)",
-  },
-};
 
 function CalendarCell({
   iso,
@@ -702,11 +638,10 @@ function CalendarCell({
   menuLabel: string;
   onOpen: (el: HTMLElement) => void;
 }) {
-  const style = TICK_STYLE[tick];
   const inner = (
     <>
-      <span style={{ fontSize: 12, fontWeight: 600 }}>{dayNumber}</span>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+      <span className="rj-cal-day-no">{dayNumber}</span>
+      <span className="rj-cal-day-marks">
         {tick === "rule" && <Check size={14} strokeWidth={2.5} />}
         {tick === "adhoc" && (
           <>
@@ -716,30 +651,25 @@ function CalendarCell({
         )}
         {tick === "locked" && <Lock size={12} strokeWidth={2.2} />}
         {windowCount > 1 && (
-          <span style={{ fontSize: 10, fontWeight: 700 }}>×{windowCount}</span>
+          <span className="rj-cal-day-count">×{windowCount}</span>
         )}
       </span>
     </>
   );
 
-  const baseStyle: CSSProperties = {
-    minHeight: 46,
-    borderRadius: 8,
-    border: `1px solid ${inMonth ? style.border : "transparent"}`,
-    background: inMonth ? style.background : "transparent",
-    color: inMonth ? style.color : "var(--text-faint, #9ca3af)",
-    opacity: inMonth ? (isPast && tick !== "locked" ? 0.5 : 1) : 0.35,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-    padding: 4,
-    width: "100%",
-  };
+  // P-7 S9 — classes, not a style map: the tick decides the colour
+  // through `.rj-cal-cell--<tick>`; out-of-month and past cells are
+  // modifiers on the same element.
+  const cellClass = [
+    "rj-cal-cell",
+    inMonth ? `rj-cal-cell--${tick}` : "rj-cal-cell--outside",
+    inMonth && isPast && tick !== "locked" ? "rj-cal-cell--past" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   if (!inMonth) {
-    return <div style={baseStyle} aria-hidden="true" />;
+    return <div className={cellClass} aria-hidden="true" />;
   }
 
   // A date with nothing to offer stays inert — the same non-interactive
@@ -748,7 +678,7 @@ function CalendarCell({
   if (!interactive) {
     return (
       <div
-        style={baseStyle}
+        className={cellClass}
         title={title}
         data-testid="calendar-day"
         data-date={iso}
@@ -762,7 +692,8 @@ function CalendarCell({
   return (
     <button
       type="button"
-      style={{ ...baseStyle, cursor: busy ? "wait" : "pointer" }}
+      className={`${cellClass} rj-cal-cell--interactive`}
+      style={{ cursor: busy ? "wait" : "pointer" }}
       onClick={(event) => onOpen(event.currentTarget)}
       disabled={busy}
       title={title || menuLabel}

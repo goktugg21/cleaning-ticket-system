@@ -36,6 +36,7 @@ import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
 import { useToast } from "../components/ToastProvider";
 import { formatDate, formatInvoiceGroupLabel, formatMoney } from "../lib/intl";
+import { monthName } from "../lib/billingSentence";
 import { customerLabelName } from "../lib/customerLabelName";
 
 const STATUS_LABEL_KEY: Record<InvoiceStatus, string> = {
@@ -60,9 +61,10 @@ const EMPTY_LINE_DRAFT: LineDraft = {
   vat_pct: "21",
 };
 
+/** P-7 S4.1 — the period as words ("augustus 2026"). */
 function formatPeriod(year: number | null, month: number | null): string | null {
   if (!year || !month) return null;
-  return `${String(month).padStart(2, "0")}-${year}`;
+  return monthName(`${year}-${String(month).padStart(2, "0")}`);
 }
 
 export function InvoiceDetailPage() {

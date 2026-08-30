@@ -355,5 +355,10 @@
   "agenda.triage_error_forbidden_transition": "this step is not allowed for your role",
   "agenda.triage_error_override_reason_required": "a reason is required",
   "agenda.triage_error_generic": "failed",
-  "agenda.parked_tag": "Parked"
+  "agenda.parked_tag": "Parked",
+  "agenda.undated_none": "Everything is planned — nothing is waiting here.",
+  "agenda.parked_title": "Parked ({{count}})",
+  "agenda.parked_hint": "set aside on purpose, with a reason — not counted as unplanned",
+  "agenda.parked_reason": "Reason: {{reason}}",
+  "agenda.parked_no_reason": "No reason recorded."
 }

@@ -16344,3 +16344,369 @@ a.topbar-search-row:hover, a.topbar-search-row:focus { background: var(--green-f
    own rhythm instead of adding its own bottom margin. */
 form.card + .form-fold { margin-top: 16px; }
 .form-section > .form-fold { margin-bottom: 0; }
+
+/* P-7 S2.3 — a plan stage that has not opened yet: its number and name
+   stay, and one quiet line says what opens it. */
+.ew-plan-section-waiting {
+  margin: -4px 0 0;
+}
+.ew-plan-section:has(> .ew-plan-section-waiting) > .ew-plan-section-title {
+  color: var(--text-faint);
+}
+.ew-plan-section:has(> .ew-plan-section-waiting) > .ew-plan-section-title .ew-plan-step {
+  background: var(--surface-2);
+  color: var(--text-faint);
+}
+
+/* P-7 S1.3 — the fill row is a TOOL: its own tint and left edge, an icon
+   before the verb, the caption on one line. Nothing about it looks like
+   a person's row. */
+.hours-week-apply-row th {
+  background: var(--accent-soft, #eff6ff);
+  border-left: 3px solid var(--accent, #2563eb);
+}
+.hours-week-apply-row th + th {
+  border-left: 0;
+}
+.hours-week-apply-label {
+  color: var(--accent, #2563eb);
+}
+.hours-week-apply-icon {
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+.hours-week-apply-row .hours-week-grid-cell {
+  border-style: dashed;
+  background: var(--surface);
+}
+.hours-week-apply-hint {
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+/* P-7 S1.4 — one person, several parts: a part starts with a thin line
+   (a new person keeps the full one), and says what it is under the name
+   or in its place. The part and the saved job tag wrap instead of
+   clipping (S9). */
+.hours-week-part-first td {
+  border-top: 1px dashed var(--border-soft);
+}
+.hours-week-part {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: normal;
+  max-width: 26ch;
+  line-height: 1.35;
+}
+.hours-week-part-general {
+  font-style: italic;
+}
+.hours-week-job-saved {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+/* P-7 S3.1 — the on-behalf decision's dialog wears the same amber as
+   its button: a band on top, the title in amber. */
+.reject-modal--warning {
+  border-top: 4px solid var(--amber);
+}
+.reject-modal--warning .reject-modal-title {
+  color: var(--amber);
+}
+
+/* P-7 S3.2 — the line editor's Add line / Cancel sit on the INPUTS'
+   band: the actions cell is as tall as a control (38px) and centres
+   its buttons, so with the row's `align-items: end` the buttons share
+   the inputs' vertical centre instead of hanging below the labels'
+   baseline; the "price required" note lives under the row now. */
+.proposal-addline-actions {
+  align-self: end;
+  height: 38px;
+  align-items: center;
+}
+.proposal-addline-note {
+  margin: 6px 0 0;
+}
+
+/* P-7 S4.2 — a committing button says its consequence beside it. */
+.hours-week-lock-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.hours-week-close-consequence,
+.ew-save-consequence {
+  max-width: 44ch;
+  line-height: 1.35;
+}
+
+/* P-7 S5.1 — a form stage that has not opened yet: number and name
+   stay, one quiet line says what opens it (the plan modal's rhythm). */
+.form-stage-waiting {
+  margin: -6px 0 0;
+}
+.form-section:has(> .form-stage-waiting) > .form-section-title {
+  color: var(--text-faint);
+}
+.form-section:has(> .form-stage-waiting) > .form-section-title .ew-plan-step {
+  background: var(--surface-2);
+  color: var(--text-faint);
+}
+
+/* P-7 S6 — the per-warning fold sits inside the card, under the values. */
+.sla-warning-fold {
+  margin: 12px 0 0;
+}
+.sla-warning-fold > .sla-warning-choices {
+  border-top: 0;
+  padding-top: 4px;
+}
+.sla-warning-fold > .sla-warning-fields {
+  padding-top: 8px;
+}
+
+/* P-7 S7 — Settings: the profile is a horizontal header band at every
+   width; the forms take the full width below it. */
+.account-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 22px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.account-header-main {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.account-header-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.account-header-identity .account-name {
+  font-size: 17px;
+}
+.account-header-facts {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.account-header-fact {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.account-header-fact .account-meta-label {
+  font-size: 11px;
+}
+.account-header-photo {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.settings-layout--single {
+  grid-template-columns: 1fr;
+  max-width: 980px;
+  margin-left: 0;
+}
+@media (max-width: 560px) {
+  .account-header-photo {
+    margin-left: 0;
+  }
+}
+
+/* P-7 S9 — the recurring-work calendar: inline styles became classes,
+   every tick colour is a token, the legend reads from the same list.
+   Skipped (grey, hollow) and cancelled (red-tinted, struck) differ. */
+.rj-cal {
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.rj-cal-readonly {
+  margin-top: 8px;
+}
+.rj-cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0 8px;
+}
+.rj-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.rj-cal-weekdays {
+  margin-bottom: 4px;
+}
+.rj-cal-weekday {
+  text-align: center;
+  font-weight: 600;
+}
+.rj-cal-cell {
+  min-height: 46px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px;
+  width: 100%;
+  font: inherit;
+}
+.rj-cal-cell--interactive {
+  cursor: pointer;
+}
+.rj-cal-cell--outside {
+  border-color: transparent;
+  opacity: 0.35;
+  color: var(--text-faint);
+}
+.rj-cal-cell--past {
+  opacity: 0.5;
+}
+.rj-cal-day-no {
+  font-size: 12px;
+  font-weight: 600;
+}
+.rj-cal-day-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.rj-cal-day-count {
+  font-size: 10px;
+  font-weight: 700;
+}
+.rj-cal-cell--rule {
+  border-color: var(--accent, #2563eb);
+  background: var(--accent-soft, #eff6ff);
+  color: var(--accent, #2563eb);
+}
+.rj-cal-cell--adhoc {
+  border-color: var(--violet, #7c3aed);
+  background: var(--violet-soft, #f5f3ff);
+  color: var(--violet, #7c3aed);
+}
+.rj-cal-cell--locked {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green);
+}
+.rj-cal-cell--skipped {
+  border-style: dashed;
+  color: var(--text-faint);
+}
+.rj-cal-cell--cancelled {
+  border-color: var(--red-border, #f3c9c9);
+  background: var(--red-soft, #fff5f5);
+  color: var(--text-faint);
+}
+.rj-cal-cell--cancelled .rj-cal-day-no {
+  text-decoration: line-through;
+}
+.rj-cal-cell--empty {
+  color: var(--text);
+}
+.rj-cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+}
+.rj-cal-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rj-cal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+  border: 1px solid var(--border);
+}
+.rj-cal-dot--rule {
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+}
+.rj-cal-dot--adhoc {
+  background: var(--violet, #7c3aed);
+  border-color: var(--violet, #7c3aed);
+}
+.rj-cal-dot--locked {
+  background: var(--green);
+  border-color: var(--green);
+}
+.rj-cal-dot--skipped {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--text-faint);
+}
+.rj-cal-dot--cancelled {
+  background: var(--red-soft, #fff5f5);
+  border-color: var(--red-border, #f3c9c9);
+}
+
+/* P-7 S9 — the pricing page's secondary panels share ONE shell (the
+   six copies of the inline overlay/card styles are gone) with the
+   guided form's air: a titled card, one intro line, sections with
+   breathing room. */
+.pricing-panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+.pricing-panel {
+  width: 100%;
+  padding: 24px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pricing-panel > .section-title {
+  margin: 0;
+}
+.pricing-panel > .muted {
+  margin: 0;
+}
+.pricing-panel .field {
+  margin: 0;
+}
+.pricing-panel-stage {
+  margin-top: 8px;
+}
+
+/* P-7 S8 — the parked sub-view inside the Not-planned-yet drawer. */
+.agenda-parked {
+  margin-top: 12px;
+}
+.wp-undated-row--parked {
+  opacity: 0.85;
+}

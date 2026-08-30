@@ -386,6 +386,16 @@ export function ContractFormDialog({
   const periodConsequence = t(`teach.billingPeriod.${form.billing_period}`);
   const termsConsequence = t("form.paymentTermsSentence", { days: form.payment_terms_days });
 
+  // P-7 S5.1 — one stage at a time, on the one page. P-4 numbered the
+  // four stages and rendered them all open, which still read as a wall.
+  // A stage now REVEALS when the one before it has its answer (who →
+  // when → billing → notes); editing an existing contract opens all
+  // four, since every answer is already there. Nothing hides again.
+  // (A contract may have no locations, so the customer alone opens
+  // "when".)
+  const stageWhenOpen = contract != null || form.customer !== "";
+  const stageBillingOpen = stageWhenOpen && (contract != null || form.start_date !== "");
+  const stageNotesOpen = stageBillingOpen;
   return (
     <div
       role="dialog"
@@ -574,6 +584,12 @@ export function ContractFormDialog({
             <span className="ew-plan-step">2</span>
             {t("form.stage_when")}
           </div>
+            {!stageWhenOpen && (
+              <p className="muted small form-stage-waiting" data-testid="contract-form-stage-when-waiting">
+                {t("form.stage_when_waiting")}
+              </p>
+            )}
+            {stageWhenOpen && (<>
           <div className="form-2col">
           <div className="field" {...bind("start_date")}>
             <label className="field-label" htmlFor="contract-start">
@@ -648,6 +664,7 @@ export function ContractFormDialog({
           {fieldError("lifecycle")}
           </div>
           </div>
+            </>)}
         </div>
 
         <div className="form-section" data-testid="contract-form-stage-billing">
@@ -655,6 +672,12 @@ export function ContractFormDialog({
             <span className="ew-plan-step">3</span>
             {t("form.stage_billing")}
           </div>
+            {!stageBillingOpen && (
+              <p className="muted small form-stage-waiting" data-testid="contract-form-stage-billing-waiting">
+                {t("form.stage_billing_waiting")}
+              </p>
+            )}
+            {stageBillingOpen && (<>
           <div className="form-2col">
           <div className="field" {...bind("billing_period")}>
             <label className="field-label" htmlFor="contract-period">
@@ -759,6 +782,7 @@ export function ContractFormDialog({
           <p className="muted small" data-testid="contract-form-billing-sentence">
             {periodConsequence} {billingConsequence} {termsConsequence}
           </p>
+            </>)}
         </div>
 
         <div className="form-section" data-testid="contract-form-stage-notes">
@@ -766,6 +790,12 @@ export function ContractFormDialog({
             <span className="ew-plan-step">4</span>
             {t("form.stage_notes")}
           </div>
+            {!stageNotesOpen && (
+              <p className="muted small form-stage-waiting" data-testid="contract-form-stage-notes-waiting">
+                {t("form.stage_notes_waiting")}
+              </p>
+            )}
+            {stageNotesOpen && (<>
         <div className="field">
           <label className="field-label" htmlFor="contract-description">
             {t("form.description")}
@@ -794,6 +824,7 @@ export function ContractFormDialog({
             data-testid="contract-form-notes"
           />
         </div>
+            </>)}
         </div>
 
         <div className="filter-actions" style={{ justifyContent: "flex-end", alignItems: "center" }}>

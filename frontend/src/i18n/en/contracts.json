@@ -169,6 +169,9 @@
     "stage_when": "When",
     "stage_billing": "Billing",
     "stage_notes": "Description and notes",
+    "stage_when_waiting": "Choose the customer and the locations first — then you choose here when the contract runs.",
+    "stage_billing_waiting": "Choose the start date first — then billing appears here.",
+    "stage_notes_waiting": "Description and notes follow billing.",
     "paymentTermsSentence": "The customer has {{days}} days to pay each invoice."
   },
   "projects": {

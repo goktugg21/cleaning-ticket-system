@@ -149,6 +149,9 @@ export interface WorkPlanEntry {
   assignment_note: string | null;
   completion_note: string | null;
   unable_to_complete_reason: string | null;
+  /** P-7 S8 — why the job was parked (the ON_HOLD leg's note); set on
+   *  the parked list's rows only. */
+  parked_reason?: string | null;
   /** The day column this card hangs on, "YYYY-MM-DD". */
   day: string;
   placement: WorkPlanPlacement;
@@ -236,6 +239,8 @@ export interface WorkPlanCounts {
   overdue_all: number;
   upcoming: number;
   undated: number;
+  /** P-7 S8 — the parked sub-view's number. */
+  parked: number;
   /** W-LATE §1a — late JOBS (deduped), any week, the strip's own count. */
   late: number;
   /** WP-1 G1 — stuck jobs (blocked with nobody assigned), whole scope. */
@@ -270,6 +275,9 @@ export interface WorkPlanResponse {
    *  `counts.undated` has always been here; the ROWS had not, so the
    *  page could only say how much work it was declining to show. */
   undated_entries: WorkPlanEntry[];
+  /** P-7 S8 — parked (ON_HOLD) undated work: out of the nag, in its
+   *  own quiet list inside the drawer, with reasons. */
+  parked_entries: WorkPlanEntry[];
   /** W-LATE §1a — the late strip: one row per late JOB, sorted by the
    *  ladder (orange leftmost, bordeaux rightmost), each carrying the
    *  same `lateness` the week cards carry. */
@@ -288,6 +296,7 @@ export interface WorkPlanResponse {
     overdue_entries: number;
     upcoming_entries: number;
     undated_entries: number;
+    parked_entries: number;
     late_entries: number;
     stuck_entries: number;
     waiting_customer_entries: number;
@@ -297,6 +306,7 @@ export interface WorkPlanResponse {
     overdue_entries: boolean;
     upcoming_entries: boolean;
     undated_entries: boolean;
+    parked_entries: boolean;
     late_entries: boolean;
     stuck_entries: boolean;
     waiting_customer_entries: boolean;

@@ -13,10 +13,12 @@ import { getApiError } from "../api/client";
 import { fetchMyInvoicePdf, getMyInvoice } from "../api/invoices";
 import type { CustomerInvoice } from "../api/types";
 import { formatDate, formatMoney } from "../lib/intl";
+import { monthName } from "../lib/billingSentence";
 
+/** P-7 S4.1 — the period as words ("augustus 2026"). */
 function formatPeriod(year: number | null, month: number | null): string {
   if (!year || !month) return "—";
-  return `${String(month).padStart(2, "0")}-${year}`;
+  return monthName(`${year}-${String(month).padStart(2, "0")}`);
 }
 
 export function MyInvoiceDetailPage() {

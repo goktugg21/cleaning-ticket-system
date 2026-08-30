@@ -177,6 +177,34 @@ export function WeekEntryDialog({
   const [dirty, setDirty] = useState(false);
   const discardDialogRef = useRef<ConfirmDialogHandle>(null);
 
+  /**
+   * P-7 S1.2 — switching week over unsaved hours ASKS first.
+   *
+   * The grid is remounted per week (its `key`), so a week change threw
+   * away every typed cell; the only mitigation was a standing sentence
+   * ("unsaved hours are cleared when you switch week"). My hours asked
+   * at the moment; this dialog now does the same: the chosen week waits
+   * in a ref while the question is on screen, and lands only on
+   * "discard". Rendered unconditionally, driven through the ref.
+   */
+  const leaveWeekDialogRef = useRef<ConfirmDialogHandle>(null);
+  const pendingWeekRef = useRef<IsoWeek | null>(null);
+  const requestWeek = (next: IsoWeek) => {
+    if (dirty) {
+      pendingWeekRef.current = next;
+      leaveWeekDialogRef.current?.open();
+      return;
+    }
+    setWeek(next);
+  };
+  const confirmLeaveWeek = () => {
+    const next = pendingWeekRef.current;
+    pendingWeekRef.current = null;
+    leaveWeekDialogRef.current?.close();
+    setDirty(false);
+    if (next) setWeek(next);
+  };
+
   const requestClose = useCallback(() => {
     if (dirty) {
       discardDialogRef.current?.open();
@@ -377,10 +405,11 @@ export function WeekEntryDialog({
    * counted and named, never seeded. Nothing is seeded at all until
    * the wall has been read for every selected person.
    */
-  const { seedRowsByEmployee, skippedPairs, rowCount } = useMemo(() => {
+  // P-7 S1.1 — the pair count this memo used to return fed the "N
+  // rows" banner; the grid's own count is the one count now.
+  const { seedRowsByEmployee, skippedPairs } = useMemo(() => {
     const out: Record<number, GridSeedRow[]> = {};
     const skipped: SkippedPair[] = [];
-    let count = 0;
     if (assignmentsReady) {
       for (const employeeId of employeeIds) {
         const person = personById.get(employeeId);
@@ -388,14 +417,12 @@ export function WeekEntryDialog({
         for (const buildingId of buildingIds) {
           if (buildingId === NO_BUILDING_ID) {
             rows.push({ building: null, source_type: "", source_id: null });
-            count += 1;
           } else if (person && person.building_ids.includes(buildingId)) {
             rows.push({
               building: buildingId,
               source_type: "",
               source_id: null,
             });
-            count += 1;
           } else {
             skipped.push({ employee: employeeId, building: buildingId });
           }
@@ -403,7 +430,7 @@ export function WeekEntryDialog({
         out[employeeId] = rows;
       }
     }
-    return { seedRowsByEmployee: out, skippedPairs: skipped, rowCount: count };
+    return { seedRowsByEmployee: out, skippedPairs: skipped };
   }, [assignmentsReady, employeeIds, buildingIds, personById]);
 
   /** Titles for the job tags: the caller-wide picker list plus every
@@ -591,7 +618,7 @@ export function WeekEntryDialog({
                 value={formatIsoWeek(week)}
                 onChange={(event) => {
                   const parsed = parseIsoWeek(event.target.value);
-                  if (parsed) setWeek(parsed);
+                  if (parsed) requestWeek(parsed);
                 }}
                 data-testid="week-setup-week"
               />
@@ -641,11 +668,13 @@ export function WeekEntryDialog({
                 ? t("week_setup.pairs_none")
                 : !assignmentsReady
                   ? t("week_setup.pairs_pending")
-                  : t("week_setup.pairs_summary", {
-                      count: rowCount,
-                      employees: employeeIds.length,
-                      buildings: buildingIds.length,
-                    })}
+                  : /* P-7 S1.1 — no row count here: this line counted
+                       (person, building) pairs and the grid counts rows
+                       (a pair × hour type × job, reconciled with what is
+                       saved), so "4 rows" sat above a grid saying "6
+                       rows". The grid's count is the one count, and its
+                       caption says what a row is. */
+                    t("week_setup.pairs_checked")}
             </p>
             {/* Task 1b — the quiet count line that names the pairs the
                 wall refused. Absent when nothing was skipped. */}
@@ -725,6 +754,18 @@ export function WeekEntryDialog({
           onConfirm={() => {
             discardDialogRef.current?.close();
             onClose();
+          }}
+        />
+        <ConfirmDialog
+          ref={leaveWeekDialogRef}
+          title={t("week_setup.leave_week_title")}
+          body={t("week_setup.leave_week_body", { week: week.isoWeek })}
+          confirmLabel={t("week_setup.leave_week_confirm")}
+          cancelLabel={t("week_setup.discard_cancel")}
+          destructive
+          onConfirm={confirmLeaveWeek}
+          onCancel={() => {
+            pendingWeekRef.current = null;
           }}
         />
       </div>

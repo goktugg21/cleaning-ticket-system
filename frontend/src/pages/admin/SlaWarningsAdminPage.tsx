@@ -46,6 +46,7 @@
  * present.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { RotateCcw } from "lucide-react";
 
@@ -192,6 +193,33 @@ function choicesFrom(company: SlaCompanyThresholds | null): ChoicesDraft {
     weekly_summary_enabled: company?.choices?.weekly_summary_enabled ?? false,
     warnings,
   };
+}
+
+/** P-7 S6 — one warning's additions at their defaults? (nothing to
+ *  fold open for). */
+function warningChoicesAreDefault(w: ChoicesDraft["warnings"][SlaWarningKey]): boolean {
+  return w.also_notify.length === 0 && w.extra_email.trim() === "" && w.final_days === "";
+}
+
+/** P-7 S6 — the fold's summary in a few words: who else hears it, the
+ *  extra address, the third step — or "standard". */
+function warningChoicesSummary(
+  w: ChoicesDraft["warnings"][SlaWarningKey],
+  t: TFunction,
+): string {
+  const parts: string[] = [];
+  if (w.also_notify.length > 0) {
+    parts.push(
+      t("sla_warnings.summary_also", {
+        who: w.also_notify.map((ring) => t(`sla_warnings.ring.${ring}`)).join(", "),
+      }),
+    );
+  }
+  if (w.extra_email.trim() !== "") parts.push(w.extra_email.trim());
+  if (w.final_days !== "") {
+    parts.push(t("sla_warnings.summary_final", { n: Number(w.final_days) || 0 }));
+  }
+  return parts.length > 0 ? parts.join(" · ") : t("sla_warnings.summary_default");
 }
 
 function choicesAreDefault(c: ChoicesDraft): boolean {
@@ -640,7 +668,24 @@ export function SlaWarningsAdminPage() {
               {/* P-5 S8 — the owner's additions, in the page's own
                   sentence style: who else hears it, an extra address,
                   and the third step. */}
+              {/* P-7 S6 — the default view is the four warnings and
+                  their values, as before S8. The recipients, the extra
+                  address and the third step fold behind ONE "Aanpassen"
+                  per warning; the summary says in a few words what is
+                  set, so the fold answers even closed. Opens itself
+                  when something is set. */}
               {isWarningKey(group.key) && (
+                <details
+                  className="form-fold sla-warning-fold"
+                  open={!warningChoicesAreDefault(choices.warnings[group.key])}
+                  data-testid={`sla-warnings-adjust-${group.key}`}
+                >
+                  <summary className="form-fold-summary">
+                    {t("sla_warnings.adjust")}
+                    <span className="form-fold-summary-value">
+                      {warningChoicesSummary(choices.warnings[group.key], t)}
+                    </span>
+                  </summary>
                 <div
                   className="sla-warning-choices"
                   data-testid={`sla-warnings-choices-${group.key}`}
@@ -748,6 +793,7 @@ export function SlaWarningsAdminPage() {
                     </label>
                   )}
                 </div>
+                </details>
               )}
             </div>
           ))}
@@ -759,6 +805,26 @@ export function SlaWarningsAdminPage() {
                 <h3 className="sla-warning-title">{t("sla_warnings.group.counting.title")}</h3>
               </div>
             </div>
+            {/* P-7 S6 — same fold for the company-wide pair: counting
+                (weekend) and the weekly summary. */}
+            <details
+              className="form-fold sla-warning-fold"
+              open={choices.count_calendar_days || choices.weekly_summary_enabled}
+              data-testid="sla-warnings-adjust-counting"
+            >
+              <summary className="form-fold-summary">
+                {t("sla_warnings.adjust")}
+                <span className="form-fold-summary-value">
+                  {[
+                    choices.count_calendar_days
+                      ? t("sla_warnings.summary_calendar")
+                      : t("sla_warnings.summary_working"),
+                    choices.weekly_summary_enabled ? t("sla_warnings.summary_weekly_on") : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </summary>
             <div className="sla-warning-fields">
               <label className="field sla-choice-field">
                 <select
@@ -797,6 +863,7 @@ export function SlaWarningsAdminPage() {
                 {t("sla_warnings.weekly_label")}
               </label>
             </div>
+            </details>
           </div>
         </>
       )}

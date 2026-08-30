@@ -94,6 +94,7 @@ export function ActualHoursPanel({
   successPath,
   previewCoversTotal = false,
   finalSubtotalAmount = null,
+  consequence,
 }: {
   ewId: number;
   hourlyLines: ActualHoursLine[];
@@ -128,6 +129,11 @@ export function ActualHoursPanel({
    *  set. Read alongside `previewCoversTotal` to say so when the saved
    *  total is not what this screen computed. */
   finalSubtotalAmount?: string | null;
+  /** P-7 S4.2 — what pressing Save DOES, in one line beside the
+   *  button, before it is pressed: "Opslaan zet dit bedrag klaar voor
+   *  de factuur van B Amsterdam voor oktober 2026." The caller
+   *  composes it from the detail it has. */
+  consequence?: string;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
@@ -375,6 +381,14 @@ export function ActualHoursPanel({
             <strong data-testid="extra-work-actual-hours-final-total">
               {finalTotalAmount ?? t("detail.actual_hours_no_total_yet")}
             </strong>
+          </span>
+        )}
+        {!locked && consequence && (
+          <span
+            className="muted small ew-save-consequence"
+            data-testid="extra-work-actual-hours-consequence"
+          >
+            {consequence}
           </span>
         )}
         {!locked && (

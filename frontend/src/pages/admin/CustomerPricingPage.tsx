@@ -2247,16 +2247,7 @@ export function CustomerPricingPage() {
           role="dialog"
           aria-modal="true"
           aria-label={formModalTitle}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <form
             onSubmit={handleSubmitForm}
@@ -2686,26 +2677,11 @@ export function CustomerPricingPage() {
           role="dialog"
           aria-modal="true"
           aria-label={t("customer_pricing.bulk_raise_button")}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <div
-            className="card"
-            style={{
-              maxWidth: 600,
-              width: "100%",
-              padding: 24,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
+            className="card pricing-panel"
+            style={{ maxWidth: 600 }}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.bulk_raise_button")}
@@ -2726,6 +2702,12 @@ export function CustomerPricingPage() {
               </div>
             )}
 
+            {/* P-7 S9 — staged like the add/edit form: which prices,
+                then how much. */}
+            <div className="form-section-title" data-testid="customer-pricing-bulk-stage-which">
+              <span className="ew-plan-step">1</span>
+              {t("customer_pricing.bulk_stage_which")}
+            </div>
             {activePrices.length === 0 ? (
               <div className="muted" style={{ marginBottom: 16 }}>
                 {t("customer_pricing.bulk_raise_empty")}
@@ -2800,6 +2782,10 @@ export function CustomerPricingPage() {
               </>
             )}
 
+            <div className="form-section-title pricing-panel-stage" data-testid="customer-pricing-bulk-stage-how">
+              <span className="ew-plan-step">2</span>
+              {t("customer_pricing.bulk_stage_how")}
+            </div>
             <div className="form-2col">
               <div className="field">
                 <label
@@ -2937,20 +2923,11 @@ export function CustomerPricingPage() {
               ? t("customer_pricing.folder_rename_title")
               : t("customer_pricing.folder_new_title")
           }
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <form
-            className="card"
-            style={{ maxWidth: 460, width: "100%", padding: 24 }}
+            className="card pricing-panel"
+            style={{ maxWidth: 460 }}
             onSubmit={submitFolder}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
@@ -3019,20 +2996,11 @@ export function CustomerPricingPage() {
           aria-label={t("customer_pricing.folder_delete_title", {
             name: folderDeleteTarget.name,
           })}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <div
-            className="card"
-            style={{ maxWidth: 520, width: "100%", padding: 24 }}
+            className="card pricing-panel"
+            style={{ maxWidth: 520 }}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_delete_title", {
@@ -3092,26 +3060,11 @@ export function CustomerPricingPage() {
           role="dialog"
           aria-modal="true"
           aria-label={t("customer_pricing.folder_from_category_title")}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <form
-            className="card"
-            style={{
-              maxWidth: 620,
-              width: "100%",
-              padding: 24,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
+            className="card pricing-panel"
+            style={{ maxWidth: 620 }}
             onSubmit={submitFromCategory}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
@@ -3261,20 +3214,11 @@ export function CustomerPricingPage() {
           aria-label={t("customer_pricing.folder_move_title", {
             count: activeBulkSelection.length,
           })}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <div
-            className="card"
-            style={{ maxWidth: 460, width: "100%", padding: 24 }}
+            className="card pricing-panel"
+            style={{ maxWidth: 460 }}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.folder_move_title", {
@@ -3349,26 +3293,11 @@ export function CustomerPricingPage() {
           role="dialog"
           aria-modal="true"
           aria-label={t("customer_pricing.copy_from_default_title")}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
+          className="pricing-panel-overlay"
         >
           <div
-            className="card"
-            style={{
-              maxWidth: 600,
-              width: "100%",
-              padding: 24,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
+            className="card pricing-panel"
+            style={{ maxWidth: 600 }}
           >
             <h3 className="section-title" style={{ marginTop: 0, marginBottom: 12 }}>
               {t("customer_pricing.copy_from_default_title")}

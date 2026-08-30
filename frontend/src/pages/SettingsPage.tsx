@@ -262,6 +262,12 @@ export function SettingsPage() {
 
   return (
     <div>
+      {/* P-7 S7 — the profile is a HORIZONTAL header band at every
+          width: the avatar, the name, the email and the role on one
+          line, the facts (member since, last sign-in, access) as an
+          inline row under it, the photo control at the right. The
+          vertical, centred sidebar card is gone; the forms take the
+          full width below. */}
       <div className="page-header">
         <div>
           <div className="eyebrow">{t("eyebrow")}</div>
@@ -270,128 +276,82 @@ export function SettingsPage() {
         </div>
       </div>
 
-      <div className="settings-layout">
-        <aside>
-          {me && (
-            <section className="card account-overview">
-              <div className="account-overview-header">
-                <Avatar
-                  imageUrl={me.profile_photo_url}
-                  name={me.full_name || me.email}
-                  size={56}
-                  className="account-avatar-img"
-                />
-                <div className="account-identity">
-                  {me.full_name?.trim() && (
-                    <div className="account-name">{me.full_name}</div>
-                  )}
-                  <div className="account-email">{me.email}</div>
-                  {me.role && (
-                    <span className="account-role-pill">
-                      {t(roleLabelKeyNs(me.role))}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="account-overview-divider" />
-
-              {/* RF-1 — own profile photo (always self-service). */}
-              <div className="account-photo-section">
-                <div className="account-meta-label" style={{ marginBottom: 8 }}>
-                  {t("common:settings.photo_title")}
-                </div>
-                <ImageUploadField
-                  imageUrl={me.profile_photo_url}
-                  name={me.full_name || me.email}
-                  size={72}
-                  testId="profile-photo-upload"
-                  onUpload={async (file) => {
-                    await uploadProfilePhoto(me.id, file);
-                    await reloadMe();
-                  }}
-                  onRemove={async () => {
-                    await deleteProfilePhoto(me.id);
-                    await reloadMe();
-                  }}
-                />
-              </div>
-
-              <div className="account-overview-divider" />
-
-              <div className="account-meta">
-                <div className="account-meta-row">
-                  <div className="account-meta-label">
-                    {t("common:account.member_since")}
-                  </div>
-                  <div className="account-meta-value">
-                    {me.date_joined
-                      ? formatJoinDate(me.date_joined, i18n.language)
-                      : "—"}
-                  </div>
-                </div>
-                <div className="account-meta-row">
-                  <div className="account-meta-label">
-                    {t("common:account.last_sign_in")}
-                  </div>
-                  <div className="account-meta-value">
-                    {formatLastSignIn(me.last_login, i18n.language, t)}
-                  </div>
-                </div>
-              </div>
-
+      {me && (
+        <section className="card account-header" data-testid="settings-account-header">
+          <Avatar
+            imageUrl={me.profile_photo_url}
+            name={me.full_name || me.email}
+            size={56}
+            className="account-avatar-img"
+          />
+          <div className="account-header-main">
+            <div className="account-header-identity">
+              {me.full_name?.trim() && (
+                <span className="account-name">{me.full_name}</span>
+              )}
+              <span className="account-email">{me.email}</span>
+              {me.role && (
+                <span className="account-role-pill">{t(roleLabelKeyNs(me.role))}</span>
+              )}
+            </div>
+            <div className="account-header-facts">
+              <span className="account-header-fact">
+                <span className="account-meta-label">{t("common:account.member_since")}</span>
+                <span className="account-meta-value">
+                  {me.date_joined ? formatJoinDate(me.date_joined, i18n.language) : "—"}
+                </span>
+              </span>
+              <span className="account-header-fact">
+                <span className="account-meta-label">{t("common:account.last_sign_in")}</span>
+                <span className="account-meta-value">
+                  {formatLastSignIn(me.last_login, i18n.language, t)}
+                </span>
+              </span>
               {(me.company_ids.length > 0 ||
                 me.building_ids.length > 0 ||
                 me.customer_ids.length > 0) && (
-                <>
-                  <div className="account-overview-divider" />
-                  <div className="account-access">
-                    <div className="account-access-label">
-                      {t("common:account.access")}
-                    </div>
-                    {me.company_ids.length > 0 && (
-                      <div className="account-access-row">
-                        <span className="account-access-count">
-                          {me.company_ids.length}
-                        </span>
-                        <span className="account-access-name">
-                          {t("common:account.companies", {
-                            count: me.company_ids.length,
-                          })}
-                        </span>
-                      </div>
-                    )}
-                    {me.building_ids.length > 0 && (
-                      <div className="account-access-row">
-                        <span className="account-access-count">
-                          {me.building_ids.length}
-                        </span>
-                        <span className="account-access-name">
-                          {t("common:account.buildings", {
-                            count: me.building_ids.length,
-                          })}
-                        </span>
-                      </div>
-                    )}
-                    {me.customer_ids.length > 0 && (
-                      <div className="account-access-row">
-                        <span className="account-access-count">
-                          {me.customer_ids.length}
-                        </span>
-                        <span className="account-access-name">
-                          {t("common:account.customers", {
-                            count: me.customer_ids.length,
-                          })}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </>
+                <span className="account-header-fact">
+                  <span className="account-meta-label">{t("common:account.access")}</span>
+                  <span className="account-meta-value">
+                    {[
+                      me.company_ids.length > 0
+                        ? `${me.company_ids.length} ${t("common:account.companies", { count: me.company_ids.length })}`
+                        : "",
+                      me.building_ids.length > 0
+                        ? `${me.building_ids.length} ${t("common:account.buildings", { count: me.building_ids.length })}`
+                        : "",
+                      me.customer_ids.length > 0
+                        ? `${me.customer_ids.length} ${t("common:account.customers", { count: me.customer_ids.length })}`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </span>
               )}
-            </section>
-          )}
-        </aside>
+            </div>
+          </div>
+          {/* RF-1 — own profile photo (always self-service). */}
+          <div className="account-header-photo">
+            <ImageUploadField
+              imageUrl={me.profile_photo_url}
+              name={me.full_name || me.email}
+              size={56}
+              testId="profile-photo-upload"
+              onUpload={async (file) => {
+                await uploadProfilePhoto(me.id, file);
+                await reloadMe();
+              }}
+              onRemove={async () => {
+                await deleteProfilePhoto(me.id);
+                await reloadMe();
+              }}
+            />
+          </div>
+        </section>
+      )}
 
+      <div className="settings-layout settings-layout--single">
         <div className="settings-main">
         <form className="card" onSubmit={handleProfileSubmit} noValidate>
           <div className="form-section">

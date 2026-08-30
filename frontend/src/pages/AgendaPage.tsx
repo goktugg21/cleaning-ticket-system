@@ -551,6 +551,14 @@ function WorkPlanWeek() {
     [data],
   );
   const undatedOldest = undatedJobs[0]?.unplanned_age_days ?? null;
+  // P-7 S8 — parked work: out of the nag, its own quiet list in the
+  // drawer, with the reason each was parked for.
+  const parkedJobs = useMemo(
+    () => (data ? dedupeByJob(data.parked_entries ?? []) : []),
+    [data],
+  );
+  const parkedShown =
+    data && !data.truncated.parked_entries ? parkedJobs.length : (data?.counts.parked ?? 0);
 
   function triageToggle(key: string) {
     setTriageSelected((prev) => {
@@ -1021,7 +1029,7 @@ function WorkPlanWeek() {
           It sits ABOVE the week, because unplanned work is what you deal
           with before you read a plan, and the action that moves a row
           out of here and into the week is on the row itself. */}
-      {data && undatedJobs.length > 0 && (
+      {data && (undatedJobs.length > 0 || parkedJobs.length > 0) && (
         <div className="wp-undated-toggle-row" data-testid="agenda-undated-toggle-row">
           <button
             type="button"
@@ -1041,7 +1049,7 @@ function WorkPlanWeek() {
           </button>
         </div>
       )}
-      {data && undatedJobs.length > 0 && undatedOpen && (
+      {data && (undatedJobs.length > 0 || parkedJobs.length > 0) && undatedOpen && (
         <section
           className="card"
           data-testid="agenda-undated-lane"
@@ -1150,6 +1158,63 @@ function WorkPlanWeek() {
                 count: data.limits.undated_entries,
               })}
             </p>
+          )}
+          {undatedJobs.length === 0 && (
+            <p className="muted small" data-testid="agenda-undated-none">
+              {t("agenda.undated_none")}
+            </p>
+          )}
+          {/* P-7 S8 — "Geparkeerd (N)": the parked work, quiet, with its
+              reasons. It left the nag above; it did not leave the drawer. */}
+          {parkedShown > 0 && (
+            <details className="form-fold agenda-parked" data-testid="agenda-parked-fold">
+              <summary className="form-fold-summary">
+                {t("agenda.parked_title", { count: parkedShown })}
+                <span className="form-fold-summary-value">{t("agenda.parked_hint")}</span>
+              </summary>
+              <BoundedList
+                size="md"
+                count={parkedJobs.length}
+                ariaLabel={t("agenda.parked_title", { count: parkedShown })}
+                testIdPrefix="agenda-parked"
+              >
+                <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                  {parkedJobs.map((entry) => (
+                    <li
+                      key={entry.key}
+                      className="wp-undated-row wp-undated-row--parked"
+                      data-testid={`agenda-parked-row-${entry.key}`}
+                    >
+                      <div className="wp-undated-row-main">
+                        <Link to={`/tickets/${entry.ticket_id}`}>
+                          {entry.ticket_no ? `${entry.ticket_no} · ` : ""}
+                          {entry.title}
+                        </Link>
+                        <span className="muted small">
+                          {[entry.building_name, entry.customer_name].filter(Boolean).join(" · ")}
+                        </span>
+                        <span className="muted small" data-testid={`agenda-parked-reason-${entry.key}`}>
+                          {entry.parked_reason
+                            ? t("agenda.parked_reason", { reason: entry.parked_reason })
+                            : t("agenda.parked_no_reason")}
+                        </span>
+                      </div>
+                      <span className="wp-undated-row-actions">
+                        <span className="cell-tag cell-tag-closed">
+                          <i />
+                          {t("agenda.parked_tag")}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </BoundedList>
+              {data.truncated.parked_entries && (
+                <p className="wp-notice" role="status">
+                  {t("agenda.truncated_note", { count: data.limits.parked_entries })}
+                </p>
+              )}
+            </details>
           )}
           {planError && (
             <div className="alert-error" role="alert">
@@ -1316,6 +1381,7 @@ function WorkPlanWeek() {
         placeholder={t("agenda.approve_on_behalf_placeholder")}
         confirmLabel={approveBusy ? t("common:admin_form.saving") : t("agenda.approve_on_behalf_confirm")}
         cancelLabel={t("common:cancel")}
+        tone="warning"
       />
       {/* P-6 V4 — one reason for every selected item; it lands in each
           item's history. */}
@@ -1716,12 +1782,16 @@ function WaitingRow({
         <span className="wp-wait" data-waiting="customer">
           {t("agenda.waiting_customer")}
         </span>
-        {/* P-5 S3.1 — a BUTTON, not a second pill: the amber
-            `btn-warning` read as a status next to the waiting chip. */}
+        {/* P-5 S3.1 made this a BUTTON (not a second pill) and, in
+            passing, dropped the amber. P-7 S3.1 — the owner's ruling:
+            deciding for the customer is an exceptional act and must
+            LOOK like one. `btn-warning`, the one amber button (Part E),
+            on a button shape so it still reads as an action beside the
+            waiting chip. */}
         {onApprove && (
           <button
             type="button"
-            className="btn btn-secondary btn-sm"
+            className="btn btn-warning btn-sm"
             onClick={() => onApprove(entry)}
             data-testid={`agenda-waiting-approve-${entry.key}`}
           >
