@@ -75,6 +75,10 @@ urlpatterns = [
     # the customer's negotiated prices).
     path("api/contracts/", include("contracts.urls")),
     path("api/invoices/", include("invoicing.urls")),
+    # P-6 V4 — the global search box. One read-only endpoint, every
+    # group scoped by the same helper its list endpoint uses. A literal
+    # path, so it sits before the `api/` router includes below.
+    path("api/search/", include("accounts.urls_search")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),
     # Sprint 24A — admin endpoints for StaffProfile +
