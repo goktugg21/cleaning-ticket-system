@@ -1,4 +1,6 @@
 import os
+
+from celery.schedules import crontab
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
@@ -531,6 +533,12 @@ CELERY_BEAT_SCHEDULE = {
     "sweep-sla-warnings": {
         "task": "sla.tasks.sweep_sla_warnings",
         "schedule": 5 * 60,
+    },
+    # P-5 S8.4 — Monday 07:00 (server zone): the weekly list of warnings
+    # sent, for the companies that switched it on.
+    "send-sla-weekly-summary": {
+        "task": "sla.tasks.send_sla_weekly_summary",
+        "schedule": crontab(hour=7, minute=0, day_of_week="mon"),
     },
     # WP-1 G4 — the billing-month-at-risk digest. WEEKLY: the guard's
     # panel is recomputed live on every page load, so the mail exists to

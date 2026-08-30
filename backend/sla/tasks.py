@@ -88,3 +88,102 @@ def sweep_sla_warnings(now=None):
             "not_started_extra_work": 0,
             "failed": 1,
         }
+
+
+# P-5 S8.4 — THE WEEKLY LIST.
+#
+# "Mail the admins a weekly list of every warning sent." Reuses the
+# digest shape `invoicing.tasks.send_billing_month_at_risk_digest`
+# established: per company, one plain-text mail per admin, through the
+# ONE logged sender, never raising. Off by default; the company's row
+# switches it on (`weekly_summary_enabled`).
+SLA_EVENT_TYPES = (
+    "SLA_APPROVAL_CUTOFF_DUE",
+    "SLA_MANAGER_REVIEW_OVERDUE",
+    "SLA_WORK_NOT_STARTED",
+)
+
+_SUMMARY_LABELS = {
+    "SLA_APPROVAL_CUTOFF_DUE": "Klantgoedkeuring voor de facturatiedatum",
+    "SLA_MANAGER_REVIEW_OVERDUE": "Afgerond werk nog niet gecontroleerd",
+    "SLA_WORK_NOT_STARTED": "Werk niet op tijd gestart",
+}
+
+
+def weekly_summary_body(rows, *, since, until) -> str:
+    lines = [
+        "Overzicht van de automatische waarschuwingen van de afgelopen week",
+        f"({since:%d-%m-%Y} t/m {until:%d-%m-%Y}).",
+        "",
+    ]
+    if not rows:
+        lines.append("Er zijn deze week geen waarschuwingen verstuurd.")
+        return "\n".join(lines)
+    by_type: dict = {}
+    for row in rows:
+        by_type.setdefault(row.event_type, []).append(row)
+    for event_type, group in by_type.items():
+        lines.append(
+            f"{_SUMMARY_LABELS.get(event_type, event_type)} - "
+            f"{len(group)} bericht(en)"
+        )
+        for row in group:
+            when = timezone.localtime(row.created_at).strftime("%d-%m %H:%M")
+            lines.append(f"  - {when}  {row.subject}  -> {row.recipient_email}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@shared_task
+def send_sla_weekly_summary(now=None):
+    """Monday morning: per company with `weekly_summary_enabled`, mail
+    every company admin the list of SLA warnings logged in the past
+    seven days. Returns `{"companies": n, "mails": m, "failed": f}`."""
+    from datetime import datetime, timedelta
+
+    from django.db.models import Q
+
+    from notifications.models import NotificationEventType, NotificationLog
+    from notifications.services import company_admin_recipients, send_logged_email
+
+    from .models import SlaWarningThreshold
+
+    when = datetime.fromisoformat(now) if now else timezone.now()
+    until = timezone.localtime(when).date()
+    since = until - timedelta(days=7)
+    companies = mails = failed = 0
+    for row in SlaWarningThreshold.objects.filter(weekly_summary_enabled=True):
+        try:
+            companies += 1
+            logs = list(
+                NotificationLog.objects.filter(
+                    event_type__in=SLA_EVENT_TYPES,
+                    created_at__gte=when - timedelta(days=7),
+                    created_at__lt=when,
+                )
+                .filter(
+                    Q(ticket__company_id=row.company_id)
+                    | Q(extra_work__company_id=row.company_id)
+                )
+                .order_by("event_type", "created_at")
+            )
+            body = weekly_summary_body(logs, since=since, until=until)
+            subject = (
+                f"Weekoverzicht automatische waarschuwingen "
+                f"({since:%d-%m} t/m {until:%d-%m-%Y})"
+            )
+            for admin in company_admin_recipients(row.company_id):
+                send_logged_email(
+                    recipient_email=admin.email,
+                    recipient_user=admin,
+                    subject=subject,
+                    body=body,
+                    event_type=NotificationEventType.SLA_WEEKLY_SUMMARY,
+                )
+                mails += 1
+        except Exception:  # noqa: BLE001 — one company must not stop the rest.
+            failed += 1
+            logger.exception(
+                "sla.tasks: weekly summary failed for company %s", row.company_id
+            )
+    return {"companies": companies, "mails": mails, "failed": failed}

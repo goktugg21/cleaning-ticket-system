@@ -55,10 +55,13 @@ import {
   resetSlaWarningThresholds,
   saveSlaWarningThresholds,
 } from "../../api/sla";
+import type { SlaThresholdPatch } from "../../api/sla";
 import type {
+  SlaAlsoNotify,
   SlaBusinessWindow,
   SlaCompanyThresholds,
   SlaThresholdRow,
+  SlaWarningKey,
 } from "../../api/types";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
@@ -147,6 +150,78 @@ const WARNING_ORDINAL: Record<string, number> = Object.fromEntries(
   GROUPS.filter((g) => g.kind === "warning").map((g, i) => [g.key, i + 1]),
 );
 
+/** P-5 S8 — which rings a warning may be ADDED to: everything except
+ *  the ring that already receives its first warning. */
+const OFFERED_RINGS: Record<SlaWarningKey, SlaAlsoNotify[]> = {
+  not_started: ["responsible_manager", "company_admins"],
+  manager_review: ["assigned_staff", "company_admins"],
+  approval_cutoff: ["assigned_staff", "responsible_manager", "company_admins"],
+};
+
+const WARNING_KEYS: SlaWarningKey[] = ["not_started", "manager_review", "approval_cutoff"];
+
+function isWarningKey(key: string): key is SlaWarningKey {
+  return (WARNING_KEYS as string[]).includes(key);
+}
+
+/** The choices draft, editable in place. */
+interface ChoicesDraft {
+  count_calendar_days: boolean;
+  weekly_summary_enabled: boolean;
+  warnings: Record<
+    SlaWarningKey,
+    { also_notify: SlaAlsoNotify[]; extra_email: string; final_days: string }
+  >;
+}
+
+function choicesFrom(company: SlaCompanyThresholds | null): ChoicesDraft {
+  const warnings = {} as ChoicesDraft["warnings"];
+  for (const key of WARNING_KEYS) {
+    const w = company?.choices?.warnings?.[key];
+    warnings[key] = {
+      also_notify: [...(w?.also_notify ?? [])],
+      extra_email: w?.extra_email ?? "",
+      final_days:
+        w?.final_escalate_days === null || w?.final_escalate_days === undefined
+          ? ""
+          : String(w.final_escalate_days),
+    };
+  }
+  return {
+    count_calendar_days: company?.choices?.count_calendar_days ?? false,
+    weekly_summary_enabled: company?.choices?.weekly_summary_enabled ?? false,
+    warnings,
+  };
+}
+
+function choicesAreDefault(c: ChoicesDraft): boolean {
+  return (
+    !c.count_calendar_days &&
+    !c.weekly_summary_enabled &&
+    WARNING_KEYS.every(
+      (key) =>
+        c.warnings[key].also_notify.length === 0 &&
+        c.warnings[key].extra_email.trim() === "" &&
+        c.warnings[key].final_days.trim() === "",
+    )
+  );
+}
+
+function choicesPatch(c: ChoicesDraft): SlaThresholdPatch {
+  const patch: SlaThresholdPatch = {
+    count_calendar_days: c.count_calendar_days,
+    weekly_summary_enabled: c.weekly_summary_enabled,
+  };
+  for (const key of WARNING_KEYS) {
+    const w = c.warnings[key];
+    patch[`${key}_also_notify`] = w.also_notify;
+    patch[`${key}_extra_email`] = w.extra_email.trim();
+    patch[`${key}_final_escalate_days`] =
+      w.final_days.trim() === "" ? null : Number(w.final_days);
+  }
+  return patch;
+}
+
 function draftFrom(company: SlaCompanyThresholds | null): Record<string, string> {
   const draft: Record<string, string> = {};
   if (!company) return draft;
@@ -165,6 +240,8 @@ export function SlaWarningsAdminPage() {
   const [window_, setWindow] = useState<SlaBusinessWindow | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  // P-5 S8 — the choices beside the numbers.
+  const [choices, setChoices] = useState<ChoicesDraft>(() => choicesFrom(null));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -198,6 +275,7 @@ export function SlaWarningsAdminPage() {
         const first = data.results[0] ?? null;
         setSelectedId(first ? first.company : null);
         setDraft(draftFrom(first));
+        setChoices(choicesFrom(first));
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
@@ -234,6 +312,14 @@ export function SlaWarningsAdminPage() {
       // lockstep has to keep in step for no gain.
       if (row.unit === "days") return t("sla_warnings.unit_days", { n: value });
       if (row.unit === "hours") return t("sla_warnings.unit_hours", { n: value });
+      // P-5 S8.3 — honest captions: in calendar mode the working
+      // window is not what is counted, so the sentence says the clock.
+      if (choices.count_calendar_days) {
+        return t("sla_warnings.unit_calendar_hours", {
+          n: value,
+          days: Math.round((value / 24) * 10) / 10,
+        });
+      }
       const w = window_;
       if (!w) return t("sla_warnings.unit_business_hours_plain", { n: value });
       const perDay = w.hours_per_day > 0 ? w.hours_per_day : 8;
@@ -245,13 +331,15 @@ export function SlaWarningsAdminPage() {
         days,
       });
     },
-    [t, window_],
+    [t, window_, choices.count_calendar_days],
   );
 
   const selectCompany = useCallback(
     (id: number) => {
       setSelectedId(id);
-      setDraft(draftFrom(companies.find((c) => c.company === id) ?? null));
+      const next = companies.find((c) => c.company === id) ?? null;
+      setDraft(draftFrom(next));
+      setChoices(choicesFrom(next));
       setError("");
     },
     [companies],
@@ -262,6 +350,7 @@ export function SlaWarningsAdminPage() {
       prev.map((c) => (c.company === updated.company ? updated : c)),
     );
     setDraft(draftFrom(updated));
+    setChoices(choicesFrom(updated));
   }, []);
 
   // W-T3 §1 — Save and Reset had been reporting into the SAME banner as
@@ -274,13 +363,17 @@ export function SlaWarningsAdminPage() {
     setSaving(true);
     setActionError("");
     try {
-      const patch: Record<string, number | null> = {};
+      const patch: SlaThresholdPatch = {};
       let anySet = false;
       for (const row of selected.thresholds) {
         const raw = (draft[row.field] ?? "").trim();
         patch[row.field] = raw === "" ? null : Number(raw);
         if (raw !== "") anySet = true;
       }
+      // P-5 S8 — the choices travel with the numbers; a company with
+      // nothing set anywhere is reset (no row) rather than saved.
+      Object.assign(patch, choicesPatch(choices));
+      if (!choicesAreDefault(choices)) anySet = true;
       // W8 §2 — SAVING AN ALL-BLANK FORM IS "BACK TO DEFAULTS", AND IT
       // MUST NOT LEAVE A ROW BEHIND.
       //
@@ -308,7 +401,7 @@ export function SlaWarningsAdminPage() {
     } finally {
       setSaving(false);
     }
-  }, [selected, draft, applyResult, pushToast, t]);
+  }, [selected, draft, choices, applyResult, pushToast, t]);
 
   const handleReset = useCallback(async () => {
     if (!selected) return;
@@ -544,8 +637,167 @@ export function SlaWarningsAdminPage() {
                   );
                 })}
               </div>
+              {/* P-5 S8 — the owner's additions, in the page's own
+                  sentence style: who else hears it, an extra address,
+                  and the third step. */}
+              {isWarningKey(group.key) && (
+                <div
+                  className="sla-warning-choices"
+                  data-testid={`sla-warnings-choices-${group.key}`}
+                >
+                  <span className="field-label">
+                    {t("sla_warnings.also_notify_label")}
+                  </span>
+                  <div className="sla-choice-row">
+                    {OFFERED_RINGS[group.key].map((ring) => {
+                      const key = group.key as SlaWarningKey;
+                      const on = choices.warnings[key].also_notify.includes(ring);
+                      return (
+                        <label className="sla-check" key={ring}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={(event) =>
+                              setChoices((prev) => ({
+                                ...prev,
+                                warnings: {
+                                  ...prev.warnings,
+                                  [key]: {
+                                    ...prev.warnings[key],
+                                    also_notify: event.target.checked
+                                      ? [...prev.warnings[key].also_notify, ring]
+                                      : prev.warnings[key].also_notify.filter((r) => r !== ring),
+                                  },
+                                },
+                              }))
+                            }
+                            data-testid={`sla-warnings-ring-${group.key}-${ring}`}
+                          />
+                          {t(`sla_warnings.ring.${ring}`)}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <label className="field sla-warning-field">
+                    <span className="field-label">{t("sla_warnings.extra_email_label")}</span>
+                    <input
+                      className="field-input"
+                      type="email"
+                      value={choices.warnings[group.key].extra_email}
+                      onChange={(event) => {
+                        const key = group.key as SlaWarningKey;
+                        setChoices((prev) => ({
+                          ...prev,
+                          warnings: {
+                            ...prev.warnings,
+                            [key]: { ...prev.warnings[key], extra_email: event.target.value },
+                          },
+                        }));
+                      }}
+                      data-testid={`sla-warnings-extra-email-${group.key}`}
+                    />
+                    <span className="muted small">{t("sla_warnings.extra_email_hint")}</span>
+                  </label>
+                  <label className="sla-check">
+                    <input
+                      type="checkbox"
+                      checked={choices.warnings[group.key].final_days !== ""}
+                      onChange={(event) => {
+                        const key = group.key as SlaWarningKey;
+                        setChoices((prev) => ({
+                          ...prev,
+                          warnings: {
+                            ...prev.warnings,
+                            [key]: {
+                              ...prev.warnings[key],
+                              final_days: event.target.checked ? "3" : "",
+                            },
+                          },
+                        }));
+                      }}
+                      data-testid={`sla-warnings-final-${group.key}`}
+                    />
+                    {t("sla_warnings.final_step_label")}
+                  </label>
+                  {choices.warnings[group.key].final_days !== "" && (
+                    <label className="field sla-warning-field">
+                      <span className="field-label">{t("sla_warnings.final_step_days_label")}</span>
+                      <input
+                        className="field-input"
+                        type="number"
+                        min={1}
+                        inputMode="numeric"
+                        value={choices.warnings[group.key].final_days}
+                        onChange={(event) => {
+                          const key = group.key as SlaWarningKey;
+                          setChoices((prev) => ({
+                            ...prev,
+                            warnings: {
+                              ...prev.warnings,
+                              [key]: { ...prev.warnings[key], final_days: event.target.value },
+                            },
+                          }));
+                        }}
+                        data-testid={`sla-warnings-final-days-${group.key}`}
+                      />
+                      <span className="muted small">
+                        {t("sla_warnings.final_step_sentence", {
+                          n: Number(choices.warnings[group.key].final_days) || 0,
+                        })}
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )}
             </div>
           ))}
+          {/* P-5 S8.3 / S8.4 — company-wide: how time is counted, and
+              the weekly list. */}
+          <div className="card sla-timing-card" data-testid="sla-warnings-group-counting">
+            <div className="sla-warning-head">
+              <div>
+                <h3 className="sla-warning-title">{t("sla_warnings.group.counting.title")}</h3>
+              </div>
+            </div>
+            <div className="sla-warning-fields">
+              <label className="field sla-warning-field">
+                <select
+                  className="field-select"
+                  value={choices.count_calendar_days ? "calendar" : "working"}
+                  onChange={(event) =>
+                    setChoices((prev) => ({
+                      ...prev,
+                      count_calendar_days: event.target.value === "calendar",
+                    }))
+                  }
+                  data-testid="sla-warnings-counting"
+                >
+                  <option value="working">
+                    {t("sla_warnings.counting_working", {
+                      start: window_?.start ?? "09:00",
+                      end: window_?.end ?? "17:00",
+                    })}
+                  </option>
+                  <option value="calendar">{t("sla_warnings.counting_calendar")}</option>
+                </select>
+                <span className="muted small">{t("sla_warnings.counting_note")}</span>
+              </label>
+              <label className="sla-check">
+                <input
+                  type="checkbox"
+                  checked={choices.weekly_summary_enabled}
+                  onChange={(event) =>
+                    setChoices((prev) => ({
+                      ...prev,
+                      weekly_summary_enabled: event.target.checked,
+                    }))
+                  }
+                  data-testid="sla-warnings-weekly"
+                />
+                {t("sla_warnings.weekly_label")}
+              </label>
+            </div>
+          </div>
         </>
       )}
     </div>

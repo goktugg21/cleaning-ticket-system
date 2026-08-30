@@ -14,7 +14,13 @@ import type {
 /** The write body. A field set to null CLEARS that override and returns
  *  the knob to the platform default; a field left out is untouched. 0 is
  *  a legal value and is NOT a way to clear anything. */
-export type SlaThresholdPatch = Record<string, number | null>;
+/** Numbers (null clears an override) and — P-5 S8 — the choices,
+ *  flattened to their column names (`manager_review_also_notify`,
+ *  `not_started_extra_email`, `count_calendar_days`, ...). */
+export type SlaThresholdPatch = Record<
+  string,
+  number | null | boolean | string | string[]
+>;
 
 export async function listSlaWarningThresholds(): Promise<SlaThresholdListResponse> {
   const response = await api.get<SlaThresholdListResponse>(

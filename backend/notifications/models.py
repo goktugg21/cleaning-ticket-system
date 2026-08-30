@@ -78,6 +78,12 @@ class NotificationEventType(models.TextChoices):
         "SLA_WORK_NOT_STARTED",
         "Planned work has not started",
     )
+    #: P-5 S8.4 — the Monday list of every warning sent last week, for
+    #: the company admins who switched it on.
+    SLA_WEEKLY_SUMMARY = (
+        "SLA_WEEKLY_SUMMARY",
+        "Weekly list of warnings sent",
+    )
 
     # ------------------------------------------------------------------
     # W-N1 — two more machine-sent types, spelled identically in the

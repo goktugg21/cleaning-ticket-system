@@ -90,6 +90,30 @@ THRESHOLD_FIELDS = (
 
 #: Settings fallbacks that are stored in SECONDS. Everything else in
 #: `THRESHOLD_FIELDS` is already in the unit the model stores.
+#: P-5 S8 — the CHOICE fields beside the numbers: no settings fallback,
+#: the model default IS the platform behaviour. Name -> default.
+CHOICE_FIELDS = {
+    "count_calendar_days": False,
+    "weekly_summary_enabled": False,
+    "not_started_also_notify": [],
+    "manager_review_also_notify": [],
+    "approval_cutoff_also_notify": [],
+    "not_started_extra_email": "",
+    "manager_review_extra_email": "",
+    "approval_cutoff_extra_email": "",
+    "not_started_final_escalate_days": None,
+    "manager_review_final_escalate_days": None,
+    "approval_cutoff_final_escalate_days": None,
+}
+
+
+def choice_values(row) -> dict:
+    """The choice fields off `row`, or their defaults when there is no row."""
+    if row is None:
+        return {name: (list(v) if isinstance(v, list) else v) for name, v in CHOICE_FIELDS.items()}
+    return {name: getattr(row, name) for name in CHOICE_FIELDS}
+
+
 _SETTINGS_IN_SECONDS = frozenset(
     name for _field, name, unit in THRESHOLD_FIELDS if unit == "business_hours"
 )
@@ -133,6 +157,18 @@ class ResolvedThresholds:
     not_started_business_seconds: int
     not_started_escalate_business_seconds: int
     cooldown_hours: int
+    # P-5 S8 — the choices, carried beside the numbers.
+    count_calendar_days: bool = False
+    weekly_summary_enabled: bool = False
+    not_started_also_notify: tuple = ()
+    manager_review_also_notify: tuple = ()
+    approval_cutoff_also_notify: tuple = ()
+    not_started_extra_email: str = ""
+    manager_review_extra_email: str = ""
+    approval_cutoff_extra_email: str = ""
+    not_started_final_escalate_days: int | None = None
+    manager_review_final_escalate_days: int | None = None
+    approval_cutoff_final_escalate_days: int | None = None
 
 
 def _to_resolved(stored: dict) -> ResolvedThresholds:
@@ -152,6 +188,17 @@ def _to_resolved(stored: dict) -> ResolvedThresholds:
             stored["not_started_escalate_business_hours"] * 3600
         ),
         cooldown_hours=stored["cooldown_hours"],
+        count_calendar_days=bool(stored.get("count_calendar_days", False)),
+        weekly_summary_enabled=bool(stored.get("weekly_summary_enabled", False)),
+        not_started_also_notify=tuple(stored.get("not_started_also_notify") or ()),
+        manager_review_also_notify=tuple(stored.get("manager_review_also_notify") or ()),
+        approval_cutoff_also_notify=tuple(stored.get("approval_cutoff_also_notify") or ()),
+        not_started_extra_email=stored.get("not_started_extra_email") or "",
+        manager_review_extra_email=stored.get("manager_review_extra_email") or "",
+        approval_cutoff_extra_email=stored.get("approval_cutoff_extra_email") or "",
+        not_started_final_escalate_days=stored.get("not_started_final_escalate_days"),
+        manager_review_final_escalate_days=stored.get("manager_review_final_escalate_days"),
+        approval_cutoff_final_escalate_days=stored.get("approval_cutoff_final_escalate_days"),
     )
 
 
@@ -176,6 +223,7 @@ def merge(row, base=None) -> dict:
     is wrong in exactly the same way if it is collapsed.
     """
     values = dict(base if base is not None else defaults())
+    values.update(choice_values(row))
     if row is None:
         return values
     for name, _setting, _unit in THRESHOLD_FIELDS:

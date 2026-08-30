@@ -19,8 +19,14 @@ never be read as "unset".
 """
 from rest_framework import serializers
 
-from .models import SlaWarningThreshold
-from .thresholds import THRESHOLD_FIELDS, defaults, merge
+from .models import ALSO_NOTIFY_CHOICES, WARNING_KEYS, SlaWarningThreshold
+from .thresholds import (
+    CHOICE_FIELDS,
+    THRESHOLD_FIELDS,
+    choice_values,
+    defaults,
+    merge,
+)
 
 #: Business meaning of each knob, in the field order the screen renders.
 #: `unit` is what the number means and is what the UI turns into the
@@ -35,13 +41,45 @@ class SlaWarningThresholdWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SlaWarningThreshold
-        fields = [name for name, _s, _u in THRESHOLD_FIELDS]
+        fields = [name for name, _s, _u in THRESHOLD_FIELDS] + list(CHOICE_FIELDS)
         extra_kwargs = {
-            name: {"required": False, "allow_null": True}
-            for name, _s, _u in THRESHOLD_FIELDS
+            **{
+                name: {"required": False, "allow_null": True}
+                for name, _s, _u in THRESHOLD_FIELDS
+            },
+            # P-5 S8 — the choices are optional on every PUT; a missing
+            # one keeps what the row has.
+            **{name: {"required": False} for name in CHOICE_FIELDS},
+            **{
+                f"{key}_final_escalate_days": {"required": False, "allow_null": True}
+                for key in WARNING_KEYS
+            },
+            **{
+                f"{key}_extra_email": {"required": False, "allow_blank": True}
+                for key in WARNING_KEYS
+            },
         }
 
     def validate(self, attrs):
+        # P-5 S8.1 — an `also_notify` list holds known ring tokens only.
+        for key in WARNING_KEYS:
+            name = f"{key}_also_notify"
+            if name not in attrs:
+                continue
+            value = attrs[name]
+            if not isinstance(value, list) or any(
+                token not in ALSO_NOTIFY_CHOICES for token in value
+            ):
+                raise serializers.ValidationError(
+                    {name: "Choose from: " + ", ".join(ALSO_NOTIFY_CHOICES) + "."}
+                )
+            attrs[name] = list(dict.fromkeys(value))
+        return self._validate_pairs(attrs)
+
+    def _validate_pairs(self, attrs):
+        return self._validate_pairs_body(attrs)
+
+    def _validate_pairs_body(self, attrs):
         """The escalation figure must not sit BELOW the first threshold.
 
         Not a style rule: the hop is `if crossed >= escalate_target`, so
@@ -59,11 +97,15 @@ class SlaWarningThresholdWriteSerializer(serializers.ModelSerializer):
         instance = getattr(self, "instance", None)
         effective = merge(instance)
         for name in attrs:
+            if name in CHOICE_FIELDS:
+                continue
             value = attrs[name]
             effective[name] = int(value) if value is not None else None
         base = defaults()
         for name, value in list(effective.items()):
-            if value is None:
+            # P-5 S8 — the choice fields (a null third step, an empty
+            # address) have no numeric default to fall back on.
+            if value is None and name in base:
                 effective[name] = base[name]
 
         if (
@@ -106,6 +148,7 @@ def serialize_company_thresholds(*, company, row):
     """The read payload for ONE company. `row` may be None."""
     base = defaults()
     effective = merge(row, base)
+    choices = choice_values(row)
     return {
         "company": company.id,
         "company_name": company.name,
@@ -120,9 +163,31 @@ def serialize_company_thresholds(*, company, row):
         # badge; it is NOT derivable from `effective` alone, because an
         # override that equals the default is still an override.
         "is_customized": row is not None
-        and any(
-            getattr(row, name) is not None for name, _s, _u in THRESHOLD_FIELDS
+        and (
+            any(
+                getattr(row, name) is not None for name, _s, _u in THRESHOLD_FIELDS
+            )
+            or any(
+                getattr(row, name) != default
+                for name, default in CHOICE_FIELDS.items()
+            )
         ),
+        # P-5 S8 — the choices beside the numbers, one block per warning
+        # plus the two company-wide switches. Defaults when there is no
+        # row, so the screen can render them without a second call.
+        "choices": {
+            "count_calendar_days": choices["count_calendar_days"],
+            "weekly_summary_enabled": choices["weekly_summary_enabled"],
+            "warnings": {
+                key: {
+                    "also_notify": list(choices[f"{key}_also_notify"] or []),
+                    "extra_email": choices[f"{key}_extra_email"] or "",
+                    "final_escalate_days": choices[f"{key}_final_escalate_days"],
+                }
+                for key in WARNING_KEYS
+            },
+            "also_notify_choices": list(ALSO_NOTIFY_CHOICES),
+        },
         "thresholds": [
             {
                 "field": name,

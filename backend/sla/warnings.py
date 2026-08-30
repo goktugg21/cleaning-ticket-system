@@ -228,6 +228,77 @@ def _already_warned_user_ids(
     return warned
 
 
+def _ring(token, ticket):
+    """P-5 S8.1 — the users behind one `also_notify` token, through the
+    SAME tenant-scoped rosters the escalation hops use."""
+    from notifications.services import (
+        company_admin_recipients,
+        ticket_assigned_staff_recipients,
+        ticket_responsible_manager_recipients,
+    )
+    from .models import (
+        ALSO_NOTIFY_ASSIGNED_STAFF,
+        ALSO_NOTIFY_COMPANY_ADMINS,
+        ALSO_NOTIFY_RESPONSIBLE_MANAGER,
+    )
+
+    if token == ALSO_NOTIFY_ASSIGNED_STAFF:
+        return list(ticket_assigned_staff_recipients(ticket))
+    if token == ALSO_NOTIFY_RESPONSIBLE_MANAGER:
+        return list(ticket_responsible_manager_recipients(ticket))
+    if token == ALSO_NOTIFY_COMPANY_ADMINS:
+        return list(company_admin_recipients(ticket.company_id))
+    return []
+
+
+def _also_notify(th, warning_key, ticket):
+    users = []
+    for token in getattr(th, f"{warning_key}_also_notify", ()):
+        users += _ring(token, ticket)
+    return users
+
+
+def _elapsed_seconds(th, start, now) -> int:
+    """P-5 S8.3 — how long since `start`, in the company's chosen unit:
+    working hours (today's rule) or hours on the wall clock."""
+    if th.count_calendar_days:
+        return max(0, int((now - start).total_seconds()))
+    return business_hours.business_seconds_between(start, now)
+
+
+def _second_warning_moment(th, start, escalate_seconds):
+    """When the second warning of an hour-based warning fires, as an
+    instant — the anchor the third step counts calendar days from."""
+    if th.count_calendar_days:
+        return start + datetime.timedelta(seconds=escalate_seconds)
+    return business_hours.add_business_seconds(start, escalate_seconds)
+
+
+def _final_step_reached(th, warning_key, start, escalate_seconds, now) -> bool:
+    """P-5 S8.2 — "still not fixed N days after the second warning"."""
+    days = getattr(th, f"{warning_key}_final_escalate_days", None)
+    if not days:
+        return False
+    anchor = _second_warning_moment(th, start, escalate_seconds)
+    return now >= anchor + datetime.timedelta(days=int(days))
+
+
+def _extra_email_in_cooldown(
+    *, email, event_type, ticket_id, extra_work_id, now, cooldown_hours
+):
+    from notifications.models import NotificationLog
+
+    since = now - datetime.timedelta(hours=cooldown_hours)
+    qs = NotificationLog.objects.filter(
+        recipient_email=email, event_type=event_type, created_at__gte=since
+    )
+    if ticket_id is not None:
+        qs = qs.filter(ticket_id=ticket_id)
+    elif extra_work_id is not None:
+        qs = qs.filter(extra_work_id=extra_work_id)
+    return qs.exists()
+
+
 def _emit(
     *,
     event_type,
@@ -239,6 +310,7 @@ def _emit(
     cooldown_hours,
     ticket=None,
     extra_work=None,
+    extra_email: str = "",
 ):
     """Warn everyone in `users` who is not in cooldown, on BOTH channels.
 
@@ -274,8 +346,29 @@ def _emit(
             continue
         seen.add(user.id)
         candidates.append(user)
+    # P-5 S8.1 — the extra address is a mailbox, not a person: mail
+    # only, under the same cooldown, logged like every other send.
+    extra_sent = 0
+    if extra_email and not _extra_email_in_cooldown(
+        email=extra_email,
+        event_type=event_type,
+        ticket_id=getattr(ticket, "id", None),
+        extra_work_id=getattr(extra_work, "id", None),
+        now=now,
+        cooldown_hours=cooldown_hours,
+    ):
+        send_logged_email(
+            recipient_email=extra_email,
+            recipient_user=None,
+            subject=subject,
+            body=body,
+            event_type=event_type,
+            ticket=ticket,
+            extra_work=extra_work,
+        )
+        extra_sent = 1
     if not candidates:
-        return 0
+        return extra_sent
 
     suppressed = _already_warned_user_ids(
         event_type=event_type,
@@ -287,7 +380,7 @@ def _emit(
     )
     warned = [u for u in candidates if u.id not in suppressed]
     if not warned:
-        return 0
+        return extra_sent
 
     emit_sla_warning_inapp(
         event_type=event_type,
@@ -308,7 +401,7 @@ def _emit(
             ticket=ticket,
             extra_work=extra_work,
         )
-    return len(warned)
+    return len(warned) + extra_sent
 
 
 def _sign_off():
@@ -435,13 +528,22 @@ def sweep_approval_cutoff(now, thresholds):
                 + _sign_off()
             )
             recipients = list(ticket_customer_recipients(ticket))
+            # P-5 S8.1 — the rings this company added to the first warning.
+            recipients += _also_notify(th, "approval_cutoff", ticket)
             if days_left <= escalate_days:
                 # The ONE hop: the provider side that can chase the
-                # customer, or record the decision on their behalf
-                # through the existing reasoned override.
+                # customer, or record the decision on their behalf.
                 recipients += list(ticket_responsible_manager_recipients(ticket))
+            # P-5 S8.2 — the third step counts calendar days past the
+            # second warning's day; the cutoff may already be behind us.
+            final_days = th.approval_cutoff_final_escalate_days
+            if final_days and days_left <= escalate_days - int(final_days):
+                from notifications.services import company_admin_recipients
+
+                recipients += list(company_admin_recipients(ticket.company_id))
             sent += _emit(
                 event_type=NotificationEventType.SLA_APPROVAL_CUTOFF_DUE,
+                extra_email=th.approval_cutoff_extra_email,
                 subject=subject,
                 body=body,
                 # The bell line carries the FACTS only — which work, how
@@ -496,9 +598,7 @@ def sweep_manager_review(now, thresholds):
             th = thresholds.for_company(ticket.company_id)
             target = th.manager_review_business_seconds
             escalate_target = th.manager_review_escalate_business_seconds
-            waited = business_hours.business_seconds_between(
-                ticket.manager_review_at, now
-            )
+            waited = _elapsed_seconds(th, ticket.manager_review_at, now)
             if waited < target:
                 continue
             hours = waited // 3600
@@ -522,11 +622,15 @@ def sweep_manager_review(now, thresholds):
                 + _sign_off()
             )
             recipients = list(ticket_responsible_manager_recipients(ticket))
-            if waited >= escalate_target:
-                # The ONE hop above a building manager.
+            recipients += _also_notify(th, "manager_review", ticket)
+            if waited >= escalate_target or _final_step_reached(
+                th, "manager_review", ticket.manager_review_at, escalate_target, now
+            ):
+                # The ONE hop (and P-5 S8.2's third step, same ring).
                 recipients += list(company_admin_recipients(ticket.company_id))
             sent += _emit(
                 event_type=NotificationEventType.SLA_MANAGER_REVIEW_OVERDUE,
+                extra_email=th.manager_review_extra_email,
                 subject=subject,
                 body=body,
                 inapp_summary=(
@@ -574,9 +678,7 @@ def sweep_not_started_tickets(now, thresholds):
             th = thresholds.for_company(ticket.company_id)
             target = th.not_started_business_seconds
             escalate_target = th.not_started_escalate_business_seconds
-            late = business_hours.business_seconds_between(
-                ticket.scheduled_start_at, now
-            )
+            late = _elapsed_seconds(th, ticket.scheduled_start_at, now)
             if late < target:
                 continue
             hours = late // 3600
@@ -598,13 +700,19 @@ def sweep_not_started_tickets(now, thresholds):
                 + _sign_off()
             )
             recipients = list(ticket_assigned_staff_recipients(ticket))
+            recipients += _also_notify(th, "not_started", ticket)
             if not recipients or late >= escalate_target:
-                # No crew on it at all is itself a management problem, so
-                # the hop fires immediately in that case; otherwise it
-                # waits for the second threshold. Still ONE hop.
+                # The ONE hop: nobody assigned, or the escalation reached.
                 recipients += list(ticket_responsible_manager_recipients(ticket))
+            if _final_step_reached(
+                th, "not_started", ticket.scheduled_start_at, escalate_target, now
+            ):
+                from notifications.services import company_admin_recipients
+
+                recipients += list(company_admin_recipients(ticket.company_id))
             sent += _emit(
                 event_type=NotificationEventType.SLA_WORK_NOT_STARTED,
+                extra_email=th.not_started_extra_email,
                 subject=subject,
                 body=body,
                 inapp_summary=(
