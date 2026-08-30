@@ -13,6 +13,7 @@
  */
 import { useState } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
@@ -90,6 +91,7 @@ export function ActualHoursPanel({
   onUpdated,
   variant = "card",
   successMessage,
+  successPath,
   previewCoversTotal = false,
   finalSubtotalAmount = null,
 }: {
@@ -111,6 +113,11 @@ export function ActualHoursPanel({
     detail: ExtraWorkRequestDetail,
     hoursSaved: number,
   ) => string;
+  /** P-6 V1 — where the sentence points. When set, the success toast
+   *  is clickable and lands on this path (the Invoices page opened on
+   *  that customer and month), so "you will find it under Invoices →
+   *  customer → month" is a door, not a description. */
+  successPath?: (detail: ExtraWorkRequestDetail) => string | null;
   /** W25 — true only when these hourly lines ARE the whole active
    *  priced set, so the sum of their client-side math is comparable to
    *  the EW's server subtotal. The PATCH response carries no per-line
@@ -124,6 +131,7 @@ export function ActualHoursPanel({
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
+  const navigate = useNavigate();
   const [draft, setDraft] = useState<Record<number, string>>(() =>
     Object.fromEntries(
       hourlyLines.map((line) => [line.id, line.actual_hours ?? ""]),
@@ -198,11 +206,13 @@ export function ActualHoursPanel({
         (sum, entry) => sum + (Number.parseFloat(entry.actual_hours) || 0),
         0,
       );
+      const path = successPath ? successPath(detail) : null;
       pushToast({
         variant: "success",
         title: successMessage
           ? successMessage(detail, hoursSaved)
           : t("detail.actual_hours_saved"),
+        ...(path ? { onClick: () => navigate(path) } : {}),
       });
     } catch (err) {
       const code = actualHoursErrorCode(err);

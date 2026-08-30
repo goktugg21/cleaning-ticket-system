@@ -16268,3 +16268,62 @@ a.summary-stat-link:hover .summary-stat-value { color: var(--green); }
 /* P-4 — the loading week on My Schedule (Part D). */
 .wp-day-loading { opacity: 0.7; }
 .wp-day-loading .wp-day-empty { font-style: italic; }
+
+/* P-6 V1 — the invoices list grouped by billing month: a quiet heading
+   row per month with its count and total, the rows beneath it. */
+.invoice-group-row td {
+  background: var(--surface-2, var(--bg));
+  padding-top: 10px; padding-bottom: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+.invoice-group-row + tr td { border-top: none; }
+.invoice-group-label { font-family: var(--f-head); font-weight: 700; font-size: 13px; color: var(--text); }
+.invoice-group-meta { margin-left: 10px; font-size: var(--font-sm); color: var(--text-muted); }
+.data-table tbody tr.invoice-group-row:hover td { background: var(--surface-2, var(--bg)); cursor: default; }
+
+/* P-6 V4 — the header search box and its popover. */
+.topbar-search { position: relative; flex: 1 1 320px; max-width: 520px; min-width: 0; }
+.topbar-search-form { position: relative; display: flex; align-items: center; }
+.topbar-search-icon { position: absolute; left: 11px; color: var(--text-faint); pointer-events: none; }
+.topbar-search-input {
+  width: 100%; height: 36px; padding: 0 34px 0 34px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  font: inherit; font-size: var(--font-sm); color: var(--text);
+}
+.topbar-search-input::placeholder { color: var(--text-faint); }
+.topbar-search-input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px var(--green-faint); }
+.topbar-search-input::-webkit-search-cancel-button { display: none; }
+.topbar-search-clear {
+  position: absolute; right: 6px; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border: none; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer;
+}
+.topbar-search-clear:hover { background: var(--surface-2); color: var(--text); }
+.topbar-search-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(16, 24, 20, 0.12); padding: 6px 0; max-height: min(70vh, 560px); overflow-y: auto;
+}
+.topbar-search-note { padding: 10px 14px; font-size: var(--font-sm); color: var(--text-muted); }
+.topbar-search-group + .topbar-search-group { border-top: 1px solid var(--border-soft); margin-top: 4px; padding-top: 4px; }
+.topbar-search-group-title {
+  display: flex; align-items: baseline; gap: 8px; padding: 6px 14px 2px;
+  font-family: var(--f-head); font-size: 10px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--green-2);
+}
+.topbar-search-more { font-family: var(--f-body, inherit); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-faint); font-size: 11px; }
+.topbar-search-list { list-style: none; margin: 0; padding: 0; }
+.topbar-search-row {
+  display: flex; flex-direction: column; gap: 1px; padding: 7px 14px;
+  color: var(--text); text-decoration: none; font-size: var(--font-sm);
+}
+a.topbar-search-row:hover, a.topbar-search-row:focus { background: var(--green-faint); outline: none; }
+.topbar-search-row-inert { color: var(--text-muted); cursor: default; }
+.topbar-search-primary { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-search-secondary { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 768px) {
+  .topbar-search { flex-basis: 160px; }
+  .topbar-search-panel { position: fixed; left: 8px; right: 8px; top: calc(var(--topbar-h) + 4px); }
+}
+/* P-6 V4 — the attention list's "show all" sits under the five rows. */
+.attn-show-all { margin: 6px 0 0 4px; }
+/* P-6 V4 — the triage checkbox sits at the row's left edge. */
+.wp-undated-select { flex: none; margin: 4px 10px 0 0; width: 16px; height: 16px; accent-color: var(--green); }

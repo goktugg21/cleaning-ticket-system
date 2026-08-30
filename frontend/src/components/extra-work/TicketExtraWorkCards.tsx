@@ -48,7 +48,7 @@ import type {
 } from "../../api/types";
 import { isPriced, rowAmounts } from "../../lib/billing";
 import { formatDate, formatMoney, formatNumber } from "../../lib/intl";
-import { billingMonthWords } from "../../lib/billingSentence";
+import { billingMonthWords, invoicesDestination } from "../../lib/billingSentence";
 import { CollapsibleCard } from "../CollapsibleCard";
 import { PdfPreviewDialog } from "../PdfPreviewDialog";
 import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
@@ -448,6 +448,7 @@ export function TicketExtraWorkCards({
                 month: billingMonthWords(detail, t),
               })
             }
+            successPath={(detail) => invoicesDestination(detail)}
             locked={finalAmountLocked}
             // W25 — the client-side math per line is a PREVIEW. The
             // saved subtotal comparison is only offered when these
@@ -486,13 +487,22 @@ export function TicketExtraWorkCards({
           <div className="detail-kv-row">
             <span className="detail-kv-label">{t("ew_card_total")}</span>
             <span className="detail-kv-val" data-testid="ticket-ew-total">
-              <strong>{money(amounts.total)}</strong>
               {/* Three states, never conflated: an agreed zero renders
                   as EUR 0,00 with no label; an empty active set says
                   nothing was agreed; hourly lines say what they wait
                   for. `noPriceAgreed` wins — an empty set has no hours
-                  to await. */}
-              {noPriceAgreed ? (
+                  to await. P-6 V5.1 — the waiting state is said ONCE:
+                  the value slot carries the full sentence, not a short
+                  word beside a long one ("awaiting hours · Awaiting
+                  worked hours"). */}
+              {!noPriceAgreed && awaitingHours ? (
+                <strong className="muted" data-testid="ticket-ew-awaiting-hours">
+                  {t("ew_card_awaiting_hours")}
+                </strong>
+              ) : (
+                <strong>{money(amounts.total)}</strong>
+              )}
+              {noPriceAgreed && (
                 <span
                   className="muted small"
                   style={{ marginLeft: 8 }}
@@ -500,16 +510,6 @@ export function TicketExtraWorkCards({
                 >
                   {t("ew_card_no_price")}
                 </span>
-              ) : (
-                awaitingHours && (
-                  <span
-                    className="muted small"
-                    style={{ marginLeft: 8 }}
-                    data-testid="ticket-ew-awaiting-hours"
-                  >
-                    {t("ew_card_awaiting_hours")}
-                  </span>
-                )
               )}
             </span>
           </div>

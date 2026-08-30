@@ -101,7 +101,7 @@ import { resolveNextStep } from "../components/extra-work/nextStep";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import type { PlanFocus } from "../components/extra-work/PlanWorkDialog";
 import { rowAmounts } from "../lib/billing";
-import { billingMonthWords } from "../lib/billingSentence";
+import { billingMonthWords, invoicesDestination } from "../lib/billingSentence";
 import {
   canSeeExtraWorkStaffing,
   isCustomerUser,
@@ -3782,6 +3782,7 @@ export function ExtraWorkDetailPage() {
               hourlyLines={activeHourlyLines}
               finalTotalAmount={ew.final_total_amount}
               locked={finalAmountLocked}
+              successPath={(detail) => invoicesDestination(detail)}
               // P-4 (Part C) — the save answers with the amount and the
               // destination: "€424 saved. You will find it under
               // Invoices → B Amsterdam → December, as unbilled work."

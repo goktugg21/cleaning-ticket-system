@@ -32,3 +32,16 @@ export function billingMonthWords(
     ? monthName(detail.invoice_date)
     : t("extra_work:billing.completion_month_words");
 }
+
+/** P-6 V1 — the Invoices page opened on this work's customer and, when
+ *  the billing month is fixed, on that month. The "completed-in" month
+ *  is not known until completion, so the link then opens on the
+ *  customer alone. */
+export function invoicesDestination(
+  detail: Pick<ExtraWorkRequestDetail, "invoice_date" | "customer">,
+): string {
+  const period = detail.invoice_date ? detail.invoice_date.slice(0, 7) : "";
+  return period
+    ? `/invoices?customer=${detail.customer}&period=${period}`
+    : `/invoices?customer=${detail.customer}`;
+}
