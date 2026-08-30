@@ -331,3 +331,12 @@
   font-size: var(--font-md, 1rem);
   color: var(--text);
 }
+
+/* P-6 V2 — the money line lives inside a titled card now; the card
+   carries the border and padding, the line keeps only its layout. */
+.pw-money.pw-money-in-card {
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+}

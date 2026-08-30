@@ -55,7 +55,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { RejectReasonDialog } from "../../components/RejectReasonDialog";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useToast } from "../../components/ToastProvider";
-import { formatDate, formatDateTime } from "../../lib/intl";
+import { formatDate } from "../../lib/intl";
 import { OccurrenceStatusBadge } from "./OccurrenceStatusBadge";
 import { OccurrenceOverrideDialog } from "./OccurrenceOverrideDialog";
 import { RecurringJobCalendar } from "./RecurringJobCalendar";
@@ -523,23 +523,51 @@ export function RecurringJobDetailPage() {
   }
 
   if (error || !job) {
+    // Never a void: the page says it cannot show the job, with the way back.
     return (
-      <div>
-        <Link to="/planned-work" className="link-back">
-          {t("detail.back_to_list")}
-        </Link>
-        <div className="alert-error" role="alert" style={{ marginTop: 16 }}>
-          {error || t("errors.load_failed")}
-        </div>
+      <div data-testid="recurring-job-detail-page">
+        <PageHeader
+          backLink={{ to: "/planned-work", label: t("detail.back_to_list") }}
+          eyebrow={t("list.page_title")}
+          title={t("detail.unavailable_title")}
+        />
+        <section className="card" role="alert" style={{ padding: 22 }} data-testid="recurring-job-unavailable">
+          <p className="muted" style={{ margin: 0 }}>{error || t("errors.load_failed")}</p>
+        </section>
       </div>
     );
   }
 
+  const windowsText = job.windows
+    .map((w) => formatWindow(w))
+    .filter(Boolean)
+    .join(", ");
+  const crewParts = [
+    job.default_staff_ids.length > 0
+      ? t("detail.crew_staff", { count: job.default_staff_ids.length })
+      : null,
+    job.default_manager_ids.length > 0
+      ? t("detail.crew_managers", { count: job.default_manager_ids.length })
+      : null,
+  ].filter(Boolean);
+  const whatStrong = job.service_category_name ?? job.price_folder_name ?? job.title;
+  const whatSub = [
+    customerLabelName(job.department_name, t),
+    customerLabelName(job.work_type_name, t),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div data-testid="recurring-job-detail-page">
+      {/* P-6 V2 — the ticket detail's rhythm: a header that holds no
+          buttons, ONE strip that narrates the rule with the next visit
+          in it and carries the one primary action, four facts, then the
+          machinery (the calendar, the money), and every rare step behind
+          "Geavanceerd". */}
       <PageHeader
         backLink={{ to: "/planned-work", label: t("detail.back_to_list") }}
-        eyebrow={t("common:ops")}
+        eyebrow={t("list.page_title")}
         title={job.title}
         statusPill={
           <StatusBadge
@@ -553,207 +581,153 @@ export function RecurringJobDetailPage() {
           />
         }
         subtitle={`${job.building_name} · ${job.customer_name}`}
-        actions={
-          <>
+      />
+
+      <div
+        className={`phase-banner ${job.is_active ? "phase-banner-progress" : "phase-banner-bad"}`}
+        role="status"
+        data-testid="recurring-job-phase"
+        data-active={job.is_active}
+      >
+        <div className="phase-banner-text">
+          {/* P-2 §6 — the rule in one sentence with the next visit in it. */}
+          <span className="phase-banner-label" data-testid="recurring-job-rule">
+            {ruleSentence}
+          </span>
+          <span className="phase-banner-sub">
+            {job.is_active
+              ? t("detail.phase_active_sub")
+              : t("detail.phase_archived_sub")}
+          </span>
+        </div>
+        <div className="phase-banner-action">
+          {job.is_active ? (
             <Link
-              className="btn btn-secondary btn-sm"
+              className="btn btn-primary btn-sm"
               to={`/planned-work/${job.id}/edit`}
               data-testid="recurring-job-edit-link"
             >
               {t("detail.edit")}
             </Link>
-            {job.is_active ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    setArchiveError("");
-                    archiveRef.current?.open();
-                  }}
-                  disabled={actionBusy}
-                  data-testid="recurring-job-archive"
-                >
-                  {t("detail.archive")}
-                </button>
-                {/* Codex P1 — Generate only on an ACTIVE job. An archived
-                    job must not spawn occurrences/tickets, so its trigger
-                    is hidden (a backend guard on the generate action is a
-                    separate follow-up). */}
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => {
-                    setGenerateError("");
-                    generateRef.current?.open();
-                  }}
-                  disabled={actionBusy}
-                  data-testid="recurring-job-generate"
-                >
-                  {t("detail.generate")}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={handleUnarchive}
-                  disabled={actionBusy}
-                  data-testid="recurring-job-unarchive"
-                >
-                  {t("detail.unarchive")}
-                </button>
-                {unarchiveError && (
-                  <span
-                    className="alert-error pw-action-error"
-                    role="alert"
-                    data-testid="recurring-job-unarchive-error"
-                  >
-                    {unarchiveError}
-                  </span>
-                )}
-              </>
-            )}
-          </>
-        }
-      />
-
-      {/* ---- 1. THE AGREEMENT ------------------------------------------
-          ONE header card, two parts. The top line is the agreement
-          sentence — what was agreed, how often, for whom. Under it the
-          job's facts as a label-over-value grid.
-
-          Until now those facts sat behind an "All details" disclosure
-          pinned to the card's right edge by `margin-left: auto`. That
-          left a 892-953px hole across the middle of the top line at
-          1920, and opening it produced a 472px card whose ink covered
-          3.8% of its own area — a void with a narrow list floating in
-          it. A grid fills the card it is given instead of hanging off
-          one corner of it.
-
-          Facts that are NOT set are ABSENT, not rendered as a dash or a
-          "No description." placeholder: an empty row still costs a line
-          of reading and says nothing. Company, the windows and the
-          counts are always true of a job, so they always show. */}
-      <div className="pw-agreement" data-testid="recurring-job-agreement">
-        {/* P-2 §6 — the page opens with the rule in one sentence and the
-            next few visits; the machinery (facts, calendar, money)
-            follows. */}
-        <p className="pw-rule" data-testid="recurring-job-rule">
-          {ruleSentence}
-        </p>
-        <div className="pw-nextup" data-testid="recurring-job-next-up">
-          <span className="pw-money-label">{t("detail.next_visits")}</span>
-          {nextUp.length === 0 && (
-            <span className="muted small">{t("detail.next_visits_none")}</span>
-          )}
-          {nextUp.map((occ) => (
-            <span
-              key={occ.id}
-              className="pw-nextup-item"
-              data-testid="recurring-job-next-up-item"
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleUnarchive}
+              disabled={actionBusy}
+              data-testid="recurring-job-unarchive"
             >
-              {new Date(`${occ.planned_date}T00:00:00`).toLocaleDateString(locale, {
-                weekday: "short",
-                day: "numeric",
-                month: "short",
-              })}
-              <OccurrenceStatusBadge status={occ.status} />
-            </span>
-          ))}
-          {occCount > occurrences.length && (
-            <span className="muted small">
-              {t("detail.occurrences_truncated", {
-                count: occurrences.length,
-              })}
-            </span>
+              {t("detail.unarchive")}
+            </button>
           )}
         </div>
-        <p className="pw-agreement-line">
-          <span
-            className="pw-agreement-pattern"
-            data-testid="pw-agreement-pattern"
-          >
-            {patternInWords}
-          </span>
-          <span className="pw-agreement-sep" aria-hidden="true">
-            ·
-          </span>
-          <span className="pw-agreement-window" data-testid="pw-agreement-window">
-            {periodText}
-          </span>
-          <span className="pw-agreement-sep" aria-hidden="true">
-            ·
-          </span>
-          <span className="pw-agreement-where">
-            {job.building_name} · {job.customer_name}
-          </span>
-        </p>
+      </div>
+      {unarchiveError && (
+        <div
+          className="alert-error"
+          role="alert"
+          style={{ marginBottom: 16 }}
+          data-testid="recurring-job-unarchive-error"
+        >
+          {unarchiveError}
+        </div>
+      )}
 
-        <dl className="pw-facts" data-testid="recurring-job-facts">
-          <Fact label={t("detail.field_company")} value={job.company_name} />
-          <Fact
-            label={t("detail.field_department")}
-            value={customerLabelName(job.department_name, t)}
-          />
-          <Fact
-            label={t("detail.field_work_type")}
-            value={customerLabelName(job.work_type_name, t)}
-          />
-          <Fact
-            label={t("detail.field_category")}
-            value={job.service_category_name ?? job.price_folder_name}
-          />
-          <Fact
-            label={t("detail.field_windows")}
-            value={
-              job.windows.map((w) => formatWindow(w)).filter(Boolean).join(" · ") ||
-              t("detail.no_window")
-            }
-          />
-          <Fact
-            label={t("detail.field_default_staff")}
-            value={String(job.default_staff_ids.length)}
-          />
-          <Fact
-            label={t("detail.field_default_managers")}
-            value={String(job.default_manager_ids.length)}
-          />
-          <Fact
-            label={t("detail.field_occurrences_count")}
-            value={String(job.occurrences_count)}
-          />
-          {/* Who made it and when, as ONE fact. Two made seven facts on
-              a three-column grid, so the last row carried a single item
-              and ~1000px of nothing beside it at 1920. Six fills two
-              rows exactly, and nine (a job that uses all three
-              classifiers) fills three. */}
-          <Fact
-            label={t("detail.field_created")}
-            value={`${job.created_by_email} · ${formatDateTime(job.created_at)}`}
-          />
-          {/* The description is prose, so it gets the grid's whole width
-              rather than one narrow column — and only when there is one.
-              Written out rather than passed as a `wide` prop so both
-              class names are STRING LITERALS: `check-css-classes.mjs`
-              skips a computed className, and a class the gate cannot
-              read is a class it cannot tell you is undefined. */}
-          {job.description?.trim() ? (
-            <div className="pw-fact pw-fact-wide">
-              <dt className="pw-fact-label">
-                {t("detail.field_description")}
-              </dt>
-              <dd className="pw-fact-value">{job.description.trim()}</dd>
-            </div>
-          ) : null}
-        </dl>
+      {/* The next few visits and their state — the calendar opens on the
+          current month, so a job whose next visit falls later would
+          otherwise show an empty grid and say nothing. */}
+      <div className="pw-nextup" data-testid="recurring-job-next-up" style={{ marginBottom: 16 }}>
+        <span className="pw-money-label">{t("detail.next_visits")}</span>
+        {nextUp.length === 0 && (
+          <span className="muted small">{t("detail.next_visits_none")}</span>
+        )}
+        {nextUp.map((occ) => (
+          <span
+            key={occ.id}
+            className="pw-nextup-item"
+            data-testid="recurring-job-next-up-item"
+          >
+            {new Date(`${occ.planned_date}T00:00:00`).toLocaleDateString(locale, {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            })}
+            <OccurrenceStatusBadge status={occ.status} />
+          </span>
+        ))}
+        {occCount > occurrences.length && (
+          <span className="muted small">
+            {t("detail.occurrences_truncated", { count: occurrences.length })}
+          </span>
+        )}
       </div>
 
-      {/* ---- 2. THE VISITS ---------------------------------------------
-          The calendar is the page's primary surface. Keyed by job id so it
-          remounts + re-seeds on a job change (no resync effect). Read-only
-          when the job is archived. */}
+      {/* FACTS — where, what, when, who. A fact with nothing to say is
+          absent; a crew that is not set yet says so in words. */}
+      <div className="facts" data-testid="recurring-job-facts">
+        <div className="ew-ctx-block" data-testid="recurring-job-fact-where">
+          <div className="ew-ctx-label">{t("detail.fact_where")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong">
+              <Link to={`/admin/buildings/${job.building}`}>{job.building_name}</Link>
+            </div>
+            <div className="ew-ctx-sub">
+              <Link to={`/admin/customers/${job.customer}`}>{job.customer_name}</Link>
+              {" · "}
+              {job.company_name}
+            </div>
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="recurring-job-fact-what">
+          <div className="ew-ctx-label">{t("detail.fact_what")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong">{whatStrong}</div>
+            {whatSub && <div className="ew-ctx-sub">{whatSub}</div>}
+            {job.description?.trim() ? (
+              <div className="ew-ctx-sub" data-testid="recurring-job-description">
+                {job.description.trim()}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="recurring-job-fact-when">
+          <div className="ew-ctx-label">{t("detail.fact_when")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong" data-testid="pw-agreement-pattern">
+              {patternInWords}
+            </div>
+            <div className="ew-ctx-sub" data-testid="pw-agreement-window">
+              {periodText}
+            </div>
+            <div className="ew-ctx-sub" data-testid="recurring-job-windows">
+              {t("detail.visits_per_day", { count: Math.max(job.windows.length, 1) })}
+              {" · "}
+              {windowsText || t("detail.visits_time_none")}
+            </div>
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="recurring-job-fact-who">
+          <div className="ew-ctx-label">{t("detail.fact_who")}</div>
+          <div className="ew-ctx-body">
+            <div className={crewParts.length > 0 ? "ew-ctx-strong" : "ew-ctx-strong muted-empty"}>
+              {crewParts.length > 0 ? crewParts.join(" · ") : t("detail.crew_none")}
+            </div>
+            <div className="ew-ctx-sub">
+              {t("detail.visits_planned", { count: job.occurrences_count })}
+            </div>
+            <div className="ew-ctx-sub">
+              {t("detail.created_line", {
+                who: job.created_by_email,
+                date: formatDate(job.created_at),
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ---- THE VISITS — the calendar is the page's primary surface.
+          Keyed by job id so it remounts on a job change; read-only when
+          the job is archived. */}
       <RecurringJobCalendar
         key={job.id}
         jobId={job.id}
@@ -767,13 +741,20 @@ export function RecurringJobDetailPage() {
         minDate={job.start_date}
       />
 
-
-      {/* ---- 3. THE MONEY ----------------------------------------------
-          One line. Linked: the line's name, and the way to the contract's
-          Planning tab where this job's weeks are the grid. Unlinked: the
-          picker that links one, inline, because "no link" is a thing to
-          fix rather than a thing to read. */}
-      <div className="pw-money" data-testid="recurring-job-money">
+      {/* ---- THE MONEY — one line. Linked: the line's name and the way to
+          the contract. Unlinked: the picker, inline. */}
+      <section
+        className="card"
+        style={{ padding: "16px 18px", marginBottom: 16 }}
+        data-testid="recurring-job-money-card"
+      >
+        <div className="section-head" style={{ marginBottom: 8 }}>
+          <div>
+            <div className="section-head-title">{t("detail.money_title")}</div>
+            <div className="section-head-sub">{t("detail.money_sub")}</div>
+          </div>
+        </div>
+      <div className="pw-money pw-money-in-card" data-testid="recurring-job-money">
         {linkedLine ? (
           <>
             <span className="pw-money-label">{t("money.billed_via")}</span>
@@ -882,6 +863,49 @@ export function RecurringJobDetailPage() {
           </div>
         )}
       </div>
+      </section>
+
+      {/* Geavanceerd — the rare steps, each with its existing dialog. */}
+      <details className="action-fold" data-testid="recurring-job-advanced">
+        <summary className="form-fold-summary">{t("detail.advanced")}</summary>
+        <p className="muted small" style={{ margin: "8px 0 0" }}>
+          {t("detail.advanced_intro")}
+        </p>
+        {job.is_active && (
+          <div className="action-fold-list">
+            {/* Codex P1 — Generate only on an ACTIVE job. */}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setGenerateError("");
+                generateRef.current?.open();
+              }}
+              disabled={actionBusy}
+              data-testid="recurring-job-generate"
+            >
+              {t("detail.generate")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setArchiveError("");
+                archiveRef.current?.open();
+              }}
+              disabled={actionBusy}
+              data-testid="recurring-job-archive"
+            >
+              {t("detail.archive")}
+            </button>
+          </div>
+        )}
+        <dl className="action-fold-raw">
+          <dt>{t("detail.raw_id")}</dt>
+          <dd><code>{job.id}</code></dd>
+        </dl>
+      </details>
+
       {/* Plan-further-ahead dialog */}
       <ConfirmDialog
         ref={generateRef}
@@ -989,27 +1013,6 @@ export function RecurringJobDetailPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-/** One fact in the agreement card's grid: the plain word above, the
- *  value below. A fact with nothing to say RENDERS NOTHING — an empty
- *  row still costs a line of reading, and a dash is not an answer. The
- *  description is the one fact this does not render; it is prose and
- *  spans the grid, so it is written out at the call site. */
-function Fact({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | null | undefined;
-}) {
-  if (!value) return null;
-  return (
-    <div className="pw-fact">
-      <dt className="pw-fact-label">{label}</dt>
-      <dd className="pw-fact-value">{value}</dd>
     </div>
   );
 }

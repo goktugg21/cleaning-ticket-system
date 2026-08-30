@@ -18,11 +18,33 @@ import { StatusBadge } from "../../components/StatusBadge";
 
 type StatusFilter = "active" | "archived" | "all";
 
-function windowSummary(job: RecurringJob): string {
-  const parts: string[] = [];
-  if (job.preferred_start_time) parts.push(job.preferred_start_time.slice(0, 5));
-  if (job.time_window_label) parts.push(job.time_window_label);
-  return parts.length > 0 ? parts.join(" · ") : "—";
+/** P-6 V2 — "2 × · 08:00, 14:00": how many visits a day and when. A job
+ *  with no clock says so in words (rule 15), never a dash. */
+function windowSummary(
+  job: RecurringJob,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  const active = job.windows.filter((w) => w.is_active);
+  const times = active
+    .map((w) => (w.start_time ? w.start_time.slice(0, 5) : ""))
+    .filter(Boolean);
+  const count = Math.max(active.length, 1);
+  return `${count} × · ${times.length > 0 ? times.join(", ") : t("list.window_time_none")}`;
+}
+
+/** "Wekelijks · ma, do" — the frequency with its weekdays. */
+function ruleSummary(
+  job: RecurringJob,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  const frequency = t(`frequency.${job.frequency}`);
+  const named = job.frequency === "WEEKLY" || job.frequency === "BIWEEKLY";
+  if (!named || job.weekdays.length === 0) return frequency;
+  const days = [...job.weekdays]
+    .sort((a, b) => a - b)
+    .map((d) => t(`weekday_short.${d}`))
+    .join(", ");
+  return t("list.rule_days", { frequency, days });
 }
 
 export function PlannedWorkListPage() {
@@ -80,7 +102,7 @@ export function PlannedWorkListPage() {
         subtitle={
           loading
             ? t("list.loading")
-            : t("list.count", { count: visibleRows.length })
+            : `${t("list.page_subtitle")} ${t("list.count", { count: visibleRows.length })}.`
         }
         actions={
           <Link
@@ -184,8 +206,8 @@ export function PlannedWorkListPage() {
                     </td>
                     <td>{job.building_name}</td>
                     <td>{job.customer_name}</td>
-                    <td>{t(`frequency.${job.frequency}`)}</td>
-                    <td>{windowSummary(job)}</td>
+                    <td>{ruleSummary(job, t)}</td>
+                    <td className="muted small">{windowSummary(job, t)}</td>
                     <td>
                       <StatusBadge
                         variant="cell"
@@ -244,9 +266,11 @@ export function PlannedWorkListPage() {
                     </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("list.col_frequency")}</dt>
-                      <dd>{t(`frequency.${job.frequency}`)}</dd>
+                      <dd>{ruleSummary(job, t)}</dd>
                     </div>
                     <div className="admin-card-meta-row">
+                      <dt>{t("list.col_window")}</dt>
+                      <dd>{windowSummary(job, t)}</dd>
                     </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("list.col_occurrences")}</dt>
