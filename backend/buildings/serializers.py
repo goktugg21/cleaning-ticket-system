@@ -20,6 +20,7 @@ class BuildingSerializer(serializers.ModelSerializer):
     def get_contracts(self, obj):
         if not self.context.get("connected"):
             return None
+        from contracts.billing import money
         from contracts.models import ContractBuilding
         from contracts.revisions import active_revision, revision_totals
 
@@ -32,7 +33,10 @@ class BuildingSerializer(serializers.ModelSerializer):
         for link in links:
             contract = link.contract
             revision = active_revision(contract)
-            amount = str(revision_totals(revision)["amount"]) if revision else None
+            # P-6 V5.3 — quantised to cents BEFORE it becomes text, so the
+            # wire always carries two decimals ("600.00", never "600.0"):
+            # the annotation's scale is the database's, not ours.
+            amount = str(money(revision_totals(revision)["amount"])) if revision else None
             out.append(
                 {
                     "id": contract.id,

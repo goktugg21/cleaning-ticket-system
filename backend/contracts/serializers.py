@@ -80,6 +80,17 @@ DOES_NOT_EXIST_MESSAGE = "Invalid pk - object does not exist."
 DEFAULT_INITIAL_REVISION_LABEL = "Oorspronkelijk contract"
 
 
+
+def _two_places(value) -> str:
+    """P-6 V5.3 — a money or hours figure as text with exactly two
+    decimals, whatever scale the database or an annotation handed us.
+    `SerializerMethodField` hands a raw Decimal to the JSON renderer,
+    which turns it into a float and loses the trailing zero; the
+    frontend types declare these fields as strings."""
+    from decimal import Decimal, ROUND_HALF_UP
+
+    return str(Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
 class ContractTypeSerializer(serializers.ModelSerializer):
     """The per-company catalog of contract kinds."""
 
@@ -599,8 +610,11 @@ class ContractSerializer(serializers.ModelSerializer):
             "id": revision.id,
             "label": revision.label,
             "effective_from": revision.effective_from,
-            "amount": totals["amount"],
-            "hours": totals["hours"],
+            # P-6 V5.3 — money and hours leave as two-decimal STRINGS, the
+            # shape `api/contracts.types.ts` declares; a raw Decimal in a
+            # method field renders as a JSON number and drops its scale.
+            "amount": _two_places(totals["amount"]),
+            "hours": _two_places(totals["hours"]),
             "line_count": totals["line_count"],
         }
 
@@ -620,7 +634,7 @@ class ContractSerializer(serializers.ModelSerializer):
         from .billing import money
 
         months = MONTHS_PER_PERIOD[obj.billing_period]
-        return money(self._period_amount(obj) / Decimal(months))
+        return _two_places(money(self._period_amount(obj) / Decimal(months)))
 
     def get_yearly_amount(self, obj) -> Decimal:
         """Twelve months of the active revision at its current price.
@@ -635,13 +649,13 @@ class ContractSerializer(serializers.ModelSerializer):
         from .billing import money
 
         months = MONTHS_PER_PERIOD[obj.billing_period]
-        return money(self._period_amount(obj) * Decimal(12) / Decimal(months))
+        return _two_places(money(self._period_amount(obj) * Decimal(12) / Decimal(months)))
 
-    def get_total_hours(self, obj) -> Decimal:
+    def get_total_hours(self, obj) -> str:
         revision = self._active_revision(obj)
         if revision is None:
-            return Decimal("0.00")
-        return revision_totals(revision)["hours"]
+            return "0.00"
+        return _two_places(revision_totals(revision)["hours"])
 
     def get_line_count(self, obj) -> int:
         revision = self._active_revision(obj)
