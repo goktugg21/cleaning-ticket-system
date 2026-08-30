@@ -1599,6 +1599,15 @@ function UndatedRow({
             {t("agenda.not_planned_yet")}
           </span>
         )}
+        {/* P-6 V4 — a parked job stays in this lane (the P-3 schedule
+            matrix places ON_HOLD here) but says so: parking is a
+            decision with a reason, not a gap. */}
+        {entry.ticket_status === "ON_HOLD" && (
+          <span className="cell-tag cell-tag-closed" data-testid={`agenda-undated-parked-${entry.key}`}>
+            <i />
+            {t("agenda.parked_tag")}
+          </span>
+        )}
         {/* WP-1 G2 — dateless work never becomes overdue by design, so
             this is its only nag: how long it has sat here, said out
             loud once it is older than the threshold. */}

@@ -354,5 +354,6 @@
   "agenda.triage_error_already_closed": "is al gesloten",
   "agenda.triage_error_forbidden_transition": "deze stap is niet toegestaan voor uw rol",
   "agenda.triage_error_override_reason_required": "een reden is verplicht",
-  "agenda.triage_error_generic": "niet gelukt"
+  "agenda.triage_error_generic": "niet gelukt",
+  "agenda.parked_tag": "Geparkeerd"
 }

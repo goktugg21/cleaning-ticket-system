@@ -354,5 +354,6 @@
   "agenda.triage_error_already_closed": "is already closed",
   "agenda.triage_error_forbidden_transition": "this step is not allowed for your role",
   "agenda.triage_error_override_reason_required": "a reason is required",
-  "agenda.triage_error_generic": "failed"
+  "agenda.triage_error_generic": "failed",
+  "agenda.parked_tag": "Parked"
 }
