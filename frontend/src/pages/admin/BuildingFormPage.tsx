@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { Briefcase, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
@@ -31,10 +31,33 @@ import type {
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { BoundedList } from "../../components/BoundedList";
+import { EmptyState } from "../../components/EmptyState";
 import { EntityPicker } from "../../components/EntityPicker";
+import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+
+/* P-6 V3 — errors live where the person is: one sentence per field, the
+   first one scrolled into view (the ContractFormDialog recipe). */
+const FIELD_ORDER = [
+  "company",
+  "name",
+  "address",
+  "city",
+  "postal_code",
+  "country",
+  "building_type",
+];
+
+function scrollToFirstField(errors: Record<string, string>): void {
+  const first = FIELD_ORDER.find((key) => errors[key]);
+  if (!first) return;
+  const el = document.querySelector<HTMLElement>(
+    `[data-testid="building-form"] [data-building-field="${first}"]`,
+  );
+  el?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
 
 export function BuildingFormPage() {
   const { id } = useParams();
@@ -103,8 +126,12 @@ export function BuildingFormPage() {
     },
     updateFn: updateBuilding,
     validate: () => {
-      if (isCreate && company === "") return { company: t("building_form.error_pick_company") };
-      return null;
+      // P-6 V3 (rule 14) — the button is never silently disabled; the
+      // name is checked on press and the error lands at the field.
+      const errs: Record<string, string> = {};
+      if (isCreate && company === "") errs.company = t("building_form.error_pick_company");
+      if (!name.trim()) errs.name = t("building_form.error_name_required");
+      return Object.keys(errs).length > 0 ? errs : null;
     },
     buildPayload: () => {
       const payload: BuildingWritePayload = {
@@ -379,33 +406,76 @@ export function BuildingFormPage() {
     }
   }
 
+  // P-6 V3 — the sentences this page itself wrote; anything else in
+  // `fieldErrors` came from the server and is said in the app's own words.
+  const ownSentences: Record<string, string> = {
+    company: t("building_form.error_pick_company"),
+    name: t("building_form.error_name_required"),
+  };
+  const bind = (key: string) => ({ "data-building-field": key });
+  const fieldError = (key: string) => {
+    const raw = form.fieldErrors[key];
+    if (!raw) return null;
+    const text = ownSentences[key] === raw ? raw : t("admin_form.field_rejected");
+    return (
+      <span className="field-error" role="alert" data-testid={`building-form-error-${key}`}>
+        {text}
+      </span>
+    );
+  };
+  const fieldErrorCount = Object.keys(form.fieldErrors).filter(
+    (key) => key !== "detail",
+  ).length;
+
+  // The hook sets the errors after `validate` / the server answers; the
+  // scroll follows them (DOM work only, no state).
+  useEffect(() => {
+    scrollToFirstField(form.fieldErrors);
+  }, [form.fieldErrors]);
+
+  const companyLockedReason = !isCreate
+    ? t("building_form.company_locked_hint")
+    : companyLocked
+      ? t("building_form.company_only_one")
+      : undefined;
+
+  const managersHaveNames = members.some((m) => m.user_full_name);
+  const addManagerReason = memberBusy
+    ? t("admin_form.busy")
+    : availableUsers.length === 0
+      ? t("building_form.add_manager_no_candidates")
+      : selectedUserId === ""
+        ? t("building_form.add_manager_pick_first")
+        : undefined;
+  const addCustomersReason = customerLinkBusy
+    ? t("admin_form.busy")
+    : customersToLink.length === 0
+      ? t("building_form.add_customers_pick_first")
+      : undefined;
+
+  const linkedCustomerCount = isCreate
+    ? pendingCustomerIds.length
+    : linkedCustomers.length;
+
   return (
     <div>
-      <Link to={backHref} className="link-back">
-        <ChevronLeft size={14} strokeWidth={2.5} />
-        {backLabel}
-      </Link>
-
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">
-            {isCreate
-              ? t("buildings.create")
-              : t("building_form.edit_title", { name: buildingName })}
-          </h2>
-          {!isCreate && building && !building.is_active && (
-            <p className="page-sub">
-              <span className="cell-tag cell-tag-closed">
-                <i />
-                {t("admin.status_inactive")}
-              </span>
-            </p>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        backLink={{ to: backHref, label: backLabel }}
+        eyebrow={t("nav.admin_group")}
+        title={
+          isCreate
+            ? t("buildings.create")
+            : t("building_form.edit_title", { name: buildingName })
+        }
+        statusPill={
+          !isCreate && building && !building.is_active ? (
+            <span className="cell-tag cell-tag-closed">
+              <i />
+              {t("admin.status_inactive")}
+            </span>
+          ) : undefined
+        }
+      />
 
       {savedBanner && (
         <div className="alert-info" style={{ marginBottom: 16 }} role="status">
@@ -424,151 +494,178 @@ export function BuildingFormPage() {
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card" onSubmit={form.handleSubmit}>
-          <div className="form-section">
-            <div className="form-section-title">{t("building_form.card_label_title")}</div>
-            <div className="form-section-helper">{t("building_form.card_label_desc")}</div>
-          <div className="field">
-            <label className="field-label" htmlFor="building-company">
-              {t("company")} *
-            </label>
-            <select
-              id="building-company"
-              className="field-select"
-              value={company === "" ? "" : String(company)}
-              onChange={(event) => {
-                const v = event.target.value;
-                setCompany(v === "" ? "" : Number(v));
-              }}
-              disabled={companyLocked}
-              required
-            >
-              <option value="" disabled>
-                {t("invitations.select_company_placeholder")}
-              </option>
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-              {!isCreate && building && !companies.some((c) => c.id === building.company) && (
-                <option value={building.company}>
-                  {t("buildings.company_fallback", { id: building.company })}
-                </option>
-              )}
-            </select>
-            {form.fieldErrors.company && (
-              <div className="alert-error login-error" role="alert">
-                {form.fieldErrors.company}
-              </div>
-            )}
-          </div>
-
-          <div className="field">
-            <label className="field-label" htmlFor="building-name">
-              {t("admin.col_name")} *
-            </label>
-            <input
-              id="building-name"
-              className="field-input"
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
-            />
-            {form.fieldErrors.name && (
-              <div className="alert-error login-error" role="alert">
-                {form.fieldErrors.name}
-              </div>
-            )}
-          </div>
-
-          <div className="field">
-            <label className="field-label" htmlFor="building-address">
-              {t("admin.col_address")}
-            </label>
-            <input
-              id="building-address"
-              className="field-input"
-              type="text"
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-            />
-          </div>
-
-          <div className="form-2col">
-            <div className="field">
-              <label className="field-label" htmlFor="building-city">
-                {t("building_form.field_city")}
-              </label>
-              <input
-                id="building-city"
-                className="field-input"
-                type="text"
-                value={city}
-                onChange={(event) => setCity(event.target.value)}
-              />
+        <form className="card" onSubmit={form.handleSubmit} noValidate data-testid="building-form">
+          {/* P-6 V3 — TWO STAGES, one thing at a time (§D.6 rule 12: dense,
+              never a wizard). Every field, value and endpoint is what it
+              was; only the order, the words at the point of choice and
+              where an error lands changed. */}
+          <div className="form-section" data-testid="building-form-stage-who">
+            <div className="form-section-title">
+              <span className="ew-plan-step">1</span>
+              {t("building_form.stage_who")}
             </div>
-            <div className="field">
-              <label className="field-label" htmlFor="building-type">
-                {t("building_form.field_building_type")}
+            <div className="field" {...bind("company")}>
+              <label className="field-label" htmlFor="building-company">
+                {t("company")} *
               </label>
               <select
-                id="building-type"
+                id="building-company"
                 className="field-select"
-                value={buildingType}
-                onChange={(event) =>
-                  setBuildingType(
-                    event.target.value === "" ? "" : Number(event.target.value),
-                  )
-                }
-                data-testid="building-type-select"
+                value={company === "" ? "" : String(company)}
+                onChange={(event) => {
+                  const v = event.target.value;
+                  setCompany(v === "" ? "" : Number(v));
+                }}
+                disabled={companyLocked}
+                title={companyLockedReason}
+                required
               >
-                <option value="">{t("building_form.building_type_none")}</option>
-                {/* ACTIVE types only, PLUS whatever this building already
-                    carries — so an archived type stays visible on the row
-                    that has it instead of silently resetting to "none"
-                    the next time somebody saves the form. */}
-                {buildingTypes
-                  .filter(
-                    (option) => option.is_active || option.id === buildingType,
-                  )
-                  .map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
+                <option value="" disabled>
+                  {t("invitations.select_company_placeholder")}
+                </option>
+                {companies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+                {!isCreate && building && !companies.some((c) => c.id === building.company) && (
+                  <option value={building.company}>
+                    {t("buildings.company_fallback", { id: building.company })}
+                  </option>
+                )}
               </select>
+              <span className="muted small">
+                {companyLockedReason ?? t("building_form.company_hint")}
+              </span>
+              {fieldError("company")}
             </div>
-            <div className="field">
-              <label className="field-label" htmlFor="building-postal">
-                {t("building_form.field_postal_code")}
+
+            <div className="field" {...bind("name")}>
+              <label className="field-label" htmlFor="building-name">
+                {t("admin.col_name")} *
               </label>
               <input
-                id="building-postal"
+                id="building-name"
                 className="field-input"
                 type="text"
-                value={postalCode}
-                onChange={(event) => setPostalCode(event.target.value)}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                required
               />
+              <span className="muted small">{t("building_form.name_hint")}</span>
+              {fieldError("name")}
             </div>
           </div>
 
-          <div className="field">
-            <label className="field-label" htmlFor="building-country">
-              {t("building_form.field_country")}
-            </label>
-            <input
-              id="building-country"
-              className="field-input"
-              type="text"
-              value={country}
-              onChange={(event) => setCountry(event.target.value)}
-            />
+          <div className="form-section" data-testid="building-form-stage-where">
+            <div className="form-section-title">
+              <span className="ew-plan-step">2</span>
+              {t("building_form.stage_where")}
+            </div>
+            <div className="form-section-helper">{t("building_form.where_hint")}</div>
+            <div className="field" {...bind("address")}>
+              <label className="field-label" htmlFor="building-address">
+                {t("admin.col_address")}
+              </label>
+              <input
+                id="building-address"
+                className="field-input"
+                type="text"
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+              />
+              {fieldError("address")}
+            </div>
+
+            <div className="form-2col">
+              <div className="field" {...bind("city")}>
+                <label className="field-label" htmlFor="building-city">
+                  {t("building_form.field_city")}
+                </label>
+                <input
+                  id="building-city"
+                  className="field-input"
+                  type="text"
+                  value={city}
+                  onChange={(event) => setCity(event.target.value)}
+                />
+                {fieldError("city")}
+              </div>
+              <div className="field" {...bind("postal_code")}>
+                <label className="field-label" htmlFor="building-postal">
+                  {t("building_form.field_postal_code")}
+                </label>
+                <input
+                  id="building-postal"
+                  className="field-input"
+                  type="text"
+                  value={postalCode}
+                  onChange={(event) => setPostalCode(event.target.value)}
+                />
+                {fieldError("postal_code")}
+              </div>
+            </div>
+
+            <div className="form-2col">
+              <div className="field" {...bind("country")}>
+                <label className="field-label" htmlFor="building-country">
+                  {t("building_form.field_country")}
+                </label>
+                <input
+                  id="building-country"
+                  className="field-input"
+                  type="text"
+                  value={country}
+                  onChange={(event) => setCountry(event.target.value)}
+                />
+                {fieldError("country")}
+              </div>
+              <div className="field" {...bind("building_type")}>
+                <label className="field-label" htmlFor="building-type">
+                  {t("building_form.field_building_type")}
+                </label>
+                <select
+                  id="building-type"
+                  className="field-select"
+                  value={buildingType}
+                  onChange={(event) =>
+                    setBuildingType(
+                      event.target.value === "" ? "" : Number(event.target.value),
+                    )
+                  }
+                  data-testid="building-type-select"
+                >
+                  <option value="">{t("building_form.building_type_none")}</option>
+                  {/* ACTIVE types only, PLUS whatever this building already
+                      carries — so an archived type stays visible on the row
+                      that has it instead of silently resetting to "none"
+                      the next time somebody saves the form. */}
+                  {buildingTypes
+                    .filter(
+                      (option) => option.is_active || option.id === buildingType,
+                    )
+                    .map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                      </option>
+                    ))}
+                </select>
+                {fieldError("building_type")}
+              </div>
+            </div>
           </div>
 
-          </div>
           <div className="form-actions">
+            {fieldErrorCount > 0 && (
+              <span
+                className="form-error"
+                role="alert"
+                style={{ marginRight: "auto" }}
+                data-testid="building-form-summary-error"
+              >
+                {t("admin_form.fix_marked", { count: fieldErrorCount })}
+              </span>
+            )}
             {!isCreate && numericId !== null && (
               <Link
                 to={`/admin/buildings/${numericId}`}
@@ -578,7 +675,12 @@ export function BuildingFormPage() {
                 {t("admin_form.cancel")}
               </Link>
             )}
-            <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={form.submitting}
+              title={form.submitting ? t("admin_form.busy") : undefined}
+            >
               {form.submitting
                 ? t("admin_form.saving")
                 : isCreate
@@ -590,181 +692,61 @@ export function BuildingFormPage() {
       )}
 
       {!isCreate && building && (
-        <section
-          className="card"
-          data-testid="section-managers"
-          style={{ marginTop: 16, padding: "20px 22px" }}
-        >
-          <h3 className="section-title">{t("building_form.section_managers_title")}</h3>
-          <p className="muted small" style={{ marginBottom: 12 }}>
-            {t("building_form.section_managers_desc")}
-          </p>
+        <details className="form-fold" open data-testid="section-managers">
+          <summary className="form-fold-summary">
+            {t("building_form.section_managers_title")}
+            <span className="form-fold-summary-value">{members.length}</span>
+          </summary>
+          <div className="form-fold-body">
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("building_form.section_managers_desc")}
+            </p>
 
-          {memberError && (
-            <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
-              {memberError}
-            </div>
-          )}
-
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>{t("users.col_email")}</th>
-                  <th>{t("users.col_full_name")}</th>
-                  <th>{t("admin_form.col_assigned")}</th>
-                  <th aria-label={t("admin.col_actions")} />
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((membership) => (
-                  <tr key={membership.id}>
-                    <td className="td-subject">{membership.user_email}</td>
-                    <td>{membership.user_full_name || "—"}</td>
-                    <td className="td-date">
-                      {new Date(membership.assigned_at).toLocaleDateString(dateLocale)}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => openRemoveDialog(membership)}
-                      >
-                        {t("admin_form.remove")}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {members.length === 0 && (
-              <p className="muted small" style={{ padding: "12px 0" }}>
-                {t("building_form.no_managers_yet")}
-              </p>
+            {memberError && (
+              <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+                {memberError}
+              </div>
             )}
-          </div>
 
-          <form
-            onSubmit={handleAddMember}
-            style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end" }}
-          >
-            <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-              <label className="field-label" htmlFor="add-building-manager">
-                {t("building_form.add_manager")}
-              </label>
-              <select
-                id="add-building-manager"
-                className="field-select"
-                value={selectedUserId === "" ? "" : String(selectedUserId)}
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setSelectedUserId(v === "" ? "" : Number(v));
-                }}
-                disabled={memberBusy || availableUsers.length === 0}
-              >
-                <option value="">
-                  {availableUsers.length === 0
-                    ? t("admin_form.no_eligible_users")
-                    : t("admin_form.select_user")}
-                </option>
-                {availableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.email}
-                    {user.full_name ? ` — ${user.full_name}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              data-testid="member-add-button"
-              disabled={memberBusy || selectedUserId === ""}
-            >
-              {memberBusy ? t("admin_form.adding") : t("admin_form.add")}
-            </button>
-          </form>
-        </section>
-      )}
-
-      {/* Sprint 154 §H — the linked-customers section, in BOTH modes.
-          In create mode the links cannot be written yet (there is no
-          building id), so the choice is held and applied straight after
-          the create; see the `createFn` wrapper above. */}
-      <section
-        className="card"
-        data-testid="section-building-customers"
-        style={{ marginTop: 16, padding: "20px 22px" }}
-      >
-        <h3 className="section-title">
-          {t("building_form.section_customers_title")}
-        </h3>
-        <p className="muted small" style={{ marginBottom: 12 }}>
-          {isCreate
-            ? company === ""
-              ? t("customer_form.select_company_first")
-              : t("building_form.create_link_customers_hint")
-            : t("building_form.section_customers_desc")}
-        </p>
-
-        {customerLinkError && (
-          <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
-            {customerLinkError}
-          </div>
-        )}
-
-        {isCreate ? (
-          company !== "" && (
-            <EntityPicker
-              options={companyCustomerOptions.map((c) => ({
-                id: c.id,
-                label: c.name,
-                sublabel: c.contact_email,
-              }))}
-              selectedIds={pendingCustomerIds}
-              onChange={setPendingCustomerIds}
-              disabled={form.submitting}
-              emptyText={t("building_form.no_eligible_customers")}
-              testIdPrefix="building-form-create-customers"
-              size="sm"
-            />
-          )
-        ) : (
-          <>
             <BoundedList
               size="md"
-              count={linkedCustomers.length}
-              ariaLabel={t("building_form.section_customers_title")}
-              testIdPrefix="building-form-linked-customers"
+              count={members.length}
+              ariaLabel={t("building_form.section_managers_title")}
+              testIdPrefix="building-form-managers"
               className="table-wrap"
               emptyState={
-                <p className="muted small" style={{ padding: "12px 0" }}>
-                  {t("building_form.no_customers_linked")}
-                </p>
+                <EmptyState
+                  icon={Users}
+                  title={t("building_form.no_managers_yet")}
+                  compact
+                  testId="building-form-managers-empty"
+                />
               }
             >
-              <table className="data-table data-table-dense">
+              <table className="data-table">
                 <thead>
                   <tr>
-                    <th>{t("admin.col_name")}</th>
+                    <th>{t("users.col_email")}</th>
+                    {/* Rule 13 — the name column exists only when a
+                        manager has one; never a column of dashes. */}
+                    {managersHaveNames && <th>{t("users.col_full_name")}</th>}
+                    <th>{t("admin_form.col_assigned")}</th>
                     <th aria-label={t("admin.col_actions")} />
                   </tr>
                 </thead>
                 <tbody>
-                  {linkedCustomers.map((link) => (
-                    <tr key={link.id}>
-                      <td className="td-subject">
-                        <Link to={`/admin/customers/${link.customer}`}>
-                          {link.customer_name || String(link.customer)}
-                        </Link>
+                  {members.map((membership) => (
+                    <tr key={membership.id}>
+                      <td className="td-subject">{membership.user_email}</td>
+                      {managersHaveNames && <td>{membership.user_full_name || ""}</td>}
+                      <td className="td-date">
+                        {new Date(membership.assigned_at).toLocaleDateString(dateLocale)}
                       </td>
                       <td>
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
-                          onClick={() => handleRemoveCustomerLink(link.customer)}
-                          disabled={customerLinkBusy}
-                          data-testid={`building-form-unlink-customer-${link.customer}`}
+                          onClick={() => openRemoveDialog(membership)}
                         >
                           {t("admin_form.remove")}
                         </button>
@@ -775,46 +757,194 @@ export function BuildingFormPage() {
               </table>
             </BoundedList>
 
-            <div style={{ marginTop: 14 }}>
-              <div className="detail-field-label" style={{ marginBottom: 6 }}>
-                {t("building_form.add_customers")}
+            <form
+              onSubmit={handleAddMember}
+              style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end" }}
+            >
+              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                <label className="field-label" htmlFor="add-building-manager">
+                  {t("building_form.add_manager")}
+                </label>
+                <select
+                  id="add-building-manager"
+                  className="field-select"
+                  value={selectedUserId === "" ? "" : String(selectedUserId)}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setSelectedUserId(v === "" ? "" : Number(v));
+                  }}
+                  disabled={memberBusy || availableUsers.length === 0}
+                  title={
+                    memberBusy
+                      ? t("admin_form.busy")
+                      : availableUsers.length === 0
+                        ? t("building_form.add_manager_no_candidates")
+                        : undefined
+                  }
+                >
+                  <option value="">
+                    {availableUsers.length === 0
+                      ? t("admin_form.no_eligible_users")
+                      : t("admin_form.select_user")}
+                  </option>
+                  {availableUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.full_name ? `${user.full_name} (${user.email})` : user.email}
+                    </option>
+                  ))}
+                </select>
+                {availableUsers.length === 0 && !memberBusy && (
+                  <span className="muted small">
+                    {t("building_form.add_manager_no_candidates")}
+                  </span>
+                )}
               </div>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                data-testid="member-add-button"
+                disabled={memberBusy || selectedUserId === ""}
+                title={addManagerReason}
+              >
+                {memberBusy ? t("admin_form.adding") : t("admin_form.add")}
+              </button>
+            </form>
+          </div>
+        </details>
+      )}
+
+      {/* Sprint 154 §H — the linked-customers section, in BOTH modes.
+          In create mode the links cannot be written yet (there is no
+          building id), so the choice is held and applied straight after
+          the create; see the `createFn` wrapper above. */}
+      <details className="form-fold" open data-testid="section-building-customers">
+        <summary className="form-fold-summary">
+          {t("building_form.section_customers_title")}
+          <span className="form-fold-summary-value">{linkedCustomerCount}</span>
+        </summary>
+        <div className="form-fold-body">
+          <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
+            {isCreate
+              ? company === ""
+                ? t("customer_form.select_company_first")
+                : t("building_form.create_link_customers_hint")
+              : t("building_form.section_customers_desc")}
+          </p>
+
+          {customerLinkError && (
+            <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+              {customerLinkError}
+            </div>
+          )}
+
+          {isCreate ? (
+            company !== "" && (
               <EntityPicker
-                options={availableCustomersToLink.map((c) => ({
+                options={companyCustomerOptions.map((c) => ({
                   id: c.id,
                   label: c.name,
                   sublabel: c.contact_email,
                 }))}
-                selectedIds={customersToLink}
-                onChange={setCustomersToLink}
-                disabled={customerLinkBusy}
+                selectedIds={pendingCustomerIds}
+                onChange={setPendingCustomerIds}
+                disabled={form.submitting}
                 emptyText={t("building_form.no_eligible_customers")}
-                testIdPrefix="building-form-add-customers"
+                testIdPrefix="building-form-create-customers"
                 size="sm"
               />
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  marginTop: 10,
-                }}
+            )
+          ) : (
+            <>
+              <BoundedList
+                size="md"
+                count={linkedCustomers.length}
+                ariaLabel={t("building_form.section_customers_title")}
+                testIdPrefix="building-form-linked-customers"
+                className="table-wrap"
+                emptyState={
+                  <EmptyState
+                    icon={Briefcase}
+                    title={t("building_form.no_customers_linked")}
+                    compact
+                    testId="building-form-linked-customers-empty"
+                  />
+                }
               >
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={handleAddCustomerLinks}
-                  disabled={customerLinkBusy || customersToLink.length === 0}
-                  data-testid="building-form-add-customers-button"
+                <table className="data-table data-table-dense">
+                  <thead>
+                    <tr>
+                      <th>{t("admin.col_name")}</th>
+                      <th aria-label={t("admin.col_actions")} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linkedCustomers.map((link) => (
+                      <tr key={link.id}>
+                        <td className="td-subject">
+                          <Link to={`/admin/customers/${link.customer}`}>
+                            {link.customer_name || String(link.customer)}
+                          </Link>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => handleRemoveCustomerLink(link.customer)}
+                            disabled={customerLinkBusy}
+                            title={customerLinkBusy ? t("admin_form.busy") : undefined}
+                            data-testid={`building-form-unlink-customer-${link.customer}`}
+                          >
+                            {t("admin_form.remove")}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </BoundedList>
+
+              <div style={{ marginTop: 14 }}>
+                <div className="detail-field-label" style={{ marginBottom: 6 }}>
+                  {t("building_form.add_customers")}
+                </div>
+                <EntityPicker
+                  options={availableCustomersToLink.map((c) => ({
+                    id: c.id,
+                    label: c.name,
+                    sublabel: c.contact_email,
+                  }))}
+                  selectedIds={customersToLink}
+                  onChange={setCustomersToLink}
+                  disabled={customerLinkBusy}
+                  emptyText={t("building_form.no_eligible_customers")}
+                  testIdPrefix="building-form-add-customers"
+                  size="sm"
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    marginTop: 10,
+                  }}
                 >
-                  {customerLinkBusy
-                    ? t("admin_form.adding")
-                    : t("admin_form.add")}
-                </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleAddCustomerLinks}
+                    disabled={customerLinkBusy || customersToLink.length === 0}
+                    title={addCustomersReason}
+                    data-testid="building-form-add-customers-button"
+                  >
+                    {customerLinkBusy
+                      ? t("admin_form.adding")
+                      : t("admin_form.add")}
+                  </button>
+                </div>
               </div>
-            </div>
-          </>
-        )}
-      </section>
+            </>
+          )}
+        </div>
+      </details>
 
       <ConfirmDialog
         ref={removeDialogRef}
