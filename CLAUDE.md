@@ -32,6 +32,15 @@ The **owner does not write code.** The workflow is:
   finished when its local gates pass and the branch is DEPLOYED to
   crmtest for the owner to see. **Merging happens only when the owner
   says "merge" — nothing is proposed for merge before that.**
+- **A sprint's report is addressed to web-Claude FIRST.** After deploy,
+  web-Claude audits the build (API probes + visual walkthrough) in its
+  own environment; the owner walks only after that audit. The owner is
+  not the first QA tester: CC uses the system as a real user, attacks
+  the meaningful paths, inspects the UI visually and discovers defects
+  before the owner encounters them. A correct HTTP status is not a
+  correct product — the screen must say the truth, where the user
+  clicked, in words they understand, and after every transition the
+  user must be able to FIND their work through normal navigation.
 
 ---
 
