@@ -16336,3 +16336,11 @@ a.topbar-search-row:hover, a.topbar-search-row:focus { background: var(--green-f
 .summary-stat-value .muted-empty { font-size: var(--font-sm); font-weight: 500; }
 .filter-field > .muted.small { max-width: 220px; line-height: 1.35; }
 .filter-actions > span { display: inline-flex; }
+
+/* P-6 V3 (forms/detail) — the relation folds under the building and
+   customer forms. `.card` carries no bottom margin (the old sections
+   used an inline marginTop), so the first fold after the form card
+   keeps that 16px; a fold nested in a form stage sits on the stage's
+   own rhythm instead of adding its own bottom margin. */
+form.card + .form-fold { margin-top: 16px; }
+.form-section > .form-fold { margin-bottom: 0; }
