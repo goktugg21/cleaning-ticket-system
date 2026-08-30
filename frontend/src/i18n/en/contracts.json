@@ -457,5 +457,13 @@
   "sentence.planned_from": "planned from {{since}}",
   "register.search_placeholder": "Search a job",
   "register.zero_rows_one": "{{count}} row of € 0.00 — show",
-  "register.zero_rows_other": "{{count}} rows of € 0.00 — show"
+  "register.zero_rows_other": "{{count}} rows of € 0.00 — show",
+  "actions.backToList": "Back to contracts",
+  "detail.unavailableTitle": "This contract cannot be shown",
+  "detail.unavailableBody": "It could not be read for your account, or it no longer exists.",
+  "facts.period": "Period",
+  "facts.until": "until {{date}}",
+  "facts.locations_one": "{{count}} location",
+  "facts.locations_other": "{{count}} locations",
+  "projects.addNeedsName": "Give the project a name first."
 }

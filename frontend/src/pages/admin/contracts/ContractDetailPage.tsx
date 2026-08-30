@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Plus, RefreshCw } from "lucide-react";
+import { ClipboardList, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
@@ -29,6 +29,8 @@ import { ContractPlanningGrid } from "../../../components/contracts/ContractPlan
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { EditModeToggle } from "../../../components/EditModeToggle";
+import { EmptyState } from "../../../components/EmptyState";
+import { PageHeader } from "../../../components/PageHeader";
 import { useToast } from "../../../components/ToastProvider";
 import { useAuth } from "../../../auth/AuthContext";
 import { canManageContracts } from "../../../auth/permissions";
@@ -312,85 +314,108 @@ export function ContractDetailPage() {
     [lineGroups],
   );
 
+  const unavailableCard = (
+    /* P-6 V3 — NEVER A VOID. A contract that could not be read says so
+       in words, with the way back. */
+    <section className="card" role="status" data-testid="contract-unavailable" style={{ padding: 22 }}>
+      <div className="section-head-title">{t("detail.unavailableTitle")}</div>
+      <p className="muted" style={{ marginTop: 6 }}>
+        {error || t("detail.unavailableBody")}
+      </p>
+      <Link to="/admin/contracts" className="btn btn-secondary btn-sm" style={{ marginTop: 10 }}>
+        {t("actions.backToList")}
+      </Link>
+    </section>
+  );
+
   if (!Number.isFinite(id)) {
-    return <div className="">{t("errors.notFound")}</div>;
+    return (
+      <div>
+        <PageHeader
+          backLink={{ to: "/admin/contracts", label: t("actions.backToList") }}
+          eyebrow={t("list.title")}
+          title={t("errors.notFound")}
+        />
+        {unavailableCard}
+      </div>
+    );
   }
+
+  /* P-6 V3 (§D.6 rule 3) — ONE primary per state: Activate while the
+     contract is a DRAFT (the press that turns the money on), Edit
+     otherwise. Refresh is gone; every mutation already re-fetches.
+
+     W16 — ACTIVATE IS A BUTTON, because it is a verb. The reference
+     system has `POST /contracts/{id}/activate` and one press; ours had
+     only a `lifecycle` dropdown three clicks inside the edit dialog,
+     which is a state picker pretending to be an action. It reuses the
+     ordinary PATCH rather than adding a second write path — the endpoint
+     already validates, scopes and audits. Shown only on a DRAFT: a role
+     — or a state — that cannot use it does not see it. */
+  const headerActions =
+    canManage && contract ? (
+      <>
+        {contract.lifecycle === "DRAFT" && (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => void activate()}
+            disabled={activating}
+            title={activating ? t("actions.activating") : undefined}
+            data-testid="contract-activate"
+          >
+            {activating ? t("actions.activating") : t("actions.activate")}
+          </button>
+        )}
+        <button
+          type="button"
+          className={
+            contract.lifecycle === "DRAFT"
+              ? "btn btn-secondary btn-sm"
+              : "btn btn-primary btn-sm"
+          }
+          onClick={() => setEditOpen(true)}
+          data-testid="contract-edit"
+        >
+          {t("actions.editContract")}
+        </button>
+      </>
+    ) : null;
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <nav className="eyebrow">
-            <Link to="/admin/contracts">{t("list.title")}</Link>
-          </nav>
-          <h2 className="page-title">{contract?.contract_no ?? "…"}</h2>
-          {/* Sprint 167 §2 — customer, number, status, LOCATION and the
-              two money figures on one line, above the tiles. */}
-          {/* P-3 §C.1 — the contract reads as ONE sentence: "B Amsterdam
-              — € 850 per maand voor B1 + B2 — sinds jan 2026 — volgende
-              periode: sep", then the status word, which teaches. */}
-          <p className="page-sub" data-testid="contract-header-line">
-            {contract ? contractSentence(contract, t, locale) : ""}
-            {contract && (
-              <>
-                {" · "}
-                <Term term="status" onOpen={setTerm} testId="contract-term-status-head">
-                  <span className={`cell-tag ${CONTRACT_STATUS_TAG[contract.status]}`}>
-                    {t(`status.${contract.status}`)}
-                  </span>
-                </Term>
-              </>
-            )}
-          </p>
-        </div>
-        <div className="page-header-actions">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={reload}
-            disabled={loading}
-            data-testid="contract-refresh"
-          >
-            <RefreshCw size={16} strokeWidth={2} />
-            {t("actions.refresh")}
-          </button>
-          {/* W16 — ACTIVATE IS A BUTTON, because it is a verb.
-              The reference system has `POST /contracts/{id}/activate`
-              and one press; ours had only a `lifecycle` dropdown three
-              clicks inside the edit dialog, which is a state picker
-              pretending to be an action. It reuses the ordinary PATCH
-              rather than adding a second write path — the endpoint
-              already validates, scopes and audits, and a dedicated
-              verb would be a second door onto one change.
-              Shown only on a DRAFT: a role — or a state — that cannot
-              use it does not see it. */}
-          {canManage && contract && contract.lifecycle === "DRAFT" && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => void activate()}
-              disabled={activating}
-              data-testid="contract-activate"
-            >
-              {activating ? t("actions.activating") : t("actions.activate")}
-            </button>
-          )}
-          {canManage && contract && (
-            <button
-              type="button"
-              className={
-                contract.lifecycle === "DRAFT"
-                  ? "btn btn-secondary btn-sm"
-                  : "btn btn-primary btn-sm"
-              }
-              onClick={() => setEditOpen(true)}
-              data-testid="contract-edit"
-            >
-              {t("actions.editContract")}
-            </button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        backLink={{ to: "/admin/contracts", label: t("actions.backToList") }}
+        eyebrow={t("list.title")}
+        title={
+          contract
+            ? contract.contract_no
+            : loading
+              ? t("list.loading")
+              : t("detail.unavailableTitle")
+        }
+        /* P-3 §C.1 — the status word teaches on click. */
+        statusPill={
+          contract ? (
+            <Term term="status" onOpen={setTerm} testId="contract-term-status-head">
+              <span className={`cell-tag ${CONTRACT_STATUS_TAG[contract.status]}`}>
+                {t(`status.${contract.status}`)}
+              </span>
+            </Term>
+          ) : undefined
+        }
+        /* Sprint 167 §2 / P-3 §C.1 — the contract reads as ONE sentence:
+           "B Amsterdam — € 850 per maand voor B1 + B2 — sinds jan 2026 —
+           volgende periode: sep". */
+        subtitle={
+          contract ? (
+            <span data-testid="contract-header-line">
+              {contractSentence(contract, t, locale)}
+            </span>
+          ) : undefined
+        }
+        actions={headerActions}
+      />
 
       {error && (
         <div className="alert-error" role="alert">
@@ -398,23 +423,95 @@ export function ContractDetailPage() {
         </div>
       )}
 
-      {/* Header tiles — all four DERIVED from the active revision. */}
+      {loading && !contract ? (
+        <div className="loading-bar">
+          <div className="loading-bar-fill" />
+        </div>
+      ) : !contract ? (
+        unavailableCard
+      ) : (
+        <>
+      {/* P-6 V3 (§D.6 rule 5) — FACTS FIRST: who, where, when, what
+          state. Presentation only; every value is the server's. */}
+      <div className="facts" data-testid="contract-facts">
+        <div className="ew-ctx-block" data-testid="contract-fact-customer">
+          <div className="ew-ctx-label">{t("fields.customer")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong">
+              <Link to={`/admin/customers/${contract.customer}`}>
+                {contract.customer_name ?? ""}
+              </Link>
+            </div>
+            {contract.contract_type_name && (
+              <div className="ew-ctx-sub">
+                {contractTypeLabel(
+                  contract.contract_type_name,
+                  contract.contract_type_standard_slot,
+                  t,
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="contract-fact-locations">
+          <div className="ew-ctx-label">{t("fields.locations")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong">
+              {contract.buildings.length === 0
+                ? t("sentence.no_locations")
+                : t("facts.locations", { count: contract.buildings.length })}
+            </div>
+            {contract.buildings.length > 0 && (
+              <div className="ew-ctx-sub">
+                {contract.buildings
+                  .slice(0, 2)
+                  .map((building) => building.name)
+                  .join(", ")}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="contract-fact-period">
+          <div className="ew-ctx-label">{t("facts.period")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong">{formatDate(contract.start_date, locale)}</div>
+            <div className="ew-ctx-sub">
+              {contract.end_date
+                ? t("facts.until", { date: formatDate(contract.end_date, locale) })
+                : t("fields.openEnded")}
+            </div>
+          </div>
+        </div>
+        <div className="ew-ctx-block" data-testid="contract-fact-status">
+          <div className="ew-ctx-label">{t("fields.status")}</div>
+          <div className="ew-ctx-body">
+            <div className="ew-ctx-strong">{t(`status.${contract.status}`)}</div>
+            {activeRevision && (
+              <div className="ew-ctx-sub">{activeRevision.label}</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Header tiles — all four DERIVED from the active revision. Zero
+          is a value (the "no lines yet" notice explains it); a contract
+          that is not loaded has no tiles at all. */}
       <div className="summary-grid" data-testid="contract-tiles">
         <Tile
           label={<Term term="monthly" onOpen={setTerm}>{t("tiles.monthly")}</Term>}
-          value={formatMoney(contract?.monthly_amount ?? "0", locale)}
+          value={formatMoney(contract.monthly_amount, locale)}
         />
         <Tile
           label={<Term term="yearly" onOpen={setTerm}>{t("tiles.yearly")}</Term>}
-          value={formatMoney(contract?.yearly_amount ?? "0", locale)}
+          value={formatMoney(contract.yearly_amount, locale)}
         />
         <Tile
           label={<Term term="hours" onOpen={setTerm}>{t("tiles.hours")}</Term>}
-          value={formatNumber(contract?.total_hours ?? "0", locale)}
+          value={formatNumber(contract.total_hours, locale)}
         />
         <Tile
           label={<Term term="projects" onOpen={setTerm}>{t("tiles.lineCount")}</Term>}
-          value={String(contract?.line_count ?? 0)}
+          value={String(contract.line_count)}
         />
       </div>
 
@@ -595,6 +692,19 @@ export function ContractDetailPage() {
             </p>
           )}
 
+          {/* Sprint 172 §2 / P-6 V3 — a contract with no lines shows
+              zeros everywhere; the empty state says why, ONCE, and the
+              add control sits directly under it. No table renders for
+              nothing (rule 13). */}
+          {lines.length === 0 ? (
+            <EmptyState
+              icon={ClipboardList}
+              title={t("projects.emptyTitle")}
+              description={t("projects.emptyWhy")}
+              compact
+              testId="contract-projects-empty"
+            />
+          ) : (
           <div className="table-wrap">
             <table className="data-table data-table-dense">
               <thead>
@@ -689,25 +799,10 @@ export function ContractDetailPage() {
                     ))}
                   </Fragment>
                 ))}
-                {lines.length === 0 && (
-                  <tr data-testid="contract-projects-empty">
-                    <td colSpan={isRegister ? 7 : 10} className="muted">
-                      {/* Sprint 172 §2 — a contract with no lines shows
-                          zeros everywhere, and nothing said WHY. Every
-                          figure on this contract is computed from these
-                          rows, so the empty state says so and the add
-                          control sits directly under it. */}
-                      <strong>{t("projects.emptyTitle")}</strong>
-                      <br />
-                      {t("projects.emptyWhy")}
-                    </td>
-                  </tr>
-                )}
-                {lines.length > 0 && (
-                  <tr
-                    className="contract-grand-total"
-                    data-testid="contract-lines-total"
-                  >
+                <tr
+                  className="contract-grand-total"
+                  data-testid="contract-lines-total"
+                >
                     <td colSpan={isRegister ? 2 : 5}>
                       <strong>{t("projects.totalPerMonth")}</strong>
                     </td>
@@ -721,10 +816,10 @@ export function ContractDetailPage() {
                     <td className="contract-num" />
                     {lineEdit.editMode && <td />}
                   </tr>
-                )}
               </tbody>
             </table>
           </div>
+          )}
 
           {canManage && editableRevision && (
             <AddLineForm
@@ -910,17 +1005,8 @@ export function ContractDetailPage() {
                 label={<Term term="revisionState" onOpen={setTerm}>{t("revisions.effectiveSince")}</Term>}
                 value={formatDate(activeRevision.effective_from, locale)}
               />
-              <Tile
-                label={<Term term="monthly" onOpen={setTerm}>{t("revisions.currentMonthly")}</Term>}
-                value={formatMoney(contract?.monthly_amount ?? "0", locale)}
-                /* Sprint 177 §9 — the figure is the amount the revision in
-                   force TODAY bills per month. It is neither a
-                   month-to-date total nor a forecast, and nothing on the
-                   screen said so. */
-                hint={t("revisions.currentMonthlyAsOf", {
-                  date: formatDate(new Date().toISOString(), locale),
-                })}
-              />
+              {/* P-6 V3 (rule 13) — the monthly amount is the header's
+                  first tile; it is not said a second time here. */}
             </div>
           )}
 
@@ -977,6 +1063,9 @@ export function ContractDetailPage() {
             </div>
           )}
         </section>
+      )}
+
+        </>
       )}
 
       {/* Both dialogs render unconditionally and are driven through the
@@ -1044,21 +1133,14 @@ export function ContractDetailPage() {
 function Tile({
   label,
   value,
-  hint,
 }: {
   label: React.ReactNode;
   value: string;
-  /** Sprint 177 §9 — what the figure MEASURES, when the label alone
-   *  cannot say it. "Current monthly" is a correct number that a reader
-   *  cannot interpret: today, this month so far, or a whole month? The
-   *  hint answers that without lengthening the label. */
-  hint?: string;
 }) {
   return (
     <div className="summary-stat">
       <span className="summary-stat-label">{label}</span>
       <span className="summary-stat-value">{value}</span>
-      {hint && <span className="muted small">{hint}</span>}
     </div>
   );
 }
@@ -1256,6 +1338,13 @@ function AddLineForm({
         className="btn btn-primary btn-sm"
         onClick={() => void submit()}
         disabled={busy || !name.trim()}
+        title={
+          busy
+            ? t("actions.saving")
+            : !name.trim()
+              ? t("projects.addNeedsName")
+              : undefined
+        }
         data-testid="contract-line-add"
       >
         {t("projects.add")}
@@ -1328,8 +1417,10 @@ function NewRevisionDialog({
         className="card"
         style={{ maxWidth: 480, width: "100%", padding: 24 }}
       >
-        <h2>{t("revisions.create")}</h2>
-        <p className="muted">{t("revisions.createHint")}</p>
+        <h2 className="section-head-title" style={{ margin: 0 }}>
+          {t("revisions.create")}
+        </h2>
+        <p className="muted" style={{ marginTop: 6 }}>{t("revisions.createHint")}</p>
 
         {error && (
           <div className="alert-error" role="alert">
@@ -1382,6 +1473,7 @@ function NewRevisionDialog({
             className="btn btn-primary btn-sm"
             onClick={() => void submit()}
             disabled={busy}
+            title={busy ? t("actions.saving") : undefined}
             data-testid="contract-revision-save"
           >
             {busy ? t("actions.saving") : t("actions.save")}

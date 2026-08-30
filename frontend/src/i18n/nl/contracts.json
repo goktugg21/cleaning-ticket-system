@@ -457,5 +457,13 @@
   "sentence.planned_from": "gepland vanaf {{since}}",
   "register.search_placeholder": "Zoek een klus",
   "register.zero_rows_one": "{{count}} regel van € 0,00 — toon",
-  "register.zero_rows_other": "{{count}} regels van € 0,00 — toon"
+  "register.zero_rows_other": "{{count}} regels van € 0,00 — toon",
+  "actions.backToList": "Terug naar contracten",
+  "detail.unavailableTitle": "Dit contract kan niet worden getoond",
+  "detail.unavailableBody": "Het kon niet worden gelezen voor uw account, of het bestaat niet meer.",
+  "facts.period": "Periode",
+  "facts.until": "tot {{date}}",
+  "facts.locations_one": "{{count}} locatie",
+  "facts.locations_other": "{{count}} locaties",
+  "projects.addNeedsName": "Geef het project eerst een naam."
 }
