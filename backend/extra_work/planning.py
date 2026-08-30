@@ -41,9 +41,20 @@ THE FOUR THINGS A PLAN SETS
     planned hours per person     that total, distributed (ExtraWorkPlannedHours)
 
 plus the two completion requirements (`file_upload_required`,
-`completion_notes_required`), and then it STARTS the work — plan and
-start are one action, as they are in the reference system, where the
-button is labelled "Start Work".
+`completion_notes_required`), and — ONLY when the caller says so with
+an explicit `start: true` — it STARTS the work.
+
+P-8R A2 — THE START IS EXPLICIT. Until P-8R an ABSENT `start` meant
+"plan and start" (the reference system's one "Start Work" button). The
+audit called that default a loaded gun: a caller that only meant to
+write a date could move the work to IN_PROGRESS by forgetting a key.
+The gates held (an unpriced quote work never started), but a safe
+default is not a gate. So the contract is inverted: a plan is a plan,
+and starting is a separate, explicit ask. Every caller in this repo
+(the single plan door, the bulk plan dialog, the ticket page's plan
+mirror) sends `start` explicitly; the serializer still has no
+`default=` so key presence keeps meaning what it means everywhere
+else here.
 
 WHAT A PLAN DELIBERATELY DOES NOT TOUCH
 ---------------------------------------
@@ -664,7 +675,9 @@ def _sync_slot_windows(extra_work, resolved) -> int:
 
 
 def _start(extra_work, *, actor) -> tuple[bool, str | None, object]:
-    """Plan and start are one action. Returns `(started, skipped_code, row)`.
+    """Start the work after its plan landed. Returns `(started, skipped_code, row)`.
+
+    Only reached when the caller asked with `start: true` (P-8R A2).
 
     A start that cannot happen is REPORTED, not raised. Two of the three
     reasons are ordinary operating states rather than mistakes:
@@ -993,13 +1006,15 @@ def apply_plan(
 
     ticket_result = getattr(extra_work, "planned_date_ticket_result", None) or {}
 
-    # ---- plan and start are one action --------------------------------
+    # ---- the start is a separate, explicit ask (P-8R A2) ----------------
     started = False
     start_skipped: str | None = START_NOT_REQUESTED
-    # ABSENT MEANS START. Plan and start are one action; `start: false`
-    # is how a caller asks for a plan without one. An empty body never
-    # reaches here — it is refused above as `nothing_to_plan`.
-    if data.get("start", True):
+    # ABSENT MEANS DO NOT START. A plan is a plan; only `start: true`
+    # moves the work. (Before P-8R the default was the other way round
+    # and the audit named it: a caller that meant to write a date could
+    # start the work by omitting a key.) An empty body never reaches
+    # here — it is refused above as `nothing_to_plan`.
+    if data.get("start", False) is True:
         started, start_skipped, row = _start(extra_work, actor=actor)
         if started:
             # `apply_transition` locks and returns its own instance; the

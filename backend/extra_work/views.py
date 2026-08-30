@@ -751,7 +751,10 @@ class ExtraWorkRequestViewSet(
         parser_classes=[JSONParser],
     )
     def plan(self, request, pk=None):
-        """W2-D — plan the work, and start it. One action, one call.
+        """W2-D — plan the work; start it only on an explicit `start: true`.
+
+        P-8R A2 — an absent `start` used to mean "plan AND start"; it now
+        means "plan only". Starting is its own explicit ask.
 
         Body (every field optional; ABSENT MEANS LEAVE UNCHANGED):
 

@@ -617,11 +617,11 @@ class OverrunTests(PlanTestBase):
 
 
 # ---------------------------------------------------------------------------
-# 4. Plan and start are one action
+# 4. Plan, then start — the start is an explicit ask (P-8R A2)
 # ---------------------------------------------------------------------------
 class PlanAndStartTests(PlanTestBase):
-    def test_planning_starts_the_work(self):
-        response = self.plan(self.ew, {"budget_hours": "3.00"})
+    def test_planning_with_start_true_starts_the_work(self):
+        response = self.plan(self.ew, {"budget_hours": "3.00", "start": True})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertTrue(response.data["plan"]["started"])
@@ -641,9 +641,23 @@ class PlanAndStartTests(PlanTestBase):
         self.assertEqual(self.ew.status, ExtraWorkStatus.CUSTOMER_APPROVED)
         self.assertEqual(self.ew.budget_hours, Decimal("3.00"))
 
+    def test_absent_start_plans_without_starting(self):
+        """P-8R A2 — the inverted default. A caller that writes a plan
+        field and says nothing about starting has planned, not started."""
+        response = self.plan(self.ew, {"budget_hours": "3.00"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertFalse(response.data["plan"]["started"])
+        self.assertEqual(
+            response.data["plan"]["start_skipped"], "start_not_requested"
+        )
+        self.ew.refresh_from_db()
+        self.assertEqual(self.ew.status, ExtraWorkStatus.CUSTOMER_APPROVED)
+        self.assertEqual(self.ew.budget_hours, Decimal("3.00"))
+
     def test_a_second_press_is_harmless(self):
-        self.plan(self.ew, {"budget_hours": "3.00"})
-        response = self.plan(self.ew, {"budget_hours": "4.00"})
+        self.plan(self.ew, {"budget_hours": "3.00", "start": True})
+        response = self.plan(self.ew, {"budget_hours": "4.00", "start": True})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertFalse(response.data["plan"]["started"])
@@ -669,7 +683,7 @@ class PlanAndStartTests(PlanTestBase):
             extra_work_request=self.ew,
         )
 
-        response = self.plan(self.ew, {"budget_hours": "5.00"})
+        response = self.plan(self.ew, {"budget_hours": "5.00", "start": True})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertFalse(response.data["plan"]["started"])
@@ -684,7 +698,7 @@ class PlanAndStartTests(PlanTestBase):
     def test_work_the_customer_has_not_approved_yet_cannot_start(self):
         ew = self.make_ew(status=ExtraWorkStatus.REQUESTED)
 
-        response = self.plan(ew, {"budget_hours": "5.00"})
+        response = self.plan(ew, {"budget_hours": "5.00", "start": True})
 
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertFalse(response.data["plan"]["started"])

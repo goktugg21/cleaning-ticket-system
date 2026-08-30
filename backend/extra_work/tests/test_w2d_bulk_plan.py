@@ -121,6 +121,9 @@ class BulkPlanHappyPathTests(BulkPlanTestBase):
             {
                 "requests": [self.ew_a.id, not_approved.id],
                 "budget_hours": "2.00",
+                # P-8R A2 — starting is explicit now; this test is about
+                # WHICH rows could start, so it asks.
+                "start": True,
             }
         )
 

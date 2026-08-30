@@ -2791,11 +2791,10 @@ class ExtraWorkPlanSerializer(serializers.Serializer):
     )
     file_upload_required = serializers.BooleanField(required=False)
     completion_notes_required = serializers.BooleanField(required=False)
-    # No `default=` on purpose: with one, `start` would be present in
-    # every validated payload and an EMPTY body would read as "start
-    # this work", which is not something anybody meant to ask for. The
-    # default lives in `planning.apply_plan` (absent -> start), so key
-    # presence keeps meaning what it means everywhere else here.
+    # No `default=` on purpose: key presence keeps meaning what it means
+    # everywhere else here. P-8R A2 — an ABSENT `start` means "do not
+    # start" (`planning.apply_plan`); starting is an explicit
+    # `start: true`, never a side effect of writing a plan field.
     start = serializers.BooleanField(required=False)
     # Task 3 — the recorded override for editing PAST days in the hours
     # grid. Not a plan field (it sets nothing); `apply_plan` demands it
