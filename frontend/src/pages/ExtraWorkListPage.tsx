@@ -27,11 +27,13 @@ import type {
   CustomerLabel,
   ExtraWorkCategory,
   ExtraWorkBulkPlanItem,
+  ExtraWorkDisplayPhase,
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
 } from "../api/types";
 import { getApiError } from "../api/client";
+import { describeExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
 import { ChoiceDialog } from "../components/ChoiceDialog";
@@ -46,7 +48,7 @@ import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { RouteBadge } from "../components/RouteBadge";
-import { StatusBadge } from "../components/StatusBadge";
+import { PhaseBadge } from "../components/customer/PhaseBadge";
 import { SeriesHeaderRow } from "../components/extra-work/SeriesHeaderRow";
 import { foldSeries } from "../lib/extraWorkSeries";
 import { isPriced, rowAmounts } from "../lib/billing";
@@ -95,7 +97,7 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
  * `IN_PROGRESS` and `COMPLETED`, and it is still on the Quote & price
  * track, because nothing operational ever started.
  *
- * `QUOTE_TRACK_CHIPS` named five of the eight Extra Work statuses, so
+ * `PHASE_CHIPS` named five of the eight Extra Work statuses, so
  * those three rows matched no chip at all: the owner measured ALLE 34
  * against a chip sum of 33. The Work started track had the same hole
  * four times over — it named seven of eleven ticket statuses, missing
@@ -160,49 +162,90 @@ function chipsFromMap<TStatus extends string, TChip extends string>(
   }));
 }
 
-const QUOTE_CHIP_ORDER = [
-  "AWAITING_PRICING",
-  "PRICING_PROPOSED",
-  "CUSTOMER_APPROVED",
-  "IN_PROGRESS",
-  "COMPLETED",
-  "CUSTOMER_REJECTED",
+/**
+ * P-8R A1 — THE CHIPS ARE THE SERVER'S PHASES, AND THE LIST HIDES NOTHING.
+ *
+ * Web-Claude's audit of the P-7 build opened /extra-work on a seed of 16
+ * requests and saw every chip at 0 and zero rows, while the list endpoint
+ * returned all 16. The cause was not a failed fetch: since W-NAV1.2 this
+ * page filtered the rows it had fetched down to "no operational ticket
+ * yet" (the quote track) and counted the chips over what was left, so a
+ * tenant whose every request had turned into a ticket saw an empty page
+ * that said nothing about the 16 it was hiding. On crmtest the same
+ * filter showed 32 of 99.
+ *
+ * So: every row the server returns is on this page, and the chips bucket
+ * rows by `display_phase` — the ONE server-computed phase (FE-2, §D.4)
+ * the banner and the tracker already read, so the tile, the badge on the
+ * row and the detail page agree by construction. The Record below is
+ * exhaustive over `ExtraWorkDisplayPhase`; a phase the union gains and
+ * this map does not place fails to compile. The chip labels are the
+ * phase labels themselves (`common:phase.ew.*`), never a second list.
+ * A row whose phase the client does not know is COUNTED (the residual
+ * chip), never dropped. The guard under the tiles says how many rows
+ * were loaded and refuses to stay quiet if the chips do not add up to
+ * that number.
+ */
+const PHASE_CHIP_ORDER = [
+  "WAITING_PRICE",
+  "WAITING_CUSTOMER_APPROVAL",
+  "WAITING_PLANNING",
+  "SCHEDULED",
+  "IN_EXECUTION",
+  "WAITING_COMPLETION_APPROVAL",
+  "DONE",
+  "INVOICED",
+  "REJECTED",
   "CANCELLED",
 ] as const;
-type QuoteChipValue = (typeof QUOTE_CHIP_ORDER)[number];
+type PhaseChipValue = (typeof PHASE_CHIP_ORDER)[number];
 
-/** Every `ExtraWorkStatus`, exhaustively. Adding one to the union breaks
- *  this line until it is placed. */
-const QUOTE_CHIP_OF: Readonly<Record<ExtraWorkStatus, QuoteChipValue>> = {
-  REQUESTED: "AWAITING_PRICING",
-  UNDER_REVIEW: "AWAITING_PRICING",
-  PRICING_PROPOSED: "PRICING_PROPOSED",
-  // The three that used to fall through. On a track defined as "no
-  // operational ticket" these are the stranded-spawn rows, and each
-  // keeps its own label rather than being lumped together: "approved",
-  // "underway" and "done" are different problems for whoever has to go
-  // and fix them.
-  CUSTOMER_APPROVED: "CUSTOMER_APPROVED",
-  IN_PROGRESS: "IN_PROGRESS",
-  COMPLETED: "COMPLETED",
-  CUSTOMER_REJECTED: "CUSTOMER_REJECTED",
+/** Every `ExtraWorkDisplayPhase`, exhaustively. The customer-voiced twin
+ *  (`WAITING_YOUR_APPROVAL`) sits with the provider's reading of the
+ *  same state; a provider list never receives it, but the union has it. */
+const PHASE_CHIP_OF: Readonly<Record<ExtraWorkDisplayPhase, PhaseChipValue>> = {
+  WAITING_PRICE: "WAITING_PRICE",
+  WAITING_YOUR_APPROVAL: "WAITING_CUSTOMER_APPROVAL",
+  WAITING_CUSTOMER_APPROVAL: "WAITING_CUSTOMER_APPROVAL",
+  WAITING_PLANNING: "WAITING_PLANNING",
+  SCHEDULED: "SCHEDULED",
+  IN_EXECUTION: "IN_EXECUTION",
+  WAITING_COMPLETION_APPROVAL: "WAITING_COMPLETION_APPROVAL",
+  DONE: "DONE",
+  INVOICED: "INVOICED",
+  REJECTED: "REJECTED",
   CANCELLED: "CANCELLED",
 };
 
-const QUOTE_CHIP_LABEL: Readonly<Record<QuoteChipValue, string>> = {
-  AWAITING_PRICING: "list.chip_awaiting_pricing",
-  // W-UX F21 — a chip that stands for ONE status wears that status's
-  // own badge label, so the tile and the badge on the row agree.
-  PRICING_PROPOSED: "common:extra_work_status.pricing_proposed",
-  CUSTOMER_APPROVED: "common:extra_work_status.customer_approved",
-  IN_PROGRESS: "common:extra_work_status.in_progress",
-  COMPLETED: "common:extra_work_status.completed",
-  CUSTOMER_REJECTED: "common:extra_work_status.customer_rejected",
-  CANCELLED: "common:extra_work_status.cancelled",
+const PHASE_CHIP_LABEL: Readonly<Record<PhaseChipValue, string>> = {
+  WAITING_PRICE: "common:phase.ew.WAITING_PRICE",
+  WAITING_CUSTOMER_APPROVAL: "common:phase.ew.WAITING_CUSTOMER_APPROVAL",
+  WAITING_PLANNING: "common:phase.ew.WAITING_PLANNING",
+  SCHEDULED: "common:phase.ew.SCHEDULED",
+  IN_EXECUTION: "common:phase.ew.IN_EXECUTION",
+  WAITING_COMPLETION_APPROVAL: "common:phase.ew.WAITING_COMPLETION_APPROVAL",
+  DONE: "common:phase.ew.DONE",
+  INVOICED: "common:phase.ew.INVOICED",
+  REJECTED: "common:phase.ew.REJECTED",
+  CANCELLED: "common:phase.ew.CANCELLED",
 };
 
-const QUOTE_TRACK_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkStatus>> =
-  chipsFromMap(QUOTE_CHIP_ORDER, QUOTE_CHIP_OF, QUOTE_CHIP_LABEL);
+const PHASE_CHIPS: ReadonlyArray<ChipSpec<ExtraWorkDisplayPhase>> =
+  chipsFromMap(PHASE_CHIP_ORDER, PHASE_CHIP_OF, PHASE_CHIP_LABEL);
+
+/** RF-18 deep links still say `?status=<ExtraWorkStatus>` (the dashboard
+ *  widgets). A status lands on the chip its phase would normally sit in;
+ *  exhaustive so a new status cannot silently open on "everything". */
+const STATUS_DEEP_LINK_CHIP: Readonly<Record<ExtraWorkStatus, PhaseChipValue>> = {
+  REQUESTED: "WAITING_PRICE",
+  UNDER_REVIEW: "WAITING_PRICE",
+  PRICING_PROPOSED: "WAITING_CUSTOMER_APPROVAL",
+  CUSTOMER_APPROVED: "WAITING_PLANNING",
+  IN_PROGRESS: "IN_EXECUTION",
+  COMPLETED: "DONE",
+  CUSTOMER_REJECTED: "REJECTED",
+  CANCELLED: "CANCELLED",
+};
 
 /** "" = no chip selected (the All tile). A chip value is a GROUP key,
  *  not necessarily a raw enum member. */
@@ -497,10 +540,10 @@ export function ExtraWorkList({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
     if (!raw || raw === "ALL") return "";
-    const match = QUOTE_TRACK_CHIPS.find((chip) =>
-      (chip.statuses as readonly string[]).includes(raw),
-    );
-    return match ? match.value : "";
+    // P-8R A1 — a phase chip by name, else a status mapped onto one.
+    const byPhase = PHASE_CHIPS.find((chip) => chip.value === raw);
+    if (byPhase) return byPhase.value;
+    return (STATUS_DEEP_LINK_CHIP as Record<string, PhaseChipValue | undefined>)[raw] ?? "";
   });
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
   const [categoryOptions, setCategoryOptions] =
@@ -663,36 +706,26 @@ export function ExtraWorkList({
     };
   }, [customerFilter]);
 
-  // W-NAV1.2 — this list only shows the Quote & price side any more:
-  // requests with no operational ticket yet. The answer comes from the
-  // server (`has_operational_ticket`, resolved through the canonical
-  // `Ticket.extra_work_request` FK — the same definition the invoice run
-  // uses), so it cannot drift from the money. Started work (an
-  // operational ticket exists) lives on the Chargeable work list
-  // (/tickets/chargeable) instead.
-  const quoteRows = useMemo(
-    () => rows.filter((row) => !row.has_operational_ticket),
-    [rows],
-  );
-
-  /** How many of the loaded requests are NOT on this page because work
-   *  has started on them. Only used to offer the Chargeable work link
-   *  from the empty state — see the EmptyState `action` below. */
-  const startedElsewhereCount = rows.length - quoteRows.length;
+  // P-8R A1 — every row the server returned is on this page. The
+  // W-NAV1.2 quote-track filter (`!has_operational_ticket`) that used to
+  // stand here is what hid a full server list behind zero chips; started
+  // work is still ALSO listed on One-off work (/tickets/chargeable), but
+  // this list no longer subtracts it.
+  const listRows = rows;
 
   // §1(b) — approved-but-never-spawned rows, counted for the marker
   // beside the list. They stay on this track (nothing operational has
   // started) but they are a failure, not a state.
   const spawnAnomalyCount = useMemo(
-    () => quoteRows.filter(isSpawnAnomaly).length,
-    [quoteRows],
+    () => listRows.filter(isSpawnAnomaly).length,
+    [listRows],
   );
 
   const chipMatches = useCallback(
     (row: ExtraWorkRequestList, chipValue: string): boolean => {
-      const spec = QUOTE_TRACK_CHIPS.find((c) => c.value === chipValue);
+      const spec = PHASE_CHIPS.find((c) => c.value === chipValue);
       if (!spec) return false;
-      return (spec.statuses as readonly string[]).includes(row.status);
+      return (spec.statuses as readonly string[]).includes(row.display_phase);
     },
     [],
   );
@@ -712,22 +745,25 @@ export function ExtraWorkList({
    *  have yet. */
   const rowChipValue = useCallback(
     (row: ExtraWorkRequestList): string | null =>
-      QUOTE_TRACK_CHIPS.find((chip) => chipMatches(row, chip.value))
+      PHASE_CHIPS.find((chip) => chipMatches(row, chip.value))
         ?.value ?? null,
     [chipMatches],
   );
 
   const { statusCounts, unmatchedCount } = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const chip of QUOTE_TRACK_CHIPS) counts[chip.value] = 0;
+    for (const chip of PHASE_CHIPS) counts[chip.value] = 0;
     let unmatched = 0;
-    for (const row of quoteRows) {
+    for (const row of listRows) {
       const value = rowChipValue(row);
       if (value === null) unmatched += 1;
       else counts[value] += 1;
     }
     return { statusCounts: counts, unmatchedCount: unmatched };
-  }, [quoteRows, rowChipValue]);
+  }, [listRows, rowChipValue]);
+  const chipTotal =
+    Object.values(statusCounts).reduce((sum, n) => sum + n, 0) +
+    unmatchedCount;
 
   // The list's own money total — computed from the full loaded set (not
   // the filtered view, and not the active track), which is what the
@@ -756,7 +792,7 @@ export function ExtraWorkList({
 
   const visibleRows = useMemo(() => {
     const needle = searchInput.trim().toLowerCase();
-    const filtered = quoteRows.filter((r) => {
+    const filtered = listRows.filter((r) => {
       // Sprint 181 §2 — a chip stands for a GROUP of statuses.
       // W24-FX1 §2a — the residual chip selects exactly the rows no chip
       // claimed, so clicking it shows them instead of emptying the table.
@@ -796,7 +832,7 @@ export function ExtraWorkList({
       return deadlineSort === "asc" ? order : -order;
     });
   }, [
-    quoteRows,
+    listRows,
     chipMatches,
     rowChipValue,
     searchInput,
@@ -923,7 +959,8 @@ export function ExtraWorkList({
       edit.exit();
       setReloadKey((key) => key + 1);
     } catch (err) {
-      setPlanError(getApiError(err));
+      // P-8R A3 — the coded sentence, at the dialog's own error line.
+      setPlanError(describeExtraWorkRefusal(err, t).sentence);
     } finally {
       setPlanBusy(false);
     }
@@ -998,8 +1035,10 @@ export function ExtraWorkList({
                           there is no ticket to read a status off: a row
                           with an operational ticket is not on this page
                           at all, it is on Chargeable work. */}
-                      <StatusBadge
-                        status={{ kind: "extra-work", value: row.status }}
+                      <PhaseBadge
+                        kind="ew"
+                        phase={row.display_phase}
+                        testId="extra-work-row-phase"
                       />
                       {/* Sprint 180 §1(b) — approved, but the spawn that
                           is supposed to be synchronous with approval
@@ -1239,9 +1278,33 @@ export function ExtraWorkList({
         </div>
 
         <div className="ew-list-scope-chips">
+          {/* P-8R A1 — the guard. Says how many rows were loaded (the
+              audit compares this to the server's count) and refuses to
+              stay quiet if the chips do not add up to it. */}
+          {!loading && !error && (
+            <p
+              className="muted small ew-list-loaded-count"
+              data-testid="extra-work-list-loaded-count"
+              data-count={rows.length}
+            >
+              {t("list.loaded_count", { count: rows.length })}
+            </p>
+          )}
+          {!loading && rows.length > 0 && chipTotal !== rows.length && (
+            <div
+              className="alert-error"
+              role="alert"
+              data-testid="extra-work-list-guard"
+            >
+              {t("list.guard_mismatch", {
+                loaded: rows.length,
+                counted: chipTotal,
+              })}
+            </div>
+          )}
           <StatusTiles
             tiles={[
-              ...QUOTE_TRACK_CHIPS.map((chip) => ({
+              ...PHASE_CHIPS.map((chip) => ({
                 value: chip.value,
                 label: t(chip.labelKey),
                 count: statusCounts[chip.value] ?? 0,
@@ -1262,7 +1325,7 @@ export function ExtraWorkList({
             ]}
             active={statusFilter}
             onChange={setStatusFilter}
-            totalCount={quoteRows.length}
+            totalCount={listRows.length}
             testIdPrefix="extra-work-status"
           />
         </div>
@@ -1487,30 +1550,12 @@ export function ExtraWorkList({
         <EmptyState
           icon={Sparkles}
           title={
-            quoteRows.length === 0
+            listRows.length === 0
               ? t("list.empty_state")
               : t("list.empty_filtered_title")
           }
           description={
-            quoteRows.length === 0 ? undefined : t("list.empty_filtered_desc")
-          }
-          action={
-            startedElsewhereCount > 0 ? (
-              <Link
-                to="/tickets/chargeable"
-                className="btn btn-secondary btn-sm"
-                data-testid="extra-work-track-switch"
-              >
-                {t("list.track_switch_to", {
-                  count: startedElsewhereCount,
-                  // W-NAV2 — the sidebar row for /tickets/chargeable is
-                  // "One-off work" now, and this link goes to that exact
-                  // page. It reads the SAME key the nav row does so the
-                  // two can never drift apart.
-                  track: t("nav.one_off_work", { ns: "common" }),
-                })}
-              </Link>
-            ) : undefined
+            listRows.length === 0 ? undefined : t("list.empty_filtered_desc")
           }
           testId="extra-work-list-empty"
         />
@@ -1713,8 +1758,10 @@ export function ExtraWorkList({
                       {/* Sprint 181 §1 — the card carries the same one
                           status the table row does, from the same
                           authority. */}
-                      <StatusBadge
-                        status={{ kind: "extra-work", value: row.status }}
+                      <PhaseBadge
+                        kind="ew"
+                        phase={row.display_phase}
+                        testId="extra-work-card-phase"
                       />
                       <RouteBadge value={row.routing_decision} />
                       {isSpawnAnomaly(row) && (

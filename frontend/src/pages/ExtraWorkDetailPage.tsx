@@ -141,6 +141,8 @@ import { ProposalBuilder } from "../components/ProposalBuilder";
 import { billedToKey } from "../lib/billedTo";
 import { customerLabelName } from "../lib/customerLabelName";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
+import { describeExtraWorkRefusal } from "../lib/extraWorkRefusal";
+import type { ExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { extraWorkStatusLabelKey, ticketStatusLabelKey } from "../lib/enumLabels";
@@ -989,6 +991,27 @@ export function ExtraWorkDetailPage() {
   // A failed ACTION on a record that is right here. Renders as an
   // alert above the content; the record stays on screen.
   const [actionError, setActionError] = useState("");
+  // P-8R A3 — the refusal's KIND and where it was pressed, so the
+  // sentence renders AT the acting control, with its door (complete the
+  // plan / give a reason), and scrolls into view.
+  const [actionRefusal, setActionRefusal] = useState<{
+    refusal: ExtraWorkRefusal;
+    target: ExtraWorkStatus | null;
+    at: "banner" | "actions";
+  } | null>(null);
+  const actionErrorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (actionError) {
+      actionErrorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [actionError]);
+  // P-8R A4 — "Start the work" asks once, naming the plan.
+  const startDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [startAt, setStartAt] = useState<"banner" | "actions">("banner");
+  // P-8R A4 — the on-behalf decision's reason is a warning modal (the
+  // drawer's pattern); `overrideDecision` remembers WHICH decision so a
+  // refusal can land under that button after the modal closes.
+  const [overrideDialogOpen, setOverrideDialogOpen] = useState(false);
 
   // Sprint 28 Batch 4 — read-only Customer Contacts panel. Backend
   // `IsSuperAdminOrCompanyAdminForCompany` gate on the contacts list
@@ -1008,7 +1031,6 @@ export function ExtraWorkDetailPage() {
   const [overrideDecision, setOverrideDecision] = useState<
     "CUSTOMER_APPROVED" | "CUSTOMER_REJECTED" | null
   >(null);
-  const [overrideReason, setOverrideReason] = useState("");
   const [overrideBusy, setOverrideBusy] = useState(false);
   const [overrideError, setOverrideError] = useState("");
 
@@ -2088,9 +2110,13 @@ export function ExtraWorkDetailPage() {
     }
   }
 
-  async function handleTransition(target: ExtraWorkStatus) {
+  async function handleTransition(
+    target: ExtraWorkStatus,
+    at: "banner" | "actions" = "banner",
+  ) {
     if (!id) return;
     setActionError("");
+    setActionRefusal(null);
     setTransitionBusy(target);
     try {
       const updated = await transitionExtraWork(id, { to_status: target });
@@ -2110,13 +2136,11 @@ export function ExtraWorkDetailPage() {
         });
       }
     } catch (err) {
-      const code = (err as { response?: { data?: { code?: string } } })
-        ?.response?.data?.code;
-      setActionError(
-        code === "plan_requirements_unmet"
-          ? t("plan_gate.blocked")
-          : getApiError(err),
-      );
+      // P-8R A3 — the server's reason, in the reader's words, at the
+      // control that was pressed, with the door it points to.
+      const refusal = describeExtraWorkRefusal(err, t);
+      setActionError(refusal.sentence);
+      setActionRefusal({ refusal, target, at });
     } finally {
       setTransitionBusy(null);
     }
@@ -2154,7 +2178,9 @@ export function ExtraWorkDetailPage() {
         });
       }
     } catch (err) {
-      setActionError(getApiError(err));
+      const refusal = describeExtraWorkRefusal(err, t);
+      setActionError(refusal.sentence);
+      setActionRefusal({ refusal, target, at: "banner" });
     } finally {
       setTransitionBusy(null);
     }
@@ -2304,8 +2330,11 @@ export function ExtraWorkDetailPage() {
     }
   }
 
-  /** Plan and start. One call, and the response IS the refreshed detail
-   *  (with a `plan` block attached), so the page does not re-fetch.
+  /** Plan — and only plan. P-8R A2: the plan door no longer starts the
+   *  work on an absent `start`; this page says `start: false` out loud,
+   *  and starting is the banner's own "Start the work" step with its
+   *  confirm. The response IS the refreshed detail (with a `plan` block
+   *  attached), so the page does not re-fetch.
    *
    *  `plan.warnings` carries the overrun. It is surfaced as a toast and
    *  it is NOT an error: the save has already happened by the time the
@@ -2316,7 +2345,10 @@ export function ExtraWorkDetailPage() {
     setPlanError("");
     setPlanRawError(null);
     try {
-      const updated = await planExtraWork(Number(id), payload);
+      const updated = await planExtraWork(Number(id), {
+        ...payload,
+        start: false,
+      });
       setEw(updated);
       setPlanOpen(false);
       pushToast({ variant: "success", title: t("plan.saved") });
@@ -2331,11 +2363,16 @@ export function ExtraWorkDetailPage() {
       // has an operational ticket driving its status — reported, not
       // raised, and the plan landed either way. Saying so beats leaving
       // the operator to notice the status did not move.
-      if (updated.plan && !updated.plan.started) {
+      if (
+        updated.plan &&
+        !updated.plan.started &&
+        updated.plan.start_skipped !== null &&
+        updated.plan.start_skipped !== "start_not_requested"
+      ) {
         pushToast({ variant: "info", title: t("plan.not_started_notice") });
       }
     } catch (err) {
-      setPlanError(getApiError(err));
+      setPlanError(describeExtraWorkRefusal(err, t).sentence);
       setPlanRawError(err);
     } finally {
       setPlanBusy(false);
@@ -2374,28 +2411,27 @@ export function ExtraWorkDetailPage() {
     }
   }
 
-  async function handleOverrideSubmit(event: FormEvent) {
-    event.preventDefault();
+  /** P-8R A4 — the decision on the customer's behalf, confirmed in the
+   *  amber reason modal. A refusal closes the modal and lands under the
+   *  button that was pressed (the decision stays remembered for that). */
+  async function submitOverride(reason: string) {
     if (!id || !overrideDecision) return;
-    if (!overrideReason.trim()) {
-      setOverrideError(t("detail.override_reason_required"));
-      return;
-    }
     setOverrideError("");
     setOverrideBusy(true);
     try {
       const updated = await transitionExtraWork(id, {
         to_status: overrideDecision,
         is_override: true,
-        override_reason: overrideReason.trim(),
+        override_reason: reason,
       });
       setEw(updated);
       setOverrideDecision(null);
-      setOverrideReason("");
+      setOverrideDialogOpen(false);
       // Override-approve reaches CUSTOMER_APPROVED → tickets spawn.
       void reloadSpawnedTickets();
     } catch (err) {
-      setOverrideError(getApiError(err));
+      setOverrideDialogOpen(false);
+      setOverrideError(describeExtraWorkRefusal(err, t).sentence);
     } finally {
       setOverrideBusy(false);
     }
@@ -2433,7 +2469,7 @@ export function ExtraWorkDetailPage() {
         title: t("detail.direct_publish_success"),
       });
     } catch (err) {
-      setDirectPublishError(getApiError(err));
+      setDirectPublishError(describeExtraWorkRefusal(err, t).sentence);
     } finally {
       setDirectPublishBusy(false);
     }
@@ -2454,7 +2490,9 @@ export function ExtraWorkDetailPage() {
       setEw(updated);
       cancelDialogRef.current?.close();
     } catch (err) {
-      setActionError(getApiError(err));
+      const refusal = describeExtraWorkRefusal(err, t);
+      setActionError(refusal.sentence);
+      setActionRefusal({ refusal, target: "CANCELLED", at: "actions" });
       cancelDialogRef.current?.close();
     } finally {
       setCancelBusy(false);
@@ -2652,7 +2690,14 @@ export function ExtraWorkDetailPage() {
             completeDialogRef.current?.open();
             return;
           }
-          void handleTransition(target);
+          // P-8R A4 — starting asks once, naming the plan.
+          if (target === "IN_PROGRESS") {
+            setActionError("");
+            setStartAt("actions");
+            startDialogRef.current?.open();
+            return;
+          }
+          void handleTransition(target, "actions");
         }}
         data-testid={
           target === "CANCELLED" ? "extra-work-cancel-button" : undefined
@@ -2664,6 +2709,60 @@ export function ExtraWorkDetailPage() {
       </button>
     );
   };
+
+  /** P-8R A3 — the refusal, rendered where it was pressed: under the
+   *  banner for the primary action, in the Acties card for the rest.
+   *  A `plan_gap` carries the door onto the plan (at its first gap); a
+   *  `reason_required` carries the door onto the amber reason modal. */
+  const renderActionError = (at: "banner" | "actions") =>
+    actionError && (actionRefusal?.at ?? "banner") === at ? (
+      <div
+        ref={actionErrorRef}
+        className="alert-error"
+        role="alert"
+        style={{ marginBottom: 16 }}
+        data-testid="extra-work-action-error"
+        data-refusal-kind={actionRefusal?.refusal.kind ?? "generic"}
+      >
+        <div>{actionError}</div>
+        {actionRefusal?.refusal.kind === "plan_gap" && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            style={{ marginTop: 8 }}
+            onClick={() =>
+              void openPlan(
+                GATE_FOCUS[actionRefusal.refusal.unmet[0] ?? ""] ?? null,
+              )
+            }
+            data-testid="extra-work-refusal-complete-plan"
+          >
+            {t("refused.complete_plan")}
+          </button>
+        )}
+        {actionRefusal?.refusal.kind === "reason_required" &&
+          (actionRefusal.target === "CUSTOMER_APPROVED" ||
+            actionRefusal.target === "CUSTOMER_REJECTED") && (
+            <button
+              type="button"
+              className="btn btn-warning btn-sm"
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                const decision = actionRefusal.target as
+                  | "CUSTOMER_APPROVED"
+                  | "CUSTOMER_REJECTED";
+                setAdvancedOpen(true);
+                setOverrideDecision(decision);
+                setOverrideError("");
+                setOverrideDialogOpen(true);
+              }}
+              data-testid="extra-work-refusal-give-reason"
+            >
+              {t("refused.give_reason")}
+            </button>
+          )}
+      </div>
+    ) : null;
 
   const renderPlanButton = () => (
     <button
@@ -2688,7 +2787,13 @@ export function ExtraWorkDetailPage() {
           completeDialogRef.current?.open();
           return;
         }
-        void handleTransition(action.to);
+        if (action.to === "IN_PROGRESS") {
+          setActionError("");
+          setStartAt("banner");
+          startDialogRef.current?.open();
+          return;
+        }
+        void handleTransition(action.to, "banner");
         return;
       case "tab":
         // FE-3 — the billing-month override moved behind Geavanceerd;
@@ -2806,7 +2911,10 @@ export function ExtraWorkDetailPage() {
     ...otherWorkflowTargets
       .filter((target) => target !== "CANCELLED" && !bannerOffersTransition(target))
       .map(renderWorkflowButton),
-    ...(hasActiveProposal && canViewProposalPdf
+    // P-8R A4 — the pair appears ONCE per page: the lines card on the
+    // Money tab is its home (W-PLANTRUTH §4a), so this fold only offers
+    // it while another tab is showing.
+    ...(hasActiveProposal && canViewProposalPdf && tab !== "money"
       ? [
           <button
             key="pdf-preview"
@@ -2848,14 +2956,14 @@ export function ExtraWorkDetailPage() {
         title={ew.title}
       />
 
-      {(actionError || error) && (
+      {error && !actionError && (
         <div
           className="alert-error"
           role="alert"
           style={{ marginBottom: 16 }}
-          data-testid="extra-work-action-error"
+          data-testid="extra-work-page-error"
         >
-          {actionError || error}
+          {error}
         </div>
       )}
 
@@ -2877,6 +2985,7 @@ export function ExtraWorkDetailPage() {
         }
         action={primaryActionNode}
       />
+      {renderActionError("banner")}
       {/* Sprint 187 §2d — say where the decision went when the customer
           is deciding on the quote itself. Purely additive: nothing new
           can be pressed from here. */}
@@ -3163,6 +3272,7 @@ export function ExtraWorkDetailPage() {
               <div className="ew-detail-actions-section-title">
                 {t("detail.actions_card_title")}
               </div>
+              {renderActionError("actions")}
               {otherStepNodes.length > 0 && (
                 <div className="ew-workflow-other" style={{ marginTop: 0 }}>
                   <button
@@ -3200,8 +3310,7 @@ export function ExtraWorkDetailPage() {
                       // reason with it.
                       if (advancedOpen) {
                         setOverrideDecision(null);
-                        setOverrideReason("");
-                        setOverrideError("");
+                                      setOverrideError("");
                       }
                       setAdvancedOpen((open) => !open);
                     }}
@@ -3258,6 +3367,7 @@ export function ExtraWorkDetailPage() {
                             onClick={() => {
                               setOverrideDecision(target);
                               setOverrideError("");
+                              setOverrideDialogOpen(true);
                             }}
                             data-testid={`extra-work-provider-${
                               target === "CUSTOMER_APPROVED"
@@ -3271,74 +3381,14 @@ export function ExtraWorkDetailPage() {
                               ? t("detail.workflow_approve_button")
                               : t("detail.workflow_reject_button")}
                           </button>
-                          {isArmed && (
+                          {isArmed && overrideError && (
                             <div
-                              className="workflow-override-inline"
-                              data-testid="extra-work-override-modal"
+                              className="alert-error"
+                              role="alert"
+                              data-testid="extra-work-override-error"
+                              style={{ marginTop: 6 }}
                             >
-                              <form onSubmit={handleOverrideSubmit}>
-                                <div className="field">
-                                  <label
-                                    className="field-label"
-                                    htmlFor="override-reason"
-                                  >
-                                    {t("detail.override_reason_label")}
-                                  </label>
-                                  <textarea
-                                    id="override-reason"
-                                    data-testid="extra-work-override-reason"
-                                    className="field-textarea"
-                                    rows={3}
-                                    value={overrideReason}
-                                    onChange={(event) =>
-                                      setOverrideReason(event.target.value)
-                                    }
-                                    placeholder={t(
-                                      "detail.override_reason_placeholder",
-                                    )}
-                                    required
-                                  />
-                                </div>
-                                {overrideError && (
-                                  <div
-                                    className="alert-error"
-                                    role="alert"
-                                    data-testid="extra-work-override-error"
-                                    style={{ marginTop: 6 }}
-                                  >
-                                    {overrideError}
-                                  </div>
-                                )}
-                                <div className="override-card-footer card-actions-cluster">
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={() => {
-                                      setOverrideDecision(null);
-                                      setOverrideReason("");
-                                      setOverrideError("");
-                                    }}
-                                    disabled={overrideBusy}
-                                    data-testid="extra-work-override-cancel"
-                                  >
-                                    {t("detail.override_cancel")}
-                                  </button>
-                                  <button
-                                    type="submit"
-                                    className="btn btn-primary btn-sm"
-                                    disabled={
-                                      overrideBusy || !overrideReason.trim()
-                                    }
-                                    data-testid="extra-work-override-submit"
-                                  >
-                                    {overrideBusy
-                                      ? t("detail.override_submitting")
-                                      : t("detail.override_confirm", {
-                                          label: tStatusLabel(t, target),
-                                        })}
-                                  </button>
-                                </div>
-                              </form>
+                              {overrideError}
                             </div>
                           )}
                         </div>
@@ -3685,6 +3735,10 @@ export function ExtraWorkDetailPage() {
                 onChanged={reloadProposals}
                 parentAdvanceBlocked={parentAdvanceBlocked}
                 noCustomerApproval={noCustomerApproval}
+                customerName={ew.customer_name}
+                onOpenPlan={(unmet) =>
+                  void openPlan(GATE_FOCUS[unmet[0] ?? ""] ?? null)
+                }
                 requestLines={ew.line_items.map((item) => ({
                   id: item.id,
                   label:
@@ -4287,6 +4341,69 @@ export function ExtraWorkDetailPage() {
         </div>
       )}
 
+      {/* P-8R A4 — deciding on the customer's behalf: the amber reason
+          modal (the drawer's pattern), never an inline form. */}
+      <RejectReasonDialog
+        open={overrideDialogOpen && overrideDecision !== null}
+        tone="warning"
+        title={
+          overrideDecision === "CUSTOMER_APPROVED"
+            ? t("detail.proposal_override_approve_title")
+            : t("detail.proposal_override_reject_title")
+        }
+        description={t("detail.proposal_override_desc")}
+        placeholder={t("detail.override_reason_placeholder")}
+        confirmLabel={
+          overrideDecision
+            ? t("detail.override_confirm", {
+                label: tStatusLabel(t, overrideDecision),
+              })
+            : undefined
+        }
+        onCancel={() => {
+          setOverrideDialogOpen(false);
+          setOverrideDecision(null);
+          setOverrideError("");
+        }}
+        onConfirm={(reason) => {
+          void submitOverride(reason);
+        }}
+      />
+      {/* P-8R A4 — "Start the work" asks once and names the plan. */}
+      <ConfirmDialog
+        ref={startDialogRef}
+        title={t("detail.start_dialog_title")}
+        body={
+          <div data-testid="extra-work-start-dialog">
+            {planGateComplete ? (
+              <p data-testid="extra-work-start-dialog-plan">
+                {t("detail.start_dialog_plan", { plan: planGateSummary })}
+              </p>
+            ) : (
+              <div data-testid="extra-work-start-dialog-no-plan">
+                <p>{t("detail.start_dialog_no_plan")}</p>
+                <ul style={{ margin: "4px 0 8px", paddingLeft: 18 }}>
+                  {planGateMissing.map((key) => (
+                    <li key={key}>
+                      {t(`plan_gate.missing_${key.replace("plan_", "")}`)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <p className="muted small">
+              {t("detail.start_dialog_question", { title: ew.title })}
+            </p>
+          </div>
+        }
+        confirmLabel={t("detail.start_dialog_confirm")}
+        busy={transitionBusy === "IN_PROGRESS"}
+        busyLabel={t("detail.workflow_working")}
+        onConfirm={async () => {
+          await handleTransition("IN_PROGRESS", startAt);
+          startDialogRef.current?.close();
+        }}
+      />
       {/* W-HOURS4 Task 4 — the proposal card's preview. Rendered
           UNCONDITIONALLY and driven through the ref (CLAUDE.md's rule
           for a native <dialog>); `withDownload` stays on. */}

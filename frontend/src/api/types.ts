@@ -2390,8 +2390,8 @@ export interface ExtraWorkPlanPayload {
   }[];
   file_upload_required?: boolean;
   completion_notes_required?: boolean;
-  /** Absent means START — plan and start are one action. Send `false`
-   *  to plan without starting. */
+  /** P-8R A2 — absent means DO NOT START. A plan is a plan; only an
+   *  explicit `true` starts the work. Every caller sends the key. */
   start?: boolean;
 }
 

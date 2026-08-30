@@ -429,8 +429,9 @@ export async function updateExtraWorkGroupMembers(
 // did not collect must be OMITTED, not sent as null or false.
 // ---------------------------------------------------------------------------
 
-/** Plan one work, and start it. Returns the refreshed detail with a
- *  `plan` result block attached. */
+/** Plan one work. P-8R A2 — starts it ONLY when the payload says
+ *  `start: true`; every caller in this repo sends the key explicitly.
+ *  Returns the refreshed detail with a `plan` result block attached. */
 export async function planExtraWork(
   id: number,
   payload: ExtraWorkPlanPayload,

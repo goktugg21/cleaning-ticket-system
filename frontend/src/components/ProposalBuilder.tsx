@@ -16,6 +16,8 @@ import { useTranslation } from "react-i18next";
 import { FileText, Plus, RefreshCw, X } from "lucide-react";
 
 import { getApiError } from "../api/client";
+import { describeExtraWorkRefusal } from "../lib/extraWorkRefusal";
+import type { ExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import {
   createProposalLine,
   deleteProposalLine,
@@ -33,6 +35,7 @@ import type { ConfirmDialogHandle } from "./ConfirmDialog";
 import { InvoiceLineRow, InvoiceLineTotalsRow } from "./InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "./invoiceLineColumns";
 import { NoteEditorDialog } from "./NoteEditorDialog";
+import { RejectReasonDialog } from "./RejectReasonDialog";
 
 // RF-14 — the live preview pane's visibility survives navigation within
 // a tab session (sessionStorage), so an operator who prefers the full-
@@ -717,6 +720,8 @@ export function ProposalBuilder({
   parentAdvanceBlocked = false,
   noCustomerApproval = false,
   requestLines,
+  customerName = null,
+  onOpenPlan,
 }: {
   ewId: number | string;
   proposal: ProposalDetail;
@@ -738,10 +743,26 @@ export function ProposalBuilder({
   /** W-FIX1 A3 — the request's own lines, offered as one-click seeds
    *  for the composer so the proposal line inherits the requested name. */
   requestLines?: RequestLineSeed[];
+  /** P-8R A4 — who the price goes to; the send confirm names them. */
+  customerName?: string | null;
+  /** P-8R A3 — a `plan_requirements_unmet` refusal offers "Complete the
+   *  plan"; the page owns the plan modal, so it opens it (at the first
+   *  gap the server named). */
+  onOpenPlan?: (unmet: string[]) => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // P-8R A3 — the refusal's kind rides with the sentence so the render
+  // site can offer its door; the sentence scrolls into view at the
+  // action buttons it belongs to.
+  const [refusal, setRefusal] = useState<ExtraWorkRefusal | null>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [error]);
+  // P-8R A4 — sending a price asks once, showing the lines and the total.
+  const sendDialogRef = useRef<ConfirmDialogHandle>(null);
   const [addOpen, setAddOpen] = useState(false);
   /* W-FIX1 A3 — what the add composer opens with; a request-line chip
      re-seeds it (the key remounts the composer's own form state). */
@@ -766,7 +787,6 @@ export function ProposalBuilder({
   const [overridePrompt, setOverridePrompt] = useState<
     "CUSTOMER_APPROVED" | "CUSTOMER_REJECTED" | null
   >(null);
-  const [overrideReason, setOverrideReason] = useState("");
   // Sprint 187 §2c — the id of the saved line currently open for edit,
   // or null. One at a time: two open editors on the same table is two
   // sources of truth for a row.
@@ -824,7 +844,9 @@ export function ProposalBuilder({
       // signal to refresh the live PDF preview.
       setPreviewNonce((n) => n + 1);
     } catch (err) {
-      setError(getApiError(err));
+      const described = describeExtraWorkRefusal(err, t);
+      setError(described.sentence);
+      setRefusal(described);
     } finally {
       setBusy(false);
     }
@@ -868,13 +890,21 @@ export function ProposalBuilder({
       cancelDialogRef.current?.close();
       setCancelReason("");
     });
-  const send = () =>
-    void run(() => transitionProposal(ewId, proposal.id, { to_status: "SENT" }));
+  // P-8R A4 — Send asks first (the lines, the total, the customer);
+  // the confirm runs the same transition it always did.
+  const send = () => {
+    setError("");
+    sendDialogRef.current?.open();
+  };
+  const confirmSend = () =>
+    void run(async () => {
+      await transitionProposal(ewId, proposal.id, { to_status: "SENT" });
+      sendDialogRef.current?.close();
+    });
   const approve = () => {
     if (isProvider) {
       // Provider approval of a SENT proposal is an override — collect the
       // mandatory reason before firing the transition.
-      setOverrideReason("");
       setOverridePrompt("CUSTOMER_APPROVED");
       return;
     }
@@ -884,7 +914,6 @@ export function ProposalBuilder({
   };
   const reject = () => {
     if (isProvider) {
-      setOverrideReason("");
       setOverridePrompt("CUSTOMER_REJECTED");
       return;
     }
@@ -892,17 +921,18 @@ export function ProposalBuilder({
       transitionProposal(ewId, proposal.id, { to_status: "CUSTOMER_REJECTED" }),
     );
   };
-  const submitOverride = () => {
+  const submitOverride = (reason: string) => {
     const to = overridePrompt;
-    if (to === null || overrideReason.trim() === "") return;
+    if (to === null || reason.trim() === "") return;
+    // The modal closes on confirm; a refusal lands under the decision
+    // buttons (the acting control), scrolled into view.
+    setOverridePrompt(null);
     void run(async () => {
       await transitionProposal(ewId, proposal.id, {
         to_status: to,
         is_override: true,
-        override_reason: overrideReason.trim(),
+        override_reason: reason.trim(),
       });
-      setOverridePrompt(null);
-      setOverrideReason("");
     });
   };
 
@@ -989,12 +1019,6 @@ export function ProposalBuilder({
             )}
           </p>
         )}
-        {error && (
-          <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
-            {error}
-          </div>
-        )}
-
         {/* Saved proposal lines render read-only in the same table layout
             as the cart's "Requested services" (InvoiceLineRow). When the
             viewer can edit, each row carries a Remove action — there is no
@@ -1244,7 +1268,10 @@ export function ProposalBuilder({
             {canApprove && (
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                /* P-8R A4 — a provider deciding on the customer's behalf
+                   is an override: amber, never green. The customer's own
+                   approve stays the primary green. */
+                className={isProvider ? "btn btn-warning btn-sm" : "btn btn-primary btn-sm"}
                 disabled={busy}
                 onClick={approve}
                 data-testid="extra-work-proposal-approve"
@@ -1259,7 +1286,7 @@ export function ProposalBuilder({
             {canReject && (
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
+                className={isProvider ? "btn btn-danger btn-sm" : "btn btn-secondary btn-sm"}
                 disabled={busy}
                 onClick={reject}
                 data-testid="extra-work-proposal-reject"
@@ -1306,62 +1333,90 @@ export function ProposalBuilder({
           </div>
         )}
 
-        {/* Provider override-decision modal. The confirm button stays
-            disabled until a non-blank reason is typed, mirroring the
-            backend's `override_reason_required` guard. */}
-        {overridePrompt !== null && (
+        {/* P-8R A3 — the refusal, AT the buttons it answers, in the
+            reader's words, with its door. */}
+        {error && (
           <div
-            className="reject-modal-backdrop"
-            data-testid="extra-work-proposal-override-dialog"
-            role="dialog"
-            aria-modal="true"
+            ref={errorRef}
+            className="alert-error"
+            role="alert"
+            style={{ marginTop: 12 }}
+            data-testid="extra-work-proposal-error"
+            data-refusal-kind={refusal?.kind ?? "generic"}
           >
-            <div className="reject-modal">
-              <h3 className="reject-modal-title">
-                {overridePrompt === "CUSTOMER_APPROVED"
-                  ? t("detail.proposal_override_approve_title")
-                  : t("detail.proposal_override_reject_title")}
-              </h3>
-              <p className="reject-modal-desc">
-                {t("detail.proposal_override_desc")}
-              </p>
-              <textarea
-                className="field-textarea reject-modal-textarea"
-                data-testid="extra-work-proposal-override-reason"
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
-                placeholder={t("detail.proposal_override_reason_placeholder")}
-                rows={4}
-                autoFocus
-              />
-              <div className="reject-modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled={busy}
-                  onClick={() => {
-                    setOverridePrompt(null);
-                    setOverrideReason("");
-                  }}
-                  data-testid="extra-work-proposal-override-cancel"
-                >
-                  {t("detail.note_modal_cancel")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  disabled={busy || overrideReason.trim() === ""}
-                  onClick={submitOverride}
-                  data-testid="extra-work-proposal-override-confirm"
-                >
-                  {busy
-                    ? t("detail.proposal_override_submitting")
-                    : t("detail.proposal_override_confirm")}
-                </button>
-              </div>
-            </div>
+            <div>{error}</div>
+            {refusal?.kind === "plan_gap" && onOpenPlan && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ marginTop: 8 }}
+                onClick={() => onOpenPlan(refusal.unmet)}
+                data-testid="extra-work-proposal-complete-plan"
+              >
+                {t("refused.complete_plan")}
+              </button>
+            )}
           </div>
         )}
+
+        {/* P-8R A4 — the provider's decision on the customer's behalf:
+            the amber reason modal (the drawer's pattern). */}
+        <RejectReasonDialog
+          open={overridePrompt !== null}
+          tone="warning"
+          title={
+            overridePrompt === "CUSTOMER_APPROVED"
+              ? t("detail.proposal_override_approve_title")
+              : t("detail.proposal_override_reject_title")
+          }
+          description={t("detail.proposal_override_desc")}
+          placeholder={t("detail.proposal_override_reason_placeholder")}
+          confirmLabel={t("detail.proposal_override_confirm")}
+          cancelLabel={t("detail.note_modal_cancel")}
+          onCancel={() => setOverridePrompt(null)}
+          onConfirm={(reason) => submitOverride(reason)}
+        />
+        {/* P-8R A4 — Send asks once: the lines, the total, the customer. */}
+        <ConfirmDialog
+          ref={sendDialogRef}
+          title={t(
+            noCustomerApproval
+              ? "detail.send_dialog_title_start"
+              : "detail.send_dialog_title",
+          )}
+          body={
+            <div data-testid="extra-work-proposal-send-dialog">
+              <ul className="ew-send-dialog-lines" style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+                {proposal.lines.map((line) => (
+                  <li key={line.id} data-testid="extra-work-proposal-send-dialog-line">
+                    {(line.service_name || line.description || "").trim() || `#${line.id}`}
+                    {" — "}
+                    {line.quantity} × {formatMoney(line.unit_price)}
+                  </li>
+                ))}
+              </ul>
+              <p style={{ fontWeight: 600 }} data-testid="extra-work-proposal-send-dialog-total">
+                {t("detail.pricing_column_total")}: {formatMoney(proposal.total_amount)}
+              </p>
+              <p className="muted small">
+                {t(
+                  noCustomerApproval
+                    ? "detail.send_dialog_question_start"
+                    : "detail.send_dialog_question",
+                  { customer: customerName ?? t("detail.send_dialog_customer_fallback") },
+                )}
+              </p>
+            </div>
+          }
+          confirmLabel={t(
+            noCustomerApproval ? "detail.proposal_send_start" : "detail.proposal_send",
+          )}
+          busy={busy}
+          busyLabel={t(
+            noCustomerApproval ? "detail.proposal_sending_start" : "detail.proposal_sending",
+          )}
+          onConfirm={confirmSend}
+        />
         {/* Sprint 187 §2b — UNCONDITIONAL, ref-driven (CLAUDE.md §3).
             `{canCancel && <ConfirmDialog/>}` would mount an invisible
             native <dialog> and the trigger above would look dead — the

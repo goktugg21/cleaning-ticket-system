@@ -207,7 +207,10 @@ export function BulkPlanDialog({
   // control, defaulted on, and it is materialised into EVERY row — so a
   // row the operator never edited still carries `start`, which is what
   // keeps it from being refused as `nothing_to_plan`.
-  const [startWorks, setStartWorks] = useState(true);
+  // P-8R A2 — OFF by default. Planning a selection is not starting it;
+  // the switch is the one explicit "and start them" ask, and the payload
+  // always carries it either way.
+  const [startWorks, setStartWorks] = useState(false);
 
   // The fill-down strip. Its own state, never sent: pressing Apply
   // writes these values INTO the rows. Nothing here reaches the wire,
@@ -314,9 +317,10 @@ export function BulkPlanDialog({
         item.planned_hours = next;
       }
 
-      // Always present, so no row is ever refused as `nothing_to_plan`
-      // and an untouched row still starts — which is exactly what bulk
-      // plan did before per-work values existed.
+      // Always present and EXPLICIT (P-8R A2): the server no longer
+      // starts on an absent key, and this dialog never leaves it to a
+      // default either way. Also keeps an untouched row from being
+      // refused as `nothing_to_plan`.
       item.start = startWorks;
       items.push(item);
     }

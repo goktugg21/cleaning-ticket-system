@@ -294,7 +294,16 @@ export function DueChip({ entry }: { entry: WorkPlanEntry }) {
     (entry.placement === "ROLLED" || entry.placement === "OVERDUE")
   )
     return null;
-  return <DueChipCore days={days} hasDeadline={hasDeadline} />;
+  // P-8R E — a real deadline prints its DATE and the countdown in one
+  // chip ("deadline 4 sep — nog 2 dagen"), so the reader gets the fact
+  // and the distance without opening the record.
+  return (
+    <DueChipCore
+      days={days}
+      hasDeadline={hasDeadline}
+      dueDate={hasDeadline ? entry.due_date : null}
+    />
+  );
 }
 
 /** FE-3 — the chip itself, for surfaces that carry the two numbers
@@ -304,19 +313,30 @@ export function DueChip({ entry }: { entry: WorkPlanEntry }) {
 export function DueChipCore({
   days,
   hasDeadline,
+  dueDate = null,
 }: {
   days: number;
   hasDeadline: boolean;
+  /** P-8R E — the deadline's own day; when given, the chip prints it
+   *  beside the countdown. Surfaces without it keep the countdown only. */
+  dueDate?: string | null;
 }) {
   const { t } = useTranslation("staff_slots");
   const tone = days < 0 ? "over" : days === 0 ? "today" : "left";
   const over = Math.abs(days);
+  const dated = hasDeadline && dueDate ? formatDay(dueDate) : null;
   const label = hasDeadline
-    ? days < 0
-      ? t("agenda.due_over", { count: over })
-      : days === 0
-        ? t("agenda.due_today")
-        : t("agenda.due_left", { count: days })
+    ? dated
+      ? days < 0
+        ? t("agenda.due_over_dated", { count: over, date: dated })
+        : days === 0
+          ? t("agenda.due_today_dated", { date: dated })
+          : t("agenda.due_left_dated", { count: days, date: dated })
+      : days < 0
+        ? t("agenda.due_over", { count: over })
+        : days === 0
+          ? t("agenda.due_today")
+          : t("agenda.due_left", { count: days })
     : days < 0
       ? t("agenda.plan_over", { count: over })
       : days === 0

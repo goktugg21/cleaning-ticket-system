@@ -168,11 +168,13 @@ function FigureCard({
   figure,
   period,
   testIdPrefix,
+  loading,
 }: {
   figureKey: ExtraWorkFinancialFigureKey;
   figure: ExtraWorkFinancialFigure | null;
   period: string;
   testIdPrefix: string;
+  loading: boolean;
 }) {
   const { t } = useTranslation("extra_work");
   // The figure would print zero AND nobody has priced any of the work
@@ -197,10 +199,22 @@ function FigureCard({
         <div className="ew-money-card-label">
           {t(`financial_strip.${figureKey}_label`)}
         </div>
-        <div className="ew-money-card-value">
+        {/* P-8R A1 — the tile never prints a dash. While the figures
+            are on their way it says so in a word; when every request
+            behind it is unpriced it says THAT (the foot line gives the
+            count), because "—" reads as "nothing" to the person who
+            just filed the request it is hiding. */}
+        <div
+          className="ew-money-card-value"
+          data-testid={`${testIdPrefix}-${figureKey}-value`}
+        >
           {figure === null
-            ? formatMoney(null)
-            : formatMoney(isAbsence ? null : figure.total)}
+            ? loading
+              ? t("financial_strip.loading")
+              : t("financial_strip.no_price_yet")
+            : isAbsence
+              ? t("financial_strip.no_price_yet")
+              : formatMoney(figure.total)}
         </div>
         <div className="ew-money-card-meta">
           {t(`financial_strip.${figureKey}_meta`, { period })}
@@ -327,6 +341,7 @@ export function FinancialStrip({
               figure={summary ? summary.figures[key] : null}
               period={period}
               testIdPrefix={testIdPrefix}
+              loading={loading}
             />
           ))}
         </div>

@@ -1748,6 +1748,15 @@ function StuckRow({
 /** P-3 §A.1 — one job waiting on the customer. A READ row: what it is,
  *  where, when it went to the customer. The customer's answer is the
  *  only thing that moves it, and that is not this reader's button. */
+/** Whole days from an ISO day to today (local), never negative. */
+function daysBetweenToday(isoDay: string): number {
+  const [y, m, d] = isoDay.split("-").map(Number);
+  const then = new Date(y, (m ?? 1) - 1, d ?? 1);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((today.getTime() - then.getTime()) / 86400000);
+}
+
 function WaitingRow({
   entry,
   role,
@@ -1774,7 +1783,13 @@ function WaitingRow({
         <span className="muted small">{where}</span>
         {since && (
           <span className="muted small" data-testid={`agenda-waiting-since-${entry.key}`}>
-            {t("agenda.waiting_since", { date: formatDay(since) })}
+            {/* P-8R E — the fact AND the wait: "klaar gemeld op <date> —
+                wacht al N dagen", counted from the day it went to the
+                customer to today. */}
+            {t("agenda.waiting_since", {
+              date: formatDay(since),
+              count: Math.max(0, daysBetweenToday(since)),
+            })}
           </span>
         )}
       </div>

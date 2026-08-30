@@ -76,6 +76,7 @@ import type { HourType } from "../../api/timesheets.types";
 import { listHourTypes } from "../../api/timesheets";
 import { dayRange } from "../../lib/planGridDays";
 import { readApiErrorDetail } from "../../lib/apiFieldErrors";
+import { describeExtraWorkRefusal } from "../../lib/extraWorkRefusal";
 import { formatDate } from "../../lib/intl";
 import { hourTypeLabel } from "../../lib/hourTypeLabel";
 import { ChipMultiSelect } from "../ChipMultiSelect";
@@ -622,7 +623,10 @@ export function PlanWorkDialog({
     return {
       fields,
       // The generic sentence ONLY when the server gave no field detail.
-      summary: hasField ? t("plan.summary_fix_marked", { count: Object.keys(fields).length }) : error,
+      // P-8R A3 — no field detail: the coded sentence, never "not accepted".
+      summary: hasField
+        ? t("plan.summary_fix_marked", { count: Object.keys(fields).length })
+        : describeExtraWorkRefusal(rawError, t).sentence || error,
       pastDays,
     };
   }, [rawError, error, t]);
@@ -986,6 +990,12 @@ export function PlanWorkDialog({
               </div>
             ) : (
               <div className="ew-plan-people" {...bind("hours")} data-testid="extra-work-plan-hours">
+                {/* P-8R A5 — label truth: the pricing gate needs hours
+                    above 0, satisfied by the per-person hours below OR
+                    the budget under them. Say so once, honestly. */}
+                <p className="muted small ew-plan-hours-caption" data-testid="extra-work-plan-hours-caption">
+                  {t("plan.hours_required_caption")}
+                </p>
                 {fieldError("hours") && (
                   <p className="field-error" role="alert" data-testid="extra-work-plan-hours-error">
                     {fieldError("hours")}
