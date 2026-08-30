@@ -2874,5 +2874,11 @@
   "customer_form.add_user_pick_first": "Kies eerst een gebruiker.",
   "customer_form.add_buildings_pick_first": "Kies eerst een of meer gebouwen.",
   "customer_form.access_self_locked": "Uw eigen toegang kunt u hier niet wijzigen.",
-  "customer_form.access_busy": "Even wachten, de toegang wordt bijgewerkt."
+  "customer_form.access_busy": "Even wachten, de toegang wordt bijgewerkt.",
+  "customer_view.overview.fact_who": "Wie",
+  "customer_view.overview.fact_contact": "Contact",
+  "customer_view.overview.no_email": "geen e-mailadres",
+  "customer_view.overview.no_phone": "geen telefoonnummer",
+  "customer_view.overview.unavailable_title": "Deze klant kan niet worden getoond",
+  "customer_view.overview.unavailable_body": "De klant kon niet worden gelezen voor uw account, of bestaat niet meer."
 }

@@ -2874,5 +2874,11 @@
   "customer_form.add_user_pick_first": "Pick a user first.",
   "customer_form.add_buildings_pick_first": "Pick one or more buildings first.",
   "customer_form.access_self_locked": "You cannot change your own access here.",
-  "customer_form.access_busy": "One moment, the access is being updated."
+  "customer_form.access_busy": "One moment, the access is being updated.",
+  "customer_view.overview.fact_who": "Who",
+  "customer_view.overview.fact_contact": "Contact",
+  "customer_view.overview.no_email": "no email address",
+  "customer_view.overview.no_phone": "no phone number",
+  "customer_view.overview.unavailable_title": "This customer cannot be shown",
+  "customer_view.overview.unavailable_body": "The customer could not be read for your account, or no longer exists."
 }

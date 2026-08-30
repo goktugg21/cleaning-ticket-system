@@ -33,6 +33,7 @@ import {
 } from "../../../components/LinkedBuildingCell";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
+import { EmptyState } from "../../../components/EmptyState";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
@@ -44,6 +45,9 @@ import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
  * nothing operational. Top-to-bottom now:
  *
  *   1. CustomerSubPageHeader (back link + name + Edit basics action).
+ *   1b. P-6 V3 (§D.6 rule 5) — the FACT block: who, contact, billing
+ *      address, status. The About card that used to carry these rows
+ *      is gone; a fact is said once.
  *   2. The six count-chips, IMMEDIATELY — Buildings / Users / Contacts /
  *      Pricing / Extra work / Tickets, each routing to its sub-page.
  *   3. A dashboard row of live operational numbers from the new
@@ -309,6 +313,53 @@ export function CustomerOverviewPage() {
       ]
     : [];
 
+  // P-6 V3 (rule 13) — a number the summary could not give is ABSENT, not
+  // a dash; when none can be read the card says so once.
+  const metrics = customer
+    ? [
+        {
+          testId: "customer-overview-metric-open-tickets",
+          label: t("customer_view.overview.metric_open_tickets"),
+          value: summary?.open_ticket_count ?? null,
+          meta:
+            summary?.ticket_count === null || summary?.ticket_count === undefined
+              ? t("customer_view.overview.metric_unreadable")
+              : t("customer_view.overview.metric_of_total", {
+                  count: summary.ticket_count,
+                }),
+          to: `/admin/customers/${customer.id}/tickets`,
+        },
+        {
+          testId: "customer-overview-metric-open-extra-work",
+          label: t("customer_view.overview.metric_open_extra_work"),
+          value: summary?.open_extra_work_count ?? null,
+          meta:
+            summary?.extra_work_count === null ||
+            summary?.extra_work_count === undefined
+              ? t("customer_view.overview.metric_unreadable")
+              : t("customer_view.overview.metric_of_total", {
+                  count: summary.extra_work_count,
+                }),
+          to: `/admin/customers/${customer.id}/extra-work`,
+        },
+        {
+          testId: "customer-overview-metric-unpaid-invoices",
+          label: t("customer_view.overview.metric_unpaid_invoices"),
+          value:
+            summary?.unpaid_invoice_total == null
+              ? null
+              : formatEuro(summary.unpaid_invoice_total),
+          meta:
+            summary?.unpaid_invoice_count == null
+              ? t("customer_view.overview.metric_unreadable")
+              : t("customer_view.overview.metric_sent_invoices", {
+                  count: summary.unpaid_invoice_count,
+                }),
+          to: `/admin/customers/${customer.id}/invoices`,
+        },
+      ].filter((metric) => metric.value !== null)
+    : [];
+
   return (
     <div data-testid="customer-overview-page">
       <CustomerSubPageHeader tab="overview"
@@ -327,8 +378,98 @@ export function CustomerOverviewPage() {
         <div className="loading-bar">
           <div className="loading-bar-fill" />
         </div>
-      ) : customer ? (
+      ) : !customer ? (
+        /* P-6 V3 — NEVER A VOID. A customer that could not be read says
+           so in words, with the way back. */
+        <section className="card" role="status" data-testid="customer-overview-unavailable" style={{ padding: 22 }}>
+          <div className="section-head-title">{t("customer_view.overview.unavailable_title")}</div>
+          <p className="muted" style={{ marginTop: 6 }}>
+            {error || t("customer_view.overview.unavailable_body")}
+          </p>
+          <Link to="/admin/customers" className="btn btn-secondary btn-sm" style={{ marginTop: 10 }}>
+            {t("customer_view.back")}
+          </Link>
+        </section>
+      ) : (
         <>
+          {/* 1b. P-6 V3 — FACTS FIRST (§D.6 rule 5): four questions,
+              always visible, before the chips. A missing value is a word
+              (rule 15), never a dash. */}
+          <div className="facts" data-testid="customer-overview-facts">
+            <div className="ew-ctx-block" data-testid="customer-fact-who">
+              <div className="ew-ctx-label">{t("customer_view.overview.fact_who")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">{customer.name}</div>
+                {providerCompany && (
+                  <div className="ew-ctx-sub">
+                    <Link to={`/admin/companies/${customer.company}`}>
+                      {providerCompany.name}
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="ew-ctx-block" data-testid="customer-fact-contact">
+              <div className="ew-ctx-label">{t("customer_view.overview.fact_contact")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">
+                  {customer.contact_email ? (
+                    <a href={`mailto:${customer.contact_email}`}>
+                      {customer.contact_email}
+                    </a>
+                  ) : (
+                    <span className="muted-empty">
+                      {t("customer_view.overview.no_email")}
+                    </span>
+                  )}
+                </div>
+                <div className="ew-ctx-sub">
+                  {customer.phone ? (
+                    <a href={`tel:${customer.phone}`}>{customer.phone}</a>
+                  ) : (
+                    <span className="muted-empty">
+                      {t("customer_view.overview.no_phone")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            {/* Sprint 188 — the BILLING address: what every invoice is
+                addressed to, and an invoice cannot be SENT without a
+                street and a city. Missing is stated rather than left
+                blank — the gap is the thing worth seeing. */}
+            <div className="ew-ctx-block" data-testid="customer-fact-billing">
+              <div className="ew-ctx-label">
+                {t("customer_view.overview.field_billing_address")}
+              </div>
+              <div className="ew-ctx-body">
+                <div
+                  className="ew-ctx-strong"
+                  data-testid="customer-overview-billing-address"
+                >
+                  {billingAddress ? (
+                    billingAddress
+                  ) : (
+                    <span className="muted-empty">
+                      {t("customer_view.overview.billing_address_missing")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="ew-ctx-block" data-testid="customer-fact-status">
+              <div className="ew-ctx-label">{t("customer_view.overview.field_status")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">
+                  {isActive
+                    ? t("customer_view.overview.status_active")
+                    : t("customer_view.overview.status_inactive")}
+                </div>
+                <div className="ew-ctx-sub">{languageLabel}</div>
+              </div>
+            </div>
+          </div>
+
           {/* 1. The chips — the page's ONE navigation surface.
               Sprint 154 §A: the quicklink grid that used to repeat these
               same six destinations at the bottom of the page is gone.
@@ -363,9 +504,9 @@ export function CustomerOverviewPage() {
             ))}
           </div>
 
-          {/* 2. The dashboard row. Numbers with a label, not links to
-              nowhere: a null value renders an em dash and does NOT link,
-              because there is no page behind it for this operator. */}
+          {/* 2. The dashboard row. Numbers with a label, each a link to
+              its page; a number this operator cannot read is absent
+              (rule 13), and the card says so once when none can be. */}
           <section
             className="card"
             data-testid="customer-overview-dashboard"
@@ -381,294 +522,119 @@ export function CustomerOverviewPage() {
                 </div>
               </div>
             </div>
-            <div
-              className="summary-grid"
-              style={{
-                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                margin: 0,
-                padding: "14px 18px 18px",
-              }}
-            >
-              <DashboardMetric
-                testId="customer-overview-metric-open-tickets"
-                label={t("customer_view.overview.metric_open_tickets")}
-                value={summary?.open_ticket_count ?? null}
-                meta={
-                  summary?.ticket_count === null ||
-                  summary?.ticket_count === undefined
-                    ? t("customer_view.overview.metric_unreadable")
-                    : t("customer_view.overview.metric_of_total", {
-                        count: summary.ticket_count,
-                      })
-                }
-                to={`/admin/customers/${customer.id}/tickets`}
-              />
-              <DashboardMetric
-                testId="customer-overview-metric-open-extra-work"
-                label={t("customer_view.overview.metric_open_extra_work")}
-                value={summary?.open_extra_work_count ?? null}
-                meta={
-                  summary?.extra_work_count === null ||
-                  summary?.extra_work_count === undefined
-                    ? t("customer_view.overview.metric_unreadable")
-                    : t("customer_view.overview.metric_of_total", {
-                        count: summary.extra_work_count,
-                      })
-                }
-                to={`/admin/customers/${customer.id}/extra-work`}
-              />
-              <DashboardMetric
-                testId="customer-overview-metric-unpaid-invoices"
-                label={t("customer_view.overview.metric_unpaid_invoices")}
-                value={
-                  summary?.unpaid_invoice_total == null
-                    ? null
-                    : formatEuro(summary.unpaid_invoice_total)
-                }
-                meta={
-                  summary?.unpaid_invoice_count == null
-                    ? t("customer_view.overview.metric_unreadable")
-                    : t("customer_view.overview.metric_sent_invoices", {
-                        count: summary.unpaid_invoice_count,
-                      })
-                }
-                to={`/admin/customers/${customer.id}/invoices`}
-              />
-            </div>
+            {metrics.length === 0 ? (
+              <p
+                className="muted small"
+                style={{ margin: 0, padding: "12px 18px 18px" }}
+                data-testid="customer-overview-dashboard-unreadable"
+              >
+                {t("customer_view.overview.metric_unreadable")}
+              </p>
+            ) : (
+              <div
+                className="summary-grid"
+                style={{
+                  gridTemplateColumns: `repeat(${metrics.length}, minmax(0, 1fr))`,
+                  margin: 0,
+                  padding: "14px 18px 18px",
+                }}
+              >
+                {metrics.map((metric) => (
+                  <Link
+                    key={metric.testId}
+                    to={metric.to}
+                    className="summary-stat"
+                    data-testid={metric.testId}
+                  >
+                    <span className="summary-stat-label">{metric.label}</span>
+                    <span className="summary-stat-value">{metric.value}</span>
+                    <span className="summary-stat-meta">{metric.meta}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
           </section>
 
-          {/* 3. About + Linked buildings, side by side. */}
-          <div className="customer-overview-split">
-            <section
-              className="card"
-              data-testid="customer-overview-about-card"
-              style={{ padding: "20px 22px" }}
-            >
-              <div className="section-head" style={{ marginBottom: 8 }}>
-                <div>
-                  <div className="section-head-title">
-                    {t("customer_view.overview.about_title")}
-                  </div>
-                  <div className="section-head-sub">
-                    {t("customer_view.overview.about_desc")}
-                  </div>
-                </div>
+          {/* 3. Linked buildings. The About card that used to sit beside
+              it is gone: everything it said is in the facts above. */}
+          <div
+            className="card"
+            data-testid="customer-overview-buildings-preview"
+          >
+            <div className="section-head">
+              <div className="section-head-title">
+                {t("customer_view.overview.buildings_preview_title")}
               </div>
-
-              <div className="detail-field-row">
-                <div className="detail-field-label">
-                  {t("customer_view.overview.field_company")}
-                </div>
-                <div className="detail-field-value">
-                  {providerCompany ? (
-                    <Link to={`/admin/companies/${customer.company}`}>
-                      {providerCompany.name}
+              {/* Sprint 153 §4.3 — the view-all link is ALWAYS offered
+                  now, not only past five rows. */}
+              {buildingsCount > 0 && (
+                <Link
+                  to={`/admin/customers/${customer.id}/buildings`}
+                  className="btn btn-ghost btn-sm"
+                  data-testid="customer-overview-buildings-view-all"
+                >
+                  {t("customer_view.overview.buildings_preview_view_all", {
+                    count: buildingsCount,
+                  })}
+                </Link>
+              )}
+            </div>
+            <div style={{ padding: "14px 18px 18px" }}>
+              {/* BoundedList replaces the hand-rolled `.slice(0, 5)`.
+                  Same rule (CLAUDE.md §8 — no unbounded server-
+                  collection list), but the app-wide primitive, so the
+                  scroll cap and the overflow count come for free. */}
+              <BoundedList
+                size="sm"
+                count={buildingsCount}
+                ariaLabel={t("customer_view.overview.buildings_list_label")}
+                testIdPrefix="customer-overview-buildings"
+                emptyState={
+                  <EmptyState
+                    icon={MapPin}
+                    title={t("customer_view.overview.buildings_preview_empty")}
+                    compact
+                    testId="customer-overview-buildings-empty"
+                  />
+                }
+              >
+                {/* Sprint 155 §2 — the row carries the full address
+                    line, what is at that building, and an inactive
+                    marker — every field annotated on the row the card
+                    already fetched, so filling it costs no extra request
+                    (`test_sprint155_linked_buildings` pins that with
+                    assertNumQueries). The row is a LINK to the building. */}
+                <div className="bld-list">
+                  {linkedBuildings.map((link) => (
+                    <Link
+                      key={link.id}
+                      to={`/admin/buildings/${link.building_id}`}
+                      className="linked-building-row"
+                      data-testid={`customer-overview-building-${link.building_id}`}
+                    >
+                      <LinkedBuildingIdentity link={link} />
+                      <LinkedBuildingCounts link={link} />
                     </Link>
-                  ) : (
-                    <span className="muted-empty">—</span>
-                  )}
+                  ))}
                 </div>
-              </div>
-              <div className="detail-field-row">
-                <div className="detail-field-label">
-                  {t("customer_view.overview.field_contact_email")}
-                </div>
-                <div className="detail-field-value">
-                  {customer.contact_email ? (
-                    <a href={`mailto:${customer.contact_email}`}>
-                      {customer.contact_email}
-                    </a>
-                  ) : (
-                    <span className="muted-empty">—</span>
-                  )}
-                </div>
-              </div>
-              <div className="detail-field-row">
-                <div className="detail-field-label">
-                  {t("customer_view.overview.field_phone")}
-                </div>
-                <div className="detail-field-value">
-                  {customer.phone ? (
-                    <a href={`tel:${customer.phone}`}>{customer.phone}</a>
-                  ) : (
-                    <span className="muted-empty">—</span>
-                  )}
-                </div>
-              </div>
-              {/* Sprint 188 — the BILLING address. Sprint 153 removed the
-                  address CARD that used to open this page, and that stands:
-                  the page opens with operational numbers. But the address
-                  itself is what every invoice is addressed to, and an
-                  invoice cannot be SENT without a street and a city, so it
-                  belongs here as a row like any other fact about the
-                  customer. Missing is stated rather than left blank — the
-                  gap is the thing worth seeing. */}
-              <div className="detail-field-row">
-                <div className="detail-field-label">
-                  {t("customer_view.overview.field_billing_address")}
-                </div>
-                <div
-                  className="detail-field-value"
-                  data-testid="customer-overview-billing-address"
-                >
-                  {billingAddress ? (
-                    billingAddress
-                  ) : (
-                    <span className="muted-empty">
-                      {t("customer_view.overview.billing_address_missing")}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="detail-field-row">
-                <div className="detail-field-label">
-                  {t("customer_view.overview.field_language")}
-                </div>
-                <div className="detail-field-value">{languageLabel}</div>
-              </div>
-              <div className="detail-field-row">
-                <div className="detail-field-label">
-                  {t("customer_view.overview.field_status")}
-                </div>
-                <div className="detail-field-value">
-                  {isActive ? (
-                    <span className="cell-tag cell-tag-open">
-                      <i />
-                      {t("customer_view.overview.status_active")}
-                    </span>
-                  ) : (
-                    <span className="cell-tag cell-tag-closed">
-                      <i />
-                      {t("customer_view.overview.status_inactive")}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            <div
-              className="card"
-              data-testid="customer-overview-buildings-preview"
-            >
-              <div className="section-head">
-                <div className="section-head-title">
-                  {t("customer_view.overview.buildings_preview_title")}
-                </div>
-                {/* Sprint 153 §4.3 — the view-all link is ALWAYS offered
-                    now, not only past five rows. */}
-                {buildingsCount > 0 && (
-                  <Link
-                    to={`/admin/customers/${customer.id}/buildings`}
-                    className="btn btn-ghost btn-sm"
-                    data-testid="customer-overview-buildings-view-all"
-                  >
-                    {t("customer_view.overview.buildings_preview_view_all", {
-                      count: buildingsCount,
-                    })}
-                  </Link>
-                )}
-              </div>
-              <div style={{ padding: "14px 18px 18px" }}>
-                {/* BoundedList replaces the hand-rolled `.slice(0, 5)`.
-                    Same rule (CLAUDE.md §8 — no unbounded server-
-                    collection list), but the app-wide primitive, so the
-                    scroll cap and the overflow count come for free. */}
-                <BoundedList
-                  size="sm"
-                  count={buildingsCount}
-                  ariaLabel={t("customer_view.overview.buildings_list_label")}
-                  testIdPrefix="customer-overview-buildings"
-                  emptyState={
-                    <p className="muted small">
-                      {t("customer_view.overview.buildings_preview_empty")}
-                    </p>
-                  }
-                >
-                  {/* Sprint 155 §2 — the card used to show a name and a
-                      city and stop, so its right-hand half was visibly
-                      empty next to About. It now carries the full
-                      address line, what is at that building, and an
-                      inactive marker — every field annotated on the row
-                      the card already fetched, so filling it costs no
-                      extra request (`test_sprint155_linked_buildings`
-                      pins that with assertNumQueries).
-
-                      The row is a LINK to the building. The prompt said
-                      Sprint 154 had already made it one; it had not —
-                      154 §G.3 added the click-through on the customer's
-                      Buildings SUB-PAGE, and this preview card was
-                      still plain divs. Adding it here rather than
-                      "keeping" it. */}
-                  <div className="bld-list">
-                    {linkedBuildings.map((link) => (
-                      <Link
-                        key={link.id}
-                        to={`/admin/buildings/${link.building_id}`}
-                        className="linked-building-row"
-                        data-testid={`customer-overview-building-${link.building_id}`}
-                      >
-                        <LinkedBuildingIdentity link={link} />
-                        <LinkedBuildingCounts link={link} />
-                      </Link>
-                    ))}
-                  </div>
-                </BoundedList>
-              </div>
+              </BoundedList>
             </div>
           </div>
-
-          <ConfirmDialog
-            ref={reactivateDialogRef}
-            title={t("customer_form.dialog_reactivate_title", {
-              name: customerName,
-            })}
-            body={t("customer_form.dialog_reactivate_body")}
-            confirmLabel={t("admin_form.reactivate")}
-            onConfirm={handleConfirmReactivate}
-            busy={actionBusy}
-          />
         </>
-      ) : null}
-    </div>
-  );
-}
+      )}
 
-/**
- * One number on the operational dashboard row. When `value` is null the
- * module is not readable by this operator: render an em dash and do NOT
- * link, because there is no page behind it for them.
- */
-function DashboardMetric({
-  label,
-  value,
-  meta,
-  to,
-  testId,
-}: {
-  label: string;
-  value: number | string | null;
-  meta: string;
-  to: string;
-  testId: string;
-}) {
-  const body = (
-    <>
-      <span className="summary-stat-label">{label}</span>
-      <span className="summary-stat-value">{value ?? "—"}</span>
-      <span className="summary-stat-meta">{meta}</span>
-    </>
-  );
-  if (value === null) {
-    return (
-      <div className="summary-stat" data-testid={testId}>
-        {body}
-      </div>
-    );
-  }
-  return (
-    <Link to={to} className="summary-stat" data-testid={testId}>
-      {body}
-    </Link>
+      {/* Rendered unconditionally, driven through its ref — CLAUDE.md §3. */}
+      <ConfirmDialog
+        ref={reactivateDialogRef}
+        title={t("customer_form.dialog_reactivate_title", {
+          name: customerName,
+        })}
+        body={t("customer_form.dialog_reactivate_body")}
+        confirmLabel={t("admin_form.reactivate")}
+        onConfirm={handleConfirmReactivate}
+        busy={actionBusy}
+      />
+    </div>
   );
 }
 
