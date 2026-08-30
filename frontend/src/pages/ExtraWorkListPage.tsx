@@ -1283,7 +1283,7 @@ export function ExtraWorkList({
               stay quiet if the chips do not add up to it. */}
           {!loading && !error && (
             <p
-              className="muted small ew-list-loaded-count"
+              className="muted small"
               data-testid="extra-work-list-loaded-count"
               data-count={rows.length}
             >

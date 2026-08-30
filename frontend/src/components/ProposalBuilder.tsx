@@ -1386,7 +1386,7 @@ export function ProposalBuilder({
           )}
           body={
             <div data-testid="extra-work-proposal-send-dialog">
-              <ul className="ew-send-dialog-lines" style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+              <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
                 {proposal.lines.map((line) => (
                   <li key={line.id} data-testid="extra-work-proposal-send-dialog-line">
                     {(line.service_name || line.description || "").trim() || `#${line.id}`}

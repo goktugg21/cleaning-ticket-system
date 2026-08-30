@@ -993,7 +993,7 @@ export function PlanWorkDialog({
                 {/* P-8R A5 — label truth: the pricing gate needs hours
                     above 0, satisfied by the per-person hours below OR
                     the budget under them. Say so once, honestly. */}
-                <p className="muted small ew-plan-hours-caption" data-testid="extra-work-plan-hours-caption">
+                <p className="muted small" data-testid="extra-work-plan-hours-caption">
                   {t("plan.hours_required_caption")}
                 </p>
                 {fieldError("hours") && (
