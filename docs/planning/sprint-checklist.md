@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p4-joy` — stacked on `feat/p3-schedule-contracts`,
+**Branch:** `feat/p5-closer` — stacked on `feat/p4-joy`,
 the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,53 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-5: the closer (Addendum D §D.17, 2026-08-30)
+
+The owner's live walkthrough of P-4, closed. Shipped on `feat/p5-closer`:
+
+- **S0 — the workflow bug.** "Send it to the customer" was refused
+  under `actual_hours_required` (an hourly meerwerk line with no
+  actual hours) and the screen said only "not accepted". The
+  requirements endpoint now reports `actual_hours`, the modal says so
+  and points at the Money tab (the missing-piece pointer), the page
+  maps every refusal code to its own sentence
+  (`lib/transitionRefusal.ts`), the requirements refusal names each
+  missing thing in words and lists `unmet`; the photo requirement is a
+  calm notice. `tickets/tests/test_p5_transition_refusals.py`.
+- **S1 — one plan, one date.** `job_start_day` / `job_end_day` on the
+  detail; the meerwerk plan pushes first AND last day; a ticket start
+  mirrors onto the meerwerk; the transition modal asks a day + optional
+  clock; the schedule card tells one story; meerwerk surfaces never say
+  "ticket" (i18next context); the execution header no longer repeats
+  the title. `tickets/tests/test_p5_one_plan_one_date.py`.
+- **S2 — plan modal.** Every person row has its X; managers plan hours
+  again; hours commit on blur/Enter with a "counted" flash; the pricing
+  gate's missing pieces open the plan modal ON the piece.
+- **S3 — drawer + chips.** The waiting chip sits on its row; "Approve
+  on customer's behalf" is a button; the replay rule in CLAUDE.md.
+- **S4 — session notes.** An honest 404 page; the disabled "Add hours"
+  says why; unset date filters read as unset and the receipt line is
+  muted; the overview's dash count is a word; §D.6 rules 13–15.
+- **S6 (partial).** My Schedule helper texts are one calm line each;
+  the audit log's fields wear human names; the contact role label is
+  dropped from read-only lines; the "more work" literal was not found
+  in either bundle (reported).
+- **S7 — the connections layer.** Contract ↔ building ↔ split ↔
+  invoice trail ↔ occurrence ticket, as links with context
+  (`contracts/tests/test_p5_connections.py`).
+- **S8 — SLA warnings, the owner's additions.** Recipients, a third
+  step, weekend handling, a weekly list; migrations `sla/0002` +
+  `notifications/0021` (`sla/tests/test_p5_sla_choices.py`).
+- **S9.** The plantruth tests run on a frozen Wednesday; the plan-gate
+  past-day tests widen their window; `rescheduled_from_day`; the
+  create page says "not chosen" instead of a dash.
+- **Not done, and why:** S5 (the invoices pages' full treatment), S6.1
+  (recurring work pages), S6.6 (the queued-1 admin pages) and S10 (the
+  approved trio: global search, top-5 attention, stale-work triage)
+  stay QUEUED — P-6 first; the sprint already carried S0–S4 and S7–S9
+  with a migration, and half-shipping a page set or the trio would
+  have put them in the owner's next walk twice.
 
 ### Done — P-4: the joy pass, system-wide (Addendum D §D.16, 2026-08-30)
 

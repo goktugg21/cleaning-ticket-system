@@ -209,6 +209,14 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   (read-only), not only fixtures; every sprint report includes what the
   ugly data showed.** FE-4's "Planned" fix passed on clean fixtures and
   failed on crmtest's June tickets (P-1).
+- **Replays create their OWN fixtures and list every data mutation at
+  the TOP of the report.** A replay never approves, closes, plans or
+  reschedules a real waiting record on crmtest to prove a path — P-4's
+  replay approved one of the owner's three waiting tickets and the
+  chip he was watching went 3 → 1 under him. Create the meerwerk /
+  ticket / people the replay needs, walk them, and open the report
+  with the list of ids touched (created, mutated, deleted), so the
+  owner can tell his data from the sprint's. (P-5, 2026-08-30.)
 - Detail pages: fact block first, ONE primary action from
   `actions.can_*`, corrections behind "Geavanceerd" with their existing
   warning/audit surfaces. No new frontend business inference — if a

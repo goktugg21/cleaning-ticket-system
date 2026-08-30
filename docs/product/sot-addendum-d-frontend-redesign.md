@@ -324,6 +324,18 @@ this list before it is called done.
     a wall of technical values; the screen tells the reader where they
     stand and what happens next. Admin surfaces do NOT become multi-step
     wizards — efficiency stays. (Owner, 2026-08-29.)
+13. **Empty columns do not render.** A table column, tile or row whose
+    every value would be empty on this page is absent, not a column of
+    dashes or blanks; an empty state is said once, in a sentence, never
+    twice on one screen. (P-5 S4, 2026-08-30.)
+14. **A disabled control says why.** Next to, under or on (`title`)
+    every disabled button, one sentence names the condition — "this
+    week is closed", "no hour types are set up yet" — so the reader
+    knows what to change instead of what to press. (P-5 S4.)
+15. **Placeholders never look like values.** A date, amount or text
+    field that is not set reads as unset (faint, or a word), never as a
+    grey value the reader could mistake for a filled-in one; the
+    filled-in state is visibly different. (P-5 S4.)
 
 ---
 
@@ -995,3 +1007,63 @@ this. The rulings below are permanent and win over any older text.
     recommends nearer Invoices); whether `ConfirmDialog`'s disabled
     destructive styling stays; what the hour-type multiplier drives
     (pay, price, both); the settings page's three independent saves.
+
+## D.17 The closer — the P-5 rulings (2026-08-30)
+
+The owner's live walkthrough of P-4 on crmtest, and web-Claude's
+session notes, closed by P-5 (`feat/p5-closer`). Decisions recorded:
+
+1. **The error-body law.** A server refusal ALWAYS names its reason in
+   the body — a `detail` sentence, or a per-field message — and the
+   screen shows THAT in its own words (`lib/transitionRefusal.ts`, one
+   i18n sentence per stable code). The generic "That was not accepted"
+   is for a truly detail-less 5xx or a network failure and nothing
+   else. The requirements refusal lists its `unmet` keys; the
+   requirements endpoint reports `actual_hours` so the modal points at
+   the Money tab before the press (`tickets/tests/
+   test_p5_transition_refusals.py`). A requirement is a calm notice,
+   never a red alert.
+2. **One plan, one date, one world.** The ticket's window and the
+   meerwerk's committed window are ONE fact seen from two ends:
+   `job_start_day` / `job_end_day` on the detail (own plan, else the
+   meerwerk plan); a plan written on the meerwerk pushes first AND last
+   day onto the ticket; a start set on the ticket mirrors onto the
+   meerwerk (`tickets/schedule.py::mirror_window_onto_extra_work`).
+   The transition modal asks for a DAY with an optional clock, never
+   the moment of the press. The schedule card tells one story; the
+   "committed" row renders only when this job holds a different date
+   of its own, and says so. Meerwerk surfaces never say "ticket":
+   i18next `context: "meerwerk"` variants, the TCK number behind
+   Geavanceerd.
+3. **The missing-piece pointer** (`lib/missingPiece.ts`): a sentence
+   that says "X is missing" carries a door that lands ON X — the tab or
+   modal opens, the part scrolls into view and lights up, and it says
+   what it needs. Used by the hours gate (Money tab), the pricing gate
+   (each missing piece opens the plan modal on that piece) and the
+   "open the split" link (building detail `?piece=cost-share`).
+4. **The connections layer** (S7): every detail page names the records
+   it feeds and is fed by, as links with one line of context —
+   contract → buildings with their split, visits, invoice trail;
+   building → contracts covering it, the split says WHERE it acts;
+   occurrence ticket → its recurring job and contract, which visit of
+   the year; invoice → its contract period, each line's meerwerk and
+   building. Additive read-only fields, detail responses only, no new
+   nav, no new models.
+5. **SLA warnings, the owner's additions** (S8): who else receives
+   each warning (rings + an extra address), a third escalation step
+   (off by default), weekend handling (working hours or the clock, per
+   company; warning 3 always counts calendar days), and a weekly
+   Monday list for the admins. The redesign's first migration —
+   `sla/0002` (11 additive columns, defaults = today's behaviour) and
+   `notifications/0021` (a choices-only `AlterField`, no SQL).
+6. **Decisions recorded:** the custom-line unit stays TEXT
+   (dropdown/migration cancelled — owner tested and approved); the
+   deadline hard-block is parked as a possible future company policy;
+   SLA customisation is UN-parked and built as S8 (owner decision
+   2026-08-30); register placement still awaits Ramazan; the contact
+   row's free-text role label ("A") is no longer rendered on read-only
+   lines — the system cannot say what it means, and it stays editable
+   on the Contacts page.
+7. **Verification rule** (CLAUDE.md): replays create their own
+   fixtures and list every data mutation at the top of the report.
+
