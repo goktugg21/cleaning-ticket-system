@@ -546,6 +546,18 @@ def _slot_undated_q() -> Q:
         _SLOT_PENDING_Q
         & Q(scheduled_start_at__isnull=True)
         & ~Exists(dated_sibling)
+        # P-7 S8 — a worker's slot on a parked job is in the parked
+        # list, not the nag (the job-side rule, mirrored).
+        & ~Q(ticket__status=TicketStatus.ON_HOLD)
+    )
+
+
+def _slot_parked_q() -> Q:
+    """P-7 S8 — the slot twin of `_ticket_parked_q`."""
+    return (
+        _SLOT_PENDING_Q
+        & Q(scheduled_start_at__isnull=True)
+        & Q(ticket__status=TicketStatus.ON_HOLD)
     )
 
 
@@ -718,6 +730,21 @@ def _ticket_upcoming_q(week_end: datetime.date) -> Q:
     return Q(**{f"{JOB_START}__gt": week_end}) & _TICKET_STATE_Q[STATE_OPEN]
 
 
+def _ticket_parked_q() -> Q:
+    """P-7 S8 — parked (ON_HOLD through triage) and without a day.
+
+    The owner's ruling: parked work leaves the "Not planned yet" nag.
+    It is still pending and still undated, so it is its own quiet list
+    ("Geparkeerd (N)") behind the same drawer, with the reason it was
+    parked for. A parked job WITH a day keeps its place on the board
+    (the P-3 matrix's rolled / planned rows for ON_HOLD stand)."""
+    return (
+        _TICKET_PENDING_Q
+        & Q(**{f"{JOB_START}__isnull": True})
+        & Q(status=TicketStatus.ON_HOLD)
+    )
+
+
 def _ticket_undated_q() -> Q:
     """Nobody has said when this job happens.
 
@@ -728,7 +755,13 @@ def _ticket_undated_q() -> Q:
     slot time. The manager's board answers "when does this job happen",
     and it happens on Tuesday.
     """
-    return _TICKET_PENDING_Q & Q(**{f"{JOB_START}__isnull": True})
+    # P-7 S8 — parked work is not "not planned yet": it was decided
+    # about, with a reason. It has its own list (`_ticket_parked_q`).
+    return (
+        _TICKET_PENDING_Q
+        & Q(**{f"{JOB_START}__isnull": True})
+        & ~Q(status=TicketStatus.ON_HOLD)
+    )
 
 
 # ---------------------------------------------------------------------
@@ -915,6 +948,32 @@ def _clock(value) -> str | None:
         return None
     return local.strftime("%H:%M")
 
+
+
+def _stamp_parked_reasons(entries) -> None:
+    """P-7 S8 — the reason a job was parked: the note on its latest
+    history row INTO ON_HOLD (the triage dialog's one reason, written
+    by `apply_transition` on that leg). One query for the whole list,
+    never one per row; the list is bounded by UNDATED_LIMIT."""
+    from .models import TicketStatusHistory
+
+    ticket_ids = [
+        e["ticket_id"] for e in entries if e.get("ticket_id") is not None
+    ]
+    if not ticket_ids:
+        return
+    reasons = {}
+    rows = (
+        TicketStatusHistory.objects.filter(
+            ticket_id__in=ticket_ids, new_status=TicketStatus.ON_HOLD
+        )
+        .order_by("ticket_id", "-created_at", "-id")
+        .values_list("ticket_id", "note")
+    )
+    for ticket_id, note in rows:
+        reasons.setdefault(ticket_id, (note or "").strip() or None)
+    for entry in entries:
+        entry["parked_reason"] = reasons.get(entry.get("ticket_id"))
 
 
 def _stamp_override_authority(entries, user) -> None:
@@ -1535,6 +1594,9 @@ def _entry_from_extra_work(
         "assignment_note": None,
         "completion_note": None,
         "unable_to_complete_reason": None,
+        # P-7 S8 — why it was parked (the ON_HOLD leg's history note);
+        # filled by `_stamp_parked_reasons` on the parked list only.
+        "parked_reason": None,
         "day": _iso(day),
         "placement": placement,
         "rolled_from": _iso(rolled_from),
@@ -1628,6 +1690,9 @@ def _entry_from_ticket(
         "assignment_note": None,
         "completion_note": None,
         "unable_to_complete_reason": None,
+        # P-7 S8 — why it was parked (the ON_HOLD leg's history note);
+        # filled by `_stamp_parked_reasons` on the parked list only.
+        "parked_reason": None,
         "day": _iso(day),
         "placement": placement,
         "rolled_from": _iso(rolled_from),
@@ -1890,6 +1955,7 @@ class WorkPlanView(APIView):
             overdue_q = _ticket_overdue_q(today)
             upcoming_q = _ticket_upcoming_q(week_end)
             undated_q = _ticket_undated_q()
+            parked_q = _ticket_parked_q()
         else:
             # `team=False` always, and it can be nothing else: the team
             # widening now belongs to `_ticket_source`. The parameter
@@ -1901,6 +1967,7 @@ class WorkPlanView(APIView):
             overdue_q = _slot_overdue_q(today)
             upcoming_q = _slot_upcoming_q(week_end)
             undated_q = _slot_undated_q()
+            parked_q = _slot_parked_q()
         extra_work = _extra_work_source(user, team)
 
         entries, truncated = self._week_entries(
@@ -1953,6 +2020,23 @@ class WorkPlanView(APIView):
             viewer=user,
             fallback_placement=PLACEMENT_PLANNED,
         )
+
+        # P-7 S8 — the parked list: undated work somebody decided to park,
+        # with its reason. Out of the nag, behind the same drawer. A
+        # meerwerk has no parked state (§D.18 item 6), so no extra-work
+        # half.
+        parked_entries, parked_truncated = self._flat_entries(
+            jobs.filter(parked_q),
+            extra_work.none(),
+            week_start,
+            week_end,
+            today,
+            limit=UNDATED_LIMIT,
+            team=team,
+            viewer=user,
+            fallback_placement=PLACEMENT_PLANNED,
+        )
+        _stamp_parked_reasons(parked_entries)
 
         # W-LATE §1a — the late strip's rows, one per job, and its total.
         late_entries, late_truncated, late_total = self._late_entries(
@@ -2033,6 +2117,8 @@ class WorkPlanView(APIView):
                 "upcoming_entries": upcoming_entries,
                 # Sprint 181 §8 — the undated lane's rows.
                 "undated_entries": undated_entries,
+                # P-7 S8 — the parked sub-view's rows, with reasons.
+                "parked_entries": parked_entries,
                 # W-LATE §1a — the late strip's rows.
                 "late_entries": late_entries,
                 # WP-1 G1 — the follow-up list's rows.
@@ -2044,6 +2130,7 @@ class WorkPlanView(APIView):
                     "overdue_entries": OVERDUE_LIMIT,
                     "upcoming_entries": UPCOMING_LIMIT,
                     "undated_entries": UNDATED_LIMIT,
+                    "parked_entries": UNDATED_LIMIT,
                     "late_entries": LATE_LIMIT,
                     "stuck_entries": STUCK_LIMIT,
                     "waiting_customer_entries": WAITING_LIMIT,
@@ -2053,6 +2140,7 @@ class WorkPlanView(APIView):
                     "overdue_entries": overdue_truncated,
                     "upcoming_entries": upcoming_truncated,
                     "undated_entries": undated_truncated,
+                    "parked_entries": parked_truncated,
                     "late_entries": late_truncated,
                     "stuck_entries": stuck_truncated,
                     "waiting_customer_entries": waiting_truncated,
@@ -2709,6 +2797,7 @@ class WorkPlanView(APIView):
             overdue_q = _ticket_overdue_q(today)
             upcoming_q = _ticket_upcoming_q(week_end)
             undated_q = _ticket_undated_q()
+            parked_q = _ticket_parked_q()
             waiting_q = _ticket_waiting_customer_q()
         else:
             board_q = _slot_board_q(week_start, week_end, today)
@@ -2716,6 +2805,7 @@ class WorkPlanView(APIView):
             overdue_q = _slot_overdue_q(today)
             upcoming_q = _slot_upcoming_q(week_end)
             undated_q = _slot_undated_q()
+            parked_q = _slot_parked_q()
             waiting_q = _slot_waiting_customer_q()
 
         # W-PLANTRUTH §1b — the chips describe THE BOARD: what the seven
@@ -2750,6 +2840,8 @@ class WorkPlanView(APIView):
             overdue_all=Count("id", filter=overdue_q),
             upcoming=Count("id", filter=upcoming_q),
             undated=Count("id", filter=undated_q),
+            # P-7 S8 — the parked sub-view's number, whole scope.
+            parked=Count("id", filter=parked_q),
             # P-3 §A.1 — the "Wacht op klant" chip's number, whole scope.
             waiting_customer=Count("id", filter=waiting_q),
         )

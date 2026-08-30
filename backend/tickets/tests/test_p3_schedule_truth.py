@@ -62,6 +62,7 @@ class _P3Fixture(WorkPlanFixture):
         for bucket in (
             "entries",
             "undated_entries",
+            "parked_entries",
             "overdue_entries",
             "upcoming_entries",
             "late_entries",
@@ -352,6 +353,8 @@ class ReconciliationTests(_P3Fixture, APITestCase):
             ("overdue_all", "overdue_entries"),
             ("upcoming", "upcoming_entries"),
             ("undated", "undated_entries"),
+            # P-7 S8 — parked work has its own list and number.
+            ("parked", "parked_entries"),
             ("late", "late_entries"),
             ("stuck", "stuck_entries"),
             ("waiting_customer", "waiting_customer_entries"),
@@ -374,7 +377,7 @@ class ReconciliationTests(_P3Fixture, APITestCase):
                 self.assertEqual(e["day"], payload["today"], e["key"])
         # Nothing is in two places at once.
         on_board = {e["key"] for e in entries}
-        for list_key in ("undated_entries", "waiting_customer_entries"):
+        for list_key in ("undated_entries", "parked_entries", "waiting_customer_entries"):
             self.assertEqual(
                 on_board & {e["key"] for e in payload[list_key]}, set(), list_key
             )
@@ -425,7 +428,10 @@ class FullMatrixTests(_P3Fixture, APITestCase):
         TicketStatus.OPEN: ("rolled", "planned_fri", "undated"),
         TicketStatus.ACKNOWLEDGED: ("rolled", "planned_fri", "undated"),
         TicketStatus.IN_PROGRESS: ("rolled", "planned_fri", "undated"),
-        TicketStatus.ON_HOLD: ("rolled", "planned_fri", "undated"),
+        # P-7 S8 (owner ruling) — parked work leaves the "Not planned
+        # yet" nag: undated ON_HOLD is in the parked list, with its
+        # reason; a parked job WITH a day keeps its board placement.
+        TicketStatus.ON_HOLD: ("rolled", "planned_fri", "parked"),
         TicketStatus.REOPENED_BY_ADMIN: ("rolled", "planned_fri", "undated"),
         TicketStatus.WAITING_MANAGER_REVIEW: ("review", "review", "review"),
         TicketStatus.WAITING_CUSTOMER_APPROVAL: ("waiting", "waiting", "waiting"),
@@ -452,6 +458,9 @@ class FullMatrixTests(_P3Fixture, APITestCase):
             self.assertFalse(card["viewer_settled"], key)
         elif shape == "undated":
             self.assertEqual(bucket, "undated_entries", key)
+        elif shape == "parked":
+            self.assertEqual(bucket, "parked_entries", key)
+            self.assertEqual(card["ticket_status"], TicketStatus.ON_HOLD, key)
         elif shape == "review":
             self.assertEqual((bucket, card["placement"]), ("entries", PLACEMENT_REVIEW), key)
             self.assertEqual(card["day"], self.wed.isoformat(), key)
