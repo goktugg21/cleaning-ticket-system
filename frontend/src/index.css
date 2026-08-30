@@ -16358,59 +16358,6 @@ form.card + .form-fold { margin-top: 16px; }
   color: var(--text-faint);
 }
 
-/* P-7 S1.3 — the fill row is a TOOL: its own tint and left edge, an icon
-   before the verb, the caption on one line. Nothing about it looks like
-   a person's row. */
-.hours-week-apply-row th {
-  background: var(--accent-soft, #eff6ff);
-  border-left: 3px solid var(--accent, #2563eb);
-}
-.hours-week-apply-row th + th {
-  border-left: 0;
-}
-.hours-week-apply-label {
-  color: var(--accent, #2563eb);
-}
-.hours-week-apply-icon {
-  vertical-align: -2px;
-  margin-right: 6px;
-}
-.hours-week-apply-row .hours-week-grid-cell {
-  border-style: dashed;
-  background: var(--surface);
-}
-.hours-week-apply-hint {
-  color: var(--text-muted);
-  max-width: 60ch;
-}
-
-/* P-7 S1.4 — one person, several parts: a part starts with a thin line
-   (a new person keeps the full one), and says what it is under the name
-   or in its place. The part and the saved job tag wrap instead of
-   clipping (S9). */
-.hours-week-part-first td {
-  border-top: 1px dashed var(--border-soft);
-}
-.hours-week-part {
-  display: block;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--text-muted);
-  white-space: normal;
-  max-width: 26ch;
-  line-height: 1.35;
-}
-.hours-week-part-general {
-  font-style: italic;
-}
-.hours-week-job-saved {
-  display: inline-block;
-  max-width: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: 1.3;
-}
-
 /* P-7 S3.1 — the on-behalf decision's dialog wears the same amber as
    its button: a band on top, the title in amber. */
 .reject-modal--warning {
@@ -16715,4 +16662,144 @@ form.card + .form-fold { margin-top: 16px; }
 .ticket-ew-billing-sentence {
   margin: 4px 0 8px;
   max-width: 70ch;
+}
+
+/* ------------------------------------------------------------------
+   P-8R C — the Enter-hours modal, back on the pre-P-7 base.
+
+   The fill tool is a normal TOOLBAR ROW above the grid (it was a row
+   inside the table's head whose three-column sticky first cell slid
+   over the day inputs whenever the table scrolled sideways). A
+   job-linked row that is not the person's own pair row is a CHILD
+   under the person's standard rows: indented, a thin dashed edge, and
+   "on <job>" with the job in the same muted tag the base drew on a
+   saved job block. Inside the modal the table lays out FIXED at the
+   dialog's own width — seven day columns, a total, the remove column
+   and the hour type at set widths, the worker and building columns
+   sharing what is left and wrapping — so the modal holds a full week
+   with no sideways scroll; elsewhere (My hours) the table lays itself
+   out as before and `.hours-week-table-wrap` keeps its fallback scroll.
+   ------------------------------------------------------------------ */
+.hours-week-fill-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.hours-week-fill-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.hours-week-fill-days {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.hours-week-fill-day {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.hours-week-fill-day-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.hours-week-fill-day.hours-week-day-quiet .hours-week-fill-day-label {
+  color: var(--text-faint);
+}
+
+.hours-week-child-first td {
+  border-top: 1px dashed var(--border-soft);
+}
+.hours-week-grid-table tbody td.hours-week-child-cell:first-child {
+  padding-left: calc(var(--cell-x-edge) + 14px);
+}
+.hours-week-child {
+  display: block;
+  margin-top: 2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1.4;
+  white-space: normal;
+}
+.hours-week-job-saved {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+  vertical-align: top;
+}
+
+.week-entry-modal .hours-week-grid-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 0;
+}
+.week-entry-modal .hours-week-grid-table th,
+.week-entry-modal .hours-week-grid-table td {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.week-entry-modal .hours-week-grid-table th:first-child,
+.week-entry-modal .hours-week-grid-table td:first-child {
+  padding-left: var(--cell-x-edge);
+}
+.week-entry-modal .hours-week-grid-table thead th {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.week-entry-modal .hours-week-col-worker,
+.week-entry-modal .hours-week-col-building,
+.week-entry-modal .hours-week-col-job {
+  /* The label columns share whatever the fixed columns leave. */
+  width: auto;
+}
+.week-entry-modal .hours-week-col-type {
+  width: 120px;
+}
+.week-entry-modal .hours-week-col-day {
+  /* 54px box + 6px padding each side, plus room for the widest
+     uppercase day header ("WO 02-09") on one line. */
+  width: 74px;
+}
+.week-entry-modal .hours-week-col-total {
+  width: 72px;
+}
+.week-entry-modal .hours-week-col-remove {
+  width: 110px;
+}
+.week-entry-modal .hours-week-identity {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.week-entry-modal .hours-week-grid-table .btn-sm {
+  height: auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  white-space: normal;
+  line-height: 1.2;
+  text-align: center;
+}
+/* The row's "+ link a job" link sits under the name; when the label
+   column makes it wrap, it wraps as text from the left, not centred. */
+.week-entry-modal .hours-week-identity .btn-sm {
+  justify-content: flex-start;
+  text-align: left;
+  min-height: 0;
 }

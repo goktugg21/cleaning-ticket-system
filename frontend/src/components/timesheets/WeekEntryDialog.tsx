@@ -540,8 +540,11 @@ export function WeekEntryDialog({
           // Sprint 167 §1 — sized to its CONTENT. No height floor: empty
           // it is three pickers and a hint; it grows as rows appear; at
           // 85vh the GRID scrolls inside it.
-          width: "min(96vw, 1180px)",
-          maxWidth: 1180,
+          // P-8R C — 1240 wide: room for the label columns beside seven
+          // fixed day columns, so the grid never scrolls sideways at
+          // the dialog's own width (`.week-entry-modal .hours-week-col-*`).
+          width: "min(96vw, 1240px)",
+          maxWidth: 1240,
           padding: 24,
           maxHeight: "85vh",
           display: "flex",
@@ -728,6 +731,11 @@ export function WeekEntryDialog({
           sourceOptions={jobTitleOptions}
           showSource
           jobPicker={jobPicker}
+          /* P-8R C — the one count line explains itself ("2 people × 2
+             buildings = 4 standard rows (+2 job rows)") once the wall
+             has been read; before that the pair rows do not exist yet
+             and the grid prints its plain count. */
+          setupBuildingCount={assignmentsReady ? buildingIds.length : undefined}
           weekClosed={weekClosed}
           onSaved={onSaved}
           onCancel={requestClose}
