@@ -3855,6 +3855,14 @@ still listed as open, and all of them had shipped.
 
 ### Decisions the owner owes — no build until he answers
 
+- **Should parked (ON_HOLD) work leave the "Not planned yet" lane?**
+  P-6's triage parks junk through the machine's own legs, but the P-3
+  schedule matrix (§D.15) keeps ON_HOLD in the undated lane, so a parked
+  row stays listed with a "Parked" tag. Moving it out is one query
+  change plus a matrix row — reversible, but it overrules P-3.
+- **"bezoek" or "geplande beurt"** for a recurring visit (§D.18 item 3).
+  The code says *bezoek* everywhere; a bundle-only change either way.
+
 - **Who may set a deadline on an extra work** — provider only, or the
   customer too? The editing surfaces exist; the policy does not.
 - **Whether a SUPER_ADMIN should stay visible when the Users list is

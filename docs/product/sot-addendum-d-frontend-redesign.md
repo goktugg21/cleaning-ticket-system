@@ -1136,7 +1136,11 @@ those pages (`feat/p6-visible`). Rulings recorded:
    to that role only (rule 14). A meerwerk has no parked state: park
    skips it and says so; close cancels it through its own transition
    with the same reason. Per-item results, never an aborted batch
-   (`tickets/tests/test_p6_bulk_triage.py`).
+   (`tickets/tests/test_p6_bulk_triage.py`). A parked ticket STAYS in
+   the "Not planned yet" lane — the §D.15 schedule-truth matrix places
+   ON_HOLD there on purpose (`test_p3_schedule_truth.py`) — and the
+   row now says "Parked"; whether parked work should leave the lane is
+   a decision the owner holds (checklist NEXT).
 7. **Money leaves the API with two decimals** (V5.3): `period_amount`
    (`buildings/serializers.py`) is quantised to cents before it
    becomes text; the contract serializer's `monthly_amount` /
