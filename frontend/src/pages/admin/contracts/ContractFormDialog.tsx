@@ -5,6 +5,7 @@ import { contractTypeLabel } from "../../../lib/contractTypeLabel";
 
 import { listAllCompanies, listCustomerBuildings } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
+import { readApiErrorDetail } from "../../../lib/apiFieldErrors";
 import {
   createContract,
   getContractOptions,
@@ -95,6 +96,28 @@ function initialState(contract?: Contract | null): FormState {
  * one between tenants is not an edit, it is a different operation
  * nobody has asked for.
  */
+const FIELD_ORDER = [
+  "customer",
+  "contract_type",
+  "building_ids",
+  "start_date",
+  "end_date",
+  "lifecycle",
+  "billing_period",
+  "billing_day",
+  "billing_type",
+  "payment_terms_days",
+];
+
+function scrollToFirstField(errors: Record<string, string>): void {
+  const first = FIELD_ORDER.find((key) => errors[key]);
+  if (!first) return;
+  const el = document.querySelector<HTMLElement>(
+    `[data-testid="contract-form-dialog"] [data-contract-field="${first}"]`,
+  );
+  el?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 export function ContractFormDialog({
   open,
   contract,
@@ -130,6 +153,8 @@ export function ContractFormDialog({
   > | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /* P-4 (Part F) — one sentence per field, the first scrolled into view. */
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesResolved, setCompaniesResolved] = useState(false);
@@ -270,13 +295,28 @@ export function ContractFormDialog({
     setOptions(null);
   };
 
+  const bind = (key: string) => ({ "data-contract-field": key });
+
   const submit = async () => {
     // The fixed customer is what gets SUBMITTED, not merely what is
     // displayed: a disabled <select> shows a value but `form.customer`
     // was never set by an onChange that cannot fire.
     const customerId = fixedCustomerId ?? form.customer;
-    if (customerId === "" || !form.start_date) {
-      setError(t("errors.customerAndStartRequired"));
+    /* P-4 (Part F) — errors live where the person is: one sentence per
+       field, the first one scrolled into view. */
+    const clientErrors: Record<string, string> = {};
+    if (customerId === "") clientErrors.customer = t("errors.customerRequired");
+    if (!form.start_date) clientErrors.start_date = t("errors.startRequired");
+    if (form.end_date && form.start_date && form.end_date < form.start_date) {
+      clientErrors.end_date = t("errors.endBeforeStart");
+    }
+    if (form.billing_day < 1 || form.billing_day > 28) {
+      clientErrors.billing_day = t("errors.billingDayRange");
+    }
+    setFieldErrors(clientErrors);
+    if (Object.keys(clientErrors).length > 0) {
+      setError("");
+      scrollToFirstField(clientErrors);
       return;
     }
     setBusy(true);
@@ -314,12 +354,37 @@ export function ContractFormDialog({
         onCreated?.(created);
       }
     } catch (err) {
-      setError(getApiError(err));
+      // DRF per-field entries land at their fields; the banner shows
+      // the generic sentence only when the server named no field.
+      const detail = readApiErrorDetail(err);
+      const serverErrors: Record<string, string> = {};
+      for (const name of Object.keys(detail.fields)) {
+        serverErrors[name] = t("errors.fieldRejected");
+      }
+      setFieldErrors(serverErrors);
+      if (Object.keys(serverErrors).length > 0) {
+        setError("");
+        scrollToFirstField(serverErrors);
+      } else {
+        setError(getApiError(err));
+      }
     } finally {
       setBusy(false);
     }
   };
 
+  const fieldError = (key: string) =>
+    fieldErrors[key] ? (
+      <span className="field-error" role="alert" data-testid={`contract-form-error-${key}`}>
+        {fieldErrors[key]}
+      </span>
+    ) : null;
+
+  /* The consequence, in the form's own numbers (the contract list's
+     click-to-teach sentences, said here where the values are chosen). */
+  const billingConsequence = t(`teach.billingType.${form.billing_type}`, { day: form.billing_day });
+  const periodConsequence = t(`teach.billingPeriod.${form.billing_period}`);
+  const termsConsequence = t("form.paymentTermsSentence", { days: form.payment_terms_days });
 
   return (
     <div
@@ -341,7 +406,7 @@ export function ContractFormDialog({
       <div
         className="card"
         style={{
-          maxWidth: 640,
+          maxWidth: 760,
           width: "100%",
           padding: 24,
           maxHeight: "90vh",
@@ -366,6 +431,15 @@ export function ContractFormDialog({
           </div>
         )}
 
+        {/* P-4 (Part F) — FOUR STAGES, one thing at a time. Rules frozen
+            (§D.15): every field, value and endpoint is what it was; only
+            the order, the words at the point of choice and where an
+            error lands changed. */}
+        <div className="form-section" data-testid="contract-form-stage-who">
+          <div className="form-section-title">
+            <span className="ew-plan-step">1</span>
+            {t("form.stage_who")}
+          </div>
         {showCompanySelector && (
           <div className="field">
             <label className="field-label" htmlFor="contract-company">
@@ -394,9 +468,8 @@ export function ContractFormDialog({
             <span className="muted small">{t("form.companyHint")}</span>
           </div>
         )}
-
-        <div className="form-2col">
-          <div className="field">
+          <div className="form-2col">
+          <div className="field" {...bind("customer")}>
             <label className="field-label" htmlFor="contract-customer">
               {t("form.customer")} *
             </label>
@@ -425,9 +498,9 @@ export function ContractFormDialog({
                 </option>
               ))}
             </select>
+          {fieldError("customer")}
           </div>
-
-          <div className="field">
+          <div className="field" {...bind("contract_type")}>
             <label className="field-label" htmlFor="contract-type">
               {t("form.type")}
             </label>
@@ -451,9 +524,58 @@ export function ContractFormDialog({
                 </option>
               ))}
             </select>
+          {fieldError("contract_type")}
           </div>
+          </div>
+        <div className="field" {...bind("building_ids")}>
+          <span className="field-label">{t("form.locations")}</span>
+          {/* Scrollable rather than unbounded: a provider with two
+              hundred buildings would otherwise render two hundred
+              checkboxes into the dialog (CLAUDE.md §8). */}
+          <div className="multi-select-list entity-picker-list">
+            {buildings.map((building) => (
+              <label
+                key={building.id}
+                className="entity-picker-row"
+                htmlFor={`contract-building-${building.id}`}
+              >
+                <input
+                  id={`contract-building-${building.id}`}
+                  type="checkbox"
+                  checked={form.building_ids.includes(building.id)}
+                  disabled={busy}
+                  onChange={() =>
+                    set(
+                      "building_ids",
+                      form.building_ids.includes(building.id)
+                        ? form.building_ids.filter((id) => id !== building.id)
+                        : [...form.building_ids, building.id],
+                    )
+                  }
+                  data-testid={`contract-form-building-${building.id}`}
+                />
+                <span className="entity-picker-text">{building.name}</span>
+              </label>
+            ))}
+            {buildings.length === 0 && (
+              <p className="muted small" style={{ margin: 4 }}>
+                {companyPending || !options
+                  ? t("form.loadingOptions")
+                  : t("form.noBuildings")}
+              </p>
+            )}
+          </div>
+        {fieldError("building_ids")}
+        </div>
+        </div>
 
-          <div className="field">
+        <div className="form-section" data-testid="contract-form-stage-when">
+          <div className="form-section-title">
+            <span className="ew-plan-step">2</span>
+            {t("form.stage_when")}
+          </div>
+          <div className="form-2col">
+          <div className="field" {...bind("start_date")}>
             <label className="field-label" htmlFor="contract-start">
               {t("form.startDate")} *
             </label>
@@ -466,9 +588,9 @@ export function ContractFormDialog({
               onChange={(event) => set("start_date", event.target.value)}
               data-testid="contract-form-start"
             />
+          {fieldError("start_date")}
           </div>
-
-          <div className="field">
+          <div className="field" {...bind("end_date")}>
             <label className="field-label" htmlFor="contract-end">
               {t("form.endDate")}
             </label>
@@ -482,9 +604,9 @@ export function ContractFormDialog({
               data-testid="contract-form-end"
             />
             <span className="muted small">{t("form.endDateHint")}</span>
+          {fieldError("end_date")}
           </div>
-
-          <div className="field">
+          <div className="field" {...bind("lifecycle")}>
             <label className="field-label" htmlFor="contract-lifecycle">
               {t("form.status")}
             </label>
@@ -523,9 +645,18 @@ export function ContractFormDialog({
             {/* EXPIRED is deliberately absent: it follows from the end
                 date and is not a choice. */}
             <span className="muted small">{t("form.statusHint")}</span>
+          {fieldError("lifecycle")}
           </div>
+          </div>
+        </div>
 
-          <div className="field">
+        <div className="form-section" data-testid="contract-form-stage-billing">
+          <div className="form-section-title">
+            <span className="ew-plan-step">3</span>
+            {t("form.stage_billing")}
+          </div>
+          <div className="form-2col">
+          <div className="field" {...bind("billing_period")}>
             <label className="field-label" htmlFor="contract-period">
               {t("form.billingPeriod")}
             </label>
@@ -543,9 +674,9 @@ export function ContractFormDialog({
               <option value="QUARTERLY">{t("billingPeriod.QUARTERLY")}</option>
               <option value="YEARLY">{t("billingPeriod.YEARLY")}</option>
             </select>
+          {fieldError("billing_period")}
           </div>
-
-          <div className="field">
+          <div className="field" {...bind("billing_day")}>
             <label className="field-label" htmlFor="contract-billing-day">
               {t("form.billingDay")}
             </label>
@@ -563,9 +694,9 @@ export function ContractFormDialog({
               data-testid="contract-form-billing-day"
             />
             <span className="muted small">{t("form.billingDayHint")}</span>
+          {fieldError("billing_day")}
           </div>
-
-          <div className="field">
+          <div className="field" {...bind("billing_type")}>
             <label className="field-label" htmlFor="contract-billing-type">
               {t("form.billingType")}
             </label>
@@ -582,9 +713,9 @@ export function ContractFormDialog({
               <option value="ADVANCE">{t("billingType.ADVANCE")}</option>
               <option value="ARREARS">{t("billingType.ARREARS")}</option>
             </select>
+          {fieldError("billing_type")}
           </div>
-
-          <div className="field">
+          <div className="field" {...bind("payment_terms_days")}>
             <label className="field-label" htmlFor="contract-terms">
               {t("form.paymentTerms")}
             </label>
@@ -601,8 +732,8 @@ export function ContractFormDialog({
               }
               data-testid="contract-form-terms"
             />
+          {fieldError("payment_terms_days")}
           </div>
-
           <div className="field">
             <label className="field-label" htmlFor="contract-proration">
               {t("form.proration")}
@@ -623,48 +754,18 @@ export function ContractFormDialog({
               </span>
             </label>
           </div>
-        </div>
-
-        <div className="field">
-          <span className="field-label">{t("form.locations")}</span>
-          {/* Scrollable rather than unbounded: a provider with two
-              hundred buildings would otherwise render two hundred
-              checkboxes into the dialog (CLAUDE.md §8). */}
-          <div className="multi-select-list entity-picker-list">
-            {buildings.map((building) => (
-              <label
-                key={building.id}
-                className="entity-picker-row"
-                htmlFor={`contract-building-${building.id}`}
-              >
-                <input
-                  id={`contract-building-${building.id}`}
-                  type="checkbox"
-                  checked={form.building_ids.includes(building.id)}
-                  disabled={busy}
-                  onChange={() =>
-                    set(
-                      "building_ids",
-                      form.building_ids.includes(building.id)
-                        ? form.building_ids.filter((id) => id !== building.id)
-                        : [...form.building_ids, building.id],
-                    )
-                  }
-                  data-testid={`contract-form-building-${building.id}`}
-                />
-                <span className="entity-picker-text">{building.name}</span>
-              </label>
-            ))}
-            {buildings.length === 0 && (
-              <p className="muted small" style={{ margin: 4 }}>
-                {companyPending || !options
-                  ? t("form.loadingOptions")
-                  : t("form.noBuildings")}
-              </p>
-            )}
           </div>
+          {/* The consequence in this contract's own numbers, ONE line. */}
+          <p className="muted small" data-testid="contract-form-billing-sentence">
+            {periodConsequence} {billingConsequence} {termsConsequence}
+          </p>
         </div>
 
+        <div className="form-section" data-testid="contract-form-stage-notes">
+          <div className="form-section-title">
+            <span className="ew-plan-step">4</span>
+            {t("form.stage_notes")}
+          </div>
         <div className="field">
           <label className="field-label" htmlFor="contract-description">
             {t("form.description")}
@@ -679,7 +780,6 @@ export function ContractFormDialog({
             data-testid="contract-form-description"
           />
         </div>
-
         <div className="field">
           <label className="field-label" htmlFor="contract-notes">
             {t("form.notes")}
@@ -694,8 +794,14 @@ export function ContractFormDialog({
             data-testid="contract-form-notes"
           />
         </div>
+        </div>
 
-        <div className="filter-actions" style={{ justifyContent: "flex-end" }}>
+        <div className="filter-actions" style={{ justifyContent: "flex-end", alignItems: "center" }}>
+          {Object.keys(fieldErrors).length > 0 && (
+            <span className="form-error" role="alert" style={{ marginRight: "auto" }} data-testid="contract-form-summary-error">
+              {t("errors.fixMarked", { count: Object.keys(fieldErrors).length })}
+            </span>
+          )}
           <button
             type="button"
             className="btn btn-secondary btn-sm"

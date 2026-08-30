@@ -45,7 +45,7 @@ import { useTranslation } from "react-i18next";
 
 import { setTicketSchedule, updateStaffSlot } from "../api/admin";
 import type { SlotStatus } from "../api/admin";
-import { getApiError } from "../api/client";
+import { api, getApiError } from "../api/client";
 import { listAllTickets } from "../api/tickets";
 import type { Role, TicketList } from "../api/types";
 import { getWorkPlan, planExtraWorkForDate } from "../api/workPlan";
@@ -318,7 +318,7 @@ function ManagerTicketsAgenda({ embedded = false }: { embedded?: boolean }) {
 // The week. One fetch, one placement rule, one set of counts.
 // ---------------------------------------------------------------------------
 function WorkPlanWeek() {
-  const { t } = useTranslation(["staff_slots", "common", "create_ticket"]);
+  const { t, i18n } = useTranslation(["staff_slots", "common", "create_ticket"]);
   const { me } = useAuth();
   const { push } = useToast();
   const role = me?.role ?? null;
@@ -399,6 +399,13 @@ function WorkPlanWeek() {
   /** P-3 §A.1 — the "Wacht op klant" drawer, the same door pattern as
    *  "Nog niet gepland": closed by default, one chip with the count. */
   const [waitingOpen, setWaitingOpen] = useState(false);
+  /* P-4 (Part E) — the drawer acts. The row whose customer decision is
+     being answered on their behalf, and the EXISTING override flow
+     behind it: a required reason, `is_override`, the audit row —
+     the same POST the ticket detail's Advanced fold sends. Offered
+     only where the server said `can_override_customer_decision`. */
+  const [approveTarget, setApproveTarget] = useState<WorkPlanEntry | null>(null);
+  const [approveBusy, setApproveBusy] = useState(false);
 
   const weekParam = formatIsoWeek(week);
 
@@ -426,6 +433,28 @@ function WorkPlanWeek() {
 
   function reload() {
     setRefreshKey((n) => n + 1);
+  }
+
+  async function approveOnBehalf(entry: WorkPlanEntry, reason: string) {
+    if (entry.ticket_id === null || approveBusy) return;
+    setApproveBusy(true);
+    try {
+      await api.post(`/tickets/${entry.ticket_id}/status/`, {
+        to_status: "APPROVED",
+        is_override: true,
+        override_reason: reason,
+      });
+      setApproveTarget(null);
+      push({
+        title: t("agenda.approve_on_behalf_done", { ticket: entry.ticket_no ?? entry.title }),
+        variant: "success",
+      });
+      reload();
+    } catch (err) {
+      push({ title: getApiError(err), variant: "error" });
+    } finally {
+      setApproveBusy(false);
+    }
   }
 
   /**
@@ -1020,7 +1049,12 @@ function WorkPlanWeek() {
           >
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {waitingJobs.map((entry) => (
-                <WaitingRow key={entry.key} entry={entry} role={role} />
+                <WaitingRow
+                  key={entry.key}
+                  entry={entry}
+                  role={role}
+                  onApprove={entry.can_override_customer_decision ? setApproveTarget : undefined}
+                />
               ))}
             </ul>
           </BoundedList>
@@ -1112,6 +1146,20 @@ function WorkPlanWeek() {
           DONE modal's rows, which is the only place they were ever
           needed. Nothing here scrolls sideways and the grid below keeps
           its own dimensions untouched. */}
+      <RejectReasonDialog
+        open={approveTarget !== null}
+        onCancel={() => setApproveTarget(null)}
+        onConfirm={(reason) => {
+          if (approveTarget) void approveOnBehalf(approveTarget, reason);
+        }}
+        title={t("agenda.approve_on_behalf_title", {
+          ticket: approveTarget?.ticket_no ?? approveTarget?.title ?? "",
+        })}
+        description={t("agenda.approve_on_behalf_desc")}
+        placeholder={t("agenda.approve_on_behalf_placeholder")}
+        confirmLabel={approveBusy ? t("common:admin_form.saving") : t("agenda.approve_on_behalf_confirm")}
+        cancelLabel={t("common:cancel")}
+      />
       {data && (
         <LateStrip
           entries={lateEntries}
@@ -1133,6 +1181,32 @@ function WorkPlanWeek() {
           description={t("agenda.empty_desc")}
           testId="agenda-empty"
         />
+      ) : !data ? (
+        /* P-4 (Part D) — THE FIRST PAINT IS HONEST. Before the week has
+           answered, the board used to draw seven "Nothing planned"
+           columns and em-dash tiles, and the "Waiting for customer"
+           chip appeared only when the answer landed a second later —
+           which the owner read as "missing until a second click"
+           (probed on crmtest: the request is in flight, the board is
+           lying). A loading week says it is loading; nothing claims
+           to be empty until the server said so (§D.6 rule 10). */
+        <div className="agenda-week-scroll">
+          <div className="agenda-week-grid" data-testid="agenda-week-loading">
+            {isoWeekDays(week).map((day) => (
+              <div key={toDateString(day)} className="wp-day wp-day-loading" aria-busy="true">
+                <div className="wp-day-head">
+                  <span className="wp-day-name">
+                    {day.toLocaleDateString(i18n.language, { weekday: "short" })}
+                  </span>
+                  <span className="wp-day-number">{day.getDate()}</span>
+                </div>
+                <div className="wp-day-body">
+                  <div className="wp-day-empty muted small">{t("agenda.loading_week")}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       ) : (
         <div className="agenda-week-scroll" ref={weekScrollRef}>
           <div className="agenda-week-grid" data-testid="agenda-week-grid">
@@ -1405,9 +1479,14 @@ function StuckRow({
 function WaitingRow({
   entry,
   role,
+  onApprove,
 }: {
   entry: WorkPlanEntry;
   role: Role | null;
+  /** P-4 (Part E) — present only for a reader the server says may
+   *  answer on the customer's behalf. One amber button; the existing
+   *  override flow (reason, `is_override`, audit) behind it. */
+  onApprove?: (entry: WorkPlanEntry) => void;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
   const to = detailPath(entry, role);
@@ -1427,8 +1506,20 @@ function WaitingRow({
           </span>
         )}
       </div>
-      <span className="wp-wait" data-waiting="customer">
-        {t("agenda.waiting_customer")}
+      <span className="wp-undated-row-actions">
+        <span className="wp-wait" data-waiting="customer">
+          {t("agenda.waiting_customer")}
+        </span>
+        {onApprove && (
+          <button
+            type="button"
+            className="btn btn-warning btn-sm"
+            onClick={() => onApprove(entry)}
+            data-testid={`agenda-waiting-approve-${entry.key}`}
+          >
+            {t("agenda.approve_on_behalf")}
+          </button>
+        )}
       </span>
     </li>
   );

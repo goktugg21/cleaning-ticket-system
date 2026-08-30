@@ -369,33 +369,77 @@ export function BuildingDetailPage() {
               system has no room concept at all, and showing 0 would claim
               the building has none rather than that the idea does not
               exist here. */}
+          {/* P-4 (Part F) — FACTS FIRST: where, whose, what state. */}
+          <div className="facts" data-testid="building-detail-facts">
+            <div className="ew-ctx-block" data-testid="building-fact-where">
+              <div className="ew-ctx-label">{t("building_detail.fact_where")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">{building.name}</div>
+                {[building.address, [building.postal_code, building.city].filter(Boolean).join(" ")]
+                  .filter(Boolean)
+                  .join(", ") && (
+                  <div className="ew-ctx-sub">
+                    {[building.address, [building.postal_code, building.city].filter(Boolean).join(" ")]
+                      .filter(Boolean)
+                      .join(", ")}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="ew-ctx-block" data-testid="building-fact-company">
+              <div className="ew-ctx-label">{t("building_detail.field_company")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">
+                  <Link to={`/admin/companies/${building.company}`}>{companyLabel}</Link>
+                </div>
+                {building.building_type_name && (
+                  <div className="ew-ctx-sub">{building.building_type_name}</div>
+                )}
+              </div>
+            </div>
+            <div className="ew-ctx-block" data-testid="building-fact-status">
+              <div className="ew-ctx-label">{t("building_detail.field_status")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">
+                  {isActive ? t("building_detail.status_active") : t("building_detail.status_inactive")}
+                </div>
+                {summary && summary.open_ticket_count !== null && summary.open_ticket_count !== undefined && (
+                  <div className="ew-ctx-sub">
+                    {t("building_detail.fact_open_work", {
+                      tickets: summary.open_ticket_count,
+                      extra: summary.open_extra_work_count ?? 0,
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* The counts of the folds below, as links into them. No tile
+              for a value that cannot exist here ("Rooms" is gone: this
+              system has no room concept). */}
           <div
             className="summary-grid summary-grid-chips"
             data-testid="building-detail-stats"
           >
             {[
-              { key: "rooms", label: t("building_detail.stat_rooms"), value: summary?.room_count },
-              { key: "customers", label: t("building_detail.stat_customers"), value: summary?.customer_count },
-              { key: "managers", label: t("building_detail.stat_managers"), value: summary?.manager_count },
-              { key: "staff", label: t("building_detail.stat_staff"), value: summary?.staff_count },
-              { key: "contacts", label: t("building_detail.stat_contacts"), value: summary?.contact_count },
-              { key: "open-tickets", label: t("building_detail.stat_open_tickets"), value: summary?.open_ticket_count },
-              { key: "open-extra-work", label: t("building_detail.stat_open_extra_work"), value: summary?.open_extra_work_count },
-            ].map((stat) => (
-              <div
-                className="summary-stat"
-                key={stat.key}
-                style={{ cursor: "default" }}
-                data-testid={`building-detail-stat-${stat.key}`}
-              >
-                <span className="summary-stat-label">{stat.label}</span>
-                <span className="summary-stat-value">
-                  {stat.value === null || stat.value === undefined
-                    ? "—"
-                    : stat.value}
-                </span>
-              </div>
-            ))}
+              { key: "customers", label: t("building_detail.stat_customers"), value: summary?.customer_count, href: "#building-customers" },
+              { key: "managers", label: t("building_detail.stat_managers"), value: summary?.manager_count, href: "#building-managers" },
+              { key: "staff", label: t("building_detail.stat_staff"), value: summary?.staff_count, href: "#building-staff" },
+              { key: "contacts", label: t("building_detail.stat_contacts"), value: summary?.contact_count, href: "#building-contacts" },
+            ]
+              .filter((stat) => stat.value !== null && stat.value !== undefined)
+              .map((stat) => (
+                <a
+                  className="summary-stat summary-stat-link"
+                  key={stat.key}
+                  href={stat.href}
+                  data-testid={`building-detail-stat-${stat.key}`}
+                >
+                  <span className="summary-stat-label">{stat.label}</span>
+                  <span className="summary-stat-value">{stat.value}</span>
+                </a>
+              ))}
           </div>
 
           <section
@@ -430,18 +474,20 @@ export function BuildingDetailPage() {
               </div>
               <div className="detail-field-value">{building.name}</div>
             </div>
+            {building.address && (
             <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("building_detail.field_address")}
+                <div className="detail-field-label">
+                  {t("building_detail.field_address")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    building.address ? "" : " muted-empty"
+                  }`}
+                >
+                  {building.address || "—"}
+                </div>
               </div>
-              <div
-                className={`detail-field-value${
-                  building.address ? "" : " muted-empty"
-                }`}
-              >
-                {building.address || "—"}
-              </div>
-            </div>
+            )}
             {/* Sprint 188 — the BILLING address, which is a different
                 thing from the row above: that one is the work site, this
                 one is who the invoice is addressed to, and it lives on
@@ -450,14 +496,13 @@ export function BuildingDetailPage() {
                 customer rather than presented as one address for the
                 building. No extra request — `allCustomers` is already
                 loaded on this page for the link picker. */}
+            {billingAddresses.length > 0 && (
             <div className="detail-field-row">
               <div className="detail-field-label">
                 {t("building_detail.field_billing_address")}
               </div>
               <div
-                className={`detail-field-value${
-                  billingAddresses.length > 0 ? "" : " muted-empty"
-                }`}
+                className="detail-field-value"
                 data-testid="building-detail-billing-address"
               >
                 {billingAddresses.length === 0 ? (
@@ -481,58 +526,67 @@ export function BuildingDetailPage() {
                 )}
               </div>
             </div>
+            )}
             {/* Sprint 178 §1 — the building's kind, from this company's
                 own catalog. Renders the em dash when unclassified, the
                 same as every other optional field on this page. */}
+            {building.building_type_name && (
             <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("building_detail.field_building_type")}
+                <div className="detail-field-label">
+                  {t("building_detail.field_building_type")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    building.building_type_name ? "" : " muted-empty"
+                  }`}
+                  data-testid="building-detail-building-type"
+                >
+                  {building.building_type_name || "—"}
+                </div>
               </div>
-              <div
-                className={`detail-field-value${
-                  building.building_type_name ? "" : " muted-empty"
-                }`}
-                data-testid="building-detail-building-type"
-              >
-                {building.building_type_name || "—"}
-              </div>
-            </div>
+            )}
+            {building.city && (
             <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("building_detail.field_city")}
+                <div className="detail-field-label">
+                  {t("building_detail.field_city")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    building.city ? "" : " muted-empty"
+                  }`}
+                >
+                  {building.city || "—"}
+                </div>
               </div>
-              <div
-                className={`detail-field-value${
-                  building.city ? "" : " muted-empty"
-                }`}
-              >
-                {building.city || "—"}
-              </div>
-            </div>
+            )}
+            {building.postal_code && (
             <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("building_detail.field_postal_code")}
+                <div className="detail-field-label">
+                  {t("building_detail.field_postal_code")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    building.postal_code ? "" : " muted-empty"
+                  }`}
+                >
+                  {building.postal_code || "—"}
+                </div>
               </div>
-              <div
-                className={`detail-field-value${
-                  building.postal_code ? "" : " muted-empty"
-                }`}
-              >
-                {building.postal_code || "—"}
-              </div>
-            </div>
+            )}
+            {building.country && (
             <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("building_detail.field_country")}
+                <div className="detail-field-label">
+                  {t("building_detail.field_country")}
+                </div>
+                <div
+                  className={`detail-field-value${
+                    building.country ? "" : " muted-empty"
+                  }`}
+                >
+                  {building.country || "—"}
+                </div>
               </div>
-              <div
-                className={`detail-field-value${
-                  building.country ? "" : " muted-empty"
-                }`}
-              >
-                {building.country || "—"}
-              </div>
-            </div>
+            )}
             <div className="detail-field-row">
               <div className="detail-field-label">
                 {t("building_detail.field_status")}
@@ -571,6 +625,11 @@ export function BuildingDetailPage() {
           {/* Sprint 154 §G.2 — the four sets of linked people, each
               manageable from here. None of these models are new; this is
               the direction that was missing. */}
+          <details className="form-fold" id="building-customers" open data-testid="building-detail-customers-fold">
+            <summary className="form-fold-summary">
+              {t("building_detail.customers_title")}
+              <span className="form-fold-summary-value">{customerLinks.length}</span>
+            </summary>
           <BuildingRelationCard
             buildingId={building.id}
             relation="customers"
@@ -595,7 +654,13 @@ export function BuildingDetailPage() {
             disabled={!canEdit}
             onChanged={() => setRelationsToken((n) => n + 1)}
           />
+          </details>
 
+          <details className="form-fold" id="building-managers"  data-testid="building-detail-managers-fold">
+            <summary className="form-fold-summary">
+              {t("building_detail.managers_title")}
+              <span className="form-fold-summary-value">{members.length}</span>
+            </summary>
           <BuildingRelationCard
             buildingId={building.id}
             relation="managers"
@@ -620,7 +685,13 @@ export function BuildingDetailPage() {
             disabled={!canEdit}
             onChanged={() => setRelationsToken((n) => n + 1)}
           />
+          </details>
 
+          <details className="form-fold" id="building-staff"  data-testid="building-detail-staff-fold">
+            <summary className="form-fold-summary">
+              {t("building_detail.staff_title")}
+              <span className="form-fold-summary-value">{staffLinks.length}</span>
+            </summary>
           <BuildingRelationCard
             buildingId={building.id}
             relation="staff"
@@ -646,7 +717,13 @@ export function BuildingDetailPage() {
             disabled={!canEdit}
             onChanged={() => setRelationsToken((n) => n + 1)}
           />
+          </details>
 
+          <details className="form-fold" id="building-contacts"  data-testid="building-detail-contacts-fold">
+            <summary className="form-fold-summary">
+              {t("building_detail.contacts_title")}
+              <span className="form-fold-summary-value">{contactLinks.length}</span>
+            </summary>
           <BuildingRelationCard
             buildingId={building.id}
             relation="contacts"
@@ -675,6 +752,7 @@ export function BuildingDetailPage() {
             disabled={!canEdit}
             onChanged={() => setRelationsToken((n) => n + 1)}
           />
+          </details>
 
           <ConfirmDialog
             ref={deactivateDialogRef}

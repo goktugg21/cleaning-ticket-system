@@ -78,7 +78,7 @@ import { CartSummaryList } from "../components/meerwerk/CartSummaryList";
 import { MeerwerkOutcome } from "../components/meerwerk/MeerwerkOutcome";
 import { OtherLinesEditor } from "../components/meerwerk/OtherLinesEditor";
 import { PricedServicePicker } from "../components/meerwerk/PricedServicePicker";
-import { formatMoney } from "../lib/intl";
+import { formatDate, formatMoney } from "../lib/intl";
 import { customerLabelName } from "../lib/customerLabelName";
 
 interface ParentFormState {
@@ -203,6 +203,8 @@ export function CreateExtraWorkPage() {
   const [batchResult, setBatchResult] = useState<{
     group: { id: number; standard_title: string };
     created: number;
+    /** P-4 (Part A) — the days that were chosen, named on the result. */
+    days: string[];
   } | null>(null);
   const [result, setResult] = useState<ExtraWorkRequestDetail | null>(null);
 
@@ -676,7 +678,11 @@ export function CreateExtraWorkPage() {
           batchKeyRef.current,
         );
         batchKeyRef.current = crypto.randomUUID();
-        setBatchResult({ group: batch.group, created: batch.created });
+        setBatchResult({
+          group: batch.group,
+          created: batch.created,
+          days: slots.map((slot) => slot.date).sort(),
+        });
       } else {
         setResult(await createExtraWork(payload));
       }
@@ -710,6 +716,14 @@ export function CreateExtraWorkPage() {
             </strong>
           </p>
           <p className="muted">{batchResult.group.standard_title}</p>
+          {/* P-4 (Part A) — the days, named: one meerwerk per chosen day. */}
+          <div className="meerwerk-day-chips" data-testid="extra-work-batch-days">
+            {batchResult.days.map((day) => (
+              <span key={day} className="meerwerk-day-chip">
+                {formatDate(day)}
+              </span>
+            ))}
+          </div>
           <div className="form-actions">
             <Link
               to="/extra-work"
@@ -1235,9 +1249,25 @@ export function CreateExtraWorkPage() {
                     </span>
                   </label>
                   {entryMode === "MULTIPLE" && (
-                    <div style={{ marginTop: 8 }}>
-                      <span className="field-label">{t("series.slot_list")}</span>
+                    <div style={{ marginTop: 8 }} data-testid="extra-work-series-block">
+                      {/* P-4 (Part A) — one plain sentence, the picker,
+                          the chosen days as chips. */}
+                      <p className="muted small" data-testid="extra-work-series-sentence">
+                        {t("create.series_sentence", { count: slots.length })}
+                      </p>
                       <SlotPicker slots={slots} onChange={setSlots} />
+                      {slots.length > 0 && (
+                        <div className="meerwerk-day-chips" data-testid="extra-work-series-chips">
+                          {[...slots]
+                            .sort((a, b) => a.date.localeCompare(b.date))
+                            .map((slot) => (
+                              <span key={slot.date} className="meerwerk-day-chip">
+                                {formatDate(slot.date)}
+                                {slot.time ? ` · ${slot.time}` : ""}
+                              </span>
+                            ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -72,7 +72,7 @@ export function PeopleAdminPage() {
         testId="people-page-header"
       />
       <div
-        className="composer-toggle"
+        className="customer-tabs"
         role="tablist"
         aria-label={t("nav.people")}
         style={{ marginBottom: 16 }}
@@ -84,7 +84,7 @@ export function PeopleAdminPage() {
             to={`/admin/people/${spec.key}`}
             role="tab"
             aria-selected={spec.key === current.key}
-            className={`composer-toggle-btn${spec.key === current.key ? " active" : ""}`}
+            className={`customer-tab${spec.key === current.key ? " active" : ""}`}
             data-testid={`people-tab-${spec.key}`}
           >
             {t(spec.labelKey)}

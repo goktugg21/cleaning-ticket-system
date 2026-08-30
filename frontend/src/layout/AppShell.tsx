@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
+import { useCurrentTicketKind } from "../lib/currentTicketKind";
 import {
   canAccessAdminArea,
   canAccessAgenda,
@@ -51,6 +52,7 @@ import {
   roleLabelKey,
 } from "../auth/permissions";
 import { useLanguageSync } from "../i18n/useLanguageSync";
+import { RouteErrorBoundary } from "../components/RouteErrorBoundary";
 import { UserMenu } from "../components/UserMenu";
 import { NotificationBell } from "../components/NotificationBell";
 import { InboxNavBadge } from "../components/InboxNavBadge";
@@ -156,7 +158,17 @@ export function AppShell({ children }: AppShellProps) {
   // The restore is re-applied on every resize of the nav for a short
   // window, because the nav is shorter at first paint (the inbox and
   // staff-request badges arrive later) and a single write gets clamped.
-  const remember = () => {
+  // P-4 — TWO captures, two rules. At CLICK time the position is the
+  // truth, zero included: the `> 0` guard here refused to record a
+  // scroll back to the top, so the next page restored the old deep
+  // position (the sidebar "dived down"). At UNMOUNT the old shell's nav
+  // fires one scroll-to-0 as it is torn down (measured), so THAT
+  // capture still ignores zero.
+  const rememberOnAct = () => {
+    const nav = sidebarNavRef.current;
+    if (nav && nav.isConnected) sidebarScrollTop = nav.scrollTop;
+  };
+  const rememberAtUnmount = () => {
     const nav = sidebarNavRef.current;
     if (nav && nav.isConnected && nav.scrollTop > 0) sidebarScrollTop = nav.scrollTop;
   };
@@ -178,7 +190,7 @@ export function AppShell({ children }: AppShellProps) {
     return () => {
       observer?.disconnect();
       window.clearTimeout(stop);
-      remember();
+      rememberAtUnmount();
     };
   }, []);
   useEffect(() => {
@@ -193,11 +205,24 @@ export function AppShell({ children }: AppShellProps) {
   const isCustomer = isCustomerUser(me?.role);
   const isStaffOnly = me?.role === "STAFF";
 
+  // P-4 (Part D) — a ticket of kind MEERWERK is extra work in its
+  // execution phase: the sidebar lights "Extra work", not "Tickets",
+  // while its detail page is open. The page publishes the kind it
+  // loaded (`lib/currentTicketKind`); the route alone cannot know.
+  const currentTicket = useCurrentTicketKind();
+  const onTicketDetail = /^\/tickets\/\d+(\/.*)?$/.test(location.pathname);
+  const onMeerwerkTicket =
+    onTicketDetail &&
+    currentTicket !== null &&
+    currentTicket.kind === "MEERWERK" &&
+    String(currentTicket.id) === (location.pathname.match(/^\/tickets\/(\d+)/)?.[1] ?? "");
   // Tickets (the work queue) lights on the list and a ticket, never on a sibling page.
-  const ticketsActive = /^\/tickets(\/\d+(\/.*)?)?$/.test(location.pathname);
+  const ticketsActive =
+    /^\/tickets(\/\d+(\/.*)?)?$/.test(location.pathname) && !onMeerwerkTicket;
   // Meerwerk (the commercial pipeline, /extra-work) lights across its
-  // own subtree — the list, both create forms and every detail page.
-  const meerwerkActive = /^\/extra-work(\/.*)?$/.test(location.pathname);
+  // own subtree — the list, both create forms and every detail page —
+  // and on a MEERWERK-kind ticket.
+  const meerwerkActive = /^\/extra-work(\/.*)?$/.test(location.pathname) || onMeerwerkTicket;
 
   // FE-1 §D.3.1 — the customer "Meer" fold. Same three rules as every
   // fold before it (Sprint 157 §6): CLOSED on load, OPEN while the
@@ -265,8 +290,8 @@ export function AppShell({ children }: AppShellProps) {
           className="sidebar-nav"
           aria-label="Main navigation"
           ref={sidebarNavRef}
-          onClickCapture={remember}
-          onKeyDownCapture={remember}
+          onClickCapture={rememberOnAct}
+          onKeyDownCapture={rememberOnAct}
         >
           {isCustomer ? (
             // ---------------------------------------------------------
@@ -770,7 +795,14 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </header>
 
-        <main className="page-canvas">{children ?? <Outlet />}</main>
+        <main className="page-canvas">
+          {/* P-4 (Part F) — one boundary per routed page, reset on every
+              route change, so a page that throws says so on a card and
+              never leaves the shell over a blank canvas. */}
+          <RouteErrorBoundary key={location.pathname}>
+            {children ?? <Outlet />}
+          </RouteErrorBoundary>
+        </main>
       </div>
     </div>
   );

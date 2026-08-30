@@ -99,6 +99,8 @@ import { PhaseBanner } from "../components/customer/PhaseBadge";
 import { DueChipCore } from "../components/workplan/WorkPlanCard";
 import { resolveNextStep } from "../components/extra-work/nextStep";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
+import { rowAmounts } from "../lib/billing";
+import { billingMonthWords } from "../lib/billingSentence";
 import {
   canSeeExtraWorkStaffing,
   isCustomerUser,
@@ -141,7 +143,7 @@ import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { extraWorkStatusLabelKey, ticketStatusLabelKey } from "../lib/enumLabels";
-import { formatDate, formatDateTime, formatRelative, useLocaleCode } from "../lib/intl";
+import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 import { Avatar } from "../components/Avatar";
 
@@ -956,6 +958,9 @@ export function ExtraWorkDetailPage() {
   const [planAssignmentsLoading, setPlanAssignmentsLoading] = useState(false);
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState("");
+  /* P-4 (Part B) — the refusal itself, so the dialog can put each
+     message at its field. */
+  const [planRawError, setPlanRawError] = useState<unknown>(null);
   // W-UX1 §2 — the plan area's assign surface.
   const [planCandidates, setPlanCandidates] = useState<AssignmentCandidate[]>([]);
   const [planCandidatesLoading, setPlanCandidatesLoading] = useState(false);
@@ -2264,6 +2269,7 @@ export function ExtraWorkDetailPage() {
   async function submitPlan(payload: ExtraWorkPlanPayload) {
     setPlanBusy(true);
     setPlanError("");
+    setPlanRawError(null);
     try {
       const updated = await planExtraWork(Number(id), payload);
       setEw(updated);
@@ -2285,6 +2291,7 @@ export function ExtraWorkDetailPage() {
       }
     } catch (err) {
       setPlanError(getApiError(err));
+      setPlanRawError(err);
     } finally {
       setPlanBusy(false);
     }
@@ -3358,6 +3365,21 @@ export function ExtraWorkDetailPage() {
                               {t("detail.billing_save")}
                             </button>
                           </div>
+                          {/* P-4 (Part C) — the consequence, in one sentence:
+                              which month, whose invoice, where to find it,
+                              and that nothing is sent by itself. Addendum B
+                              unchanged. */}
+                          <p className="muted small" style={{ margin: "6px 0 0" }} data-testid="extra-work-billing-consequence">
+                            {t(
+                              ew.invoice_date
+                                ? "billing.consequence_month"
+                                : "billing.consequence_completion",
+                              {
+                                month: billingMonthWords(ew, t),
+                                customer: ew.customer_name,
+                              },
+                            )}
+                          </p>
                           {billingError && (
                             <div className="alert-error" style={{ marginTop: 8 }}>
                               {billingError}
@@ -3737,6 +3759,16 @@ export function ExtraWorkDetailPage() {
               hourlyLines={activeHourlyLines}
               finalTotalAmount={ew.final_total_amount}
               locked={finalAmountLocked}
+              // P-4 (Part C) — the save answers with the amount and the
+              // destination: "€424 saved. You will find it under
+              // Invoices → B Amsterdam → December, as unbilled work."
+              successMessage={(detail) =>
+                t("billing.hours_saved_where", {
+                  amount: formatMoney(rowAmounts(detail).total),
+                  customer: detail.customer_name,
+                  month: billingMonthWords(detail, t),
+                })
+              }
               onUpdated={(detail) => {
                 setEw(detail);
                 if (approvedProposalId !== null) {
@@ -4071,6 +4103,7 @@ export function ExtraWorkDetailPage() {
           onAssignManagers={(userIds) => void addPlanManagers(userIds)}
           busy={planBusy}
           error={planError}
+          rawError={planRawError}
           onCancel={() => setPlanOpen(false)}
           onSubmit={(payload) => void submitPlan(payload)}
         />

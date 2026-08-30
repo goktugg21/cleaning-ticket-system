@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p3-schedule-contracts` — stacked on `feat/p2-guidance`,
+**Branch:** `feat/p4-joy` — stacked on `feat/p3-schedule-contracts`,
 the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,48 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-4: the joy pass, system-wide (Addendum D §D.16, 2026-08-30)
+
+The law: a person who knows nothing about computers finishes the job
+without knowing the system beforehand. Shipped on `feat/p4-joy`:
+
+- **Part A** — units on every chip, quantity suffix, cart line and
+  confirm page (`service_unit_type` / `service_unit_label` on the price
+  row, `lib/unitLabel.ts`); the custom line reads as a request for work
+  with quantity-with-unit in the text; "On several days" is one
+  sentence + calm picker + day chips; the result names the days.
+- **Part B** — `PlanWorkDialog` rebuilt as three stages (When / Who and
+  how much / Done means) with per-person day chips, honest totals, the
+  move-the-plan question, inline deadline warnings, field-level errors
+  (`lib/apiFieldErrors.ts`). The double-count: hours on a day dropped
+  out of the window survived in state, total and payload; the server
+  now refuses new/changed rows outside the window
+  (`test_p4_plan_days.py`, red → green).
+- **Part C** — the billing-month consequence sentence and the
+  "€X saved — Invoices → customer → month" answer
+  (`lib/billingSentence.ts`); Close week explains itself; "Weighted" =
+  "Hours × factor" with a click-to-teach. Per-day WORKED entry mirrors:
+  queued (endpoint accepts dated rows; dialog work only).
+- **Part D** — MEERWERK-kind tickets light "Extra work"
+  (`lib/currentTicketKind.ts`); My Schedule's first paint is an honest
+  loading week (the chip was behind an in-flight response); the sidebar
+  scroll capture no longer refuses zero.
+- **Part E** — the waiting drawer's amber "Approve on customer's
+  behalf" for readers who already hold the override
+  (`tickets/override_authority.py`, `can_override_customer_decision` on
+  entries, `test_p4_waiting_drawer.py`).
+- **Part F** — converted: contract form (4 stages, field errors,
+  billing consequence), Contracts page (filter fold + chips, one view
+  hierarchy), Company detail (facts, policy twin, Advanced, folds,
+  never-void + `RouteErrorBoundary`), Company edit (read tables cut),
+  Building detail (facts, linked tiles, hidden empties, cost split
+  behind Advanced, valueless columns dropped), customer Contracts tab
+  (draft honesty; bounded register, € 0.00 collapse, search), Settings
+  header, Services & catalogs / People top-level tabs, pill
+  unification. The full inventory (converted / passes / decision /
+  queued) is in the P-4 report; the NEXT queue below carries the
+  queued rows.
 
 ### Done — P-3: schedule truth pass + contracts clarity (Addendum D §D.15, 2026-08-29)
 

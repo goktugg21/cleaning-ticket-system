@@ -68,6 +68,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
+import { Toggle } from "../Toggle";
+import { getExtraWork } from "../../api/extraWork";
 import { listManagerAssignments } from "../../api/managerAssignments";
 import {
   createTimeEntry,
@@ -77,7 +79,7 @@ import {
 import type { HourType } from "../../api/timesheets.types";
 import { ChipMultiSelect } from "../ChipMultiSelect";
 import { hourTypeLabel } from "../../lib/hourTypeLabel";
-import { formatNumber } from "../../lib/intl";
+import { formatDate, formatNumber } from "../../lib/intl";
 import { fromDateString, isoWeekOf, toDateString } from "../../lib/isoWeek";
 import { usePickerReserve } from "../../lib/usePickerReserve";
 
@@ -104,6 +106,7 @@ export function BookHoursDialog({
   companyId,
   buildingId,
   crew,
+  extraWorkId = null,
   onClose,
   onBooked,
 }: {
@@ -114,6 +117,12 @@ export function BookHoursDialog({
   /** The ticket's crew (its staff slots). The responsible managers are
    *  read here and merged in — see the header comment. */
   crew: BookHoursCrewMember[];
+  /** P-4 (Part C) — the extra work whose PLAN this job carries. When
+   *  it holds dated planned hours, the dialog offers "per day, as
+   *  planned": one row per person per planned day, prefilled with the
+   *  planned hours, one `TimeEntry` per row (the same endpoint; it has
+   *  always taken a date). */
+  extraWorkId?: number | null;
   onClose: () => void;
   /** Called with how many rows landed. The page refreshes the
    *  comparison and closes this. */
@@ -142,6 +151,30 @@ export function BookHoursDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [landed, setLanded] = useState(0);
+  /** P-4 (Part C) — the plan's dated rows, `null` until read (or when
+   *  there is no extra work). */
+  const [planned, setPlanned] = useState<{ user_id: number; date: string; hours: string }[] | null>(null);
+  const [perDay, setPerDay] = useState(false);
+  const [dayHours, setDayHours] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (extraWorkId === null) return;
+    let cancelled = false;
+    getExtraWork(extraWorkId)
+      .then((detail) => {
+        if (cancelled) return;
+        setPlanned(
+          (detail.planned_hours ?? [])
+            .filter((row) => row.date !== null)
+            .map((row) => ({ user_id: row.user_id, date: String(row.date), hours: row.hours })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setPlanned([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [extraWorkId]);
   /** W-FIX1 D8 (audit F47) — the week lock, read like the admin dialog
    *  reads it: for the week of the chosen date. Closed: the inputs are
    *  disabled and the standard closed-week line is shown; the server's
@@ -257,12 +290,37 @@ export function BookHoursDialog({
     own: id in ownHours,
   }));
 
+  /** P-4 (Part C) — per (person, planned day): the plan's own rows,
+   *  summed per day across hour types, prefilled and editable. */
+  const plannedDayRows = peopleIds.flatMap((id) => {
+    const byDay = new Map<string, number>();
+    for (const row of planned ?? []) {
+      if (row.user_id !== id) continue;
+      byDay.set(row.date, (byDay.get(row.date) ?? 0) + (Number.parseFloat(row.hours) || 0));
+    }
+    return Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, hours]) => {
+        const key = `${id}|${day}`;
+        return {
+          id,
+          name: nameOf(id),
+          day,
+          key,
+          hours: key in dayHours ? dayHours[key] : hours.toFixed(2),
+        };
+      });
+  });
+  const perDayOffered = plannedDayRows.length > 0;
+  const perDayOn = perDay && perDayOffered;
+
   const acceptHours = (raw: string) => HOURS_INPUT.test(raw);
 
-  const totalHours = rows.reduce(
+  const totalHours = (perDayOn ? plannedDayRows : rows).reduce(
     (sum, row) => sum + (parseHours(row.hours) ?? 0),
     0,
   );
+  const summaryCount = perDayOn ? plannedDayRows.length : rows.length;
 
   async function submit() {
     if (busy) return;
@@ -272,7 +330,7 @@ export function BookHoursDialog({
       setError(t("book_hours.need_people"));
       return;
     }
-    if (date === "") {
+    if (date === "" && !perDayOn) {
       setError(t("book_hours.need_date"));
       return;
     }
@@ -282,18 +340,29 @@ export function BookHoursDialog({
     }
     // Task 8 — every row must carry real hours; the first one that
     // does not is named.
-    const amounts: { id: number; hours: number }[] = [];
-    for (const row of rows) {
-      const value = parseHours(row.hours);
-      if (value === null) {
-        setError(
-          row.own || sharedHours.trim() !== ""
-            ? t("book_hours.need_hours_for", { name: row.name })
-            : t("book_hours.need_hours"),
-        );
-        return;
+    const amounts: { id: number; hours: number; date: string }[] = [];
+    if (perDayOn) {
+      for (const row of plannedDayRows) {
+        const value = parseHours(row.hours);
+        if (value === null) {
+          setError(t("book_hours.need_hours_for", { name: `${row.name} · ${row.day}` }));
+          return;
+        }
+        amounts.push({ id: row.id, hours: value, date: row.day });
       }
-      amounts.push({ id: row.id, hours: value });
+    } else {
+      for (const row of rows) {
+        const value = parseHours(row.hours);
+        if (value === null) {
+          setError(
+            row.own || sharedHours.trim() !== ""
+              ? t("book_hours.need_hours_for", { name: row.name })
+              : t("book_hours.need_hours"),
+          );
+          return;
+        }
+        amounts.push({ id: row.id, hours: value, date });
+      }
     }
     setBusy(true);
     setError("");
@@ -304,7 +373,7 @@ export function BookHoursDialog({
         await createTimeEntry({
           company: companyId,
           employee: amount.id,
-          date,
+          date: amount.date,
           hour_type: hourTypeId,
           hours: amount.hours.toFixed(2),
           building: buildingId,
@@ -404,7 +473,17 @@ export function BookHoursDialog({
             )}
           </div>
 
+          {perDayOffered && (
+            <label className="ew-plan-switch" style={{ marginBottom: 10 }} data-testid="book-hours-per-day">
+              <Toggle checked={perDayOn} onChange={(e) => setPerDay(e.target.checked)} disabled={busy} />
+              <span>
+                {t("book_hours.per_day_label", { count: plannedDayRows.length })}
+                <span className="muted small" style={{ display: "block" }}>{t("book_hours.per_day_hint")}</span>
+              </span>
+            </label>
+          )}
           <div className="book-hours-row">
+            {!perDayOn && (
             <div className="field">
               <label className="field-label" htmlFor="book-hours-date">
                 {t("book_hours.date_label")}
@@ -419,6 +498,7 @@ export function BookHoursDialog({
                 data-testid="book-hours-date"
               />
             </div>
+            )}
             <div className="field">
               <label className="field-label" htmlFor="book-hours-type">
                 {t("book_hours.hour_type_label")}
@@ -449,6 +529,7 @@ export function BookHoursDialog({
               </select>
               {typesError && <p className="form-error">{typesError}</p>}
             </div>
+            {!perDayOn && (
             <div className="field">
               <label className="field-label" htmlFor="book-hours-hours">
                 {t("book_hours.shared_hours_label")}
@@ -473,7 +554,37 @@ export function BookHoursDialog({
                 data-testid="book-hours-hours"
               />
             </div>
+            )}
           </div>
+          {perDayOn && (
+            <div className="field" style={{ marginTop: 4 }} data-testid="book-hours-day-rows">
+              <span className="field-label">{t("book_hours.per_day_title")}</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {plannedDayRows.map((row) => (
+                  <div key={row.key} className="ew-plan-hours-box" data-testid={`book-hours-day-${row.id}-${row.day}`}>
+                    <span style={{ minWidth: 160 }}>{row.name}</span>
+                    <span className="muted small">{formatDate(row.day)}</span>
+                    <input
+                      className="field-input"
+                      type="text"
+                      inputMode="decimal"
+                      value={row.hours}
+                      onChange={(event) => {
+                        if (acceptHours(event.target.value)) {
+                          setDayHours((prev) => ({ ...prev, [row.key]: event.target.value }));
+                        }
+                      }}
+                      disabled={busy}
+                      style={{ width: 72 }}
+                      aria-label={`${row.name} ${formatDate(row.day)}`}
+                      data-testid={`book-hours-day-hours-${row.id}-${row.day}`}
+                    />
+                    <span className="muted small">h</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {weekClosed && (
             <p className="form-error" data-testid="book-hours-week-closed">
               {t("common:hours_week_grid.week_closed")}
@@ -483,7 +594,7 @@ export function BookHoursDialog({
           {/* Task 8 — ONE COMPACT ROW PER SELECTED PERSON. Their hours
               follow the shared box until touched; a touched row is
               marked so the operator can see which ones are their own. */}
-          {rows.length > 0 && (
+          {rows.length > 0 && !perDayOn && (
             <div
               className="field"
               style={{ marginTop: 4 }}
@@ -558,7 +669,7 @@ export function BookHoursDialog({
           >
             {peopleIds.length > 0
               ? t("book_hours.summary", {
-                  count: peopleIds.length,
+                  count: summaryCount,
                   ticket: ticketNo,
                   total: formatNumber(totalHours, {
                     minimumFractionDigits: 2,

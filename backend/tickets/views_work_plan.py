@@ -916,6 +916,32 @@ def _clock(value) -> str | None:
     return local.strftime("%H:%M")
 
 
+
+def _stamp_override_authority(entries, user) -> None:
+    """P-4 (Part E) -- `can_override_customer_decision` on the waiting rows.
+
+    The SAME question the ticket detail answers, asked with the same
+    function (`override_authority.can_override_customer_decision`), so
+    the drawer's amber button renders exactly where the detail page's
+    Advanced fold would offer the override. Bounded by `WAITING_LIMIT`:
+    one ticket fetch for the page, one machine read per row.
+    """
+    from .override_authority import can_override_customer_decision
+    from .state_machine import allowed_next_statuses
+
+    ticket_ids = {e["ticket_id"] for e in entries if e.get("ticket_id")}
+    if not ticket_ids:
+        return
+    tickets = Ticket.objects.in_bulk(list(ticket_ids))
+    for entry in entries:
+        ticket = tickets.get(entry.get("ticket_id"))
+        if ticket is None:
+            continue
+        entry["can_override_customer_decision"] = can_override_customer_decision(
+            user, ticket, allowed_next_statuses(user, ticket)
+        )
+
+
 def _ticket_waiting_customer(ticket) -> bool:
     """Python twin of `_ticket_waiting_customer_q`."""
     return ticket.status == TicketStatus.WAITING_CUSTOMER_APPROVAL
@@ -1350,6 +1376,9 @@ def _entry_from_slot(
         # Stable across the two kinds so React can key one merged list
         # without inventing an index.
         "key": f"slot-{slot.id}",
+        # P-4 (Part E) -- stamped True on "Wacht op klant" rows for a reader who
+        # may answer on the customer's behalf (`_stamp_override_authority`).
+        "can_override_customer_decision": False,
         "source_id": slot.id,
         "ticket_id": slot.ticket_id,
         "ticket_no": slot.ticket.ticket_no,
@@ -1467,6 +1496,9 @@ def _entry_from_extra_work(
         ),
         "kind": KIND_EXTRA_WORK,
         "key": f"ew-{extra_work.id}",
+        # P-4 (Part E) -- stamped True on "Wacht op klant" rows for a reader who
+        # may answer on the customer's behalf (`_stamp_override_authority`).
+        "can_override_customer_decision": False,
         "source_id": extra_work.id,
         "ticket_id": None,
         "ticket_no": None,
@@ -1559,6 +1591,9 @@ def _entry_from_ticket(
         ),
         "kind": KIND_TICKET,
         "key": f"ticket-{ticket.id}",
+        # P-4 (Part E) -- stamped True on "Wacht op klant" rows for a reader who
+        # may answer on the customer's behalf (`_stamp_override_authority`).
+        "can_override_customer_decision": False,
         "source_id": ticket.id,
         "ticket_id": ticket.id,
         "ticket_no": ticket.ticket_no,
@@ -1956,6 +1991,10 @@ class WorkPlanView(APIView):
             viewer=user,
             fallback_placement=PLACEMENT_PLANNED,
         )
+        # P-4 (Part E) -- the drawer acts. Same rule, same answer as the ticket
+        # detail's `actions.can_override_customer_decision`; nothing new is
+        # permitted to anyone.
+        _stamp_override_authority(waiting_entries, user)
         counts = self._counts(
             jobs, extra_work, week_start, week_end, today, team=team
         )

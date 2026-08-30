@@ -7,6 +7,7 @@
 import { useTranslation } from "react-i18next";
 
 import { formatMoney } from "../../lib/intl";
+import { unitPhrase, unitSuffix } from "../../lib/unitLabel";
 import { lineAmounts, type MeerwerkCartLine } from "./cart";
 
 export function CartSummaryList({
@@ -32,7 +33,18 @@ export function CartSummaryList({
             data-kind={line.kind}
           >
             <div className="wp-undated-row-main">
-              <span>{`${line.quantity} × ${line.label}`}</span>
+              {/* P-4 (Part A) — "50 m² × Ramen wassen", the unit repeated
+                  where the reader confirms. A fixed price stays "2 ×". */}
+              <span>
+                {line.unit && line.unit.type !== "FIXED"
+                  ? `${line.quantity} ${unitSuffix(line.unit, t)} × ${line.label}`
+                  : `${line.quantity} × ${line.label}`}
+                {line.unit && (
+                  <span className="meerwerk-unit-chip" data-testid={`${testIdPrefix}-confirm-unit`}>
+                    {unitPhrase(line.unit, t)}
+                  </span>
+                )}
+              </span>
               {line.note && <span className="muted small">{line.note}</span>}
             </div>
             {line.unitPrice ? (

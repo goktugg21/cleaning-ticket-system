@@ -44,7 +44,11 @@
     "allBuildings": "Alle locaties",
     "allTypes": "Alle soorten",
     "activeNotice": "Er staat een filter aan, dus je ziet niet alles.",
-    "clear": "Filter wissen"
+    "clear": "Filter wissen",
+    "fold_label": "Filter",
+    "fold_active_one": "{{count}} actief",
+    "fold_active_other": "{{count}} actief",
+    "apply": "Zoeken"
   },
   "views": {
     "groupLabel": "Weergave",
@@ -160,7 +164,12 @@
     "companyHint": "Je maakt dit contract voor dit bedrijf; klanten, locaties en soorten komen hieruit.",
     "createIntro": "Kies het bedrijf, de klant en de locaties, en leg de facturatie vast.",
     "editIntro": "Wijzig de gegevens van dit contract. De projecten en prijzen staan op de versie.",
-    "loadingOptions": "Bezig met laden…"
+    "loadingOptions": "Bezig met laden…",
+    "stage_who": "Wie en waar",
+    "stage_when": "Wanneer",
+    "stage_billing": "Facturatie",
+    "stage_notes": "Omschrijving en notities",
+    "paymentTermsSentence": "De klant heeft {{days}} dagen om elke factuur te betalen."
   },
   "projects": {
     "title": "Projecten",
@@ -238,7 +247,14 @@
   "errors": {
     "customerAndStartRequired": "Kies een klant en een startdatum.",
     "notFound": "Dit contract bestaat niet.",
-    "companyLoadFailed": "Bedrijven konden niet worden geladen."
+    "companyLoadFailed": "Bedrijven konden niet worden geladen.",
+    "customerRequired": "Kies een klant.",
+    "startRequired": "Kies de startdatum.",
+    "endBeforeStart": "De einddatum ligt vóór de startdatum.",
+    "billingDayRange": "Kies een dag van 1 tot 28.",
+    "fieldRejected": "Deze waarde is niet geaccepteerd.",
+    "fixMarked_one": "Herstel het {{count}} gemarkeerde veld.",
+    "fixMarked_other": "Herstel de {{count}} gemarkeerde velden."
   },
   "customerSection": {
     "empty": "Deze klant heeft nog geen contracten.",
@@ -422,5 +438,10 @@
   "teach.period_noun.QUARTERLY": "kwartaal",
   "teach.period_noun.YEARLY": "jaar",
   "teach.revision.editable": "nog te wijzigen",
-  "teach.revision.replaced": "vervangen door een latere versie"
+  "teach.revision.replaced": "vervangen door een latere versie",
+  "sentence.draft_editable": "concept — nog aan te passen, er wordt niets gefactureerd",
+  "sentence.planned_from": "gepland vanaf {{since}}",
+  "register.search_placeholder": "Zoek een klus",
+  "register.zero_rows_one": "{{count}} regel van € 0,00 — toon",
+  "register.zero_rows_other": "{{count}} regels van € 0,00 — toon"
 }

@@ -21,6 +21,9 @@ from customers.models import (
 )
 from sla import business_hours
 
+from .override_authority import (
+    can_override_customer_decision as _can_override_customer_decision,
+)
 from .models import (
     AttachmentVisibility,
     SubTask,
@@ -1152,37 +1155,12 @@ class TicketDetailSerializer(
         # `provider_driven_customer_decision` coercion block in
         # `tickets.state_machine.apply_transition`: SA / CA in scope /
         # BM in assigned building (gated by the B6 revocable key) —
-        # the per-record answer is precise to THIS ticket's building.
-        has_override_authority = False
-        if role == UserRole.SUPER_ADMIN:
-            has_override_authority = True
-        elif role == UserRole.COMPANY_ADMIN:
-            from companies.models import CompanyUserMembership
-            has_override_authority = CompanyUserMembership.objects.filter(
-                user=user, company_id=obj.company_id
-            ).exists()
-        elif role == UserRole.BUILDING_MANAGER:
-            assigned = BuildingManagerAssignment.objects.filter(
-                user=user, building_id=obj.building_id
-            ).exists()
-            has_override_authority = assigned and user_has_osius_permission(
-                user,
-                "osius.building_manager.override_customer_decision",
-                building_id=obj.building_id,
-            )
-        # Tightened so the answer reflects CURRENT record state, not
-        # just authority: the override is only meaningful at the
-        # customer-decision step (WAITING_CUSTOMER_APPROVAL with
-        # APPROVED or REJECTED reachable in the live state machine).
-        in_decision_phase = (
-            str(obj.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
-            and (
-                str(TicketStatus.APPROVED) in allowed_set
-                or str(TicketStatus.REJECTED) in allowed_set
-            )
-        )
-        can_override_customer_decision = (
-            has_override_authority and in_decision_phase
+        # the per-record answer is precise to THIS ticket's building,
+        # and only at the customer-decision step. P-4: the rule lives
+        # in `override_authority` so the My Schedule drawer can ask
+        # the same question and get the same answer.
+        can_override_customer_decision = _can_override_customer_decision(
+            user, obj, allowed
         )
 
         # M1 B5 — note booleans mirror the POSTING table enforced by

@@ -44,7 +44,11 @@
     "allBuildings": "All locations",
     "allTypes": "All types",
     "activeNotice": "A filter is on, so you are not seeing everything.",
-    "clear": "Clear filter"
+    "clear": "Clear filter",
+    "fold_label": "Filter",
+    "fold_active_one": "{{count}} active",
+    "fold_active_other": "{{count}} active",
+    "apply": "Search"
   },
   "views": {
     "groupLabel": "View",
@@ -160,7 +164,12 @@
     "companyHint": "You are creating this contract for this company; customers, locations and types come from it.",
     "createIntro": "Choose the company, the customer and the locations, and set the billing.",
     "editIntro": "Change this contract's details. Projects and prices live on the revision.",
-    "loadingOptions": "Loading…"
+    "loadingOptions": "Loading…",
+    "stage_who": "Who and where",
+    "stage_when": "When",
+    "stage_billing": "Billing",
+    "stage_notes": "Description and notes",
+    "paymentTermsSentence": "The customer has {{days}} days to pay each invoice."
   },
   "projects": {
     "title": "Projects",
@@ -238,7 +247,14 @@
   "errors": {
     "customerAndStartRequired": "Choose a customer and a start date.",
     "notFound": "This contract does not exist.",
-    "companyLoadFailed": "Companies could not be loaded."
+    "companyLoadFailed": "Companies could not be loaded.",
+    "customerRequired": "Pick a customer.",
+    "startRequired": "Pick the start date.",
+    "endBeforeStart": "The end date is before the start date.",
+    "billingDayRange": "Pick a day from 1 to 28.",
+    "fieldRejected": "This value was not accepted.",
+    "fixMarked_one": "Fix the {{count}} marked field.",
+    "fixMarked_other": "Fix the {{count}} marked fields."
   },
   "customerSection": {
     "empty": "This customer has no contracts yet.",
@@ -422,5 +438,10 @@
   "teach.period_noun.QUARTERLY": "quarter",
   "teach.period_noun.YEARLY": "year",
   "teach.revision.editable": "still editable",
-  "teach.revision.replaced": "replaced by a later revision"
+  "teach.revision.replaced": "replaced by a later revision",
+  "sentence.draft_editable": "draft — still editable, nothing is invoiced",
+  "sentence.planned_from": "planned from {{since}}",
+  "register.search_placeholder": "Search a job",
+  "register.zero_rows_one": "{{count}} row of € 0.00 — show",
+  "register.zero_rows_other": "{{count}} rows of € 0.00 — show"
 }

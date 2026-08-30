@@ -48,6 +48,7 @@ import type {
 } from "../../api/types";
 import { isPriced, rowAmounts } from "../../lib/billing";
 import { formatDate, formatMoney, formatNumber } from "../../lib/intl";
+import { billingMonthWords } from "../../lib/billingSentence";
 import { CollapsibleCard } from "../CollapsibleCard";
 import { PdfPreviewDialog } from "../PdfPreviewDialog";
 import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
@@ -416,17 +417,14 @@ export function TicketExtraWorkCards({
             // hours just written, the total they produced (rowAmounts,
             // the ONE rule, over the refreshed detail) and the month it
             // bills in. No new fetch — everything is in the response.
-            successMessage={(detail, hoursSaved) =>
-              detail.invoice_date
-                ? t("ew_hours_saved", {
-                    hours: formatNumber(hoursSaved),
-                    total: formatMoney(rowAmounts(detail).total),
-                    month: detail.invoice_date.slice(0, 7),
-                  })
-                : t("ew_hours_saved_no_month", {
-                    hours: formatNumber(hoursSaved),
-                    total: formatMoney(rowAmounts(detail).total),
-                  })
+            successMessage={(detail) =>
+              // P-4 (Part C) — the amount and where it will be found,
+              // the same sentence the meerwerk page gives.
+              t("extra_work:billing.hours_saved_where", {
+                amount: formatMoney(rowAmounts(detail).total),
+                customer: detail.customer_name,
+                month: billingMonthWords(detail, t),
+              })
             }
             locked={finalAmountLocked}
             // W25 — the client-side math per line is a PREVIEW. The

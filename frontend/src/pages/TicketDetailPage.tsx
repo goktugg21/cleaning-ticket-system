@@ -101,6 +101,7 @@ import type {
   ExtraWorkRequestDetail,
 } from "../api/types";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
+import { publishCurrentTicketKind } from "../lib/currentTicketKind";
 import { PlannedVsWorkedPanel } from "../components/extra-work/PlannedVsWorkedPanel";
 import { BookHoursDialog } from "../components/extra-work/BookHoursDialog";
 import {
@@ -730,6 +731,18 @@ export function TicketDetailPage() {
   };
 
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
+  // P-4 (Part D) — tell the sidebar what kind of record this is, so a
+  // MEERWERK-kind ticket lights "Extra work" and not "Tickets".
+  const currentTicketId = ticket?.id ?? null;
+  const currentTicketKind = ticket?.kind ?? null;
+  useEffect(() => {
+    publishCurrentTicketKind(
+      currentTicketId !== null && currentTicketKind !== null
+        ? { id: currentTicketId, kind: currentTicketKind }
+        : null,
+    );
+    return () => publishCurrentTicketKind(null);
+  }, [currentTicketId, currentTicketKind]);
   /** Sprint 185 E §1 — the company's own kinds of WORK, for the picker.
    *  Loaded once; non-fatal on failure, like every other optional picker
    *  here — a catalog that would not load must not stop somebody reading
@@ -1387,6 +1400,8 @@ export function TicketDetailPage() {
   const [ewPlanLoading, setEwPlanLoading] = useState(false);
   const [ewPlanBusy, setEwPlanBusy] = useState(false);
   const [ewPlanError, setEwPlanError] = useState("");
+  /* P-4 (Part B) — the refusal itself, for field-level messages. */
+  const [ewPlanRawError, setEwPlanRawError] = useState<unknown>(null);
   /* W-HOURS5 Task 2 — the plan modal owns the whole crew. People and
      managers are added and removed through the TICKET's own endpoints
      (the People tab's doors), and `tickets.crew_sync` mirrors every
@@ -1571,6 +1586,7 @@ export function TicketDetailPage() {
     if (ewOriginId === null) return;
     setEwPlanBusy(true);
     setEwPlanError("");
+    setEwPlanRawError(null);
     try {
       // `start: false` — starting is the TICKET's business after spawn
       // (the EW's status follows the ticket); this save is a plan
@@ -1583,6 +1599,7 @@ export function TicketDetailPage() {
       await loadTicket();
     } catch (err) {
       setEwPlanError(getApiError(err));
+      setEwPlanRawError(err);
     } finally {
       setEwPlanBusy(false);
     }
@@ -5886,6 +5903,7 @@ export function TicketDetailPage() {
           ticketNo={ticket.ticket_no}
           companyId={ticket.company}
           buildingId={ticket.building}
+          extraWorkId={ewOriginId}
           crew={ticket.assigned_staff.flatMap((entry) =>
             entry.anonymous
               ? []
@@ -5935,6 +5953,7 @@ export function TicketDetailPage() {
           onRemoveManager={(userId) => void removeEwPlanManager(userId)}
           busy={ewPlanBusy}
           error={ewPlanError}
+          rawError={ewPlanRawError}
           onCancel={() => {
             setEwPlanOpen(false);
             setEwPlanDetail(null);

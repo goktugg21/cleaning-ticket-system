@@ -290,6 +290,16 @@ export function CompanyRelationCards({
       {/* Employees — the "who can do what, where" card. The
           buildings column is the reason this list exists; without it
           the page says who works here but not where. */}
+      <details
+        className="form-fold"
+        id="company-employees"
+        open
+        data-testid="company-detail-employees-fold"
+      >
+        <summary className="form-fold-summary">
+          {t("company_detail.employees_title")}
+          <span className="form-fold-summary-value">{employees.length}</span>
+        </summary>
       <section
         className="card"
         data-testid="company-detail-employees-card"
@@ -463,8 +473,19 @@ export function CompanyRelationCards({
           </table>
         </BoundedList>
       </section>
+      </details>
 
       {/* Buildings, each row a link to the building detail page. */}
+      <details
+        className="form-fold"
+        id="company-buildings"
+        
+        data-testid="company-detail-buildings-fold"
+      >
+        <summary className="form-fold-summary">
+          {t("company_detail.buildings_title")}
+          <span className="form-fold-summary-value">{companyBuildings.length}</span>
+        </summary>
       <section
         className="card"
         data-testid="company-detail-buildings-card"
@@ -606,9 +627,20 @@ export function CompanyRelationCards({
           </table>
         </BoundedList>
       </section>
+      </details>
 
       {/* Customers, each row a link to that customer's OVERVIEW page
           — the owner asked for this click-through explicitly. */}
+      <details
+        className="form-fold"
+        id="company-customers"
+        
+        data-testid="company-detail-customers-fold"
+      >
+        <summary className="form-fold-summary">
+          {t("company_detail.customers_title")}
+          <span className="form-fold-summary-value">{companyCustomers.length}</span>
+        </summary>
       <section
         className="card"
         data-testid="company-detail-customers-card"
@@ -753,6 +785,7 @@ export function CompanyRelationCards({
           </table>
         </BoundedList>
       </section>
+      </details>
       {/* Rendered UNCONDITIONALLY and ref-driven — a native
           <dialog> behind a condition mounts invisible and its
           trigger looks dead (CLAUDE.md §3). */}

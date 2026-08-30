@@ -499,6 +499,9 @@ ENTRY_KEYS = {
     # stuck list's rows, null everywhere else). One shape, both kinds.
     "unplanned_age_days",
     "stuck_age_days",
+    # P-4 (Part E) -- the waiting drawer acts: may THIS reader answer on the
+    # customer's behalf. False on every row that is not waiting.
+    "can_override_customer_decision",
     # FE-4 (Addendum D SS D.12) -- the honest-date facts: when the record
     # was created (never a plan), what kind of date placed it, what the
     # headline lateness counts against, and when settled work was over.

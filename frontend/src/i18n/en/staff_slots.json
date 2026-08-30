@@ -324,5 +324,12 @@
   "agenda.planned_after_deadline": "Planned after the deadline",
   "agenda.show_more_one": "Show {{count}} more",
   "agenda.show_more_other": "Show {{count}} more",
-  "agenda.show_less": "Show fewer"
+  "agenda.show_less": "Show fewer",
+  "agenda.approve_on_behalf": "Approve on customer's behalf",
+  "agenda.approve_on_behalf_title": "Approve {{ticket}} on the customer's behalf?",
+  "agenda.approve_on_behalf_desc": "You are answering a question that is the customer's. The work is marked approved and closed, and this is recorded with your name and the reason.",
+  "agenda.approve_on_behalf_placeholder": "Why are you deciding for the customer? For example: approved by phone on 30 Aug.",
+  "agenda.approve_on_behalf_confirm": "Approve on customer's behalf",
+  "agenda.approve_on_behalf_done": "{{ticket}} is approved on the customer's behalf and closed.",
+  "agenda.loading_week": "Loading the week…"
 }

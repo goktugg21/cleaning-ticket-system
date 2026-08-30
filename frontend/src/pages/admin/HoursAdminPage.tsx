@@ -1374,7 +1374,17 @@ export function HoursAdminPage() {
                       <th>{t("hours_admin.col_source")}</th>
                       <th>{t("hours_admin.col_hour_type")}</th>
                       <th>{t("hours_admin.col_hours")}</th>
-                      <th>{t("hours_admin.col_weighted")}</th>
+                      <th>
+                        {/* P-4 — a plain word and a click-to-teach: what
+                            "weighted" is, in one sentence. */}
+                        <abbr
+                          title={t("hours_admin.col_weighted_teach")}
+                          style={{ textDecoration: "underline dotted", cursor: "help" }}
+                          data-testid="hours-col-weighted"
+                        >
+                          {t("hours_admin.col_weighted")}
+                        </abbr>
+                      </th>
                       <th>{t("hours_admin.col_building")}</th>
                       <th>{t("hours_admin.col_note")}</th>
                       {/* The actions column EXISTS only inside edit
@@ -1863,7 +1873,7 @@ export function HoursAdminPage() {
         title={t("weeks.close_confirm_title", { week: formatIsoWeek(week) })}
         body={
           <>
-            {t("weeks.close_confirm_body")}
+            {t("weeks.close_confirm_body", { week: formatIsoWeek(week) })}
             {confirmError && (
               <div
                 className="alert-error"

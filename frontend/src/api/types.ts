@@ -3272,6 +3272,11 @@ export interface CustomerServicePrice {
   folder: number | null;
   service: number;
   service_name: string;
+  /** P-4 (Part A) — the unit the service is priced per, read off the
+   *  catalog row (`Service.unit_type`); `service_unit_label` is the
+   *  operator's own unit word for OTHER ("pallet"), blank otherwise. */
+  service_unit_type: ServiceUnitType;
+  service_unit_label: string;
   unit_price: string;
   vat_pct: string;
   valid_from: string;

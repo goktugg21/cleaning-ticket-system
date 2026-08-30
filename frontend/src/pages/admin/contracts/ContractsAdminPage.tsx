@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FileSignature, Plus, RefreshCw } from "lucide-react";
+import { FileSignature, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../../../components/EmptyState";
 import { useTranslation } from "react-i18next";
 
@@ -314,6 +314,21 @@ export function ContractsAdminPage() {
     customerFilter !== "" ||
     buildingFilter !== "" ||
     typeFilter !== "";
+  /* P-4 (Part F) — the chips on the Filter button: one label per
+     active filter, in the person's words. */
+  const activeFilterChips: string[] = [
+    statusFilter !== "" ? t(`status.${statusFilter}`) : "",
+    companyFilter !== "" && !companyDropdownDisabled
+      ? (companies.find((row) => row.id === companyFilter)?.name ?? "")
+      : "",
+    customerFilter !== ""
+      ? (uniqueRefs(contracts.map((row) => ({ id: row.customer, name: row.customer_name ?? "" }))).find(
+          (row) => String(row.id) === String(customerFilter),
+        )?.name ?? t("filters.customer"))
+      : "",
+    buildingFilter !== "" ? t("filters.building") : "",
+    typeFilter !== "" ? t("filters.type") : "",
+  ].filter(Boolean);
   // P-2 §5 — nothing at all (not "nothing matches"): the one card.
   const showEmptyCard =
     !loading && !error && !filtersActive && (stats?.total ?? contracts.length) === 0;
@@ -389,7 +404,7 @@ export function ContractsAdminPage() {
           contract is required: without this, a new tenant cannot create
           a single contract. */}
       <div
-        className="composer-toggle"
+        className="customer-tabs"
         role="tablist"
         aria-label={t("types.tabsAria")}
         style={{ marginBottom: 16 }}
@@ -398,7 +413,7 @@ export function ContractsAdminPage() {
           type="button"
           role="tab"
           aria-selected={pageTab === "list"}
-          className={`composer-toggle-btn ${pageTab === "list" ? "active" : ""}`}
+          className={`customer-tab ${pageTab === "list" ? "active" : ""}`}
           onClick={() => setPageTab("list")}
           data-testid="contracts-page-tab-list"
         >
@@ -408,7 +423,7 @@ export function ContractsAdminPage() {
           type="button"
           role="tab"
           aria-selected={pageTab === "types"}
-          className={`composer-toggle-btn ${pageTab === "types" ? "active" : ""}`}
+          className={`customer-tab ${pageTab === "types" ? "active" : ""}`}
           onClick={() => setPageTab("types")}
           data-testid="contracts-page-tab-types"
         >
@@ -578,6 +593,32 @@ export function ContractsAdminPage() {
               data-testid="contracts-search"
             />
           </div>
+          <button type="submit" className="btn btn-secondary btn-sm" data-testid="contracts-search-apply">
+            {t("filters.apply")}
+          </button>
+          {/* P-4 (Part F) — the five filters fold behind ONE Filter button
+              with the active ones as chips (the tickets-list pattern);
+              the search and Apply stay outside. */}
+          <details
+            className="filter-fold"
+            open={activeFilterChips.length > 0}
+            data-testid="contracts-filter-fold"
+          >
+            <summary className="filter-fold-summary" data-testid="contracts-filter-toggle">
+              <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+              {t("filters.fold_label")}
+              {activeFilterChips.length > 0 && (
+                <span className="filter-fold-count">
+                  {t("filters.fold_active", { count: activeFilterChips.length })}
+                </span>
+              )}
+              {activeFilterChips.map((label) => (
+                <span className="filter-fold-chip" key={label}>
+                  {label}
+                </span>
+              ))}
+            </summary>
+            <div className="filter-fold-body">
           <div className="filter-field">
             <span className="filter-label">{t("filters.status")}</span>
             <select
@@ -715,6 +756,8 @@ export function ContractsAdminPage() {
               ))}
             </select>
           </div>
+            </div>
+          </details>
         </form>
 
         {/* The filter-is-on line, one click from clear — the Sprint 158
@@ -737,7 +780,10 @@ export function ContractsAdminPage() {
           </div>
         )}
 
-        <div className="contract-view-bar">
+        {/* P-4 (Part F) — ONE hierarchy: the grouping is the tab row,
+            the measure and the timeframe are two small labelled pill
+            pairs under it. */}
+        <div className="contract-view-bar contract-view-bar--tiered">
           <div className="status-tabs" role="group" aria-label={t("views.groupLabel")}>
             {(
               [
@@ -758,7 +804,8 @@ export function ContractsAdminPage() {
               </button>
             ))}
           </div>
-          <div className="status-tabs" role="group" aria-label={t("views.measureLabel")}>
+          <span className="muted small contract-view-label">{t("views.measureLabel")}</span>
+          <div className="status-tabs status-tabs--small" role="group" aria-label={t("views.measureLabel")}>
             {(
               [
                 ["prices", t("views.prices")],
@@ -777,7 +824,8 @@ export function ContractsAdminPage() {
               </button>
             ))}
           </div>
-          <div className="status-tabs" role="group" aria-label={t("views.timeframeLabel")}>
+          <span className="muted small contract-view-label">{t("views.timeframeLabel")}</span>
+          <div className="status-tabs status-tabs--small" role="group" aria-label={t("views.timeframeLabel")}>
             {(
               [
                 ["monthly", t("views.monthly")],

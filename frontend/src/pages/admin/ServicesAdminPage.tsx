@@ -1195,7 +1195,7 @@ export function ServicesAdminPage({ embedded = false }: { embedded?: boolean } =
       )}
 
       <div
-        className="composer-toggle"
+        className="composer-toggle tabs-secondary"
         role="tablist"
         aria-label={t("services.tabs_aria")}
         style={{ marginBottom: 12 }}

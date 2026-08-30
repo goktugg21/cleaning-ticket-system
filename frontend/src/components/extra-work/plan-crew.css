@@ -160,3 +160,167 @@
     align-items: stretch;
   }
 }
+
+/* P-4 (Part B) — THE GUIDED PLAN DIALOG.
+ *
+ * Three numbered stages down one column, the guided form's measure:
+ * the wide grid is gone (a person's days are chips that wrap, and an
+ * hours box per chosen day), so the dialog no longer needs 1180px to
+ * show a week. Errors are inline sentences at the field; the amber
+ * `.field-warning` is the same sentence shape for a warning that does
+ * not block (a day past the deadline). */
+.card.ew-plan-dialog.ew-plan-dialog--guided {
+  width: min(880px, 96vw);
+}
+.ew-plan-dialog--guided .ew-plan-dates {
+  max-width: none;
+  grid-template-columns: minmax(0, 260px) minmax(0, 260px);
+}
+.ew-plan-dialog--guided .field .field-label {
+  margin-bottom: 4px;
+}
+.field-warning {
+  margin: 4px 0 0;
+  color: var(--state-waiting);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.field-input-invalid {
+  border-color: var(--red);
+}
+.ew-plan-customer-strip {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 13px;
+}
+.ew-plan-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--state-waiting-bg);
+  border: 1px solid var(--amber-border);
+}
+.ew-plan-question-text {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.ew-plan-question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ew-plan-people {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ew-plan-person {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.ew-plan-person-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.ew-plan-person-total {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.ew-plan-day-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ew-plan-day-chips-label {
+  margin-right: 4px;
+}
+.ew-plan-day-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ew-plan-day-chip.is-on {
+  background: var(--accent-bg, var(--surface-2));
+  border-color: var(--accent, var(--text));
+  color: var(--text);
+  font-weight: 600;
+}
+.ew-plan-day-chip.is-locked {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.ew-plan-hours-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+.ew-plan-hours-line-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  min-width: 110px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ew-plan-hours-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ew-plan-hours-box .ew-plan-crew-hours {
+  width: 72px;
+}
+.ew-plan-hours-box--undated {
+  padding-left: 10px;
+  border-left: 1px dashed var(--border-soft);
+}
+.ew-plan-outside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ew-plan-outside-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--state-waiting-bg);
+  border: 1px solid var(--amber-border);
+  color: var(--state-waiting);
+  font-size: 12px;
+}
+.ew-plan-summary-error {
+  flex: 1 1 auto;
+  text-align: right;
+}
+.ew-plan-dialog--guided .ew-plan-budget {
+  max-width: 280px;
+}

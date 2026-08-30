@@ -73,7 +73,7 @@ export function CatalogsAdminPage({ embedded = false }: { embedded?: boolean } =
       )}
 
       <div
-        className="composer-toggle"
+        className="composer-toggle tabs-secondary"
         role="tablist"
         aria-label={t("catalogs.tabs_aria")}
         style={{ marginBottom: 16 }}

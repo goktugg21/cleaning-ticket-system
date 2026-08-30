@@ -869,3 +869,129 @@ older text.
 9. **One teaching line per surface.** Any surface with more than one
    short teaching line is cut to one — including P-2's invoices sentence
    — and structure carries the rest.
+
+
+## D.16 The joy pass — the P-4 rulings (2026-08-30)
+
+The owner walked the plan flow and got stressed, lost, and blocked by
+an invisible error. The law of this sprint, in the owner's words:
+imagine you work at this company and know NOTHING about computers or
+this system, and you try to do a job. If the system lets you finish
+WITHOUT knowing it beforehand, that surface passes — as ticket
+creation and the meerwerk create page do. Every create/edit surface,
+every modal and (extended mid-sprint) EVERY PAGE is measured against
+this. The rulings below are permanent and win over any older text.
+
+1. **Units everywhere they are true.** A service is priced per hour,
+   per m², per item, as a fixed price, or per the operator's own unit;
+   the meerwerk cart says so on the chip ("per uur"), as the suffix of
+   the quantity box ("50 m²"), on the cart line and on the confirm
+   page — from EXISTING `unit_type` data only (`Service.unit_type` read
+   onto the customer price row as `service_unit_type` /
+   `service_unit_label`; `lib/unitLabel.ts`). An "iets anders" line is a
+   REQUEST FOR WORK: its placeholder and helper say that quantity and
+   unit belong in the text ("bijv. 2x ramen wassen, ±40 m²"). A
+   persisted unit on a custom line needs a migration and is ledgered,
+   not built. "On several days" is one plain sentence ("You are
+   creating one meerwerk per chosen day — N days = N meerwerken"), a
+   calm day picker, the chosen days as chips, and a result that names
+   the days ("Created — one for each chosen day"). No mirror/copy
+   jargon exists in either locale.
+2. **The plan modal is a guided staged flow** (`PlanWorkDialog`), the
+   create page's pattern: (1) WHEN — "First work day" / "Last work
+   day", the customer strip in plain words ("Customer would like: Sep
+   4 · Must be done by: Sep 3"), a day past the deadline warning INLINE
+   at the field the moment it happens, never blocking; (2) WHO AND HOW
+   MUCH — people, then per person the plan's days as chips with an
+   hours box per chosen day, a "no day yet" box, a per-person total and
+   a grand total, the hours budget optional under the total; (3) DONE
+   MEANS — the two completion switches, one line each. Any day
+   combination (2+3, 1+3, a single day) reads exactly as chosen.
+3. **A number counts only if it is on screen.** The double-count the
+   owner hit (4 in the no-day box, 4 on a day, total 12) was a day that
+   had dropped out of the window: the old grid kept its hours in state,
+   in the total and in the payload. Now un-choosing a day deletes its
+   hours visibly; hours kept from an earlier plan on days outside
+   first..last work day are shown as "outside the plan" chips and
+   counted only while shown; and the SERVER refuses a new or changed
+   dated row outside the committed window
+   (`planning.ERR_PLANNED_HOURS_OUTSIDE_WINDOW`, `field` and `days` in
+   the body; unchanged rows pass so "people's days stayed on the old
+   dates" stays expressible) — `extra_work/tests/test_p4_plan_days.py`.
+4. **Moving a plan asks in plain words.** When the first work day moves
+   and people already have days: "Also move everyone's planned days
+   along?" — yes shifts every dated row by the same difference inside
+   the same save (the payload replaces the distribution; no new
+   endpoint); no keeps them and says "People's days stayed on the old
+   dates — adjust them below" and shows them. A worker's plan row
+   shows the DAY only unless a person chose a time (§D.15 rule 3).
+   Past days stay unplannable; worked hours for past days stay
+   enterable through the recorded unlock.
+5. **Errors live where the person is.** Field-level messages at the
+   field, a one-line summary next to Save, the first error scrolled
+   into view. The server's body is read for its shape
+   (`lib/apiFieldErrors.ts`: `code`, `field`, `days`, DRF per-field
+   entries) and mapped to the form's own sentences; the generic "That
+   was not accepted" may appear only when the server truly gave no
+   field detail. This is the pattern for every converted form.
+6. **Money calms.** Addendum B unchanged; the tab states consequences.
+   Under the billing month: "This work bills in December: it will
+   appear as unbilled work on B Amsterdam's December invoice on the
+   Invoices page. Nothing is sent automatically." After "Save hours to
+   bill": "€424 saved. You will find it under Invoices → B Amsterdam →
+   December, as unbilled work." (`lib/billingSentence.ts`, one
+   destination sentence for both surfaces.) Hours → "Close week" says
+   what closing means, who can still change what, and that it can be
+   reopened; "Weighted" reads "Hours × factor" with a click-to-teach.
+7. **Navigation tells the truth.** A ticket of kind MEERWERK lights
+   "Extra work" in the sidebar, not "Tickets" (the unified queue keeps
+   it with the pill — base SoT §1.4 stands; only the active state
+   lied). `lib/currentTicketKind.ts`: the detail page publishes the
+   kind it loaded, the shell subscribes. My Schedule's first paint is
+   honest: while the week is loading it says so and claims nothing
+   empty — the "missing chip until a second click" was the response in
+   flight behind seven "Nothing planned" columns (probed on crmtest).
+   The sidebar records its scroll position unconditionally at click
+   time (the `> 0` guard restored a stale deep position).
+8. **The waiting-for-customer drawer acts.** Each drawer row carries
+   `can_override_customer_decision` — the SAME rule as the ticket
+   detail's Advanced fold, moved to `tickets/override_authority.py` and
+   asked by both; nothing is widened (SA; CA in the ticket's company;
+   BM assigned with the B6 key; only at the decision step). One amber
+   "Approve on customer's behalf" button runs the EXISTING override
+   flow: required reason, `is_override`, the audit row. The ticket
+   lands settled on its day column (`tickets/tests/test_p4_waiting_drawer.py`).
+9. **The modal law, and the page law.** Every create/edit modal and
+   every page is either converted to the guided pattern (staged
+   sections, plain labels, one primary, field-level errors, a
+   consequence sentence where money or scheduling results) or appears
+   in the P-4 report's inventory table as "passes as is" / "decision
+   needed (why)" / "queued". The approved references: ticket create,
+   the melding flow, the meerwerk create page, the ticket detail, the
+   meerwerk detail, My Schedule, the Permissions page, and — added by
+   the audit — the SLA warnings page (plain sentences, working-day math
+   explained, every warning naming who receives it: steal its sentence
+   style wherever numbers need explaining). Nothing is silently
+   skipped; the owner never reports a page twice: if it is in the
+   table, it is owed. Converted in P-4: the New/Edit contract modal
+   (four stages, field errors, the billing consequence in the form's
+   own numbers — rules frozen, §D.15), the Contracts page (five filters
+   behind one Filter button with chips, one view hierarchy), Company
+   detail (fact block, the policy as the read-only twin of the edit
+   page's toggle card, SLUG behind Advanced, folds, and it can never
+   render silent white: an explicit "cannot be shown" state plus a
+   per-route error boundary in the shell), Company edit (the duplicated
+   read tables cut), Building detail (facts, no dash tiles, empty
+   fields hidden, cost split behind Advanced with a calm sentence,
+   valueless columns dropped), the customer Contracts tab (a draft
+   reads as one; the register bounded, € 0.00 rows collapsed, a search
+   box), Settings (a horizontal profile header at every width),
+   Services & catalogs and People (one top-level tab component — the
+   customer page's row — with subordinate second-level pills; "Lijst /
+   Categorieën / Eenheden"; "Catalogus van: …"), and the pill families
+   unified so chip text sits centred.
+10. **Decisions the owner holds** (from the inventory): where the extra
+    work register lives (Contracts tab vs Invoices/Work — web-Claude
+    recommends nearer Invoices); whether `ConfirmDialog`'s disabled
+    destructive styling stays; what the hour-type multiplier drives
+    (pay, price, both); the settings page's three independent saves.

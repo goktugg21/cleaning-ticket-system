@@ -16057,3 +16057,107 @@ body[data-toast-rail] .page-canvas { padding-bottom: 220px; }
   font-weight: 400;
   margin-top: 2px;
 }
+
+/* ===================================================================
+   P-4 — the joy pass. APPEND-ONLY block.
+   =================================================================== */
+
+/* Part E — the ONE amber button: an action that is allowed but is a
+   decision taken out of the customer's hands. Amber, never red. */
+.btn-warning {
+  background: var(--state-waiting-bg);
+  color: var(--state-waiting);
+  border: 1px solid var(--amber-border);
+}
+.btn-warning:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+.wp-undated-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* Part A — units where they are true. */
+.meerwerk-unit-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.meerwerk-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.meerwerk-qty .field-input {
+  width: 64px;
+}
+.meerwerk-qty-suffix {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.meerwerk-day-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.meerwerk-day-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* P-4 — pill unification (owner's root cause 2: chip text sat above
+   centre on the small pill variants). ONE base rule for every pill
+   family: inline-flex, centred, line-height 1. The customer page's
+   tab row (`.customer-tabs`) is THE top-level tab component; the
+   `.composer-toggle` pill is the subordinate second level; the
+   `.status-tabs` segmented control keeps its shape but centres. */
+.composer-toggle-btn,
+.status-tabs button,
+.status-chip,
+.filter-fold-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.composer-toggle-btn { height: 28px; padding: 0 12px; }
+.status-tabs button { height: 26px; padding: 0 12px; }
+.composer-toggle { flex-wrap: wrap; align-items: center; }
+/* Second-level pills read subordinate to a `.customer-tabs` row above. */
+.customer-tabs + .composer-toggle,
+.tabs-secondary {
+  margin-top: -6px;
+  margin-bottom: 14px;
+}
+
+/* P-4 — Settings: the profile card is a horizontal header at every width. */
+.account-overview-header {
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+}
+.account-identity { align-items: flex-start; text-align: left; }
+
+/* P-4 — a stat tile that opens something is a link and looks like one. */
+a.summary-stat-link { text-decoration: none; color: inherit; cursor: pointer; }
+a.summary-stat-link:hover .summary-stat-value { color: var(--green); }
+
+/* P-4 — the loading week on My Schedule (Part D). */
+.wp-day-loading { opacity: 0.7; }
+.wp-day-loading .wp-day-empty { font-style: italic; }

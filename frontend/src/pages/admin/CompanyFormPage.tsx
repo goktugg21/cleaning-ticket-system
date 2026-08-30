@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { CompanyRelationCards } from "../../components/CompanyRelationCards";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
@@ -591,9 +590,9 @@ export function CompanyFormPage() {
           Only on EDIT: a company that does not exist yet has no
           employees, buildings or customers to link, and the id these
           reads need is the thing `isCreate` means we do not have. */}
-      {!isCreate && company && (
-        <CompanyRelationCards companyId={company.id} />
-      )}
+      {/* P-4 (Part F) — the employees / buildings / customers tables
+          left this page: the edit page EDITS (logo, name, language,
+          policy, admins); the lists live on the detail page only. */}
 
       <ConfirmDialog
         ref={removeDialogRef}

@@ -202,6 +202,11 @@ export interface WorkPlanEntry {
    *  "unable" and nobody is assigned any more). Set on the rows of
    *  `stuck_entries`, null everywhere else. */
   stuck_age_days: number | null;
+  /** P-4 (Part E) — the waiting drawer acts: may THIS reader answer on
+   *  the customer's behalf (the ticket detail's own
+   *  `actions.can_override_customer_decision`, same rule, same answer).
+   *  False on every row that is not waiting on the customer. */
+  can_override_customer_decision: boolean;
   /** P-3 §A.5 — a REAL plan whose last day is past the deadline. Said
    *  on the card and the detail; nothing is blocked. */
   planned_after_deadline: boolean;

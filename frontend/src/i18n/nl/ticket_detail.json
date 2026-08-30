@@ -278,8 +278,6 @@
   "ew_cancel_action": "Meerwerk annuleren",
   "ew_cancel_reason_label": "Reden (verplicht)",
   "ew_cancel_done": "Meerwerk geannuleerd. Deze melding blijft zoals hij is.",
-  "ew_hours_saved": "{{hours}} uur opgeslagen — nieuw totaal {{total}}, gefactureerd in {{month}}.",
-  "ew_hours_saved_no_month": "{{hours}} uur opgeslagen — nieuw totaal {{total}}, gefactureerd in de maand van afronden.",
   "ew_plan_button": "Werk inplannen",
   "ew_money_unavailable": "Het meerwerk achter dit ticket kon niet worden gelezen:",
   "ew_plan_loading": "Plan openen…",
@@ -393,5 +391,9 @@
   "facts.not_planned_yet_age_other": "nog niet ingepland · al {{count}} dagen",
   "facts.planned_after_deadline": "Gepland na de deadline",
   "facts.contact_role": "functie: {{role}}",
-  "schedule.after_deadline_warning": "Deze dag is na de deadline ({{date}}). Opslaan kan; het werk is dan te laat."
+  "schedule.after_deadline_warning": "Deze dag is na de deadline ({{date}}). Opslaan kan; het werk is dan te laat.",
+  "book_hours.per_day_label_one": "Per dag, zoals gepland ({{count}} geplande dag)",
+  "book_hours.per_day_label_other": "Per dag, zoals gepland ({{count}} geplande dagen)",
+  "book_hours.per_day_hint": "Eén regel per persoon per geplande dag, vooraf ingevuld met de geplande uren. Pas een getal aan waar de dag anders liep.",
+  "book_hours.per_day_title": "Per persoon, per dag"
 }

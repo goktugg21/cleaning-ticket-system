@@ -72,6 +72,23 @@ function locationsText(contract: Contract, t: Translate): string {
 
 /** The sentence a contract reads as, wherever it is listed. */
 export function contractSentence(contract: Contract, t: Translate, locale: string): string {
+  // P-4 (Part F) — a DRAFT reads as one (P-3's "still editable" honesty):
+  // never "€ 0.00 per month since Aug until Aug" for a contract that is
+  // not in force. Rules frozen; words only.
+  if (contract.status === "DRAFT") {
+    const amount = contract.active_revision?.amount ?? contract.monthly_amount;
+    const draftParts = [
+      contract.customer_name ?? "",
+      t("sentence.draft_editable"),
+      Number(amount) > 0
+        ? `${amountPerPeriod(contract, t, locale)} ${t("sentence.for", { locations: locationsText(contract, t) })}`
+        : t("sentence.for", { locations: locationsText(contract, t) }),
+      contract.start_date
+        ? t("sentence.planned_from", { since: monthYear(contract.start_date, locale) })
+        : "",
+    ];
+    return draftParts.filter(Boolean).join(" — ");
+  }
   const parts = [
     contract.customer_name ?? "",
     `${amountPerPeriod(contract, t, locale)} ${t("sentence.for", { locations: locationsText(contract, t) })}`,

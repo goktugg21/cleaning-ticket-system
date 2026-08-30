@@ -278,8 +278,6 @@
   "ew_cancel_action": "Cancel extra work",
   "ew_cancel_reason_label": "Reason (required)",
   "ew_cancel_done": "Extra work cancelled. This ticket stays as it is.",
-  "ew_hours_saved": "Saved {{hours}} h — new total {{total}}, bills in {{month}}.",
-  "ew_hours_saved_no_month": "Saved {{hours}} h — new total {{total}}, bills in its completion month.",
   "ew_plan_button": "Plan the work",
   "ew_money_unavailable": "The extra work behind this ticket could not be read:",
   "ew_plan_loading": "Opening the plan…",
@@ -393,5 +391,9 @@
   "facts.not_planned_yet_age_other": "not planned yet · {{count}} days now",
   "facts.planned_after_deadline": "Planned after the deadline",
   "facts.contact_role": "role: {{role}}",
-  "schedule.after_deadline_warning": "This day is after the deadline ({{date}}). You can save; the work will then be late."
+  "schedule.after_deadline_warning": "This day is after the deadline ({{date}}). You can save; the work will then be late.",
+  "book_hours.per_day_label_one": "Per day, as planned ({{count}} planned day)",
+  "book_hours.per_day_label_other": "Per day, as planned ({{count}} planned days)",
+  "book_hours.per_day_hint": "One row per person per planned day, prefilled with the planned hours. Change a number where the day went differently.",
+  "book_hours.per_day_title": "Per person, per day"
 }

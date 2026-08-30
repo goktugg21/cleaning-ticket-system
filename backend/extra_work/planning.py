@@ -213,6 +213,9 @@ ERR_PLAN_REQUIREMENTS_UNMET = "plan_requirements_unmet"
 #: Task 3 — a past day is history; worked hours own it. Editing one
 #: takes the recorded override with a mandatory reason.
 ERR_PLAN_PAST_DAY_LOCKED = "plan_past_day_locked"
+#: P-4 — a NEW or CHANGED planned-hours row dated outside the committed
+#: window (first..last work day). The body names the days and the field.
+ERR_PLANNED_HOURS_OUTSIDE_WINDOW = "planned_hours_outside_window"
 
 
 def plan_requirements(extra_work) -> list[dict]:
@@ -816,6 +819,65 @@ def apply_plan(
                 + ", ".join(sorted(str(d) for d in past_changed))
                 + f" edited (override): {reason}"
             )
+
+    # ---- P-4 — THE PLAN'S DAYS ARE THE ONLY DAYS HOURS CAN SIT ON ----
+    #
+    # The owner typed 4 in the "no day yet" box and 4 on one day and the
+    # total read 12: the old dialog kept hours on a day that had dropped
+    # out of the window in state, in the total and in the payload, and
+    # this endpoint accepted them (crmtest EW 83 holds rows dated 26 Aug
+    # under a 27-29 Aug window). A NEW or CHANGED row dated outside
+    # first..last work day is refused, and the refusal names the days
+    # and the field so the dialog can say it AT the field. An UNCHANGED
+    # row outside a window that moved is kept: "people's days stayed on
+    # the old dates" must stay expressible, and resubmitting history
+    # unchanged is free (the past-day rule's own reading). Undated rows
+    # are never outside anything. No start date = no window = no rule,
+    # which is exactly what every pre-P-4 payload relied on.
+    if resolved_hours is not None:
+        window_start = (
+            data["provider_planned_date"]
+            if "provider_planned_date" in data
+            else extra_work.provider_planned_date
+        )
+        window_end = (
+            data["provider_planned_end_date"]
+            if "provider_planned_end_date" in data
+            else extra_work.provider_planned_end_date
+        )
+        if window_start is not None:
+            if window_end is None or window_end < window_start:
+                window_end = window_start
+            stored_all = {
+                (row.user_id, row.date, row.hour_type_id): row.hours
+                for row in extra_work.planned_hours.all()
+            }
+            outside: set = set()
+            for user_id, on_date, hour_type_id, hours in resolved_hours:
+                if on_date is None:
+                    continue
+                if window_start <= on_date <= window_end:
+                    continue
+                if stored_all.get((user_id, on_date, hour_type_id)) == hours:
+                    continue
+                outside.add(on_date)
+            if outside:
+                body = {
+                    "detail": (
+                        "Hours can only be planned on the plan's own days "
+                        "(first to last work day). Days outside: "
+                        + ", ".join(sorted(str(d) for d in outside))
+                        + "."
+                    ),
+                    "code": ERR_PLANNED_HOURS_OUTSIDE_WINDOW,
+                    "field": "planned_hours",
+                    "days": sorted(str(d) for d in outside),
+                    "window": [str(window_start), str(window_end)],
+                }
+                if name_the_work:
+                    body["extra_work"] = extra_work.id
+                    body["extra_work_title"] = extra_work.title
+                raise PlanRejected(body)
 
     # ---- the committed window, through the ONE date writer ------------
     date_fields = {

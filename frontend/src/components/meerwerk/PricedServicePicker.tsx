@@ -20,6 +20,7 @@ import type {
   CustomerServicePrice,
 } from "../../api/types";
 import { formatMoney } from "../../lib/intl";
+import { unitPhrase, unitSuffix } from "../../lib/unitLabel";
 import { BoundedList } from "../BoundedList";
 import {
   customPriceLine,
@@ -185,20 +186,30 @@ export function PricedServicePicker({
                     data-testid={row.testId}
                   />
                   <span>{row.line.label}</span>
+                  {/* P-4 (Part A) — the unit, where it is true. */}
+                  {unitPhrase(row.line.unit, t) && (
+                    <span className="meerwerk-unit-chip" data-testid={`${row.testId}-unit`}>
+                      {unitPhrase(row.line.unit, t)}
+                    </span>
+                  )}
                 </label>
                 <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
                   {inCart && (
-                    <input
-                      type="number"
-                      min={1}
-                      value={inCart.quantity}
-                      onChange={(event) =>
-                        onQuantity(inCart.key, Number(event.target.value) || 1)
-                      }
-                      style={{ width: 64 }}
-                      className="field-input"
-                      aria-label={t("meerwerk_flow.quantity")}
-                    />
+                    <span className="meerwerk-qty">
+                      <input
+                        type="number"
+                        min={1}
+                        value={inCart.quantity}
+                        onChange={(event) =>
+                          onQuantity(inCart.key, Number(event.target.value) || 1)
+                        }
+                        className="field-input"
+                        aria-label={t("meerwerk_flow.quantity")}
+                      />
+                      <span className="meerwerk-qty-suffix" data-testid={`${row.testId}-qty-unit`}>
+                        {unitSuffix(inCart.unit, t)}
+                      </span>
+                    </span>
                   )}
                   <span className="muted small">
                     {formatMoney(row.line.unitPrice ?? "0")}

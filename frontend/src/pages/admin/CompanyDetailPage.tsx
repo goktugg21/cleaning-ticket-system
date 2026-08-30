@@ -11,17 +11,15 @@ import {
   listCompanyAdminPeople,
   reactivateCompany,
 } from "../../api/admin";
-import type {
-  CompanyAdmin,
-  CompanyAdminPerson,
-  CompanySummary,
-} from "../../api/types";
+import type { CompanyAdmin, CompanyAdminPerson, CompanySummary, CompanyPolicyFlag } from "../../api/types";
 import { BoundedList } from "../../components/BoundedList";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
+import { COMPANY_POLICY_FLAGS } from "../../api/types";
 import { PageHeader } from "../../components/PageHeader";
+import { Toggle } from "../../components/Toggle";
 import { CompanyRelationCards } from "../../components/CompanyRelationCards";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
@@ -39,6 +37,13 @@ import { useSavedBanner } from "../../hooks/useSavedBanner";
  * The page intentionally does NOT mutate company fields or admin
  * memberships — those affordances live on the edit form.
  */
+const POLICY_KEY: Record<CompanyPolicyFlag, string> = {
+  provider_admin_may_manage_customer_company_admins: "manage_cca",
+  provider_admin_may_manage_catalog: "manage_catalog",
+  provider_admin_may_manage_customer_prices: "manage_prices",
+  provider_admin_may_quote_override_start: "quote_override",
+};
+
 export function CompanyDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -64,7 +69,9 @@ export function CompanyDetailPage() {
   // summary block for the same reason.
   const [summary, setSummary] = useState<CompanySummary | null>(null);
   const [admins, setAdmins] = useState<CompanyAdminPerson[]>([]);
-  const [loading, setLoading] = useState(false);
+  // P-4 (Part F) — starts TRUE: the first paint is "loading", never a
+  // blank canvas under the title (the void the owner reported).
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
@@ -208,6 +215,16 @@ export function CompanyDetailPage() {
     </>
   ) : null;
 
+  const policyRows = COMPANY_POLICY_FLAGS.map((flag) => ({
+    flag,
+    key: POLICY_KEY[flag],
+    on: company ? company[flag] : false,
+    dangerous: flag === "provider_admin_may_quote_override_start",
+  }));
+
+  const count = (value: number | null | undefined) =>
+    value === null || value === undefined ? null : value;
+
   return (
     <div data-testid="company-detail-page">
       <PageHeader
@@ -240,251 +257,220 @@ export function CompanyDetailPage() {
         </div>
       )}
 
-
       {loading && !company ? (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
         </div>
-      ) : company ? (
+      ) : !company ? (
+        /* P-4 (Part F) — NEVER A VOID. A company that could not be read
+           says so in words, with the way back. */
+        <section className="card" role="status" data-testid="company-detail-unavailable" style={{ padding: 22 }}>
+          <div className="section-head-title">{t("company_detail.unavailable_title")}</div>
+          <p className="muted" style={{ marginTop: 6 }}>
+            {error || t("company_detail.unavailable_body")}
+          </p>
+          <Link to="/admin/companies" className="btn btn-secondary btn-sm" style={{ marginTop: 10 }}>
+            {t("company_form.back")}
+          </Link>
+        </section>
+      ) : (
         <>
-          <section
-            className="card"
-            data-testid="company-detail-about-card"
-            style={{ padding: "20px 22px", marginBottom: 16 }}
-          >
-            <div className="section-head" style={{ marginBottom: 8 }}>
-              <div>
-                <div className="section-head-title">
-                  {t("company_detail.about_title")}
+          {/* P-4 (Part F) — FACTS FIRST, the ticket detail's rhythm: four
+              questions, always visible, then the folds. The stat tiles
+              are the counts of the folds below and open them. */}
+          <div className="facts" data-testid="company-detail-facts">
+            <div className="ew-ctx-block" data-testid="company-fact-who">
+              <div className="ew-ctx-label">{t("company_detail.fact_company")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">{company.name}</div>
+                <div className="ew-ctx-sub">{languageLabel}</div>
+              </div>
+            </div>
+            <div className="ew-ctx-block" data-testid="company-fact-status">
+              <div className="ew-ctx-label">{t("company_detail.field_status")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">
+                  {isActive
+                    ? t("company_detail.status_active")
+                    : t("company_detail.status_inactive")}
                 </div>
-                <div className="section-head-sub">
-                  {t("company_detail.about_desc")}
-                </div>
-              </div>
-            </div>
-
-            {/* Sprint 161 §2 — a compact TWO-COLUMN field grid, not
-                nine full-width rows. Sprint 157 was right that the page
-                under-displayed what its Edit changes, and every field it
-                added stays; what changed here is only the layout, which
-                had turned the About block into a 417px column of single
-                lines and pushed the stat tiles and relation cards - the
-                things that actually carry the page - below the fold. */}
-            <div className="detail-field-grid">
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_detail.field_name")}
-              </div>
-              <div className="detail-field-value">{company.name}</div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_detail.field_slug")}
-              </div>
-              <div className="detail-field-value">{company.slug}</div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_detail.field_default_language")}
-              </div>
-              <div className="detail-field-value">{languageLabel}</div>
-            </div>
-            {/* Sprint 157 §4 — the four provider-policy switches and the
-                logo. The Edit action already reached ALL of them: it
-                opens `CompanyFormPage`, which edits name, slug, default
-                language, logo and these four booleans, i.e. every
-                writable field `Company` has. What was missing was the
-                other half — the DETAIL page displayed four fields while
-                the form edited nine, so the Edit looked thin because the
-                page did not show what it changes.
-
-                Showing them here also makes the switches discoverable:
-                they govern what a provider ADMIN may do to a customer's
-                company admins, catalog and prices, and they were
-                previously invisible unless you opened the edit form. */}
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_policy.manage_cca_label")}
-              </div>
-              <div className="detail-field-value">
-                {company.provider_admin_may_manage_customer_company_admins
-                  ? t("admin.status_active")
-                  : t("company_detail.policy_off")}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_policy.manage_catalog_label")}
-              </div>
-              <div className="detail-field-value">
-                {company.provider_admin_may_manage_catalog
-                  ? t("admin.status_active")
-                  : t("company_detail.policy_off")}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_policy.manage_prices_label")}
-              </div>
-              <div className="detail-field-value">
-                {company.provider_admin_may_manage_customer_prices
-                  ? t("admin.status_active")
-                  : t("company_detail.policy_off")}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_policy.quote_override_label")}
-              </div>
-              <div className="detail-field-value">
-                {company.provider_admin_may_quote_override_start
-                  ? t("admin.status_active")
-                  : t("company_detail.policy_off")}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_detail.field_logo")}
-              </div>
-              <div className="detail-field-value">
-                {company.logo_url ? (
+                {company.logo_url && (
                   <img
                     src={company.logo_url}
                     alt=""
-                    style={{ maxHeight: 40, maxWidth: 160 }}
+                    style={{ maxHeight: 32, maxWidth: 140, marginTop: 4 }}
                     data-testid="company-detail-logo"
                   />
-                ) : (
-                  <span className="muted-empty">—</span>
                 )}
               </div>
             </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("company_detail.field_status")}
-              </div>
-              <div className="detail-field-value">
-                {isActive ? (
-                  <span className="cell-tag cell-tag-open">
-                    <i />
-                    {t("company_detail.status_active")}
-                  </span>
-                ) : (
-                  <span className="cell-tag cell-tag-closed">
-                    <i />
-                    {t("company_detail.status_inactive")}
-                  </span>
-                )}
+            <div className="ew-ctx-block" data-testid="company-fact-work">
+              <div className="ew-ctx-label">{t("company_detail.fact_work")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">
+                  {count(summary?.open_ticket_count) === null
+                    ? t("company_detail.fact_unknown")
+                    : t("company_detail.fact_open_tickets", { count: summary?.open_ticket_count ?? 0 })}
+                </div>
+                <div className="ew-ctx-sub">
+                  {count(summary?.open_extra_work_count) === null
+                    ? ""
+                    : t("company_detail.fact_open_extra_work", { count: summary?.open_extra_work_count ?? 0 })}
+                </div>
               </div>
             </div>
+            <div className="ew-ctx-block" data-testid="company-fact-people">
+              <div className="ew-ctx-label">{t("company_detail.fact_people")}</div>
+              <div className="ew-ctx-body">
+                <div className="ew-ctx-strong">
+                  {count(summary?.employee_count) === null
+                    ? t("company_detail.fact_unknown")
+                    : t("company_detail.fact_employees", { count: summary?.employee_count ?? 0 })}
+                </div>
+                <div className="ew-ctx-sub">
+                  {count(summary?.admin_count) === null
+                    ? ""
+                    : t("company_detail.fact_admins", { count: summary?.admin_count ?? 0 })}
+                </div>
+              </div>
             </div>
-          </section>
+          </div>
 
-          {/* Sprint 156 §1 — the tiles. A null count renders an em
-              dash, never a zero: the server returns null when a block is
-              not answerable for this actor, and 0 would be the different
-              and false claim that there are none. */}
           <div
             className="summary-grid summary-grid-chips"
             data-testid="company-detail-stats"
           >
             {[
-              { key: "buildings", label: t("company_detail.stat_buildings"), value: summary?.building_count },
-              { key: "customers", label: t("company_detail.stat_customers"), value: summary?.customer_count },
-              { key: "admins", label: t("company_detail.stat_admins"), value: summary?.admin_count },
-              { key: "employees", label: t("company_detail.stat_employees"), value: summary?.employee_count },
-              { key: "open-tickets", label: t("company_detail.stat_open_tickets"), value: summary?.open_ticket_count },
-              { key: "open-extra-work", label: t("company_detail.stat_open_extra_work"), value: summary?.open_extra_work_count },
-            ].map((stat) => (
-              <div
-                className="summary-stat"
-                key={stat.key}
-                style={{ cursor: "default" }}
-                data-testid={`company-detail-stat-${stat.key}`}
-              >
-                <span className="summary-stat-label">{stat.label}</span>
-                <span className="summary-stat-value">
-                  {stat.value === null || stat.value === undefined
-                    ? "—"
-                    : stat.value}
-                </span>
-              </div>
-            ))}
+              { key: "buildings", label: t("company_detail.stat_buildings"), value: summary?.building_count, href: "#company-buildings" },
+              { key: "customers", label: t("company_detail.stat_customers"), value: summary?.customer_count, href: "#company-customers" },
+              { key: "admins", label: t("company_detail.stat_admins"), value: summary?.admin_count, href: "#company-admins" },
+              { key: "employees", label: t("company_detail.stat_employees"), value: summary?.employee_count, href: "#company-employees" },
+            ]
+              .filter((stat) => stat.value !== null && stat.value !== undefined)
+              .map((stat) => (
+                <a
+                  className="summary-stat summary-stat-link"
+                  key={stat.key}
+                  href={stat.href}
+                  data-testid={`company-detail-stat-${stat.key}`}
+                >
+                  <span className="summary-stat-label">{stat.label}</span>
+                  <span className="summary-stat-value">{stat.value}</span>
+                </a>
+              ))}
           </div>
 
-          {/* Company admins. E-mail AND phone, and the name reaches the
-              person — the old card showed three columns of text with no
-              way to open anybody (§7). */}
+          {/* The policy: the read-only TWIN of the edit page's toggle
+              card — human captions, the danger note — never a column of
+              screaming-caps label rows. */}
           <section
             className="card"
-            data-testid="company-detail-admins-card"
+            data-testid="company-detail-policy-card"
             style={{ padding: "20px 22px", marginBottom: 16 }}
           >
             <div className="section-head" style={{ marginBottom: 8 }}>
               <div>
-                <div className="section-head-title">
-                  {t("company_detail.admins_title")}
-                </div>
-                <div className="section-head-sub">
-                  {t("company_detail.admins_desc")}
-                </div>
+                <div className="section-head-title">{t("company_policy.section_title")}</div>
+                <div className="section-head-sub">{t("company_policy.section_desc")}</div>
               </div>
             </div>
-
-            <BoundedList
-              size="md"
-              count={admins.length}
-              ariaLabel={t("company_detail.admins_title")}
-              testIdPrefix="company-detail-admins"
-              className="table-wrap"
-              emptyState={
-                <EmptyState
-                  icon={Users}
-                  title={t("company_detail.admins_empty")}
-                  compact
-                  testId="company-detail-admins-empty"
-                />
-              }
-            >
-              <table className="data-table data-table-dense">
-                <thead>
-                  <tr>
-                    <th>{t("users.col_full_name")}</th>
-                    <th>{t("users.col_email")}</th>
-                    <th>{t("customer_contacts.field_phone")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {admins.map((person) => (
-                    <tr key={person.id}>
-                      <td className="td-subject">
-                        <Link to={`/admin/users/${person.id}`}>
-                          {person.full_name || person.email}
-                        </Link>
-                      </td>
-                      <td>
-                        <a href={`mailto:${person.email}`}>{person.email}</a>
-                      </td>
-                      <td>
-                        {person.phone ? (
-                          <a href={`tel:${person.phone}`}>{person.phone}</a>
-                        ) : (
-                          <span className="muted-empty">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </BoundedList>
+            <div className="settings-toggle-group">
+              {policyRows.map((row) => (
+                <div key={row.flag} className="field" style={{ marginBottom: 8 }} data-testid={`company-detail-policy-${row.flag}`}>
+                  <label className="settings-toggle-row">
+                    <Toggle checked={row.on} disabled onChange={() => undefined} />
+                    <span>
+                      {t(`company_policy.${row.key}_label`)}
+                      {row.dangerous && (
+                        <span className="cell-tag cell-tag-rejected" style={{ marginLeft: 8 }}>
+                          <i />
+                          {t("company_policy.dangerous_badge")}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                  <p
+                    className="muted small"
+                    style={{ margin: "2px 0 0 30px", ...(row.dangerous ? { color: "var(--red-1, #b42318)" } : {}) }}
+                  >
+                    {t(`company_policy.${row.key}_helper`)}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {!isSuperAdmin && (
+              <p className="muted small" style={{ marginTop: 6 }}>
+                {t("company_policy.readonly_hint")}
+              </p>
+            )}
           </section>
-          {/* Sprint 163 §4 — the three relation cards, extracted so
-              the company EDIT page can carry them too. This page's
-              rendered output is unchanged: the component owns the
-              same fetches, the same three useEditMode controllers,
-              the same dialogs and the same handlers it used to hold
-              inline. */}
+
+          <details className="form-fold" id="company-admins" open data-testid="company-detail-admins-card">
+            <summary className="form-fold-summary">
+              {t("company_detail.admins_title")}
+              <span className="form-fold-summary-value">{admins.length}</span>
+            </summary>
+            <div className="form-fold-body">
+              <p className="muted small" style={{ marginTop: 0 }}>{t("company_detail.admins_desc")}</p>
+              <BoundedList
+                size="md"
+                count={admins.length}
+                ariaLabel={t("company_detail.admins_title")}
+                testIdPrefix="company-detail-admins"
+                className="table-wrap"
+                emptyState={
+                  <EmptyState
+                    icon={Users}
+                    title={t("company_detail.admins_empty")}
+                    compact
+                    testId="company-detail-admins-empty"
+                  />
+                }
+              >
+                <table className="data-table data-table-dense">
+                  <thead>
+                    <tr>
+                      <th>{t("users.col_full_name")}</th>
+                      <th>{t("users.col_email")}</th>
+                      {admins.some((person) => person.phone) && (
+                        <th>{t("customer_contacts.field_phone")}</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {admins.map((person) => (
+                      <tr key={person.id}>
+                        <td className="td-subject">
+                          <Link to={`/admin/users/${person.id}`}>
+                            {person.full_name || person.email}
+                          </Link>
+                        </td>
+                        <td>
+                          <a href={`mailto:${person.email}`}>{person.email}</a>
+                        </td>
+                        {admins.some((row) => row.phone) && (
+                          <td>{person.phone ? <a href={`tel:${person.phone}`}>{person.phone}</a> : ""}</td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </BoundedList>
+            </div>
+          </details>
+
+          {/* The three relation lists, each behind its own fold with its
+              count on the summary (bounded lists inside). */}
           <CompanyRelationCards companyId={company.id} />
+
+          {/* Advanced: the technical value nobody needs day to day. */}
+          <details className="action-fold" data-testid="company-detail-advanced">
+            <summary className="form-fold-summary">{t("company_detail.advanced")}</summary>
+            <dl className="action-fold-raw">
+              <dt>{t("company_detail.field_slug")}</dt>
+              <dd><code>{company.slug}</code></dd>
+            </dl>
+          </details>
 
           <ConfirmDialog
             ref={deactivateDialogRef}
@@ -496,7 +482,6 @@ export function CompanyDetailPage() {
             onConfirm={handleConfirmDeactivate}
             busy={actionBusy}
           />
-
           <ConfirmDialog
             ref={reactivateDialogRef}
             title={t("company_form.dialog_reactivate_title", {
@@ -508,7 +493,7 @@ export function CompanyDetailPage() {
             busy={actionBusy}
           />
         </>
-      ) : null}
+      )}
     </div>
   );
 }

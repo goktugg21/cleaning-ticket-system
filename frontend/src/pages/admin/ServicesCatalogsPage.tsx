@@ -43,11 +43,12 @@ export function ServicesCatalogsPage() {
         title={t("nav.services_catalogs")}
         testId="services-catalogs-page-header"
       />
+      {/* P-4 (Part F) — THE tab component (the customer page's row) at the
+          top level; the pages under it use the subordinate pill row. */}
       <div
-        className="composer-toggle"
+        className="customer-tabs"
         role="tablist"
         aria-label={t("nav.services_catalogs")}
-        style={{ marginBottom: 16 }}
         data-testid="services-catalogs-tabs"
       >
         {SERVICES_CATALOGS_TABS.map((spec) => (
@@ -56,7 +57,7 @@ export function ServicesCatalogsPage() {
             to={`/admin/services-catalogs/${spec.key}`}
             role="tab"
             aria-selected={spec.key === current.key}
-            className={`composer-toggle-btn${spec.key === current.key ? " active" : ""}`}
+            className={`customer-tab${spec.key === current.key ? " active" : ""}`}
             data-testid={`services-catalogs-tab-${spec.key}`}
           >
             {t(spec.labelKey)}

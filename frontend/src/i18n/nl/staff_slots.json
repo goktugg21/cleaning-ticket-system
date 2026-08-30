@@ -324,5 +324,12 @@
   "agenda.planned_after_deadline": "Gepland na de deadline",
   "agenda.show_more_one": "Toon er nog {{count}}",
   "agenda.show_more_other": "Toon er nog {{count}}",
-  "agenda.show_less": "Minder tonen"
+  "agenda.show_less": "Minder tonen",
+  "agenda.approve_on_behalf": "Goedkeuren namens de klant",
+  "agenda.approve_on_behalf_title": "{{ticket}} namens de klant goedkeuren?",
+  "agenda.approve_on_behalf_desc": "U beantwoordt een vraag die van de klant is. Het werk wordt goedgekeurd en afgesloten, en dit wordt vastgelegd met uw naam en de reden.",
+  "agenda.approve_on_behalf_placeholder": "Waarom beslist u voor de klant? Bijvoorbeeld: telefonisch goedgekeurd op 30 aug.",
+  "agenda.approve_on_behalf_confirm": "Goedkeuren namens de klant",
+  "agenda.approve_on_behalf_done": "{{ticket}} is namens de klant goedgekeurd en afgesloten.",
+  "agenda.loading_week": "Week wordt geladen…"
 }

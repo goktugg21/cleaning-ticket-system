@@ -1,210 +1,152 @@
 /**
- * W3-F — the plan modal. The screen for the layer W2-D built.
+ * P-4 (Part B) — the plan dialog, rebuilt as a guided staged flow.
  *
- * W2-D shipped `POST /api/extra-work/<id>/plan/` complete and tested,
- * and nothing anywhere called it. From the owner's chair a feature with
- * no screen does not exist, so this is the screen.
+ * THE LAW (owner, 2026-08-30): a person who knows nothing about
+ * computers or this system must be able to finish planning a job
+ * without knowing it beforehand. The owner walked the old dialog and
+ * got stressed, lost, and blocked by an invisible error. So: one thing
+ * at a time, plain words, every number on screen, every error where
+ * the person is.
  *
- * THE FOUR THINGS THIS DIALOG HAS TO GET RIGHT
- * --------------------------------------------
- * 1. **The dates are OURS, and they are labelled as ours.** The customer
- *    asked for a date and gave us a deadline; those live elsewhere on the
- *    page, they are written by a different endpoint, and this one cannot
- *    touch them. The whole reason the backend stores two pairs is that a
- *    provider's commitment is not the customer's request, so the two
- *    fields here say "we commit to" and the customer's dates are shown
- *    beside them, read-only, for comparison. An operator who cannot see
- *    what was asked for cannot judge what to commit to.
+ * THE THREE STAGES
+ *   1. WHEN — "First work day" / "Last work day". The customer's
+ *      wish and deadline in one plain strip beside them. A day past
+ *      the deadline warns INLINE, at the field, the moment it happens.
+ *   2. WHO AND HOW MUCH — the people; each person gets the plan's days
+ *      as chips, an hours box per chosen day, a box for "hours without
+ *      a day yet", a visible per-person total and a grand total. Any
+ *      day combination (2+3, 1+3, a single day) reads exactly as
+ *      chosen. The hours budget is optional and sits under the total.
+ *   3. DONE MEANS — the two completion switches, one line each.
  *
- * 2. **Hours are distributed across the ASSIGNED crew, and only them.**
- *    The backend refuses hours for anybody not currently assigned, and it
- *    refuses them with the same body it uses for an id that does not
- *    exist, so a client that guessed would get an unexplainable 400. The
- *    assignment list is therefore read FIRST and the rows are built from
- *    it. With nobody assigned there is nothing to distribute, and the
- *    dialog says so and points at the fix rather than rendering an empty
- *    table.
+ * THE DOUBLE-COUNT (the reason this was rebuilt first). The owner typed
+ * 4 in the "no day yet" box and 4 on one day and the total read 12.
+ * The old grid kept hours on a day that had dropped out of the window
+ * in state, in the total and in the payload (W7's "paging is display
+ * only", one level too far): the phantom 4 was a day nobody could see.
+ * Here a number counts only if it is ON SCREEN: a chosen day's box, the
+ * "no day yet" box, or a clearly marked "outside the plan" day kept
+ * from an earlier plan. Un-choosing a day deletes its hours, visibly.
+ * The server refuses new hours outside the window too
+ * (`planning.ERR_PLANNED_HOURS_OUTSIDE_WINDOW`, tested in
+ * `extra_work/tests/test_p4_plan_days.py`).
  *
- * 3. **Overrun WARNS. It never blocks.** The warning is live, it is
- *    unmissable, and the submit button stays enabled behind it. This is
- *    not a UX preference: in the reference system the hard cap exists as
- *    a complete function, `validateTotalHours()`, it is never called, and
- *    the model still carries the comment "// Hours validation removed per
- *    user request". Somebody built the block and the business had it
- *    removed. Do not add `disabled={overrun}` to the submit button.
+ * MOVING A PLAN. When the first work day moves and people already have
+ * days, the dialog asks in plain words: "Also move everyone's planned
+ * days along?" — yes shifts every dated row by the same difference
+ * INSIDE THE SAME SAVE (the payload replaces the distribution; no new
+ * endpoint); no keeps them and says "People's days stayed on the old
+ * dates — adjust them below", showing them as outside-the-plan chips.
  *
- * 4. **Absence means "leave it alone".** The payload is read by KEY
- *    PRESENCE server-side, so a field this dialog did not collect is
- *    OMITTED. The two switches are the sharp case: they are only sent
- *    when the operator actually touched them, because sending `false`
- *    for a switch nobody looked at is how the reference system ended up
- *    with 0 of 78 records carrying either flag.
+ * ERRORS LIVE WHERE THE PERSON IS. Field-level messages at the field,
+ * a one-line summary next to Save, the first error scrolled into
+ * view. The server's coded refusals (`plan_past_day_locked`,
+ * `planned_hours_outside_window`, the end-before-start pair, DRF
+ * per-field entries) are mapped to fields through
+ * `lib/apiFieldErrors`; the generic "That was not accepted" appears
+ * only when the server truly gave no field detail.
  *
- * The button says PLAN AND START because that is what the endpoint does
- * — planning and starting are one action, the way the reference system's
- * "Start Work" button is. Calling it "Save" would describe half of it.
+ * KEPT FROM BEFORE (the owner praised these): past days stay
+ * unplannable — a past chip is locked and only "Unlock past days" with
+ * a recorded reason opens it, the reason riding with the save
+ * (`past_days_override_reason`); a person added in this session gets
+ * today-and-future only; overrun WARNS and never blocks (the reference
+ * system's hard cap was removed by the business — do not add
+ * `disabled={overrun}`); absence means "leave it alone" for the two
+ * switches; the submit says PLAN AND START where starting is a real
+ * outcome and "Save the plan" elsewhere.
  *
- * NO FIGURE IN HERE IS MONEY. Budget hours is a planning and control
- * number; `rowAmounts()` is not imported and must never be.
+ * NO FIGURE IN HERE IS MONEY. Hours only; `rowAmounts()` is never
+ * imported.
  *
- * A non-native overlay, conditionally mounted — the same split
- * `BulkAssignDialog` documents. CLAUDE.md's render-it-unconditionally
- * rule is about the native `<dialog>` element, which this is not.
- *
- * W7 — THE THREE THINGS THAT WERE WRONG WITH IT ON THE LIVE SITE
- * --------------------------------------------------------------
- * 5. **You could record a night shift and not plan one.**
- *    `ExtraWorkPlannedHours` had no hour type while `TimeEntry` has had
- *    one since it was written, so the hours panel could render
- *    "Noah Bakker | Normale uren | Aug 10 | 3.00" for work already done
- *    and the plan had no vocabulary for it. Each person now carries one
- *    LINE PER KIND OF HOUR, from the same `timesheets.HourType` catalog
- *    the actuals use — never a second catalog, or planned-vs-actual
- *    becomes a join between two vocabularies.
- *
- * 6. **The grid scrolled sideways and took the useful part with it.**
- *    Person and hour type slid out of view first, so an operator typing
- *    into a cell three weeks along could not see whose row it was. Two
- *    rules: the left columns are FROZEN (`position: sticky`, see
- *    `.ew-plan-grid-scroll`), and the days are PAGED a week at a time
- *    rather than laid end to end. Paging is display only — hours on a
- *    day that is off screen stay in state, stay in every total and are
- *    still submitted.
- *
- * 7. **The feature was invisible until you did something else first.**
- *    With no window set there are no day columns, so the grid was one
- *    blank column and a sentence UNDER a scrollbar explained why. The
- *    owner could not find the feature at all. The window now comes
- *    FIRST, before the budget and the grid, and the waiting state lives
- *    INSIDE the grid where the eye already is — with the control that
- *    fixes it. The sentence is gone.
- *
- * W-HOURS5 — "AHMET IS NOT PLANNABLE" (Task 1), AND THE CREW (Task 2)
- * ---------------------------------------------------------------------
- * 8. **The last crew row was below the dialog's own fold.** Measured on
- *    ticket 373 at 1366x768: the dialog is 92vh (707px) over 1047px of
- *    content, and the fourth row — Ahmet's, last because his assignment
- *    was created last — started 18px BELOW the dialog's bottom edge.
- *    At 800px it was 12px visible, and a click at his cell's centre
- *    landed on the dialog's clipped scroll box, not on the input:
- *    "refuses input while others accept it". Nothing froze him; the
- *    row was simply where a click could not reach, and the only hint
- *    that the dialog scrolls was an overlay scrollbar that is invisible
- *    on a touchpad.
- *
- *    Three things fix that, none of them per person. The dialog is now
- *    a fixed HEAD, a scrolling BODY and a fixed FOOT (`.ew-plan-body`,
- *    `.ew-plan-foot` in plan-crew.css): the footer's top edge marks the
- *    fold on every screen, and the actions never scroll away. A cell
- *    that gains focus scrolls itself fully into view (`onFocus` ->
- *    `scrollIntoView`), so a click on a half-visible input, or a Tab
- *    into one, brings the row up instead of leaving it clipped. And the
- *    crew pickers above the grid are one-line chip pickers rather than
- *    checkbox lists, so the grid starts higher on the screen.
- *
- * 9. **The modal owns the whole crew.** People AND responsible managers
- *    are added (multi-select, one Add) and removed (chip x) here, and
- *    the People tab stays the other door to the SAME crew: the page
- *    writes through the ticket's own endpoints and `tickets.crew_sync`
- *    mirrors every change onto the plan's `ExtraWorkAssignment` rows.
- *    Past-day interplay, as ruled: a person added in this session gets
- *    today-and-future cells only — their past cells stay frozen even
- *    when the past is unlocked (they were not there); removing a person
- *    clears only their today-and-future plan, their PAST planned hours
- *    stay as history, and deleting those is possible only by hand —
- *    unlock with a reason, then zero the cells.
- *
- * 10. **Unlock asks first.** "Unlock past days" opens the reason
- *    prompt; nothing unlocks until the reason is given and confirmed,
- *    and the state line then says that the reason lands on the save.
- *    Today never carries a lock glyph: `isPastDay` is strictly before
- *    today.
+ * A non-native overlay, conditionally mounted — CLAUDE.md's
+ * render-it-unconditionally rule is about the native `<dialog>`.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-
-import { dayRange } from "../../lib/planGridDays";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  AlertTriangle,
-  CalendarPlus,
-  ChevronLeft,
-  ChevronRight,
-  Lock,
-  Users,
-  X,
-} from "lucide-react";
+import { AlertTriangle, Lock, Users, X } from "lucide-react";
 
 import type {
+  AssignmentCandidate,
   ExtraWorkAssignment,
   ExtraWorkPlanPayload,
   ExtraWorkRequestDetail,
 } from "../../api/types";
 import type { HourType } from "../../api/timesheets.types";
 import { listHourTypes } from "../../api/timesheets";
+import { dayRange } from "../../lib/planGridDays";
+import { readApiErrorDetail } from "../../lib/apiFieldErrors";
+import { formatDate } from "../../lib/intl";
+import { hourTypeLabel } from "../../lib/hourTypeLabel";
 import { ChipMultiSelect } from "../ChipMultiSelect";
 import { Toggle } from "../Toggle";
 import "./plan-crew.css";
-import type { AssignmentCandidate } from "../../api/types";
-import { hourTypeLabel } from "../../lib/hourTypeLabel";
-import { formatDate } from "../../lib/intl";
 
-/** W7 — how many day columns are on screen at once.
- *
- *  THE GRID USED TO SCROLL SIDEWAYS AND TAKE THE USEFUL PART WITH IT.
- *  Person and hour type slid out of view first, so an operator typing
- *  into a cell three weeks along could not see whose row it was. Two
- *  rules fix that and this is the second: the left columns are frozen
- *  (see `.ew-plan-grid-scroll` in index.css), and the day range is
- *  PAGED rather than laid out end to end. Seven is a week, which is the
- *  unit a work window is actually discussed in.
- *
- *  Paging is display only. Hours entered on a day that is not currently
- *  on screen stay in state, stay in every total, and are still
- *  submitted — the same rule that already applied to a day dropped out
- *  of the window entirely. */
-const DAY_PAGE_SIZE = 7;
-
-/** One line of the grid: a person, and which kind of hour this line
- *  budgets. `hourType` null is ORDINARY hours — the state every plan
- *  written before W7 is in, and the right answer for an operator who
- *  does not split the day. */
+/** One line of a person's hours: ordinary (`hourType` null) or one
+ *  kind of hour from the company's own `timesheets.HourType` catalog —
+ *  never a second vocabulary. */
 interface CrewLine {
   userId: number;
   hourType: number | null;
 }
 
-/** Hours arithmetic, in one place, on strings that arrive as decimals.
- *  Returns a number for comparison only — every value that reaches the
- *  API goes back out as the string the operator typed. */
+/** Hours arithmetic on the strings the person typed. Comparison only;
+ *  what reaches the API is the string. */
 function toHours(value: string): number {
   const parsed = Number.parseFloat((value ?? "").replace(",", "."));
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** `19-11` — short enough for a column head, unambiguous in a window
- *  that never spans a year. */
-function formatDayHeader(day: string): string {
-  const [, month, dayOfMonth] = day.split("-");
-  return `${dayOfMonth}-${month}`;
-}
-
-/** The LOCAL wall date, not toISOString() — the UTC date is yesterday's
- *  or tomorrow's for half the world. */
+/** The LOCAL wall date — the UTC date is yesterday's or tomorrow's for
+ *  half the world. */
 function localToday(): string {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
-    now.getDate(),
-  )}`;
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-/** Whole days from `from` to `to`, both YYYY-MM-DD, in local time. */
+function parseDay(day: string): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** Signed whole days from `from` to `to`, both YYYY-MM-DD, local. */
 function daysBetweenIso(from: string, to: string): number {
-  const [fy, fm, fd] = from.split("-").map(Number);
-  const [ty, tm, td] = to.split("-").map(Number);
-  const a = new Date(fy, fm - 1, fd).getTime();
-  const b = new Date(ty, tm - 1, td).getTime();
-  return Math.max(0, Math.round((b - a) / 86400000));
+  return Math.round((parseDay(to).getTime() - parseDay(from).getTime()) / 86400000);
+}
+
+function shiftDay(day: string, delta: number): string {
+  const date = parseDay(day);
+  date.setDate(date.getDate() + delta);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** A cell key: `user|YYYY-MM-DD|hourType`, the day "" for "no day yet"
+ *  and the type "" for ordinary hours. One flat key per number on
+ *  screen, so an accidental whole-row overwrite is unspellable. */
+function cellKey(userId: number, day: string, hourType: number | null): string {
+  return `${userId}|${day}|${hourType ?? ""}`;
+}
+function splitKey(key: string): { userId: number; day: string; hourType: number | null } {
+  const [rawUser, rawDay, rawType] = key.split("|");
+  return { userId: Number(rawUser), day: rawDay, hourType: rawType === "" ? null : Number(rawType) };
+}
+
+/** Which fields the dialog can point an error at. */
+type FieldKey = "start" | "end" | "people" | "hours" | "move" | "past" | "budget";
+
+const FIELD_ORDER: FieldKey[] = ["start", "end", "move", "people", "hours", "past", "budget"];
+
+/** Scroll the first field that has an error into view. Looks the field
+ *  up by its `data-plan-field` attribute inside the open dialog. */
+function scrollToFirstField(fields: Partial<Record<FieldKey, string>>): void {
+  const first = FIELD_ORDER.find((key) => fields[key]);
+  if (!first) return;
+  const el = document.querySelector<HTMLElement>(
+    `[data-testid="extra-work-plan-dialog"] [data-plan-field="${first}"]`,
+  );
+  el?.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 export function PlanWorkDialog({
@@ -213,6 +155,7 @@ export function PlanWorkDialog({
   assignmentsLoading,
   busy,
   error,
+  rawError,
   onCancel,
   onSubmit,
   candidates,
@@ -232,45 +175,33 @@ export function PlanWorkDialog({
   assignments: ExtraWorkAssignment[];
   assignmentsLoading: boolean;
   busy: boolean;
+  /** The page's one-sentence reading of the last refusal. Shown next to
+   *  Save ONLY when `rawError` carries no field detail. */
   error: string;
+  /** P-4 — the refusal itself, so its field detail can land at the
+   *  field. Optional: a page that passes none gets the sentence only. */
+  rawError?: unknown;
   onCancel: () => void;
   onSubmit: (payload: ExtraWorkPlanPayload) => void;
-  /** W-UX1 §2 — people the plan area may still add, from the SERVER's
-   *  own eligibility helper. R2: the page hands over only the
-   *  not-yet-assigned, so the picker offers exactly what is addable and
-   *  the crew above is the default. */
   candidates: AssignmentCandidate[];
   candidatesLoading: boolean;
   assignBusy: boolean;
   assignError: string;
   onAssign: (userIds: number[]) => void;
-  /** W-TABS Task 3b — the RESPONSIBLE MANAGER is assigned HERE. The
-   *  current managers render from `assignments` (role=MANAGER), so this
-   *  component still makes no visibility or eligibility decision of its
-   *  own. Empty candidates = no picker. */
   managerCandidates?: AssignmentCandidate[];
   managerBusy?: boolean;
   onAssignManagers?: (userIds: number[]) => void;
-  /** Renders an X on each manager chip. Absent = chips without remove. */
   onRemoveManager?: (userId: number) => void;
-  /** W-HOURS5 Task 2 — renders an X on each PERSON chip. The page takes
-   *  the person off the job through the ticket's own endpoint; the plan
-   *  crew follows (`tickets.crew_sync`). Absent = chips without remove. */
   onRemovePerson?: (userId: number) => void;
   removeBusy?: boolean;
-  /** W-PLAN Task 2 — mounted from an operational (spawned) ticket page.
-   *  SAME dialog, SAME store (the plan lives on the EW pre- and
-   *  post-spawn); what changes is the words: the submit says "Save the
-   *  plan", because starting is the ticket's business now. The page
-   *  passes `start: false` with the payload for the same reason. */
+  /** Mounted from a spawned ticket: same dialog, same store; the
+   *  submit says "Save the plan" because starting is the ticket's
+   *  business now. */
   postSpawn?: boolean;
 }) {
-  const { t } = useTranslation(["extra_work", "common"]);
+  const { t, i18n } = useTranslation(["extra_work", "common"]);
+  const locale = i18n.language || "nl";
 
-  // W-UX F38 -- the starred fields, checked before the request leaves.
-  // The server stays the authority; this only says which star is empty.
-  const [requiredError, setRequiredError] = useState("");
-  // W-UX F39 -- Escape closes when idle, the parts modal's exact rule.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy) onCancel();
@@ -278,35 +209,20 @@ export function PlanWorkDialog({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel, busy]);
-  const [budget, setBudget] = useState(ew.budget_hours ?? "");
-  const [start, setStart] = useState(ew.provider_planned_date ?? "");
+
+  // ---- stage 1: when ---------------------------------------------------
+  const seededStart = ew.provider_planned_date ?? "";
+  const [start, setStart] = useState(seededStart);
   const [end, setEnd] = useState(ew.provider_planned_end_date ?? "");
-  const [photoRequired, setPhotoRequired] = useState(
-    ew.file_upload_required ?? false,
-  );
-  const [notesRequired, setNotesRequired] = useState(
-    ew.completion_notes_required ?? false,
-  );
-  // Only sent when the operator moved them — see (4) in the docblock.
-  // ONE FLAG PER SWITCH. Both are seeded from the row here, so a shared
-  // flag would merely re-write what was already stored — but the bulk
-  // dialog has nothing to seed from and there the same shortcut wipes
-  // the untouched flag on every selected work. Same shape in both, so
-  // the safe one cannot drift into the unsafe one.
-  const [photoTouched, setPhotoTouched] = useState(false);
-  const [notesTouched, setNotesTouched] = useState(false);
+  const days = useMemo(() => dayRange(start, end || start), [start, end]);
+  const todayStr = localToday();
+  const isPastDay = (day: string) => day !== "" && day < todayStr;
 
-  // W6-H — THE GRID. Keyed `userId|YYYY-MM-DD`, with the empty string
-  // as the day for "planned, day not decided". W7 adds the hour type as
-  // a third segment, empty for ordinary hours. One flat map rather than
-  // a nested one because every read here is a single cell and a flat
-  // key makes an accidental whole-row overwrite unspellable.
-  const cellKey = (userId: number, day: string, hourType: number | null) =>
-    `${userId}|${day}|${hourType ?? ""}`;
-  const lineKey = (line: CrewLine) => `${line.userId}|${line.hourType ?? ""}`;
-
-  // Seeded from what is already planned, so reopening the dialog shows
-  // the plan rather than a blank grid.
+  // ---- stage 2: who and how much ------------------------------------
+  const [budget, setBudget] = useState(ew.budget_hours ?? "");
+  /** What the server holds right now, keyed like the cells. Unchanged
+   *  values on days outside the window are allowed through the save
+   *  (the server keeps them); anything else outside is refused. */
   const seeded = useMemo(() => {
     const map = new Map<string, string>();
     for (const row of ew.planned_hours ?? []) {
@@ -320,14 +236,16 @@ export function PlanWorkDialog({
     for (const [key, value] of seeded) initial[key] = value;
     return initial;
   });
+  /** Which days each person has CHOSEN: `user|day`. A chosen day shows
+   *  its box even while empty; un-choosing deletes the day's hours. */
+  const [chosen, setChosen] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const row of ew.planned_hours ?? []) {
+      if (row.date) initial[`${row.user_id}|${row.date}`] = true;
+    }
+    return initial;
+  });
 
-  // W7 — THE HOUR-TYPE CATALOG, read from the work's OWN company.
-  //
-  // Fetched here rather than passed in: this dialog is the only screen
-  // that plans hour types, and the page that mounts it is being rebuilt
-  // by another chat this sprint. `is_active` because an archived type is
-  // retired for NEW entries — the same contract the actuals have, and
-  // the same rule the server enforces on the write.
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -336,9 +254,6 @@ export function PlanWorkDialog({
         if (!cancelled) setHourTypes(rows);
       })
       .catch(() => {
-        // A catalog we could not read leaves the operator with ordinary
-        // hours, which is exactly what they had before W7. Never an
-        // error banner over a dialog whose main job still works.
         if (!cancelled) setHourTypes([]);
       });
     return () => {
@@ -353,17 +268,9 @@ export function PlanWorkDialog({
           const known = hourTypes.find((h) => h.id === id);
           return known ? hourTypeLabel(known, t) : undefined;
         })() ??
-        // Seeded from a row whose type has since been archived: name it
-        // from the plan rather than printing a bare id.
-        (ew.planned_hours ?? []).find((r) => r.hour_type === id)
-          ?.hour_type_name ??
+        (ew.planned_hours ?? []).find((r) => r.hour_type === id)?.hour_type_name ??
         t("plan.hour_type_unknown"));
 
-  // WHICH LINES EXIST. One per person by default (ordinary hours), plus
-  // any extra kind of hour already planned or added in this session.
-  // Derived once from the plan and then owned locally: adding a line is
-  // an edit, and re-deriving it from props would undo the operator's
-  // click on the next render.
   const [extraLines, setExtraLines] = useState<CrewLine[]>(() => {
     const seen = new Set<string>();
     const out: CrewLine[] = [];
@@ -377,32 +284,20 @@ export function PlanWorkDialog({
     return out;
   });
 
-  // EVERY LINE IN THE GRID, in render order: each assigned person, then
-  // their ordinary-hours line, then their extra kinds in the order the
-  // catalog lists them — so two people with the same kinds of hour read
-  // the same way down the grid.
-  //
-  // ONE memo, keyed by person, and it is the single source for the
-  // totals, the row spans and the submit. Deriving it three times would
-  // be three chances for the screen and the payload to disagree about
-  // which lines exist.
-  const linesByUser = useMemo(() => {
-    const map = new Map<number, CrewLine[]>();
-    for (const a of assignments) {
-      const extras = extraLines
-        .filter((line) => line.userId === a.user_id)
-        .sort((x, y) => {
-          const xi = hourTypes.findIndex((h) => h.id === x.hourType);
-          const yi = hourTypes.findIndex((h) => h.id === y.hourType);
-          return (xi < 0 ? 999 : xi) - (yi < 0 ? 999 : yi);
-        });
-      map.set(a.user_id, [{ userId: a.user_id, hourType: null }, ...extras]);
-    }
-    return map;
-  }, [assignments, extraLines, hourTypes]);
+  const workers = assignments.filter((a) => a.role !== "MANAGER");
+  const managers = assignments.filter((a) => a.role === "MANAGER");
+  const personName = (a: ExtraWorkAssignment) => a.user_full_name || a.user_email;
 
-  const linesFor = (userId: number): CrewLine[] =>
-    linesByUser.get(userId) ?? [{ userId, hourType: null }];
+  const linesFor = (userId: number): CrewLine[] => {
+    const extras = extraLines
+      .filter((line) => line.userId === userId)
+      .sort((x, y) => {
+        const xi = hourTypes.findIndex((h) => h.id === x.hourType);
+        const yi = hourTypes.findIndex((h) => h.id === y.hourType);
+        return (xi < 0 ? 999 : xi) - (yi < 0 ? 999 : yi);
+      });
+    return [{ userId, hourType: null }, ...extras];
+  };
 
   const addLine = (userId: number, hourType: number) =>
     setExtraLines((prev) =>
@@ -410,256 +305,304 @@ export function PlanWorkDialog({
         ? prev
         : [...prev, { userId, hourType }],
     );
-
-  // Removing a line clears its cells too. A line with no cells submits
-  // nothing, so leaving the values behind would resurrect them the next
-  // time the same kind of hour was added — a stale number nobody typed.
   const removeLine = (userId: number, hourType: number) => {
     setExtraLines((prev) =>
       prev.filter((l) => !(l.userId === userId && l.hourType === hourType)),
     );
     setHours((prev) => {
       const next = { ...prev };
-      const prefix = `${userId}|`;
-      const suffix = `|${hourType}`;
       for (const key of Object.keys(next)) {
-        if (key.startsWith(prefix) && key.endsWith(suffix)) delete next[key];
+        const k = splitKey(key);
+        if (k.userId === userId && k.hourType === hourType) delete next[key];
       }
       return next;
     });
   };
 
-  // THE COLUMNS ARE THE COMMITTED WINDOW the plan already stores. They
-  // follow the two date fields above live, so moving the window
-  // re-draws the grid without a save — which is the only way the two
-  // controls can be understood as one decision.
-  const days = useMemo(() => dayRange(start, end), [start, end]);
-
-  // Task 3 — PAST DAYS ARE HISTORY; WORKED HOURS OWN THEM.
-  //
-  // Columns strictly before today render FROZEN: value visible, cell
-  // read-only. This is data safety, not permission — hiding the past
-  // would hide the plan's history, so the numbers stay on screen and
-  // only the INPUT is withheld. The one way in is the recorded
-  // override: "Unlock past days" asks for a reason FIRST, the unlock
-  // holds for this dialog session, and the reason rides with the save
-  // (`past_days_override_reason`), which the server requires whenever
-  // a past row actually changes and writes onto the timeline. Today
-  // and the future stay free; today never carries a lock glyph.
-  const todayStr = localToday();
-  /* W-TABS Task 3c — WHAT THE BUTTON ACTUALLY DRIVES. `apply_plan`
-     only starts work from CUSTOMER_APPROVED (`_start` -> the
-     IN_PROGRESS transition; anything earlier reports a skipped start).
-     On the pricing-gate flow (REQUESTED / UNDER_REVIEW) the button
-     saves a plan and starts nothing — starting happens after pricing —
-     so the label says "Save plan" there and keeps "Plan and start"
-     only where starting is a real outcome. */
-  const submitStarts = !postSpawn && ew.status === "CUSTOMER_APPROVED";
+  // ---- past days: history, worked hours own them -----------------------
   const [pastUnlocked, setPastUnlocked] = useState(false);
   const [pastReason, setPastReason] = useState("");
   const [pastPromptOpen, setPastPromptOpen] = useState(false);
-  const hasPastDays = days.some((day) => day < todayStr);
-  const isPastDay = (day: string) => day !== "" && day < todayStr;
-
-  /** W-HOURS5 Task 2 — people put on the job IN THIS SESSION. Their
-   *  past cells stay frozen even when the past is unlocked: they were
-   *  not on the job then, and "adding a person opens today and future
-   *  cells only" is the ruling. Held as ids so a person removed and
-   *  re-added in the same session is still "added this session". */
   const [addedThisSession, setAddedThisSession] = useState<number[]>([]);
   const isFrozen = (userId: number, day: string) =>
     isPastDay(day) && (!pastUnlocked || addedThisSession.includes(userId));
-  const frozenTitle = (userId: number, day: string) =>
-    isPastDay(day) && pastUnlocked && addedThisSession.includes(userId)
-      ? t("plan.added_past_frozen")
-      : t("plan.past_locked_tooltip");
 
   const handleAssign = (userIds: number[]) => {
     if (userIds.length === 0) return;
-    setAddedThisSession((prev) => [
-      ...prev,
-      ...userIds.filter((id) => !prev.includes(id)),
-    ]);
+    setAddedThisSession((prev) => [...prev, ...userIds.filter((id) => !prev.includes(id))]);
     onAssign(userIds);
   };
   const handleAssignManagers = (userIds: number[]) => {
     if (!onAssignManagers || userIds.length === 0) return;
-    setAddedThisSession((prev) => [
-      ...prev,
-      ...userIds.filter((id) => !prev.includes(id)),
-    ]);
-    // W-FIX1 D10 (audit F35) — ONE write for the whole pick. The loop
-    // this replaces fired N requests behind one busy flag: the button
-    // re-enabled after the first answer and the last reload won.
+    setAddedThisSession((prev) => [...prev, ...userIds.filter((id) => !prev.includes(id))]);
     onAssignManagers(userIds);
   };
 
-  // W7 — THE VISIBLE WEEK. Display only; `days` above stays the whole
-  // window and is what every total and the submit read.
-  const [dayPage, setDayPage] = useState(0);
-  const pageCount = Math.max(1, Math.ceil(days.length / DAY_PAGE_SIZE));
-  // Clamped rather than reset: shrinking the window while looking at
-  // the last page should land on the new last page, not throw the
-  // operator back to the first.
-  const safePage = Math.min(dayPage, pageCount - 1);
-  const visibleDays = days.slice(
-    safePage * DAY_PAGE_SIZE,
-    safePage * DAY_PAGE_SIZE + DAY_PAGE_SIZE,
-  );
-
-  // W7 fix 3 — the control the waiting state points at.
-  const startRef = useRef<HTMLInputElement | null>(null);
-  const focusWindow = () => {
-    startRef.current?.focus();
-    startRef.current?.scrollIntoView({ block: "center" });
+  // ---- the day chips ----------------------------------------------------
+  const isChosen = (userId: number, day: string) => Boolean(chosen[`${userId}|${day}`]);
+  const chooseDay = (userId: number, day: string) => {
+    setChosen((prev) => ({ ...prev, [`${userId}|${day}`]: true }));
+  };
+  const unchooseDay = (userId: number, day: string) => {
+    setChosen((prev) => {
+      const next = { ...prev };
+      delete next[`${userId}|${day}`];
+      return next;
+    });
+    setHours((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        const k = splitKey(key);
+        if (k.userId === userId && k.day === day) delete next[key];
+      }
+      return next;
+    });
   };
 
-  // Every cell in the grid, plus every UNDATED cell, plus any cell on a
-  // day that is no longer in the window. That last group matters: hours
-  // planned for a Thursday that has since been dropped from the window
-  // still exist server-side and still count, so hiding them from the
-  // total would put the screen and the server at odds — the reference
-  // system's §4.4 defect, one level down.
-  //
-  // W-HOURS5 — only keys of people ON THE CREW. A person removed in
-  // this session may still have typed values in `hours`; they are
-  // neither sent nor counted, or the total on screen would name hours
-  // the save will not write.
-  const liveKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const [userId, lines] of linesByUser) {
-      for (const line of lines) {
-        keys.add(`${userId}||${line.hourType ?? ""}`);
-        for (const day of days) {
-          keys.add(`${userId}|${day}|${line.hourType ?? ""}`);
-        }
-      }
-    }
+  /** Days a person has hours on that are NOT between first and last
+   *  work day — kept from an earlier plan. Shown, never hidden, never
+   *  counted silently. */
+  const outsideDaysFor = (userId: number): string[] => {
+    const inWindow = new Set(days);
+    const out = new Set<string>();
     for (const key of Object.keys(hours)) {
-      if (linesByUser.has(Number(key.split("|")[0]))) keys.add(key);
+      const k = splitKey(key);
+      if (k.userId !== userId || k.day === "" || inWindow.has(k.day)) continue;
+      if ((hours[key] ?? "").trim() === "") continue;
+      out.add(k.day);
     }
-    return keys;
-  }, [linesByUser, days, hours]);
+    return Array.from(out).sort();
+  };
+  const removeOutsideDay = (userId: number, day: string) => unchooseDay(userId, day);
 
-  const distributed = Array.from(liveKeys).reduce(
-    (sum, key) => sum + toHours(hours[key] ?? ""),
+  // ---- moving the plan --------------------------------------------------
+  const [moveBaseline, setMoveBaseline] = useState(seededStart);
+  const [moveDecision, setMoveDecision] = useState<"moved" | "kept" | null>(null);
+  const crewIds = useMemo(() => new Set(workers.map((a) => a.user_id)), [workers]);
+  const datedKeys = useMemo(
+    () =>
+      Object.keys(hours).filter((key) => {
+        const k = splitKey(key);
+        return k.day !== "" && crewIds.has(k.userId) && (hours[key] ?? "").trim() !== "";
+      }),
+    [hours, crewIds],
+  );
+  const moveDelta = moveBaseline && start ? daysBetweenIso(moveBaseline, start) : 0;
+  const moveQuestionOpen = moveDelta !== 0 && datedKeys.length > 0 && moveDecision === null;
+
+  const moveDaysAlong = () => {
+    let touchesPast = false;
+    setHours((prev) => {
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        const k = splitKey(key);
+        if (k.day === "" || !crewIds.has(k.userId)) {
+          next[key] = value;
+          continue;
+        }
+        const moved = shiftDay(k.day, moveDelta);
+        if (isPastDay(k.day) || isPastDay(moved)) touchesPast = true;
+        next[cellKey(k.userId, moved, k.hourType)] = value;
+      }
+      return next;
+    });
+    setChosen((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const key of Object.keys(prev)) {
+        const [rawUser, day] = key.split("|");
+        if (!crewIds.has(Number(rawUser))) {
+          next[key] = true;
+          continue;
+        }
+        next[`${rawUser}|${shiftDay(day, moveDelta)}`] = true;
+      }
+      return next;
+    });
+    if (end) setEnd(shiftDay(end, moveDelta));
+    setMoveBaseline(start);
+    setMoveDecision("moved");
+    if (touchesPast && !pastUnlocked) setPastPromptOpen(true);
+  };
+  const keepOldDays = () => {
+    setMoveBaseline(start);
+    setMoveDecision("kept");
+  };
+  // A further change of the first day re-asks relative to the new baseline.
+  const onStartChange = (value: string) => {
+    setStart(value);
+    if (moveDecision !== null && value !== moveBaseline) setMoveDecision(null);
+  };
+
+  // ---- totals: only what is on screen ------------------------------------
+  const inWindow = useMemo(() => new Set(days), [days]);
+  const countsKey = (key: string): boolean => {
+    const k = splitKey(key);
+    if (!crewIds.has(k.userId)) return false;
+    if (k.day === "") return true;
+    if (inWindow.has(k.day)) return isChosen(k.userId, k.day);
+    // Outside the plan: counted only while it is SHOWN as an outside chip.
+    return (hours[key] ?? "").trim() !== "";
+  };
+  const personTotal = (userId: number) =>
+    Object.keys(hours).reduce(
+      (sum, key) =>
+        splitKey(key).userId === userId && countsKey(key) ? sum + toHours(hours[key] ?? "") : sum,
+      0,
+    );
+  const distributed = Object.keys(hours).reduce(
+    (sum, key) => (countsKey(key) ? sum + toHours(hours[key] ?? "") : sum),
     0,
   );
-
-  const personTotal = (userId: number) => {
-    let sum = 0;
-    for (const key of liveKeys) {
-      if (key.startsWith(`${userId}|`)) sum += toHours(hours[key] ?? "");
-    }
-    return sum;
-  };
-
-  // Across every LINE on that day, not one cell per person: a day with
-  // eight normal and four night hours totals twelve.
-  const dayTotal = (day: string) => {
-    let sum = 0;
-    for (const [userId, lines] of linesByUser) {
-      for (const line of lines) {
-        sum += toHours(hours[cellKey(userId, day, line.hourType)] ?? "");
-      }
-    }
-    return sum;
-  };
   const budgetHours = toHours(budget);
-  // A budget of zero is a real budget; only a BLANK one means "no budget
-  // set", which is nothing to overrun. Same reading as the server's
-  // `hours_overrun`, which returns None when `budget_hours` is null.
   const hasBudget = budget.trim() !== "";
   const overrun = hasBudget && distributed > budgetHours;
   const overBy = (distributed - budgetHours).toFixed(2);
+  const fmtHours = (n: number) => n.toFixed(2).replace(".", locale.startsWith("nl") ? "," : ".");
 
-  const workers = assignments.filter((a) => a.role !== "MANAGER");
-  const managers = assignments.filter((a) => a.role === "MANAGER");
-  const personName = (a: ExtraWorkAssignment) => a.user_full_name || a.user_email;
+  // ---- stage 3: done means ------------------------------------------------
+  const [photoRequired, setPhotoRequired] = useState(ew.file_upload_required ?? false);
+  const [notesRequired, setNotesRequired] = useState(ew.completion_notes_required ?? false);
+  const [photoTouched, setPhotoTouched] = useState(false);
+  const [notesTouched, setNotesTouched] = useState(false);
+
+  // ---- errors live where the person is -------------------------------------
+  const [clientErrors, setClientErrors] = useState<Partial<Record<FieldKey, string>>>({});
+  /** Each field container carries `data-plan-field`; the first error is
+   *  scrolled to by looking it up in the dialog — no refs read during
+   *  render. */
+  const bind = (key: FieldKey) => ({ "data-plan-field": key });
+
+  /** The server's refusal, read for its field detail. */
+  const serverErrors = useMemo((): {
+    fields: Partial<Record<FieldKey, string>>;
+    summary: string;
+    pastDays: string[];
+  } => {
+    const empty = { fields: {}, summary: "", pastDays: [] as string[] };
+    if (!rawError) return { ...empty, summary: error };
+    const d = readApiErrorDetail(rawError);
+    const fields: Partial<Record<FieldKey, string>> = {};
+    let pastDays: string[] = [];
+    const dayList = d.days.map((day) => formatDate(day)).join(", ");
+    switch (d.code) {
+      case "provider_planned_end_before_start":
+        fields.end = t("plan.err_end_before_start");
+        break;
+      case "provider_planned_end_without_start":
+        fields.start = t("plan.err_start_required");
+        break;
+      case "plan_past_day_locked":
+        fields.past = t("plan.err_past_locked", { days: dayList });
+        pastDays = d.days;
+        break;
+      case "planned_hours_outside_window":
+        fields.hours = t("plan.err_outside_window", { days: dayList });
+        break;
+      case "planned_hours_invalid":
+      case "planned_hours_duplicate_user":
+      case "planned_hours_hour_type_invalid":
+        fields.hours = t("plan.err_hours_rejected");
+        break;
+      default:
+        break;
+    }
+    for (const name of Object.keys(d.fields)) {
+      if (name === "provider_planned_date") fields.start ??= t("plan.err_field_rejected");
+      else if (name === "provider_planned_end_date") fields.end ??= t("plan.err_field_rejected");
+      else if (name === "budget_hours") fields.budget ??= t("plan.err_field_rejected");
+      else if (name === "planned_hours") fields.hours ??= t("plan.err_hours_rejected");
+    }
+    const hasField = Object.keys(fields).length > 0;
+    return {
+      fields,
+      // The generic sentence ONLY when the server gave no field detail.
+      summary: hasField ? t("plan.summary_fix_marked", { count: Object.keys(fields).length }) : error,
+      pastDays,
+    };
+  }, [rawError, error, t]);
+
+  const fieldError = (key: FieldKey): string | undefined =>
+    clientErrors[key] ?? serverErrors.fields[key];
+
+  // A past-day refusal opens the unlock prompt where the reason goes —
+  // derived, not synced: the prompt is open while the server says so
+  // and the person has neither unlocked nor dismissed THAT refusal.
+  const [dismissedPastError, setDismissedPastError] = useState<unknown>(null);
+  const promptOpen =
+    pastPromptOpen ||
+    (serverErrors.pastDays.length > 0 && !pastUnlocked && dismissedPastError !== rawError);
+
+  // The first error scrolls into view. Client errors scroll from
+  // `submit()` itself; a server refusal scrolls when it arrives. The
+  // latest field map is read through a ref so the effect depends on
+  // the refusal alone.
+  useEffect(() => {
+    if (!rawError) return;
+    scrollToFirstField(serverErrors.fields);
+  }, [rawError, serverErrors]);
+
+  const submitStarts = !postSpawn && ew.status === "CUSTOMER_APPROVED";
+  const startAfterDeadline = Boolean(start && ew.deadline && start > ew.deadline);
+  const endAfterDeadline = Boolean(end && ew.deadline && end > ew.deadline);
 
   function submit() {
-    const missing: string[] = [];
-    if (start === "") missing.push(t("plan.our_start_label"));
-    if (budget.trim() === "") missing.push(t("plan.budget_hours_label"));
-    if (workers.length === 0) missing.push(t("plan.people_label"));
-    if (missing.length > 0) {
-      setRequiredError(t("plan.required_missing", { fields: missing.join(", ") }));
+    const errors: Partial<Record<FieldKey, string>> = {};
+    if (start === "") errors.start = t("plan.err_start_required");
+    if (end !== "" && start !== "" && end < start) errors.end = t("plan.err_end_before_start");
+    if (workers.length === 0) errors.people = t("plan.err_people_required");
+    if (moveQuestionOpen) errors.move = t("plan.err_move_undecided");
+    if (promptOpen && !pastUnlocked) errors.past = t("plan.err_past_reason_required");
+    setClientErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      scrollToFirstField(errors);
       return;
     }
-    setRequiredError("");
     const payload: ExtraWorkPlanPayload = {};
-    // OMIT, never default. A blank budget field means "leave the stored
-    // budget alone"; clearing a budget is a different intention and this
-    // dialog does not offer it.
     if (budget.trim() !== "") payload.budget_hours = budget.trim();
-    if (start !== "") payload.provider_planned_date = start;
-    if (end !== "") payload.provider_planned_end_date = end;
+    payload.provider_planned_date = start;
+    payload.provider_planned_end_date = end !== "" ? end : start;
     if (assignments.length > 0) {
-      // W6-H — one entry per NON-EMPTY cell. A blank cell is not "zero
-      // hours on that day", it is "no plan for that day", and sending a
-      // zero for every day of a two-week window would fill the grid
-      // with rows nobody entered.
-      const cells: {
-        user: number;
-        date?: string | null;
-        hour_type?: number | null;
-        hours: string;
-      }[] = [];
-      for (const [userId, lines] of linesByUser) {
+      const cells: { user: number; date?: string | null; hour_type?: number | null; hours: string }[] = [];
+      for (const a of assignments) {
         let any = false;
-        for (const line of lines) {
-          // Every day of the window PLUS the undated cell PLUS any day
-          // this person already has hours on that has since dropped out
-          // of the window — the last group is why this walks `liveKeys`
-          // rather than `days`. Hours on a dropped day still exist
-          // server-side and still count; omitting them here would
-          // silently delete them.
-          for (const key of liveKeys) {
-            const [rawUser, rawDay, rawType] = key.split("|");
-            if (Number(rawUser) !== userId) continue;
-            if ((rawType === "" ? null : Number(rawType)) !== line.hourType) {
-              continue;
-            }
-            const raw = (hours[key] ?? "").trim();
-            if (raw === "") continue;
-            cells.push({
-              user: userId,
-              date: rawDay === "" ? null : rawDay,
-              // Omitted-or-null both mean ORDINARY hours server-side, so
-              // the ordinary line sends null and reads identically to
-              // every pre-W7 payload.
-              hour_type: line.hourType,
-              hours: raw.replace(",", "."),
-            });
-            any = true;
-          }
+        for (const key of Object.keys(hours)) {
+          const k = splitKey(key);
+          if (k.userId !== a.user_id) continue;
+          if (!countsKey(key) && k.day !== "") continue;
+          const raw = (hours[key] ?? "").trim();
+          if (raw === "") continue;
+          cells.push({
+            user: a.user_id,
+            date: k.day === "" ? null : k.day,
+            hour_type: k.hourType,
+            hours: raw.replace(",", "."),
+          });
+          any = true;
         }
-        // The person-level exception is deliberate and unchanged:
-        // somebody on the crew with nothing anywhere still gets one
-        // undated ordinary zero row, because "on the job, no hours
-        // budgeted yet" is a state the plan has always expressed and
-        // losing it would drop them off the screen entirely.
-        if (!any) {
-          cells.push({ user: userId, date: null, hour_type: null, hours: "0" });
-        }
+        // On the crew with nothing anywhere: one undated ordinary zero
+        // row, the state the plan has always used for "on the job, no
+        // hours yet".
+        if (!any) cells.push({ user: a.user_id, date: null, hour_type: null, hours: "0" });
       }
       payload.planned_hours = cells;
     }
     if (photoTouched) payload.file_upload_required = photoRequired;
     if (notesTouched) payload.completion_notes_required = notesRequired;
-    // Task 3 — the unlock's reason travels with the save. The server
-    // demands it exactly when a past row actually changed, so sending
-    // it on an unlock that touched nothing is inert.
     if (pastUnlocked && pastReason.trim() !== "") {
-      (
-        payload as ExtraWorkPlanPayload & {
-          past_days_override_reason?: string;
-        }
-      ).past_days_override_reason = pastReason.trim();
+      (payload as ExtraWorkPlanPayload & { past_days_override_reason?: string }).past_days_override_reason =
+        pastReason.trim();
     }
     onSubmit(payload);
   }
 
+  const summaryLine =
+    Object.values(clientErrors).find(Boolean) ??
+    (Object.keys(serverErrors.fields).length > 0 ? serverErrors.summary : error);
+
+  const dayChipLabel = (day: string) =>
+    parseDay(day).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
+
+  // ---- render --------------------------------------------------------------
   return (
     <div
       className="ew-plan-overlay"
@@ -668,719 +611,570 @@ export function PlanWorkDialog({
       aria-label={t(postSpawn ? "plan.dialog_title_planned" : "plan.dialog_title")}
       data-testid="extra-work-plan-dialog"
     >
-      {/* W-HOURS5 Task 1 — HEAD / BODY / FOOT. The body is the one
-          thing that scrolls; the foot's top edge is the fold, on every
-          screen, and the actions never leave it. */}
-      <div className="card ew-plan-dialog ew-plan-dialog--framed">
+      <div className="card ew-plan-dialog ew-plan-dialog--framed ew-plan-dialog--guided">
         <div className="ew-plan-head">
-          {/* W-UX F40 -- on a job that is already spawned, starting is the
-              ticket's business; the title says what this dialog does. */}
           <h3 className="section-title ew-plan-dialog-title">
             {t(postSpawn ? "plan.dialog_title_planned" : "plan.dialog_title")}
           </h3>
-          <p className="muted small ew-plan-dialog-sub">
-            {t("plan.dialog_subtitle")}
-          </p>
+          <p className="muted small ew-plan-dialog-sub">{t("plan.dialog_subtitle")}</p>
         </div>
 
         <div className="ew-plan-body" data-testid="extra-work-plan-body">
-        {error && (
-          <div
-            className="alert-error"
-            role="alert"
-            data-testid="extra-work-plan-error"
-          >
-            {error}
-          </div>
-        )}
-
-        {/* W7 fix 3 — THE WINDOW COMES FIRST.
-            It used to sit under the budget, and the grid below it drew
-            no day columns until it was set — so the dialog opened on a
-            budget box and one blank column, with a sentence beneath a
-            scrollbar explaining why. The owner never found the feature.
-            The decision that unlocks the rest of the screen is now the
-            first thing on it, numbered, and the grid says the same
-            thing again in its own body rather than in a footnote.
-
-            OUR dates, with the customer's shown beside them read-only.
-            Two pairs of dates on one screen is exactly the confusion the
-            labels have to prevent. */}
-        <div className="ew-plan-section">
-          <div className="ew-plan-section-title">
-            <span className="ew-plan-step">1</span>
-            {t("plan.our_window_title")}
-          </div>
-          <div className="ew-plan-dates">
-            <label className="field">
-              <span className="muted small">
-                {t("plan.our_start_label")}
-                <span className="ew-plan-req" aria-hidden="true">*</span>
-              </span>
-              <input
-                ref={startRef}
-                type="date"
-                className="field-input"
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-                data-testid="extra-work-plan-start"
-              />
-            </label>
-            <label className="field">
-              <span className="muted small">{t("plan.our_end_label")}</span>
-              <input
-                type="date"
-                className="field-input"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-                data-testid="extra-work-plan-end"
-              />
-            </label>
-          </div>
-          <div
-            className="ew-plan-customer-dates"
-            data-testid="extra-work-plan-customer-dates"
-          >
-            <span className="muted small">
-              {t("plan.customer_asked_label")}
-            </span>
-            <span className="muted small">
-              {t("plan.customer_preferred", {
-                date: ew.preferred_date
-                  ? formatDate(ew.preferred_date)
-                  : t("detail.empty_dash"),
-              })}
-            </span>
-            <span className="muted small">
-              {t("plan.customer_deadline", {
-                date: ew.deadline
-                  ? formatDate(ew.deadline)
-                  : t("detail.empty_dash"),
-              })}
-            </span>
-          </div>
-          {/* W-FIX1 B3 (audit F15) — allowed, flagged, never blocked. */}
-          {end && ew.deadline && end > ew.deadline && (
-            <p
-              className="muted small ew-hours-tone-over"
-              data-testid="extra-work-plan-end-after-deadline"
-            >
-              {t("plan.end_after_deadline", {
-                count: daysBetweenIso(ew.deadline, end),
-              })}
-            </p>
-          )}
-        </div>
-
-        <div className="ew-plan-section">
-          <label className="field ew-plan-budget">
-            <span className="muted small">
-              {t("plan.budget_hours_label")}
-              <span className="ew-plan-req" aria-hidden="true">*</span>
-            </span>
-            <input
-              type="number"
-              min="0"
-              step="0.25"
-              inputMode="decimal"
-              className="field-input"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value)}
-              data-testid="extra-work-plan-budget"
-            />
-            <span className="muted small">{t("plan.budget_hours_hint")}</span>
-          </label>
-        </div>
-
-        <div className="ew-plan-section">
-          <div className="ew-plan-section-title">
-            <span className="ew-plan-step">2</span>
-            {t("plan.hours_title")}
-            <span className="ew-plan-req" aria-hidden="true">*</span>
-          </div>
-          {/* W-HOURS5 Task 2 — THE CREW, both halves, owned here.
-              People and responsible managers each read from the same
-              `assignments` rows the grid reads, each carry a chip x
-              (when the page offers a remove) and a one-line multi-select
-              adder over the candidates the page handed over. Provider-
-              only by construction: the plan dialog has no customer entry
-              point. */}
-          <div className="ew-plan-crew" data-testid="extra-work-plan-crew">
-            <div
-              className="ew-plan-crew-group"
-              data-testid="extra-work-plan-people"
-            >
-              <span className="field-label">
-                {t("plan.people_label")}
-                <span className="ew-plan-req" aria-hidden="true">*</span>
-              </span>
-              <div className="ew-plan-manager-row">
-                {workers.map((a) => (
-                  <span
-                    key={a.id}
-                    className="parts-chip"
-                    data-testid="extra-work-plan-person-chip"
-                    data-user-id={a.user_id}
-                  >
-                    {personName(a)}
-                    {onRemovePerson && (
-                      <button
-                        type="button"
-                        className="ew-plan-type-remove"
-                        disabled={removeBusy || assignBusy}
-                        onClick={() => onRemovePerson(a.user_id)}
-                        aria-label={t("plan.person_remove", {
-                          name: personName(a),
-                        })}
-                        data-testid="extra-work-plan-person-remove"
-                      >
-                        <X size={12} aria-hidden="true" />
-                      </button>
-                    )}
-                  </span>
-                ))}
-                {workers.length === 0 && (
-                  <span
-                    className="muted small"
-                    data-testid="extra-work-plan-people-none"
-                  >
-                    {t("plan.people_none")}
-                  </span>
-                )}
-              </div>
-              {onRemovePerson && (
-                <p
-                  className="muted small ew-plan-crew-hint"
-                  data-testid="extra-work-plan-remove-hint"
-                >
-                  {t("plan.remove_person_hint")}
-                </p>
-              )}
-              <CrewAdder
-                candidates={candidates}
-                loading={candidatesLoading}
-                busy={assignBusy}
-                error={assignError}
-                onAssign={handleAssign}
-                placeholderKey="plan.add_people_pick"
-                buttonKey="plan.add_people"
-                testId="extra-work-plan-crew-add"
-              />
+          {/* ---- 1. WHEN ---- */}
+          <div className="ew-plan-section" data-testid="extra-work-plan-stage-when">
+            <div className="ew-plan-section-title">
+              <span className="ew-plan-step">1</span>
+              {t("plan.stage_when")}
             </div>
-
-            {/* W-TABS Task 3b — RESPONSIBLE MANAGERS, beside the crew.
-                Same rows, same chips, same adder. */}
-            <div
-              className="ew-plan-crew-group"
-              data-testid="extra-work-plan-manager"
-            >
-              <span className="field-label">
-                {t("plan.manager_label")}
-                <span className="ew-plan-req" aria-hidden="true">*</span>
-              </span>
-              <div className="ew-plan-manager-row">
-                {managers.map((a) => (
-                  <span
-                    key={a.id}
-                    className="parts-chip"
-                    data-testid="extra-work-plan-manager-chip"
-                    data-user-id={a.user_id}
-                  >
-                    {personName(a)}
-                    {onRemoveManager && (
-                      <button
-                        type="button"
-                        className="ew-plan-type-remove"
-                        disabled={managerBusy || removeBusy}
-                        onClick={() => onRemoveManager(a.user_id)}
-                        aria-label={t("plan.manager_remove", {
-                          name: personName(a),
-                        })}
-                        data-testid="extra-work-plan-manager-remove"
-                      >
-                        <X size={12} aria-hidden="true" />
-                      </button>
-                    )}
-                  </span>
-                ))}
-                {managers.length === 0 && (
-                  <span
-                    className="muted small"
-                    data-testid="extra-work-plan-manager-none"
-                  >
-                    {t("plan.manager_none")}
-                  </span>
-                )}
-              </div>
-              {onAssignManagers && (
-                <CrewAdder
-                  candidates={managerCandidates}
-                  loading={false}
-                  busy={managerBusy}
-                  error=""
-                  onAssign={handleAssignManagers}
-                  placeholderKey="plan.add_managers_pick"
-                  buttonKey="plan.add_managers_button"
-                  testId="extra-work-plan-manager-add"
+            <div className="ew-plan-dates">
+              <label className="field" {...bind("start")}>
+                <span className="field-label">{t("plan.first_day_label")}</span>
+                <input
+                  type="date"
+                  className={`field-input${fieldError("start") ? " field-input-invalid" : ""}`}
+                  value={start}
+                  onChange={(e) => onStartChange(e.target.value)}
+                  aria-invalid={Boolean(fieldError("start"))}
+                  data-testid="extra-work-plan-start"
                 />
-              )}
-            </div>
-          </div>
-          {assignmentsLoading ? (
-            <div className="loading-bar">
-              <div className="loading-bar-fill" />
-            </div>
-          ) : assignments.length === 0 ? (
-            /* Not an empty table — the backend refuses hours for anybody
-               not assigned, so the fix is upstream and the message says
-               where. */
-            <div
-              className="ew-plan-empty"
-              data-testid="extra-work-plan-no-crew"
-            >
-              <Users size={18} aria-hidden="true" />
-              <div>
-                <div className="ew-plan-empty-title">
-                  {t("plan.no_crew_title")}
-                </div>
-                <div className="muted small">{t("plan.no_crew_hint")}</div>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* W6-H — PEOPLE DOWN THE SIDE, PLANNED DAYS ACROSS THE
-                  TOP. The columns are the committed window the plan
-                  already stores, so setting the window and filling the
-                  grid are one decision rather than two screens.
-
-                  The "no day yet" column is always present and is not a
-                  fallback: a plan can legitimately say "Gokhan: 8
-                  hours" before anyone has decided which day, and that
-                  was the ONLY thing this dialog could say before W6-H.
-                  Dropping it would break every existing plan. */}
-              {/* The pager. Only when there is more than one week to
-                  page through — a three-day job gets no controls it
-                  does not need. */}
-              {pageCount > 1 && (
-                <div className="ew-plan-day-pager">
-                  <span
-                    className="ew-plan-day-pager-label"
-                    data-testid="extra-work-plan-day-page-label"
-                  >
-                    {t("plan.day_page_label", {
-                      from: safePage * DAY_PAGE_SIZE + 1,
-                      to: safePage * DAY_PAGE_SIZE + visibleDays.length,
-                      total: days.length,
-                    })}
+                {fieldError("start") && (
+                  <span className="field-error" role="alert" data-testid="extra-work-plan-start-error">
+                    {fieldError("start")}
                   </span>
+                )}
+                {!fieldError("start") && startAfterDeadline && (
+                  <span
+                    className="field-warning"
+                    role="status"
+                    data-testid="extra-work-plan-start-after-deadline"
+                  >
+                    {t("plan.after_deadline_inline", { date: formatDate(ew.deadline ?? "") })}
+                  </span>
+                )}
+              </label>
+              <label className="field" {...bind("end")}>
+                <span className="field-label">{t("plan.last_day_label")}</span>
+                <input
+                  type="date"
+                  className={`field-input${fieldError("end") ? " field-input-invalid" : ""}`}
+                  value={end}
+                  min={start || undefined}
+                  onChange={(e) => setEnd(e.target.value)}
+                  aria-invalid={Boolean(fieldError("end"))}
+                  data-testid="extra-work-plan-end"
+                />
+                <span className="muted small">{t("plan.last_day_hint")}</span>
+                {fieldError("end") && (
+                  <span className="field-error" role="alert" data-testid="extra-work-plan-end-error">
+                    {fieldError("end")}
+                  </span>
+                )}
+                {!fieldError("end") && endAfterDeadline && (
+                  <span
+                    className="field-warning"
+                    role="status"
+                    data-testid="extra-work-plan-end-after-deadline"
+                  >
+                    {t("plan.after_deadline_inline", { date: formatDate(ew.deadline ?? "") })}
+                  </span>
+                )}
+              </label>
+            </div>
+            {(ew.preferred_date || ew.deadline) && (
+              <p className="ew-plan-customer-strip" data-testid="extra-work-plan-customer-dates">
+                {[
+                  ew.preferred_date &&
+                    t("plan.customer_would_like", { date: formatDate(ew.preferred_date) }),
+                  ew.deadline && t("plan.must_be_done_by", { date: formatDate(ew.deadline) }),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
+            {moveQuestionOpen && (
+              <div
+                className="ew-plan-question"
+                {...bind("move")}
+                role="group"
+                data-testid="extra-work-plan-move-question"
+              >
+                <p className="ew-plan-question-text">
+                  {t("plan.move_question", {
+                    from: formatDate(moveBaseline),
+                    to: formatDate(start),
+                    count: Math.abs(moveDelta),
+                  })}
+                </p>
+                <div className="ew-plan-question-actions">
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setDayPage(Math.max(0, safePage - 1))}
-                    disabled={safePage === 0}
-                    aria-label={t("plan.day_page_prev")}
-                    data-testid="extra-work-plan-day-prev"
+                    className="btn btn-primary btn-sm"
+                    onClick={moveDaysAlong}
+                    data-testid="extra-work-plan-move-yes"
                   >
-                    <ChevronLeft size={14} aria-hidden="true" />
+                    {t("plan.move_yes")}
                   </button>
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() =>
-                      setDayPage(Math.min(pageCount - 1, safePage + 1))
-                    }
-                    disabled={safePage >= pageCount - 1}
-                    aria-label={t("plan.day_page_next")}
-                    data-testid="extra-work-plan-day-next"
+                    className="btn btn-secondary btn-sm"
+                    onClick={keepOldDays}
+                    data-testid="extra-work-plan-move-no"
                   >
-                    <ChevronRight size={14} aria-hidden="true" />
+                    {t("plan.move_no")}
                   </button>
                 </div>
-              )}
-              {hasPastDays && (
-                <div
-                  className="ew-plan-past-bar"
-                  data-testid="extra-work-plan-past-bar"
-                >
-                  {pastUnlocked ? (
+                {fieldError("move") && (
+                  <span className="field-error" role="alert">
+                    {fieldError("move")}
+                  </span>
+                )}
+              </div>
+            )}
+            {moveDecision === "kept" && datedKeys.some((key) => !inWindow.has(splitKey(key).day)) && (
+              <p className="field-warning" role="status" data-testid="extra-work-plan-move-kept">
+                {t("plan.move_kept_warning")}
+              </p>
+            )}
+          </div>
+
+          {/* ---- 2. WHO AND HOW MUCH ---- */}
+          <div className="ew-plan-section" data-testid="extra-work-plan-stage-who">
+            <div className="ew-plan-section-title">
+              <span className="ew-plan-step">2</span>
+              {t("plan.stage_who")}
+            </div>
+
+            <div className="ew-plan-crew" data-testid="extra-work-plan-crew">
+              <div className="ew-plan-crew-group" data-testid="extra-work-plan-people" {...bind("people")}>
+                <span className="field-label">{t("plan.people_label")}</span>
+                <div className="ew-plan-manager-row">
+                  {workers.map((a) => (
                     <span
-                      className="muted small"
-                      data-testid="extra-work-plan-past-unlocked"
+                      key={a.id}
+                      className="parts-chip"
+                      data-testid="extra-work-plan-person-chip"
+                      data-user-id={a.user_id}
                     >
-                      {t("plan.unlock_past_active")}
+                      {personName(a)}
+                      {onRemovePerson && (
+                        <button
+                          type="button"
+                          className="ew-plan-type-remove"
+                          disabled={removeBusy || assignBusy}
+                          onClick={() => onRemovePerson(a.user_id)}
+                          aria-label={t("plan.person_remove", { name: personName(a) })}
+                          data-testid="extra-work-plan-person-remove"
+                        >
+                          <X size={12} aria-hidden="true" />
+                        </button>
+                      )}
                     </span>
-                  ) : pastPromptOpen ? (
-                    /* Task 3 — the reason is asked BEFORE anything
-                       unlocks. Confirm is disabled until it is given;
-                       "Keep locked" backs out without unlocking. */
-                    <div className="ew-plan-past-prompt">
-                      <textarea
-                        className="field-textarea"
-                        rows={2}
-                        autoFocus
-                        value={pastReason}
-                        onChange={(e) => setPastReason(e.target.value)}
-                        placeholder={t("plan.unlock_past_reason_placeholder")}
-                        aria-label={t(
-                          "plan.unlock_past_reason_placeholder",
-                        )}
-                        data-testid="extra-work-plan-past-reason"
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        disabled={pastReason.trim() === ""}
-                        onClick={() => setPastUnlocked(true)}
-                        data-testid="extra-work-plan-past-unlock-confirm"
-                      >
-                        {t("plan.unlock_past_confirm")}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                          setPastPromptOpen(false);
-                          setPastReason("");
-                        }}
-                        data-testid="extra-work-plan-past-unlock-cancel"
-                      >
-                        {t("plan.unlock_past_cancel")}
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setPastPromptOpen(true)}
-                      title={t("plan.past_locked_tooltip")}
-                      data-testid="extra-work-plan-past-unlock"
-                    >
-                      <Lock size={13} aria-hidden="true" />
-                      <span style={{ marginLeft: 6 }}>
-                        {t("plan.unlock_past")}
-                      </span>
-                    </button>
+                  ))}
+                  {workers.length === 0 && (
+                    <span className="muted small" data-testid="extra-work-plan-people-none">
+                      {t("plan.people_none")}
+                    </span>
                   )}
                 </div>
-              )}
-              <div className="ew-plan-grid-scroll">
-                <table className="data-table ew-plan-grid">
-                  <thead>
-                    <tr>
-                      <th className="ew-plan-grid-name">
-                        {t("plan.grid_person")}
-                      </th>
-                      <th className="ew-plan-grid-type">
-                        {t("plan.grid_hour_type")}
-                      </th>
-                      <th className="ew-plan-grid-cell">
-                        {t("plan.grid_no_day")}
-                      </th>
-                      {visibleDays.map((day) => (
-                        <th
-                          key={day}
-                          className="ew-plan-grid-cell"
-                          title={
-                            isPastDay(day)
-                              ? t("plan.past_locked_tooltip")
-                              : undefined
-                          }
-                          data-testid="extra-work-plan-day-head"
-                          data-day={day}
-                          data-past={isPastDay(day) ? "true" : "false"}
+                {fieldError("people") && (
+                  <span className="field-error" role="alert" data-testid="extra-work-plan-people-error">
+                    {fieldError("people")}
+                  </span>
+                )}
+                <CrewAdder
+                  candidates={candidates}
+                  loading={candidatesLoading}
+                  busy={assignBusy}
+                  error={assignError}
+                  onAssign={handleAssign}
+                  placeholderKey="plan.add_people_pick"
+                  buttonKey="plan.add_people"
+                  testId="extra-work-plan-crew-add"
+                />
+              </div>
+
+              <div className="ew-plan-crew-group" data-testid="extra-work-plan-manager">
+                <span className="field-label">{t("plan.manager_label")}</span>
+                <div className="ew-plan-manager-row">
+                  {managers.map((a) => (
+                    <span
+                      key={a.id}
+                      className="parts-chip"
+                      data-testid="extra-work-plan-manager-chip"
+                      data-user-id={a.user_id}
+                    >
+                      {personName(a)}
+                      {onRemoveManager && (
+                        <button
+                          type="button"
+                          className="ew-plan-type-remove"
+                          disabled={managerBusy || removeBusy}
+                          onClick={() => onRemoveManager(a.user_id)}
+                          aria-label={t("plan.manager_remove", { name: personName(a) })}
+                          data-testid="extra-work-plan-manager-remove"
                         >
-                          {isPastDay(day) && !pastUnlocked && (
-                            <Lock
-                              size={10}
-                              aria-hidden="true"
-                              className="ew-plan-past-lock"
-                              data-testid="extra-work-plan-day-lock"
-                            />
-                          )}
-                          {formatDayHeader(day)}
-                        </th>
-                      ))}
-                      <th className="ew-plan-grid-cell">
-                        {t("plan.grid_row_total")}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {assignments.map((a) => {
-                      const lines = linesFor(a.user_id);
-                      const used = new Set(
-                        lines
-                          .map((l) => l.hourType)
-                          .filter((id): id is number => id !== null),
-                      );
-                      const addable = hourTypes.filter(
-                        (h) => !used.has(h.id),
-                      );
-                      return lines.map((line, index) => (
-                        <tr
-                          key={lineKey(line)}
-                          data-testid="extra-work-plan-crew-row"
-                          data-user-id={a.user_id}
+                          <X size={12} aria-hidden="true" />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                  {managers.length === 0 && (
+                    <span className="muted small" data-testid="extra-work-plan-manager-none">
+                      {t("plan.manager_none")}
+                    </span>
+                  )}
+                </div>
+                <span className="muted small">{t("plan.manager_hint")}</span>
+                {onAssignManagers && (
+                  <CrewAdder
+                    candidates={managerCandidates}
+                    loading={false}
+                    busy={managerBusy}
+                    error=""
+                    onAssign={handleAssignManagers}
+                    placeholderKey="plan.add_managers_pick"
+                    buttonKey="plan.add_managers_button"
+                    testId="extra-work-plan-manager-add"
+                  />
+                )}
+              </div>
+            </div>
+
+            {assignmentsLoading ? (
+              <div className="loading-bar">
+                <div className="loading-bar-fill" />
+              </div>
+            ) : workers.length === 0 ? (
+              <div className="ew-plan-empty" data-testid="extra-work-plan-no-crew">
+                <Users size={18} aria-hidden="true" />
+                <div>
+                  <div className="ew-plan-empty-title">{t("plan.no_crew_title")}</div>
+                  <div className="muted small">{t("plan.no_crew_hint")}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="ew-plan-people" {...bind("hours")} data-testid="extra-work-plan-hours">
+                {fieldError("hours") && (
+                  <p className="field-error" role="alert" data-testid="extra-work-plan-hours-error">
+                    {fieldError("hours")}
+                  </p>
+                )}
+                {days.some(isPastDay) && (
+                  <div className="ew-plan-past-bar" {...bind("past")} data-testid="extra-work-plan-past-bar">
+                    {pastUnlocked ? (
+                      <span className="muted small" data-testid="extra-work-plan-past-unlocked">
+                        {t("plan.unlock_past_active")}
+                      </span>
+                    ) : promptOpen ? (
+                      <div className="ew-plan-past-prompt">
+                        <textarea
+                          className="field-textarea"
+                          rows={2}
+                          autoFocus
+                          value={pastReason}
+                          onChange={(e) => setPastReason(e.target.value)}
+                          placeholder={t("plan.unlock_past_reason_placeholder")}
+                          aria-label={t("plan.unlock_past_reason_placeholder")}
+                          data-testid="extra-work-plan-past-reason"
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={pastReason.trim() === ""}
+                          onClick={() => setPastUnlocked(true)}
+                          data-testid="extra-work-plan-past-unlock-confirm"
+                        >
+                          {t("plan.unlock_past_confirm")}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            setPastPromptOpen(false);
+                            setDismissedPastError(rawError ?? null);
+                            setPastReason("");
+                          }}
+                          data-testid="extra-work-plan-past-unlock-cancel"
+                        >
+                          {t("plan.unlock_past_cancel")}
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="muted small">{t("plan.past_days_note")}</span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setPastPromptOpen(true)}
+                          title={t("plan.past_locked_tooltip")}
+                          data-testid="extra-work-plan-past-unlock"
+                        >
+                          <Lock size={13} aria-hidden="true" />
+                          <span style={{ marginLeft: 6 }}>{t("plan.unlock_past")}</span>
+                        </button>
+                      </>
+                    )}
+                    {fieldError("past") && (
+                      <span className="field-error" role="alert" data-testid="extra-work-plan-past-error">
+                        {fieldError("past")}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {workers.map((a) => {
+                  const lines = linesFor(a.user_id);
+                  const used = new Set(lines.map((l) => l.hourType).filter((id): id is number => id !== null));
+                  const addable = hourTypes.filter((h) => !used.has(h.id));
+                  const chosenDays = days.filter((day) => isChosen(a.user_id, day));
+                  const outside = outsideDaysFor(a.user_id);
+                  return (
+                    <div
+                      key={a.id}
+                      className="ew-plan-person"
+                      data-testid="extra-work-plan-crew-row"
+                      data-user-id={a.user_id}
+                    >
+                      <div className="ew-plan-person-head">
+                        <strong>{personName(a)}</strong>
+                        <span className="ew-plan-person-total" data-testid="extra-work-plan-row-total">
+                          {t("plan.person_total", { hours: fmtHours(personTotal(a.user_id)) })}
+                        </span>
+                      </div>
+
+                      {days.length === 0 ? (
+                        <p className="muted small" data-testid="extra-work-plan-no-window">
+                          {t("plan.pick_first_day_hint")}
+                        </p>
+                      ) : (
+                        <div className="ew-plan-day-chips" role="group" aria-label={t("plan.days_label")}>
+                          <span className="muted small ew-plan-day-chips-label">{t("plan.days_label")}</span>
+                          {days.map((day) => {
+                            const on = isChosen(a.user_id, day);
+                            const locked = isPastDay(day) && !on && isFrozen(a.user_id, day);
+                            return (
+                              <button
+                                key={day}
+                                type="button"
+                                className={`ew-plan-day-chip${on ? " is-on" : ""}${locked ? " is-locked" : ""}`}
+                                aria-pressed={on}
+                                disabled={locked}
+                                title={locked ? t("plan.past_locked_tooltip") : undefined}
+                                onClick={() => (on ? unchooseDay(a.user_id, day) : chooseDay(a.user_id, day))}
+                                data-testid="extra-work-plan-day-chip"
+                                data-day={day}
+                                data-on={on ? "true" : "false"}
+                              >
+                                {locked && <Lock size={10} aria-hidden="true" className="ew-plan-past-lock" />}
+                                {dayChipLabel(day)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {lines.map((line) => (
+                        <div
+                          key={`${line.userId}|${line.hourType ?? ""}`}
+                          className="ew-plan-hours-line"
+                          data-testid="extra-work-plan-hours-line"
                           data-hour-type={line.hourType ?? ""}
                         >
-                          {/* The name is written ONCE and spans the
-                              person's lines — the reference system's
-                              shape, and the only way a crew of three
-                              with a night shift each reads as three
-                              blocks rather than six unrelated rows. */}
-                          {index === 0 && (
-                            <td
-                              className="ew-plan-grid-name"
-                              rowSpan={lines.length}
-                            >
-                              <div className="ew-plan-grid-person">
-                                <span>{personName(a)}</span>
-                                {addable.length > 0 && (
-                                  <select
-                                    className="ew-plan-add-type"
-                                    value=""
-                                    onChange={(e) => {
-                                      if (e.target.value === "") return;
-                                      addLine(
-                                        a.user_id,
-                                        Number(e.target.value),
-                                      );
-                                    }}
-                                    aria-label={t("plan.add_hour_type", {
-                                      name: personName(a),
-                                    })}
-                                    data-testid="extra-work-plan-add-hour-type"
-                                  >
-                                    <option value="">
-                                      {t("plan.add_hour_type_placeholder")}
-                                    </option>
-                                    {addable.map((h) => (
-                                      <option key={h.id} value={h.id}>
-                                        {h.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                )}
-                              </div>
-                            </td>
-                          )}
-                          <td className="ew-plan-grid-type">
-                            <div className="ew-plan-type-line">
-                              <span>{hourTypeName(line.hourType)}</span>
-                              {/* Ordinary hours cannot be removed: it is
-                                  the line every plan has and the one a
-                                  person with no split falls back to. */}
+                          {lines.length > 1 && (
+                            <span className="ew-plan-hours-line-type">
+                              {hourTypeName(line.hourType)}
                               {line.hourType !== null && (
                                 <button
                                   type="button"
                                   className="ew-plan-type-remove"
-                                  onClick={() =>
-                                    removeLine(a.user_id, line.hourType!)
-                                  }
-                                  aria-label={t("plan.remove_hour_type", {
-                                    type: hourTypeName(line.hourType),
-                                  })}
+                                  onClick={() => line.hourType !== null && removeLine(a.user_id, line.hourType)}
+                                  aria-label={t("plan.remove_hour_type", { type: hourTypeName(line.hourType) })}
                                   data-testid="extra-work-plan-remove-hour-type"
                                 >
                                   <X size={13} aria-hidden="true" />
                                 </button>
                               )}
-                            </div>
-                          </td>
-                          {["", ...visibleDays].map((day) => (
-                            <td
-                              key={day || "none"}
-                              className="ew-plan-grid-cell"
-                              title={
-                                isFrozen(a.user_id, day)
-                                  ? frozenTitle(a.user_id, day)
-                                  : undefined
-                              }
-                            >
-                              {isFrozen(a.user_id, day) ? (
-                                /* FROZEN, not absent: the value stays
-                                   on screen — hiding it would hide the
-                                   plan's history. */
-                                <span
-                                  className="ew-plan-cell-frozen"
-                                  data-testid="extra-work-plan-frozen-cell"
-                                  data-day={day}
-                                >
-                                  {hours[
-                                    cellKey(a.user_id, day, line.hourType)
-                                  ] ?? "—"}
-                                </span>
-                              ) : (
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.25"
-                                inputMode="decimal"
-                                className="field-input ew-plan-crew-hours"
-                                value={
-                                  hours[
-                                    cellKey(a.user_id, day, line.hourType)
-                                  ] ?? ""
-                                }
-                                onChange={(e) =>
-                                  setHours((prev) => ({
-                                    ...prev,
-                                    [cellKey(
-                                      a.user_id,
-                                      day,
-                                      line.hourType,
-                                    )]: e.target.value,
-                                  }))
-                                }
-                                /* W-HOURS5 Task 1 — a cell that gains
-                                   focus brings its whole row into view,
-                                   so a half-clipped last row is never
-                                   typed into blind. */
-                                onFocus={(e) =>
-                                  e.currentTarget.scrollIntoView({
-                                    block: "nearest",
-                                  })
-                                }
-                                aria-label={`${t("plan.hours_for", {
-                                  name: personName(a),
-                                })} ${hourTypeName(line.hourType)} ${
-                                  day || t("plan.grid_no_day")
-                                }`}
-                                data-testid="extra-work-plan-crew-hours"
-                                data-day={day}
-                                data-hour-type={line.hourType ?? ""}
-                              />
-                              )}
-                            </td>
-                          ))}
-                          {index === 0 && (
-                            <td
-                              className="ew-plan-grid-cell"
-                              rowSpan={lines.length}
-                            >
-                              <strong data-testid="extra-work-plan-row-total">
-                                {personTotal(a.user_id).toFixed(2)}
-                              </strong>
-                            </td>
+                            </span>
                           )}
-                        </tr>
-                      ));
-                    })}
-                    {/* W7 fix 3 — THE WAITING STATE, IN THE GRID.
-                        With no window there are no day columns, and the
-                        old dialog explained that in a sentence below a
-                        scrollbar. It says it here instead, in the space
-                        the day columns will occupy, with the control
-                        that fills them. */}
-                    {days.length === 0 && (
-                      <tr data-testid="extra-work-plan-no-window">
-                        <td
-                          className="ew-plan-grid-waiting"
-                          colSpan={4}
-                        >
-                          <div className="ew-plan-grid-waiting-title">
-                            {t("plan.grid_waiting_title")}
-                          </div>
-                          <div className="muted small">
-                            {t("plan.grid_waiting_hint")}
-                          </div>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            style={{ marginTop: 8 }}
-                            onClick={focusWindow}
-                            data-testid="extra-work-plan-goto-window"
-                          >
-                            <CalendarPlus size={14} aria-hidden="true" />
-                            {t("plan.grid_waiting_action")}
-                          </button>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td className="ew-plan-grid-name">
-                        {t("plan.grid_day_total")}
-                      </td>
-                      <td className="ew-plan-grid-type" />
-                      <td className="ew-plan-grid-cell" />
-                      {visibleDays.map((day) => (
-                        <td key={day} className="ew-plan-grid-cell">
-                          {dayTotal(day).toFixed(2)}
-                        </td>
+                          {chosenDays.map((day) => {
+                            const key = cellKey(a.user_id, day, line.hourType);
+                            const frozen = isFrozen(a.user_id, day);
+                            return (
+                              <label key={day} className="ew-plan-hours-box">
+                                <span className="muted small">{dayChipLabel(day)}</span>
+                                {frozen ? (
+                                  <span
+                                    className="ew-plan-cell-frozen"
+                                    title={t("plan.past_locked_tooltip")}
+                                    data-testid="extra-work-plan-frozen-cell"
+                                    data-day={day}
+                                  >
+                                    {hours[key] ?? "—"}
+                                  </span>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.25"
+                                    inputMode="decimal"
+                                    className="field-input ew-plan-crew-hours"
+                                    value={hours[key] ?? ""}
+                                    onChange={(e) => setHours((prev) => ({ ...prev, [key]: e.target.value }))}
+                                    aria-label={`${t("plan.hours_for", { name: personName(a) })} ${hourTypeName(line.hourType)} ${dayChipLabel(day)}`}
+                                    data-testid="extra-work-plan-crew-hours"
+                                    data-day={day}
+                                    data-hour-type={line.hourType ?? ""}
+                                  />
+                                )}
+                                <span className="muted small">{t("plan.hours_unit")}</span>
+                              </label>
+                            );
+                          })}
+                          <label className="ew-plan-hours-box ew-plan-hours-box--undated">
+                            <span className="muted small">{t("plan.no_day_yet")}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.25"
+                              inputMode="decimal"
+                              className="field-input ew-plan-crew-hours"
+                              value={hours[cellKey(a.user_id, "", line.hourType)] ?? ""}
+                              onChange={(e) =>
+                                setHours((prev) => ({ ...prev, [cellKey(a.user_id, "", line.hourType)]: e.target.value }))
+                              }
+                              aria-label={`${t("plan.hours_for", { name: personName(a) })} ${hourTypeName(line.hourType)} ${t("plan.no_day_yet")}`}
+                              data-testid="extra-work-plan-crew-hours"
+                              data-day=""
+                              data-hour-type={line.hourType ?? ""}
+                            />
+                            <span className="muted small">{t("plan.hours_unit")}</span>
+                          </label>
+                        </div>
                       ))}
-                      <td className="ew-plan-grid-cell">
-                        <strong data-testid="extra-work-plan-total">
-                          {distributed.toFixed(2)}
-                        </strong>
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-              <div className="ew-plan-total" data-testid="extra-work-plan-total-line">
-                <span>{t("plan.distributed_label")}</span>
-                <strong>
-                  {t("plan.hours_value", { hours: distributed.toFixed(2) })}
-                </strong>
-              </div>
-            </>
-          )}
-        </div>
 
-        {/* WARNS, NEVER BLOCKS. The submit button below is not disabled
-            by this and must never be — see (3) in the docblock. */}
-        {overrun && (
-          <div
-            className="ew-plan-overrun"
-            role="status"
-            data-testid="extra-work-plan-overrun"
-          >
-            <AlertTriangle size={18} aria-hidden="true" />
-            <div>
-              <div className="ew-plan-overrun-title">
-                {t("plan.overrun_title", {
-                  over: overBy,
+                      {outside.length > 0 && (
+                        <div className="ew-plan-outside" data-testid="extra-work-plan-outside">
+                          <span className="muted small">{t("plan.outside_label")}</span>
+                          {outside.map((day) => {
+                            const total = lines.reduce(
+                              (sum, line) => sum + toHours(hours[cellKey(a.user_id, day, line.hourType)] ?? ""),
+                              0,
+                            );
+                            return (
+                              <span key={day} className="ew-plan-outside-chip" data-day={day}>
+                                {dayChipLabel(day)} · {fmtHours(total)} {t("plan.hours_unit")}
+                                {!isFrozen(a.user_id, day) && (
+                                  <button
+                                    type="button"
+                                    className="ew-plan-type-remove"
+                                    onClick={() => removeOutsideDay(a.user_id, day)}
+                                    aria-label={t("plan.outside_remove", { day: dayChipLabel(day) })}
+                                    data-testid="extra-work-plan-outside-remove"
+                                  >
+                                    <X size={12} aria-hidden="true" />
+                                  </button>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {addable.length > 0 && (
+                        <select
+                          className="ew-plan-add-type"
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value === "") return;
+                            addLine(a.user_id, Number(e.target.value));
+                          }}
+                          aria-label={t("plan.add_hour_type", { name: personName(a) })}
+                          data-testid="extra-work-plan-add-hour-type"
+                        >
+                          <option value="">{t("plan.add_hour_type_placeholder")}</option>
+                          {addable.map((h) => (
+                            <option key={h.id} value={h.id}>
+                              {h.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  );
                 })}
+
+                <div className="ew-plan-total" data-testid="extra-work-plan-total-line">
+                  <span>{t("plan.grand_total_label")}</span>
+                  <strong data-testid="extra-work-plan-total">
+                    {t("plan.hours_value", { hours: fmtHours(distributed) })}
+                  </strong>
+                </div>
+
+                <label className="field ew-plan-budget" {...bind("budget")}>
+                  <span className="muted small">{t("plan.budget_optional_label")}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    inputMode="decimal"
+                    className="field-input"
+                    value={budget}
+                    onChange={(e) => setBudget(e.target.value)}
+                    data-testid="extra-work-plan-budget"
+                  />
+                  {fieldError("budget") && (
+                    <span className="field-error" role="alert">
+                      {fieldError("budget")}
+                    </span>
+                  )}
+                </label>
+                {overrun && (
+                  <div className="ew-plan-overrun" role="status" data-testid="extra-work-plan-overrun">
+                    <AlertTriangle size={18} aria-hidden="true" />
+                    <div>
+                      <div className="ew-plan-overrun-title">{t("plan.overrun_title", { over: overBy })}</div>
+                      <div className="muted small">
+                        {t("plan.overrun_hint", {
+                          distributed: distributed.toFixed(2),
+                          budget: budgetHours.toFixed(2),
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="muted small">
-                {t("plan.overrun_hint", {
-                  distributed: distributed.toFixed(2),
-                  budget: budgetHours.toFixed(2),
-                })}
-              </div>
+            )}
+          </div>
+
+          {/* ---- 3. DONE MEANS ---- */}
+          <div className="ew-plan-section" data-testid="extra-work-plan-stage-done">
+            <div className="ew-plan-section-title">
+              <span className="ew-plan-step">3</span>
+              {t("plan.stage_done")}
             </div>
+            <label className="ew-plan-switch">
+              <Toggle
+                checked={photoRequired}
+                onChange={(e) => {
+                  setPhotoRequired(e.target.checked);
+                  setPhotoTouched(true);
+                }}
+                data-testid="extra-work-plan-photo-required"
+              />
+              <span>{t("plan.photo_required_label")}</span>
+            </label>
+            <label className="ew-plan-switch">
+              <Toggle
+                checked={notesRequired}
+                onChange={(e) => {
+                  setNotesRequired(e.target.checked);
+                  setNotesTouched(true);
+                }}
+                data-testid="extra-work-plan-notes-required"
+              />
+              <span>{t("plan.notes_required_label")}</span>
+            </label>
           </div>
-        )}
-
-        <div className="ew-plan-section">
-          <div className="ew-plan-section-title">
-            {t("plan.completion_title")}
-          </div>
-          <label className="ew-plan-switch">
-            <Toggle
-              checked={photoRequired}
-              onChange={(e) => {
-                setPhotoRequired(e.target.checked);
-                setPhotoTouched(true);
-              }}
-              data-testid="extra-work-plan-photo-required"
-            />
-            <span>{t("plan.photo_required_label")}</span>
-          </label>
-          <label className="ew-plan-switch">
-            <Toggle
-              checked={notesRequired}
-              onChange={(e) => {
-                setNotesRequired(e.target.checked);
-                setNotesTouched(true);
-              }}
-              data-testid="extra-work-plan-notes-required"
-            />
-            <span>{t("plan.notes_required_label")}</span>
-          </label>
-        </div>
         </div>
 
         <div className="ew-plan-foot" data-testid="extra-work-plan-foot">
@@ -1394,13 +1188,9 @@ export function PlanWorkDialog({
             >
               {t("common:cancel")}
             </button>
-            {requiredError && (
-              <p
-                className="form-error"
-                role="alert"
-                data-testid="extra-work-plan-required"
-              >
-                {requiredError}
+            {summaryLine && (
+              <p className="form-error ew-plan-summary-error" role="alert" data-testid="extra-work-plan-required">
+                {summaryLine}
               </p>
             )}
             <button
@@ -1411,9 +1201,7 @@ export function PlanWorkDialog({
               onClick={submit}
               data-testid="extra-work-plan-submit"
             >
-              {busy
-                ? t("plan.submitting")
-                : t(submitStarts ? "plan.submit" : "plan.submit_save")}
+              {busy ? t("plan.submitting") : t(submitStarts ? "plan.submit" : "plan.submit_save")}
             </button>
           </div>
         </div>
@@ -1422,19 +1210,8 @@ export function PlanWorkDialog({
   );
 }
 
-
-/** W-HOURS5 Task 2 — the crew's adder: ONE line, several people, one Add.
- *
- *  Replaces the checkbox list (`.assign-picker`) that stood here since
- *  W-UX1 §2: on a crew of thirty that list was a scroll box the height
- *  of the grid itself, which is part of why the grid's last row sat
- *  below the fold (Task 1). `ChipMultiSelect` is the standing people
- *  picker — every picker multi-selects — and it keeps to a line.
- *
- *  R2 is enforced by the caller: `candidates` arrives already filtered
- *  to the not-yet-assigned, so a person on the crew never appears here
- *  as something to add again. Nothing to offer = nothing rendered.
- */
+/** The crew's adder: one line, several people, one Add. `candidates`
+ *  arrives already filtered to the not-yet-assigned. */
 function CrewAdder({
   candidates,
   loading,

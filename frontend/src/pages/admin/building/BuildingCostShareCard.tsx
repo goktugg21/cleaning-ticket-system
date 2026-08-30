@@ -114,13 +114,33 @@ export function BuildingCostShareCard({
     }
   }
 
+  /* P-4 (Part F) — the split is ADVANCED. Outside the fold: one calm
+     sentence (unsplit: "All work here bills to the ticket's own
+     customer"; split: who pays what). The form, the percentages and
+     Save live inside the fold only. */
+  const splitSentence =
+    rows.length === 0
+      ? t("cost_shares.unsplit_sentence")
+      : t("cost_shares.split_sentence", {
+          shares: rows
+            .map(
+              (row) =>
+                `${row.customer_name || customers.find((c) => c.id === row.customer)?.name || row.customer} ${Number(row.share_pct)}%`,
+            )
+            .join(" · "),
+        });
+
   return (
-    <section
-      className="card card-detail-pad"
+    <details
+      className="action-fold card card-detail-pad"
       style={{ marginBottom: 16 }}
       data-testid="building-cost-shares"
     >
-      <div className="section-head" style={{ marginBottom: 8 }}>
+      <summary className="form-fold-summary" data-testid="building-cost-shares-summary">
+        {splitSentence}
+        {canEdit && <span className="form-fold-summary-value">{t("cost_shares.change")}</span>}
+      </summary>
+      <div className="section-head" style={{ marginBottom: 8, marginTop: 10 }}>
         <div>
           <div className="section-head-title">{t("cost_shares.title")}</div>
           <div className="section-head-sub">{t("cost_shares.desc")}</div>
@@ -274,6 +294,6 @@ export function BuildingCostShareCard({
           </button>
         </div>
       )}
-    </section>
+    </details>
   );
 }

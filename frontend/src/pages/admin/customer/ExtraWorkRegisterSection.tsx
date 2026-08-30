@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
+import { BoundedList } from "../../../components/BoundedList";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -8,7 +9,7 @@ import {
   getExtraWorkRegister,
   syncExtraWorkRegister,
 } from "../../../api/contracts";
-import type { ExtraWorkRegister } from "../../../api/contracts.types";
+import type { ExtraWorkRegister, ContractLine, ExtraWorkRegisterBuilding } from "../../../api/contracts.types";
 import { useAuth } from "../../../auth/AuthContext";
 import { useToast } from "../../../components/ToastProvider";
 import { formatMoney } from "../contracts/contractTables";
@@ -68,6 +69,8 @@ export function ExtraWorkRegisterSection({
   const locale = i18n.language;
 
   const [register, setRegister] = useState<ExtraWorkRegister | null>(null);
+  const [search, setSearch] = useState("");
+  const [showZero, setShowZero] = useState<Record<number, boolean>>({});
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -141,6 +144,20 @@ export function ExtraWorkRegisterSection({
   const withWork = (register?.buildings ?? []).filter(
     (building) => building.job_count > 0,
   );
+  const needle = search.trim().toLowerCase();
+  const isZero = (line: ContractLine) => Number(line.amount) === 0;
+  const matches = (line: ContractLine) =>
+    !needle || line.name.toLowerCase().includes(needle);
+  const zeroCount = (building: ExtraWorkRegisterBuilding) =>
+    building.lines.filter((line) => isZero(line) && matches(line)).length;
+  const linesFor = (building: ExtraWorkRegisterBuilding) =>
+    building.lines.filter(
+      (line) => matches(line) && (!isZero(line) || showZero[building.id]),
+    );
+  const visibleLineCount = withWork.reduce(
+    (sum, building) => sum + linesFor(building).length + 1,
+    0,
+  );
 
   return (
     <div className="card card-detail-pad" data-testid="ew-register">
@@ -187,7 +204,30 @@ export function ExtraWorkRegisterSection({
         </div>
       )}
 
-      <div className="table-wrap">
+      {/* P-4 (Part F) — a SERVER list is bounded (CLAUDE.md §8): the
+          table scrolls inside `BoundedList`; rows of € 0.00 collapse to
+          one line per building with a "show" toggle; a search box finds
+          a job by name. Grouping by MONTH needs a date on the register
+          line, which the serializer does not carry — ledgered. */}
+      {visibleLineCount > 8 && (
+        <input
+          type="search"
+          className="field-input"
+          style={{ maxWidth: 320, marginBottom: 8 }}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t("register.search_placeholder")}
+          aria-label={t("register.search_placeholder")}
+          data-testid="ew-register-search"
+        />
+      )}
+      <BoundedList
+        size="lg"
+        count={visibleLineCount}
+        ariaLabel={t("register.title")}
+        testIdPrefix="ew-register-list"
+        className="table-wrap"
+      >
         <table className="data-table data-table-dense">
           <thead>
             <tr>
@@ -204,7 +244,21 @@ export function ExtraWorkRegisterSection({
                     {formatMoney(building.total_amount, locale)}
                   </td>
                 </tr>
-                {building.lines.map((line) => (
+                {zeroCount(building) > 0 && !showZero[building.id] && (
+                  <tr>
+                    <td colSpan={2} className="muted small">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setShowZero((prev) => ({ ...prev, [building.id]: true }))}
+                        data-testid={`ew-register-show-zero-${building.id}`}
+                      >
+                        {t("register.zero_rows", { count: zeroCount(building) })}
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {linesFor(building).map((line) => (
                   <tr key={line.id}>
                     <td>
                       {/* The row goes to the JOB, because that is where
@@ -234,7 +288,7 @@ export function ExtraWorkRegisterSection({
             )}
           </tbody>
         </table>
-      </div>
+      </BoundedList>
     </div>
   );
 }

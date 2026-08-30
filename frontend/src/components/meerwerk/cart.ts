@@ -9,6 +9,7 @@
  * live here rather than as two copies that drift.
  */
 import type { CustomerCustomPrice, CustomerServicePrice } from "../../api/types";
+import type { LineUnit } from "../../lib/unitLabel";
 
 export interface MeerwerkCartLine {
   key: string;
@@ -22,6 +23,10 @@ export interface MeerwerkCartLine {
   otherText: string;
   /** The optional note on a line. */
   note?: string;
+  /** P-4 (Part A) — what the quantity counts: the service's own unit
+   *  (existing `unit_type` data). Absent on an "iets anders" line, whose
+   *  quantity-with-unit belongs in its text. */
+  unit?: LineUnit;
 }
 
 /** FE-4 — one "iets anders" row while it is being typed. */
@@ -45,6 +50,7 @@ export function serviceLine(price: CustomerServicePrice): MeerwerkCartLine {
     vatPct: price.vat_pct,
     quantity: 1,
     otherText: "",
+    unit: { type: price.service_unit_type, label: price.service_unit_label ?? "" },
   };
 }
 
@@ -58,6 +64,7 @@ export function customPriceLine(price: CustomerCustomPrice): MeerwerkCartLine {
     vatPct: price.vat_pct,
     quantity: 1,
     otherText: "",
+    unit: { type: price.unit_type, label: price.custom_unit_label ?? "" },
   };
 }
 
