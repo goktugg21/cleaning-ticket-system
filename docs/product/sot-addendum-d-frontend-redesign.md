@@ -1152,3 +1152,101 @@ those pages (`feat/p6-visible`). Rulings recorded:
 8. **The money card says its waiting state once** (V5.1): the value
    slot carries "Wacht op gewerkte uren" instead of a short word beside
    the long one.
+
+
+## D.19 The finishing round — the P-7 rulings (2026-08-30)
+
+The owner's last list before "the system is done" (`feat/p7-finish`).
+Every item was merge-blocking. Rulings recorded:
+
+1. **One count in the Enter-hours modal, and it says what a row is.**
+   The setup banner counted (person, building) pairs; the grid counted
+   rows — a pair × hour type × job, reconciled with what is already
+   saved — so "4 rows" sat above a grid saying "6 rows". The banner
+   now states only that building access was checked; the grid's count
+   is THE count, and its caption defines a row ("one person at one
+   building on one job, per hour type"). Dutch uses ONE word for it,
+   *regel* (the setup said *rij*). The save math was verified
+   server-side (`timesheets/tests/test_p7_mixed_week.py`): three rows
+   for one person at one building are three facts and stay three
+   entries; "0" deletes; untouched cells are not sent; the multiplier
+   is snapshotted per entry; one bad cell writes nothing for anybody.
+   Nothing was broken — every finding is by design.
+2. **Silent loss dies.** Switching week over unsaved hours ASKS first
+   (the My-hours pattern, now in the modal too); the standing
+   "unsaved hours are cleared when you switch week" sentence is gone
+   because the loss it described no longer happens.
+3. **The fill row is a tool.** Its own tint and edge, an icon, a verb
+   ("Fill every standard row at once") and one caption — nothing about
+   it reads as a person's row.
+4. **One person, several parts.** The name prints once; each further
+   block of theirs is a PART that says what it is: "on Ticket #374",
+   "on Extra werk regie uren +1", "general hours, not linked to a
+   job". Job labels wrap instead of clipping at 18 characters.
+5. **Removal after Add — root cause.** The Extra Work page never passed
+   the plan dialog a remove handler, and the dialog renders its X only
+   when one exists; the ticket page passed one and removed silently.
+   Now: every X asks once ("X leaves the job. Planned hours from today
+   on are cleared; worked hours and the past stay.") and runs the
+   EXISTING unassign. The EW-side door (`bulk-assign` with
+   `mode: "unassign"`) now clears the person's open plan like the
+   ticket-side doors do (`extra_work/tests/test_p7_plan_removal.py`).
+6. **Last-before-first is refused at the field, the moment it happens;
+   the plan modal reveals one stage at a time** — dates; the people
+   and hours once a first day exists; "done means" once someone is on
+   the crew. A stage never hides again; a caller pointing at a missing
+   piece opens it.
+7. **Approving on the customer's behalf is AMBER** — on the agenda row
+   and in the meerwerk's Geavanceerd fold — and its reason dialog wears
+   the same amber band. P-5 made it a button and dropped the colour in
+   passing; the exceptional act must look like one. The one amber
+   button (`btn-warning`), never red.
+8. **A billing month is words, everywhere.** "oktober 2026", never
+   "2026-10" nor "10-2026": the meerwerk's billing line, its save
+   toast, the invoices page's due sentences, generate panel and filter
+   chips, the invoice detail's period, the customer's invoice pages.
+   The consequence sentence is the owner's: "Dit werk wordt gefactureerd
+   in oktober 2026 — het verschijnt op de factuur van B Amsterdam voor
+   oktober 2026."
+9. **A committing button states its consequence in one line before
+   it acts**: "Save hours to bill" (readies the amount for that
+   customer's invoice for that month; nothing is sent), "Close week"
+   (locks everyone's hours; reports and invoices calculate from them).
+   Generate and Send/Issue already carried theirs.
+10. **The contract modal reveals one stage at a time** — who and
+    where; when (once a customer and locations are chosen); billing
+    (once a start date exists); notes. Editing opens all four. Rules
+    stay frozen (§D.15 item 8). **The contracts page has ONE view
+    control** (list / by customer / by location); the measure (prices
+    / hours) and the timeframe (per month / per year) are two selects
+    in the Filter fold with chips when off their default. P-4's
+    "tiered" bar named CSS classes that never existed.
+11. **The SLA page is calm again.** The default view is the warnings
+    and their values; the recipients, the extra address and the third
+    step fold behind ONE "Aanpassen" per warning whose summary says
+    what is set ("also to the responsible manager · third step after 3
+    days" / "standard"); the weekend rule and the weekly summary fold
+    the same way on the counting card. Every P-5 S8 feature stays.
+12. **Settings is a horizontal header** at every width: avatar, name,
+    email and role on one line, the facts (member since, last sign-in,
+    access) as an inline row, the photo control at the right; the
+    forms take the full width below. The P-6 inventory's "converted"
+    rows were spot-checked against live crmtest (the audit table is in
+    the P-7 report).
+13. **Parked work leaves the nag.** ON_HOLD-without-a-day is no longer
+    in "Not planned yet" (`counts.undated`, `undated_entries`); it is
+    its own quiet list, `parked_entries` / `counts.parked`, behind the
+    same drawer as "Geparkeerd (N)", each row with the reason it was
+    parked for (the note on its ON_HOLD history leg). A parked job
+    WITH a day keeps its board placement. The §D.15 matrix row for
+    ON_HOLD reads `("rolled", "planned_fri", "parked")`
+    (`tickets/tests/test_p3_schedule_truth.py`,
+    `tickets/tests/test_p7_parked.py`). This closes the decision P-6
+    left with the owner.
+14. **Small closures.** The recurring calendar's inline styles became
+    classes, the legend derives from the same tick list the cells
+    paint with, and skipped (grey, dashed) and cancelled (red-tinted,
+    struck) no longer share one dot; the pricing page's six secondary
+    panels share one shell and the bulk-raise panel is staged (which
+    prices → how much, from when); the truncated job chip in the hours
+    grid wraps to its full label.

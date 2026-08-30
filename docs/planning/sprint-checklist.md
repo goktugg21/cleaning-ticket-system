@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p6-visible` — stacked on `feat/p5-closer`,
+**Branch:** `feat/p7-finish` — stacked on `feat/p6-visible`,
 the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,51 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-7: the finishing round (Addendum D §D.19, 2026-08-30)
+
+The owner's last list — "fix these and I can really say the system is
+done". Shipped on `feat/p7-finish`, every item merge-blocking:
+
+- **S1 — the Enter-hours modal.** One count (the grid's) that says
+  what a row is, *regel* as the one Dutch word; switching week over
+  unsaved hours asks first and the standing loss sentence is gone;
+  the fill row is a tool (tint, edge, icon, verb, one caption); one
+  person prints once with their parts named ("on Ticket #374",
+  "general hours"); job labels wrap. The save math verified
+  server-side: `timesheets/tests/test_p7_mixed_week.py` — all by
+  design, nothing broken.
+- **S2 — plan modal.** Root cause of "cannot remove after Add": the
+  Extra Work page passed no remove handler. Every X asks once and runs
+  the existing unassign; the EW-side unassign clears the open plan
+  (`extra_work/tests/test_p7_plan_removal.py`); last-before-first is
+  refused at the field the moment it happens; stages reveal one at a
+  time (dates → people and hours → done means).
+- **S3 — colour and alignment.** Approve-on-behalf is amber again (row
+  + Geavanceerd + its reason dialog); the pricing line editor's buttons
+  sit on the inputs' band, the "price required" note under the row.
+- **S4 — money words.** Month names everywhere a billing month
+  appears (meerwerk billing line and toast, invoices due sentences /
+  generate panel / chips, invoice detail, customer invoice pages); the
+  owner's consequence sentence; "Save hours to bill" and "Close week"
+  say their consequence beside the button.
+- **S5 — contracts.** The New/Edit modal reveals one stage at a time
+  (all four open when editing); the contracts page has ONE view control
+  with measure and timeframe in the Filter fold. Rules frozen (§D.15).
+- **S6 — SLA calm.** Default view = the warnings and values; the P-5
+  additions fold behind one "Aanpassen" per warning (and on the
+  counting card) with a summary that says what is set.
+- **S7 — the claims audit.** Settings is a horizontal header at every
+  width; the P-6 "converted" rows were spot-checked on live crmtest
+  (audit table in the P-7 report).
+- **S8 — parked leaves the nag.** `parked_entries` / `counts.parked`,
+  a "Geparkeerd (N)" sub-view in the drawer with reasons; the §D.15
+  matrix row for ON_HOLD is `("rolled", "planned_fri", "parked")`
+  (`tickets/tests/test_p7_parked.py`).
+- **S9 — small closures.** Recurring calendar classes + derived legend
+  (skipped ≠ cancelled); the pricing panels share one shell, bulk raise
+  staged; the truncated job chip wraps.
+- **Zero migrations.**
 
 ### Done — P-6: the visible round (Addendum D §D.18, 2026-08-30)
 
@@ -81,8 +126,9 @@ he opens. Shipped on `feat/p6-visible`:
 | Customer overview | converted (V3) | facts block above the chips, About card absorbed, unreadable metrics absent, never a void |
 | Customer pricing | converted (V3) | FE-6's "prices first" finished: EmptyState, money/percent formatted, dashes gone, staged add/edit form with field errors, locked actions say why |
 | Contract detail | converted (V3) | PageHeader + status pill + sentence, facts block, one primary per state, projects empty state; rules frozen (§D.15) |
-| Recurring calendar internals | queued | inline styles and hard-coded legend colours (skipped/cancelled share one colour) — merge-prep round, low |
-| Pricing page's five secondary panels (folders, move, copy, bulk raise) | queued | left flat; the add/edit form is staged — merge-prep round, low |
+| Recurring calendar internals | converted (P-7 S9) | classes, legend derived from the tick list, skipped and cancelled distinct |
+| Pricing page's six secondary panels (folders, move, copy, bulk raise) | converted (P-7 S9) | one shared shell; bulk raise staged (which prices → how much) |
+| Settings | converted (P-7 S7) | horizontal header band at every width; the forms full width below |
 
 ### Done — P-5: the closer (Addendum D §D.17, 2026-08-30)
 
@@ -3855,11 +3901,11 @@ still listed as open, and all of them had shipped.
 
 ### Decisions the owner owes — no build until he answers
 
-- **Should parked (ON_HOLD) work leave the "Not planned yet" lane?**
-  P-6's triage parks junk through the machine's own legs, but the P-3
-  schedule matrix (§D.15) keeps ON_HOLD in the undated lane, so a parked
-  row stays listed with a "Parked" tag. Moving it out is one query
-  change plus a matrix row — reversible, but it overrules P-3.
+- ~~**Should parked (ON_HOLD) work leave the "Not planned yet" lane?**~~
+  **Decided by the owner, built in P-7 S8 (§D.19 item 13):** parked
+  work leaves the nag and lives in the drawer's "Geparkeerd (N)"
+  sub-view with its reason; the §D.15 matrix row for ON_HOLD is
+  `("rolled", "planned_fri", "parked")`.
 - **"bezoek" or "geplande beurt"** for a recurring visit (§D.18 item 3).
   The code says *bezoek* everywhere; a bundle-only change either way.
 
