@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p5-closer` — stacked on `feat/p4-joy`,
+**Branch:** `feat/p6-visible` — stacked on `feat/p5-closer`,
 the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,51 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-6: the visible round (Addendum D §D.18, 2026-08-30)
+
+The pages P-5 queued, so the owner SEES the difference on every page
+he opens. Shipped on `feat/p6-visible`:
+
+- **V1 — Invoices, the bone.** `/invoices`: four facts, one primary per
+  due row, the guard folded with its count, the list grouped by billing
+  month with status tiles, search and a filter fold; the generate panel
+  in two numbered questions with its consequence sentence; teaching
+  empty states; `?customer=&period=` deep link from the "saved under
+  Invoices → customer → month" toast. `/invoices/:id`: the phase strip
+  with the one action, four facts, lines with their sources, the
+  text-on-the-invoice fold, the document, Geavanceerd for corrections.
+- **V2 — Recurring work.** The detail in the ticket detail's rhythm
+  (rule sentence + next visit on the strip, facts, calendar, money
+  card, Geavanceerd); the list's window column in words; "bezoek"
+  kept as the one word (§D.18 item 3).
+- **V3 — The queued-1 admin pages.** See the inventory table below.
+- **V4 — The trio.** Global search (`GET /api/search/`,
+  `accounts/tests/test_p6_global_search.py`, the header box); the
+  dashboard's top-5 attention with "show all N"; stale-work triage in
+  the "Not planned yet" drawer (`POST /api/tickets/bulk-triage/`,
+  `tickets/tests/test_p6_bulk_triage.py`).
+- **V5 — Small closures.** The money card's doubled waiting phrase;
+  the pricing deep-link proven live on a fixture EW; money and hours
+  serialize with two decimals; the inventory table below.
+- **Zero migrations.**
+
+#### Inventory — the page sets after P-6
+
+| Surface | State | Note |
+|---|---|---|
+| Invoices list, invoice detail | converted (V1) | the bone |
+| Recurring work list, detail, calendar | converted (V2) | calendar's inline styles and legend colours left as they are |
+| Companies list | converted (V3) | PageHeader, one primary, slug column gone (Advanced on the detail), language a word, filter fold, EmptyState, tiles dropped |
+| Buildings list | converted (V3) | filter fold, words for city/type/customers, type column absent when empty, locked selects say why |
+| Building new/edit | converted (V3) | two numbered stages, field-level errors, relation folds with counts |
+| Customers list | converted (V3) | filter fold, lifecycle a word beside one pill, the building filter says it needs a company |
+| Customer new/edit | converted (V3) | three numbered stages, field-level errors, folds with counts, disabled controls say why |
+| Customer overview | converted (V3) | facts block above the chips, About card absorbed, unreadable metrics absent, never a void |
+| Customer pricing | converted (V3) | FE-6's "prices first" finished: EmptyState, money/percent formatted, dashes gone, staged add/edit form with field errors, locked actions say why |
+| Contract detail | converted (V3) | PageHeader + status pill + sentence, facts block, one primary per state, projects empty state; rules frozen (§D.15) |
+| Recurring calendar internals | queued | inline styles and hard-coded legend colours (skipped/cancelled share one colour) — merge-prep round, low |
+| Pricing page's five secondary panels (folders, move, copy, bulk raise) | queued | left flat; the add/edit form is staged — merge-prep round, low |
 
 ### Done — P-5: the closer (Addendum D §D.17, 2026-08-30)
 

@@ -1067,3 +1067,84 @@ session notes, closed by P-5 (`feat/p5-closer`). Decisions recorded:
 7. **Verification rule** (CLAUDE.md): replays create their own
    fixtures and list every data mutation at the top of the report.
 
+
+---
+
+## D.18 The visible round — the P-6 rulings (2026-08-30)
+
+The owner walked P-5 and said "it doesn't seem a lot changed" — correct:
+P-5 fixed the journey's spine and queued the visible page sets. P-6 is
+those pages (`feat/p6-visible`). Rulings recorded:
+
+1. **The invoices pages are the bone** (V1). `/invoices` reads top to
+   bottom as one story: four facts (due now · drafts · issued-not-sent
+   · at risk), the due rows with ONE primary per row (a row with
+   nothing to generate carries its reason in words, not two dead
+   buttons — rules 3 and 14), the billing-month guard folded with its
+   count, and every invoice grouped by billing month with the month's
+   count and total on its heading, status tiles with real counts, a
+   search box and a filter fold. `?customer=<id>&period=YYYY-MM` opens
+   the page on that customer and month, and the "€X saved — Invoices →
+   customer → month" toast (`lib/billingSentence.ts::invoicesDestination`)
+   is a door that lands there. `/invoices/:id` opens on one strip that
+   says where the invoice stands and what happens next, with the one
+   primary action beside it (Issue / Send / Download), four facts
+   (customer · period + contract · amount · dates as words when unset,
+   rule 15), the lines with their meerwerk and building links, the
+   text-on-the-invoice fold, the document, and every correction
+   (delete draft, back to draft, credit note) under Geavanceerd.
+2. **Recurring work carries the ticket detail's rhythm** (V2): a
+   header without buttons, the rule sentence with the next visit in it
+   on the phase strip beside the one primary action (Edit; Restore
+   when archived), four facts (where · what · when · who — a crew that
+   is not set says so in words), the visit calendar, the money in a
+   titled card, and Plan-further-ahead / Archive under Geavanceerd.
+   The list's "Time window" column becomes "Visits per day" and a job
+   with no clock says "time not set" (rule 15).
+3. **Vocabulary ruling.** §D.2 offers "geplande beurt (or 'bezoek')".
+   The code had already standardised on **bezoek / visit** everywhere
+   the ticket side speaks ("bezoek 3 van 12 dit jaar"); switching the
+   recurring pages to "beurt" would have created two names for one
+   thing. P-6 keeps *bezoek* as the one word and removes the last
+   "tijdvenster / venster" leftovers (list column, facts, calendar
+   default, override dialog). The owner may still overrule to
+   "beurt" — it is a bundle-only change.
+4. **Global search** (V4.1): ONE read-only endpoint, `GET
+   /api/search/?q=`, viewer-scoped by the EXISTING scope helpers
+   (`scope_tickets_for`, `scope_extra_work_for`, `scope_customers_for`,
+   `scope_buildings_for`, `manageable_user_ids_for`), five groups of at
+   most five with a `truncated` flag; nothing fuzzy (`icontains` on
+   number/title/name). The header box shows a row as a link only where
+   the viewer may go, using the same predicates as the sidebar
+   (`canAccessExtraWork` keeps the meerwerk door shut for STAFF).
+5. **Top-5 attention** (V4.2): the dashboard's attention list orders
+   its rows by the order of CONSEQUENCE, shows five, and offers "show
+   all N". The order: review (finished work waits on your check) →
+   approval overdue (the customer went silent on finished work) → at
+   risk (will miss the billing month) → stuck (planned, never done) →
+   awaiting price → unassigned → unplanned → awaiting the customer's
+   decision. Counts do not decide the order; a row with a zero count
+   does not render.
+6. **Stale-work triage** (V4.3): in the "Not planned yet" drawer,
+   select rows and park or close them with ONE reason. `POST
+   /api/tickets/bulk-triage/` walks the machine's OWN legs (OPEN →
+   ACKNOWLEDGED → ON_HOLD; APPROVED → CLOSED) through
+   `apply_transition`, so every leg writes its history row with the
+   reason; closing from any other status is the out-of-machine jump
+   only a SUPER_ADMIN may make, recorded as an override
+   (`is_override` + `override_reason`) — the Close action is offered
+   to that role only (rule 14). A meerwerk has no parked state: park
+   skips it and says so; close cancels it through its own transition
+   with the same reason. Per-item results, never an aborted batch
+   (`tickets/tests/test_p6_bulk_triage.py`).
+7. **Money leaves the API with two decimals** (V5.3): `period_amount`
+   (`buildings/serializers.py`) is quantised to cents before it
+   becomes text; the contract serializer's `monthly_amount` /
+   `yearly_amount` / `total_hours` and the active revision's `amount`
+   / `hours` are two-decimal STRINGS (the shape the frontend types
+   declared, and a `SerializerMethodField`'s raw Decimal was leaving
+   as a JSON number that dropped its scale). The contracts page's
+   local `formatMoney` always renders two decimals.
+8. **The money card says its waiting state once** (V5.1): the value
+   slot carries "Wacht op gewerkte uren" instead of a short word beside
+   the long one.
