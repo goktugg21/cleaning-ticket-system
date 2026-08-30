@@ -2138,25 +2138,37 @@ table.data-table {
    reading width on wide monitors. */
 .page-form-narrow { max-width: 720px; }
 
-/* Sprint 29 Batch 29.1 — Settings layout rebalance.
-   Account-overview info card on the left (380px), settings cards
-   stacked on the right (1fr). Centred under a 1400px clamp so the
-   page stops looking lonely on ultra-wide monitors. Collapses to a
-   single column at typical laptop widths (<= 1280px); align-items:
-   start prevents the left card from stretching to match the right
-   column's height. */
+/* Sprint 29 Batch 29.1 / P-8R D — Settings layout. The forms fill the
+   width under the account header in a two-column grid: Profile left,
+   Password right, Notifications spanning both columns underneath, so
+   no half of the page is ever empty. minmax(0, 1fr) tracks so a long
+   value can never force horizontal scroll. One column at laptop
+   widths and below (<= 1100px); align-items: start keeps the shorter
+   card from stretching to its neighbour's height. */
 .settings-layout {
   display: grid;
-  grid-template-columns: 380px 1fr;
-  gap: 32px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
-  max-width: 1400px;
-  margin-left: auto;
-  margin-right: auto;
 }
-.settings-main { display: flex; flex-direction: column; gap: 16px; }
-@media (max-width: 1280px) {
-  .settings-layout { grid-template-columns: 1fr; }
+.settings-span { grid-column: 1 / -1; }
+/* The spanning Notifications card lays its toggle rows out two
+   abreast at desktop so a label is never a card-width away from its
+   switch; the last ROW loses its divider, not only the last item. */
+.notification-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 40px;
+}
+.notification-rows .notification-row:nth-last-child(-n + 2) {
+  border-bottom: none;
+}
+@media (max-width: 1100px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .notification-rows { grid-template-columns: minmax(0, 1fr); }
+  .notification-rows .notification-row:nth-last-child(2) {
+    border-bottom: 1px solid var(--border-soft);
+  }
 }
 
 /* ---- Account overview card ---- */
@@ -16420,18 +16432,19 @@ form.card + .form-fold { margin-top: 16px; }
   padding-top: 8px;
 }
 
-/* P-7 S7 — Settings: the profile is a horizontal header band at every
-   width; the forms take the full width below it. */
+/* P-7 S7 / P-8R D — Settings: the profile is a horizontal header band
+   at every width: the avatar with its pencil badge, then the identity
+   line (name · email · role chip) and ONE quiet meta row under it
+   (member since · last sign-in · access). */
 .account-header {
   display: flex;
   align-items: center;
   gap: 18px;
   padding: 18px 22px;
   margin-bottom: 18px;
-  flex-wrap: wrap;
 }
 .account-header-main {
-  flex: 1 1 320px;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -16447,34 +16460,86 @@ form.card + .form-fold { margin-top: 16px; }
 .account-header-identity .account-name {
   font-size: 17px;
 }
+.account-header-identity .account-role-pill {
+  margin-top: 0;
+}
 .account-header-facts {
   display: flex;
-  gap: 18px;
   flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  row-gap: 2px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
 }
 .account-header-fact {
   display: inline-flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: baseline;
+  gap: 5px;
   min-width: 0;
 }
-.account-header-fact .account-meta-label {
-  font-size: 11px;
+.account-header-fact + .account-header-fact::before {
+  content: "\00b7";
+  color: var(--text-faint);
+  margin-right: 3px;
 }
-.account-header-photo {
+.account-header-fact dt {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+.account-header-fact dd {
+  margin: 0;
+  color: var(--text);
+}
+
+/* P-8R D — the avatar-with-pencil upload (ImageUploadField
+   variant="badge"): the pencil opens the same file picker, the quiet
+   link under the avatar is the same remove path. */
+.image-upload-badge {
   flex: 0 0 auto;
-  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
-.settings-layout--single {
-  grid-template-columns: 1fr;
-  max-width: 980px;
-  margin-left: 0;
+.image-upload-badge-avatar {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
 }
-@media (max-width: 560px) {
-  .account-header-photo {
-    margin-left: 0;
-  }
+.image-upload-badge-btn {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  background: var(--green);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  cursor: pointer;
 }
+.image-upload-badge-btn:hover { filter: brightness(1.1); }
+.image-upload-badge-btn:disabled { opacity: 0.6; cursor: default; }
+.image-upload-badge-remove {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.image-upload-badge-remove:hover { color: var(--red); }
+.image-upload-badge-remove:disabled { opacity: 0.6; cursor: default; }
+.image-upload-badge > .alert-error { min-width: 220px; }
 
 /* P-7 S9 — the recurring-work calendar: inline styles became classes,
    every tick colour is a token, the legend reads from the same list.

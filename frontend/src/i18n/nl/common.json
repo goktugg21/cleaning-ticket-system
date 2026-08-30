@@ -23,6 +23,8 @@
   "image_upload.upload": "Uploaden",
   "image_upload.replace": "Vervangen",
   "image_upload.remove": "Verwijderen",
+  "image_upload.change_photo": "Foto wijzigen",
+  "image_upload.remove_photo": "Foto verwijderen",
   "image_upload.hint": "JPEG, PNG of WebP, tot 2 MB.",
   "settings.photo_title": "Profielfoto",
   "customer_form.logo_title": "Logo",
