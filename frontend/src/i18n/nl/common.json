@@ -887,7 +887,7 @@
   "services.error_category_required": "Kies een categorie.",
   "services.error_price_invalid": "Voer een niet-negatieve referentieprijs in.",
   "services.error_vat_invalid": "Voer een niet-negatief BTW-percentage in.",
-  "catalog.company_selector_label": "Catalogus van",
+  "catalog.company_selector_label": "Bedrijf",
   "catalog.company_selector_placeholder": "Selecteer een bedrijf…",
   "catalog.company_load_failed": "De bedrijvenlijst kon niet worden geladen. Herlaad de pagina; zonder deze lijst kunt u geen bedrijf kiezen voor nieuwe catalogusrijen.",
   "catalog.company_selector_hint_filtering": "De lijst toont alleen categorieën, diensten en eenheden van dit bedrijf. Nieuwe rijen worden ook onder dit bedrijf aangemaakt.",
@@ -2657,5 +2657,6 @@
   "building_detail.fact_open_work": "{{tickets}} open tickets · {{extra}} open meerwerk",
   "cost_shares.unsplit_sentence": "Al het werk hier wordt gefactureerd aan de eigen klant van het ticket.",
   "cost_shares.split_sentence": "De factuur wordt verdeeld: {{shares}}.",
-  "cost_shares.change": "wijzigen"
+  "cost_shares.change": "wijzigen",
+  "services.company_selector_label": "Catalogus van"
 }

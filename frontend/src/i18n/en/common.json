@@ -887,7 +887,7 @@
   "services.error_category_required": "Pick a category.",
   "services.error_price_invalid": "Enter a non-negative reference price.",
   "services.error_vat_invalid": "Enter a non-negative VAT percentage.",
-  "catalog.company_selector_label": "Catalogue of",
+  "catalog.company_selector_label": "Company",
   "catalog.company_selector_placeholder": "Select a company…",
   "catalog.company_load_failed": "The company list could not be loaded. Reload the page; without it you cannot pick a company for new catalog rows.",
   "catalog.company_selector_hint_filtering": "The list shows only this company's categories, services and units. New rows are created under this company too.",
@@ -2631,7 +2631,7 @@
   "unit.fixed": "fixed price",
   "unit.per_item": "per item",
   "unit.per_custom": "per {{label}}",
-  "unit.suffix_hours": "hours",
+  "unit.suffix_hours": "h",
   "unit.suffix_items": "pcs",
   "hours_admin.col_weighted_teach": "Hours × the factor of the hour type (an evening hour of factor 1.5 counts as 1.5). This is the number pay and rates are calculated from.",
   "route_error.title": "This page could not be shown",
@@ -2657,5 +2657,6 @@
   "building_detail.fact_open_work": "{{tickets}} open tickets · {{extra}} open extra work",
   "cost_shares.unsplit_sentence": "All work here bills to the ticket's own customer.",
   "cost_shares.split_sentence": "The invoice is split: {{shares}}.",
-  "cost_shares.change": "change"
+  "cost_shares.change": "change",
+  "services.company_selector_label": "Catalogue of"
 }

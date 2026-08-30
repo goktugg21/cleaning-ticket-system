@@ -1250,7 +1250,7 @@ export function ServicesAdminPage({ embedded = false }: { embedded?: boolean } =
       {showCompanySelector && (
         <div className="field" style={{ maxWidth: 320, marginBottom: 16 }}>
           <label className="field-label" htmlFor="catalog-company-selector">
-            {t("catalog.company_selector_label")}
+            {t("services.company_selector_label")}
           </label>
           <select
             id="catalog-company-selector"

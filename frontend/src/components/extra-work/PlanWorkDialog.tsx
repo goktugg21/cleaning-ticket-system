@@ -418,7 +418,9 @@ export function PlanWorkDialog({
       }
       return next;
     });
-    if (end) setEnd(shiftDay(end, moveDelta));
+    // The last work day is the person's own field: it is never shifted.
+    // (Replayed on crmtest: shifting it by the stored delta dragged a
+    // freshly typed end date into July.)
     setMoveBaseline(start);
     setMoveDecision("moved");
     if (touchesPast && !pastUnlocked) setPastPromptOpen(true);
