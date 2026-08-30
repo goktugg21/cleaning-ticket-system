@@ -549,8 +549,17 @@ export function HoursWeekGrid({
       // opened with the saved block AND a blank general twin, and typing
       // into the twin doubled the day. An untagged seed now yields to
       // any saved row of its pair.
+      // P-8R C — ...but only to a saved row that IS the pair's own
+      // standard row: an untagged one, or an auto-filled CONTRACT row
+      // (D9's case). A saved row linked to a JOB (ticket / extra work)
+      // is a child of the pair, not its stand-in: without this the
+      // person x building pair whose only saved hours were on jobs had
+      // no standard row at all, and the count read "1 person x 2
+      // buildings = 1 standard row" on crmtest (P-8R walk).
       const savedPairs = new Set(
-        [...byKey.values()].map((row) => `${row.hourTypeId}|${row.buildingId}`),
+        [...byKey.values()]
+          .filter((row) => row.sourceType === "" || row.sourceType === "CONTRACT")
+          .map((row) => `${row.hourTypeId}|${row.buildingId}`),
       );
 
       // One row per (building, hour type) from the setup. RECONCILED,

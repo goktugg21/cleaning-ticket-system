@@ -213,6 +213,25 @@ class QuoteDecisionOnBehalfTests(ProposalFixtureMixin, TestCase):
                 self.assertEqual(response.status_code, 400, response.data)
                 self.assertEqual(response.data["code"], "override_reason_required")
 
+    def test_customer_reject_on_the_proposal_door_needs_a_reason(self):
+        """P-8R B — the walk found a customer could reject a sent quote
+        with no reason on the proposal door; the request door already
+        refused that. Parity: `rejection_note_required`."""
+        ew, proposal = self._sent()
+        response = self._api(self.cust_user).post(
+            self._transition_url(ew.id, proposal.id),
+            {"to_status": ProposalStatus.CUSTOMER_REJECTED},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["code"], "rejection_note_required")
+        response = self._api(self.cust_user).post(
+            self._transition_url(ew.id, proposal.id),
+            {"to_status": ProposalStatus.CUSTOMER_REJECTED, "note": "Too expensive"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+
     def test_provider_decision_on_the_ew_transition_door_needs_a_reason(self):
         ew = self._make_ew(status=ExtraWorkStatus.PRICING_PROPOSED)
         for target in (ExtraWorkStatus.CUSTOMER_APPROVED, ExtraWorkStatus.CUSTOMER_REJECTED):
