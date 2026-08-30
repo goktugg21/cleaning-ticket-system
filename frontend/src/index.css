@@ -16327,3 +16327,12 @@ a.topbar-search-row:hover, a.topbar-search-row:focus { background: var(--green-f
 .attn-show-all { margin: 6px 0 0 4px; }
 /* P-6 V4 — the triage checkbox sits at the row's left edge. */
 .wp-undated-select { flex: none; margin: 4px 10px 0 0; width: 16px; height: 16px; accent-color: var(--green); }
+
+/* P-6 V3 (lists) — the four admin lists on the guided pattern: a KPI
+   tile that is still being counted says so in a small word, not at
+   number size; the sentence under a locked filter select stays narrow;
+   the wrapper that carries a disabled toggle's title keeps the toggle
+   aligned with its neighbours. */
+.summary-stat-value .muted-empty { font-size: var(--font-sm); font-weight: 500; }
+.filter-field > .muted.small { max-width: 220px; line-height: 1.35; }
+.filter-actions > span { display: inline-flex; }
