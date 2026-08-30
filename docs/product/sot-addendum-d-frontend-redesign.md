@@ -1392,3 +1392,11 @@ crmtest with its own fixtures. Rulings:
     tests pin; it waits for the owner's word: a history card in its
     original column ("Gepland hier — staat vandaag op het bord") or the
     current rule.
+    (e) **A day planned on the ticket AFTER a person was assigned does
+    not reach that person's slot unless the planner ticks "also apply
+    to the people"** (`POST /tickets/<id>/schedule/` `apply_to_slots`,
+    default false — P-5's one-plan-one-date wiring). The manager's board
+    then shows the job on its day while the person's own My schedule
+    lists it under "Not planned yet" (E1–E3 on crmtest, tickets 431–433).
+    By design, but the two views disagree about one fact; the default
+    is the owner's call.

@@ -515,10 +515,6 @@ ENTRY_KEYS = {
     "due_kind",
     "settled_at",
     "reported_done_at",
-    # P-7 S8 — the reason a parked job was parked for (stamped on the
-    # parked list; null elsewhere). Added here by P-8R, which ran this
-    # module and found the key had never been listed.
-    "parked_reason",
     "settled_days_after_due",
     # P-3 §A.5 — a real plan whose last day is past the deadline.
     "planned_after_deadline",
@@ -537,6 +533,11 @@ ENTRY_KEYS = {
 }
 
 #: Commercial and internal extra-work fields that must never reach this
+#: P-7 S8 / P-8R — keys an entry carries only on ONE list: `parked_reason`
+#: is stamped on `parked_entries` (the reason it was parked for) and on
+#: nothing else, so it is not part of the exact shape above.
+OPTIONAL_ENTRY_KEYS = {"parked_reason"}
+
 #: surface. Named individually rather than checked as "not in ENTRY_KEYS"
 #: because the point is the NAMES: these are the exact fields the
 #: post-2026-05-20 privacy fix found leaking to STAFF.
@@ -618,6 +619,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "stuck",
                 # P-3 §A.1 — jobs waiting on the customer, whole scope.
                 "waiting_customer",
+                "parked",
             },
         )
         # Every list is bounded, and the response says by how much and
@@ -632,6 +634,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "overdue_entries",
                 "upcoming_entries",
                 "undated_entries",
+                "parked_entries",
                 "late_entries",
                 "stuck_entries",
                 "waiting_customer_entries",
@@ -644,6 +647,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "overdue_entries",
                 "upcoming_entries",
                 "undated_entries",
+                "parked_entries",
                 "late_entries",
                 "stuck_entries",
                 "waiting_customer_entries",
@@ -655,7 +659,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
         payload = self.get_plan(self.worker)
         entry = self.entry(payload, f"slot-{self.slot.id}")
         self.assertIsNotNone(entry)
-        self.assertEqual(set(entry), ENTRY_KEYS)
+        self.assertEqual(set(entry) - OPTIONAL_ENTRY_KEYS, ENTRY_KEYS)
         self.assertEqual(entry["kind"], KIND_TICKET_SLOT)
         self.assertEqual(entry["ticket_id"], self.ticket.id)
         self.assertEqual(entry["ticket_no"], self.ticket.ticket_no)
@@ -673,7 +677,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
         payload = self.get_plan(self.worker)
         entry = self.entry(payload, f"ew-{self.extra_work.id}")
         self.assertIsNotNone(entry)
-        self.assertEqual(set(entry), ENTRY_KEYS)
+        self.assertEqual(set(entry) - OPTIONAL_ENTRY_KEYS, ENTRY_KEYS)
         self.assertEqual(entry["kind"], KIND_EXTRA_WORK)
         self.assertEqual(entry["extra_work_id"], self.extra_work.id)
         self.assertIsNone(entry["ticket_id"])
@@ -1166,6 +1170,7 @@ class WorkPlanRuleParityTests(WorkPlanFixture, APITestCase):
             "overdue_entries",
             "upcoming_entries",
             "undated_entries",
+            "parked_entries",
             "late_entries",
         ):
             with self.subTest(bucket=bucket):
