@@ -16867,4 +16867,17 @@ form.card + .form-fold { margin-top: 16px; }
   justify-content: flex-start;
   text-align: left;
   min-height: 0;
+/* P-8R F — connected-facts links on list rows (contracts: building and
+   customer; invoices: customer). Quiet on purpose: they inherit the
+   cell's colour and carry a dotted underline, so they read as "this
+   opens something else" without fighting the row's own click target. */
+.row-fact-link {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.row-fact-link:hover,
+.row-fact-link:focus-visible {
+  color: var(--green-2);
+  text-decoration-style: solid;
 }

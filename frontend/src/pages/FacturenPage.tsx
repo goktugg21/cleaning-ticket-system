@@ -30,6 +30,8 @@ import { useTranslation } from "react-i18next";
 import { BadgeEuro, CheckCircle2, Search, SlidersHorizontal } from "lucide-react";
 
 import { getApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { canReadCustomerArea } from "../auth/permissions";
 import {
   generateInvoices,
   getBillingMonthAtRisk,
@@ -241,7 +243,13 @@ export function FacturenPage({
 } = {}) {
   const { t } = useTranslation(["common", "invoices"]);
   const { push: pushToast } = useToast();
+  const { me } = useAuth();
   const customerScoped = customerId !== undefined;
+  // P-8R F — the row's customer link goes to the customer detail, whose
+  // own guard (`CustomerReadRoute`) decides who may open it. Every
+  // billing role passes today; the gate is stated so a plain name, not a
+  // dead door, is what a narrower role would get.
+  const canOpenCustomer = canReadCustomerArea(me?.role);
   // P-6 V1 — the "Invoices → customer → month" sentence on the meerwerk
   // pages links here with `?customer=<id>&period=YYYY-MM`; the page opens
   // on exactly that customer and month.
@@ -612,6 +620,7 @@ export function FacturenPage({
           eyebrow={t("facturen.eyebrow")}
           title={t("facturen.title")}
           subtitle={t("facturen.subtitle")}
+          testId="facturen-header"
         />
       )}
 
@@ -1190,6 +1199,7 @@ export function FacturenPage({
                     group={group}
                     columnCount={columnCount}
                     customerScoped={customerScoped}
+                    canOpenCustomer={canOpenCustomer}
                     showBuildingColumn={showBuildingColumn}
                     showGroupLabelColumn={showGroupLabelColumn}
                     t={t}
@@ -1211,6 +1221,7 @@ function GroupRows({
   group,
   columnCount,
   customerScoped,
+  canOpenCustomer,
   showBuildingColumn,
   showGroupLabelColumn,
   t,
@@ -1218,6 +1229,7 @@ function GroupRows({
   group: InvoiceGroup;
   columnCount: number;
   customerScoped: boolean;
+  canOpenCustomer: boolean;
   showBuildingColumn: boolean;
   showGroupLabelColumn: boolean;
   t: (key: string, opts?: Record<string, unknown>) => string;
@@ -1256,7 +1268,26 @@ function GroupRows({
             <td style={{ textAlign: "right" }}>
               <strong>{formatMoney(inv.total_amount)}</strong>
             </td>
-            {!customerScoped && <td>{inv.customer_name}</td>}
+            {/* P-8R F — the connected fact: this invoice's customer. The
+                row itself opens the invoice; the link opens the customer,
+                and `ClickableRow` already ignores clicks that start on an
+                inner anchor. */}
+            {!customerScoped && (
+              <td>
+                {canOpenCustomer ? (
+                  <Link
+                    to={`/admin/customers/${inv.customer}`}
+                    className="row-fact-link"
+                    data-testid="facturen-row-customer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {inv.customer_name}
+                  </Link>
+                ) : (
+                  inv.customer_name
+                )}
+              </td>
+            )}
             {showBuildingColumn && (
               <td className="muted small">{inv.building_name ?? t("facturen.all_buildings")}</td>
             )}

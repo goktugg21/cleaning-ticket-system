@@ -1417,7 +1417,7 @@
   "customer_reports.full_reports_link": "Volledige rapporten →",
   "facturen.eyebrow": "Facturatie",
   "facturen.title": "Facturen",
-  "facturen.subtitle": "Afgerond meerwerk komt hier binnen als nog te factureren. U maakt er een concept van, geeft het uit en verstuurt het — pas bij verzenden krijgt het een nummer.",
+  "facturen.subtitle": "Facturen worden gevuld met afgerond meerwerk per klant en maand, en met de vaste contractperiodes.",
   "facturen.at_risk_title": "Deze factuurmaand loopt risico",
   "facturen.at_risk_sub": "Werk dat in de open factuurmaand (of eerder) valt, maar waarvan de afronding niet compleet is. Zolang dat zo blijft, komt het niet op de factuur.",
   "facturen.at_risk_col_item": "Werk",

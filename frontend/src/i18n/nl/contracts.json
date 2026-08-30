@@ -5,7 +5,8 @@
   "list": {
     "title": "Contracten",
     "eyebrow": "Beheer",
-    "loading": "Bezig met laden…"
+    "loading": "Bezig met laden…",
+    "purpose": "Wat er met elke klant per locatie is afgesproken: bedragen, uren en looptijd."
   },
   "actions": {
     "refresh": "Vernieuwen",

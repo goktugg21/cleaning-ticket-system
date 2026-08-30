@@ -1417,7 +1417,7 @@
   "customer_reports.full_reports_link": "Full reports →",
   "facturen.eyebrow": "Billing",
   "facturen.title": "Invoices",
-  "facturen.subtitle": "Finished extra work arrives here as still to invoice. You turn it into a draft, issue it and send it — only sending assigns a number.",
+  "facturen.subtitle": "Invoices are filled with completed extra work per customer and month, and with the fixed contract periods.",
   "facturen.at_risk_title": "This billing month is at risk",
   "facturen.at_risk_sub": "Work that falls in the open billing month (or earlier) whose completion is not finished. Until it is, it will not reach the invoice.",
   "facturen.at_risk_col_item": "Work",

@@ -5,7 +5,8 @@
   "list": {
     "title": "Contracts",
     "eyebrow": "Admin",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "purpose": "What is agreed with each customer per location: amounts, hours and term."
   },
   "actions": {
     "refresh": "Refresh",

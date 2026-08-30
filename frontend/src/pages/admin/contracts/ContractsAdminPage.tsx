@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { SyntheticEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FileSignature, Plus, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { EmptyState } from "../../../components/EmptyState";
@@ -14,6 +15,7 @@ import {
 } from "../../../api/contracts";
 import type {
   Contract,
+  ContractBuildingRef,
   ContractFilters,
   ContractStats,
   ContractStatus,
@@ -26,7 +28,11 @@ import { MultiSelectToolbar } from "../../../components/MultiSelectToolbar";
 import { SortableHeader } from "../../../components/SortableHeader";
 import type { SortState } from "../../../components/SortableHeader";
 import { useAuth } from "../../../auth/AuthContext";
-import { canManageContracts } from "../../../auth/permissions";
+import {
+  canAccessAdminArea,
+  canManageContracts,
+  canReadCustomerArea,
+} from "../../../auth/permissions";
 import { useEditMode } from "../../../lib/useEditMode";
 import { ContractFormDialog } from "./ContractFormDialog";
 import { ContractTypesTab } from "./ContractTypesTab";
@@ -101,6 +107,12 @@ export function ContractsAdminPage() {
   // The shared predicate, not an inline role list: a second copy of
   // "who may change commercial terms" is the drift CLAUDE.md warns about.
   const canManage = canManageContracts(me?.role);
+  // P-8R F — the connected-facts links on a row point at pages with their
+  // own guards: a building detail is admin-only, a customer detail admits
+  // a BUILDING_MANAGER through its own variant. A link a role cannot
+  // follow is a dead door, so each renders as a plain name instead.
+  const canOpenBuilding = canAccessAdminArea(me?.role);
+  const canOpenCustomer = canReadCustomerArea(me?.role);
 
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [stats, setStats] = useState<ContractStats | null>(null);
@@ -376,8 +388,11 @@ export function ContractsAdminPage() {
             {t("list.eyebrow")}
           </div>
           <h2 className="page-title">{t("list.title")}</h2>
-          <p className="page-sub">
-            {loading ? t("list.loading") : t("table.countLabel", { count })}
+          {/* P-8R F — ONE purpose line (Addendum D §D.15 item 9). The
+              count it replaces is still on the "Contracten" tile below,
+              which reads the same filters, and on the pagination bar. */}
+          <p className="page-sub" data-testid="contracts-purpose">
+            {t("list.purpose")}
           </p>
         </div>
         <div className="page-header-actions">
@@ -970,6 +985,8 @@ export function ContractsAdminPage() {
                   editMode={editMode}
                   statusTag={CONTRACT_STATUS_TAG}
                   totalColumnCount={totalColumnCount}
+                  canOpenBuilding={canOpenBuilding}
+                  canOpenCustomer={canOpenCustomer}
                   onOpen={(id) => navigate(`/admin/contracts/${id}`)}
                   collapsed={collapsed.includes(group.key)}
                   onToggleCollapse={() =>
@@ -1048,9 +1065,20 @@ export function ContractsAdminPage() {
                     SAME commit as the table: the two render in parallel
                     and drift the moment only one is touched. */}
                 <span className="admin-card-meta">
-                  {[row.company_name, row.customer_name]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {row.company_name}
+                  {row.company_name && row.customer_name ? " · " : ""}
+                  {/* P-8R F — the same links as the table row. */}
+                  {row.customer_name && canOpenCustomer ? (
+                    <Link
+                      to={`/admin/customers/${row.customer}`}
+                      className="row-fact-link"
+                      data-testid={`contracts-card-customer-${row.id}`}
+                    >
+                      {row.customer_name}
+                    </Link>
+                  ) : (
+                    row.customer_name
+                  )}
                 </span>
               </div>
               <div className="admin-card-meta-row">
@@ -1058,6 +1086,18 @@ export function ContractsAdminPage() {
                   {contractSentence(row, t, locale)}
                 </span>
               </div>
+              {row.buildings.length > 0 && (
+                <div className="admin-card-meta-row">
+                  <span className="admin-card-meta">
+                    <BuildingsCell
+                      buildings={row.buildings}
+                      linked={canOpenBuilding}
+                      testIdPrefix={`contracts-card-building-${row.id}`}
+                      moreLabel={(n) => t("table.andMore", { count: n })}
+                    />
+                  </span>
+                </div>
+              )}
               <div className="admin-card-meta-row">
                 <span className="admin-card-meta">
                   {measureLabel}:{" "}
@@ -1152,6 +1192,8 @@ function ContractGroup({
   editMode,
   statusTag,
   totalColumnCount,
+  canOpenBuilding,
+  canOpenCustomer,
   onOpen,
   collapsed,
   onToggleCollapse,
@@ -1166,6 +1208,8 @@ function ContractGroup({
   editMode: ReturnType<typeof useEditMode<number>>;
   statusTag: Record<ContractStatus, string>;
   totalColumnCount: number;
+  canOpenBuilding: boolean;
+  canOpenCustomer: boolean;
   onOpen: (id: number) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -1211,8 +1255,15 @@ function ContractGroup({
           role="link"
           tabIndex={0}
           aria-label={`${t("actions.open")}: ${row.contract_no}`}
-          onClick={() => onOpen(row.id)}
+          onClick={(event) => {
+            // P-8R F — the row carries inline links now; a click or an
+            // Enter on one of them must open THAT page and not also the
+            // contract (the `ClickableRow` rule, applied to this row).
+            if (fromInnerControl(event)) return;
+            onOpen(row.id);
+          }}
           onKeyDown={(event) => {
+            if (fromInnerControl(event)) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               onOpen(row.id);
@@ -1242,13 +1293,28 @@ function ContractGroup({
             </span>
           </td>
           <td className="muted small">{row.company_name ?? ""}</td>
-          <td>{row.customer_name ?? ""}</td>
+          <td>
+            {row.customer_name && canOpenCustomer ? (
+              <Link
+                to={`/admin/customers/${row.customer}`}
+                className="row-fact-link"
+                data-testid={`contracts-row-customer-${row.id}`}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {row.customer_name}
+              </Link>
+            ) : (
+              (row.customer_name ?? "")
+            )}
+          </td>
           <td>
             {row.buildings.length === 0 ? (
               <span className="muted-empty">{t("sentence.no_locations")}</span>
             ) : (
               <BuildingsCell
-                names={row.buildings.map((building) => building.name)}
+                buildings={row.buildings}
+                linked={canOpenBuilding}
+                testIdPrefix={`contracts-row-building-${row.id}`}
                 moreLabel={(n) => t("table.andMore", { count: n })}
               />
             )}
@@ -1291,17 +1357,39 @@ function ContractGroup({
  * data. Same shape as the buildings list's Customers cell.
  */
 function BuildingsCell({
-  names,
+  buildings,
+  linked,
+  testIdPrefix,
   moreLabel,
 }: {
-  names: string[];
+  buildings: ContractBuildingRef[];
+  /** P-8R F — each shown name is a link to the building's own page.
+   *  Off for a role the building detail's guard would turn away. */
+  linked: boolean;
+  testIdPrefix: string;
   moreLabel: (n: number) => string;
 }) {
-  const shown = names.slice(0, 2);
-  const hidden = names.length - shown.length;
+  const shown = buildings.slice(0, 2);
+  const hidden = buildings.length - shown.length;
   return (
     <span>
-      {shown.join(", ")}
+      {shown.map((building, index) => (
+        <Fragment key={building.id}>
+          {index > 0 ? ", " : ""}
+          {linked ? (
+            <Link
+              to={`/admin/buildings/${building.id}`}
+              className="row-fact-link"
+              data-testid={`${testIdPrefix}-${building.id}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {building.name}
+            </Link>
+          ) : (
+            building.name
+          )}
+        </Fragment>
+      ))}
       {hidden > 0 && (
         <span className="cell-tag cell-tag-muted" style={{ marginLeft: 6 }}>
           {moreLabel(hidden)}
@@ -1309,6 +1397,20 @@ function BuildingsCell({
       )}
     </span>
   );
+}
+
+/**
+ * P-8R F — did this event start on a control INSIDE the row (a link, a
+ * button, the edit-mode checkbox)? Then the row must not also react:
+ * `ClickableRow` makes the same check, and this table's rows are not
+ * `ClickableRow` yet. Covers keyboard too — an Enter on a focused inline
+ * link bubbles to the row, and without this the row would open the
+ * contract on top of the page the link opened.
+ */
+function fromInnerControl(event: SyntheticEvent<HTMLTableRowElement>): boolean {
+  if (!(event.target instanceof HTMLElement)) return false;
+  const inner = event.target.closest("a,button,input,select,textarea,label");
+  return inner !== null && inner !== event.currentTarget;
 }
 
 export { MAX_PROJECT_COLUMNS };
