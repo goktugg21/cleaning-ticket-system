@@ -545,58 +545,64 @@ class TicketListSerializer(
     def get_extra_work_origin(self, obj):
         return resolve_extra_work_origin_core(obj)
 
-    # P-5 S7 — THE OTHER ORIGIN: an occurrence ticket says which recurring
-    # job (and, through its contract line, which contract) it is a visit
-    # of, and which visit of this year's it is.
+    # P-5 S7 — the occurrence origin (see `resolve_occurrence_origin`).
     occurrence_origin = serializers.SerializerMethodField()
 
     def get_occurrence_origin(self, obj):
-        occurrence_id = getattr(obj, "planned_occurrence_id", None)
-        if occurrence_id is None:
-            return None
-        from planned_work.models import PlannedOccurrence
+        return resolve_occurrence_origin(obj)
 
-        occ = (
-            PlannedOccurrence.objects.select_related(
-                "recurring_job",
-                "recurring_job__contract_line",
-                "recurring_job__contract_line__revision",
-                "recurring_job__contract_line__revision__contract",
-                "recurring_job__contract_line__revision__contract__contract_type",
-            )
-            .filter(pk=occurrence_id)
-            .first()
+
+def resolve_occurrence_origin(obj):
+    """P-5 S7 — THE OTHER ORIGIN: an occurrence ticket says which recurring
+    job (and, through its contract line, which contract) it is a visit
+    of, and which visit of this year's it is. None for any other ticket.
+    Shared by the list and the detail serializer."""
+    occurrence_id = getattr(obj, "planned_occurrence_id", None)
+    if occurrence_id is None:
+        return None
+    from planned_work.models import PlannedOccurrence
+
+    occ = (
+        PlannedOccurrence.objects.select_related(
+            "recurring_job",
+            "recurring_job__contract_line",
+            "recurring_job__contract_line__revision",
+            "recurring_job__contract_line__revision__contract",
+            "recurring_job__contract_line__revision__contract__contract_type",
         )
-        if occ is None:
-            return None
-        job = occ.recurring_job
-        year = occ.planned_date.year
-        siblings = PlannedOccurrence.objects.filter(
-            recurring_job_id=job.id, planned_date__year=year
-        ).exclude(status__in=["CANCELLED", "SKIPPED"])
-        visit_index = siblings.filter(planned_date__lt=occ.planned_date).count() + (
-            siblings.filter(planned_date=occ.planned_date, id__lte=occ.id).count()
-        )
-        line = job.contract_line
-        contract = line.revision.contract if line is not None else None
-        return {
-            "occurrence_id": occ.id,
-            "planned_date": occ.planned_date.isoformat(),
-            "status": occ.status,
-            "recurring_job_id": job.id,
-            "recurring_job_title": job.title,
-            "frequency": job.frequency,
-            "visit_index": visit_index,
-            "visits_this_year": siblings.count(),
-            "contract_id": contract.id if contract else None,
-            "contract_no": contract.contract_no if contract else None,
-            "contract_type_name": (
-                contract.contract_type.name
-                if contract is not None and contract.contract_type_id
-                else None
-            ),
-            "contract_line_name": line.name if line is not None else None,
-        }
+        .filter(pk=occurrence_id)
+        .first()
+    )
+    if occ is None:
+        return None
+    job = occ.recurring_job
+    year = occ.planned_date.year
+    siblings = PlannedOccurrence.objects.filter(
+        recurring_job_id=job.id, planned_date__year=year
+    ).exclude(status__in=["CANCELLED", "SKIPPED"])
+    visit_index = siblings.filter(planned_date__lt=occ.planned_date).count() + (
+        siblings.filter(planned_date=occ.planned_date, id__lte=occ.id).count()
+    )
+    line = job.contract_line
+    contract = line.revision.contract if line is not None else None
+    return {
+        "occurrence_id": occ.id,
+        "planned_date": occ.planned_date.isoformat(),
+        "status": occ.status,
+        "recurring_job_id": job.id,
+        "recurring_job_title": job.title,
+        "frequency": job.frequency,
+        "visit_index": visit_index,
+        "visits_this_year": siblings.count(),
+        "contract_id": contract.id if contract else None,
+        "contract_no": contract.contract_no if contract else None,
+        "contract_type_name": (
+            contract.contract_type.name
+            if contract is not None and contract.contract_type_id
+            else None
+        ),
+        "contract_line_name": line.name if line is not None else None,
+    }
 
 
 # Sprint 4 — sub-task serializers.
@@ -867,6 +873,12 @@ class TicketDetailSerializer(
 
     def get_settled_days_after_due(self, obj):
         return self._due_facts(obj)["settled_days_after_due"]
+
+    # P-5 S7 — the occurrence origin (see `resolve_occurrence_origin`).
+    occurrence_origin = serializers.SerializerMethodField()
+
+    def get_occurrence_origin(self, obj):
+        return resolve_occurrence_origin(obj)
 
     # P-5 S1 — ONE PLAN, ONE DATE. The job's own window as
     # `tickets/job_dates.job_window` resolves it: the ticket's own

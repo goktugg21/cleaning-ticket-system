@@ -42,7 +42,8 @@ class BuildingSerializer(serializers.ModelSerializer):
                     ),
                     "customer_id": contract.customer_id,
                     "customer_name": contract.customer.name if contract.customer_id else None,
-                    "status": contract.status,
+                    # `Contract.status` is a METHOD (resolved on a date).
+                    "status": contract.status(),
                     "lifecycle": contract.lifecycle,
                     "billing_period": contract.billing_period,
                     "period_amount": amount,
