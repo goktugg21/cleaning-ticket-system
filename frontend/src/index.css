@@ -16710,3 +16710,9 @@ form.card + .form-fold { margin-top: 16px; }
 .wp-undated-row--parked {
   opacity: 0.85;
 }
+
+/* P-7 S4.1 — the billing sentence under the ticket card's month row. */
+.ticket-ew-billing-sentence {
+  margin: 4px 0 8px;
+  max-width: 70ch;
+}

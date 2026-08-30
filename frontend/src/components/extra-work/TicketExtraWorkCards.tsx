@@ -553,6 +553,21 @@ export function TicketExtraWorkCards({
               </button>
             </span>
           </div>
+          {/* P-7 S4.1 — the sentence that names the customer and the month
+              in WORDS, here too: a spawned meerwerk's request page
+              redirects to this ticket, so this card is where the owner
+              reads it. Same keys as the request page. */}
+          <p
+            className="muted small ticket-ew-billing-sentence"
+            data-testid="ticket-ew-billing-sentence"
+          >
+            {t(
+              ew.invoice_date
+                ? "extra_work:billing.consequence_month"
+                : "extra_work:billing.consequence_completion",
+              { customer: ew.customer_name, month: billingMonthWords(ew, t) },
+            )}
+          </p>
           <div className="detail-kv-row">
             <span className="detail-kv-label">{t("ew_card_invoiced")}</span>
             <span className="detail-kv-val" data-testid="ticket-ew-invoiced">
