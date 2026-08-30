@@ -1062,7 +1062,7 @@ export function FacturenPage({
           testIdPrefix="facturen-status"
         />
 
-        <div className="filter-bar" style={{ marginTop: 12 }} data-testid="facturen-filters">
+        <div className="ew-list-filters" style={{ marginTop: 12 }} data-testid="facturen-filters">
           <div className="filter-field search">
             <Search size={14} strokeWidth={2.2} aria-hidden="true" />
             <input

@@ -2877,5 +2877,6 @@
   "customer_view.overview.no_email": "geen e-mailadres",
   "customer_view.overview.no_phone": "geen telefoonnummer",
   "customer_view.overview.unavailable_title": "Deze klant kan niet worden getoond",
-  "customer_view.overview.unavailable_body": "De klant kon niet worden gelezen voor uw account, of bestaat niet meer."
+  "customer_view.overview.unavailable_body": "De klant kon niet worden gelezen voor uw account, of bestaat niet meer.",
+  "linked_building.no_address": "geen adres bekend"
 }

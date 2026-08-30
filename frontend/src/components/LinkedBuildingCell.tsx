@@ -34,10 +34,11 @@ export function LinkedBuildingIdentity({
   // locate a building, "Amsterdam · 1012 AB" does. Falls back to the
   // street address, then an em dash: a blank cell reads as a rendering
   // bug, an em dash reads as "nothing on file".
+  // P-6 (rule 15) — nothing on file is said in words, never as a dash.
   const address =
     [link.building_city, link.building_postal_code].filter(Boolean).join(" · ") ||
     link.building_address ||
-    "—";
+    null;
 
   return (
     <span
@@ -56,7 +57,7 @@ export function LinkedBuildingIdentity({
           </span>
         )}
       </span>
-      <span className="muted small">{address}</span>
+      <span className="muted small">{address ?? <span className="muted-empty">{t("linked_building.no_address")}</span>}</span>
     </span>
   );
 }

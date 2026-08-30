@@ -2877,5 +2877,6 @@
   "customer_view.overview.no_email": "no email address",
   "customer_view.overview.no_phone": "no phone number",
   "customer_view.overview.unavailable_title": "This customer cannot be shown",
-  "customer_view.overview.unavailable_body": "The customer could not be read for your account, or no longer exists."
+  "customer_view.overview.unavailable_body": "The customer could not be read for your account, or no longer exists.",
+  "linked_building.no_address": "no address on file"
 }
