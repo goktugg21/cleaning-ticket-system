@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft } from "lucide-react";
+import { MapPin, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { CUSTOMER_LIFECYCLE_VALUES } from "../../api/types";
@@ -46,7 +46,9 @@ import type {
 // surfaces a "Manage permissions →" deep-link to that page.
 import { useAuth } from "../../auth/AuthContext";
 import { BoundedList } from "../../components/BoundedList";
+import { EmptyState } from "../../components/EmptyState";
 import { EntityPicker } from "../../components/EntityPicker";
+import { PageHeader } from "../../components/PageHeader";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
@@ -55,6 +57,30 @@ import { deleteCustomerLogo, uploadCustomerLogo } from "../../api/media";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 import { Toggle } from "../../components/Toggle";
+
+/* P-6 V3 — errors live where the person is: one sentence per field, the
+   first one scrolled into view (the ContractFormDialog recipe). */
+const FIELD_ORDER = [
+  "company",
+  "name",
+  "contact_email",
+  "phone",
+  "language",
+  "lifecycle",
+  "address",
+  "postal_code",
+  "city",
+  "country",
+];
+
+function scrollToFirstField(errors: Record<string, string>): void {
+  const first = FIELD_ORDER.find((key) => errors[key]);
+  if (!first) return;
+  const el = document.querySelector<HTMLElement>(
+    `[data-testid="customer-form"] [data-customer-field="${first}"]`,
+  );
+  el?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
 
 export function CustomerFormPage() {
   const navigate = useNavigate();
@@ -146,9 +172,11 @@ export function CustomerFormPage() {
     },
     updateFn: updateCustomer,
     validate: () => {
-      if (!isCreate) return null;
       const errs: AdminFieldErrors = {};
-      if (company === "") errs.company = t("customer_form.error_pick_company");
+      if (isCreate && company === "") errs.company = t("customer_form.error_pick_company");
+      // P-6 V3 (rule 14) — the button is never silently disabled; the
+      // name is checked on press and the error lands at the field.
+      if (!name.trim()) errs.name = t("customer_form.error_name_required");
       // Sprint 154 §B — no building check. A customer is in MANY
       // buildings; the M:N "Linked buildings" section below is the real
       // one. See the payload builder for why the column itself stays.
@@ -700,34 +728,83 @@ export function CustomerFormPage() {
     [allCompanyBuildings, linkedBuildingIds],
   );
 
+  // P-6 V3 — the sentences this page itself wrote; anything else in
+  // `fieldErrors` came from the server and is said in the app's own words.
+  const ownSentences: Record<string, string> = {
+    company: t("customer_form.error_pick_company"),
+    name: t("customer_form.error_name_required"),
+  };
+  const bind = (key: string) => ({ "data-customer-field": key });
+  const fieldError = (key: string) => {
+    const raw = form.fieldErrors[key];
+    if (!raw) return null;
+    const text = ownSentences[key] === raw ? raw : t("admin_form.field_rejected");
+    return (
+      <span className="field-error" role="alert" data-testid={`customer-form-error-${key}`}>
+        {text}
+      </span>
+    );
+  };
+  const fieldErrorCount = Object.keys(form.fieldErrors).filter(
+    (key) => key !== "detail",
+  ).length;
+
+  // The hook sets the errors after `validate` / the server answers; the
+  // scroll follows them (DOM work only, no state).
+  useEffect(() => {
+    scrollToFirstField(form.fieldErrors);
+  }, [form.fieldErrors]);
+
+  const companyLockedReason = !isCreate
+    ? t("customer_form.company_locked_hint")
+    : companyLocked
+      ? t("customer_form.company_only_one")
+      : undefined;
+
+  // Rule 13 — a column exists only when a row has something for it.
+  const linkedBuildingsHaveAddress = linkedBuildings.some((l) => l.building_address);
+  const membersHaveNames = members.some((m) => m.user_full_name);
+
+  const addUserReason = memberBusy
+    ? t("admin_form.busy")
+    : availableUsers.length === 0
+      ? t("customer_form.add_user_no_candidates")
+      : selectedUserId === ""
+        ? t("customer_form.add_user_pick_first")
+        : undefined;
+  const addBuildingsReason = buildingLinkBusy
+    ? t("admin_form.busy")
+    : buildingsToLink.length === 0
+      ? t("customer_form.add_buildings_pick_first")
+      : undefined;
+
+  const toggleLabelStyle = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    cursor: "pointer",
+  } as const;
+
   return (
     <div>
-      <Link to="/admin/customers" className="link-back">
-        <ChevronLeft size={14} strokeWidth={2.5} />
-        {t("customer_form.back")}
-      </Link>
-
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("nav.admin_group")}
-          </div>
-          <h2 className="page-title">
-            {isCreate
-              ? t("customers.create")
-              : t("customer_form.edit_title", { name: customerName })}
-          </h2>
-          {!isCreate && customer && !customer.is_active && (
-            <p className="page-sub">
-              <span className="cell-tag cell-tag-closed">
-                <i />
-                {t("admin.status_inactive")}
-              </span>
-            </p>
-          )}
-        </div>
-        {!isCreate && customer && !customer.is_active && isSuperAdmin && (
-          <div className="page-header-actions">
+      <PageHeader
+        backLink={{ to: "/admin/customers", label: t("customer_form.back") }}
+        eyebrow={t("nav.admin_group")}
+        title={
+          isCreate
+            ? t("customers.create")
+            : t("customer_form.edit_title", { name: customerName })
+        }
+        statusPill={
+          !isCreate && customer && !customer.is_active ? (
+            <span className="cell-tag cell-tag-closed">
+              <i />
+              {t("admin.status_inactive")}
+            </span>
+          ) : undefined
+        }
+        actions={
+          !isCreate && customer && !customer.is_active && isSuperAdmin ? (
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -736,9 +813,9 @@ export function CustomerFormPage() {
             >
               {t("admin_form.reactivate")}
             </button>
-          </div>
-        )}
-      </div>
+          ) : undefined
+        }
+      />
 
       {savedBanner && (
         <div className="alert-info" style={{ marginBottom: 16 }} role="status">
@@ -757,182 +834,162 @@ export function CustomerFormPage() {
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card" onSubmit={form.handleSubmit}>
-          {/* RF-1 — customer logo (edit mode only; needs an existing id). */}
-          {!isCreate && customer && canManageLogo && (
-            <div className="form-section">
-              <div className="form-section-title">
-                {t("customer_form.logo_title")}
-              </div>
-              <ImageUploadField
-                imageUrl={logoUrl}
-                name={customer.name}
-                rounded={false}
-                testId="customer-logo-upload"
-                onUpload={async (file) => {
-                  const url = await uploadCustomerLogo(customer.id, file);
-                  setLogoOverride(url);
-                }}
-                onRemove={async () => {
-                  await deleteCustomerLogo(customer.id);
-                  setLogoOverride(null);
-                }}
-              />
+        <form className="card" onSubmit={form.handleSubmit} noValidate data-testid="customer-form">
+          {/* P-6 V3 — THREE STAGES, one thing at a time (§D.6 rule 12:
+              dense, never a wizard). Every field, value and endpoint is
+              what it was; only the order, the words at the point of
+              choice and where an error lands changed. */}
+          <div className="form-section" data-testid="customer-form-stage-who">
+            <div className="form-section-title">
+              <span className="ew-plan-step">1</span>
+              {t("customer_form.stage_who")}
             </div>
-          )}
-          <div className="form-section">
-            <div className="form-section-title">{t("customer_form.card_label_title")}</div>
-            <div className="form-section-helper">{t("customer_form.card_label_desc")}</div>
-          <div className="form-2col">
-            <div className="field">
-              <label className="field-label" htmlFor="customer-company">
-                {t("company")} *
-              </label>
-              <select
-                id="customer-company"
-                className="field-select"
-                value={company === "" ? "" : String(company)}
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setCompany(v === "" ? "" : Number(v));
-                }}
-                disabled={companyLocked}
-                required
-              >
-                <option value="" disabled>
-                  {t("invitations.select_company_placeholder")}
-                </option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
+            <div className="form-2col">
+              <div className="field" {...bind("company")}>
+                <label className="field-label" htmlFor="customer-company">
+                  {t("company")} *
+                </label>
+                <select
+                  id="customer-company"
+                  className="field-select"
+                  value={company === "" ? "" : String(company)}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setCompany(v === "" ? "" : Number(v));
+                  }}
+                  disabled={companyLocked}
+                  title={companyLockedReason}
+                  required
+                >
+                  <option value="" disabled>
+                    {t("invitations.select_company_placeholder")}
                   </option>
-                ))}
-                {!isCreate &&
-                  customer &&
-                  !companies.some((c) => c.id === customer.company) && (
-                    <option value={customer.company}>
-                      {t("buildings.company_fallback", { id: customer.company })}
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
                     </option>
-                  )}
-              </select>
-              {form.fieldErrors.company && (
-                <div className="alert-error login-error" role="alert">
-                  {form.fieldErrors.company}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="field">
-            <label className="field-label" htmlFor="customer-name">
-              {t("admin.col_name")} *
-            </label>
-            <input
-              id="customer-name"
-              className="field-input"
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
-            />
-            {form.fieldErrors.name && (
-              <div className="alert-error login-error" role="alert">
-                {form.fieldErrors.name}
+                  ))}
+                  {!isCreate &&
+                    customer &&
+                    !companies.some((c) => c.id === customer.company) && (
+                      <option value={customer.company}>
+                        {t("buildings.company_fallback", { id: customer.company })}
+                      </option>
+                    )}
+                </select>
+                <span className="muted small">
+                  {companyLockedReason ?? t("customer_form.company_hint")}
+                </span>
+                {fieldError("company")}
               </div>
-            )}
-          </div>
-
-          <div className="form-2col">
-            <div className="field">
-              <label className="field-label" htmlFor="customer-email">
-                {t("customers.col_contact_email")}
-              </label>
-              <input
-                id="customer-email"
-                className="field-input"
-                type="email"
-                value={contactEmail}
-                onChange={(event) => setContactEmail(event.target.value)}
-              />
-              {form.fieldErrors.contact_email && (
-                <div className="alert-error login-error" role="alert">
-                  {form.fieldErrors.contact_email}
-                </div>
-              )}
+              <div className="field" {...bind("name")}>
+                <label className="field-label" htmlFor="customer-name">
+                  {t("admin.col_name")} *
+                </label>
+                <input
+                  id="customer-name"
+                  className="field-input"
+                  type="text"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
+                <span className="muted small">{t("customer_form.name_hint")}</span>
+                {fieldError("name")}
+              </div>
             </div>
-            <div className="field">
-              <label className="field-label" htmlFor="customer-phone">
-                {t("customer_form.field_phone")}
-              </label>
-              <input
-                id="customer-phone"
-                className="field-input"
-                type="tel"
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-              />
+
+            <div className="form-2col">
+              <div className="field" {...bind("contact_email")}>
+                <label className="field-label" htmlFor="customer-email">
+                  {t("customers.col_contact_email")}
+                </label>
+                <input
+                  id="customer-email"
+                  className="field-input"
+                  type="email"
+                  value={contactEmail}
+                  onChange={(event) => setContactEmail(event.target.value)}
+                />
+                {fieldError("contact_email")}
+              </div>
+              <div className="field" {...bind("phone")}>
+                <label className="field-label" htmlFor="customer-phone">
+                  {t("customer_form.field_phone")}
+                </label>
+                <input
+                  id="customer-phone"
+                  className="field-input"
+                  type="tel"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                />
+                {fieldError("phone")}
+              </div>
+            </div>
+
+            <div className="form-2col">
+              <div className="field" {...bind("language")}>
+                <label className="field-label" htmlFor="customer-language">
+                  {t("users.col_language")}
+                </label>
+                <select
+                  id="customer-language"
+                  className="field-select"
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value)}
+                >
+                  {languageOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {fieldError("language")}
+              </div>
+
+              {/* Sprint 185 §3 — where the relationship is. Descriptive:
+                  it never gates access; `is_active` does. */}
+              <div className="field" {...bind("lifecycle")}>
+                <label className="field-label" htmlFor="customer-lifecycle">
+                  {t("customers.lifecycle")}
+                </label>
+                <select
+                  id="customer-lifecycle"
+                  className="field-select"
+                  data-testid="customer-lifecycle"
+                  value={lifecycle}
+                  onChange={(event) =>
+                    setLifecycle(event.target.value as CustomerLifecycle)
+                  }
+                >
+                  {CUSTOMER_LIFECYCLE_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {t(`customers.lifecycle_${value.toLowerCase()}`)}
+                    </option>
+                  ))}
+                </select>
+                <span className="muted small">{t("customers.lifecycle_hint")}</span>
+                {fieldError("lifecycle")}
+              </div>
             </div>
           </div>
 
-          <div className="field">
-            <label className="field-label" htmlFor="customer-language">
-              {t("users.col_language")}
-            </label>
-            <select
-              id="customer-language"
-              className="field-select"
-              value={language}
-              onChange={(event) => setLanguage(event.target.value)}
-            >
-              {languageOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Sprint 185 §3 — where the relationship is. Beside the
-              address because the two answer the same operator question:
-              is this a real, invoiceable customer, and for how long. */}
-          <div className="field">
-            <label className="field-label" htmlFor="customer-lifecycle">
-              {t("customers.lifecycle")}
-            </label>
-            <select
-              id="customer-lifecycle"
-              className="field-select"
-              data-testid="customer-lifecycle"
-              value={lifecycle}
-              onChange={(event) =>
-                setLifecycle(event.target.value as CustomerLifecycle)
-              }
-            >
-              {CUSTOMER_LIFECYCLE_VALUES.map((value) => (
-                <option key={value} value={value}>
-                  {t(`customers.lifecycle_${value.toLowerCase()}`)}
-                </option>
-              ))}
-            </select>
-            <div className="form-section-helper">
-              {t("customers.lifecycle_hint")}
-            </div>
-          </div>
-
-          </div>
-
-          {/* Sprint 185 §1 — the billing address. Its own card, because
+          {/* Sprint 185 §1 — the billing address. Its own stage, because
               this is the thing an invoice is addressed TO and it must not
               read as one more optional contact detail. */}
           <div className="form-section" data-testid="section-customer-address">
-            <div className="form-section-title">{t("customers.address")}</div>
+            <div className="form-section-title">
+              <span className="ew-plan-step">2</span>
+              {t("customers.address")}
+            </div>
             <div className="form-section-helper">{t("customers.address_hint")}</div>
             {!isCreate && !addressIsPrintable && (
               <div className="alert-warning" role="status">
                 {t("customers.address_missing")}
               </div>
             )}
-            <div className="field">
+            <div className="field" {...bind("address")}>
               <label className="field-label" htmlFor="customer-address">
                 {t("customers.address_street")}
               </label>
@@ -943,9 +1000,10 @@ export function CustomerFormPage() {
                 value={address}
                 onChange={(event) => setAddress(event.target.value)}
               />
+              {fieldError("address")}
             </div>
             <div className="form-2col">
-              <div className="field">
+              <div className="field" {...bind("postal_code")}>
                 <label className="field-label" htmlFor="customer-postal-code">
                   {t("customers.address_postal_code")}
                 </label>
@@ -956,8 +1014,9 @@ export function CustomerFormPage() {
                   value={postalCode}
                   onChange={(event) => setPostalCode(event.target.value)}
                 />
+                {fieldError("postal_code")}
               </div>
-              <div className="field">
+              <div className="field" {...bind("city")}>
                 <label className="field-label" htmlFor="customer-city">
                   {t("customers.address_city")}
                 </label>
@@ -968,9 +1027,10 @@ export function CustomerFormPage() {
                   value={city}
                   onChange={(event) => setCity(event.target.value)}
                 />
+                {fieldError("city")}
               </div>
             </div>
-            <div className="field">
+            <div className="field" {...bind("country")}>
               <label className="field-label" htmlFor="customer-country">
                 {t("customers.address_country")}
               </label>
@@ -981,8 +1041,10 @@ export function CustomerFormPage() {
                 value={country}
                 onChange={(event) => setCountry(event.target.value)}
               />
+              {fieldError("country")}
             </div>
           </div>
+
           {/* Sprint 23B — Assigned-staff contact-visibility policy.
               Default True; toggling off scrubs the corresponding
               field from the ticket-detail payload that CUSTOMER_USER
@@ -990,7 +1052,8 @@ export function CustomerFormPage() {
               info regardless of these toggles. */}
           <div className="form-section" data-testid="contact-visibility-section">
             <div className="form-section-title">
-              {t("customer_form.contact_visibility_title")}
+              <span className="ew-plan-step">3</span>
+              {t("customer_form.stage_visibility")}
             </div>
             <div className="form-section-helper">
               {selectedCompanyName
@@ -1000,14 +1063,7 @@ export function CustomerFormPage() {
                 : t("customer_form.contact_visibility_helper_unknown")}
             </div>
             <div className="field">
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  cursor: "pointer",
-                }}
-              >
+              <label style={toggleLabelStyle}>
                 <Toggle
                   checked={showAssignedStaffName}
                   onChange={(event) =>
@@ -1019,14 +1075,7 @@ export function CustomerFormPage() {
               </label>
             </div>
             <div className="field">
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  cursor: "pointer",
-                }}
-              >
+              <label style={toggleLabelStyle}>
                 <Toggle
                   checked={showAssignedStaffEmail}
                   onChange={(event) =>
@@ -1038,14 +1087,7 @@ export function CustomerFormPage() {
               </label>
             </div>
             <div className="field">
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  cursor: "pointer",
-                }}
-              >
+              <label style={toggleLabelStyle}>
                 <Toggle
                   checked={showAssignedStaffPhone}
                   onChange={(event) =>
@@ -1057,7 +1099,50 @@ export function CustomerFormPage() {
               </label>
             </div>
           </div>
+
+          {/* RF-1 — customer logo (edit mode only; needs an existing id).
+              A fold: it is the one thing on this form that is not a
+              field, and most saves never touch it. */}
+          {!isCreate && customer && canManageLogo && (
+            <div className="form-section">
+              <details className="form-fold" data-testid="customer-logo-fold">
+                <summary className="form-fold-summary">
+                  {t("customer_form.logo_title")}
+                  <span className="form-fold-summary-value">
+                    {logoUrl ? t("customer_form.logo_set") : t("customer_form.logo_unset")}
+                  </span>
+                </summary>
+                <div className="form-fold-body">
+                  <ImageUploadField
+                    imageUrl={logoUrl}
+                    name={customer.name}
+                    rounded={false}
+                    testId="customer-logo-upload"
+                    onUpload={async (file) => {
+                      const url = await uploadCustomerLogo(customer.id, file);
+                      setLogoOverride(url);
+                    }}
+                    onRemove={async () => {
+                      await deleteCustomerLogo(customer.id);
+                      setLogoOverride(null);
+                    }}
+                  />
+                </div>
+              </details>
+            </div>
+          )}
+
           <div className="form-actions">
+            {fieldErrorCount > 0 && (
+              <span
+                className="form-error"
+                role="alert"
+                style={{ marginRight: "auto" }}
+                data-testid="customer-form-summary-error"
+              >
+                {t("admin_form.fix_marked", { count: fieldErrorCount })}
+              </span>
+            )}
             {!isCreate && customer && customer.is_active && (
               <button
                 type="button"
@@ -1068,7 +1153,12 @@ export function CustomerFormPage() {
                 {t("admin_form.deactivate")}
               </button>
             )}
-            <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={form.submitting}
+              title={form.submitting ? t("admin_form.busy") : undefined}
+            >
               {form.submitting
                 ? t("admin_form.saving")
                 : isCreate
@@ -1084,481 +1174,521 @@ export function CustomerFormPage() {
           is held and applied immediately after the create succeeds; see
           the `createFn` wrapper above. */}
       {isCreate && (
-        <section
-          className="card"
-          data-testid="section-customer-buildings-create"
-          style={{ marginTop: 16, padding: "20px 22px" }}
-        >
-          <h3 className="section-title">
+        <details className="form-fold" open data-testid="section-customer-buildings-create">
+          <summary className="form-fold-summary">
             {t("customer_form.section_buildings_title")}
-          </h3>
-          <p className="muted small" style={{ marginBottom: 12 }}>
-            {company === ""
-              ? t("customer_form.select_company_first")
-              : t("customer_form.create_link_buildings_hint")}
-          </p>
-          {company !== "" && (
-            <EntityPicker
-              options={buildings.map((b) => ({
-                id: b.id,
-                label: b.name,
-                sublabel: [b.city, b.address].filter(Boolean).join(" — "),
-              }))}
-              selectedIds={pendingBuildingIds}
-              onChange={setPendingBuildingIds}
-              disabled={form.submitting}
-              emptyText={t("customer_form.no_eligible_buildings")}
-              testIdPrefix="customer-form-create-buildings"
-              size="sm"
-            />
-          )}
-        </section>
+            <span className="form-fold-summary-value">{pendingBuildingIds.length}</span>
+          </summary>
+          <div className="form-fold-body">
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
+              {company === ""
+                ? t("customer_form.select_company_first")
+                : t("customer_form.create_link_buildings_hint")}
+            </p>
+            {company !== "" && (
+              <EntityPicker
+                options={buildings.map((b) => ({
+                  id: b.id,
+                  label: b.name,
+                  sublabel: [b.city, b.address].filter(Boolean).join(", "),
+                }))}
+                selectedIds={pendingBuildingIds}
+                onChange={setPendingBuildingIds}
+                disabled={form.submitting}
+                emptyText={t("customer_form.no_eligible_buildings")}
+                testIdPrefix="customer-form-create-buildings"
+                size="sm"
+              />
+            )}
+          </div>
+        </details>
       )}
 
       {!isCreate && customer && (
-        <section
-          className="card"
-          data-testid="section-customer-buildings"
-          style={{ marginTop: 16, padding: "20px 22px" }}
-        >
-          <h3 className="section-title">
+        <details className="form-fold" open data-testid="section-customer-buildings">
+          <summary className="form-fold-summary">
             {t("customer_form.section_buildings_title")}
-          </h3>
-          <p className="muted small" style={{ marginBottom: 12 }}>
-            {t("customer_form.section_buildings_desc")}
-          </p>
+            <span className="form-fold-summary-value">{linkedBuildings.length}</span>
+          </summary>
+          <div className="form-fold-body">
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("customer_form.section_buildings_desc")}
+            </p>
 
-          {buildingLinkError && (
-            <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
-              {buildingLinkError}
-            </div>
-          )}
+            {buildingLinkError && (
+              <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+                {buildingLinkError}
+              </div>
+            )}
 
-          <BoundedList
-            size="lg"
-            count={linkedBuildings.length}
-            ariaLabel={t("customer_form.section_buildings_title")}
-            testIdPrefix="customer-form-linked-buildings"
-            className="table-wrap"
-            emptyState={
-              <p className="muted small" style={{ padding: "12px 0" }}>
-                {t("customer_form.no_buildings_linked")}
-              </p>
-            }
-          >
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>{t("admin.col_name")}</th>
-                  <th>{t("admin.col_address")}</th>
-                  <th>{t("customer_form.col_linked")}</th>
-                  <th aria-label={t("admin.col_actions")} />
-                </tr>
-              </thead>
-              <tbody>
-                {linkedBuildings.map((link) => (
-                  <tr key={link.id}>
-                    <td className="td-subject">{link.building_name}</td>
-                    <td>{link.building_address || "—"}</td>
-                    <td className="td-date">
-                      {new Date(link.created_at).toLocaleDateString(dateLocale)}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => openUnlinkBuildingDialog(link)}
-                        disabled={buildingLinkBusy}
-                      >
-                        {t("admin_form.remove")}
-                      </button>
-                    </td>
+            <BoundedList
+              size="lg"
+              count={linkedBuildings.length}
+              ariaLabel={t("customer_form.section_buildings_title")}
+              testIdPrefix="customer-form-linked-buildings"
+              className="table-wrap"
+              emptyState={
+                <EmptyState
+                  icon={MapPin}
+                  title={t("customer_form.no_buildings_linked")}
+                  compact
+                  testId="customer-form-linked-buildings-empty"
+                />
+              }
+            >
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t("admin.col_name")}</th>
+                    {linkedBuildingsHaveAddress && <th>{t("admin.col_address")}</th>}
+                    <th>{t("customer_form.col_linked")}</th>
+                    <th aria-label={t("admin.col_actions")} />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </BoundedList>
+                </thead>
+                <tbody>
+                  {linkedBuildings.map((link) => (
+                    <tr key={link.id}>
+                      <td className="td-subject">{link.building_name}</td>
+                      {linkedBuildingsHaveAddress && <td>{link.building_address || ""}</td>}
+                      <td className="td-date">
+                        {new Date(link.created_at).toLocaleDateString(dateLocale)}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => openUnlinkBuildingDialog(link)}
+                          disabled={buildingLinkBusy}
+                          title={buildingLinkBusy ? t("admin_form.busy") : undefined}
+                        >
+                          {t("admin_form.remove")}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </BoundedList>
 
-          {/* Sprint 154 §H — a MULTI-select add, replacing the
-              one-at-a-time <select>. Linking six buildings used to be six
-              round-trips; it is now one request through the shared bulk
-              endpoint. */}
-          <div style={{ marginTop: 14 }}>
-            <div className="detail-field-label" style={{ marginBottom: 6 }}>
-              {t("customer_form.add_building")}
-            </div>
-            <EntityPicker
-              options={availableBuildingsToLink.map((b) => ({
-                id: b.id,
-                label: b.name,
-                sublabel: [b.city, b.address].filter(Boolean).join(" — "),
-              }))}
-              selectedIds={buildingsToLink}
-              onChange={setBuildingsToLink}
-              disabled={buildingLinkBusy}
-              emptyText={t("customer_form.no_eligible_buildings")}
-              testIdPrefix="customer-form-add-buildings"
-              size="sm"
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                data-testid="building-link-add-button"
-                onClick={handleAddBuildingLinks}
-                disabled={buildingLinkBusy || buildingsToLink.length === 0}
-              >
+            {/* Sprint 154 §H — a MULTI-select add, replacing the
+                one-at-a-time <select>. Linking six buildings used to be six
+                round-trips; it is now one request through the shared bulk
+                endpoint. */}
+            <div style={{ marginTop: 14 }}>
+              <div className="detail-field-label" style={{ marginBottom: 6 }}>
                 {t("customer_form.add_building")}
-              </button>
+              </div>
+              <EntityPicker
+                options={availableBuildingsToLink.map((b) => ({
+                  id: b.id,
+                  label: b.name,
+                  sublabel: [b.city, b.address].filter(Boolean).join(", "),
+                }))}
+                selectedIds={buildingsToLink}
+                onChange={setBuildingsToLink}
+                disabled={buildingLinkBusy}
+                emptyText={t("customer_form.no_eligible_buildings")}
+                testIdPrefix="customer-form-add-buildings"
+                size="sm"
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  data-testid="building-link-add-button"
+                  onClick={handleAddBuildingLinks}
+                  disabled={buildingLinkBusy || buildingsToLink.length === 0}
+                  title={addBuildingsReason}
+                >
+                  {t("customer_form.add_building")}
+                </button>
+              </div>
             </div>
           </div>
-
-        </section>
+        </details>
       )}
 
       {!isCreate && customer && (
-        <section
-          className="card"
-          data-testid="section-customer-users"
-          style={{ marginTop: 16, padding: "20px 22px" }}
-        >
-          <h3 className="section-title">{t("customer_form.section_users_title")}</h3>
-          <p className="muted small" style={{ marginBottom: 12 }}>
-            {t("customer_form.section_users_desc")}
-          </p>
+        <details className="form-fold" open data-testid="section-customer-users">
+          <summary className="form-fold-summary">
+            {t("customer_form.section_users_title")}
+            <span className="form-fold-summary-value">{members.length}</span>
+          </summary>
+          <div className="form-fold-body">
+            <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("customer_form.section_users_desc")}
+            </p>
 
-          {(memberError || accessError) && (
-            <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
-              {memberError || accessError}
-            </div>
-          )}
+            {(memberError || accessError) && (
+              <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+                {memberError || accessError}
+              </div>
+            )}
 
-          <BoundedList
-            size="lg"
-            count={members.length}
-            ariaLabel={t("customer_form.section_users_title")}
-            testIdPrefix="customer-form-members"
-            className="table-wrap"
-            emptyState={
-              <p className="muted small" style={{ padding: "12px 0" }}>
-                {t("customer_form.no_users_yet")}
-              </p>
-            }
-          >
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>{t("users.col_email")}</th>
-                  <th>{t("users.col_full_name")}</th>
-                  <th>{t("customer_form.col_user_access")}</th>
-                  <th aria-label={t("admin.col_actions")} />
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((membership) => {
-                  const userAccess =
-                    accessByUserId[membership.user_id] ?? [];
-                  const userAccessBuildingIds = new Set(
-                    userAccess.map((a) => a.building_id),
-                  );
-                  const grantableBuildings = linkedBuildings.filter(
-                    (l) => !userAccessBuildingIds.has(l.building_id),
-                  );
-                  const isThisUserBusy =
-                    accessBusyUserId === membership.user_id;
-                  return (
-                    <tr key={membership.id}>
-                      <td className="td-subject">{membership.user_email}</td>
-                      <td>{membership.user_full_name || "—"}</td>
-                      <td>
-                        {userAccess.length === 0 ? (
-                          <p
-                            className="muted small"
-                            style={{ marginBottom: 6 }}
-                          >
-                            {t("customer_form.access_no_buildings")}
-                          </p>
-                        ) : (
+            <BoundedList
+              size="lg"
+              count={members.length}
+              ariaLabel={t("customer_form.section_users_title")}
+              testIdPrefix="customer-form-members"
+              className="table-wrap"
+              emptyState={
+                <EmptyState
+                  icon={Users}
+                  title={t("customer_form.no_users_yet")}
+                  compact
+                  testId="customer-form-members-empty"
+                />
+              }
+            >
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t("users.col_email")}</th>
+                    {membersHaveNames && <th>{t("users.col_full_name")}</th>}
+                    <th>{t("customer_form.col_user_access")}</th>
+                    <th aria-label={t("admin.col_actions")} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.map((membership) => {
+                    const userAccess =
+                      accessByUserId[membership.user_id] ?? [];
+                    const userAccessBuildingIds = new Set(
+                      userAccess.map((a) => a.building_id),
+                    );
+                    const grantableBuildings = linkedBuildings.filter(
+                      (l) => !userAccessBuildingIds.has(l.building_id),
+                    );
+                    const isThisUserBusy =
+                      accessBusyUserId === membership.user_id;
+                    return (
+                      <tr key={membership.id}>
+                        <td className="td-subject">{membership.user_email}</td>
+                        {membersHaveNames && <td>{membership.user_full_name || ""}</td>}
+                        <td>
+                          {userAccess.length === 0 ? (
+                            <p
+                              className="muted small"
+                              style={{ marginBottom: 6 }}
+                            >
+                              {t("customer_form.access_no_buildings")}
+                            </p>
+                          ) : (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 6,
+                                flexWrap: "wrap",
+                                marginBottom: 6,
+                              }}
+                            >
+                              {userAccess.map((access) => {
+                                // Sprint 23C — inline access_role
+                                // editor. Sprint 27E adds: an Active
+                                // checkbox (PATCH is_active), an
+                                // "Edit permissions" button that opens
+                                // the per-key override editor section
+                                // below, and the Sprint 27C self-edit
+                                // guard mirrored in the UI so actor
+                                // controls are disabled on their own
+                                // access row.
+                                const isSelf = isSelfAccess(access);
+                                // P-6 V3 (rule 14) — a disabled control
+                                // says why: your own row, or a write in
+                                // flight.
+                                const accessLockedReason = isThisUserBusy
+                                  ? t("customer_form.access_busy")
+                                  : isSelf
+                                    ? t("customer_form.access_self_locked")
+                                    : undefined;
+                                return (
+                                  <span
+                                    key={access.id}
+                                    className="badge badge-pill"
+                                    data-testid="customer-access-badge"
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 6,
+                                      padding: "2px 8px",
+                                      background:
+                                        access.is_active === false
+                                          ? "var(--surface-3, var(--surface-2))"
+                                          : "var(--surface-2)",
+                                      border: "1px solid var(--border)",
+                                      borderRadius: 999,
+                                      fontSize: 12,
+                                      opacity:
+                                        access.is_active === false ? 0.6 : 1,
+                                    }}
+                                  >
+                                    <span>{access.building_name}</span>
+                                    <span aria-hidden="true">·</span>
+                                    <select
+                                      className="customer-access-role-select"
+                                      data-testid="customer-access-role-select"
+                                      data-user-id={membership.user_id}
+                                      data-building-id={access.building_id}
+                                      value={access.access_role}
+                                      disabled={isThisUserBusy || isSelf}
+                                      title={accessLockedReason}
+                                      onChange={(event) =>
+                                        handleAccessRoleChange(
+                                          membership,
+                                          access,
+                                          event.target.value as CustomerAccessRole,
+                                        )
+                                      }
+                                      aria-label={t(
+                                        "customer_form.access_role_edit_label",
+                                      )}
+                                      style={{
+                                        fontSize: 11,
+                                        padding: "0 4px",
+                                        height: 20,
+                                        border: "1px solid var(--border)",
+                                        borderRadius: 4,
+                                        background: "transparent",
+                                      }}
+                                    >
+                                      <option value="CUSTOMER_USER">
+                                        {t("access_role.customer_user")}
+                                      </option>
+                                      <option value="CUSTOMER_LOCATION_MANAGER">
+                                        {t(
+                                          "access_role.customer_location_manager",
+                                        )}
+                                      </option>
+                                      <option value="CUSTOMER_COMPANY_ADMIN">
+                                        {t(
+                                          "access_role.customer_company_admin",
+                                        )}
+                                      </option>
+                                    </select>
+                                    <label
+                                      style={{
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        gap: 4,
+                                        fontSize: 11,
+                                        cursor:
+                                          isThisUserBusy || isSelf
+                                            ? "default"
+                                            : "pointer",
+                                      }}
+                                      title={
+                                        accessLockedReason ??
+                                        t("customer_form.access_active_hint")
+                                      }
+                                    >
+                                      <Toggle
+                                        data-testid="customer-access-active-toggle"
+                                        data-user-id={membership.user_id}
+                                        data-building-id={access.building_id}
+                                        checked={access.is_active !== false}
+                                        disabled={isThisUserBusy || isSelf}
+                                        onChange={(event) =>
+                                          handleToggleAccessActive(
+                                            membership,
+                                            access,
+                                            event.target.checked,
+                                          )
+                                        }
+                                      />
+                                      <span>
+                                        {t(
+                                          "customer_form.access_active_label",
+                                        )}
+                                      </span>
+                                    </label>
+                                    {/* Sprint 29 Batch 29.2 — repurposes
+                                        the previous inline override button
+                                        as a deep-link into the canonical
+                                        Permissions page, opening the
+                                        OverrideDrawer for (user, building)
+                                        on mount via the focus_user +
+                                        focus_building search params. */}
+                                    <Link
+                                      to={`/admin/customers/${numericId}/permissions?focus_user=${membership.user_id}&focus_building=${access.building_id}`}
+                                      className="btn btn-ghost btn-xs"
+                                      data-testid="manage-permissions-chip-link"
+                                      data-user-id={membership.user_id}
+                                      data-building-id={access.building_id}
+                                      style={{
+                                        height: 18,
+                                        padding: "0 6px",
+                                        fontSize: 11,
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                      }}
+                                      aria-disabled={isThisUserBusy}
+                                    >
+                                      {t(
+                                        "customer_form.access_overrides_button",
+                                      )}
+                                    </Link>
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-xs"
+                                      style={{
+                                        height: 18,
+                                        padding: "0 6px",
+                                        fontSize: 11,
+                                      }}
+                                      onClick={() =>
+                                        openRevokeAccessDialog(
+                                          membership,
+                                          access,
+                                        )
+                                      }
+                                      disabled={isThisUserBusy}
+                                      title={
+                                        isThisUserBusy
+                                          ? t("customer_form.access_busy")
+                                          : t("customer_form.access_remove_button")
+                                      }
+                                      aria-label={t(
+                                        "customer_form.access_remove_button",
+                                      )}
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <select
+                              className="field-select"
+                              style={{ flex: 1 }}
+                              value=""
+                              onChange={(event) => {
+                                const v = event.target.value;
+                                if (v === "") return;
+                                handleAddAccess(membership, Number(v));
+                                event.target.value = "";
+                              }}
+                              disabled={
+                                isThisUserBusy || grantableBuildings.length === 0
+                              }
+                              title={
+                                isThisUserBusy
+                                  ? t("customer_form.access_busy")
+                                  : grantableBuildings.length === 0
+                                    ? t("customer_form.access_no_more")
+                                    : undefined
+                              }
+                            >
+                              <option value="">
+                                {grantableBuildings.length === 0
+                                  ? t("customer_form.access_no_more")
+                                  : t(
+                                      "customer_form.access_select_placeholder",
+                                    )}
+                              </option>
+                              {grantableBuildings.map((l) => (
+                                <option key={l.id} value={l.building_id}>
+                                  {l.building_name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
+                        <td>
+                          {/* Sprint 29 Batch 29.2 — row-level deep-link
+                              to the canonical Permissions page,
+                              scrolling to (and focusing on) this user's
+                              access card via the focus_user search
+                              param. */}
                           <div
                             style={{
                               display: "flex",
                               gap: 6,
+                              justifyContent: "flex-end",
+                              alignItems: "center",
                               flexWrap: "wrap",
-                              marginBottom: 6,
                             }}
                           >
-                            {userAccess.map((access) => {
-                              // Sprint 23C — inline access_role
-                              // editor. Sprint 27E adds: an Active
-                              // checkbox (PATCH is_active), an
-                              // "Edit permissions" button that opens
-                              // the per-key override editor section
-                              // below, and the Sprint 27C self-edit
-                              // guard mirrored in the UI so actor
-                              // controls are disabled on their own
-                              // access row.
-                              const isSelf = isSelfAccess(access);
-                              return (
-                                <span
-                                  key={access.id}
-                                  className="badge badge-pill"
-                                  data-testid="customer-access-badge"
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: 6,
-                                    padding: "2px 8px",
-                                    background:
-                                      access.is_active === false
-                                        ? "var(--surface-3, var(--surface-2))"
-                                        : "var(--surface-2)",
-                                    border: "1px solid var(--border)",
-                                    borderRadius: 999,
-                                    fontSize: 12,
-                                    opacity:
-                                      access.is_active === false ? 0.6 : 1,
-                                  }}
-                                >
-                                  <span>{access.building_name}</span>
-                                  <span aria-hidden="true">·</span>
-                                  <select
-                                    className="customer-access-role-select"
-                                    data-testid="customer-access-role-select"
-                                    data-user-id={membership.user_id}
-                                    data-building-id={access.building_id}
-                                    value={access.access_role}
-                                    disabled={isThisUserBusy || isSelf}
-                                    onChange={(event) =>
-                                      handleAccessRoleChange(
-                                        membership,
-                                        access,
-                                        event.target.value as CustomerAccessRole,
-                                      )
-                                    }
-                                    aria-label={t(
-                                      "customer_form.access_role_edit_label",
-                                    )}
-                                    style={{
-                                      fontSize: 11,
-                                      padding: "0 4px",
-                                      height: 20,
-                                      border: "1px solid var(--border)",
-                                      borderRadius: 4,
-                                      background: "transparent",
-                                    }}
-                                  >
-                                    <option value="CUSTOMER_USER">
-                                      {t("access_role.customer_user")}
-                                    </option>
-                                    <option value="CUSTOMER_LOCATION_MANAGER">
-                                      {t(
-                                        "access_role.customer_location_manager",
-                                      )}
-                                    </option>
-                                    <option value="CUSTOMER_COMPANY_ADMIN">
-                                      {t(
-                                        "access_role.customer_company_admin",
-                                      )}
-                                    </option>
-                                  </select>
-                                  <label
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: 4,
-                                      fontSize: 11,
-                                      cursor:
-                                        isThisUserBusy || isSelf
-                                          ? "default"
-                                          : "pointer",
-                                    }}
-                                    title={t(
-                                      "customer_form.access_active_hint",
-                                    )}
-                                  >
-                                    <Toggle
-                                      data-testid="customer-access-active-toggle"
-                                      data-user-id={membership.user_id}
-                                      data-building-id={access.building_id}
-                                      checked={access.is_active !== false}
-                                      disabled={isThisUserBusy || isSelf}
-                                      onChange={(event) =>
-                                        handleToggleAccessActive(
-                                          membership,
-                                          access,
-                                          event.target.checked,
-                                        )
-                                      }
-                                    />
-                                    <span>
-                                      {t(
-                                        "customer_form.access_active_label",
-                                      )}
-                                    </span>
-                                  </label>
-                                  {/* Sprint 29 Batch 29.2 — repurposes
-                                      the previous inline override button
-                                      as a deep-link into the canonical
-                                      Permissions page, opening the
-                                      OverrideDrawer for (user, building)
-                                      on mount via the focus_user +
-                                      focus_building search params. */}
-                                  <Link
-                                    to={`/admin/customers/${numericId}/permissions?focus_user=${membership.user_id}&focus_building=${access.building_id}`}
-                                    className="btn btn-ghost btn-xs"
-                                    data-testid="manage-permissions-chip-link"
-                                    data-user-id={membership.user_id}
-                                    data-building-id={access.building_id}
-                                    style={{
-                                      height: 18,
-                                      padding: "0 6px",
-                                      fontSize: 11,
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                    }}
-                                    aria-disabled={isThisUserBusy}
-                                  >
-                                    {t(
-                                      "customer_form.access_overrides_button",
-                                    )}
-                                  </Link>
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost btn-xs"
-                                    style={{
-                                      height: 18,
-                                      padding: "0 6px",
-                                      fontSize: 11,
-                                    }}
-                                    onClick={() =>
-                                      openRevokeAccessDialog(
-                                        membership,
-                                        access,
-                                      )
-                                    }
-                                    disabled={isThisUserBusy}
-                                    aria-label={t(
-                                      "customer_form.access_remove_button",
-                                    )}
-                                  >
-                                    ×
-                                  </button>
-                                </span>
-                              );
-                            })}
+                            <Link
+                              to={`/admin/customers/${numericId}/permissions?focus_user=${membership.user_id}`}
+                              className="btn btn-ghost btn-sm"
+                              data-testid="manage-permissions-link"
+                              data-user-id={membership.user_id}
+                            >
+                              {t("customer_form.user_row_manage_permissions")}
+                              {" →"}
+                            </Link>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => openRemoveDialog(membership)}
+                            >
+                              {t("admin_form.remove")}
+                            </button>
                           </div>
-                        )}
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <select
-                            className="field-select"
-                            style={{ flex: 1 }}
-                            value=""
-                            onChange={(event) => {
-                              const v = event.target.value;
-                              if (v === "") return;
-                              handleAddAccess(membership, Number(v));
-                              event.target.value = "";
-                            }}
-                            disabled={
-                              isThisUserBusy || grantableBuildings.length === 0
-                            }
-                          >
-                            <option value="">
-                              {grantableBuildings.length === 0
-                                ? t("customer_form.access_no_more")
-                                : t(
-                                    "customer_form.access_select_placeholder",
-                                  )}
-                            </option>
-                            {grantableBuildings.map((l) => (
-                              <option key={l.id} value={l.building_id}>
-                                {l.building_name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </td>
-                      <td>
-                        {/* Sprint 29 Batch 29.2 — row-level deep-link
-                            to the canonical Permissions page,
-                            scrolling to (and focusing on) this user's
-                            access card via the focus_user search
-                            param. */}
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 6,
-                            justifyContent: "flex-end",
-                            alignItems: "center",
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <Link
-                            to={`/admin/customers/${numericId}/permissions?focus_user=${membership.user_id}`}
-                            className="btn btn-ghost btn-sm"
-                            data-testid="manage-permissions-link"
-                            data-user-id={membership.user_id}
-                          >
-                            {t("customer_form.user_row_manage_permissions")}
-                            {" →"}
-                          </Link>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => openRemoveDialog(membership)}
-                          >
-                            {t("admin_form.remove")}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </BoundedList>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </BoundedList>
 
-          <form
-            onSubmit={handleAddMember}
-            style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end" }}
-          >
-            <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-              <label className="field-label" htmlFor="add-customer-user">
-                {t("customer_form.add_user")}
-              </label>
-              <select
-                id="add-customer-user"
-                className="field-select"
-                value={selectedUserId === "" ? "" : String(selectedUserId)}
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setSelectedUserId(v === "" ? "" : Number(v));
-                }}
-                disabled={memberBusy || availableUsers.length === 0}
-              >
-                <option value="">
-                  {availableUsers.length === 0
-                    ? t("admin_form.no_eligible_users")
-                    : t("admin_form.select_user")}
-                </option>
-                {availableUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.email}
-                    {user.full_name ? ` — ${user.full_name}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              data-testid="member-add-button"
-              disabled={memberBusy || selectedUserId === ""}
+            <form
+              onSubmit={handleAddMember}
+              style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end" }}
             >
-              {memberBusy ? t("admin_form.adding") : t("admin_form.add")}
-            </button>
-          </form>
-        </section>
+              <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+                <label className="field-label" htmlFor="add-customer-user">
+                  {t("customer_form.add_user")}
+                </label>
+                <select
+                  id="add-customer-user"
+                  className="field-select"
+                  value={selectedUserId === "" ? "" : String(selectedUserId)}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setSelectedUserId(v === "" ? "" : Number(v));
+                  }}
+                  disabled={memberBusy || availableUsers.length === 0}
+                  title={
+                    memberBusy
+                      ? t("admin_form.busy")
+                      : availableUsers.length === 0
+                        ? t("customer_form.add_user_no_candidates")
+                        : undefined
+                  }
+                >
+                  <option value="">
+                    {availableUsers.length === 0
+                      ? t("admin_form.no_eligible_users")
+                      : t("admin_form.select_user")}
+                  </option>
+                  {availableUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.full_name ? `${user.full_name} (${user.email})` : user.email}
+                    </option>
+                  ))}
+                </select>
+                {availableUsers.length === 0 && !memberBusy && (
+                  <span className="muted small">
+                    {t("customer_form.add_user_no_candidates")}
+                  </span>
+                )}
+              </div>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                data-testid="member-add-button"
+                disabled={memberBusy || selectedUserId === ""}
+                title={addUserReason}
+              >
+                {memberBusy ? t("admin_form.adding") : t("admin_form.add")}
+              </button>
+            </form>
+          </div>
+        </details>
       )}
 
       {/* Sprint 29 Batch 29.2 — the per-access override editor and
@@ -1569,6 +1699,8 @@ export function CustomerFormPage() {
           optional &focus_building=<id>) so the Permissions page can
           scroll to and open the right access on mount. */}
 
+      {/* All five dialogs render unconditionally and are driven through
+          their refs — CLAUDE.md §3 / Sprint 128. */}
       <ConfirmDialog
         ref={deactivateDialogRef}
         title={t("customer_form.dialog_deactivate_title", { name: customerName })}
@@ -1630,4 +1762,3 @@ export function CustomerFormPage() {
     </div>
   );
 }
-

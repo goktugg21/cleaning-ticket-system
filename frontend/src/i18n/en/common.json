@@ -2860,5 +2860,19 @@
   "admin_form.busy": "One moment, this is being saved.",
   "admin_form.field_rejected": "This value was not accepted.",
   "admin_form.fix_marked_one": "Fix the {{count}} marked field.",
-  "admin_form.fix_marked_other": "Fix the {{count}} marked fields."
+  "admin_form.fix_marked_other": "Fix the {{count}} marked fields.",
+  "customer_form.stage_who": "Who the customer is",
+  "customer_form.stage_visibility": "What the customer's people see of your staff",
+  "customer_form.error_name_required": "Give the customer a name.",
+  "customer_form.company_hint": "The buildings you can link to this customer come from this company.",
+  "customer_form.company_locked_hint": "An existing customer's company does not change.",
+  "customer_form.company_only_one": "You work within one company; it is already filled in.",
+  "customer_form.name_hint": "This is the customer's name everywhere in the system and on every invoice.",
+  "customer_form.logo_set": "set",
+  "customer_form.logo_unset": "no logo yet",
+  "customer_form.add_user_no_candidates": "There are no customer users left to add.",
+  "customer_form.add_user_pick_first": "Pick a user first.",
+  "customer_form.add_buildings_pick_first": "Pick one or more buildings first.",
+  "customer_form.access_self_locked": "You cannot change your own access here.",
+  "customer_form.access_busy": "One moment, the access is being updated."
 }

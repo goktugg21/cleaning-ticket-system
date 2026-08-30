@@ -2860,5 +2860,19 @@
   "admin_form.busy": "Even wachten, dit wordt opgeslagen.",
   "admin_form.field_rejected": "Deze waarde is niet geaccepteerd.",
   "admin_form.fix_marked_one": "Herstel het {{count}} gemarkeerde veld.",
-  "admin_form.fix_marked_other": "Herstel de {{count}} gemarkeerde velden."
+  "admin_form.fix_marked_other": "Herstel de {{count}} gemarkeerde velden.",
+  "customer_form.stage_who": "Wie de klant is",
+  "customer_form.stage_visibility": "Wat de mensen van de klant zien van uw medewerkers",
+  "customer_form.error_name_required": "Geef de klant een naam.",
+  "customer_form.company_hint": "De gebouwen die u aan deze klant kunt koppelen, komen uit dit bedrijf.",
+  "customer_form.company_locked_hint": "Het bedrijf van een bestaande klant verandert niet.",
+  "customer_form.company_only_one": "U werkt binnen één bedrijf; het staat al ingevuld.",
+  "customer_form.name_hint": "Zo heet deze klant overal in het systeem en op elke factuur.",
+  "customer_form.logo_set": "ingesteld",
+  "customer_form.logo_unset": "nog geen logo",
+  "customer_form.add_user_no_candidates": "Er zijn geen klantgebruikers meer om toe te voegen.",
+  "customer_form.add_user_pick_first": "Kies eerst een gebruiker.",
+  "customer_form.add_buildings_pick_first": "Kies eerst een of meer gebouwen.",
+  "customer_form.access_self_locked": "Uw eigen toegang kunt u hier niet wijzigen.",
+  "customer_form.access_busy": "Even wachten, de toegang wordt bijgewerkt."
 }
