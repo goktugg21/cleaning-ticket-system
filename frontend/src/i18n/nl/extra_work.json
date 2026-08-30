@@ -241,6 +241,8 @@
   "detail.actual_hours_section_title": "Uren om te factureren",
   "detail.actual_hours_input_aria": "Uren om te factureren voor {{line}}",
   "detail.actual_hours_final_total": "Definitief bedrag:",
+  "detail.actual_hours_no_amount_yet": "nog geen bedrag",
+  "detail.actual_hours_no_total_yet": "nog geen totaal",
   "detail.actual_hours_save": "Uren om te factureren opslaan",
   "detail.actual_hours_saving": "Bezig met opslaan…",
   "detail.actual_hours_saved": "Uren om te factureren opgeslagen.",

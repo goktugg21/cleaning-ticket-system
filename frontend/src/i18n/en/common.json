@@ -2726,6 +2726,7 @@
   "building_connections.intro": "Each contract holds the work done here; its visits and invoices follow from it.",
   "building_connections.empty": "No contract covers this building yet.",
   "building_connections.line": "{{customer}} · {{amount}} per {{period}} · {{status}}",
+  "building_connections.line_unpriced": "{{customer}} · no priced lines yet · {{status}}",
   "building_connections.period_monthly": "month",
   "building_connections.period_quarterly": "quarter",
   "building_connections.period_yearly": "year",

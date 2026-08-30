@@ -2726,6 +2726,7 @@
   "building_connections.intro": "Elk contract bevat het werk dat hier wordt gedaan; de bezoeken en facturen volgen eruit.",
   "building_connections.empty": "Nog geen contract voor dit gebouw.",
   "building_connections.line": "{{customer}} · {{amount}} per {{period}} · {{status}}",
+  "building_connections.line_unpriced": "{{customer}} · nog geen geprijsde regels · {{status}}",
   "building_connections.period_monthly": "maand",
   "building_connections.period_quarterly": "kwartaal",
   "building_connections.period_yearly": "jaar",

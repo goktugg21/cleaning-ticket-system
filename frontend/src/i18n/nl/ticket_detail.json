@@ -307,6 +307,8 @@
   "ew_card_billing_month": "Factuurmaand",
   "ew_card_invoiced": "Gefactureerd",
   "ew_card_awaiting_hours": "Wacht op gewerkte uren",
+  "ew_card_awaiting_hours_short": "wacht op uren",
+  "ew_card_not_priced_yet": "nog niet geprijsd",
   "ew_thread_chip": "Meerwerk",
   "ew_open_work": "Open het werk",
   "ew_card_no_price": "Geen prijs afgesproken",

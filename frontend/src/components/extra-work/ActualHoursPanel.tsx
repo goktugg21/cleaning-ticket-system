@@ -323,7 +323,9 @@ export function ActualHoursPanel({
                       {formatMoney(line.rate)} ={" "}
                     </span>
                     <strong data-testid="extra-work-actual-hours-line-amount">
-                      {preview !== null ? formatMoney(preview) : "—"}
+                      {preview !== null
+                        ? formatMoney(preview)
+                        : t("detail.actual_hours_no_amount_yet")}
                     </strong>
                   </span>
                 )}
@@ -361,7 +363,7 @@ export function ActualHoursPanel({
           <span className="muted small">
             {t("detail.actual_hours_final_total")}{" "}
             <strong data-testid="extra-work-actual-hours-final-total">
-              {finalTotalAmount ?? "—"}
+              {finalTotalAmount ?? t("detail.actual_hours_no_total_yet")}
             </strong>
           </span>
         )}

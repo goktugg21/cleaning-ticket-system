@@ -678,7 +678,7 @@ export function SlaWarningsAdminPage() {
                       );
                     })}
                   </div>
-                  <label className="field sla-warning-field">
+                  <label className="field sla-choice-field">
                     <span className="field-label">{t("sla_warnings.extra_email_label")}</span>
                     <input
                       className="field-input"
@@ -720,7 +720,7 @@ export function SlaWarningsAdminPage() {
                     {t("sla_warnings.final_step_label")}
                   </label>
                   {choices.warnings[group.key].final_days !== "" && (
-                    <label className="field sla-warning-field">
+                    <label className="field sla-choice-field">
                       <span className="field-label">{t("sla_warnings.final_step_days_label")}</span>
                       <input
                         className="field-input"
@@ -760,7 +760,7 @@ export function SlaWarningsAdminPage() {
               </div>
             </div>
             <div className="sla-warning-fields">
-              <label className="field sla-warning-field">
+              <label className="field sla-choice-field">
                 <select
                   className="field-select"
                   value={choices.count_calendar_days ? "calendar" : "working"}

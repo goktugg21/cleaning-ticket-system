@@ -241,6 +241,8 @@
   "detail.actual_hours_section_title": "Hours to bill",
   "detail.actual_hours_input_aria": "Hours to bill for {{line}}",
   "detail.actual_hours_final_total": "Final amount:",
+  "detail.actual_hours_no_amount_yet": "no amount yet",
+  "detail.actual_hours_no_total_yet": "no total yet",
   "detail.actual_hours_save": "Save hours to bill",
   "detail.actual_hours_saving": "Saving…",
   "detail.actual_hours_saved": "Hours to bill saved.",

@@ -231,8 +231,16 @@ export function TicketExtraWorkCards({
       ? ew.line_items.length
       : ew.pricing_line_items.length;
   const noPriceAgreed = activePricedCount === 0;
+  // P-5 (§D.2 dash ban) — an amount that cannot be stated yet is said
+  // in a word: what it is waiting for.
   const money = (value: number) =>
-    priced && !awaitingHours && !noPriceAgreed ? formatMoney(value) : "—";
+    priced && !awaitingHours && !noPriceAgreed
+      ? formatMoney(value)
+      : awaitingHours
+        ? t("ew_card_awaiting_hours_short")
+        : noPriceAgreed
+          ? t("ew_card_no_price")
+          : t("ew_card_not_priced_yet");
   // Same lock the Extra Work page derives: the backend freezes the final
   // amount once any spawned operational ticket is APPROVED or CLOSED.
   const finalAmountLocked = ew.spawned_tickets.some(

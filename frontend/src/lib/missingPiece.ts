@@ -42,6 +42,12 @@ export function useMissingPieceAnchor<T extends HTMLElement = HTMLDivElement>(
   id: string,
 ) {
   const ref = useRef<T | null>(null);
+  // No dependency list on purpose: the element often arrives a render
+  // or two AFTER the component mounts (a card that first renders its
+  // loading state — the ticket's Money card), and no event fires
+  // then. Re-checking every render is cheap and idempotent: it acts
+  // once, only when this id is the pending target AND the element
+  // exists.
   useEffect(() => {
     const consume = () => {
       if (pending !== id || !ref.current) return;
@@ -52,6 +58,6 @@ export function useMissingPieceAnchor<T extends HTMLElement = HTMLDivElement>(
     consume();
     window.addEventListener(EVENT, consume);
     return () => window.removeEventListener(EVENT, consume);
-  }, [id]);
+  });
   return ref;
 }

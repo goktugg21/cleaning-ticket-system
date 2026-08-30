@@ -647,16 +647,26 @@ export function BuildingDetailPage() {
                           : contract.contract_no}
                       </Link>
                       <span className="muted small contract-connected-line">
-                        {t("building_connections.line", {
-                          customer: contract.customer_name ?? "",
-                          amount: contract.period_amount ? formatMoney(contract.period_amount) : "",
-                          period: t(`building_connections.period_${contract.billing_period.toLowerCase()}`, {
-                            defaultValue: contract.billing_period.toLowerCase(),
-                          }),
-                          status: t(`building_connections.status_${contract.lifecycle.toLowerCase()}`, {
-                            defaultValue: contract.lifecycle.toLowerCase(),
-                          }),
-                        })}
+                        {/* A contract without priced lines yet says so
+                            instead of "€0.00 per month" (a zero is a
+                            claim). */}
+                        {t(
+                          contract.period_amount && Number(contract.period_amount) > 0
+                            ? "building_connections.line"
+                            : "building_connections.line_unpriced",
+                          {
+                            customer: contract.customer_name ?? "",
+                            amount: contract.period_amount ? formatMoney(contract.period_amount) : "",
+                            period: t(
+                              `building_connections.period_${contract.billing_period.toLowerCase()}`,
+                              { defaultValue: contract.billing_period.toLowerCase() },
+                            ),
+                            status: t(
+                              `building_connections.status_${contract.lifecycle.toLowerCase()}`,
+                              { defaultValue: contract.lifecycle.toLowerCase() },
+                            ),
+                          },
+                        )}
                       </span>
                     </li>
                   ))}

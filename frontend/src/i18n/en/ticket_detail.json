@@ -307,6 +307,8 @@
   "ew_card_billing_month": "Billing month",
   "ew_card_invoiced": "Invoiced",
   "ew_card_awaiting_hours": "Awaiting worked hours",
+  "ew_card_awaiting_hours_short": "awaiting hours",
+  "ew_card_not_priced_yet": "not priced yet",
   "ew_thread_chip": "Extra work",
   "ew_open_work": "Open the work",
   "ew_card_no_price": "No price agreed",
