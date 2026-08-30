@@ -15,6 +15,8 @@ export interface OverflowMenuItem {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** P-6 V3 (§D.6 rule 14) — a disabled item says why, on hover. */
+  title?: string;
   destructive?: boolean;
   /** A11y state for a toggle item ("show archived"). */
   pressed?: boolean;
@@ -82,6 +84,7 @@ export function OverflowMenu({
               className={`overflow-menu-item${item.destructive ? " destructive" : ""}`}
               aria-pressed={item.pressed}
               disabled={item.disabled}
+              title={item.title}
               onClick={() => {
                 setOpen(false);
                 item.onClick();
