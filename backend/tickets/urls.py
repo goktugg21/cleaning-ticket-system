@@ -45,6 +45,7 @@ staff_request_router.register(
     basename="staff-assignment-request",
 )
 
+from .views_bulk_triage import TicketBulkTriageView
 from .views_bulk_assign import (
     TicketAssignableUsersView,
     TicketBulkAssignView,
@@ -91,6 +92,13 @@ urlpatterns = [
         "bulk-assign/",
         TicketBulkAssignView.as_view(),
         name="ticket-bulk-assign",
+    ),
+    # P-6 V4 — stale-work triage (park / close many, one reason). Before
+    # the router for the same reason `bulk-assign/` is.
+    path(
+        "bulk-triage/",
+        TicketBulkTriageView.as_view(),
+        name="ticket-bulk-triage",
     ),
     path(
         "<int:pk>/assignments/candidates/",

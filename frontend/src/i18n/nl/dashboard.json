@@ -105,5 +105,7 @@
   "hero.month_none": "Nog geen bedrag",
   "filters.fold_label": "Filter",
   "filters.fold_active_one": "{{count}} actief",
-  "filters.fold_active_other": "{{count}} actief"
+  "filters.fold_active_other": "{{count}} actief",
+  "attention.show_all": "Toon alle {{count}}",
+  "attention.show_less": "Toon de vijf dringendste"
 }

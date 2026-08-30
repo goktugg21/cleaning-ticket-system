@@ -105,5 +105,7 @@
   "hero.month_none": "No amount yet",
   "filters.fold_label": "Filter",
   "filters.fold_active_one": "{{count}} active",
-  "filters.fold_active_other": "{{count}} active"
+  "filters.fold_active_other": "{{count}} active",
+  "attention.show_all": "Show all {{count}}",
+  "attention.show_less": "Show the five most urgent"
 }

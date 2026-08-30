@@ -46,7 +46,8 @@ import { useTranslation } from "react-i18next";
 import { setTicketSchedule, updateStaffSlot } from "../api/admin";
 import type { SlotStatus } from "../api/admin";
 import { api, getApiError } from "../api/client";
-import { listAllTickets } from "../api/tickets";
+import { bulkTriageTickets, listAllTickets, type TicketTriageAction } from "../api/tickets";
+import { transitionExtraWork } from "../api/extraWork";
 import type { Role, TicketList } from "../api/types";
 import { getWorkPlan, planExtraWorkForDate } from "../api/workPlan";
 import type {
@@ -62,7 +63,9 @@ import {
 } from "../auth/permissions";
 import { BoundedList } from "../components/BoundedList";
 import { ClickableRow } from "../components/ClickableRow";
+import { EditModeToggle } from "../components/EditModeToggle";
 import { EmptyState } from "../components/EmptyState";
+import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 // Sprint 183 — the week's three pieces, extracted. This file was 1334
 // lines holding a role dispatcher, a manager table, the week, the card,
 // the placement marker and two modals; the card and the column are the
@@ -406,6 +409,20 @@ function WorkPlanWeek() {
      only where the server said `can_override_customer_decision`. */
   const [approveTarget, setApproveTarget] = useState<WorkPlanEntry | null>(null);
   const [approveBusy, setApproveBusy] = useState(false);
+  /* P-6 V4 — stale-work triage. Select rows in the "Not planned yet"
+     drawer, then park or close them with ONE reason, through the
+     existing transitions (`/tickets/bulk-triage/` walks the machine's
+     own legs; a meerwerk is cancelled through its own transition with
+     the same reason as an override). Per-item results are reported. */
+  const [triageMode, setTriageMode] = useState(false);
+  const [triageSelected, setTriageSelected] = useState<Set<string>>(() => new Set());
+  const [triageAction, setTriageAction] = useState<TicketTriageAction | null>(null);
+  const [triageBusy, setTriageBusy] = useState(false);
+  const [triageReport, setTriageReport] = useState<{
+    ok: number;
+    skipped: number;
+    failed: { label: string; error: string }[];
+  } | null>(null);
 
   const weekParam = formatIsoWeek(week);
 
@@ -481,6 +498,80 @@ function WorkPlanWeek() {
    * has a planned day — and one shared "plan this" endpoint over two
    * models would be a third thing to keep in step with both.
    */
+  function triageToggle(key: string) {
+    setTriageSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function triageExit() {
+    setTriageMode(false);
+    setTriageSelected(new Set());
+    setTriageAction(null);
+  }
+
+  async function runTriage(reason: string) {
+    if (!triageAction || triageBusy) return;
+    const chosen = undatedJobs.filter((entry) => triageSelected.has(entry.key));
+    const tickets = chosen.filter((entry) => entry.ticket_id !== null);
+    const extraWorks = chosen.filter(
+      (entry) => entry.ticket_id === null && entry.extra_work_id !== null,
+    );
+    setTriageBusy(true);
+    const failed: { label: string; error: string }[] = [];
+    let ok = 0;
+    let skipped = 0;
+    const labelOf = (entry: WorkPlanEntry) =>
+      entry.ticket_no ? `${entry.ticket_no} · ${entry.title}` : entry.title;
+    try {
+      if (tickets.length > 0) {
+        const result = await bulkTriageTickets({
+          ticket_ids: tickets.map((entry) => entry.ticket_id as number),
+          action: triageAction,
+          reason,
+        });
+        for (const item of result.results) {
+          const entry = tickets.find((row) => row.ticket_id === item.id);
+          if (item.ok) ok += 1;
+          else failed.push({ label: entry ? labelOf(entry) : String(item.id), error: item.error ?? "generic" });
+        }
+      }
+      if (triageAction === "park") {
+        // A meerwerk has no parked state; it is skipped and said so.
+        skipped = extraWorks.length;
+      } else {
+        for (const entry of extraWorks) {
+          try {
+            await transitionExtraWork(entry.extra_work_id as number, {
+              to_status: "CANCELLED",
+              note: reason,
+              is_override: true,
+              override_reason: reason,
+            });
+            ok += 1;
+          } catch (err) {
+            failed.push({ label: labelOf(entry), error: getApiError(err) });
+          }
+        }
+      }
+      setTriageReport({ ok, skipped, failed });
+      push({
+        title: t("agenda.triage_done", { ok, failed: failed.length }),
+        variant: failed.length === 0 ? "success" : "info",
+      });
+      setTriageAction(null);
+      setTriageSelected(new Set());
+      reload();
+    } catch (err) {
+      push({ title: getApiError(err), variant: "error" });
+    } finally {
+      setTriageBusy(false);
+    }
+  }
+
   async function planForToday(entry: WorkPlanEntry) {
     setPlanningKey(entry.key);
     setPlanError("");
@@ -957,18 +1048,80 @@ function WorkPlanWeek() {
         >
           <div className="section-head" style={{ marginBottom: 4 }}>
             <div className="section-head-title">{t("agenda.undated_title")}</div>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setUndatedOpen(false)}
-              data-testid="agenda-undated-hide"
-            >
-              {t("agenda.undated_hide")}
-            </button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {data.can_plan && (
+                <EditModeToggle
+                  editMode={triageMode}
+                  onToggle={() => (triageMode ? triageExit() : setTriageMode(true))}
+                  disabled={triageBusy}
+                  testId="agenda-triage-toggle"
+                />
+              )}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setUndatedOpen(false)}
+                data-testid="agenda-undated-hide"
+              >
+                {t("agenda.undated_hide")}
+              </button>
+            </div>
           </div>
           <p className="muted small" style={{ marginTop: 0 }}>
             {t(data.can_plan ? "agenda.undated_desc" : "agenda.undated_desc_readonly")}
           </p>
+          {triageMode && (
+            <MultiSelectToolbar
+              selectedCount={triageSelected.size}
+              onSelectAll={() => setTriageSelected(new Set(undatedJobs.map((entry) => entry.key)))}
+              onClearAll={() => setTriageSelected(new Set())}
+              disabled={triageBusy}
+              countLabel={t("agenda.triage_count", { count: triageSelected.size })}
+              actions={[
+                {
+                  key: "park",
+                  label: t("agenda.triage_park"),
+                  onClick: () => setTriageAction("park"),
+                  disabled: triageSelected.size === 0,
+                  title: triageSelected.size === 0 ? t("agenda.triage_pick_first") : t("agenda.triage_park_hint"),
+                },
+                ...(me?.role === "SUPER_ADMIN"
+                  ? [
+                      {
+                        key: "close",
+                        label: t("agenda.triage_close"),
+                        onClick: () => setTriageAction("close"),
+                        destructive: true,
+                        disabled: triageSelected.size === 0,
+                        title: triageSelected.size === 0 ? t("agenda.triage_pick_first") : t("agenda.triage_close_hint"),
+                      },
+                    ]
+                  : []),
+              ]}
+              testIdPrefix="agenda-triage"
+            />
+          )}
+          {triageReport && (
+            <div
+              className={triageReport.failed.length > 0 ? "alert-warning" : "alert-info"}
+              role="status"
+              data-testid="agenda-triage-report"
+            >
+              {t("agenda.triage_done", { ok: triageReport.ok, failed: triageReport.failed.length })}
+              {triageReport.skipped > 0 && (
+                <> {t("agenda.triage_skipped_ew", { count: triageReport.skipped })}</>
+              )}
+              {triageReport.failed.length > 0 && (
+                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                  {triageReport.failed.map((row) => (
+                    <li key={`${row.label}-${row.error}`}>
+                      {row.label} — {t([`agenda.triage_error_${row.error}`, "agenda.triage_error_generic"])}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <BoundedList
             size="lg"
             count={undatedJobs.length}
@@ -983,6 +1136,9 @@ function WorkPlanWeek() {
                   busy={planningKey === entry.key}
                   canPlan={data.can_plan}
                   onPlanToday={() => planForToday(entry)}
+                  selectable={triageMode}
+                  selected={triageSelected.has(entry.key)}
+                  onToggleSelect={() => triageToggle(entry.key)}
                 />
               ))}
             </ul>
@@ -1159,6 +1315,28 @@ function WorkPlanWeek() {
         placeholder={t("agenda.approve_on_behalf_placeholder")}
         confirmLabel={approveBusy ? t("common:admin_form.saving") : t("agenda.approve_on_behalf_confirm")}
         cancelLabel={t("common:cancel")}
+      />
+      {/* P-6 V4 — one reason for every selected item; it lands in each
+          item's history. */}
+      <RejectReasonDialog
+        open={triageAction !== null}
+        title={
+          triageAction === "close"
+            ? t("agenda.triage_reason_title_close", { count: triageSelected.size })
+            : t("agenda.triage_reason_title_park", { count: triageSelected.size })
+        }
+        description={t("agenda.triage_reason_desc")}
+        placeholder={t("agenda.triage_reason_placeholder")}
+        confirmLabel={
+          triageBusy
+            ? t("common:admin_form.saving")
+            : triageAction === "close"
+              ? t("agenda.triage_close")
+              : t("agenda.triage_park")
+        }
+        cancelLabel={t("common:cancel")}
+        onCancel={() => setTriageAction(null)}
+        onConfirm={(reason) => void runTriage(reason)}
       />
       {data && (
         <LateStrip
@@ -1355,9 +1533,17 @@ function UndatedRow({
   busy,
   canPlan,
   onPlanToday,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: {
   entry: WorkPlanEntry;
   busy: boolean;
+  /** P-6 V4 — triage selection, shown only while the drawer is in
+   *  select mode. */
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
   /** FE-5 step 0 — the server's `can_plan`. A viewer the schedule
    *  endpoints would refuse gets no button: a refusal in raw backend
    *  English can no longer be clicked into existence. */
@@ -1371,6 +1557,16 @@ function UndatedRow({
       className="wp-undated-row"
       data-testid={`agenda-undated-row-${entry.key}`}
     >
+      {selectable && (
+        <input
+          type="checkbox"
+          className="wp-undated-select"
+          checked={selected}
+          onChange={onToggleSelect}
+          aria-label={entry.ticket_no ?? entry.title}
+          data-testid={`agenda-triage-select-${entry.key}`}
+        />
+      )}
       <div className="wp-undated-row-main">
         <Link
           to={

@@ -101,6 +101,33 @@ export async function bulkConfirmTickets(
   return response.data;
 }
 
+// P-6 V4 — stale-work triage: park or close many tickets with ONE reason,
+// through the existing transitions (`TicketBulkTriageView`). Per-item
+// semantics like bulk-status: always 200 with a breakdown.
+export type TicketTriageAction = "park" | "close";
+export interface TicketBulkTriageResult {
+  id: number;
+  ok: boolean;
+  status?: string;
+  error?: string;
+}
+export interface TicketBulkTriageResponse {
+  succeeded: number;
+  failed: number;
+  results: TicketBulkTriageResult[];
+}
+export async function bulkTriageTickets(payload: {
+  ticket_ids: number[];
+  action: TicketTriageAction;
+  reason: string;
+}): Promise<TicketBulkTriageResponse> {
+  const response = await api.post<TicketBulkTriageResponse>(
+    "/tickets/bulk-triage/",
+    payload,
+  );
+  return response.data;
+}
+
 // ---- Sprint 158/159 — people on a ticket ------------------------------
 
 /** The people who may be assigned to THIS ticket in THIS role, from the

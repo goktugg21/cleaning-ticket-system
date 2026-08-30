@@ -284,6 +284,21 @@ function keepStatusFilter(
 // silent queue here is lost revenue, not just a stale list.
 const STALLED_APPROVAL_DAYS = 14;
 
+/** P-6 V4 — how many attention rows show before "show all". */
+const ATTENTION_TOP = 5;
+/** P-6 V4 — the urgency order of the attention rows (see the comment at
+ *  the list). Keys not listed sort last. */
+const ATTENTION_URGENCY_ORDER: readonly string[] = [
+  "review",
+  "approval-overdue",
+  "at-risk",
+  "stuck",
+  "awaiting-pricing",
+  "unassigned",
+  "unplanned",
+  "awaiting-customer",
+];
+
 /**
  * Sprint 181 §4 — `historical` is gone from the UI.
  *
@@ -1455,6 +1470,7 @@ export function DashboardPage({
   // #108 Option A — count badge for the "Aandacht nodig" rows. Rows the
   // provider must act on get the warning tint as soon as the count is
   // positive; rows waiting on someone else stay neutral.
+  const [attentionExpanded, setAttentionExpanded] = useState(false);
   const attnBadge = (value: number | null, actionable: boolean): string =>
     actionable && value !== null && value > 0
       ? "attn-count attn-count-warn"
@@ -1525,7 +1541,29 @@ export function DashboardPage({
       actionable: true,
     },
   ] as const
-  const attentionRows = allAttentionRows.filter((row) => (row.value ?? 0) > 0);
+  // P-6 V4 — the five most urgent rows first, the rest behind "show all".
+  // Urgency is the ORDER of consequence, not the size of the count:
+  //   1. review            finished work waits on YOUR check; the customer
+  //                        and the invoice wait behind it
+  //   2. approval-overdue  the customer has gone silent on finished work;
+  //                        money that will never bill unless chased
+  //   3. at-risk           work that will miss this billing month
+  //   4. stuck             a promise broken — planned, never done
+  //   5. awaiting-pricing  the customer waits on your price
+  //   6. unassigned        nobody is on it yet
+  //   7. unplanned         no day chosen yet
+  //   8. awaiting-customer the customer's decision, not yours
+  const attentionRowsAll = allAttentionRows
+    .filter((row) => (row.value ?? 0) > 0)
+    .slice()
+    .sort(
+      (a, b) =>
+        ATTENTION_URGENCY_ORDER.indexOf(a.key) -
+        ATTENTION_URGENCY_ORDER.indexOf(b.key),
+    );
+  const attentionRows = attentionExpanded
+    ? attentionRowsAll
+    : attentionRowsAll.slice(0, ATTENTION_TOP);
   const needsYouCount = allAttentionRows
     .filter((row) => row.actionable)
     .reduce((sum, row) => sum + (row.value ?? 0), 0);
@@ -1777,6 +1815,7 @@ export function DashboardPage({
                     {t("attention.all_clear")}
                   </p>
                 ) : (
+                <>
                 <ul className="attn-list">
                   {attentionRows.map((row) => (
                     <li className="attn-item" key={row.key}>
@@ -1793,6 +1832,20 @@ export function DashboardPage({
                     </li>
                   ))}
                 </ul>
+                {attentionRowsAll.length > ATTENTION_TOP && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm attn-show-all"
+                    onClick={() => setAttentionExpanded((value) => !value)}
+                    aria-expanded={attentionExpanded}
+                    data-testid="attention-show-all"
+                  >
+                    {attentionExpanded
+                      ? t("attention.show_less")
+                      : t("attention.show_all", { count: attentionRowsAll.length })}
+                  </button>
+                )}
+                </>
                 )}
               </div>
 

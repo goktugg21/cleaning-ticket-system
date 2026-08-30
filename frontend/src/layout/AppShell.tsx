@@ -54,6 +54,7 @@ import {
 import { useLanguageSync } from "../i18n/useLanguageSync";
 import { RouteErrorBoundary } from "../components/RouteErrorBoundary";
 import { UserMenu } from "../components/UserMenu";
+import { GlobalSearch } from "../components/GlobalSearch";
 import { NotificationBell } from "../components/NotificationBell";
 import { InboxNavBadge } from "../components/InboxNavBadge";
 import { listStaffAssignmentRequests } from "../api/admin";
@@ -788,7 +789,10 @@ export function AppShell({ children }: AppShellProps) {
           {/* P-2 §2 — the brand is on the sidebar already; the top bar
               no longer repeats "Operations console / CleanOps" above a
               page that states its own name. */}
-          <div className="topbar-context" aria-hidden="true" />
+          {/* P-6 V4 — the search box takes the top bar's empty middle. */}
+          <div className="topbar-context">
+            <GlobalSearch />
+          </div>
           <div className="topbar-right">
             <NotificationBell />
             <UserMenu />
