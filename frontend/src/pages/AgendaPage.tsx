@@ -498,6 +498,60 @@ function WorkPlanWeek() {
    * has a planned day — and one shared "plan this" endpoint over two
    * models would be a third thing to keep in step with both.
    */
+  async function planForToday(entry: WorkPlanEntry) {
+    setPlanningKey(entry.key);
+    setPlanError("");
+    try {
+      const today = new Date();
+      if (entry.ticket_id !== null) {
+        // P-3 §A.3 — a DAY, not a moment: a naive local midnight the
+        // server reads in ITS zone (`plannedDayIso`). Noon used to hand
+        // every job planned from here a "12:00" clock nobody chose.
+        await setTicketSchedule(entry.ticket_id, {
+          scheduled_start_at: plannedDayIso(toDateString(today)),
+        });
+      } else if (entry.extra_work_id !== null) {
+        // A DATE, not a timestamp: `provider_planned_date` is a DateField
+        // and the day is the whole fact. Formatted from the local date
+        // parts rather than `toISOString().slice(0, 10)`, which converts
+        // to UTC first and files an evening in Amsterdam under the next
+        // day.
+        await planExtraWorkForDate(entry.extra_work_id, toDateString(today));
+      } else {
+        return;
+      }
+      push({ title: t("agenda.undated_planned"), variant: "success" });
+      reload();
+    } catch (err) {
+      // Surfaced, never swallowed. Until Agent A's branch is merged the
+      // extra-work half answers 400 here, and a button that silently did
+      // nothing would be worse than one that says why.
+      setPlanError(getApiError(err));
+    } finally {
+      setPlanningKey(null);
+    }
+  }
+
+  /** W24-FX1 §2b — the undated lane, one row per JOB.
+   *
+   *  The server's ticket source is one row per ASSIGNED PERSON, so a
+   *  ticket with two staff on it arrives twice (see `dedupeByJob`). The
+   *  week grid below keeps both — each person has their own card. This
+   *  lane must not: its one action writes the ticket's schedule, so the
+   *  second row is the same button against the same record. */
+  const undatedJobs = useMemo(
+    () =>
+      data
+        ? // FE-4 — oldest first: the row that has waited longest is the
+          // one to deal with first.
+          [...dedupeByJob(data.undated_entries)].sort(
+            (a, b) => (b.unplanned_age_days ?? 0) - (a.unplanned_age_days ?? 0),
+          )
+        : [],
+    [data],
+  );
+  const undatedOldest = undatedJobs[0]?.unplanned_age_days ?? null;
+
   function triageToggle(key: string) {
     setTriageSelected((prev) => {
       const next = new Set(prev);
@@ -572,59 +626,6 @@ function WorkPlanWeek() {
     }
   }
 
-  async function planForToday(entry: WorkPlanEntry) {
-    setPlanningKey(entry.key);
-    setPlanError("");
-    try {
-      const today = new Date();
-      if (entry.ticket_id !== null) {
-        // P-3 §A.3 — a DAY, not a moment: a naive local midnight the
-        // server reads in ITS zone (`plannedDayIso`). Noon used to hand
-        // every job planned from here a "12:00" clock nobody chose.
-        await setTicketSchedule(entry.ticket_id, {
-          scheduled_start_at: plannedDayIso(toDateString(today)),
-        });
-      } else if (entry.extra_work_id !== null) {
-        // A DATE, not a timestamp: `provider_planned_date` is a DateField
-        // and the day is the whole fact. Formatted from the local date
-        // parts rather than `toISOString().slice(0, 10)`, which converts
-        // to UTC first and files an evening in Amsterdam under the next
-        // day.
-        await planExtraWorkForDate(entry.extra_work_id, toDateString(today));
-      } else {
-        return;
-      }
-      push({ title: t("agenda.undated_planned"), variant: "success" });
-      reload();
-    } catch (err) {
-      // Surfaced, never swallowed. Until Agent A's branch is merged the
-      // extra-work half answers 400 here, and a button that silently did
-      // nothing would be worse than one that says why.
-      setPlanError(getApiError(err));
-    } finally {
-      setPlanningKey(null);
-    }
-  }
-
-  /** W24-FX1 §2b — the undated lane, one row per JOB.
-   *
-   *  The server's ticket source is one row per ASSIGNED PERSON, so a
-   *  ticket with two staff on it arrives twice (see `dedupeByJob`). The
-   *  week grid below keeps both — each person has their own card. This
-   *  lane must not: its one action writes the ticket's schedule, so the
-   *  second row is the same button against the same record. */
-  const undatedJobs = useMemo(
-    () =>
-      data
-        ? // FE-4 — oldest first: the row that has waited longest is the
-          // one to deal with first.
-          [...dedupeByJob(data.undated_entries)].sort(
-            (a, b) => (b.unplanned_age_days ?? 0) - (a.unplanned_age_days ?? 0),
-          )
-        : [],
-    [data],
-  );
-  const undatedOldest = undatedJobs[0]?.unplanned_age_days ?? null;
 
   /** What the overview line says. The deduped count once the lane holds
    *  every row; the server's own count while the lane is bounded. */
