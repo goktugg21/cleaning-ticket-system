@@ -818,6 +818,7 @@ function WorkPlanWeek() {
               {t("agenda.zone_unplanned", { count: undatedShown })}
               {undatedOldest !== null && undatedOldest >= UNPLANNED_AGE_THRESHOLD_DAYS && (
                 <span className="muted small" style={{ marginLeft: 10, fontSize: 13, fontWeight: 500, letterSpacing: 0 }}>
+                  {"· "}
                   {t("agenda.undated_oldest", { count: undatedOldest })}
                 </span>
               )}
