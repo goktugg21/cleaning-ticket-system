@@ -103,6 +103,7 @@ from django.db.models import (
     Q,
     Subquery,
     Sum,
+    Value,
     When,
 )
 from django.db.models.functions import Coalesce, TruncDate
@@ -118,6 +119,7 @@ from accounts.permissions import (
 )
 from accounts.models import UserRole
 from accounts.scoping import scope_tickets_for
+from buildings.models import BuildingManagerAssignment
 from extra_work.models import (
     ExtraWorkAssignment,
     ExtraWorkPlannedHours,
@@ -131,6 +133,7 @@ from . import lateness as late_rules
 from .detail_facts import ticket_finished_at, ticket_is_live, ticket_settled_at
 from .job_dates import (
     PLAN_SOURCE_CUSTOMER_WISH,
+    PLAN_SOURCE_PROVIDER_PLAN,
     PLAN_SOURCE_TICKET,
     job_plan_source,
     JOB_START,
@@ -145,6 +148,7 @@ from .models import (
     StaffAssignmentSlotStatus,
     SubTask,
     Ticket,
+    TicketManagerAssignment,
     TicketStaffAssignment,
     TicketStatus,
 )
@@ -361,30 +365,77 @@ _TICKET_FINISH_CHAIN = (
     "resolved_at",
 )
 
+#: The blocked endings' chain — not a finish, but the moment the job
+#: left the board (`detail_facts.ticket_finished_at`'s other branch).
+_TICKET_BLOCKED_FINISH_CHAIN = (
+    "rejected_at",
+    "closed_at",
+    "approved_at",
+    "resolved_at",
+)
+
+#: P-10 A1 — reported done, waiting for somebody's check: NOT finished.
+#: A ticket in one of these carries a report stamp and no finish; it is
+#: in no past column (the review strip / the responsible manager's today
+#: card, or the customer zone, carry it), and it settles on its report
+#: day only once the chain is over.
+_REPORTED_DONE_STATUS_LIST = [
+    TicketStatus.WAITING_MANAGER_REVIEW,
+    TicketStatus.WAITING_CUSTOMER_APPROVAL,
+]
+
+
+def _ticket_finish_expr(prefix: str = ""):
+    """SQL twin of `detail_facts.ticket_finished_at`, branch for branch:
+    NULL while reported done (P-10 A1), the blocked chain for a blocked
+    ending, else the finish chain. `prefix` walks it from a slot
+    (`ticket__`)."""
+
+    def chain(fields):
+        return Coalesce(
+            *[F(f"{prefix}{field}") for field in fields],
+            output_field=DateTimeField(),
+        )
+
+    return Case(
+        When(
+            Q(**{f"{prefix}status__in": _REPORTED_DONE_STATUS_LIST}),
+            then=Value(None, output_field=DateTimeField()),
+        ),
+        When(
+            Q(**{f"{prefix}status__in": list(_TICKET_BLOCKED_STATUSES)}),
+            then=chain(_TICKET_BLOCKED_FINISH_CHAIN),
+        ),
+        default=chain(_TICKET_FINISH_CHAIN),
+        output_field=DateTimeField(),
+    )
+
 
 def _with_ticket_settled_day(queryset):
     return queryset.annotate(
-        **{
-            SETTLED_DAY: TruncDate(
-                Coalesce(*_TICKET_FINISH_CHAIN, output_field=DateTimeField()),
-                output_field=DateField(),
-            )
-        }
+        **{SETTLED_DAY: TruncDate(_ticket_finish_expr(), output_field=DateField())}
     )
 
 
 def _with_slot_settled_day(queryset):
-    ticket_chain = Coalesce(
-        "completed_at",
-        *[f"ticket__{field}" for field in _TICKET_FINISH_CHAIN],
-        output_field=DateTimeField(),
-    )
+    # The person's own completion stamp, else the ticket's finish. While
+    # the ticket is live — or reported done and unchecked (P-10 A1) —
+    # ONLY the slot's own stamp: a colleague may still be working, and a
+    # report stamp is not a finish.
     return queryset.annotate(
         **{
             SETTLED_DAY: TruncDate(
                 Case(
                     When(_TICKET_LIVE_Q, then=F("completed_at")),
-                    default=ticket_chain,
+                    When(
+                        Q(ticket__status__in=_REPORTED_DONE_STATUS_LIST),
+                        then=F("completed_at"),
+                    ),
+                    default=Coalesce(
+                        "completed_at",
+                        _ticket_finish_expr("ticket__"),
+                        output_field=DateTimeField(),
+                    ),
                     output_field=DateTimeField(),
                 ),
                 output_field=DateField(),
@@ -416,13 +467,15 @@ def _settled_in_week_q(week_start: datetime.date, week_end: datetime.date) -> Q:
 
 
 def _home_or_settled_q(
-    home: Q, done_q: Q, week_start: datetime.date, week_end: datetime.date
+    home: Q, over_q: Q, week_start: datetime.date, week_end: datetime.date
 ) -> Q:
-    """Rule 1 for a job that is not finished (or finished at an unknown
-    moment), rule 10 for a finished job: SQL twin of the first branch of
-    `work_plan.placement_for`."""
-    return (home & (~done_q | Q(**{f"{SETTLED_DAY}__isnull": True}))) | (
-        done_q & _settled_in_week_q(week_start, week_end)
+    """Rule 1 for a job that is not over (or over at an unknown moment),
+    rule 10 for a job that is over: SQL twin of the first branch of
+    `work_plan.placement_for`. `over_q` is the closed set — finished OR
+    blocked (P-10 A1: a rejected / converted job hangs on the day it
+    left the board when that moment is known, like a finished one)."""
+    return (home & (~over_q | Q(**{f"{SETTLED_DAY}__isnull": True}))) | (
+        over_q & _settled_in_week_q(week_start, week_end)
     )
 
 
@@ -462,12 +515,55 @@ def _slot_overdue_q(today: datetime.date) -> Q:
     return _SLOT_PENDING_Q & _slot_due_q("lt", today)
 
 
-def _ew_window_end_q(lookup: str, value: datetime.date) -> Q:
-    """`window_end <lookup> value` for an extra work: the planned end,
-    else the preferred (first) day — `Job.window_end`'s reading."""
-    return Q(**{f"planned_end_date__{lookup}": value}) | Q(
-        planned_end_date__isnull=True, **{f"preferred_date__{lookup}": value}
+# ---------------------------------------------------------------------
+# P-10 A6 — THE EXTRA WORK'S WINDOW IS THE PROVIDER'S PLAN FIRST.
+#
+# The "Not planned yet" row's one button writes `provider_planned_date`
+# (`POST /extra-work/bulk-dates/`, Sprint 182 §3), which is what
+# `tickets/job_dates.py` reads as the job's window for a spawned
+# ticket — but this board read the request's `preferred_date` (the
+# customer's WISH) and nothing else, so a request the operator had just
+# planned stayed in "Not planned yet" with the count unmoved (the owner's
+# A6). Two annotations carry the same reading `job_window` has for a
+# ticket: the provider's committed window when one exists, else the
+# wish. Every EW predicate and the Python twin `_extra_work_job` read
+# these and nothing else.
+# ---------------------------------------------------------------------
+EW_START = "ew_start"
+EW_END = "ew_end"
+
+
+def _with_ew_dates(queryset):
+    # `ew_end` is NEVER NULL when `ew_start` is set: the end, else the
+    # start (`Job.window_end`'s one-day reading). An annotation Django
+    # cannot know to be nullable would otherwise turn every `~Q(ew_end
+    # < today)` into SQL NULL and drop the row from the board — the
+    # three-valued trap a real nullable column is guarded against.
+    start = Coalesce("provider_planned_date", "preferred_date", output_field=DateField())
+    end = Case(
+        When(provider_planned_date__isnull=False, then=F("provider_planned_end_date")),
+        default=F("planned_end_date"),
+        output_field=DateField(),
     )
+    return queryset.annotate(
+        **{
+            EW_START: start,
+            EW_END: Coalesce(end, start, output_field=DateField()),
+        }
+    )
+
+
+def _ew_planned_window(extra_work):
+    """Python twin of `_with_ew_dates`: `(start, end)`."""
+    if extra_work.provider_planned_date is not None:
+        return extra_work.provider_planned_date, extra_work.provider_planned_end_date
+    return extra_work.preferred_date, extra_work.planned_end_date
+
+
+def _ew_window_end_q(lookup: str, value: datetime.date) -> Q:
+    """`window_end <lookup> value` for an extra work — `Job.window_end`'s
+    reading, over the P-10 A6 annotation (already the end-or-start)."""
+    return Q(**{f"{EW_END}__{lookup}": value})
 
 
 def _slot_rolled_q(today: datetime.date) -> Q:
@@ -484,6 +580,14 @@ def _slot_waiting_customer_q() -> Q:
     """P-3 §A.1 — SQL twin of rule 9 for a slot: the job it is on has been
     sent to the customer and waits on their answer."""
     return Q(ticket__status=TicketStatus.WAITING_CUSTOMER_APPROVAL)
+
+
+def _slot_review_q() -> Q:
+    """P-10 A2 — the job this slot is on was reported done and waits for
+    a manager's check. For the worker it is a strip ("Reported done,
+    waiting for the check"), never a column: not their day any more,
+    not finished either."""
+    return Q(ticket__status=TicketStatus.WAITING_MANAGER_REVIEW)
 
 
 def _slot_board_q(
@@ -506,7 +610,9 @@ def _slot_board_q(
     board = _slot_week_q(week_start, week_end, today) & ~_slot_rolled_q(today)
     if week_start <= today <= week_end:
         board = board | _slot_rolled_q(today)
-    return board & ~_slot_waiting_customer_q()
+    # Rule 9 (customer) and P-10 A2 (manager's check): both waits are
+    # outside the dates for the worker — strips, never columns.
+    return board & ~_slot_waiting_customer_q() & ~_slot_review_q()
 
 
 def _ew_board_q(
@@ -556,7 +662,13 @@ def _slot_week_q(
         & _slot_window_end_q("gte", week_start)
     ) | _part_window_q(week_start, week_end)
     # P-9 §A.2b — a finished slot is in the week it was finished in.
-    return _home_or_settled_q(home, _SLOT_STATE_Q[STATE_DONE], week_start, week_end)
+    # P-10 A1 — so is a blocked one whose ending moment is known.
+    return _home_or_settled_q(
+        home,
+        _SLOT_STATE_Q[STATE_DONE] | _SLOT_STATE_Q[STATE_BLOCKED],
+        week_start,
+        week_end,
+    )
 
 
 def _part_day_in_week(
@@ -614,10 +726,7 @@ def _ew_week_q(
     week_start: datetime.date, week_end: datetime.date, today: datetime.date
 ) -> Q:
     del today
-    home = Q(preferred_date__lte=week_end) & (
-        Q(planned_end_date__gte=week_start)
-        | Q(planned_end_date__isnull=True, preferred_date__gte=week_start)
-    )
+    home = Q(**{f"{EW_START}__lte": week_end}) & _ew_window_end_q("gte", week_start)
     # P-9 §A.2b — a completed extra work is in the week it was completed.
     return _home_or_settled_q(home, _EW_STATE_Q[STATE_DONE], week_start, week_end)
 
@@ -631,7 +740,7 @@ def _slot_upcoming_q(week_end: datetime.date) -> Q:
 
 
 def _ew_upcoming_q(week_end: datetime.date) -> Q:
-    return Q(preferred_date__gt=week_end) & _EW_STATE_Q[STATE_OPEN]
+    return Q(**{f"{EW_START}__gt": week_end}) & _EW_STATE_Q[STATE_OPEN]
 
 
 def _slot_undated_q() -> Q:
@@ -684,7 +793,9 @@ def _slot_parked_q() -> Q:
 
 
 def _ew_undated_q() -> Q:
-    return _EW_LIVE_Q & Q(preferred_date__isnull=True)
+    # P-10 A6 — no window from either source: neither the provider's
+    # plan nor the customer's wish.
+    return _EW_LIVE_Q & Q(**{f"{EW_START}__isnull": True})
 
 
 # ---------------------------------------------------------------------
@@ -798,7 +909,13 @@ def _ticket_week_q(week_start: datetime.date, week_end: datetime.date) -> Q:
         **{f"{JOB_START}__lte": week_end, f"{JOB_WINDOW_END}__gte": week_start}
     )
     # P-9 §A.2b (rule 10) — a finished job is in the week of its finish.
-    return _home_or_settled_q(home, _TICKET_STATE_Q[STATE_DONE], week_start, week_end)
+    # P-10 A1 — a blocked job in the week it left the board.
+    return _home_or_settled_q(
+        home,
+        _TICKET_STATE_Q[STATE_DONE] | _TICKET_STATE_Q[STATE_BLOCKED],
+        week_start,
+        week_end,
+    )
 
 
 def _ticket_rolled_q(today: datetime.date) -> Q:
@@ -808,10 +925,40 @@ def _ticket_rolled_q(today: datetime.date) -> Q:
 
 def _ticket_review_q() -> Q:
     """Rule 8 (P-1 §3) — SQL twin of `work_plan.awaits_review` for a
-    job: the worker finished, a manager has not confirmed."""
-    return Q(
-        status=TicketStatus.WAITING_MANAGER_REVIEW, archived_at__isnull=True
-    )
+    job: the worker finished, a manager has not confirmed. The status
+    alone (like the customer wait): archive is housekeeping, and an
+    archived job still waiting for a check is still waiting."""
+    return Q(status=TicketStatus.WAITING_MANAGER_REVIEW)
+
+
+def _ticket_responsible_q(user) -> Q:
+    """P-10 A2 — is THIS viewer a manager responsible for the job?
+
+    The owner's ruling: "everyone's schedule is their own; the manager
+    sees it on their day, the owner sees it in a section." Responsible
+    is `notifications.services.ticket_responsible_manager_recipients`'s
+    three tiers, first non-empty wins, asked about one person:
+
+      1. named on the ticket (`TicketManagerAssignment`);
+      2. else the legacy primary manager (`Ticket.assigned_to`);
+      3. else — for a BUILDING_MANAGER — the building's authority ring
+         (`BuildingManagerAssignment`).
+
+    `Exists` throughout, so the predicate composes into `Count` without
+    multiplying rows. A SUPER_ADMIN or provider admin is responsible for
+    nothing by role: they read the strip.
+    """
+    named_any = TicketManagerAssignment.objects.filter(ticket_id=OuterRef("id"))
+    named_me = named_any.filter(user_id=user.id)
+    tier1 = Exists(named_me)
+    tier2 = ~Exists(named_any) & Q(assigned_to_id=user.id)
+    q = Q(tier1) | Q(tier2)
+    if user.role == UserRole.BUILDING_MANAGER:
+        ring = BuildingManagerAssignment.objects.filter(
+            building_id=OuterRef("building_id"), user_id=user.id
+        )
+        q = q | (~Exists(named_any) & Q(assigned_to__isnull=True) & Exists(ring))
+    return q
 
 
 def _ticket_waiting_customer_q() -> Q:
@@ -833,13 +980,27 @@ def _ticket_waiting_customer_q() -> Q:
 
 
 def _ticket_board_q(
-    week_start: datetime.date, week_end: datetime.date, today: datetime.date
+    week_start: datetime.date,
+    week_end: datetime.date,
+    today: datetime.date,
+    user=None,
 ) -> Q:
-    board = _ticket_week_q(week_start, week_end) & ~_ticket_rolled_q(today)
+    # P-10 A1/A2 — a job waiting for a manager's check is in NO column
+    # of any week (its report is not a finish); the ONE exception is
+    # the responsible manager's today, where it hangs as their card to
+    # check (rule 8, made personal). Everybody else reads it in the
+    # "Waiting for a manager's check" strip.
+    board = (
+        _ticket_week_q(week_start, week_end)
+        & ~_ticket_rolled_q(today)
+        & ~_ticket_review_q()
+    )
     if week_start <= today <= week_end:
-        # Rule 5's rolled rows and rule 8's review rows both sit on
-        # today, whichever week they were planned in.
-        board = board | _ticket_rolled_q(today) | _ticket_review_q()
+        # Rule 5's rolled rows sit on today, whichever week they were
+        # planned in; so do the review rows this viewer must check.
+        board = board | _ticket_rolled_q(today)
+        if user is not None:
+            board = board | (_ticket_review_q() & _ticket_responsible_q(user))
     # Rule 9 (P-9 §A.2a: in EVERY week) — waiting rows sit nowhere on
     # the board; they are zone 2, outside the dates.
     return board & ~_ticket_waiting_customer_q()
@@ -969,9 +1130,11 @@ def _extra_work_source(user, team: bool):
     )
     # P-1 — the plan's provenance (`extra_work_plan_provenance`) reads
     # the "committed window" history row; one prefetch for the board.
-    return _with_ew_settled_day(
-        queryset.select_related("building", "customer", "created_by")
-        .prefetch_related("status_history__changed_by")
+    return _with_ew_dates(
+        _with_ew_settled_day(
+            queryset.select_related("building", "customer", "created_by")
+            .prefetch_related("status_history__changed_by")
+        )
     )
 
 
@@ -991,8 +1154,8 @@ def _stuck_extra_work_source(user, team: bool):
             deleted_at__isnull=True,
             id__in=assigned_ids.filter(user=user),
         )
-    return queryset.filter(_ew_stuck_q()).select_related(
-        "building", "customer"
+    return _with_ew_dates(
+        queryset.filter(_ew_stuck_q()).select_related("building", "customer")
     )
 
 
@@ -1103,6 +1266,65 @@ def _stamp_parked_reasons(entries) -> None:
         reasons.setdefault(ticket_id, (note or "").strip() or None)
     for entry in entries:
         entry["parked_reason"] = reasons.get(entry.get("ticket_id"))
+
+
+def _stamp_manager_names(entries) -> None:
+    """P-10 A2 — WHO is answerable for each job on the manager's-check
+    strip: `ticket_responsible_manager_recipients`'s three tiers, asked
+    per ticket, in three queries for the whole (bounded) list. The
+    strip's summary names them ("Gökhan 2 · Sophie 1 · oldest 6 days")
+    and the worker's row says whose check it waits on."""
+    ticket_ids = {e["ticket_id"] for e in entries if e.get("ticket_id")}
+    if not ticket_ids:
+        return
+    named: dict[int, list[str]] = {}
+    rows = (
+        TicketManagerAssignment.objects.filter(ticket_id__in=list(ticket_ids))
+        .select_related("user")
+        .order_by("user__full_name", "user__email", "id")
+    )
+    for row in rows:
+        names = named.setdefault(row.ticket_id, [])
+        label = _person_label(row.user)
+        if label and label not in names:
+            names.append(label)
+    tickets = {
+        t.id: t
+        for t in Ticket.objects.filter(id__in=list(ticket_ids)).select_related(
+            "assigned_to"
+        )
+    }
+    ring_buildings = {
+        t.building_id
+        for t in tickets.values()
+        if t.building_id and t.id not in named and t.assigned_to_id is None
+    }
+    ring: dict[int, list[str]] = {}
+    if ring_buildings:
+        members = (
+            BuildingManagerAssignment.objects.filter(
+                building_id__in=list(ring_buildings),
+                user__role=UserRole.BUILDING_MANAGER,
+                user__is_active=True,
+            )
+            .select_related("user")
+            .order_by("user__full_name", "user__email", "id")
+        )
+        for row in members:
+            names = ring.setdefault(row.building_id, [])
+            label = _person_label(row.user)
+            if label and label not in names:
+                names.append(label)
+    for entry in entries:
+        ticket = tickets.get(entry.get("ticket_id"))
+        if ticket is None:
+            continue
+        if ticket.id in named:
+            entry["manager_names"] = list(named[ticket.id])
+        elif ticket.assigned_to_id:
+            entry["manager_names"] = [_person_label(ticket.assigned_to)]
+        else:
+            entry["manager_names"] = list(ring.get(ticket.building_id, []))
 
 
 def _stamp_override_authority(entries, user) -> None:
@@ -1235,8 +1457,11 @@ def _slot_job(slot) -> Job:
     state = _slot_state(slot)
     # P-9 §A.2b — the day THIS person finished: their own completion
     # stamp, else the ticket's finish (twin of `_with_slot_settled_day`).
+    # P-10 A1 — the closed set (finished or blocked); `ticket_finished_at`
+    # answers None while the ticket is live or reported done, so only
+    # the slot's own stamp can place it then.
     settled_day = None
-    if state == STATE_DONE:
+    if state in CLOSED_STATES:
         settled_day = _local_date(
             slot.completed_at or ticket_finished_at(slot.ticket)
         )
@@ -1277,18 +1502,16 @@ def _ticket_job(ticket) -> Job:
     # over is `manager_review_at` (stamped on entry to the status);
     # `updated_at` stands in for rows older than that stamp.
     review_since = None
-    if (
-        ticket.status == TicketStatus.WAITING_MANAGER_REVIEW
-        and ticket.archived_at is None
-    ):
+    if ticket.status == TicketStatus.WAITING_MANAGER_REVIEW:
         review_since = _local_date(
             ticket.manager_review_at or ticket.updated_at
         )
     state = _ticket_state(ticket)
     # P-9 §A.2b — rule 10: a finished job is placed by the day it was
-    # finished (twin of `_with_ticket_settled_day`).
+    # finished (twin of `_with_ticket_settled_day`). P-10 A1 — the closed
+    # set, and never while reported done (`ticket_finished_at` is None).
     settled_day = (
-        _local_date(ticket_finished_at(ticket)) if state == STATE_DONE else None
+        _local_date(ticket_finished_at(ticket)) if state in CLOSED_STATES else None
     )
     return Job(
         planned_start=start,
@@ -1347,9 +1570,10 @@ def _extra_work_job(extra_work) -> Job:
     settled_day = (
         _local_date(_ew_finished_at(extra_work)) if state == STATE_DONE else None
     )
+    start, end = _ew_planned_window(extra_work)
     return Job(
-        planned_start=extra_work.preferred_date,
-        planned_end=extra_work.planned_end_date,
+        planned_start=start,
+        planned_end=end,
         due=extra_work.deadline,
         state=state,
         settled_day=settled_day,
@@ -1476,6 +1700,8 @@ def _fe4_facts(
     sent_to=None,
     planned_hours=None,
     today=None,
+    manager_checked=(None, None),
+    approved_by=None,
 ) -> dict:
     """FE-4 (Addendum D SS D.12 items 2-4) -- the honest-date facts every
     entry carries, whatever its source:
@@ -1531,6 +1757,9 @@ def _fe4_facts(
         waiting_days = max((today - _local_date(reported_done_at)).days, 0)
     return {
         "created_at": created,
+        # P-10 A4 — the creation DAY as the server states it (P-3 §A.3:
+        # the card prints this, never a slice of the instant).
+        "created_day": _iso(_local_date(created)),
         "created_by_name": _person_label(created_by) if created_by else None,
         "plan_source": plan_source,
         "has_real_plan": provenance.has_real_plan,
@@ -1549,6 +1778,14 @@ def _fe4_facts(
         "settled_day": _iso(_local_date(settled_at)),
         "reported_done_day": _iso(_local_date(reported_done_at)),
         "approved_day": _iso(_local_date(approved_at)),
+        # P-10 A4 — the finished card's Details: the manager's check and
+        # the customer's approval, each a server DAY and a name.
+        "manager_checked_day": _iso(_local_date(manager_checked[0])),
+        "manager_checked_by_name": manager_checked[1],
+        "approved_by_name": approved_by,
+        # P-3 §A.3 twin for the report: the clock of the report moment in
+        # the server's zone, or null at midnight / when unknown.
+        "reported_done_time": _clock(reported_done_at),
         "planned_hours": _hours_text(planned_hours),
         "settled_days_after_due": settled_after,
         "settled_days_after_plan": settled_days_after_plan(job),
@@ -1576,26 +1813,59 @@ _REPORTED_DONE_STATUSES = (
 )
 
 
+#: P-10 A4 — the finished card's Details name the whole chain, so the
+#: report legs are read for a job that is OVER too (approved, closed),
+#: not only while it waits.
+_OVER_STATUSES = (TicketStatus.APPROVED, TicketStatus.CLOSED)
+
+
+def _latest_leg(ticket, *, into=None, out_of=None):
+    """The latest history row whose `new_status` is in `into` and/or
+    whose `old_status` is in `out_of`, off the prefetched rows."""
+    latest = None
+    for row in ticket.status_history.all():
+        if into is not None and row.new_status not in into:
+            continue
+        if out_of is not None and row.old_status not in out_of:
+            continue
+        if latest is None or (row.created_at, row.id) > (latest.created_at, latest.id):
+            latest = row
+    return latest
+
+
+def _leg_facts(leg):
+    if leg is None:
+        return None, None
+    who = _person_label(leg.changed_by) if leg.changed_by_id else None
+    return leg.created_at, who
+
+
 def _ticket_reported_done(ticket):
     """When the work was reported done — the moment it went to the
     customer (or the manager) for a check — and WHO reported it.
     Server-computed from the status history so the card and the waiting
     row cannot print the planned day for it (P-8R E). `(None, None)`
-    unless the ticket is waiting on that check right now; the past-tense
-    card reads `settled_at`. Read off the prefetched history rows (both
-    sources prefetch them), so this costs no query per card."""
-    if ticket.status not in _REPORTED_DONE_STATUSES:
+    unless the ticket is waiting on that check right now or is over
+    (P-10 A4: the finished card's Details say who reported it and
+    when). Read off the prefetched history rows (both sources prefetch
+    them), so this costs no query per card."""
+    if ticket.status not in _REPORTED_DONE_STATUSES + _OVER_STATUSES:
         return None, None
-    latest = None
-    for row in ticket.status_history.all():
-        if row.new_status not in _REPORTED_DONE_STATUSES:
-            continue
-        if latest is None or (row.created_at, row.id) > (latest.created_at, latest.id):
-            latest = row
-    if latest is None:
-        return None, None
-    who = _person_label(latest.changed_by) if latest.changed_by_id else None
-    return latest.created_at, who
+    return _leg_facts(_latest_leg(ticket, into=_REPORTED_DONE_STATUSES))
+
+
+def _ticket_check_facts(ticket):
+    """P-10 A4 — the manager's check (the leg OUT of
+    WAITING_MANAGER_REVIEW into the customer wait or straight to
+    approved) and the customer's approval (the leg INTO APPROVED), each
+    as (moment, who). None where the leg never happened."""
+    checked = _latest_leg(
+        ticket,
+        out_of=(TicketStatus.WAITING_MANAGER_REVIEW,),
+        into=(TicketStatus.WAITING_CUSTOMER_APPROVAL, TicketStatus.APPROVED),
+    )
+    approved = _latest_leg(ticket, into=(TicketStatus.APPROVED,))
+    return _leg_facts(checked), _leg_facts(approved)
 
 
 def _ticket_settled_at(ticket):
@@ -1669,11 +1939,14 @@ def _entry_from_slot(
     planned_hours=None,
 ) -> dict:
     reported_done_at, reported_done_by = _ticket_reported_done(slot.ticket)
+    manager_checked, approved_by = _ticket_check_facts(slot.ticket)
     return {
         **_fe4_facts(
             job,
             created=slot.ticket.created_at,
             deadline=_slot_deadline(slot),
+            manager_checked=manager_checked,
+            approved_by=approved_by[1],
             # A slot IS a dated piece of a ticket: its own day is a plan,
             # given by whoever put this person on it.
             plan_source=(
@@ -1766,6 +2039,9 @@ def _entry_from_slot(
         ),
         "assignee_names": [_person_label(slot.user)],
         "assignee_count": 1,
+        # P-10 A2 — the managers answerable for the job; filled on the
+        # manager's-check strip (`_stamp_manager_names`), empty elsewhere.
+        "manager_names": [],
         # W-N1 §3 — the parts this person holds on this ticket, so the
         # Work Plan can say WHICH half of the job is theirs. Empty list,
         # never null: a card that renders `parts.map` should not have to
@@ -1814,12 +2090,16 @@ def _entry_from_extra_work(
             job,
             created=extra_work.requested_at,
             deadline=extra_work.deadline,
-            # `_extra_work_job` places by the CUSTOMER's preferred date.
-            # That is a wish, and the card says so.
+            # P-10 A6 — placed by the PROVIDER's plan when one exists
+            # (the row's Plan-it button writes it), else by the
+            # customer's preferred date, which is a wish and is captioned
+            # as one. The same branch `job_plan_source` takes for a ticket.
             plan_source=(
-                PLAN_SOURCE_CUSTOMER_WISH
-                if job.planned_start is not None
-                else None
+                None
+                if job.planned_start is None
+                else PLAN_SOURCE_PROVIDER_PLAN
+                if extra_work.provider_planned_date is not None
+                else PLAN_SOURCE_CUSTOMER_WISH
             ),
             provenance=extra_work_plan_provenance(extra_work),
             created_by=extra_work.created_by,
@@ -1889,6 +2169,7 @@ def _entry_from_extra_work(
         "lateness": lateness if lateness is not None else _empty_lateness(),
         "assignee_names": names[:ASSIGNEE_NAMES_SHOWN],
         "assignee_count": len(names),
+        "manager_names": [],
         "can_complete": False,
     }
 
@@ -1920,11 +2201,14 @@ def _entry_from_ticket(
     instead is how many people are on it.
     """
     reported_done_at, reported_done_by = _ticket_reported_done(ticket)
+    manager_checked, approved_by = _ticket_check_facts(ticket)
     return {
         **_fe4_facts(
             job,
             created=ticket.created_at,
             deadline=job_deadline(ticket),
+            manager_checked=manager_checked,
+            approved_by=approved_by[1],
             plan_source=job_plan_source(ticket),
             settled_at=_ticket_settled_at(ticket),
             reported_done_at=reported_done_at,
@@ -1995,6 +2279,7 @@ def _entry_from_ticket(
         "lateness": lateness if lateness is not None else _empty_lateness(),
         "assignee_names": names[:ASSIGNEE_NAMES_SHOWN],
         "assignee_count": len(names),
+        "manager_names": [],
         # A job card is a READ. Completing a slot belongs to the person
         # holding it, on their own week.
         "can_complete": False,
@@ -2236,7 +2521,7 @@ class WorkPlanView(APIView):
         # placement rule applied to both.
         if team:
             jobs = _ticket_source(user)
-            board_q = _ticket_board_q(week_start, week_end, today)
+            board_q = _ticket_board_q(week_start, week_end, today, user)
             overdue_q = _ticket_overdue_q(today)
             upcoming_q = _ticket_upcoming_q(week_end)
             undated_q = _ticket_undated_q()
@@ -2364,8 +2649,32 @@ class WorkPlanView(APIView):
         # detail's `actions.can_override_customer_decision`; nothing new is
         # permitted to anyone.
         _stamp_override_authority(waiting_entries, user)
+        # P-10 A2 — the manager's-check strip: reported done, not yet
+        # checked, and NOT this viewer's to check (those hang on their
+        # today, `_ticket_board_q`). A worker's own strip is every slot
+        # of theirs on a job waiting for the check. Whole scope, like
+        # the customer zone: a job reported done in July still waits in
+        # September.
+        if team:
+            review_source = jobs.filter(_ticket_review_q()).exclude(
+                _ticket_review_q() & _ticket_responsible_q(user)
+            )
+        else:
+            review_source = jobs.filter(_slot_review_q())
+        review_entries, review_truncated = self._flat_entries(
+            review_source,
+            extra_work.none(),
+            week_start,
+            week_end,
+            today,
+            limit=WAITING_LIMIT,
+            team=team,
+            viewer=user,
+            fallback_placement=PLACEMENT_PLANNED,
+        )
+        _stamp_manager_names(review_entries)
         counts = self._counts(
-            jobs, extra_work, week_start, week_end, today, team=team
+            jobs, extra_work, week_start, week_end, today, team=team, user=user
         )
         # Counted over the deduped JOB set in Python rather than as a SQL
         # aggregate, because the ladder needs the widest window across a
@@ -2410,6 +2719,8 @@ class WorkPlanView(APIView):
                 "stuck_entries": stuck_entries,
                 # P-3 §A.1 — the "Wacht op klant" chip's rows.
                 "waiting_customer_entries": waiting_entries,
+                # P-10 A2 — the manager's-check strip's rows.
+                "review_entries": review_entries,
                 "limits": {
                     "entries": ENTRY_LIMIT,
                     "overdue_entries": OVERDUE_LIMIT,
@@ -2419,6 +2730,7 @@ class WorkPlanView(APIView):
                     "late_entries": LATE_LIMIT,
                     "stuck_entries": STUCK_LIMIT,
                     "waiting_customer_entries": WAITING_LIMIT,
+                    "review_entries": WAITING_LIMIT,
                 },
                 "truncated": {
                     "entries": truncated,
@@ -2429,6 +2741,7 @@ class WorkPlanView(APIView):
                     "late_entries": late_truncated,
                     "stuck_entries": stuck_truncated,
                     "waiting_customer_entries": waiting_truncated,
+                    "review_entries": review_truncated,
                 },
             },
             status=status.HTTP_200_OK,
@@ -2520,9 +2833,7 @@ class WorkPlanView(APIView):
             rows = list(
                 rows_source.order_by("scheduled_start_at", "id")[: limit + 1]
             )
-        ew_rows = list(
-            extra_work.order_by("preferred_date", "id")[: limit + 1]
-        )
+        ew_rows = list(extra_work.order_by(EW_START, "id")[: limit + 1])
         assignees = cls._assignee_map(
             [row.id for row in ew_rows], team=team, viewer=viewer
         )
@@ -2655,14 +2966,15 @@ class WorkPlanView(APIView):
         # placement and is not affected.
         if fallback_placement is None and _ticket_waiting_customer(ticket):
             return []
-        # Rule 8 (P-1 §3) — waiting for a manager: on today's column of
-        # the current week, marked. Any other week keeps rule 1, so the
-        # week the worker finished it still shows it, settled, at home.
-        if (
-            fallback_placement is None
-            and today_in_week
-            and job.review_since is not None
-        ):
+        # Rule 8 (P-1 §3), personal since P-10 A2 — waiting for a
+        # manager: on today's column of the current week for the
+        # responsible viewer (the SQL board narrows to exactly those
+        # rows, `_ticket_responsible_q`), marked. In any other week, and
+        # for every other reader, such a job is in NO column: its report
+        # is not a finish (A1), so it never hangs in the past.
+        if fallback_placement is None and ticket.status == TicketStatus.WAITING_MANAGER_REVIEW:
+            if not today_in_week or job.review_since is None:
+                return []
             placement, day = PLACEMENT_REVIEW, today
         # Rule 5, unchanged in what it decides: a pending job whose last
         # planned day has passed is not left in that past column, it is
@@ -2724,6 +3036,13 @@ class WorkPlanView(APIView):
         # Rule 9 (P-3 §A.1, P-9 §A.2a: EVERY week) — the slot's job waits
         # on the customer: it is in no column (twin of `_slot_board_q`).
         if fallback_placement is None and _ticket_waiting_customer(slot.ticket):
+            return []
+        # P-10 A2 — the worker's slot on a job waiting for the manager's
+        # check: a strip row, never a column (twin of `_slot_board_q`).
+        if (
+            fallback_placement is None
+            and slot.ticket.status == TicketStatus.WAITING_MANAGER_REVIEW
+        ):
             return []
         if fallback_placement is None and rolls_forward(job, today):
             if not today_in_week:
@@ -3082,7 +3401,7 @@ class WorkPlanView(APIView):
 
     @staticmethod
     def _counts(
-        jobs, extra_work, week_start, week_end, today, *, team
+        jobs, extra_work, week_start, week_end, today, *, team, user=None
     ) -> dict:
         """Every number on the screen, over the WHOLE scope.
 
@@ -3098,7 +3417,7 @@ class WorkPlanView(APIView):
         chip reading "12" sits over eight cards.
         """
         if team:
-            board_q = _ticket_board_q(week_start, week_end, today)
+            board_q = _ticket_board_q(week_start, week_end, today, user)
             state_q = _TICKET_STATE_Q
             overdue_q = _ticket_overdue_q(today)
             upcoming_q = _ticket_upcoming_q(week_end)
@@ -3168,6 +3487,23 @@ class WorkPlanView(APIView):
                 key: job_other[key] + ew_other.get(key, 0) for key in job_other
             }
         )
+        # P-10 A2 — the manager's-check numbers, whole scope: `review` is
+        # the strip (not this viewer's to check), `review_mine` the cards
+        # on their today. Two plain counts rather than a conditional
+        # aggregate: the responsible predicate is three `Exists`, and it
+        # has to read the same here as on the board.
+        if team:
+            review_total = jobs.filter(_ticket_review_q()).count()
+            review_mine = (
+                jobs.filter(_ticket_review_q() & _ticket_responsible_q(user)).count()
+                if user is not None
+                else 0
+            )
+        else:
+            review_total = jobs.filter(_slot_review_q()).count()
+            review_mine = 0
+        counts["review"] = review_total - review_mine
+        counts["review_mine"] = review_mine
         return counts
 
 

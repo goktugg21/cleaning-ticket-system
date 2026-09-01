@@ -506,6 +506,8 @@ ENTRY_KEYS = {
     # was created (never a plan), what kind of date placed it, what the
     # headline lateness counts against, and when settled work was over.
     "created_at",
+    # P-10 A4 — the creation day as a server DAY.
+    "created_day",
     "plan_source",
     # P-1 -- provenance: a date is a plan only if a person made it.
     "has_real_plan",
@@ -530,10 +532,19 @@ ENTRY_KEYS = {
     "settled_day",
     "reported_done_day",
     "approved_day",
+    # P-10 A4 — the finished card's Details: the manager's check and the
+    # customer's approval (day + name), and the report's clock.
+    "manager_checked_day",
+    "manager_checked_by_name",
+    "approved_by_name",
+    "reported_done_time",
     # P-3 §A.5 — a real plan whose last day is past the deadline.
     "planned_after_deadline",
     "assignee_names",
     "assignee_count",
+    # P-10 A2 — the managers answerable for the job (the manager's-check
+    # strip fills it; empty everywhere else).
+    "manager_names",
     # W-N1 §3 — the parts of this ticket the entry's person holds. This
     # constant is shared by both kinds on purpose ("a field cannot exist
     # on one and be forgotten on the other"), which is why extra work
@@ -603,6 +614,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "stuck_entries",
                 # P-3 §A.1 — the "Wacht op klant" chip's rows.
                 "waiting_customer_entries",
+                # P-10 A2 — the manager's-check strip.
+                "review_entries",
                 # FE-5 step 0 — whether this viewer may plan undated work.
                 # (On the wire since FE-5; this set had drifted — P-1.)
                 "can_plan",
@@ -634,6 +647,10 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 # P-3 §A.1 — jobs waiting on the customer, whole scope.
                 "waiting_customer",
                 "parked",
+                # P-10 A2 — the manager's-check strip (not mine) and the
+                # cards on my today (mine).
+                "review",
+                "review_mine",
             },
         )
         # Every list is bounded, and the response says by how much and
@@ -652,6 +669,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "late_entries",
                 "stuck_entries",
                 "waiting_customer_entries",
+                # P-10 A2 — the manager's-check strip.
+                "review_entries",
             },
         )
         self.assertEqual(
@@ -665,6 +684,8 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
                 "late_entries",
                 "stuck_entries",
                 "waiting_customer_entries",
+                # P-10 A2 — the manager's-check strip.
+                "review_entries",
             },
         )
         self.assertFalse(any(payload["truncated"].values()))

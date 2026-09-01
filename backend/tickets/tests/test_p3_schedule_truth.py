@@ -68,6 +68,8 @@ class _P3Fixture(WorkPlanFixture):
             "late_entries",
             "stuck_entries",
             "waiting_customer_entries",
+            # P-10 A2 — the manager's-check strip.
+            "review_entries",
         ):
             for entry in payload.get(bucket, []):
                 if entry["key"] == key:
@@ -362,6 +364,8 @@ class ReconciliationTests(_P3Fixture, APITestCase):
             ("late", "late_entries"),
             ("stuck", "stuck_entries"),
             ("waiting_customer", "waiting_customer_entries"),
+            # P-10 A2 — the manager's-check strip has its own number.
+            ("review", "review_entries"),
         ):
             self.assertEqual(
                 counts[count_key], len(payload[list_key]), count_key
@@ -381,10 +385,21 @@ class ReconciliationTests(_P3Fixture, APITestCase):
                 self.assertEqual(e["day"], payload["today"], e["key"])
         # Nothing is in two places at once.
         on_board = {e["key"] for e in entries}
-        for list_key in ("undated_entries", "parked_entries", "waiting_customer_entries"):
+        for list_key in (
+            "undated_entries",
+            "parked_entries",
+            "waiting_customer_entries",
+            "review_entries",
+        ):
             self.assertEqual(
                 on_board & {e["key"] for e in payload[list_key]}, set(), list_key
             )
+        # P-10 A2 — the review job is in the strip for a viewer who is
+        # not responsible for it (both readers here), never in a column.
+        self.assertGreater(counts["review"], 0)
+        self.assertEqual(counts["review_mine"], 0)
+        for e in entries:
+            self.assertNotEqual(e["ticket_status"], TicketStatus.WAITING_MANAGER_REVIEW)
         self.assertGreater(counts["total"], 0)
         self.assertGreater(counts["late"], 0)
         self.assertGreater(counts["waiting_customer"], 0)
@@ -437,7 +452,12 @@ class FullMatrixTests(_P3Fixture, APITestCase):
         # reason; a parked job WITH a day keeps its board placement.
         TicketStatus.ON_HOLD: ("rolled", "planned_fri", "parked"),
         TicketStatus.REOPENED_BY_ADMIN: ("rolled", "planned_fri", "undated"),
-        TicketStatus.WAITING_MANAGER_REVIEW: ("review", "review", "review"),
+        # P-10 A1/A2 — reported done is not finished: in no column of
+        # any week. A COMPANY_ADMIN is responsible for nothing by role,
+        # so for this viewer every such job is a strip row; the
+        # responsible manager's today card is pinned in
+        # `test_p10_review_placement.py`.
+        TicketStatus.WAITING_MANAGER_REVIEW: ("review_strip", "review_strip", "review_strip"),
         TicketStatus.WAITING_CUSTOMER_APPROVAL: ("waiting", "waiting", "waiting"),
         TicketStatus.APPROVED: ("settled_mon", "settled_fri", None),
         TicketStatus.CLOSED: ("settled_mon", "settled_fri", None),
@@ -472,6 +492,9 @@ class FullMatrixTests(_P3Fixture, APITestCase):
             self.assertFalse(card["viewer_settled"], key)
         elif shape == "waiting":
             self.assertEqual(bucket, "waiting_customer_entries", key)
+        elif shape == "review_strip":
+            self.assertEqual(bucket, "review_entries", key)
+            self.assertEqual(card["placement"], PLACEMENT_PLANNED, key)
         elif shape == "stuck":
             self.assertEqual(bucket, "stuck_entries", key)
         elif shape in ("settled_mon", "settled_fri", "blocked_mon", "blocked_fri"):

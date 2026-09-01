@@ -117,6 +117,15 @@ def ticket_finished_at(ticket):
     """
     if ticket_is_live(ticket):
         return None
+    # P-10 A1 — a job in review is NOT finished. The worker's report
+    # (`manager_review_at` / `sent_for_approval_at`) becomes the finish
+    # only once the chain is over (approved, closed); while the ticket
+    # still waits for the manager's or the customer's check there is no
+    # finish moment, and the board must not hang such a job in the past
+    # week of its report (that is where the owner found unapproved
+    # work: in columns nobody looks at).
+    if ticket.status in _REPORTED_DONE_STATUSES:
+        return None
     if ticket.status in _BLOCKED_STATUSES:
         return (
             ticket.rejected_at
@@ -138,9 +147,9 @@ def ticket_settled_at(ticket):
     over. None while live, and None while reported done but waiting on
     a check — `reported_done_at` carries that moment, and a card that
     said "finished" about work the customer has not accepted would be
-    telling the reader the chain is complete when it is not."""
-    if ticket.status in _REPORTED_DONE_STATUSES:
-        return None
+    telling the reader the chain is complete when it is not. Since
+    P-10 A1 `ticket_finished_at` answers None for those statuses too,
+    so the two are one stamp."""
     return ticket_finished_at(ticket)
 
 
