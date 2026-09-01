@@ -135,3 +135,9 @@ export function partHostDays(
   }
   return out;
 }
+
+/** P-10 — "TCK-2026-000123 · Title", the one heading a row or a toast
+ *  prints for a job; the bare title for an extra work. */
+export function entryLabel(entry: WorkPlanEntry): string {
+  return entry.ticket_no ? `${entry.ticket_no} · ${entry.title}` : entry.title;
+}

@@ -40,6 +40,10 @@
   --amber-border:   #F5DFB8;
   --teal:           #0F6B5E;
   --teal-soft:      #E8F5F3;
+  /* P-10 A3 — the "Waiting for the customer" strip's colour. */
+  --violet:         #5B3FA6;
+  --violet-soft:    #F1EDFA;
+  --violet-border:  #D7CCF0;
   --closed:         #556259;
   --closed-soft:    #EAEFEB;
 

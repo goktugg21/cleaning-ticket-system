@@ -62,7 +62,6 @@ import {
 } from "../auth/permissions";
 import { BoundedList } from "../components/BoundedList";
 import { ClickableRow } from "../components/ClickableRow";
-import { EditModeToggle } from "../components/EditModeToggle";
 import { EmptyState } from "../components/EmptyState";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 // Sprint 183 — the week's three pieces, extracted. This file was 1334
@@ -70,16 +69,20 @@ import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 // the placement marker and two modals; the card and the column are the
 // two the sprint rebuilds, and they are easier to reason about with a
 // file each than as two of six things in one.
-import { WorkPlanCard } from "../components/workplan/WorkPlanCard";
-import { cardFactLine, cardFactState } from "../components/workplan/cardFact";
+import { FactsList, WorkPlanCard } from "../components/workplan/WorkPlanCard";
+import { cardFacts } from "../components/workplan/cardFacts";
 import {
   dedupeByJob,
   detailPath,
+  entryLabel,
   formatDay,
   partHostDays,
 } from "../components/workplan/entryHelpers";
 import { PlanItDialog } from "../components/workplan/PlanItDialog";
 import type { PlanItChoice } from "../components/workplan/PlanItDialog";
+import { PlanManyDialog } from "../components/workplan/PlanManyDialog";
+import type { PlanManyResult } from "../components/workplan/PlanManyDialog";
+import { ZoneStrip } from "../components/workplan/ZoneStrip";
 import "../components/workplan/workplan-zones.css";
 import { CHIPS, FOLDED_KEYS, matchesChip } from "../components/workplan/chips";
 import { latenessOf, sortLate } from "../components/workplan/lateness";
@@ -131,9 +134,8 @@ const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
   OTHER: "type_other",
 };
 
-// WP-1 G2 — how old dateless work must be before the "Nog niet gepland"
-// row starts saying so out loud (Addendum D §D.11.2: threshold 3 days).
-const UNPLANNED_AGE_THRESHOLD_DAYS = 3;
+// P-10 A3 — a strip shows this many rows before "Show all N".
+const STRIP_ROWS = 8;
 
 
 // ---------------------------------------------------------------------------
@@ -400,6 +402,14 @@ function WorkPlanWeek() {
   const [planTarget, setPlanTarget] = useState<WorkPlanEntry | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState("");
+  /* P-10 A5 — "Plan N": the selected rows the one dialog plans. */
+  const [planMany, setPlanMany] = useState<WorkPlanEntry[] | null>(null);
+  /* P-10 A3 — "Show all N": a strip's whole list, in the table modal. */
+  const [showAll, setShowAll] = useState<{
+    title: string;
+    rows: WorkPlanEntry[];
+    testId: string;
+  } | null>(null);
   /* P-6 V4 — stale-work triage. Select rows in the "Not planned yet"
      drawer, then park or close them with ONE reason, through the
      existing transitions (`/tickets/bulk-triage/` walks the machine's
@@ -443,6 +453,41 @@ function WorkPlanWeek() {
     setRefreshKey((n) => n + 1);
   }
 
+  /** P-10 A6 — reload and RESOLVE once the new payload is on screen, so
+   *  a caller can toast AFTER the strip count and the board changed:
+   *  the three agree in the same render. */
+  async function refetch() {
+    try {
+      const payload = await getWorkPlan(weekParam, teamWeek);
+      setData(payload);
+    } catch (err) {
+      setError(getApiError(err));
+    }
+  }
+
+  /** P-10 A5 — after one Save of "Plan N": reload first, then say what
+   *  happened. Refused rows stay in the dialog (and selected) with their
+   *  reason on the row; saved rows have already left the strip. */
+  async function handlePlanManySaved(result: PlanManyResult) {
+    await refetch();
+    const names = result.refused.map((row) => row.label).join(", ");
+    const title =
+      result.planned > 0
+        ? t("agenda.plan_many_saved", { count: result.planned })
+        : t("agenda.plan_many_none_saved");
+    push({
+      title: result.refused.length > 0 ? `${title} ${t("agenda.plan_many_refused", { names })}` : title,
+      variant: result.refused.length > 0 ? "info" : "success",
+    });
+    if (result.refused.length === 0) {
+      setPlanMany(null);
+      triageExit();
+    } else {
+      const keep = new Set(result.refused.map((row) => row.key));
+      setTriageSelected((prev) => new Set([...prev].filter((key) => keep.has(key))));
+    }
+  }
+
   /** P-9 §A.1 — plan an undated row on the day (and time) the operator
    *  chose in the Plan-it dialog. A ticket writes its schedule (and,
    *  ticked by default, moves everyone on it — ruling 12(e)); an extra
@@ -465,9 +510,11 @@ function WorkPlanWeek() {
       } else {
         return;
       }
+      // A6 — the reload lands BEFORE the toast, so the strip count, the
+      // board and the toast agree in the same render.
+      await refetch();
       setPlanTarget(null);
       push({ title: t("agenda.plan_it_saved", { date: formatDay(choice.day) }), variant: "success" });
-      reload();
     } catch (err) {
       // Surfaced in the dialog, never swallowed.
       setPlanError(getApiError(err));
@@ -570,7 +617,7 @@ function WorkPlanWeek() {
       });
       setTriageAction(null);
       setTriageSelected(new Set());
-      reload();
+      await refetch();
     } catch (err) {
       push({ title: getApiError(err), variant: "error" });
     } finally {
@@ -605,6 +652,37 @@ function WorkPlanWeek() {
     data && !data.truncated.waiting_customer_entries
       ? waitingJobs.length
       : (data?.counts.waiting_customer ?? 0);
+  /** P-10 A2 — reported done, waiting for a manager's check, and not
+   *  this viewer's to check (the server keeps the viewer's own on their
+   *  today). One row per job. */
+  const reviewJobs = useMemo(
+    () => (data ? dedupeByJob(data.review_entries ?? []) : []),
+    [data],
+  );
+  const reviewShown =
+    data && !data.truncated.review_entries ? reviewJobs.length : (data?.counts.review ?? 0);
+  /** The strip's one sentence: "reported done, not yet checked: Gökhan 2
+   *  · Sophie 1 · oldest 6 days" — first names, counted over the loaded
+   *  rows; a worker's strip says whose check it waits on. */
+  const reviewSummary = useMemo(() => {
+    if (!teamWeek) return t("agenda.strip_review_worker_summary");
+    const byManager = new Map<string, number>();
+    let oldest = 0;
+    for (const entry of reviewJobs) {
+      for (const name of entry.manager_names) {
+        const first = name.split(" ")[0] || name;
+        byManager.set(first, (byManager.get(first) ?? 0) + 1);
+      }
+      oldest = Math.max(oldest, entry.waiting_days ?? 0);
+    }
+    const managers = [...byManager.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => `${name} ${count}`)
+      .join(" · ");
+    return managers
+      ? t("agenda.strip_review_summary", { managers, count: oldest })
+      : t("agenda.strip_review_summary_plain", { count: oldest });
+  }, [reviewJobs, teamWeek, t]);
 
   /** Mon-Sun of the loaded week, ALWAYS all seven — a week with nothing
    *  on Thursday must show an empty Thursday, not silently close the
@@ -800,46 +878,76 @@ function WorkPlanWeek() {
         </div>
       )}
 
-      {/* P-9 §A.1 — THE FOUR ZONES, always visible, in this order: Not
-          planned yet, Waiting for the customer, the week board, and
-          nothing else above the board. The owner's model in plain
-          words: "Today shows what is planned for today and what I
-          didn't do yesterday. The past shows only what I finished. The
-          future shows what I will do. Not-planned and waiting-for-the-
-          customer are outside the dates." The two lanes are SECTIONS,
-          not toggles: the count is the section title, in the page's h2
-          size, and each row carries the one card fact line (§A.3) and
-          one button. Nothing renders as empty before the server has
-          answered (§D.6 rule 10). */}
-      {data && (
-        <section className="card wp-zone" data-testid="agenda-undated-lane">
-          <div className="wp-zone-head">
-            <h2 className="wp-zone-title" data-testid="agenda-undated-title" data-count={undatedShown}>
-              {t("agenda.zone_unplanned", { count: undatedShown })}
-              {undatedOldest !== null && undatedOldest >= UNPLANNED_AGE_THRESHOLD_DAYS && (
-                <span className="muted small" style={{ marginLeft: 10, fontSize: 13, fontWeight: 500, letterSpacing: 0 }}>
-                  {"· "}
-                  {t("agenda.undated_oldest", { count: undatedOldest })}
-                </span>
+      {/* P-10 A3 — THE PAGE IS THE BOARD; THE ZONES FOLD ABOVE IT. Every
+          zone is a strip (`ZoneStrip`): one row, closed by default, the
+          zone's colour, count · title · one summary sentence. A strip
+          with count 0 does not render (§D.6 rule 13). Nothing renders
+          before the server has answered (rule 10). Order: Not planned
+          yet (amber) · Waiting for a manager's check (teal) · Waiting for
+          the customer (violet) · Stuck (red) · the board. */}
+      {data && undatedShown > 0 && (
+        <ZoneStrip
+          id="unplanned"
+          tone="amber"
+          count={undatedShown}
+          title={t("agenda.undated_title")}
+          summary={
+            undatedOldest !== null && undatedOldest > 0
+              ? t("agenda.strip_unplanned_summary", { count: undatedOldest })
+              : t("agenda.strip_unplanned_summary_fresh")
+          }
+          testId="agenda-undated-lane"
+          actions={
+            <>
+              {data.can_plan && undatedJobs.length > 0 && !triageMode && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setTriageMode(true)}
+                  disabled={triageBusy}
+                  data-testid="agenda-triage-toggle"
+                >
+                  {t("agenda.strip_select")}
+                </button>
               )}
-            </h2>
-            {data.can_plan && undatedJobs.length > 0 && (
-              <EditModeToggle
-                editMode={triageMode}
-                onToggle={() => (triageMode ? triageExit() : setTriageMode(true))}
-                disabled={triageBusy}
-                testId="agenda-triage-toggle"
-              />
-            )}
-          </div>
+              {!triageMode && undatedJobs.length > STRIP_ROWS && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() =>
+                    setShowAll({
+                      title: t("agenda.undated_title"),
+                      rows: undatedJobs,
+                      testId: "agenda-undated-all",
+                    })
+                  }
+                  data-testid="agenda-undated-show-all"
+                >
+                  {t("agenda.strip_show_all", { count: undatedShown })}
+                </button>
+              )}
+            </>
+          }
+        >
+          {/* P-10 A5 — Select → "N selected: Plan N · Put on hold · Close
+              · Done". Selection exists only while the bar is up; every
+              row is reachable while selecting. */}
           {triageMode && (
             <MultiSelectToolbar
               selectedCount={triageSelected.size}
               onSelectAll={() => setTriageSelected(new Set(undatedJobs.map((entry) => entry.key)))}
               onClearAll={() => setTriageSelected(new Set())}
               disabled={triageBusy}
-              countLabel={t("agenda.triage_count", { count: triageSelected.size })}
+              countLabel={t("agenda.select_count", { count: triageSelected.size })}
               actions={[
+                {
+                  key: "plan",
+                  label: t("agenda.plan_n", { count: triageSelected.size }),
+                  onClick: () =>
+                    setPlanMany(undatedJobs.filter((entry) => triageSelected.has(entry.key))),
+                  disabled: triageSelected.size === 0,
+                  title: triageSelected.size === 0 ? t("agenda.triage_pick_first") : undefined,
+                },
                 {
                   key: "park",
                   label: t("agenda.triage_park"),
@@ -859,6 +967,11 @@ function WorkPlanWeek() {
                       },
                     ]
                   : []),
+                {
+                  key: "done",
+                  label: t("agenda.select_done"),
+                  onClick: triageExit,
+                },
               ]}
               testIdPrefix="agenda-triage"
             />
@@ -884,185 +997,177 @@ function WorkPlanWeek() {
               )}
             </div>
           )}
-          {undatedJobs.length === 0 ? (
-            <p className="muted small" style={{ margin: "4px 0 0" }} data-testid="agenda-undated-none">
-              {t("agenda.undated_none")}
-            </p>
-          ) : (
-            <BoundedList
-              size="lg"
-              count={undatedJobs.length}
-              ariaLabel={t("agenda.undated_title")}
-              testIdPrefix="agenda-undated"
-            >
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {undatedJobs.map((entry) => (
-                  <UndatedRow
-                    key={entry.key}
-                    entry={entry}
-                    today={todayKey}
-                    canPlan={data.can_plan}
-                    onPlan={() => {
-                      setPlanError("");
-                      setPlanTarget(entry);
-                    }}
-                    selectable={triageMode}
-                    selected={triageSelected.has(entry.key)}
-                    onToggleSelect={() => triageToggle(entry.key)}
-                  />
-                ))}
-              </ul>
-            </BoundedList>
-          )}
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }} data-testid="agenda-undated-rows">
+            {(triageMode ? undatedJobs : undatedJobs.slice(0, STRIP_ROWS)).map((entry) => (
+              <ZoneRow
+                key={entry.key}
+                entry={entry}
+                today={todayKey}
+                role={role}
+                testPrefix="agenda-undated"
+                selectable={triageMode}
+                selected={triageSelected.has(entry.key)}
+                onToggleSelect={() => triageToggle(entry.key)}
+                action={
+                  data.can_plan ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => {
+                        setPlanError("");
+                        setPlanTarget(entry);
+                      }}
+                      data-testid={`agenda-undated-plan-${entry.key}`}
+                    >
+                      {t("agenda.plan_it")}
+                    </button>
+                  ) : null
+                }
+              />
+            ))}
+          </ul>
           {data.truncated.undated_entries && (
             <p className="wp-notice" role="status">
-              {t("agenda.truncated_note", {
-                count: data.limits.undated_entries,
-              })}
+              {t("agenda.truncated_note", { count: data.limits.undated_entries })}
             </p>
           )}
-          {/* P-7 S8 — "Geparkeerd (N)": the parked work, quiet, with its
-              reasons. It left the nag above; it did not leave the zone. */}
-          {parkedShown > 0 && (
-            <details className="form-fold agenda-parked" data-testid="agenda-parked-fold">
-              <summary className="form-fold-summary">
-                {t("agenda.parked_title", { count: parkedShown })}
-                <span className="form-fold-summary-value">{t("agenda.parked_hint")}</span>
-              </summary>
-              <BoundedList
-                size="md"
-                count={parkedJobs.length}
-                ariaLabel={t("agenda.parked_title", { count: parkedShown })}
-                testIdPrefix="agenda-parked"
-              >
-                <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                  {parkedJobs.map((entry) => (
-                    <li
-                      key={entry.key}
-                      className="wp-undated-row wp-undated-row--parked"
-                      data-testid={`agenda-parked-row-${entry.key}`}
-                    >
-                      <div className="wp-undated-row-main">
-                        <Link to={`/tickets/${entry.ticket_id}`}>
-                          {entry.ticket_no ? `${entry.ticket_no} · ` : ""}
-                          {entry.title}
-                        </Link>
-                        <span className="muted small">
-                          {[entry.building_name, entry.customer_name].filter(Boolean).join(" · ")}
-                        </span>
-                        <span className="muted small" data-testid={`agenda-parked-reason-${entry.key}`}>
-                          {entry.parked_reason
-                            ? t("agenda.parked_reason", { reason: entry.parked_reason })
-                            : t("agenda.parked_no_reason")}
-                        </span>
-                      </div>
-                      <span className="wp-undated-row-actions">
-                        <span className="cell-tag cell-tag-closed">
-                          <i />
-                          {t("agenda.parked_tag")}
-                        </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </BoundedList>
-              {data.truncated.parked_entries && (
-                <p className="wp-notice" role="status">
-                  {t("agenda.truncated_note", { count: data.limits.parked_entries })}
-                </p>
-              )}
-            </details>
-          )}
-        </section>
+        </ZoneStrip>
       )}
 
-      {/* P-9 §A.1 zone 2 — Waiting for the customer: one row per job,
-          reported done · sent to · waiting N days. No action on the row
-          except Open; the reminder lives on the request. Global across
-          week browsing (P-8R E) and, since P-9 §A.2a, in no column of
-          ANY week. */}
-      {data && (
-        <section className="card wp-zone" data-testid="agenda-waiting-lane">
-          <div className="wp-zone-head">
-            <h2 className="wp-zone-title" data-testid="agenda-waiting-title" data-count={waitingShown}>
-              {t("agenda.zone_waiting", { count: waitingShown })}
-            </h2>
-          </div>
-          {waitingJobs.length === 0 ? (
-            <p className="muted small" style={{ margin: "4px 0 0" }} data-testid="agenda-waiting-none">
-              {t("agenda.waiting_none")}
+      {/* P-10 A2 — reported done, waiting for a manager's check. For SA,
+          a provider admin and a manager who is NOT responsible: this
+          strip, its summary naming the managers it waits on. For the
+          worker: "Reported done, waiting for the check" — never a
+          column. The responsible manager's own rows are not here: they
+          hang on their today as "Check: …" cards. */}
+      {data && reviewShown > 0 && (
+        <ZoneStrip
+          id="review"
+          tone="teal"
+          count={reviewShown}
+          title={teamWeek ? t("agenda.strip_review_title") : t("agenda.strip_review_worker_title")}
+          summary={reviewSummary}
+          testId="agenda-review-lane"
+          actions={
+            reviewJobs.length > STRIP_ROWS ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() =>
+                  setShowAll({
+                    title: teamWeek ? t("agenda.strip_review_title") : t("agenda.strip_review_worker_title"),
+                    rows: reviewJobs,
+                    testId: "agenda-review-all",
+                  })
+                }
+                data-testid="agenda-review-show-all"
+              >
+                {t("agenda.strip_show_all", { count: reviewShown })}
+              </button>
+            ) : undefined
+          }
+        >
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {reviewJobs.slice(0, STRIP_ROWS).map((entry) => (
+              <ZoneRow key={entry.key} entry={entry} today={todayKey} role={role} testPrefix="agenda-review" />
+            ))}
+          </ul>
+          {data.truncated.review_entries && (
+            <p className="wp-notice" role="status">
+              {t("agenda.truncated_note", { count: data.limits.review_entries })}
             </p>
-          ) : (
-            <BoundedList
-              size="lg"
-              count={waitingJobs.length}
-              ariaLabel={t("agenda.waiting_title")}
-              testIdPrefix="agenda-waiting"
-            >
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {waitingJobs.map((entry) => (
-                  <WaitingRow key={entry.key} entry={entry} today={todayKey} role={role} />
-                ))}
-              </ul>
-            </BoundedList>
           )}
+        </ZoneStrip>
+      )}
+
+      {/* P-9 §A.1 zone 2 → P-10 A3 strip — Waiting for the customer: one
+          row per job, no action except Open; the reminder lives on the
+          request. In no column of ANY week (rule 9). */}
+      {data && waitingShown > 0 && (
+        <ZoneStrip
+          id="customer"
+          tone="violet"
+          count={waitingShown}
+          title={t("agenda.strip_customer_title")}
+          summary={t("agenda.strip_customer_summary")}
+          testId="agenda-waiting-lane"
+          actions={
+            waitingJobs.length > STRIP_ROWS ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() =>
+                  setShowAll({
+                    title: t("agenda.strip_customer_title"),
+                    rows: waitingJobs,
+                    testId: "agenda-waiting-all",
+                  })
+                }
+                data-testid="agenda-waiting-show-all"
+              >
+                {t("agenda.strip_show_all", { count: waitingShown })}
+              </button>
+            ) : undefined
+          }
+        >
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {waitingJobs.slice(0, STRIP_ROWS).map((entry) => (
+              <ZoneRow key={entry.key} entry={entry} today={todayKey} role={role} testPrefix="agenda-waiting" />
+            ))}
+          </ul>
           {data.truncated.waiting_customer_entries && (
             <p className="wp-notice" role="status">
-              {t("agenda.truncated_note", {
-                count: data.limits.waiting_customer_entries,
-              })}
+              {t("agenda.truncated_note", { count: data.limits.waiting_customer_entries })}
             </p>
           )}
-        </section>
+        </ZoneStrip>
       )}
 
-      {/* WP-1 G1 — "Vastgelopen — actie nodig". Work that stopped
-          without being done: somebody said "unable" and nobody is
-          assigned any more, or an extra work whose ticket ended
-          blocked. Blocked is not done — a row leaves this list only
-          when a human reschedules, reassigns or cancels through the
-          existing actions, which live one click away on the record
-          itself. Outside the dates like the two zones above; renders
-          only when it holds something. */}
+      {/* WP-1 G1 — "Stuck — action needed", as a strip. Work that stopped
+          without being done; a row leaves only when a human reschedules,
+          reassigns or cancels through the existing actions on the record
+          the title opens. Renders only when it holds something. */}
       {data && stuckJobs.length > 0 && (
-        <section
-          className="card"
-          data-testid="agenda-stuck-list"
-          style={{ marginBottom: 18, padding: "16px 18px" }}
+        <ZoneStrip
+          id="stuck"
+          tone="red"
+          count={data.counts.stuck}
+          title={t("agenda.stuck_title")}
+          summary={t("agenda.stuck_desc")}
+          testId="agenda-stuck-list"
         >
-          <div className="section-head-title" style={{ marginBottom: 4 }}>
-            {t("agenda.stuck_title")}
-          </div>
-          <p className="muted small" style={{ marginTop: 0 }}>
-            {t("agenda.stuck_desc")}
-          </p>
-          <BoundedList
-            size="lg"
-            count={stuckJobs.length}
-            ariaLabel={t("agenda.stuck_title")}
-            testIdPrefix="agenda-stuck"
-          >
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {stuckJobs.map((entry) => (
-                <StuckRow key={entry.key} entry={entry} role={role} />
-              ))}
-            </ul>
-          </BoundedList>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {stuckJobs.slice(0, STRIP_ROWS).map((entry) => (
+              <ZoneRow
+                key={entry.key}
+                entry={entry}
+                today={todayKey}
+                role={role}
+                testPrefix="agenda-stuck"
+                facts={false}
+                action={
+                  <span className="wp-stuck-age" data-testid={`agenda-stuck-age-${entry.key}`}>
+                    {(entry.stuck_age_days ?? 0) === 0
+                      ? t("agenda.stuck_age_today")
+                      : t("agenda.stuck_age", { count: entry.stuck_age_days ?? 0 })}
+                  </span>
+                }
+              />
+            ))}
+          </ul>
           {data.truncated.stuck_entries && (
             <p className="wp-notice" role="status">
-              {t("agenda.truncated_note", {
-                count: data.limits.stuck_entries,
-              })}
+              {t("agenda.truncated_note", { count: data.limits.stuck_entries })}
             </p>
           )}
-        </section>
+        </ZoneStrip>
       )}
 
-      {/* P-9 §A.1 zone 3 — the week board. Its header row holds the
-          week stepper and ONE Filter button (P-2's fold rule): the
-          counted status chips, the source select, the search box and
-          the two "elsewhere" doors (late any week, planned later) live
-          inside it. Nothing else above the board. */}
+      {/* P-9 §A.1 zone 3 / P-10 A3 — the week board is the first thing
+          after the strips. Its header row holds the week stepper and ONE
+          Filter button (P-2's fold rule): the counted status chips, the
+          source select, the search box and the two "elsewhere" doors
+          (late any week, planned later) live inside it. */}
       <div className="wp-board-head">
         <div
           style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
@@ -1205,12 +1310,6 @@ function WorkPlanWeek() {
         </p>
       )}
 
-      {/* W-PLANTRUTH §1c — ONE late surface: three severity chips above
-          the week grid, each opening its group's modal. The separate
-          quarantine bar is gone — its three actions live on the NEVER
-          DONE modal's rows, which is the only place they were ever
-          needed. Nothing here scrolls sideways and the grid below keeps
-          its own dimensions untouched. */}
       {/* P-6 V4 — one reason for every selected item; it lands in each
           item's history. */}
       <RejectReasonDialog
@@ -1233,15 +1332,6 @@ function WorkPlanWeek() {
         onCancel={() => setTriageAction(null)}
         onConfirm={(reason) => void runTriage(reason)}
       />
-      {data && (
-        <LateStrip
-          entries={lateEntries}
-          truncated={data.truncated.late_entries}
-          limit={data.limits.late_entries}
-          role={role}
-          onChanged={reload}
-        />
-      )}
 
       {/* The empty state is about the whole PLAN, not about this week:
           a week with nothing in it is a normal week and gets seven
@@ -1322,6 +1412,74 @@ function WorkPlanWeek() {
         </div>
       )}
 
+      {/* W-PLANTRUTH §1c — ONE late surface: three severity chips, each
+          opening its group's modal. Under the board since P-10 A3 (the
+          board is the first thing after the stepper); the numbers and
+          the modals are unchanged. */}
+      {data && (
+        <LateStrip
+          entries={lateEntries}
+          truncated={data.truncated.late_entries}
+          limit={data.limits.late_entries}
+          role={role}
+          onChanged={reload}
+        />
+      )}
+
+      {/* P-7 S8 / P-10 A5 — "On hold (N)": the work somebody put on hold,
+          quiet, with its reasons, under the board. `ticket_status.on_hold`'s
+          own word; the page does not invent a second one. */}
+      {data && parkedShown > 0 && (
+        <details className="form-fold agenda-parked" data-testid="agenda-parked-fold">
+          <summary className="form-fold-summary">
+            {t("agenda.parked_title", { count: parkedShown })}
+            <span className="form-fold-summary-value">{t("agenda.parked_hint")}</span>
+          </summary>
+          <BoundedList
+            size="md"
+            count={parkedJobs.length}
+            ariaLabel={t("agenda.parked_title", { count: parkedShown })}
+            testIdPrefix="agenda-parked"
+          >
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {parkedJobs.map((entry) => (
+                <li
+                  key={entry.key}
+                  className="wp-undated-row wp-undated-row--parked"
+                  data-testid={`agenda-parked-row-${entry.key}`}
+                >
+                  <div className="wp-undated-row-main">
+                    <Link to={`/tickets/${entry.ticket_id}`}>
+                      {entry.ticket_no ? `${entry.ticket_no} · ` : ""}
+                      {entry.title}
+                    </Link>
+                    <span className="muted small">
+                      {[entry.building_name, entry.customer_name].filter(Boolean).join(" · ")}
+                    </span>
+                    <span className="muted small" data-testid={`agenda-parked-reason-${entry.key}`}>
+                      {entry.parked_reason
+                        ? t("agenda.parked_reason", { reason: entry.parked_reason })
+                        : t("agenda.parked_no_reason")}
+                    </span>
+                  </div>
+                  <span className="wp-undated-row-actions">
+                    <span className="cell-tag cell-tag-closed">
+                      <i />
+                      {t("agenda.parked_tag")}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </BoundedList>
+          {data.truncated.parked_entries && (
+            <p className="wp-notice" role="status">
+              {t("agenda.truncated_note", { count: data.limits.parked_entries })}
+            </p>
+          )}
+        </details>
+      )}
+
       {/* T2-3 — the day, full-width. Deliberately the SAME
           `EntryTableModal` the Overdue button already opens: the owner
           asked for the same rows, roomier, and a second modal
@@ -1348,6 +1506,23 @@ function WorkPlanWeek() {
           // late half — the LAW says late work sits on today, not on the
           // day it was planned.
           lateRows={dayModal === todayKey ? lateEntries : undefined}
+        />
+      )}
+
+      {/* P-10 A3 — "Show all N": the zone's list view, the same table. */}
+      {showAll && (
+        <EntryTableModal
+          title={showAll.title}
+          description={t("agenda.day_count", { count: showAll.rows.length })}
+          rows={showAll.rows}
+          truncated={false}
+          limit={0}
+          emptyLabel={t("agenda.day_empty")}
+          dateColumnLabel={t("agenda.col_planned")}
+          showOverdueBy={false}
+          role={role}
+          onClose={() => setShowAll(null)}
+          testId={showAll.testId}
         />
       )}
 
@@ -1399,6 +1574,17 @@ function WorkPlanWeek() {
         />
       )}
 
+      {/* P-10 A5 — "Plan N": one dialog for the selection, keyed by it. */}
+      {planMany && (
+        <PlanManyDialog
+          key={planMany.map((entry) => entry.key).join("|")}
+          entries={planMany}
+          todayIso={todayKey}
+          onCancel={() => setPlanMany(null)}
+          onSaved={handlePlanManySaved}
+        />
+      )}
+
       {completionTarget && completionTarget.ticket_id !== null && (
         <SlotCompletionDialog
           slot={{
@@ -1431,46 +1617,50 @@ function WorkPlanWeek() {
 // `components/workplan/WorkPlanCard.tsx` — see Sprint 183 §3.
 
 /**
- * Sprint 181 §8 — one row of the undated lane.
- *
- * Deliberately NOT `WorkPlanCard`. That card carries a planned window,
- * a time, an overdue marker and completion actions — every one of which
- * is about a job that HAS a date, and all of them would be blank or
- * meaningless here. A row in this lane needs three things: what it is,
- * where it is, and the one action that gets it out of this lane. The
- * sprint's own rule applies hardest here: if a control does not change
- * what somebody does next, it is not on this row.
+ * P-10 A3/A4 — one row of a strip. What it is, where it is, the three
+ * facts of its state (`cardFacts`, the same table the board's cards
+ * read), and ONE action: Plan it on a "Not planned yet" row, Open
+ * elsewhere, the stuck age on a stuck row. Deliberately not
+ * `WorkPlanCard`: a row is read across, a card is read down.
  */
-function UndatedRow({
+function ZoneRow({
   entry,
   today,
-  canPlan,
-  onPlan,
+  role,
+  testPrefix,
+  action,
+  facts = true,
   selectable = false,
   selected = false,
   onToggleSelect,
 }: {
   entry: WorkPlanEntry;
-  /** The server's today, for the one card fact line. */
+  /** The server's today, the day the facts are decided against. */
   today: string;
-  /** P-6 V4 — triage selection, shown only while the zone is in
-   *  select mode. */
+  role: Role | null;
+  testPrefix: string;
+  /** The row's one action; `undefined` renders Open, `null` nothing. */
+  action?: React.ReactNode;
+  /** The stuck strip says its age instead of the facts. */
+  facts?: boolean;
+  /** P-6 V4 / P-10 A5 — selection, shown only while the bar is up. */
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
-  /** FE-5 step 0 — the server's `can_plan`. A viewer the schedule
-   *  endpoints would refuse gets no button: a refusal in raw backend
-   *  English can no longer be clicked into existence. */
-  canPlan: boolean;
-  onPlan: () => void;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
-  const isTicket = entry.ticket_id !== null;
+  const to = detailPath(entry, role);
+  const where = [
+    entry.building_name,
+    entry.customer_name,
+    entry.kind === "EXTRA_WORK" ? t("agenda.source_extra_work") : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const heading = entryLabel(entry);
+  const lines = facts ? cardFacts(entry, today, t).lines : [];
   return (
-    <li
-      className="wp-undated-row"
-      data-testid={`agenda-undated-row-${entry.key}`}
-    >
+    <li className="wp-undated-row" data-testid={`${testPrefix}-row-${entry.key}`}>
       {selectable && (
         <input
           type="checkbox"
@@ -1482,148 +1672,18 @@ function UndatedRow({
         />
       )}
       <div className="wp-undated-row-main">
-        <Link
-          to={
-            isTicket
-              ? `/tickets/${entry.ticket_id}`
-              : `/extra-work/${entry.extra_work_id}`
-          }
-        >
-          {entry.ticket_no ? `${entry.ticket_no} · ` : ""}
-          {entry.title}
-        </Link>
-        <span className="muted small">
-          {[entry.building_name, entry.customer_name]
-            .filter(Boolean)
-            .join(" · ")}
-        </span>
-        {/* P-9 §A.3 — THE one card fact line: "created <date> by <who> ·
-            deadline <date> (<n> days left)" or "no deadline". Never
-            "planned". */}
-        <span
-          className={`wp-fact wp-fact-${cardFactState(entry, today)}`}
-          data-testid={`agenda-undated-created-${entry.key}`}
-        >
-          {cardFactLine(entry, today, t)}
-        </span>
-        {/* P-6 V4 — a parked job stays in this zone (the P-3 schedule
-            matrix places ON_HOLD here) but says so: parking is a
-            decision with a reason, not a gap. */}
-        {entry.ticket_status === "ON_HOLD" && (
-          <span className="cell-tag cell-tag-closed" data-testid={`agenda-undated-parked-${entry.key}`}>
-            <i />
-            {t("agenda.parked_tag")}
-          </span>
-        )}
-        {/* WP-1 G2 — dateless work never becomes overdue by design, so
-            this is its only nag: how long it has sat here, said out
-            loud once it is older than the threshold. */}
-        {entry.unplanned_age_days !== null &&
-          entry.unplanned_age_days >= UNPLANNED_AGE_THRESHOLD_DAYS && (
-            <span
-              className="wp-undated-age"
-              data-testid={`agenda-undated-age-${entry.key}`}
-            >
-              {t("agenda.unplanned_age", {
-                count: entry.unplanned_age_days,
-              })}
-            </span>
-          )}
-      </div>
-      {/* P-9 §A.1 — ONE button: Plan it. The same action on both kinds
-          (a ticket writes its schedule, an extra work writes the
-          provider's planned day); the row does not make the reader
-          care which. */}
-      {canPlan && (
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={onPlan}
-          data-testid={`agenda-undated-plan-${entry.key}`}
-        >
-          {t("agenda.plan_it")}
-        </button>
-      )}
-    </li>
-  );
-}
-
-/** WP-1 G1 — one stuck job. A READ row: the actions that empty this
- *  list (reschedule, reassign, cancel) are the existing ones on the
- *  record the title opens. */
-function StuckRow({
-  entry,
-  role,
-}: {
-  entry: WorkPlanEntry;
-  role: Role | null;
-}) {
-  const { t } = useTranslation(["staff_slots", "common"]);
-  const to = detailPath(entry, role);
-  const where = [entry.building_name, entry.customer_name]
-    .filter(Boolean)
-    .join(" · ");
-  const heading = `${entry.ticket_no ? `${entry.ticket_no} · ` : ""}${entry.title}`;
-  const age = entry.stuck_age_days ?? 0;
-  return (
-    <li className="wp-undated-row" data-testid={`agenda-stuck-row-${entry.key}`}>
-      <div className="wp-undated-row-main">
         {to ? <Link to={to}>{heading}</Link> : <span>{heading}</span>}
-        <span className="muted small">{where}</span>
-        {/* P-3 §A.2 — the couldn't-complete reason is on the detail the
-            title opens, not on the row: a raw "rrr" beside the job told
-            the reader nothing and looked like a defect. */}
-      </div>
-      <span
-        className="wp-stuck-age"
-        data-testid={`agenda-stuck-age-${entry.key}`}
-      >
-        {age === 0
-          ? t("agenda.stuck_age_today")
-          : t("agenda.stuck_age", { count: age })}
-      </span>
-    </li>
-  );
-}
-
-/** P-3 §A.1 / P-9 §A.1 — one job waiting on the customer. A READ row:
- *  what it is, where, and the one fact line ("reported done <date> ·
- *  sent to <contact> · waiting <n> days"). No action on the row except
- *  Open; the reminder lives on the request, and deciding for the
- *  customer lives behind the ticket's own Geavanceerd. */
-function WaitingRow({
-  entry,
-  today,
-  role,
-}: {
-  entry: WorkPlanEntry;
-  today: string;
-  role: Role | null;
-}) {
-  const { t } = useTranslation(["staff_slots", "common"]);
-  const to = detailPath(entry, role);
-  const where = [entry.building_name, entry.customer_name]
-    .filter(Boolean)
-    .join(" · ");
-  const heading = `${entry.ticket_no ? `${entry.ticket_no} · ` : ""}${entry.title}`;
-  return (
-    <li className="wp-undated-row" data-testid={`agenda-waiting-row-${entry.key}`}>
-      <div className="wp-undated-row-main">
-        {to ? <Link to={to}>{heading}</Link> : <span>{heading}</span>}
-        <span className="muted small">{where}</span>
-        <span
-          className="wp-fact wp-fact-waiting_customer"
-          data-testid={`agenda-waiting-since-${entry.key}`}
-        >
-          {cardFactLine(entry, today, t)}
-        </span>
+        {where && <span className="muted small">{where}</span>}
+        {lines.length > 0 && <FactsList lines={lines} testId={`${testPrefix}-facts-${entry.key}`} />}
       </div>
       <span className="wp-undated-row-actions">
-        {to && (
-          <Link className="btn btn-ghost btn-sm" to={to} data-testid={`agenda-waiting-open-${entry.key}`}>
-            {t("agenda.open")}
-          </Link>
-        )}
+        {action === undefined
+          ? to && (
+              <Link className="btn btn-ghost btn-sm" to={to} data-testid={`${testPrefix}-open-${entry.key}`}>
+                {t("agenda.open")}
+              </Link>
+            )
+          : action}
       </span>
     </li>
   );

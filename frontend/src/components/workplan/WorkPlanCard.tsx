@@ -1,18 +1,12 @@
-import {
-  CalendarClock,
-  CheckCircle2,
-  Hourglass,
-  Users,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, ClipboardCheck, Hourglass, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import type { Role } from "../../api/types";
 import type { WorkPlanEntry, WorkPlanPart } from "../../api/workPlan";
-import { formatPlannedWindow } from "../../lib/plannedWindow";
 import { toDateString } from "../../lib/isoWeek";
-import { cardFactLine, cardFactState } from "./cardFact";
+import { cardFacts } from "./cardFacts";
+import type { CardFactLine } from "./cardFacts";
 import { detailPath, formatDay } from "./entryHelpers";
 import { PartChips } from "./PartChips";
 
@@ -200,111 +194,64 @@ export function AfterDeadlineChip() {
   );
 }
 
-/** The clock window as the server states it ("09:30–12:00"), else the
- *  slot's free-text window label; empty when the plan is a day and not
- *  a time. Never derived from the raw instant — see `start_time`. */
-function clockText(entry: WorkPlanEntry): string {
-  const parts: string[] = [];
-  if (entry.start_time) {
-    parts.push(
-      entry.end_time ? `${entry.start_time}–${entry.end_time}` : entry.start_time,
-    );
-  }
-  if (entry.kind === "TICKET_SLOT" && entry.time_window_label) {
-    parts.push(entry.time_window_label);
-  }
-  return parts.join(" · ");
-}
-
-/** The planned DAY window, for a card whose plan is days rather than a
- *  time: a customer's wish is captioned as one; a multi-day window says
- *  where it ends. Empty for a one-day plan — the column IS the day. */
-function dayWindowText(
-  entry: WorkPlanEntry,
-  t: (key: string, opts?: Record<string, unknown>) => string,
-): string {
-  if (entry.plan_source === "CUSTOMER_WISH" && entry.planned_start) {
-    return t("agenda.wished_on", { date: formatDay(entry.planned_start) });
-  }
-  if (entry.planned_end && entry.planned_end !== entry.planned_start) {
-    return formatPlannedWindow(entry.planned_start, entry.planned_end, formatDay, {
-      empty: "",
-      endOnly: (end) => t("agenda.until_date", { date: end }),
-    });
-  }
-  return "";
-}
-
 /**
- * P-3 §A.2 — AT MOST ONE TIME CHIP.
- *
- * For the person holding a slot the clock is what they need ("09:00 –
- * 12:00"), so it wins. For a job or an extra work on a manager's board
- * the promise wins: "planned after the deadline" first (it is the fact
- * that needs a decision), then the deadline countdown, then a day
- * window when the plan spans days. A settled card carries none — its
- * settled line already holds its date.
+ * P-10 A4 — THE FACTS LIST. Three lines, one fact per line: a faint
+ * label and a value (`cardFacts.ts` is the table). Lines wrap inside
+ * the card; nothing overflows a column. Shared by the board's cards
+ * and the strips' rows, so the same state reads the same everywhere.
  */
-function TimeChip({ entry }: { entry: WorkPlanEntry }) {
-  const { t } = useTranslation("staff_slots");
-  if (entry.viewer_settled) return null;
-  const clock = clockText(entry);
-  const isSlot = entry.kind === "TICKET_SLOT";
-  // P-9 §A.3 — the deadline (date AND countdown) is in the one fact
-  // line now, so the due chip is not repeated here; the chip keeps
-  // only what the line does not say: a real clock, "planned after the
-  // deadline", a multi-day window.
-  const order: (() => React.ReactNode)[] = isSlot
-    ? [
-        () => clock && <ClockChip text={clock} />,
-        () => entry.planned_after_deadline && <AfterDeadlineChip />,
-      ]
-    : [
-        () => entry.planned_after_deadline && <AfterDeadlineChip />,
-        () => clock && <ClockChip text={clock} />,
-        () => {
-          const window = dayWindowText(entry, t);
-          return window && <ClockChip text={window} />;
-        },
-      ];
-  for (const pick of order) {
-    const node = pick();
-    if (node) return <>{node}</>;
-  }
-  return null;
-}
-
-function ClockChip({ text }: { text: string }) {
+export function FactsList({
+  lines,
+  testId,
+}: {
+  lines: CardFactLine[];
+  testId: string;
+}) {
   return (
-    <span className="wp-card-time" data-testid="agenda-card-time">
-      <CalendarClock size={11} strokeWidth={2} />
-      {text}
-    </span>
+    <ul className="wp-facts" data-testid={testId}>
+      {lines.map((row) => (
+        <li key={row.key} className="wp-facts-row" data-fact={row.key}>
+          <span className="wp-facts-label">{row.label}</span>
+          <span className="wp-facts-value" data-tone={row.tone ?? "plain"}>
+            {row.value}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 /**
- * P-3 §A.2 — THE ONE STATUS LINE. P-9 §A.3 — and it is the ONE card fact
- * sentence (`cardFact.ts`), the same words the zones and the detail
- * headers print for the same state: "planned Tue 2 Sep · 4 h · Ahmet ·
- * deadline 4 Sep (2 days left)", "planned Mon 19 Aug · 2 days late",
- * "reported done 21 Aug by Ahmet · waiting for your check 3 days",
- * "planned Mon 19 Aug · finished Wed 21 Aug (2 days after the plan)".
- * A blocked card (rejected, converted, cancelled, could not be done)
- * keeps its closed word from the settled line. Never two lines.
+ * P-10 A4 — "Details": a fold on the card with the FULL list (the three
+ * lines and the rest) and one link to the record. Native <details>; the
+ * panel is a popover anchored to the card on a desk and a bottom sheet
+ * on a phone (CSS decides, `workplan-zones.css`). Mounted only when the
+ * state has more to say than the card shows.
  */
-function StatusLine({ entry, today }: { entry: WorkPlanEntry; today: string }) {
-  const { t } = useTranslation(["staff_slots", "common"]);
-  const state = cardFactState(entry, today);
-  if (state === "blocked") return <SettledLine entry={entry} />;
+function CardDetails({
+  lines,
+  details,
+  to,
+  isExtraWork,
+}: {
+  lines: CardFactLine[];
+  details: CardFactLine[];
+  to: string | null;
+  isExtraWork: boolean;
+}) {
+  const { t } = useTranslation("staff_slots");
   return (
-    <span
-      className={`wp-fact wp-fact-${state}`}
-      data-testid="agenda-card-fact"
-      data-state={state}
-    >
-      {cardFactLine(entry, today, t)}
-    </span>
+    <details className="wp-details" data-testid="agenda-card-details">
+      <summary className="wp-details-toggle">{t("agenda.details")}</summary>
+      <div className="wp-details-panel">
+        <FactsList lines={[...lines, ...details]} testId="agenda-card-details-list" />
+        {to && (
+          <Link to={to} className="btn btn-secondary btn-sm wp-details-open">
+            {isExtraWork ? t("agenda.details_open_extra_work") : t("agenda.details_open_ticket")}
+          </Link>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -334,6 +281,11 @@ export function WorkPlanCard({
   const to = detailPath(entry, role);
   const isExtraWork = entry.kind === "EXTRA_WORK";
   const isHost = hostParts !== undefined;
+  const todayIso = today ?? toDateString(new Date());
+  const facts = cardFacts(entry, todayIso, t);
+  // P-10 A2 — the responsible manager's today card asks for a check:
+  // teal, titled "Check: …", one button.
+  const isCheck = facts.state === "check";
 
   const where = [entry.building_name, entry.customer_name]
     .filter(Boolean)
@@ -341,7 +293,7 @@ export function WorkPlanCard({
   const heading = (
     <>
       {entry.ticket_no ? `${entry.ticket_no} · ` : ""}
-      {entry.title}
+      {isCheck ? t("agenda.check_title", { title: entry.title }) : entry.title}
     </>
   );
 
@@ -374,11 +326,12 @@ export function WorkPlanCard({
       // W-VIEWER §5 — a card with nothing left for THIS reader to do is
       // calm: it stays on the board (a manager may still withdraw a job
       // sitting with the customer) and stops demanding action.
-      className={`wp-card${entry.viewer_settled ? " wp-card-settled" : ""}`}
+      className={`wp-card${entry.viewer_settled ? " wp-card-settled" : ""}${isCheck ? " wp-card-check" : ""}`}
       data-testid="agenda-slot-card"
       data-kind={entry.kind}
       data-placement={entry.placement}
       data-settled={entry.viewer_settled ? "1" : "0"}
+      data-state={facts.state}
     >
       <span
         className={`wp-kind-tag${isExtraWork ? "" : " wp-kind-tag-ticket"}`}
@@ -397,9 +350,18 @@ export function WorkPlanCard({
 
       {where && <span className="wp-card-where">{where}</span>}
 
-      <div className="wp-card-status" data-testid="agenda-card-status">
-        <StatusLine entry={entry} today={today ?? toDateString(new Date())} />
+      {/* P-10 A4 — three facts, one per line; the rest behind Details.
+          A blocked card keeps its closed word (the settled line). */}
+      <div className="wp-card-status" data-testid="agenda-card-status" data-state={facts.state}>
+        {facts.state === "blocked" ? (
+          <SettledLine entry={entry} />
+        ) : (
+          <FactsList lines={facts.lines} testId="agenda-card-facts" />
+        )}
       </div>
+      {facts.details.length > 0 && (
+        <CardDetails lines={facts.lines} details={facts.details} to={to} isExtraWork={isExtraWork} />
+      )}
 
       {/* W-N1 §3 — WHICH half of the job is this person's. Reuses the
           Assignment section's own `.parts-chip` pair rather than a
@@ -409,15 +371,22 @@ export function WorkPlanCard({
         <PartChips parts={entry.parts} testId="agenda-card-part" />
       )}
 
-      <div className="wp-card-foot">
-        <TimeChip entry={entry} />
-        {entry.assignee_count > 1 && (
-          <span className="wp-card-time" data-testid="agenda-card-assignees">
-            <Users size={11} strokeWidth={2} />
-            {entry.assignee_count}
-          </span>
-        )}
-      </div>
+      {/* P-3 §A.5 — the one chip the facts do not say: a real plan whose
+          last day is past the deadline. */}
+      {!entry.viewer_settled && entry.planned_after_deadline && (
+        <div className="wp-card-foot">
+          <AfterDeadlineChip />
+        </div>
+      )}
+
+      {isCheck && to && (
+        <div className="wp-card-actions" data-testid="agenda-check-actions">
+          <Link to={to} className="btn btn-primary btn-sm" data-testid="agenda-check-work">
+            <ClipboardCheck size={13} strokeWidth={2} />
+            {t("agenda.check_button")}
+          </Link>
+        </div>
+      )}
 
       {entry.can_complete && (
         <div className="wp-card-actions" data-testid="agenda-slot-actions">

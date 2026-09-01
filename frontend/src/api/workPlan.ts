@@ -184,6 +184,8 @@ export interface WorkPlanEntry {
    *  lateness counts against; `settled_at` / `settled_days_after_due`
    *  are the past-tense facts of work that is over. */
   created_at: string | null;
+  /** P-10 A4 — the creation day as the server states it ("YYYY-MM-DD"). */
+  created_day: string | null;
   plan_source: "TICKET" | "PROVIDER_PLAN" | "CUSTOMER_WISH" | null;
   /** P-1 — a date is a plan only if a PERSON made it. `has_real_plan`
    *  is false for a seeded date nobody set; such a card reads "created
@@ -217,6 +219,13 @@ export interface WorkPlanEntry {
   settled_day: string | null;
   reported_done_day: string | null;
   approved_day: string | null;
+  /** P-10 A4 — the finished card's Details: the manager's check and the
+   *  customer's approval (server day + name), and the report's clock
+   *  ("15:00", or null at midnight / unknown). */
+  manager_checked_day: string | null;
+  manager_checked_by_name: string | null;
+  approved_by_name: string | null;
+  reported_done_time: string | null;
   settled_days_after_due: number | null;
   /** WP-1 G2 — whole days this job has sat with NO planned date at
    *  all. Null on every dated entry. The "Nog niet gepland" lane
@@ -236,6 +245,10 @@ export interface WorkPlanEntry {
   planned_after_deadline: boolean;
   assignee_names: string[];
   assignee_count: number;
+  /** P-10 A2 — the managers answerable for the job (the three tiers of
+   *  `ticket_responsible_manager_recipients`); filled on the rows of
+   *  `review_entries`, empty everywhere else. */
+  manager_names: string[];
   /** W-N1 §3 — the parts of this ticket THIS entry's person holds.
    *  Always an array, never null, and empty for extra work, which has
    *  no parts. Scope is the server's: a STAFF viewer's rows carry their
@@ -268,6 +281,13 @@ export interface WorkPlanCounts {
   stuck: number;
   /** P-3 §A.1 — jobs waiting on the customer, whole scope. */
   waiting_customer: number;
+  /** P-10 A2 — reported done, waiting for a manager's check, and NOT
+   *  this viewer's to check: the strip's number, whole scope. For a
+   *  worker: their own reported-done slots. */
+  review: number;
+  /** P-10 A2 — the review jobs THIS viewer is responsible for: their
+   *  today cards. 0 for a worker and for anyone responsible for none. */
+  review_mine: number;
 }
 
 export interface WorkPlanWeek {
@@ -312,6 +332,11 @@ export interface WorkPlanResponse {
    *  In the current week these rows are in NO day column; they live
    *  behind the "Wacht op klant" chip, whole scope. */
   waiting_customer_entries: WorkPlanEntry[];
+  /** P-10 A2 — the "Waiting for a manager's check" strip (or, for a
+   *  worker, "Reported done, waiting for the check"): whole scope,
+   *  never a column. The responsible manager's own rows are NOT here —
+   *  they hang on their today with placement REVIEW. */
+  review_entries: WorkPlanEntry[];
   limits: {
     entries: number;
     overdue_entries: number;
@@ -321,6 +346,7 @@ export interface WorkPlanResponse {
     late_entries: number;
     stuck_entries: number;
     waiting_customer_entries: number;
+    review_entries: number;
   };
   truncated: {
     entries: boolean;
@@ -331,6 +357,7 @@ export interface WorkPlanResponse {
     late_entries: boolean;
     stuck_entries: boolean;
     waiting_customer_entries: boolean;
+    review_entries: boolean;
   };
 }
 
