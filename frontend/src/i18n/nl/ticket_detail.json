@@ -194,7 +194,7 @@
   "schedule.card_title": "Planning",
   "schedule.not_scheduled": "Nog niet ingepland",
   "schedule.window_label": "Tijdvak",
-  "schedule.set_button": "Datums instellen",
+  "schedule.set_button": "Plan het in",
   "schedule.change_button": "Datums wijzigen",
   "schedule.clear_button": "Planning wissen",
   "schedule.reason_field_label": "Waarom verschuift het?",
@@ -438,5 +438,11 @@
   "book_hours.per_day_label_one": "Per dag, zoals gepland ({{count}} geplande dag)",
   "book_hours.per_day_label_other": "Per dag, zoals gepland ({{count}} geplande dagen)",
   "book_hours.per_day_hint": "Eén regel per persoon per geplande dag, vooraf ingevuld met de geplande uren. Pas een getal aan waar de dag anders liep.",
-  "book_hours.per_day_title": "Per persoon, per dag"
+  "book_hours.per_day_title": "Per persoon, per dag",
+  "schedule.apply_to_slots_label": "Iedereen op dit werk verhuist mee.",
+  "schedule.not_scheduled_plan_it": "Nog niet gepland — plan het in",
+  "workflow.start_blocked": "Nog niet gepland — plan het eerst in: {{list}}.",
+  "workflow.start_needs_assignee": "iemand op het werk",
+  "workflow.start_needs_schedule": "een dag",
+  "workflow.start_blocked_link": "Plan het in"
 }

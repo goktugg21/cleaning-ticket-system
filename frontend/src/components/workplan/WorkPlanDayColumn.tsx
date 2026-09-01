@@ -76,6 +76,7 @@ export function WorkPlanDayColumn({
     <section
       className={isToday ? "wp-day wp-day-today" : "wp-day"}
       data-testid={isToday ? "agenda-day-today" : "agenda-day"}
+      data-day={iso}
       aria-label={fullDate}
     >
       {/* T2-3 — the header is the door to the day. A <button> rather

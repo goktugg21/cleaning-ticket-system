@@ -804,7 +804,8 @@ class TicketViewSet(
                 time_window_label=data.get("time_window_label", ""),
                 reschedule_reason=data.get("reschedule_reason") or "",
                 # W-PLANTRUTH §1a — the door that means "move the job".
-                apply_to_slots=bool(data.get("apply_to_slots", False)),
+                # P-9 12(e): the serializer defaults it to True.
+                apply_to_slots=bool(data.get("apply_to_slots", True)),
             )
         except ScheduleError as exc:
             return Response(
@@ -1582,7 +1583,6 @@ class TicketViewSet(
             parse_is_extra_work(request.query_params.get("is_extra_work")),
         )
 
-        # The chips must count the rows they sit above. A customer's own
         # P-9 D2 -- the Origin axis (melding / meerwerk / recurring /
         # ticket), through the list filter's own helper, so the four tabs
         # count exactly the rows they sit above under every setting of
@@ -1591,6 +1591,7 @@ class TicketViewSet(
             scoped, parse_origin(request.query_params.get("origin"))
         )
 
+        # The chips must count the rows they sit above. A customer's own
         # ticket page pins `?customer=<id>` on the LIST and the chips did
         # not carry it, so every customer's page showed the whole
         # company's totals -- two different customers both reading "25".

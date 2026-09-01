@@ -32,6 +32,7 @@ from accounts.models import UserRole
 
 from .job_dates import job_deadline, job_due, job_plan_source, job_window
 from .lateness_index import LATE_LIVE_TICKET_STATUSES
+from .models import TicketStatus
 from .plan_provenance import ticket_plan_provenance
 
 KIND_MELDING = "MELDING"
@@ -72,6 +73,77 @@ def _planned_after_deadline(ticket, has_real_plan: bool) -> bool:
     return window_end > deadline
 
 
+#: P-9 §A.2b — reported done, not yet settled for this reader. Such a
+#: ticket carries `reported_done_at` (P-8R E) and NO `settled_at`: FE-4
+#: pinned "work waiting on the customer is settled without a finish".
+_REPORTED_DONE_STATUSES = frozenset(
+    {TicketStatus.WAITING_MANAGER_REVIEW, TicketStatus.WAITING_CUSTOMER_APPROVAL}
+)
+
+#: The endings that are not a finish: the work did not get done.
+_BLOCKED_STATUSES = frozenset(
+    {TicketStatus.REJECTED, TicketStatus.CONVERTED_TO_EXTRA_WORK}
+)
+
+
+def ticket_is_live(ticket) -> bool:
+    """Somebody on the provider side still has to work this: the
+    ladder's live set, and not archived. The one reading `ticket_due`,
+    the board (`views_work_plan._ticket_live`) and the finish stamp
+    below all share."""
+    return (
+        ticket.status in LATE_LIVE_TICKET_STATUSES
+        and ticket.archived_at is None
+    )
+
+
+def ticket_finished_at(ticket):
+    """P-9 §A.2b — the moment the WORK was finished, on a ticket that is
+    over. None while it is live.
+
+    The worker's report is the finish: `manager_review_at` (the leg into
+    the manager's check) or `sent_for_approval_at` (the leg to the
+    customer) — both stamped by the state machine on entry, both
+    overwritten when the work is sent back and reported again, so the
+    LAST report is the one that counts. A row that carries neither
+    (approved straight from work, closed by hand, a legacy row) answers
+    with the approval, the close, or the old `resolved_at`. A blocked
+    ending (rejected, converted) answers with the moment it ended: it
+    is not a finish, but it is when the job left the board.
+
+    This is the day a finished card hangs on (`work_plan` rule 10) AND
+    the day it prints, so the card can never sit in one column and
+    name another.
+    """
+    if ticket_is_live(ticket):
+        return None
+    if ticket.status in _BLOCKED_STATUSES:
+        return (
+            ticket.rejected_at
+            or ticket.closed_at
+            or ticket.approved_at
+            or ticket.resolved_at
+        )
+    return (
+        ticket.manager_review_at
+        or ticket.sent_for_approval_at
+        or ticket.approved_at
+        or ticket.closed_at
+        or ticket.resolved_at
+    )
+
+
+def ticket_settled_at(ticket):
+    """FE-4's past-tense stamp: when the work was over, on a job that IS
+    over. None while live, and None while reported done but waiting on
+    a check — `reported_done_at` carries that moment, and a card that
+    said "finished" about work the customer has not accepted would be
+    telling the reader the chain is complete when it is not."""
+    if ticket.status in _REPORTED_DONE_STATUSES:
+        return None
+    return ticket_finished_at(ticket)
+
+
 def ticket_due(ticket, today: datetime.date) -> dict:
     """The due facts for the fact block: `due_date`, `due_kind`,
     `days_until_due`, `unplanned_age_days`, `settled_at`,
@@ -82,20 +154,12 @@ def ticket_due(ticket, today: datetime.date) -> dict:
     is None unless the ticket is live (the same set the lateness ladder
     calls live) and unarchived.
     """
-    live = (
-        ticket.status in LATE_LIVE_TICKET_STATUSES
-        and ticket.archived_at is None
-    )
+    live = ticket_is_live(ticket)
     # FE-4 (Addendum D SS D.12 item 4) -- when the work was over, and how
     # far after its due date that came: past tense, quiet history.
-    settled_at = None
-    if not live:
-        settled_at = (
-            ticket.closed_at
-            or ticket.approved_at
-            or ticket.resolved_at
-            or ticket.rejected_at
-        )
+    # P-9 §A.2b -- the FINISH moment (the worker's report), the same
+    # stamp the board places the card by, so card and detail agree.
+    settled_at = ticket_settled_at(ticket)
     due = job_due(ticket)
     # P-1 — WHO planned the window and WHEN, or that nobody did. The
     # words on the detail and on the card both key off `has_real_plan`;

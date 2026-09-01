@@ -200,6 +200,23 @@ export interface WorkPlanEntry {
    *  the customer / the manager for a check), server-computed from the
    *  status history; null unless the ticket is waiting on that check. */
   reported_done_at: string | null;
+  /** P-9 §A.3 — the one card standard's facts, on every kind (null
+   *  where they do not apply): who reported the work done and how many
+   *  whole days ago, when the customer approved, who the finished work
+   *  was sent to, the plan's hours ("4.00"), and how many days after
+   *  the last planned day the finish came (0 = on the day). The three
+   *  `*_day` fields are the same moments as DAYS decided by the server
+   *  in its own zone (P-3 §A.3) — print those, never a slice of the
+   *  instant. */
+  reported_done_by_name: string | null;
+  waiting_days: number | null;
+  approved_at: string | null;
+  sent_to_name: string | null;
+  planned_hours: string | null;
+  settled_days_after_plan: number | null;
+  settled_day: string | null;
+  reported_done_day: string | null;
+  approved_day: string | null;
   settled_days_after_due: number | null;
   /** WP-1 G2 — whole days this job has sat with NO planned date at
    *  all. Null on every dated entry. The "Nog niet gepland" lane

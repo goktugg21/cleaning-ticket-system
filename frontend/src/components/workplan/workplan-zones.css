@@ -1,0 +1,63 @@
+/* P-9 Part A — the four zones of My schedule (Addendum D §D.21).
+ *
+ * Two sections above the board that are not toggles: "Not planned yet"
+ * and "Waiting for the customer", each titled with its count in the
+ * page's h2 size. Beside the component that owns them, for the same
+ * reason `workplan-day.css` is: the gate walks every .css under src/.
+ */
+.wp-zone { margin-bottom: 18px; padding: 16px 18px; }
+.wp-zone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.wp-zone-title {
+  font-family: var(--f-head);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  margin: 0;
+  color: var(--text);
+}
+/* The one card fact line: what and where above it, this under it. */
+.wp-fact {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+.wp-fact-rolled { color: var(--red, #b42318); font-weight: 600; }
+.wp-fact-review { color: var(--amber-text, #92400e); font-weight: 600; }
+.wp-fact-planned_today { color: var(--text); font-weight: 600; }
+.wp-fact-waiting_customer { color: var(--text-muted); }
+.wp-fact-not_planned,
+.wp-fact-planned,
+.wp-fact-finished { color: var(--text-muted); }
+/* The board's header row: the week stepper left, the Filter fold right. */
+.wp-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.wp-filter { margin: 0 0 12px; }
+.wp-filter .filter-fold-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: flex-end;
+}
+.wp-filter .wp-strip { margin: 0; flex: 1 1 100%; }
+.wp-plan-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  font-size: 13px;
+}

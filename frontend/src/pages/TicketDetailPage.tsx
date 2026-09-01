@@ -26,7 +26,7 @@ import {
 import axios from "axios";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
-import { pointAtMissingPiece } from "../lib/missingPiece";
+import { pointAtMissingPiece, useMissingPieceAnchor } from "../lib/missingPiece";
 import { describeTransitionRefusal } from "../lib/transitionRefusal";
 // W-UX1-B — reuse, not redesign: the same viewer the invoice preview
 // opens, with its download button switched off.
@@ -1152,6 +1152,44 @@ export function TicketDetailPage() {
     useState<TicketStatus | null>(null);
   const [transitionReqs, setTransitionReqs] =
     useState<TransitionRequirements | null>(null);
+  /* P-9 ruling 12(b) / §D.6 rule 14 — NEVER A START BUTTON ON AN
+     UNPLANNED TICKET. The server refuses `-> IN_PROGRESS` without a crew
+     and a day (`transition_requirements_unmet`); the screen must say so
+     BEFORE the click. The same endpoint the modal asks is asked once,
+     when the page offers a start, and the answer is kept with the
+     ticket it describes so a stale one is never read. */
+  const [startReqs, setStartReqs] = useState<{
+    ticketId: number;
+    stamp: string;
+    unmet: string[];
+  } | null>(null);
+  const scheduleAnchor = useMissingPieceAnchor<HTMLDivElement>("schedule");
+  // P-9 12(b) — ask the server what the start still needs, whenever a
+  // start is legal for THIS ticket in THIS state (the stamp changes
+  // with every save, so a plan set on the schedule card re-asks).
+  const startIsLegal = Boolean(ticket?.allowed_next_statuses.includes("IN_PROGRESS"));
+  const startTicketId = ticket?.id ?? null;
+  const startStamp = ticket ? `${ticket.status}:${ticket.updated_at}` : "";
+  useEffect(() => {
+    if (!startIsLegal || startTicketId === null) return;
+    let cancelled = false;
+    getTransitionRequirements(startTicketId, "IN_PROGRESS")
+      .then((reqs) => {
+        if (cancelled) return;
+        setStartReqs({
+          ticketId: startTicketId,
+          stamp: startStamp,
+          unmet: reqs.requirements.filter((r) => !r.satisfied).map((r) => r.key),
+        });
+      })
+      .catch(() => {
+        // A failed read leaves the button live: the server still
+        // refuses, and the modal then says why (P-5's describer).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [startIsLegal, startTicketId, startStamp]);
   const [transitionLoading, setTransitionLoading] = useState(false);
   const [transitionStaff, setTransitionStaff] = useState<AssignableStaff[]>([]);
   /* W-FIX1 C3 (audit F34) — why the assignee list is empty, when the
@@ -3092,6 +3130,15 @@ export function TicketDetailPage() {
   const primaryButtons = primaryForRender.filter(
     (status) => !isCustomerDecisionOverride(status),
   );
+  // P-9 12(b) — the server's answer, read only when it describes THIS
+  // ticket in THIS state (the effect that asks lives with the other
+  // hooks above the early return).
+  const offersStart = primaryButtons.includes("IN_PROGRESS");
+  const startUnmet =
+    offersStart && startReqs && startReqs.ticketId === ticket.id && startReqs.stamp === startStamp
+      ? startReqs.unmet.filter((key) => key === "assignee" || key === "schedule")
+      : [];
+  const startBlocked = startUnmet.length > 0;
   const sidewaysForRender = otherSecondaryForRender.filter(
     (status) => !isCorrection(ticket.status, status),
   );
@@ -3105,12 +3152,28 @@ export function TicketDetailPage() {
     if (tone === "hold") return "btn btn-secondary";
     return "btn btn-primary";
   };
+  const startBlockedSentence = startBlocked
+    ? t("workflow.start_blocked", {
+        list: startUnmet
+          .map((key) =>
+            key === "assignee"
+              ? t("workflow.start_needs_assignee")
+              : t("workflow.start_needs_schedule"),
+          )
+          .join(" + "),
+      })
+    : "";
   const renderBannerButton = (status: TicketStatus, solid: boolean) => (
     <button
       key={status}
       type="button"
       className={solid ? bannerToneClass(status) : "btn btn-secondary"}
-      disabled={statusBusy !== null || overrideBusy}
+      // P-9 12(b) / rule 14 — a start the server would refuse is not a
+      // live button; the sentence beside it says what to change.
+      disabled={
+        statusBusy !== null || overrideBusy || (status === "IN_PROGRESS" && startBlocked)
+      }
+      title={status === "IN_PROGRESS" && startBlocked ? startBlockedSentence : undefined}
       data-testid={`workflow-move-${status}`}
       onClick={() => void openTransition(status)}
     >
@@ -3137,6 +3200,23 @@ export function TicketDetailPage() {
     <>
       {primaryButtons.map((status, index) =>
         renderBannerButton(status, index === 0 || WORKFLOW_TONE[status] === "reject"),
+      )}
+      {startBlocked && (
+        <span
+          className="muted small"
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+          data-testid="ticket-start-blocked"
+        >
+          {startBlockedSentence}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => pointAtMissingPiece("schedule")}
+            data-testid="ticket-start-blocked-plan"
+          >
+            {t("workflow.start_blocked_link")}
+          </button>
+        </span>
       )}
     </>
   ) : archiveIsPrimary ? (
@@ -5420,13 +5500,15 @@ export function TicketDetailPage() {
               scheduled date read-only inside the same card (no control, no
               403 call). A successful set/clear refetches the ticket so the
               date and the audit timeline refresh. */}
-          <TicketScheduleCard
-            ticket={ticket}
-            canManage={isProviderManagementRole(me?.role)}
-            onChanged={() => {
-              void loadTicket();
-            }}
-          />
+          <div ref={scheduleAnchor}>
+            <TicketScheduleCard
+              ticket={ticket}
+              canManage={isProviderManagementRole(me?.role)}
+              onChanged={() => {
+                void loadTicket();
+              }}
+            />
+          </div>
 
           {/* W17 §2 — the Extra Work card group, on a ticket born from
               one. PROVIDER-ONLY and the gate sits on the MOUNT, not the

@@ -208,9 +208,13 @@ class CardEqualsDetailTests(_Fixture):
             slot_status=StaffAssignmentSlotStatus.COMPLETED,
             completed_at=closed_at,
         )
-        card = self.find(self.company_plan(week=self.week_of(-3)), f"ticket-{ticket.id}")
+        # P-9 rule 10 -- a finished job hangs on the day it was FINISHED
+        # (closed one day ago), not on the day it was planned (three days
+        # ago), which may be a different week.
+        card = self.find(self.company_plan(week=self.week_of(-1)), f"ticket-{ticket.id}")
         detail = self.detail(ticket)
         self.assertIsNotNone(card)
+        self.assertEqual(card["day"], self._at(-1).date().isoformat())
         self.assertTrue(card["viewer_settled"])
         # No pressure: no countdown on either surface.
         self.assertIsNone(card["days_until_due"])

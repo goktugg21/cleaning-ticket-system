@@ -97,10 +97,29 @@ three days to understand why it was there. `views_work_plan.py` owns
 the predicate (`_ticket_waiting_customer_q` and its slot twin) because
 it is a ticket-status fact, not a date fact this module can express.
 
-    9. In the current week, a job waiting on the customer is in no
-       column: it is one row behind the "Wacht op klant" chip, whole
-       scope, like the undated lane. Past and future weeks keep rule 1
-       as history.
+    9. A job waiting on the customer is in no column of ANY week: it is
+       one row behind the "Wacht op klant" chip, whole scope, like the
+       undated lane. (P-9 §A.2a, owner ruling: "when it goes to customer
+       approval it leaves the dates." Until P-9 only the current week
+       subtracted it; past weeks showed it as history.)
+
+P-9 §A.2b (owner ruling, 2026-09-01) — THE PAST SHOWS ONLY WHAT I
+FINISHED, ON THE DAY I FINISHED IT. The owner's whole model in plain
+words: "Today shows what is planned for today and what I didn't do
+yesterday. The past shows only what I finished. The future shows what
+I will do. Not-planned and waiting-for-the-customer are outside the
+dates." Rule 5 already empties the past of undone work; what it left
+wrong was WHERE finished work sat: on its planned day, so a job planned
+Monday and finished Wednesday read as Monday's work. A finished job now
+hangs on the day it was finished (`Job.settled_day`, the local date of
+the moment the work was reported done — or approved / closed for rows
+that carry no report stamp), and its card says "planned Mon 19 Aug —
+finished Wed 21 Aug (2 days after the plan)". A finished job with NO
+known finish moment (legacy rows) keeps rule 1: nothing is invented.
+
+    10. A finished job appears in the week of its settled day, on that
+        day, and in no other week. Only when the settled day is unknown
+        does its planned window place it (rule 1).
 
 **Why a normalised `Job` instead of two copies of the rule.** The two
 sources are a dated ticket slot (`TicketStaffAssignment`) and an extra
@@ -212,6 +231,11 @@ class Job:
     #: a job that is still waiting for that review. Only the JOB builder
     #: sets it (a manager's board); a worker's slot never carries it.
     review_since: datetime.date | None = None
+    #: P-9 §A.2b (rule 10) — the local date the work was FINISHED, set
+    #: only on a job in a closed state whose finish moment is known. A
+    #: job with a settled day is placed by it and by nothing else; a
+    #: closed job without one keeps its planned window (rule 1).
+    settled_day: datetime.date | None = None
 
     @property
     def window_end(self) -> datetime.date | None:
@@ -281,6 +305,16 @@ def placement_for(
       it is also late — the `is_overdue` flag still marks the card, but
       the card is not a visitor. September shows September's work.
     """
+    # P-9 §A.2b (rule 10) — a finished job with a known finish day is in
+    # the week of that day and in no other. It is checked BEFORE the
+    # planned window so a job planned Monday and finished the next
+    # Wednesday is Wednesday's, not Monday's; the planned day is what
+    # the card prints beside the finish, not what places it.
+    if job.settled_day is not None:
+        if week_start <= job.settled_day <= week_end:
+            return PLACEMENT_PLANNED
+        return None
+
     if covers_week(job, week_start, week_end):
         if week_start <= today <= week_end and is_overdue(job, today):
             return PLACEMENT_OVERDUE
@@ -317,6 +351,11 @@ def day_for(
     Rule 5 (rolled) and this one are the two halves of one sentence: the
     card is where the work is, which is today, until it is done.
     """
+    # P-9 §A.2b (rule 10) — finished work hangs on the day it was
+    # finished. `placement_for` only answers PLANNED for a settled job
+    # when that day is inside the week, so no clamping is needed.
+    if placement == PLACEMENT_PLANNED and job.settled_day is not None:
+        return job.settled_day
     if placement != PLACEMENT_PLANNED or job.planned_start is None:
         return today if week_start <= today <= week_end else week_start
     if week_start <= today <= week_end and covers_today(job, today):
@@ -405,6 +444,17 @@ def overdue_days(job: Job, today: datetime.date) -> int | None:
     if not is_overdue(job, today) or job.due is None:
         return None
     return (today - job.due).days
+
+
+def settled_days_after_plan(job: Job) -> int | None:
+    """P-9 §A.3 — whole days the finish came after the last planned day:
+    the number the finished card prints ("finished Wed 21 Aug — 2 days
+    after the plan"; 0 reads "on the day"). None without a settled day
+    or without a plan to measure against; never negative (a job finished
+    before its planned day is "on the day" as far as lateness goes)."""
+    if job.settled_day is None or job.window_end is None:
+        return None
+    return max((job.settled_day - job.window_end).days, 0)
 
 
 def days_to_due(job: Job, today: datetime.date) -> int | None:

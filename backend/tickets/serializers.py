@@ -2994,9 +2994,12 @@ class TicketScheduleInputSerializer(serializers.Serializer):
         required=False, allow_blank=True, default=""
     )
     # W-PLANTRUTH §1a — also move the job's PENDING slots onto this
-    # window (`tickets.schedule.move_pending_slots`). Off by default so
-    # every existing caller keeps writing exactly what it wrote.
-    apply_to_slots = serializers.BooleanField(required=False, default=False)
+    # window (`tickets.schedule.move_pending_slots`).
+    # P-9 ruling 12(e) — ON by default: one plan, one date (P-5). When
+    # the job's day moves, every person's slot on it moves too, so the
+    # manager's board and a worker's own schedule can never disagree
+    # about the day. A caller that means "the job only" says so.
+    apply_to_slots = serializers.BooleanField(required=False, default=True)
 
     def validate(self, attrs):
         start = attrs.get("scheduled_start_at")

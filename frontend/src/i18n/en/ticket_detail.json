@@ -194,7 +194,7 @@
   "schedule.card_title": "Scheduling",
   "schedule.not_scheduled": "Not planned yet",
   "schedule.window_label": "Time window",
-  "schedule.set_button": "Set the dates",
+  "schedule.set_button": "Plan it",
   "schedule.change_button": "Change the dates",
   "schedule.clear_button": "Clear the plan",
   "schedule.reason_field_label": "Why is it moving?",
@@ -438,5 +438,11 @@
   "book_hours.per_day_label_one": "Per day, as planned ({{count}} planned day)",
   "book_hours.per_day_label_other": "Per day, as planned ({{count}} planned days)",
   "book_hours.per_day_hint": "One row per person per planned day, prefilled with the planned hours. Change a number where the day went differently.",
-  "book_hours.per_day_title": "Per person, per day"
+  "book_hours.per_day_title": "Per person, per day",
+  "schedule.apply_to_slots_label": "Everyone on this job moves with it.",
+  "schedule.not_scheduled_plan_it": "Not planned yet — plan it",
+  "workflow.start_blocked": "Not planned yet — plan it first: {{list}}.",
+  "workflow.start_needs_assignee": "someone on the job",
+  "workflow.start_needs_schedule": "a day",
+  "workflow.start_blocked_link": "Plan it"
 }

@@ -38,6 +38,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CalendarClock, CalendarPlus, Pencil } from "lucide-react";
+import "../../components/workplan/workplan-zones.css";
 import axios from "axios";
 
 import { getApiError } from "../../api/client";
@@ -121,6 +122,9 @@ export function TicketScheduleCard({
   const [endDate, setEndDate] = useState("");
   const [endTime, setEndTime] = useState("");
   const [reason, setReason] = useState("");
+  // P-9 ruling 12(e) — one plan, one date: the people's days move with
+  // the job's day unless the operator unticks it. Shown ticked.
+  const [applyToSlots, setApplyToSlots] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Rule 4 — every action answers, in words. Cleared when the next one
@@ -184,6 +188,7 @@ export function TicketScheduleCard({
     setEndDate(planEnd ?? "");
     setEndTime(planEndTime ?? "");
     setReason("");
+    setApplyToSlots(true);
     setError(null);
     setResult(null);
     setConfirmClear(false);
@@ -231,6 +236,9 @@ export function TicketScheduleCard({
         // a legacy label, in the same save that replaces it.
         time_window_label: "",
         reschedule_reason: isPlanned ? reason.trim() : "",
+        // P-9 12(e) — explicit, so the intent is on the wire whatever
+        // the server's default.
+        apply_to_slots: applyToSlots,
       });
       setOpen(false);
       const toText = momentText(startDate, startTime.trim() || null);
@@ -410,9 +418,13 @@ export function TicketScheduleCard({
             </span>
             <span className="detail-kv-val" data-testid="ticket-schedule-date">
               <CalendarClock size={14} strokeWidth={2} />
+              {/* P-9 ruling 12(b) — an unplanned job's schedule card IS
+                  the "Not planned yet — plan it" row, the lane's words. */}
               {planStart
                 ? momentText(planStart, planStartTime)
-                : t("schedule.not_scheduled")}
+                : canEdit
+                  ? t("schedule.not_scheduled_plan_it")
+                  : t("schedule.not_scheduled")}
             </span>
           </div>
           {/* P-5 S1.2 — where the window came from, when it is not the
@@ -737,6 +749,20 @@ export function TicketScheduleCard({
                     })}
                   </div>
                 )}
+
+                {/* P-9 ruling 12(e) — everyone on this job moves with it,
+                    ticked by default; the sentence says what the tick
+                    does. */}
+                <label className="wp-plan-check" data-testid="ticket-schedule-apply-row">
+                  <input
+                    type="checkbox"
+                    checked={applyToSlots}
+                    onChange={(event) => setApplyToSlots(event.target.checked)}
+                    disabled={busy}
+                    data-testid="ticket-schedule-apply-to-slots"
+                  />
+                  {t("schedule.apply_to_slots_label")}
+                </label>
 
                 {isPlanned && (
                   <div className="field">

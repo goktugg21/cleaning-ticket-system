@@ -36,16 +36,15 @@ import {
   CalendarRange,
   ChevronLeft,
   ChevronRight,
-  Hourglass,
   Lock,
+  SlidersHorizontal,
   Ticket,
-  Info,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { setTicketSchedule, updateStaffSlot } from "../api/admin";
 import type { SlotStatus } from "../api/admin";
-import { api, getApiError } from "../api/client";
+import { getApiError } from "../api/client";
 import { bulkTriageTickets, listAllTickets, type TicketTriageAction } from "../api/tickets";
 import { transitionExtraWork } from "../api/extraWork";
 import type { Role, TicketList } from "../api/types";
@@ -72,12 +71,16 @@ import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 // two the sprint rebuilds, and they are easier to reason about with a
 // file each than as two of six things in one.
 import { WorkPlanCard } from "../components/workplan/WorkPlanCard";
+import { cardFactLine, cardFactState } from "../components/workplan/cardFact";
 import {
   dedupeByJob,
   detailPath,
   formatDay,
   partHostDays,
 } from "../components/workplan/entryHelpers";
+import { PlanItDialog } from "../components/workplan/PlanItDialog";
+import type { PlanItChoice } from "../components/workplan/PlanItDialog";
+import "../components/workplan/workplan-zones.css";
 import { CHIPS, FOLDED_KEYS, matchesChip } from "../components/workplan/chips";
 import { latenessOf, sortLate } from "../components/workplan/lateness";
 import { LateBadge, LateStrip } from "../components/workplan/LateStrip";
@@ -390,25 +393,13 @@ function WorkPlanWeek() {
   const [unableTarget, setUnableTarget] = useState<WorkPlanEntry | null>(null);
   /** Treatment 1 — the "can't complete" failure, shown in its own modal. */
   const [unableError, setUnableError] = useState("");
-  // Sprint 181 §8 — which undated row is being planned, and why the
-  // last attempt failed. Keyed by entry rather than a bare boolean so
-  // only the pressed button goes busy.
-  const [planningKey, setPlanningKey] = useState<string | null>(null);
+  /* P-9 §A.1 — "Plan it": the one button on a "Not planned yet" row
+     opens a small dialog with today pre-filled (never writes today
+     blind). `planTarget` is the row being planned; `planBusy` /
+     `planError` belong to that dialog. */
+  const [planTarget, setPlanTarget] = useState<WorkPlanEntry | null>(null);
+  const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState("");
-  /** FE-4 (Addendum D §D.12 item 5) — "Nog niet gepland" is a count-with-
-   *  age BUTTON that opens the drawer; closed by default so it does not
-   *  dominate the page. */
-  const [undatedOpen, setUndatedOpen] = useState(false);
-  /** P-3 §A.1 — the "Wacht op klant" drawer, the same door pattern as
-   *  "Nog niet gepland": closed by default, one chip with the count. */
-  const [waitingOpen, setWaitingOpen] = useState(false);
-  /* P-4 (Part E) — the drawer acts. The row whose customer decision is
-     being answered on their behalf, and the EXISTING override flow
-     behind it: a required reason, `is_override`, the audit row —
-     the same POST the ticket detail's Advanced fold sends. Offered
-     only where the server said `can_override_customer_decision`. */
-  const [approveTarget, setApproveTarget] = useState<WorkPlanEntry | null>(null);
-  const [approveBusy, setApproveBusy] = useState(false);
   /* P-6 V4 — stale-work triage. Select rows in the "Not planned yet"
      drawer, then park or close them with ONE reason, through the
      existing transitions (`/tickets/bulk-triage/` walks the machine's
@@ -452,83 +443,36 @@ function WorkPlanWeek() {
     setRefreshKey((n) => n + 1);
   }
 
-  async function approveOnBehalf(entry: WorkPlanEntry, reason: string) {
-    if (entry.ticket_id === null || approveBusy) return;
-    setApproveBusy(true);
-    try {
-      await api.post(`/tickets/${entry.ticket_id}/status/`, {
-        to_status: "APPROVED",
-        is_override: true,
-        override_reason: reason,
-      });
-      setApproveTarget(null);
-      push({
-        title: t("agenda.approve_on_behalf_done", { ticket: entry.ticket_no ?? entry.title }),
-        variant: "success",
-      });
-      reload();
-    } catch (err) {
-      push({ title: getApiError(err), variant: "error" });
-    } finally {
-      setApproveBusy(false);
-    }
-  }
-
-  /**
-   * Sprint 181 §8 — one action to move a job out of the undated lane
-   * and onto a day.
-   *
-   * "Today", not a date picker, because that is the action the lane
-   * exists for: the reason a job has no date is almost never that
-   * somebody meant a different one, it is that nobody set one. A picker
-   * asks a question; this answers the common case and leaves the
-   * uncommon one to the ticket's own schedule card.
-   *
-   * Sprint 182 §3 — BOTH kinds now. It used to be ticket slots only,
-   * and that was a real limit rather than an oversight: an extra work's
-   * only date was `preferred_date`, which is the CUSTOMER's wish
-   * (Sprint 176 §3 was explicit — the customer states a wish, the
-   * provider commits to a deadline), and writing it here would have had
-   * the work plan put words in a customer's mouth. Sprint 182 gives the
-   * provider a date of its own, `provider_planned_date`, so the lane's
-   * one action now works on the rows it could not reach.
-   *
-   * The two branches write through different endpoints because they are
-   * genuinely different records — a ticket has a schedule, an extra work
-   * has a planned day — and one shared "plan this" endpoint over two
-   * models would be a third thing to keep in step with both.
-   */
-  async function planForToday(entry: WorkPlanEntry) {
-    setPlanningKey(entry.key);
+  /** P-9 §A.1 — plan an undated row on the day (and time) the operator
+   *  chose in the Plan-it dialog. A ticket writes its schedule (and,
+   *  ticked by default, moves everyone on it — ruling 12(e)); an extra
+   *  work writes the provider's planned day. */
+  async function planEntry(entry: WorkPlanEntry, choice: PlanItChoice) {
+    setPlanBusy(true);
     setPlanError("");
     try {
-      const today = new Date();
       if (entry.ticket_id !== null) {
-        // P-3 §A.3 — a DAY, not a moment: a naive local midnight the
-        // server reads in ITS zone (`plannedDayIso`). Noon used to hand
-        // every job planned from here a "12:00" clock nobody chose.
+        // P-3 §A.3 — a DAY, not a moment, unless a time was chosen: a
+        // naive local instant the server reads in ITS zone.
         await setTicketSchedule(entry.ticket_id, {
-          scheduled_start_at: plannedDayIso(toDateString(today)),
+          scheduled_start_at: choice.time
+            ? `${choice.day}T${choice.time}:00`
+            : plannedDayIso(choice.day),
+          apply_to_slots: choice.applyToSlots,
         });
       } else if (entry.extra_work_id !== null) {
-        // A DATE, not a timestamp: `provider_planned_date` is a DateField
-        // and the day is the whole fact. Formatted from the local date
-        // parts rather than `toISOString().slice(0, 10)`, which converts
-        // to UTC first and files an evening in Amsterdam under the next
-        // day.
-        await planExtraWorkForDate(entry.extra_work_id, toDateString(today));
+        await planExtraWorkForDate(entry.extra_work_id, choice.day);
       } else {
         return;
       }
-      push({ title: t("agenda.undated_planned"), variant: "success" });
+      setPlanTarget(null);
+      push({ title: t("agenda.plan_it_saved", { date: formatDay(choice.day) }), variant: "success" });
       reload();
     } catch (err) {
-      // Surfaced, never swallowed. Until Agent A's branch is merged the
-      // extra-work half answers 400 here, and a button that silently did
-      // nothing would be worse than one that says why.
+      // Surfaced in the dialog, never swallowed.
       setPlanError(getApiError(err));
     } finally {
-      setPlanningKey(null);
+      setPlanBusy(false);
     }
   }
 
@@ -793,6 +737,11 @@ function WorkPlanWeek() {
     counts.undated === 0 &&
     counts.late === 0;
 
+  /** P-9 §A.1 — what the Filter fold holds that narrows the board, so
+   *  a narrowed board never looks like a short one. */
+  const activeFilterCount =
+    (chip !== "" ? 1 : 0) + (kindFilter !== "" ? 1 : 0) + (needle ? 1 : 0);
+
   const weekRangeLabel = useMemo(() => {
     const days = isoWeekDays(week);
     return `${formatDate(toDateString(days[0]))} – ${formatDate(
@@ -839,43 +788,6 @@ function WorkPlanWeek() {
         }
       />
 
-      {/* Sprint 182 §3 — ONE sentence, in plain words, saying what this
-          week holds AND what it does not.
-          The page used to admit the second half only obliquely: a muted
-          count of undated rows below the fold, and six columns reading
-          "Nothing planned" while two thirds of the live work sat outside
-          the week entirely. A reader had to assemble "most of the work is
-          not here" out of an absence. It is stated instead, and in the
-          operator's words — jobs, not entries; "not planned yet", not
-          "undated". */}
-      {counts !== null && (
-        <p
-          className="muted"
-          data-testid="agenda-overview"
-          style={{ marginTop: -4 }}
-        >
-          {t("agenda.overview_week", { count: counts.total })}
-          {/* W24-FX1 §2b — the same number the lane below renders, not a
-              second one. `counts.undated` is COUNT(*) over the server's
-              slot rows, which are per-person, so it says 2 where the lane
-              shows one two-person job. The server count stays the
-              authority when the lane is TRUNCATED, because then the lane
-              is a page and cannot answer "how many are there". */}
-          {undatedShown > 0 && (
-            <> · {t("agenda.overview_unplanned", { count: undatedShown })}</>
-          )}
-          {counts.overdue_all > 0 && (
-            <> · {t("agenda.overview_overdue", { count: counts.overdue_all })}</>
-          )}
-          {/* W-LATE §1a — the strip's own number, said in the sentence
-              that describes the plan. A late job is the one thing this
-              line must not leave to be inferred. */}
-          {counts.late > 0 && (
-            <> · {t("agenda.overview_late", { count: counts.late })}</>
-          )}
-        </p>
-      )}
-
       {loading && (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
@@ -888,197 +800,37 @@ function WorkPlanWeek() {
         </div>
       )}
 
-      <div className="hours-tiles-head">
-        <span className="hours-tiles-title">{t("agenda.week_title")}</span>
-        <div
-          style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
-          data-testid="agenda-week-stepper"
-        >
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => setWeek((w) => shiftIsoWeek(w, -1))}
-            aria-label={t("agenda.prev_week")}
-            data-testid="agenda-week-prev"
-          >
-            <ChevronLeft size={14} strokeWidth={2.5} />
-          </button>
-          {/* Sprint 171 §3 — the week RANGE, which is what an operator
-              reads. "2026-W33" is precise and tells nobody which days. */}
-          <span
-            style={{ fontWeight: 600, minWidth: 210, textAlign: "center" }}
-            data-testid="agenda-week-label"
-          >
-            {weekRangeLabel}
-            <span className="muted small" style={{ marginLeft: 6 }}>
-              {weekParam}
-            </span>
-          </span>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => setWeek((w) => shiftIsoWeek(w, 1))}
-            aria-label={t("agenda.next_week")}
-            data-testid="agenda-week-next"
-          >
-            <ChevronRight size={14} strokeWidth={2.5} />
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => setWeek(currentIsoWeek())}
-            data-testid="agenda-week-today"
-          >
-            {t("agenda.this_week")}
-          </button>
-          {/* Two questions the WEEK cannot answer, so they get their own
-              buttons: "what is late, anywhere" and "what is coming after
-              this week". Both counts are the server's. */}
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => setOverdueOpen(true)}
-            data-testid="agenda-overdue-open"
-          >
-            <AlarmClock size={14} strokeWidth={2.5} />
-            {t("agenda.overdue_button", { count: counts?.overdue_all ?? 0 })}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => setUpcomingOpen(true)}
-            data-testid="agenda-upcoming-open"
-          >
-            <CalendarRange size={14} strokeWidth={2.5} />
-            {t("agenda.upcoming_button", { count: counts?.upcoming ?? 0 })}
-          </button>
-        </div>
-      </div>
-
-      {/* Sprint 183 §4 — the reference's counted strip. Every number is
-          the SERVER's, over the whole scope, and every chip filters. */}
-      <WorkPlanStrip counts={counts} active={chip} onChange={setChip} />
-
-      {/* Sprint 183 §4 — search + source, the reference's filter row.
-
-          The reference has a third control, a Status dropdown, and it is
-          not here: the strip above IS the status filter, and offering
-          the same choice twice is the "one control, one question" rule
-          this batch is written around.
-
-          "Source" rather than the reference's "Type": Sprint 182
-          measured that a ticket TYPE filter on a page holding two kinds
-          of work silently emptied every extra work out of the week.
-          Kept ours. */}
-      <form className="filter-bar" onSubmit={(e) => e.preventDefault()}>
-        <div className="filter-field search">
-          <span className="filter-label">{t("common:search")}</span>
-          <input
-            className="filter-control"
-            type="search"
-            value={search}
-            placeholder={t("agenda.search_placeholder")}
-            onChange={(e) => setSearch(e.target.value)}
-            data-testid="agenda-search"
-          />
-        </div>
-        <div className="filter-field">
-          <span className="filter-label">{t("agenda.filter_source")}</span>
-          <select
-            className="filter-control"
-            // FE-4 — the three status buckets that left the strip live
-            // here, beside the source. One control: a status pick clears
-            // the source and vice versa, and the strip's own three tiles
-            // keep their server counts.
-            value={
-              FOLDED_KEYS.includes(chip) ? `status:${chip}` : kindFilter
-            }
-            onChange={(e) => {
-              const value = e.target.value;
-              if (value.startsWith("status:")) {
-                setKindFilter("");
-                setChip(value.slice("status:".length) as ChipKey);
-              } else {
-                if (FOLDED_KEYS.includes(chip)) setChip("");
-                setKindFilter(value as "" | WorkPlanKind);
-              }
-            }}
-            data-testid="agenda-filter-kind"
-          >
-            <option value="">{t("agenda.all_sources")}</option>
-            <option value="TICKET_SLOT">{t("agenda.source_ticket")}</option>
-            <option value="EXTRA_WORK">{t("agenda.source_extra_work")}</option>
-            <optgroup label={t("agenda.filter_status_group")}>
-              {CHIPS.filter((c) => FOLDED_KEYS.includes(c.key)).map((c) => (
-                <option key={c.key} value={`status:${c.key}`}>
-                  {t(`agenda.${c.label}`)}
-                  {counts ? ` (${c.count(counts)})` : ""}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-        </div>
-      </form>
-
-      {/* Sprint 181 §8 — the undated work has a PLACE now.
-          This was one muted sentence saying N items had no date. On
-          crmtest that sentence stood for 43 of 70 live tickets: two
-          thirds of the work admitted to and not shown, while six of the
-          seven week columns underneath read "Nothing planned". A count
-          is not somewhere to put something.
-          It sits ABOVE the week, because unplanned work is what you deal
-          with before you read a plan, and the action that moves a row
-          out of here and into the week is on the row itself. */}
-      {data && (undatedJobs.length > 0 || parkedJobs.length > 0) && (
-        <div className="wp-undated-toggle-row" data-testid="agenda-undated-toggle-row">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            aria-expanded={undatedOpen}
-            onClick={() => setUndatedOpen((open) => !open)}
-            data-testid="agenda-undated-toggle"
-          >
-            <CalendarClock size={14} strokeWidth={2.5} />
-            {t("agenda.undated_toggle", { count: undatedShown })}
-            {undatedOldest !== null && undatedOldest >= UNPLANNED_AGE_THRESHOLD_DAYS && (
-              <span className="wp-undated-toggle-age">
-                {" · "}
-                {t("agenda.undated_oldest", { count: undatedOldest })}
-              </span>
-            )}
-          </button>
-        </div>
-      )}
-      {data && (undatedJobs.length > 0 || parkedJobs.length > 0) && undatedOpen && (
-        <section
-          className="card"
-          data-testid="agenda-undated-lane"
-          style={{ marginBottom: 18, padding: "16px 18px" }}
-        >
-          <div className="section-head" style={{ marginBottom: 4 }}>
-            <div className="section-head-title">{t("agenda.undated_title")}</div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {data.can_plan && (
-                <EditModeToggle
-                  editMode={triageMode}
-                  onToggle={() => (triageMode ? triageExit() : setTriageMode(true))}
-                  disabled={triageBusy}
-                  testId="agenda-triage-toggle"
-                />
+      {/* P-9 §A.1 — THE FOUR ZONES, always visible, in this order: Not
+          planned yet, Waiting for the customer, the week board, and
+          nothing else above the board. The owner's model in plain
+          words: "Today shows what is planned for today and what I
+          didn't do yesterday. The past shows only what I finished. The
+          future shows what I will do. Not-planned and waiting-for-the-
+          customer are outside the dates." The two lanes are SECTIONS,
+          not toggles: the count is the section title, in the page's h2
+          size, and each row carries the one card fact line (§A.3) and
+          one button. Nothing renders as empty before the server has
+          answered (§D.6 rule 10). */}
+      {data && (
+        <section className="card wp-zone" data-testid="agenda-undated-lane">
+          <div className="wp-zone-head">
+            <h2 className="wp-zone-title" data-testid="agenda-undated-title" data-count={undatedShown}>
+              {t("agenda.zone_unplanned", { count: undatedShown })}
+              {undatedOldest !== null && undatedOldest >= UNPLANNED_AGE_THRESHOLD_DAYS && (
+                <span className="muted small" style={{ marginLeft: 10, fontSize: 13, fontWeight: 500, letterSpacing: 0 }}>
+                  {t("agenda.undated_oldest", { count: undatedOldest })}
+                </span>
               )}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setUndatedOpen(false)}
-                data-testid="agenda-undated-hide"
-              >
-                {t("agenda.undated_hide")}
-              </button>
-            </div>
+            </h2>
+            {data.can_plan && undatedJobs.length > 0 && (
+              <EditModeToggle
+                editMode={triageMode}
+                onToggle={() => (triageMode ? triageExit() : setTriageMode(true))}
+                disabled={triageBusy}
+                testId="agenda-triage-toggle"
+              />
+            )}
           </div>
-          <p className="muted small" style={{ marginTop: 0 }}>
-            {t(data.can_plan ? "agenda.undated_desc" : "agenda.undated_desc_readonly")}
-          </p>
           {triageMode && (
             <MultiSelectToolbar
               selectedCount={triageSelected.size}
@@ -1131,27 +883,36 @@ function WorkPlanWeek() {
               )}
             </div>
           )}
-          <BoundedList
-            size="lg"
-            count={undatedJobs.length}
-            ariaLabel={t("agenda.undated_title")}
-            testIdPrefix="agenda-undated"
-          >
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {undatedJobs.map((entry) => (
-                <UndatedRow
-                  key={entry.key}
-                  entry={entry}
-                  busy={planningKey === entry.key}
-                  canPlan={data.can_plan}
-                  onPlanToday={() => planForToday(entry)}
-                  selectable={triageMode}
-                  selected={triageSelected.has(entry.key)}
-                  onToggleSelect={() => triageToggle(entry.key)}
-                />
-              ))}
-            </ul>
-          </BoundedList>
+          {undatedJobs.length === 0 ? (
+            <p className="muted small" style={{ margin: "4px 0 0" }} data-testid="agenda-undated-none">
+              {t("agenda.undated_none")}
+            </p>
+          ) : (
+            <BoundedList
+              size="lg"
+              count={undatedJobs.length}
+              ariaLabel={t("agenda.undated_title")}
+              testIdPrefix="agenda-undated"
+            >
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {undatedJobs.map((entry) => (
+                  <UndatedRow
+                    key={entry.key}
+                    entry={entry}
+                    today={todayKey}
+                    canPlan={data.can_plan}
+                    onPlan={() => {
+                      setPlanError("");
+                      setPlanTarget(entry);
+                    }}
+                    selectable={triageMode}
+                    selected={triageSelected.has(entry.key)}
+                    onToggleSelect={() => triageToggle(entry.key)}
+                  />
+                ))}
+              </ul>
+            </BoundedList>
+          )}
           {data.truncated.undated_entries && (
             <p className="wp-notice" role="status">
               {t("agenda.truncated_note", {
@@ -1159,13 +920,8 @@ function WorkPlanWeek() {
               })}
             </p>
           )}
-          {undatedJobs.length === 0 && (
-            <p className="muted small" data-testid="agenda-undated-none">
-              {t("agenda.undated_none")}
-            </p>
-          )}
           {/* P-7 S8 — "Geparkeerd (N)": the parked work, quiet, with its
-              reasons. It left the nag above; it did not leave the drawer. */}
+              reasons. It left the nag above; it did not leave the zone. */}
           {parkedShown > 0 && (
             <details className="form-fold agenda-parked" data-testid="agenda-parked-fold">
               <summary className="form-fold-summary">
@@ -1216,75 +972,39 @@ function WorkPlanWeek() {
               )}
             </details>
           )}
-          {planError && (
-            <div className="alert-error" role="alert">
-              {planError}
-            </div>
-          )}
         </section>
       )}
 
-      {/* P-8R E — the chip is GLOBAL across week browsing: the server
-          returns the waiting rows for the whole scope whatever week is
-          shown, and the reader's question ("who is waiting on a
-          customer?") does not change with the week they are looking at.
-          Past and future weeks keep the rows' placement as history. */}
-      {/* P-3 §A.1 — "Wacht op klant". Sent to the customer, waiting on
-          their answer: nothing for this reader to do, so not in a day
-          column of the working week (a calm card in Tuesday's column
-          read as "something is wrong with Tuesday"). One chip in its
-          own calm colour, the same door as "Nog niet gepland". */}
-      {data && waitingJobs.length > 0 && (
-        <div className="wp-waiting-toggle-row" data-testid="agenda-waiting-toggle-row">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm wp-waiting-toggle"
-            aria-expanded={waitingOpen}
-            onClick={() => setWaitingOpen((open) => !open)}
-            data-testid="agenda-waiting-toggle"
-          >
-            <Hourglass size={14} strokeWidth={2.5} />
-            {t("agenda.waiting_toggle", { count: waitingShown })}
-          </button>
-        </div>
-      )}
-      {data && waitingJobs.length > 0 && waitingOpen && (
-        <section
-          className="card"
-          data-testid="agenda-waiting-lane"
-          style={{ marginBottom: 18, padding: "16px 18px" }}
-        >
-          <div className="section-head" style={{ marginBottom: 4 }}>
-            <div className="section-head-title">{t("agenda.waiting_title")}</div>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setWaitingOpen(false)}
-              data-testid="agenda-waiting-hide"
-            >
-              {t("agenda.waiting_hide")}
-            </button>
+      {/* P-9 §A.1 zone 2 — Waiting for the customer: one row per job,
+          reported done · sent to · waiting N days. No action on the row
+          except Open; the reminder lives on the request. Global across
+          week browsing (P-8R E) and, since P-9 §A.2a, in no column of
+          ANY week. */}
+      {data && (
+        <section className="card wp-zone" data-testid="agenda-waiting-lane">
+          <div className="wp-zone-head">
+            <h2 className="wp-zone-title" data-testid="agenda-waiting-title" data-count={waitingShown}>
+              {t("agenda.zone_waiting", { count: waitingShown })}
+            </h2>
           </div>
-          <p className="muted small" style={{ marginTop: 0 }}>
-            {t("agenda.waiting_desc")}
-          </p>
-          <BoundedList
-            size="lg"
-            count={waitingJobs.length}
-            ariaLabel={t("agenda.waiting_title")}
-            testIdPrefix="agenda-waiting"
-          >
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {waitingJobs.map((entry) => (
-                <WaitingRow
-                  key={entry.key}
-                  entry={entry}
-                  role={role}
-                  onApprove={entry.can_override_customer_decision ? setApproveTarget : undefined}
-                />
-              ))}
-            </ul>
-          </BoundedList>
+          {waitingJobs.length === 0 ? (
+            <p className="muted small" style={{ margin: "4px 0 0" }} data-testid="agenda-waiting-none">
+              {t("agenda.waiting_none")}
+            </p>
+          ) : (
+            <BoundedList
+              size="lg"
+              count={waitingJobs.length}
+              ariaLabel={t("agenda.waiting_title")}
+              testIdPrefix="agenda-waiting"
+            >
+              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                {waitingJobs.map((entry) => (
+                  <WaitingRow key={entry.key} entry={entry} today={todayKey} role={role} />
+                ))}
+              </ul>
+            </BoundedList>
+          )}
           {data.truncated.waiting_customer_entries && (
             <p className="wp-notice" role="status">
               {t("agenda.truncated_note", {
@@ -1301,7 +1021,8 @@ function WorkPlanWeek() {
           blocked. Blocked is not done — a row leaves this list only
           when a human reschedules, reassigns or cancels through the
           existing actions, which live one click away on the record
-          itself. */}
+          itself. Outside the dates like the two zones above; renders
+          only when it holds something. */}
       {data && stuckJobs.length > 0 && (
         <section
           className="card"
@@ -1336,28 +1057,144 @@ function WorkPlanWeek() {
         </section>
       )}
 
-      {/* W-VIEWER §3 — WHAT THIS BOARD IS, said once, where it is read.
-          The general plan places every job on the ticket's own scheduled
-          date and shows it once however many people are on it. Each of
-          those people may have been given a different working day, and
-          those days are real — they are just not this board's subject.
-          Saying so here is what stops the next reader concluding the
-          board has lost somebody's assignment. */}
-      {/* P-2 §1 — ONE short line is the page subtitle; the rest is one
-          click away in a popover, not three stacked paragraphs. */}
-      {teamWeek && (
-        <details className="wp-info" data-testid="agenda-job-board-hint">
-          <summary className="wp-info-summary">
-            <Info size={14} strokeWidth={2.4} aria-hidden="true" />
-            {t("agenda.info_toggle")}
-          </summary>
-          {/* P-3 §C.4 — ONE teaching line; the late strip's own sentence
-              is its tooltip, not a second paragraph here. */}
-          <div className="wp-info-body">
-            <p>{t("agenda.job_board_hint")}</p>
+      {/* P-9 §A.1 zone 3 — the week board. Its header row holds the
+          week stepper and ONE Filter button (P-2's fold rule): the
+          counted status chips, the source select, the search box and
+          the two "elsewhere" doors (late any week, planned later) live
+          inside it. Nothing else above the board. */}
+      <div className="wp-board-head">
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+          data-testid="agenda-week-stepper"
+        >
+          <span className="hours-tiles-title">{t("agenda.week_title")}</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setWeek((w) => shiftIsoWeek(w, -1))}
+            aria-label={t("agenda.prev_week")}
+            data-testid="agenda-week-prev"
+          >
+            <ChevronLeft size={14} strokeWidth={2.5} />
+          </button>
+          {/* Sprint 171 §3 — the week RANGE, which is what an operator
+              reads. "2026-W33" is precise and tells nobody which days. */}
+          <span
+            style={{ fontWeight: 600, minWidth: 210, textAlign: "center" }}
+            data-testid="agenda-week-label"
+          >
+            {weekRangeLabel}
+            <span className="muted small" style={{ marginLeft: 6 }}>
+              {weekParam}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setWeek((w) => shiftIsoWeek(w, 1))}
+            aria-label={t("agenda.next_week")}
+            data-testid="agenda-week-next"
+          >
+            <ChevronRight size={14} strokeWidth={2.5} />
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setWeek(currentIsoWeek())}
+            data-testid="agenda-week-today"
+          >
+            {t("agenda.this_week")}
+          </button>
+        </div>
+      </div>
+      <details
+        className="filter-fold wp-filter"
+        open={activeFilterCount > 0}
+        data-testid="agenda-filter-fold"
+      >
+        <summary className="filter-fold-summary" data-testid="agenda-filter-toggle">
+          <SlidersHorizontal size={14} strokeWidth={2.4} aria-hidden="true" />
+          {t("agenda.filter_label")}
+          {activeFilterCount > 0 && (
+            <span className="filter-fold-count">
+              {t("agenda.filter_active", { count: activeFilterCount })}
+            </span>
+          )}
+        </summary>
+        <div className="filter-fold-body">
+          {/* Sprint 183 §4 — the counted strip. Every number is the
+              SERVER's, over the whole scope, and every chip filters. */}
+          <WorkPlanStrip counts={counts} active={chip} onChange={setChip} />
+          <div className="filter-field search">
+            <span className="filter-label">{t("common:search")}</span>
+            <input
+              className="filter-control"
+              type="search"
+              value={search}
+              placeholder={t("agenda.search_placeholder")}
+              onChange={(e) => setSearch(e.target.value)}
+              data-testid="agenda-search"
+            />
           </div>
-        </details>
-      )}
+          <div className="filter-field">
+            <span className="filter-label">{t("agenda.filter_source")}</span>
+            <select
+              className="filter-control"
+              // FE-4 — the three status buckets that left the strip live
+              // here, beside the source. One control: a status pick clears
+              // the source and vice versa, and the strip's own three tiles
+              // keep their server counts.
+              value={
+                FOLDED_KEYS.includes(chip) ? `status:${chip}` : kindFilter
+              }
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value.startsWith("status:")) {
+                  setKindFilter("");
+                  setChip(value.slice("status:".length) as ChipKey);
+                } else {
+                  if (FOLDED_KEYS.includes(chip)) setChip("");
+                  setKindFilter(value as "" | WorkPlanKind);
+                }
+              }}
+              data-testid="agenda-filter-kind"
+            >
+              <option value="">{t("agenda.all_sources")}</option>
+              <option value="TICKET_SLOT">{t("agenda.source_ticket")}</option>
+              <option value="EXTRA_WORK">{t("agenda.source_extra_work")}</option>
+              <optgroup label={t("agenda.filter_status_group")}>
+                {CHIPS.filter((c) => FOLDED_KEYS.includes(c.key)).map((c) => (
+                  <option key={c.key} value={`status:${c.key}`}>
+                    {t(`agenda.${c.label}`)}
+                    {counts ? ` (${c.count(counts)})` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+          {/* Two questions the WEEK cannot answer, so they get their own
+              doors: "what is late, anywhere" and "what is coming after
+              this week". Both counts are the server's. */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setOverdueOpen(true)}
+            data-testid="agenda-overdue-open"
+          >
+            <AlarmClock size={14} strokeWidth={2.5} />
+            {t("agenda.overdue_button", { count: counts?.overdue_all ?? 0 })}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setUpcomingOpen(true)}
+            data-testid="agenda-upcoming-open"
+          >
+            <CalendarRange size={14} strokeWidth={2.5} />
+            {t("agenda.upcoming_button", { count: counts?.upcoming ?? 0 })}
+          </button>
+        </div>
+      </details>
 
       {/* A list that silently stops is the same defect as a count that
           describes one page — so when the bound bites, it says so. */}
@@ -1373,21 +1210,6 @@ function WorkPlanWeek() {
           DONE modal's rows, which is the only place they were ever
           needed. Nothing here scrolls sideways and the grid below keeps
           its own dimensions untouched. */}
-      <RejectReasonDialog
-        open={approveTarget !== null}
-        onCancel={() => setApproveTarget(null)}
-        onConfirm={(reason) => {
-          if (approveTarget) void approveOnBehalf(approveTarget, reason);
-        }}
-        title={t("agenda.approve_on_behalf_title", {
-          ticket: approveTarget?.ticket_no ?? approveTarget?.title ?? "",
-        })}
-        description={t("agenda.approve_on_behalf_desc")}
-        placeholder={t("agenda.approve_on_behalf_placeholder")}
-        confirmLabel={approveBusy ? t("common:admin_form.saving") : t("agenda.approve_on_behalf_confirm")}
-        cancelLabel={t("common:cancel")}
-        tone="warning"
-      />
       {/* P-6 V4 — one reason for every selected item; it lands in each
           item's history. */}
       <RejectReasonDialog
@@ -1477,6 +1299,7 @@ function WorkPlanWeek() {
                   key={entry.key}
                   entry={entry}
                   role={role}
+                  today={todayKey}
                   onComplete={() => setCompletionTarget(entry)}
                   onUnable={() => setUnableTarget(entry)}
                 />
@@ -1486,6 +1309,7 @@ function WorkPlanWeek() {
                   key={`host-${host.entry.key}`}
                   entry={host.entry}
                   role={role}
+                  today={todayKey}
                   onComplete={() => setCompletionTarget(host.entry)}
                   onUnable={() => setUnableTarget(host.entry)}
                   hostParts={host.parts}
@@ -1558,6 +1382,22 @@ function WorkPlanWeek() {
         />
       )}
 
+      {/* P-9 §A.1 — "Plan it", keyed by the row so its state is that
+          row's. Mounted only while open (a plain overlay, no <dialog>). */}
+      {planTarget && (
+        <PlanItDialog
+          key={planTarget.key}
+          entry={planTarget}
+          todayIso={todayKey}
+          busy={planBusy}
+          error={planError}
+          onCancel={() => {
+            if (!planBusy) setPlanTarget(null);
+          }}
+          onSave={(choice) => void planEntry(planTarget, choice)}
+        />
+      )}
+
       {completionTarget && completionTarget.ticket_id !== null && (
         <SlotCompletionDialog
           slot={{
@@ -1602,16 +1442,17 @@ function WorkPlanWeek() {
  */
 function UndatedRow({
   entry,
-  busy,
+  today,
   canPlan,
-  onPlanToday,
+  onPlan,
   selectable = false,
   selected = false,
   onToggleSelect,
 }: {
   entry: WorkPlanEntry;
-  busy: boolean;
-  /** P-6 V4 — triage selection, shown only while the drawer is in
+  /** The server's today, for the one card fact line. */
+  today: string;
+  /** P-6 V4 — triage selection, shown only while the zone is in
    *  select mode. */
   selectable?: boolean;
   selected?: boolean;
@@ -1620,7 +1461,7 @@ function UndatedRow({
    *  endpoints would refuse gets no button: a refusal in raw backend
    *  English can no longer be clicked into existence. */
   canPlan: boolean;
-  onPlanToday: () => void;
+  onPlan: () => void;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
   const isTicket = entry.ticket_id !== null;
@@ -1655,22 +1496,16 @@ function UndatedRow({
             .filter(Boolean)
             .join(" · ")}
         </span>
-        {/* FE-4 (Addendum D §D.12 item 2) — the honest words: when it was
-            created, and that it is not planned yet. Never "Gepland". */}
-        {entry.created_at && (
-          <span className="muted small" data-testid={`agenda-undated-created-${entry.key}`}>
-            {/* P-1 — and WHO created it: nobody guesses who opened a ticket. */}
-            {entry.created_by_name
-              ? t("agenda.created_by_on", {
-                  date: formatDay(entry.created_at.slice(0, 10)),
-                  name: entry.created_by_name,
-                })
-              : t("agenda.created_on", { date: formatDay(entry.created_at.slice(0, 10)) })}
-            {" · "}
-            {t("agenda.not_planned_yet")}
-          </span>
-        )}
-        {/* P-6 V4 — a parked job stays in this lane (the P-3 schedule
+        {/* P-9 §A.3 — THE one card fact line: "created <date> by <who> ·
+            deadline <date> (<n> days left)" or "no deadline". Never
+            "planned". */}
+        <span
+          className={`wp-fact wp-fact-${cardFactState(entry, today)}`}
+          data-testid={`agenda-undated-created-${entry.key}`}
+        >
+          {cardFactLine(entry, today, t)}
+        </span>
+        {/* P-6 V4 — a parked job stays in this zone (the P-3 schedule
             matrix places ON_HOLD here) but says so: parking is a
             decision with a reason, not a gap. */}
         {entry.ticket_status === "ON_HOLD" && (
@@ -1694,18 +1529,18 @@ function UndatedRow({
             </span>
           )}
       </div>
-      {/* Sprint 182 §3 — the SAME action on both kinds. A ticket writes
-          its schedule, an extra work writes the provider's planned day;
-          the row does not make the reader care which. */}
+      {/* P-9 §A.1 — ONE button: Plan it. The same action on both kinds
+          (a ticket writes its schedule, an extra work writes the
+          provider's planned day); the row does not make the reader
+          care which. */}
       {canPlan && (
         <button
           type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={onPlanToday}
-          disabled={busy}
+          className="btn btn-primary btn-sm"
+          onClick={onPlan}
           data-testid={`agenda-undated-plan-${entry.key}`}
         >
-          {busy ? t("agenda.undated_planning") : t("agenda.undated_plan_today")}
+          {t("agenda.plan_it")}
         </button>
       )}
     </li>
@@ -1750,29 +1585,19 @@ function StuckRow({
   );
 }
 
-/** P-3 §A.1 — one job waiting on the customer. A READ row: what it is,
- *  where, when it went to the customer. The customer's answer is the
- *  only thing that moves it, and that is not this reader's button. */
-/** Whole days from an ISO day to today (local), never negative. */
-function daysBetweenToday(isoDay: string): number {
-  const [y, m, d] = isoDay.split("-").map(Number);
-  const then = new Date(y, (m ?? 1) - 1, d ?? 1);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((today.getTime() - then.getTime()) / 86400000);
-}
-
+/** P-3 §A.1 / P-9 §A.1 — one job waiting on the customer. A READ row:
+ *  what it is, where, and the one fact line ("reported done <date> ·
+ *  sent to <contact> · waiting <n> days"). No action on the row except
+ *  Open; the reminder lives on the request, and deciding for the
+ *  customer lives behind the ticket's own Geavanceerd. */
 function WaitingRow({
   entry,
+  today,
   role,
-  onApprove,
 }: {
   entry: WorkPlanEntry;
+  today: string;
   role: Role | null;
-  /** P-4 (Part E) — present only for a reader the server says may
-   *  answer on the customer's behalf. One amber button; the existing
-   *  override flow (reason, `is_override`, audit) behind it. */
-  onApprove?: (entry: WorkPlanEntry) => void;
 }) {
   const { t } = useTranslation(["staff_slots", "common"]);
   const to = detailPath(entry, role);
@@ -1780,50 +1605,23 @@ function WaitingRow({
     .filter(Boolean)
     .join(" · ");
   const heading = `${entry.ticket_no ? `${entry.ticket_no} · ` : ""}${entry.title}`;
-  // P-8R E — the day it was REPORTED done (server-computed from the
-  // status history), never the planned day: a job planned for tomorrow
-  // and reported done today used to read "klaar gemeld op <tomorrow>".
-  const since =
-    entry.reported_done_at?.slice(0, 10) ??
-    entry.settled_at?.slice(0, 10) ??
-    entry.planned_end ??
-    entry.planned_start;
   return (
     <li className="wp-undated-row" data-testid={`agenda-waiting-row-${entry.key}`}>
       <div className="wp-undated-row-main">
         {to ? <Link to={to}>{heading}</Link> : <span>{heading}</span>}
         <span className="muted small">{where}</span>
-        {since && (
-          <span className="muted small" data-testid={`agenda-waiting-since-${entry.key}`}>
-            {/* P-8R E — the fact AND the wait: "klaar gemeld op <date> —
-                wacht al N dagen", counted from the day it went to the
-                customer to today. */}
-            {t("agenda.waiting_since", {
-              date: formatDay(since),
-              count: Math.max(0, daysBetweenToday(since)),
-            })}
-          </span>
-        )}
+        <span
+          className="wp-fact wp-fact-waiting_customer"
+          data-testid={`agenda-waiting-since-${entry.key}`}
+        >
+          {cardFactLine(entry, today, t)}
+        </span>
       </div>
       <span className="wp-undated-row-actions">
-        <span className="wp-wait" data-waiting="customer">
-          {t("agenda.waiting_customer")}
-        </span>
-        {/* P-5 S3.1 made this a BUTTON (not a second pill) and, in
-            passing, dropped the amber. P-7 S3.1 — the owner's ruling:
-            deciding for the customer is an exceptional act and must
-            LOOK like one. `btn-warning`, the one amber button (Part E),
-            on a button shape so it still reads as an action beside the
-            waiting chip. */}
-        {onApprove && (
-          <button
-            type="button"
-            className="btn btn-warning btn-sm"
-            onClick={() => onApprove(entry)}
-            data-testid={`agenda-waiting-approve-${entry.key}`}
-          >
-            {t("agenda.approve_on_behalf")}
-          </button>
+        {to && (
+          <Link className="btn btn-ghost btn-sm" to={to} data-testid={`agenda-waiting-open-${entry.key}`}>
+            {t("agenda.open")}
+          </Link>
         )}
       </span>
     </li>

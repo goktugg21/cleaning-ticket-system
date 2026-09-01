@@ -393,12 +393,20 @@ class ReviewCarryTests(_Fixture):
         # The chips describe the board, and the board holds it.
         self.assertEqual(payload["counts"]["total"], 1)
 
-    def test_it_stays_settled_at_home_in_the_week_it_was_finished(self):
-        ticket = self._reviewed(planned_days_ago=10, waiting_days=5)
-        payload = self.board(week=self.week_of(-10))
+    def test_it_hangs_on_the_day_it_was_reported_done_not_its_planned_day(self):
+        # P-9 §A.2b (rule 10) — the past shows only what was finished, on
+        # the day it was finished: planned 20 days ago, reported done 12
+        # days ago, the card is in the week of day -12 on day -12, and
+        # absent from the week it was planned in. (Both days are outside
+        # the current week whatever weekday the suite runs on.)
+        ticket = self._reviewed(planned_days_ago=20, waiting_days=12)
+        planned_week = self.board(week=self.week_of(-20))
+        self.assertIsNone(self.find(planned_week, f"ticket-{ticket.id}")[0])
+        payload = self.board(week=self.week_of(-12))
         card, bucket = self.find(payload, f"ticket-{ticket.id}")
         self.assertEqual(bucket, "entries")
         self.assertEqual(card["placement"], PLACEMENT_PLANNED)
+        self.assertEqual(card["day"], (self.today - datetime.timedelta(days=12)).isoformat())
         self.assertTrue(card["viewer_settled"])
         self.assertIsNone(card["stuck_age_days"])
 

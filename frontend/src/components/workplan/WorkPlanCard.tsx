@@ -1,24 +1,19 @@
 import {
-  AlarmClock,
   CalendarClock,
   CheckCircle2,
-  History,
   Hourglass,
-  PlayCircle,
   Users,
   XCircle,
-  ClipboardCheck,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
-import type { SlotStatus } from "../../api/admin";
 import type { Role } from "../../api/types";
 import type { WorkPlanEntry, WorkPlanPart } from "../../api/workPlan";
-import { SlotStatusBadge } from "../SlotStatusBadge";
-import { StatusBadge } from "../StatusBadge";
 import { formatPlannedWindow } from "../../lib/plannedWindow";
-import { detailPath, formatDay, formatPlannedDay } from "./entryHelpers";
+import { toDateString } from "../../lib/isoWeek";
+import { cardFactLine, cardFactState } from "./cardFact";
+import { detailPath, formatDay } from "./entryHelpers";
 import { PartChips } from "./PartChips";
 
 /**
@@ -51,120 +46,6 @@ import { PartChips } from "./PartChips";
  * never-done hours moved to the late strip's own modal, where the rung
  * is explained.
  */
-
-/**
- * Why this card is in a week that is not its planned one.
- *
- * §12B, verbatim: "A card shown outside its planned week must say why —
- * a short marker reading started early or overdue, with its planned date
- * on the card. Otherwise the operator meets the same job in two weeks
- * and cannot tell why."
- *
- * A card at HOME renders nothing here — which is the point. The marker
- * means "this is a visitor", so putting one on every card would tell the
- * reader nothing.
- *
- * W-PLANTRUTH §1b — ROLLED is the visitor this wave adds, and the one
- * the LAW is about. The card is on TODAY's column because its work is
- * not done; the marker prints the day it was PLANNED for and how far
- * past that we are, because that date is the fact and it never moved.
- * Driven by `rolled_from` / `rolled_days` and NOT by the late ladder:
- * a slot whose own day has passed can sit on a ticket whose widest
- * window has not (a colleague works it on Friday), so the card rolls
- * while the JOB is not yet late. Two different questions, two fields.
- */
-export function PlacementMarker({
-  entry,
-  deadlineIsHeadline = false,
-}: {
-  entry: WorkPlanEntry;
-  /** FE-4 — a real deadline is the ONE headline (the due chip); the
-   *  marker then says only where the card came from, without a second
-   *  "te laat" count. */
-  deadlineIsHeadline?: boolean;
-}) {
-  const { t } = useTranslation("staff_slots");
-  if (entry.placement === "PLANNED") return null;
-
-  /* FE-4 (Addendum D §D.12 item 2) — HONEST DATE WORDS. "Gepland <date>"
-     only when somebody planned it (`plan_source` TICKET / PROVIDER_PLAN);
-     a customer's wish says it is a wish; a card with no window at all
-     says when it was created and that it is not planned yet. */
-  const originDate = entry.rolled_from ?? entry.planned_start;
-  const origin = (count: number | null) => {
-    if (entry.plan_source === "CUSTOMER_WISH" && originDate) {
-      return t("agenda.wished_on", { date: formatPlannedDay(originDate) });
-    }
-    // P-1 — a date is a plan only if a PERSON made it: a seeded date
-    // (`has_real_plan` false) reads exactly like no date at all, with
-    // who created it. Never "Gepland", never "te laat".
-    if (entry.plan_source === null || !originDate || !entry.has_real_plan) {
-      if (!entry.created_at) return t("agenda.not_planned_yet");
-      const created = formatDay(entry.created_at.slice(0, 10));
-      const line = entry.created_by_name
-        ? t("agenda.created_by_on", { date: created, name: entry.created_by_name })
-        : t("agenda.created_on", { date: created });
-      return `${line} · ${t("agenda.not_planned_yet")}`;
-    }
-    if (deadlineIsHeadline || count === null) {
-      return t("agenda.planned_on", { date: formatPlannedDay(originDate) });
-    }
-    return t("agenda.why_rolled", { date: formatPlannedDay(originDate), count });
-  };
-
-  if (entry.placement === "ROLLED") {
-    return (
-      <div
-        className={deadlineIsHeadline ? "wp-why wp-why-origin" : "wp-why wp-why-rolled"}
-        data-testid="agenda-card-why"
-      >
-        <History size={11} strokeWidth={2.5} />
-        {origin(entry.rolled_days)}
-      </div>
-    );
-  }
-
-  if (entry.placement === "REVIEW") {
-    // P-1 §3 / P-3 §A.4 — the worker reported it done; THIS reader has
-    // to check it. The manager reads the truth, with the waiting age.
-    return (
-      <div className="wp-why wp-why-review" data-testid="agenda-card-why">
-        <ClipboardCheck size={11} strokeWidth={2.5} />
-        {t("agenda.why_review", { count: entry.stuck_age_days ?? 0 })}
-      </div>
-    );
-  }
-
-  if (entry.placement === "OVERDUE") {
-    // WP-1 G0 — the same-week carry: the card is a marked visitor on
-    // today's column. With a real deadline the due chip is the alarm and
-    // this line is only the origin; without one, this line is the alarm.
-    return (
-      <div
-        className={deadlineIsHeadline ? "wp-why wp-why-origin" : "wp-why wp-why-overdue"}
-        data-testid="agenda-card-why"
-      >
-        <AlarmClock size={11} strokeWidth={2.5} />
-        {entry.plan_source !== null && originDate
-          ? origin(entry.overdue_days)
-          : entry.due_date && !deadlineIsHeadline
-            ? t("agenda.why_overdue", { date: formatDay(entry.due_date) })
-            : origin(null)}
-      </div>
-    );
-  }
-
-  const key =
-    entry.placement === "STARTED_EARLY" ? "why_started_early" : "why_started";
-  return (
-    <div className="wp-why wp-why-started" data-testid="agenda-card-why">
-      <PlayCircle size={11} strokeWidth={2.5} />
-      {entry.planned_start
-        ? t(`agenda.${key}`, { date: formatDay(entry.planned_start) })
-        : t("agenda.why_started_undated")}
-    </div>
-  );
-}
 
 /**
  * FE-4 (Addendum D §D.12 item 4) — WORK THAT IS OVER, IN THE PAST TENSE.
@@ -255,54 +136,6 @@ export function SettledLine({ entry }: { entry: WorkPlanEntry }) {
         </span>
       )}
     </span>
-  );
-}
-
-/**
- * W-VIEWER §5 — HOW THIS READER STANDS AGAINST THE PROMISE.
- *
- * "Late" is a fact you learn one day after you could have acted on it.
- * The ruling asks every relevant card to say the time remaining until
- * the deadline OR how far past it, so somebody can read their standing
- * without opening the ticket. `days_until_due` is the signed number the
- * server computes from the same `due` the placement rule uses — days
- * left when positive, days over when negative, today at zero.
- *
- * TWO WORDINGS, and the difference matters. `lateness.deadline` is the
- * extra work's own PROMISE; `due_date` falls back to the last planned
- * day for a job nobody promised anything about. Counting down to the
- * second one under the word "deadline" would be inventing a promise, so
- * a job with no deadline counts down to its PLAN and says so.
- *
- * Suppressed on a rolled card with no deadline: the placement marker
- * there already prints "Planned <date> — N days late", and this would be
- * that same fact a second time. Where a real deadline exists it is shown
- * even on a rolled card, because the plan and the promise are then two
- * different dates and the reader needs both.
- */
-export function DueChip({ entry }: { entry: WorkPlanEntry }) {
-  const days = entry.days_until_due;
-  if (days === null) return null;
-  // FE-4 — the SERVER's word for what the number counts against; the
-  // detail page reads the same field, so card and detail agree.
-  const hasDeadline = entry.due_kind === "DEADLINE";
-  // WP-1 G0 — an OVERDUE-placed card's marker already prints
-  // "Gepland <day> — N dagen te laat"; without a real deadline the chip
-  // would be that same fact a second time, exactly like on ROLLED.
-  if (
-    !hasDeadline &&
-    (entry.placement === "ROLLED" || entry.placement === "OVERDUE")
-  )
-    return null;
-  // P-8R E — a real deadline prints its DATE and the countdown in one
-  // chip ("deadline 4 sep — nog 2 dagen"), so the reader gets the fact
-  // and the distance without opening the record.
-  return (
-    <DueChipCore
-      days={days}
-      hasDeadline={hasDeadline}
-      dueDate={hasDeadline ? entry.due_date : null}
-    />
   );
 }
 
@@ -417,15 +250,17 @@ function TimeChip({ entry }: { entry: WorkPlanEntry }) {
   if (entry.viewer_settled) return null;
   const clock = clockText(entry);
   const isSlot = entry.kind === "TICKET_SLOT";
+  // P-9 §A.3 — the deadline (date AND countdown) is in the one fact
+  // line now, so the due chip is not repeated here; the chip keeps
+  // only what the line does not say: a real clock, "planned after the
+  // deadline", a multi-day window.
   const order: (() => React.ReactNode)[] = isSlot
     ? [
         () => clock && <ClockChip text={clock} />,
         () => entry.planned_after_deadline && <AfterDeadlineChip />,
-        () => <DueChip entry={entry} />,
       ]
     : [
         () => entry.planned_after_deadline && <AfterDeadlineChip />,
-        () => <DueChip entry={entry} />,
         () => clock && <ClockChip text={clock} />,
         () => {
           const window = dayWindowText(entry, t);
@@ -449,29 +284,28 @@ function ClockChip({ text }: { text: string }) {
 }
 
 /**
- * P-3 §A.2 — THE ONE STATUS LINE.
- *
- * Settled: the past-tense sentence. A visitor on this column: the reason
- * it is here (the placement marker). A live card at home: the plain
- * status badge. Exactly one of the three, never a badge under a marker.
+ * P-3 §A.2 — THE ONE STATUS LINE. P-9 §A.3 — and it is the ONE card fact
+ * sentence (`cardFact.ts`), the same words the zones and the detail
+ * headers print for the same state: "planned Tue 2 Sep · 4 h · Ahmet ·
+ * deadline 4 Sep (2 days left)", "planned Mon 19 Aug · 2 days late",
+ * "reported done 21 Aug by Ahmet · waiting for your check 3 days",
+ * "planned Mon 19 Aug · finished Wed 21 Aug (2 days after the plan)".
+ * A blocked card (rejected, converted, cancelled, could not be done)
+ * keeps its closed word from the settled line. Never two lines.
  */
-function StatusLine({ entry }: { entry: WorkPlanEntry }) {
-  if (entry.viewer_settled) return <SettledLine entry={entry} />;
-  if (entry.placement !== "PLANNED") {
-    return (
-      <PlacementMarker
-        entry={entry}
-        deadlineIsHeadline={entry.due_kind === "DEADLINE" && entry.days_until_due !== null}
-      />
-    );
-  }
-  if (entry.kind === "EXTRA_WORK") {
-    return <StatusBadge status={{ kind: "extra-work", value: entry.status }} variant="cell" />;
-  }
-  if (entry.kind === "TICKET") {
-    return <StatusBadge status={{ kind: "ticket", value: entry.status }} variant="cell" />;
-  }
-  return <SlotStatusBadge status={entry.status as SlotStatus} />;
+function StatusLine({ entry, today }: { entry: WorkPlanEntry; today: string }) {
+  const { t } = useTranslation(["staff_slots", "common"]);
+  const state = cardFactState(entry, today);
+  if (state === "blocked") return <SettledLine entry={entry} />;
+  return (
+    <span
+      className={`wp-fact wp-fact-${state}`}
+      data-testid="agenda-card-fact"
+      data-state={state}
+    >
+      {cardFactLine(entry, today, t)}
+    </span>
+  );
 }
 
 export function WorkPlanCard({
@@ -479,12 +313,17 @@ export function WorkPlanCard({
   role,
   onComplete,
   onUnable,
+  today,
   hostParts,
 }: {
   entry: WorkPlanEntry;
   role: Role | null;
   onComplete: () => void;
   onUnable: () => void;
+  /** P-9 §A.3 — the server's today ("YYYY-MM-DD"), the day the fact
+   *  line's "Today" and "planned/finished" words are decided against.
+   *  Falls back to the browser's day for a caller without a payload. */
+  today?: string;
   /** W-LATE §3b — when set, this is a HOST card: the ticket's heading
    *  over the parts windowed on THIS day, on a day that is not the
    *  card's own. No status, no time, no actions — the job's own card
@@ -559,7 +398,7 @@ export function WorkPlanCard({
       {where && <span className="wp-card-where">{where}</span>}
 
       <div className="wp-card-status" data-testid="agenda-card-status">
-        <StatusLine entry={entry} />
+        <StatusLine entry={entry} today={today ?? toDateString(new Date())} />
       </div>
 
       {/* W-N1 §3 — WHICH half of the job is this person's. Reuses the

@@ -111,15 +111,19 @@ class WaitingCustomerLeavesTheColumnsTests(_P3Fixture, APITestCase):
         self.assertEqual(payload["counts"]["total"], 0)
         self.assertEqual(payload["entries"], [])
 
-    def test_a_past_week_browsed_as_history_keeps_placement(self):
+    def test_a_past_week_browsed_shows_it_behind_the_chip_not_in_a_column(self):
+        # P-9 §A.2a (owner ruling): "when it goes to customer approval it
+        # leaves the dates" — in EVERY week, not only the current one.
+        # Until P-9 a past week kept the calm card in its planned column
+        # as history.
         planned = self.today - 10 * DAY
         ticket = self._waiting(planned)
         payload = self.team(week=self.week_of(planned))
         card, bucket = self.find(payload, f"ticket-{ticket.id}")
-        self.assertEqual(bucket, "entries")
-        self.assertEqual(card["placement"], PLACEMENT_PLANNED)
-        self.assertEqual(card["day"], planned.isoformat())
+        self.assertEqual(bucket, "waiting_customer_entries")
         self.assertTrue(card["viewer_settled"])
+        self.assertEqual(payload["entries"], [])
+        self.assertEqual(payload["counts"]["total"], 0)
         # Still counted behind the chip, whole scope, on any week.
         self.assertEqual(payload["counts"]["waiting_customer"], 1)
 

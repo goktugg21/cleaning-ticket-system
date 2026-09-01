@@ -516,6 +516,20 @@ ENTRY_KEYS = {
     "settled_at",
     "reported_done_at",
     "settled_days_after_due",
+    # P-9 §A.3 — the one card standard's facts, on every kind: who
+    # reported the work done and how long ago, when the customer
+    # approved, who the finished work was sent to, the plan's hours, and
+    # how many days after the plan the finish came.
+    "reported_done_by_name",
+    "waiting_days",
+    "approved_at",
+    "sent_to_name",
+    "planned_hours",
+    "settled_days_after_plan",
+    # P-3 §A.3 — the same three moments as server-decided DAYS.
+    "settled_day",
+    "reported_done_day",
+    "approved_day",
     # P-3 §A.5 — a real plan whose last day is past the deadline.
     "planned_after_deadline",
     "assignee_names",

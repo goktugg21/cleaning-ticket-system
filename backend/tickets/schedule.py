@@ -49,7 +49,7 @@ def set_schedule(
     scheduled_end_at=None,
     time_window_label: str = "",
     reschedule_reason: str = "",
-    apply_to_slots: bool = False,
+    apply_to_slots: bool = True,
 ) -> str:
     """Set or move the ticket's schedule. Returns the history action
     written: `"set"` on first scheduling, `"rescheduled"` after.
@@ -58,6 +58,10 @@ def set_schedule(
     already has a schedule and no reason was given — the rule the
     schedule endpoint has enforced since Sprint 9B, now enforced for
     every door.
+
+    P-9 ruling 12(e) — `apply_to_slots` defaults to TRUE on every door:
+    one plan, one date. A caller that wants the job's date moved without
+    its people's days passes False explicitly.
 
     W-PLANTRUTH §1a — `apply_to_slots`. The owner's ruling is that the
     ticket-level schedule is a different fact from the planned day of
