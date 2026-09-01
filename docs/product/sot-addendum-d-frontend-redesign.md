@@ -1607,3 +1607,205 @@ answers "where is it?" the same way on every surface. Rulings:
     row); the guidance layer on admin surfaces (every completing action
     says what happened and the one next step, with one link — the
     melding-flow voice, system-wide).
+
+### D.21.1 P-10 amendments — "Personal schedule, honest words" (2026-09-01)
+
+The owner vetoed four P-9 calls on crmtest (web-Claude's, not CC's): the
+one-line card fact, the word "Busy", the always-open lanes, and the
+one-Tickets-queue decision. P-10 (`feat/p10-personal-schedule`) reverses
+them and repairs the defect the P-9 walk could not see because its
+fixtures were all stamped "today". Where this section disagrees with
+item 1, 2, 5 or 7 above, this section wins.
+
+1. **A job in review is not finished (A1).** `WAITING_MANAGER_REVIEW`
+   is not in the ladder's live set, so the board read it as DONE,
+   `settled_day` became the worker's report day and rule 10 hung the
+   card in the week of that report — unapproved work in past columns
+   where nobody looks. Rule 8 was dead code for any report older than
+   today. Now `detail_facts.ticket_finished_at` answers None while the
+   ticket is reported done and unchecked (manager OR customer); the SQL
+   twins (`_ticket_finish_expr`, the slot annotation's `Case`) say the
+   same; `settled_day` exists only once the chain is over — approved,
+   closed, or the blocked endings (a rejected / converted job hangs on
+   the day it left the board when that moment is known). Pin: a ticket
+   reported done last Wednesday and still in review is absent from
+   last week for EVERY viewer (`tickets/tests/test_p10_review_placement.py`).
+2. **Where "waiting for the manager" lives is personal (A2).** The
+   owner: *"everyone's schedule is their own; the manager sees it on
+   their day, the owner sees it in a section."*
+
+   | viewer | reported done, waiting for a manager's check |
+   |---|---|
+   | a manager responsible for the ticket (`ticket_responsible_manager_recipients`'s three tiers, asked about one person: named on the ticket → else the legacy `assigned_to` → else, for a BUILDING_MANAGER, the building ring) | a card on **today**, teal, titled "Check: {title}", facts Reported done {date} — {n} days ago · By {who} · Planned {day}, one button **Check the work** (opens the ticket). It stays on today until checked. Placement `REVIEW`; `counts.review_mine`. |
+   | SA / provider admin / a manager not responsible | the strip **Waiting for a manager's check — N** (`review_entries`, `counts.review`), summary "reported done, not yet checked: Gökhan 2 · Sophie 1 · oldest 6 days" (`manager_names` on each row, first names, counted over the loaded rows) |
+   | the worker who reported it | the strip **Reported done, waiting for the check — N**; never a column |
+
+   Waiting for the customer: a strip for SA / admin / manager; gone from
+   the worker's board (finished for them; it settles on the report day
+   once approved). `_ticket_board_q(…, user)` carries the viewer; the
+   Python twin drops every review row that is not on the viewer's
+   today.
+3. **The page is the board; the zones fold above it (A3).** The board
+   is the first thing after the strips and the week stepper. Everything
+   above it is a `ZoneStrip`: one row, full width, a native `<details>`
+   closed by default, the zone's colour on the left edge, a count pill,
+   the title, one summary sentence, a chevron; open/closed remembered
+   per user in localStorage (`agenda.strip.<id>`); rows capped at 8
+   with **Show all N** (the same table modal the day and Overdue doors
+   use). Colours, one each: Not planned yet **amber** · Waiting for a
+   manager's check **teal** · Waiting for the customer **violet**
+   (`--violet`, `--violet-soft`, `--violet-border` in index.css) ·
+   Stuck **red**. On hold is the grey fold **under** the board (moved
+   out of the zone). A strip with count 0 does not render (§D.6 rule
+   13). Summaries: Not planned yet "nobody has said when. The oldest
+   has waited {n} days." · Manager's check as above · Customer
+   "finished work sent for approval. Nothing to do until they answer."
+   The late chips (W-PLANTRUTH §1c) sit under the board too.
+4. **Card facts: three per card, one per line, short dates, more
+   behind "Details" (A4).** `components/workplan/cardFacts.ts` replaces
+   P-9's joined sentence (`cardFact.ts` is gone): each line a faint
+   label and a value; lines wrap inside the card (`overflow-wrap:
+   anywhere`, `min-width: 0`); people are their own line, never inside
+   a date. Dates are short (`lib/shortDate.ts`, `Intl.DateTimeFormat`
+   per locale: `Wed 26 Aug` / `wo 26 aug`; the year only when it is not
+   today's; ranges `Sun 30 Aug – Wed 9 Sep`; a clock only when a person
+   set one: `Today 09:00`). The table per state is the owner's (not
+   planned · planned · planned window with today inside it — "it comes
+   along with me until it's reported done, deadline passed or not" —
+   · rolled · check · reported done · waiting for the customer ·
+   finished); the finished card's Details is his explicit list:
+   original deadline, when it was done, how early/late against the
+   deadline, when the manager checked, when the customer approved.
+   The entry gained `created_day`, `manager_checked_day`,
+   `manager_checked_by_name`, `approved_by_name`, `reported_done_time`
+   and `manager_names`, all server-decided; `reported_done_*` now also
+   answer for a job that is over. "Details" is a native `<details>`
+   fold: a popover anchored to the card on a desk, a bottom sheet on a
+   phone, with the full list and one link **Open the ticket**. The
+   extra-work amount is NOT in Details: the work-plan entry carries no
+   money by design (Sprint 179A's privacy floor; STAFF read the same
+   shape) — the request page shows it.
+5. **Select → Plan N; "Park" is "Put on hold" (A5).** The strip's
+   **Select** enters selection (checkboxes; every row reachable); the
+   bar reads "N selected: **Plan N** · Put on hold · Close (SA) · Done".
+   **Plan N** (`PlanManyDialog`) is one dialog: a row per job (title,
+   building · customer, a day pre-filled today, an optional time for a
+   ticket), the 12(e) box ticked once for all, one Save; each row is
+   written through the single-row doors (`POST /tickets/<id>/schedule/`,
+   `POST /extra-work/bulk-dates/`), a refusal renders on ITS row and
+   never aborts the others; the toast — pushed AFTER the reload landed
+   — says "Planned {n} jobs — they're on the board" and names any that
+   were refused. "Park" → "Put on hold" on every key of this page
+   (`ticket_status.on_hold`'s own word; nl "In de wacht").
+6. **A6 — the count that didn't move, reproduced.** On crmtest (SA,
+   extra work 137, own fixture): Plan it → `POST /extra-work/bulk-dates/`
+   200 (`provider_planned_date` set; the request's own `display_phase`
+   turned SCHEDULED) — and the strip read 15 before, after, and after a
+   reload, with `ew-137` still in `undated_entries`. Root cause: every
+   extra-work predicate on the board (`_ew_undated_q`, `_ew_week_q`,
+   `_ew_upcoming_q`, `_ew_window_end_q`) and the Python twin
+   `_extra_work_job` read `preferred_date` (the customer's WISH) and
+   nothing else; the row's one button writes the provider's plan. The
+   ticket door was fine (three probes: 200, count 16 → 15 in the same
+   render). Fix: `_with_ew_dates` annotates `ew_start` / `ew_end` —
+   the provider's committed window when one exists, else the wish —
+   exactly `job_dates.job_window`'s branch for a ticket; every
+   predicate and the twin read those; the EW card's `plan_source` is
+   PROVIDER_PLAN for a planned one. Also: the page's single Plan it and
+   Plan N reload BEFORE they toast, so the strip count, the board and
+   the toast agree in the same render. Pin:
+   `tickets/tests/test_p10_bulk_plan.py`. A second finding from the
+   probes: detaching the demo toast nodes from the DOM (a walk-script
+   habit since P-9) crashes React's reconciler (`removeChild … not a
+   child`) to the app's error boundary — a probe artefact, not a
+   product defect; walk scripts hide toasts with CSS instead.
+7. **Extra work: the ticket's own words (B1), each tab opens on the
+   chip with work to do (B2), no extra work on the Tickets page (B3 —
+   reverses item 7 above), pricing edits in the row and nothing saves
+   itself (B4), the plan modal marks all four pricing needs (B5), the
+   create page loses the "Planning" fold (B6), Next-step buttons
+   aligned (B7).** The Approved tab's chips and badges are the
+   `ticket_status.*` labels the ticket itself shows — Not planned yet ·
+   Scheduled, not started (`acknowledged`) · In progress (`in_progress`)
+   · Waiting for the manager (`waiting_manager_review`, the new
+   computed phase `WAITING_MANAGER_CHECK`, provider viewer only) ·
+   Waiting for the customer (`waiting_customer_approval`) · Work approved
+   (`approved`); "Busy", "Planned", "To plan", "Done, check it" are
+   gone from both locales. The owner, twice: *"Tickets page: no extra
+   work. Ever."* — the Tickets list and `/tickets/stats/` always send
+   `is_extra_work=false`, the Origin column and `?origin=` are gone;
+   recurring visits stay; spawned tickets are found under Extra work →
+   Approved and on My schedule; deep links `/tickets/<id>` keep working.
+   The Open tab's period default (this month) stays, and its empty
+   state says it in the owner's words: "No new tickets created in
+   September yet. Earlier: 28 open — Show all time." (C4). Details of
+   B4–B7 in the P-10 report.
+8. **The list-page standard is §D.22.** Written from the Extra work
+   page as built and approved; the owner: *"this should be the standard
+   everywhere in the system."*
+
+## D.22 List pages — the standard (P-10, 2026-09-01)
+
+Written from the Extra work page as built in P-9 and polished in P-10,
+which the owner approved with the words "this should be the standard
+everywhere in the system". Every list page in the system is measured
+against these ten points; a page that does not meet them is a P-11
+candidate below. Docs only this sprint — no code on those pages.
+
+1. **A purpose sentence under the title.** One plain sentence: what the
+   page is for and what happens next (the Extra work tabs each carry
+   one; the page's own sentence sits under the h1).
+2. **Tabs with counts, each tab one question the operator asks.** The
+   tab label carries its count; the tabs partition the object's own
+   status set exhaustively (an exported `Record` over the status/phase
+   union, so a new state fails compilation rather than landing in no
+   tab); the guard "server count = tab counts (+ the hidden view)" is
+   a quiet footer line, red only when it fails.
+3. **Each tab opens on the chip with work to do.** The default chip is
+   the one the operator acts on first ("Not planned yet", "To invoice",
+   "Waiting"); "All" is always one click away; the URL carries the tab
+   AND the chip (`/page/:tab?chip=`) so a reload and "Back" land where
+   the person was.
+4. **One money / summary line per tab**, computed over the loaded rows
+   and labelled with which set it means. Never a KPI card row.
+5. **At most four chips per tab.** A chip is a sub-question of the
+   tab; it narrows by the object's own state (or by one declared
+   attribute, like "starts as soon as it is priced"); every chip has a
+   count.
+6. **At most six columns, tuned to the tab.** Columns answer the tab's
+   question; what the tab does not ask is not a column (route,
+   category and department left the Extra work list). Dates are short
+   (§D.21.1 item 4); people are names, not ids.
+7. **One next-step button per row, from the phase's own next step**
+   (`nextStep.ts` is the pattern: the detail page and the list share
+   ONE resolver, so the row and the page never disagree). Never two
+   buttons on a row; corrections live on the record behind
+   "Geavanceerd".
+8. **Filters folded behind one Filter button** (P-2's rule); the
+   button says how many are active; a narrowed list never looks like a
+   short one.
+9. **Cancelled / archived behind a link, never a tab.** A text link at
+   the foot of the last tab opens the same table filtered to the hidden
+   state; the guard counts it.
+10. **The status words are the object's own status words.** A chip, a
+    badge and the detail page use the SAME key (`ticket_status.*`,
+    `phase.*`) — never a parallel set, never a synonym, in both locales
+    (§D.2). "Busy" for `in_progress` is the P-10 example of what not to
+    do.
+
+Also settled here: rows over a server collection are bounded
+(CLAUDE.md §8); nothing renders as empty before the server answered
+(§D.6 rule 10); a list that is truncated says so; every completing
+action on the page says what happened and the one next step (§D.21
+item 10's guidance layer).
+
+### D.22.1 Pages that do not meet it yet — P-11 candidates
+
+| page | what it needs (two or three changes each) |
+|---|---|
+| **Tickets** (`DashboardPage`, the Tickets queue) | (1) a purpose sentence and the period default named beside the tabs, not only in the empty state; (2) each tab opens on its chip with work to do (Open → the oldest first; Busy → without hours this week) and the URL carries the chip; (3) columns cut to six per tab (drop type/priority where the tab does not ask) and ONE next-step button per row from the ticket's own next step (Plan it / Start / Check the work), the status words from `ticket_status.*` only. |
+| **Invoices** (`FacturenPage`) | (1) tabs by the invoice's own lifecycle with counts (Draft · Issued · Sent · Reversed) instead of filters, the hidden state (reversed) behind a link; (2) one money line per tab over the loaded rows; (3) one next step per row (Issue / Send / Open) and "Generate" → "Make a draft — nothing is sent until you send it" (§D.21 item 10). |
+| **Contracts** (`components/contracts/*`) | (1) a purpose sentence and tabs by term state (Active · Ending · Draft · Ended) with counts; (2) ≤5 columns and "Projects" → "Lines"; (3) a draft with no lines shows one card and one button (§D.21 item 10). |
+| **Hours** (`MyHoursPage`, the admin Hours page) | (1) the week is the tab and the stepper says where the hours are (P-9 D3 did the empty week; the rest of the page still shows every column); (2) one summary line per week (booked / planned / missing) over the loaded rows; (3) ONE next step per row (Enter hours / Approve). |
+| **SLA warnings** (`components/sla/*`) | (1) one purpose sentence and tabs by rung (L1 · L2 · L3) with counts; (2) ≤6 columns; (3) one action per row (Open the job) — a reference page, per §D.21 item 10. |
+| **Recurring** (`pages/planned-work/*`) | (1) tabs by the plan's own state (Active · Paused · Ended) with counts, cancelled behind a link; (2) the purpose sentence and the rule sentence merged into one; (3) one next step per row (Plan the next visit / Open). |

@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p9-find-your-way` — stacked on `feat/p8-truth`,
+**Branch:** `feat/p10-personal-schedule` — stacked on `feat/p9-find-your-way`,
 the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,44 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-10: personal schedule, honest words (Addendum D §D.21.1 / §D.22, 2026-09-01)
+
+The owner vetoed four P-9 calls on crmtest (the one-line card fact,
+"Busy", the always-open lanes, extra work on the Tickets page); P-10
+reverses them and repairs the review-placement defect the P-9 walk could
+not see (its fixtures were all stamped "today" — Step 0.2: every waiting
+/ finished fixture is now stamped at least five days in the past).
+Shipped on `feat/p10-personal-schedule`:
+
+- **A — My schedule: the repair.** A1 a job in review is NOT finished
+  (`ticket_finished_at` None while reported done; SQL twins; the closed
+  set incl. blocked endings); A2 review placement is personal (the
+  responsible manager's today card "Check: …" · the strip "Waiting for a
+  manager's check" for everybody else · the worker's "Reported done,
+  waiting for the check"); A3 the page is the board, the zones fold
+  above it as coloured strips (amber / teal / violet / red), On hold
+  under the board; A4 three facts per card, one per line, short dates
+  (`lib/shortDate.ts`), Details fold with the owner's full list; A5
+  Select → Plan N, "Park" → "Put on hold"; A6 reproduced and fixed (the
+  extra-work board read only the customer's wish; `_with_ew_dates`).
+  `tickets/tests/test_p10_review_placement.py`, `test_p10_bulk_plan.py`.
+- **B — Extra work polish.** B1 the ticket's own status words; B2 each
+  tab opens on the chip with work to do, `?chip=` in the URL; B3 no
+  extra work on the Tickets page (reverses P-9 D2); B4 pricing edits in
+  the row, nothing saves itself; B5 four pricing markers in the plan
+  modal; B6 the create page's "Planning" fold is gone; B7 Next-step
+  alignment. `extra_work/tests/test_p10_phase_words.py`,
+  `tickets/tests/test_p10_ticket_list_excludes_extra_work.py`.
+- **C — P-9 leftovers.** C1/C2 screenshots; C3 the stale e2e spec; C4
+  the Open tab's empty state on the 1st in the owner's words.
+- **D — the list-page standard.** Addendum D §D.22, with the P-11
+  candidates (Tickets, Invoices, Contracts, Hours, SLA warnings,
+  Recurring) and the two or three changes each needs.
+
+Queued for P-11: §D.22.1's six pages; §D.21 item 10's calm-down items
+(Contracts/Invoices, SLA warnings as a reference page, the guidance
+layer) are folded into that table.
 
 ### Done — P-9: find your way (Addendum D §D.21, 2026-09-01)
 
