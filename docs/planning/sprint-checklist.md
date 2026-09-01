@@ -13,9 +13,9 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p8-truth` — stacked on `feat/p7-finish`,
+**Branch:** `feat/p9-find-your-way` — stacked on `feat/p8-truth`,
 the head of the Addendum D redesign train (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -38,6 +38,43 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-9: find your way (Addendum D §D.21, 2026-09-01)
+
+The findability round: the schedule law, the Extra work tabs, the money
+ceremonies, the two empty pages. Step 0 pushed `feat/p8-truth` (it had
+never reached `origin`) and put the rule in CLAUDE.md §1. Shipped on
+`feat/p9-find-your-way`:
+
+- **A — the schedule law.** Four zones always visible (Not planned yet —
+  N · Waiting for the customer — N · the week board · one Filter fold);
+  waiting rows leave the columns of every week; finished work hangs on
+  the day it was finished (`Job.settled_day`, SQL twins on every
+  source, parity pinned); rolled work is on today only (12(d) closed);
+  `apply_to_slots` defaults true (12(e)); an unplanned ticket's start
+  button is disabled with the reason and a door (12(b)); the one card
+  fact line (`cardFact.ts`) on cards, zones and the ticket detail.
+  `tickets/tests/test_p9_schedule_law.py`.
+- **B — Extra work tabs.** `/extra-work/:tab` (to-price · with-customer
+  · approved · finished), cancelled as a foot link, ≤6 columns and one
+  next step per tab from `nextStep.ts`, one money sentence per tab, the
+  guard footer; B2 vocabulary; EN free of "meerwerk".
+  `extra_work/tests/test_p9_tabs.py`, `tests/e2e/p9_extra_work_tabs.spec.ts`.
+- **C — create + money.** Add-only "Something else"; "Total planned
+  hours" needed before pricing; every cart line in the Pricing table
+  ("needs a price"); the coverage check in the three confirms
+  (`lib/extraWorkCoverage.ts`, vitest); hours worked only once started;
+  "Contract price" / "Your price" (12(a)); C7 helper audit.
+- **D — the two empty pages.** One Tickets queue with an Origin column
+  and filter (server `kind`), tab counts always visible, the empty
+  state naming the period and the other tabs; Hours: the empty week
+  says where the hours are, the stepper marks weeks with hours.
+- **G — Settings.** Equal-height cards; last sign-in shown only when
+  recorded (12(c)).
+
+Queued for P-10 by name (§D.21 item 10): Contracts and Invoices
+calm-down, SLA warnings as a reference page, the guidance layer on
+admin surfaces.
 
 ### Done — P-8R: the truth round, audit-driven (Addendum D §D.20, 2026-08-30)
 

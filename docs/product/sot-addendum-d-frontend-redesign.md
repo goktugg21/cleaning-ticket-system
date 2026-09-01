@@ -1400,3 +1400,210 @@ crmtest with its own fixtures. Rulings:
     lists it under "Not planned yet" (E1–E3 on crmtest, tickets 431–433).
     By design, but the two views disagree about one fact; the default
     is the owner's call.
+
+## D.21 Find your way — the P-9 rulings (2026-09-01)
+
+Web-Claude's audit of the P-8R deploy and the owner's walk named the
+same thing three ways: work that exists but cannot be FOUND — a started
+meerwerk hidden from every list, a schedule board that files finished
+work under the day it was planned, a Tickets page that opens empty on
+the first of the month. P-9 (`feat/p9-find-your-way`) is the round that
+answers "where is it?" the same way on every surface. Rulings:
+
+1. **The schedule law (Part A).** The owner's model, verbatim in plain
+   words: *"Today shows what is planned for today and what I didn't do
+   yesterday. The past shows only what I finished. The future shows
+   what I will do. Not-planned and waiting-for-the-customer are outside
+   the dates."* `tickets/work_plan.py` states it as rules 9 and 10:
+   - **Four zones, always visible, in this order:** *Not planned yet —
+     N* (a section, not a toggle; the count is the section title in the
+     page's h2 size; each row: what · where · the one card fact line ·
+     one button **Plan it**, which opens a small dialog with today
+     pre-filled; Parked stays as the quiet fold under it), *Waiting for
+     the customer — N* (same shape; no action on the row except Open —
+     the reminder lives on the request, and deciding for the customer
+     lives behind the ticket's own Geavanceerd, so P-4's amber
+     approve-on-behalf button left the row), the **week board**, and
+     nothing else above the board: the status chips, the source
+     select, the search box and the two "elsewhere" doors (late any
+     week, planned later) fold behind ONE **Filter** button (P-2's
+     rule); the "how does this board work?" fold is gone.
+   - **A day column holds, per direction:** today = planned for today +
+     every unfinished job whose planned day has passed (rule 5) +
+     review rows (rule 8); future days = planned work only; **past days
+     = finished work only, placed on the day it was FINISHED.** Two
+     changes carry that: (a) a job waiting for the customer leaves the
+     columns of EVERY week, not only the current one (rule 9 in every
+     week — "when it goes to customer approval it leaves the dates");
+     (b) a finished job hangs on its settled day (rule 10):
+     `Job.settled_day` is the local date of the finish moment — the
+     worker's report (`manager_review_at` / `sent_for_approval_at`),
+     else approval / close — the same stamp the card prints
+     (`detail_facts.ticket_finished_at`), so a card can never sit in
+     one column and name another; a finished job with no known finish
+     moment (legacy rows) keeps its planned window. The SQL twins carry
+     a `settled_day` annotation on every source and the parity tests
+     hold (`test_p9_schedule_law.py::CountsAgreeWithTheLawTests`).
+   - **Ruling 12(d), closed by the owner's words:** an unfinished job
+     planned in a past week is NOT in that week — it is on today.
+   - **Ruling 12(e), decided:** `POST /tickets/<id>/schedule/`
+     `apply_to_slots` defaults **true** on every door (serializer,
+     `set_schedule`): one plan, one date — when the job's day moves,
+     every person's slot on it moves too; the modal shows the box
+     ticked with "Everyone on this job moves with it." The manager's
+     board and a worker's own schedule can never disagree about the day.
+   - **Ruling 12(b), decided:** an unplanned ticket's schedule card IS
+     the "Not planned yet — plan it" row (the lane's words); a start
+     the server would refuse (`transition_requirements_unmet`: no crew
+     or no day) is a DISABLED button with the reason beside it and a
+     door to the schedule card — the screen says so before the click
+     (§D.6 rule 14). The page asks the same `transition-requirements`
+     endpoint the modal asks.
+2. **The one card fact standard (§A.3).** One sentence per state, the
+   same sentence on the board's cards, the two zones and the detail
+   headers (`components/workplan/cardFact.ts`); no surface writes its
+   own version. The table:
+
+   | state | line |
+   |---|---|
+   | not planned | created {date} by {who} · deadline {date} ({n} days left / over) — or "no deadline" |
+   | planned, future | planned {weekday date} · {n} h · {people} · deadline {date} ({relative}) |
+   | planned, today | same, first word "Today" |
+   | rolled onto today | planned {weekday date} · {n} days late · deadline … |
+   | reported done, manager check | reported done {date} by {who} · waiting for your check {n} days |
+   | waiting for customer | reported done {date} · sent to {contact} · waiting {n} days |
+   | finished | planned {date} · finished {date} ({n} days after the plan / on the day) · approved {date} when later |
+
+   A deadline is always date AND relative; "planned" is only ever a day
+   a person chose (P-1). The board's due chip is gone from the card —
+   the line carries the deadline; the time chip keeps only what the
+   line does not say (a real clock, "planned after the deadline", a
+   multi-day window). The work-plan entry carries the facts the line
+   needs, server-computed: `reported_done_by_name`, `waiting_days`,
+   `approved_at`, `sent_to_name` (the customer's person who opened the
+   melding, else the organisation), `planned_hours` (the request's
+   budget, else the sum of its per-person rows; a worker's own hours on
+   their own slot), `settled_days_after_plan`, and the three moments as
+   server-decided DAYS (`settled_day`, `reported_done_day`,
+   `approved_day` — P-3 §A.3, never a slice of a UTC instant).
+3. **Same law for every viewer (§A.4).** SA and manager read the team
+   scope, staff their own jobs: identical zones, identical sentences.
+   Customers have no board (§D.3).
+4. **Extra work: four tabs (Part B).** `/extra-work/:tab`, URL-backed
+   like the People page, `/extra-work` landing on the first tab with
+   rows (else To price): **To price** (WAITING_PRICE; sub-chips All ·
+   Goes to the customer after pricing · Starts as soon as it is priced),
+   **With the customer** (WAITING_CUSTOMER_APPROVAL, REJECTED; Waiting ·
+   Declined), **Approved, in the works** (WAITING_PLANNING, SCHEDULED,
+   IN_EXECUTION, WAITING_COMPLETION_APPROVAL; All · To plan · Planned ·
+   Busy · Done, check it), **Finished** (DONE, INVOICED; All · To invoice
+   · Invoiced). Cancelled is not a tab: a text link at the foot of
+   Finished opens the same table filtered to cancelled. The tab label
+   carries its count; the P-8 guard (server count = tabs + cancelled)
+   stays as a quiet footer line, red only when it fails. The tab table
+   is ONE exported Record over `ExtraWorkDisplayPhase`
+   (`lib/extraWorkTabs.ts`): a new phase fails compilation, and
+   `extra_work/tests/test_p9_tabs.py` pins that every server phase maps
+   to exactly one tab or to cancelled. Per tab at most six columns and
+   ONE next-step button from `nextStep.ts` (the detail page's one
+   source): Price it / Price and start; Remind the customer (after 3
+   days, else Open); Plan it / Check the work / Open; Go to invoices /
+   Open invoice. One money sentence per tab from the loaded rows. Gone:
+   the "Quoted, not yet started" tile, the total-value line, the seven
+   open filter dropdowns (folded behind Filter, customer-first), the
+   route / category / department columns. Recurring work stays on its
+   own page (B5). Decided while building (the reference mockup was not
+   on disk): the "To price" split reads `request_intent`
+   (AUTO_START_AFTER_PRICING = "Starts as soon as it is priced",
+   everything else = "Goes to the customer" — `display_phase.py`'s own
+   branch); sub-chips are the composer pills, every tab with an "All"
+   chip first; dashboard `?status=` deep links land on the tab holding
+   that status with its chip preselected; "Remind the customer" opens
+   the request's messages (no reminder endpoint exists); the list row
+   gained eight additive read-only facts (`line_summary`,
+   `contract_estimate_amount`, `people_names`, `rejection_note`,
+   `completed_at`, `invoice_ref`, `contact_name`,
+   `customer_invoice_day` — the last three provider-only), loaded
+   once per page, query growth pinned at zero; the customer admin
+   embed keeps the tab in `?tab=`; `phase.ew.SCHEDULED` reads
+   "Planned" in EN like `phase.ticket.PLANNED` (one word per concept).
+5. **Vocabulary (B2).** `phase.ew.WAITING_PLANNING` = "To plan" / "Nog
+   plannen"; `phase.ew.IN_EXECUTION` and `phase.ticket.IN_EXECUTION` =
+   "Busy" / "Bezig" (the Tickets tab's word); `WAITING_COMPLETION_
+   APPROVAL` = "Done, check it" / "Klaar, controleer". The EN bundles
+   no longer contain the Dutch word "meerwerk" (§D.2: one word per
+   concept per language).
+6. **Extra work create and money (Part C).** "Something else" is a box
+   that adds only on Add (disabled with its reason while empty; a
+   typed-but-not-added line at submit is an amber question, never sent
+   silently). The plan modal's budget is "Total planned hours", needed
+   before pricing, marked as such, saveable at 0. Every requested line
+   is in the Pricing table: a cart line without a quote line renders
+   as an unpriced row ("needs a price"; pricing it creates the quote
+   line from the cart; "Leave it out" drops it). The Send / Start /
+   Approve-on-behalf confirms carry the coverage check
+   (`lib/extraWorkCoverage.ts`, one `CoverageNotice`): fewer / more /
+   quantity differs make the confirm amber and the primary button says
+   what it does ("Start with 2 of 3", "Send 4 lines (1 extra)", "Send
+   the price"). Hours worked are entered only once the work has started
+   (IN_EXECUTION → DONE; read-only after INVOICED). **Ruling 12(a),
+   decided:** a quote line's source badge says "Contract price" only
+   when it came from the contract pricing; a line the operator priced
+   says "Your price"; custom cart lines say "needs a price" until
+   priced — no field was added: `price_source` already carries the
+   provenance (CONTRACT only when the line has a service and its price
+   equals the applicable contract row), pinned by
+   `extra_work/tests/test_p9_price_source.py`; a customer reading the
+   same table sees "Quoted price". No helper sentence about something
+   the screen does not show (C7; the removed sentences are in the P-9
+   report). Decided while building: the old per-line optional note
+   left with the box (the request's description carries particulars);
+   the start / approve-on-behalf ceremonies name an uncovered line
+   without the "unless you add it" door, because the quote cannot
+   change any more; the "hours worked are entered once started" card
+   renders for WAITING_PLANNING / SCHEDULED only. Frontend unit tests
+   run on vitest (`npm run test:unit`), added on this sprint's explicit
+   ask.
+7. **One Tickets queue (Part D).** The `is_extra_work=false` default is
+   gone: the Tickets page shows every operational ticket with an
+   **Origin** column (Melding / Extra work / Recurring / Ticket, from
+   the server's `kind`) and Origin in the Filter fold; the four tabs
+   keep their counts visible; a tab's empty state points at the others
+   — and names the period when the period narrowed the list (the
+   Tickets page opens on this month; on the 1st that is empty by
+   design, and the sentence offers "Show all time"). The Extra work
+   page is the money view, the Tickets page the operational view.
+   The Origin filter is a server-side `?origin=melding|meerwerk|
+   recurring|ticket` on the list AND on `stats` (never `?type=REPORT`:
+   on crmtest every one of the 91 extra-work tickets is typed REPORT
+   too), partitioning rows exactly as the column labels them;
+   `hide_finished_extra_work` is no longer sent by the Tickets page
+   (finished work of every origin lives on the Done tab). Hours: an
+   empty week says where the hours are ("No hours saved for week 36
+   yet. Last saved week: 35 (312 h)", Open week 35, Enter hours worked)
+   and a full-year week strip under the week bar marks the weeks that
+   hold hours (`GET /api/timesheets/weeks/with-hours/?iso_year=`, one
+   aggregate query in the entries list's own scope; no server cache —
+   `settings.CACHES` is not configured — the pages refetch it with the
+   entries). Open question for the owner, from D1: with the
+   `this_month` default the Open tab opens empty on the 1st of every
+   month; a status pile narrowed by creation month hides open work for
+   being older.
+8. **Settings (Part G).** Profile and Password cards are equal height.
+   **Ruling 12(c), decided:** "Last sign-in" shows the last token issue
+   time if it is recorded; if it is not, the line is removed — a fact
+   the system does not know is not shown. It is NOT recorded (SimpleJWT
+   without `UPDATE_LAST_LOGIN`; the token view does not touch
+   `last_login`), so the row is gone; the setting was not switched on.
+9. **Process.** A report about commits that are not on `origin` is a
+   report about nothing: `feat/p8-truth` was pushed as P-9's step 0
+   and the rule is in CLAUDE.md §1 beside "CC pushes branches".
+10. **Queued for P-10, not started:** Contracts and Invoices calm-down
+    (a draft contract with no lines shows one card and one button;
+    "Projects" → "Lines"; contracts list ≤5 columns; Invoices
+    "Generate" → "Make a draft" with "nothing is sent until you send
+    it"; the creator e-mail under draft numbers goes); SLA warnings as
+    an approved reference page (one purpose sentence, one action per
+    row); the guidance layer on admin surfaces (every completing action
+    says what happened and the one next step, with one link — the
+    melding-flow voice, system-wide).

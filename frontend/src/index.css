@@ -2143,14 +2143,22 @@ table.data-table {
    Password right, Notifications spanning both columns underneath, so
    no half of the page is ever empty. minmax(0, 1fr) tracks so a long
    value can never force horizontal scroll. One column at laptop
-   widths and below (<= 1100px); align-items: start keeps the shorter
-   card from stretching to its neighbour's height. */
+   widths and below (<= 1100px). P-9 G — align-items: stretch: the
+   Profile and Password cards are the same height (P-8R's `start` was
+   deliberate and this round's ruling overrides it), and each card is a
+   column flex so its actions row sits on the shared bottom edge. */
 .settings-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
+.settings-layout > .card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.settings-layout > .card > .form-section { flex: 1 1 auto; }
 .settings-span { grid-column: 1 / -1; }
 /* The spanning Notifications card lays its toggle rows out two
    abreast at desktop so a label is never a card-width away from its
@@ -16882,3 +16890,70 @@ form.card + .form-fold { margin-top: 16px; }
   color: var(--green-2);
   text-decoration-style: solid;
 }
+
+/* P-9 B — Extra work tabs */
+/* The tab strip is the People page's `.customer-tabs`; each tab carries
+   its count. The sub-chips are the composer pills. One purpose sentence
+   and one money line above the table; the cancelled door and the P-8
+   guard line under it. */
+.ew-tabs .ew-tab-count {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+.ew-tabs .customer-tab.active .ew-tab-count { color: var(--green); }
+.ew-tab-head { margin: 0 0 12px; }
+.ew-tab-title {
+  font-family: var(--f-head);
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.ew-tab-purpose { font-size: 13px; margin: 0 0 6px; max-width: 78ch; }
+.ew-tab-money {
+  margin: 0 0 8px;
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.ew-tab-band {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.ew-subtabs { flex-wrap: wrap; }
+.ew-chip-count { margin-left: 6px; font-weight: 600; opacity: 0.8; }
+.ew-filter-fold { margin: 0 0 14px; }
+/* The fold body reuses the old bar's field layout; the bar's own box is
+   not wanted inside a fold. */
+.ew-filter-fold .filter-fold-body.ew-list-filters { margin-bottom: 0; padding: 12px 0 0; }
+.ew-cell-sub { margin-top: 2px; }
+.ew-late { color: var(--red); font-weight: 600; }
+.ew-warn { color: var(--amber); font-weight: 600; }
+.ew-reason {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ew-tab-table .td-next { text-align: right; white-space: nowrap; }
+.ew-list-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.ew-cancelled-link {
+  width: fit-content;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-decoration: underline dotted;
+}
+.ew-cancelled-link:hover { color: var(--text); }
+.ew-list-guard-line { margin: 0; }
+.admin-card .btn { margin: 8px 14px 12px; }
+
+/* P-9 D — the Tickets queue's Origin column: one word, never wrapped. */
+.td-origin { white-space: nowrap; }
+/* P-9 B — the right-hand group of a tab's band (the cancelled door). */
+.ew-tab-band-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
