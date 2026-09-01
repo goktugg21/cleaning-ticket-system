@@ -142,8 +142,16 @@ export function cardFactLine(entry: WorkPlanEntry, todayIso: string, t: TFunctio
             : t("agenda.fact_reported_done", { date: reported }),
         );
       }
+      // "your check" only for the reader who checks (rule 8 places the
+      // card on their today, placement REVIEW); the worker's own card
+      // says whose check it waits for.
       parts.push(
-        t("agenda.fact_waiting_check", { count: entry.waiting_days ?? entry.stuck_age_days ?? 0 }),
+        t(
+          entry.placement === "REVIEW"
+            ? "agenda.fact_waiting_check"
+            : "agenda.fact_waiting_managers_check",
+          { count: entry.waiting_days ?? entry.stuck_age_days ?? 0 },
+        ),
       );
       break;
     }

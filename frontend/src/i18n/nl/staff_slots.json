@@ -357,5 +357,7 @@
   "agenda.fact_finished_after_other": "afgerond {{date}} ({{count}} dagen na de planning)",
   "agenda.fact_finished_on_the_day": "afgerond {{date}} (op de dag zelf)",
   "agenda.fact_approved": "goedgekeurd {{date}}",
-  "agenda.fact_wished": "klant wenst {{date}}"
+  "agenda.fact_wished": "klant wenst {{date}}",
+  "agenda.fact_waiting_managers_check_one": "wacht {{count}} dag op de controle van de manager",
+  "agenda.fact_waiting_managers_check_other": "wacht {{count}} dagen op de controle van de manager"
 }

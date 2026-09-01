@@ -357,5 +357,7 @@
   "agenda.fact_finished_after_other": "finished {{date}} ({{count}} days after the plan)",
   "agenda.fact_finished_on_the_day": "finished {{date}} (on the day)",
   "agenda.fact_approved": "approved {{date}}",
-  "agenda.fact_wished": "customer wishes {{date}}"
+  "agenda.fact_wished": "customer wishes {{date}}",
+  "agenda.fact_waiting_managers_check_one": "waiting for the manager's check {{count}} day",
+  "agenda.fact_waiting_managers_check_other": "waiting for the manager's check {{count}} days"
 }
