@@ -1161,24 +1161,35 @@ export function TicketDetailPage() {
   const [startReqs, setStartReqs] = useState<{
     ticketId: number;
     stamp: string;
+    target: TicketStatus;
     unmet: string[];
   } | null>(null);
   const scheduleAnchor = useMissingPieceAnchor<HTMLDivElement>("schedule");
-  // P-9 12(b) — ask the server what the start still needs, whenever a
-  // start is legal for THIS ticket in THIS state (the stamp changes
-  // with every save, so a plan set on the schedule card re-asks).
-  const startIsLegal = Boolean(ticket?.allowed_next_statuses.includes("IN_PROGRESS"));
+  // P-9 12(b) — ask the server what the forward move still needs,
+  // whenever one is legal for THIS ticket in THIS state (the stamp
+  // changes with every save, so a plan set on the schedule card
+  // re-asks). P-10 C1 — the SAME gate covers "Mark as seen and planned"
+  // (`-> ACKNOWLEDGED` needs a day, `transition_requirements.py`): the
+  // walk found a spawned, unplanned ticket offering a live acknowledge
+  // button that the server refused with `transition_requirements_unmet`.
+  const startTarget: TicketStatus | null = ticket?.allowed_next_statuses.includes("IN_PROGRESS")
+    ? "IN_PROGRESS"
+    : ticket?.allowed_next_statuses.includes("ACKNOWLEDGED")
+      ? "ACKNOWLEDGED"
+      : null;
+  const startIsLegal = startTarget !== null;
   const startTicketId = ticket?.id ?? null;
   const startStamp = ticket ? `${ticket.status}:${ticket.updated_at}` : "";
   useEffect(() => {
-    if (!startIsLegal || startTicketId === null) return;
+    if (startTarget === null || startTicketId === null) return;
     let cancelled = false;
-    getTransitionRequirements(startTicketId, "IN_PROGRESS")
+    getTransitionRequirements(startTicketId, startTarget)
       .then((reqs) => {
         if (cancelled) return;
         setStartReqs({
           ticketId: startTicketId,
           stamp: startStamp,
+          target: startTarget,
           unmet: reqs.requirements.filter((r) => !r.satisfied).map((r) => r.key),
         });
       })
@@ -1189,7 +1200,7 @@ export function TicketDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [startIsLegal, startTicketId, startStamp]);
+  }, [startIsLegal, startTarget, startTicketId, startStamp]);
   const [transitionLoading, setTransitionLoading] = useState(false);
   const [transitionStaff, setTransitionStaff] = useState<AssignableStaff[]>([]);
   /* W-FIX1 C3 (audit F34) — why the assignee list is empty, when the
@@ -3133,9 +3144,13 @@ export function TicketDetailPage() {
   // P-9 12(b) — the server's answer, read only when it describes THIS
   // ticket in THIS state (the effect that asks lives with the other
   // hooks above the early return).
-  const offersStart = primaryButtons.includes("IN_PROGRESS");
+  const offersStart = startTarget !== null && primaryButtons.includes(startTarget);
   const startUnmet =
-    offersStart && startReqs && startReqs.ticketId === ticket.id && startReqs.stamp === startStamp
+    offersStart &&
+    startReqs &&
+    startReqs.ticketId === ticket.id &&
+    startReqs.stamp === startStamp &&
+    startReqs.target === startTarget
       ? startReqs.unmet.filter((key) => key === "assignee" || key === "schedule")
       : [];
   const startBlocked = startUnmet.length > 0;
@@ -3171,9 +3186,9 @@ export function TicketDetailPage() {
       // P-9 12(b) / rule 14 — a start the server would refuse is not a
       // live button; the sentence beside it says what to change.
       disabled={
-        statusBusy !== null || overrideBusy || (status === "IN_PROGRESS" && startBlocked)
+        statusBusy !== null || overrideBusy || (status === startTarget && startBlocked)
       }
-      title={status === "IN_PROGRESS" && startBlocked ? startBlockedSentence : undefined}
+      title={status === startTarget && startBlocked ? startBlockedSentence : undefined}
       data-testid={`workflow-move-${status}`}
       onClick={() => void openTransition(status)}
     >

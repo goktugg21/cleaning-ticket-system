@@ -97,7 +97,8 @@ import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { SlotStatusBadge } from "../components/SlotStatusBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { formatDate } from "../lib/intl";
+import { formatDate, localeCode } from "../lib/intl";
+import { shortDay } from "../lib/shortDate";
 import {
   currentIsoWeek,
   formatIsoWeek,
@@ -514,7 +515,10 @@ function WorkPlanWeek() {
       // board and the toast agree in the same render.
       await refetch();
       setPlanTarget(null);
-      push({ title: t("agenda.plan_it_saved", { date: formatDay(choice.day) }), variant: "success" });
+      push({
+        title: t("agenda.plan_it_saved", { date: shortDay(choice.day, localeCode(), todayKey) }),
+        variant: "success",
+      });
     } catch (err) {
       // Surfaced in the dialog, never swallowed.
       setPlanError(getApiError(err));
