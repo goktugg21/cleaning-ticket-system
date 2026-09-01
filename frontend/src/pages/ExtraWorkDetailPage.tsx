@@ -112,7 +112,6 @@ import {
   isProviderManagementRole,
 } from "../auth/permissions";
 import type {
-  ExtraWorkDisplayPhase,
   AssignmentCandidate,
   Contact,
   CustomerLabel,
