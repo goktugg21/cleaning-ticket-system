@@ -1738,7 +1738,13 @@ item 1, 2, 5 or 7 above, this section wins.
    Approved and on My schedule; deep links `/tickets/<id>` keep working.
    The Open tab's period default (this month) stays, and its empty
    state says it in the owner's words: "No new tickets created in
-   September yet. Earlier: 28 open — Show all time." (C4). Details of
+   September yet. Earlier: 28 open — Show all time." (C4). C1's walk
+   found that the rule-14 gate on the ticket page asked the server about
+   IN_PROGRESS only: a spawned, unplanned ticket is OPEN, its primary is
+   "Mark as seen and planned" (`→ ACKNOWLEDGED` needs a day too), and
+   that button was live and refused on click; the gate now keys off the
+   banner's own primary move (the first legal `PRIMARY_TRANSITIONS`
+   entry) and disables it with the same sentence and door. Details of
    B4–B7 in the P-10 report.
 8. **The list-page standard is §D.22.** Written from the Extra work
    page as built and approved; the owner: *"this should be the standard
