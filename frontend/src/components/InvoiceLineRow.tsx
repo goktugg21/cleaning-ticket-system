@@ -70,6 +70,9 @@ const UNIT_TYPE_I18N_KEY: Record<ExtraWorkUnitType | ServiceUnitType, string> =
 interface InvoiceLineRowSharedProps {
   editable?: boolean;
   onEdit?: () => void;
+  /** P-10 B4 — a per-row testid for the Edit button (the proposal
+   *  builder's `pricing-row-edit-<id>`); the default is the shared one. */
+  editTestId?: string;
   onRemove?: () => void;
   rowTestId?: string;
   subLabel?: ReactNode;
@@ -297,7 +300,7 @@ export function InvoiceLineRow(props: InvoiceLineRowProps) {
                 type="button"
                 className="btn btn-ghost btn-sm"
                 onClick={props.onEdit}
-                data-testid="invoice-line-row-edit"
+                data-testid={props.editTestId ?? "invoice-line-row-edit"}
               >
                 {t("invoice_row.action_edit")}
               </button>

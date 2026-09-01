@@ -16961,3 +16961,48 @@ form.card + .form-fold { margin-top: 16px; }
 .td-origin { white-space: nowrap; }
 /* P-9 B — the right-hand group of a tab's band (the cancelled door). */
 .ew-tab-band-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+/* P-10 B — extra work polish. */
+/* B5 — the "required for pricing" marker after a `.field-label` word
+   (first work day, people, responsible manager, total planned hours):
+   the label is uppercase bold; the marker text is not. */
+.field-label .ew-plan-pricing-marker {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* B6 — the series switch stands in the When section beside the wish
+   date (the "Planning" fold it lived in is gone): one clear line of
+   air above it, as P-1 §4 gave it inside the fold. */
+.ew-create-series {
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--border-soft);
+}
+/* B7 — the Actions card's "Other actions" buttons. Measured on crmtest
+   at 1440 (extra work 123): the heading, the billing-month row and the
+   technical values all start at x=313 (the card's gutter), but each
+   button under the heading was stretched to the full 1070px with its
+   label centred (`.ew-workflow-other-list > .btn` above: width: 100%;
+   justify-content: center), so the label floated mid-card, out of
+   line with everything around it. The buttons now start where the
+   heading starts, at their own width, one under the other. */
+.ew-workflow-other-list > .btn {
+  width: auto;
+  align-self: flex-start;
+  justify-content: flex-start;
+}
+
+/* P-10 B4 — the Pricing table's row editor: inputs where the values
+   were, a notes row under the line, the reason Save is refused. */
+.ew-pricing-table .pricing-row-editing td { vertical-align: top; padding-left: 8px; padding-right: 8px; }
+.pricing-row-input { width: 100%; min-width: 0; padding: 6px 8px; font-size: 13px; }
+.pricing-row-num { text-align: right; font-variant-numeric: tabular-nums; }
+.pricing-row-unit-name { margin-top: 6px; }
+.pricing-row-money { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ew-pricing-table .pricing-row-actions { flex-wrap: wrap; justify-content: center; gap: 4px; }
+.ew-pricing-table .pricing-row-notes td { padding-top: 0; text-align: left; }
+.pricing-row-notes-body { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: flex-end; }
+.pricing-row-note { display: flex; flex-direction: column; gap: 4px; flex: 1 1 260px; min-width: 0; }
+.pricing-row-why { margin: 0 0 0 auto; color: var(--amber); font-size: 13px; font-weight: 600; }
+/* P-10 C4 — the period empty state is one line with one link in it. */
+.tickets-tab-empty-line { margin: 0; }

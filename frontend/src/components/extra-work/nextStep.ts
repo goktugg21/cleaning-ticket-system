@@ -411,8 +411,10 @@ export function listNextStep(
     case "IN_EXECUTION":
       return open;
 
+    case "WAITING_MANAGER_CHECK":
     case "WAITING_COMPLETION_APPROVAL": {
-      // The finished work is checked on the ticket that did it.
+      // The finished work is checked on the ticket that did it — the
+      // manager's own check (P-10 B1) and the customer's alike.
       const ticket = row.spawned_tickets[0];
       return ticket
         ? {

@@ -4,18 +4,34 @@
  * The list is four tabs, each holding a set of `display_phase` values
  * (FE-2's one server-computed phase, Addendum D §D.4). This file is the
  * only place that says which phase sits on which tab, which sub-chips a
- * tab offers, and where a `?status=` deep link lands. The page iterates
- * these exported constants and never keeps a second copy — CLAUDE.md's
- * exhaustiveness rule: `TAB_OF_PHASE` is a `Record` over the FULL phase
- * union, so a phase the union gains and this table does not place fails
- * to compile, instead of landing in no tab and going uncounted.
+ * tab offers, which chip a tab OPENS on, and where a `?status=` deep
+ * link lands. The page iterates these exported constants and never
+ * keeps a second copy — CLAUDE.md's exhaustiveness rule: `TAB_OF_PHASE`
+ * is a `Record` over the FULL phase union, so a phase the union gains
+ * and this table does not place fails to compile, instead of landing in
+ * no tab and going uncounted.
+ *
+ * P-10 B1 — THE CHIP WORDS ARE THE TICKET'S OWN WORDS. The owner: "Don't
+ * tickets have their own statuses? Why aren't you using them?" The
+ * Approved tab's chips (and the Finished tab's DONE chip) point at the
+ * `common:ticket_status.*` keys the ticket itself shows; the
+ * `common:phase.ew.*` values every badge and banner reads are set to
+ * the same words, so no surface shows a parallel word. The one state
+ * that had no phase — the crew reported done, the manager has not
+ * checked — is `WAITING_MANAGER_CHECK` (provider viewer only).
+ *
+ * P-10 B2 — EACH TAB OPENS ON THE CHIP WITH WORK TO DO (`DEFAULT_CHIP`);
+ * "All" is always one click away. The page carries the chosen chip in
+ * the address (`?chip=<key>`); a missing or unknown value means the
+ * tab's default.
  *
  * CANCELLED is not a tab. It is a view reached from the foot of Finished
  * ("Cancelled requests (32)"), and the P-8 guard still holds over it:
  * server count = the four tab counts + cancelled.
  *
  * Pure data and pure functions only. No React, no i18n — labels are
- * KEYS in the `extra_work` namespace, resolved by the page.
+ * KEYS (the `extra_work` namespace unless prefixed), resolved by the
+ * page.
  */
 import type {
   ExtraWorkDisplayPhase,
@@ -52,6 +68,7 @@ export const TAB_OF_PHASE: Readonly<Record<ExtraWorkDisplayPhase, ExtraWorkBucke
   WAITING_PLANNING: "approved",
   SCHEDULED: "approved",
   IN_EXECUTION: "approved",
+  WAITING_MANAGER_CHECK: "approved",
   WAITING_COMPLETION_APPROVAL: "approved",
   DONE: "finished",
   INVOICED: "finished",
@@ -104,23 +121,55 @@ export const SUB_CHIPS: Readonly<Record<ExtraWorkTab, ReadonlyArray<ExtraWorkSub
     },
     { key: "declined", labelKey: "tabs.chip_declined", phases: ["REJECTED"] },
   ],
+  // P-10 B1 — the ticket's own words, in the order the work moves.
+  // "Not planned yet" is the schedule's zone word (My schedule's
+  // `staff_slots:agenda.undated_title`), kept identical in the shared
+  // `common:phase.ew.WAITING_PLANNING` every badge reads.
   approved: [
     ALL_CHIP,
-    { key: "to_plan", labelKey: "common:phase.ew.WAITING_PLANNING", phases: ["WAITING_PLANNING"] },
-    { key: "planned", labelKey: "common:phase.ew.SCHEDULED", phases: ["SCHEDULED"] },
-    { key: "busy", labelKey: "common:phase.ew.IN_EXECUTION", phases: ["IN_EXECUTION"] },
+    { key: "not_planned", labelKey: "common:phase.ew.WAITING_PLANNING", phases: ["WAITING_PLANNING"] },
+    { key: "scheduled", labelKey: "common:ticket_status.acknowledged", phases: ["SCHEDULED"] },
+    { key: "in_progress", labelKey: "common:ticket_status.in_progress", phases: ["IN_EXECUTION"] },
     {
-      key: "check",
-      labelKey: "common:phase.ew.WAITING_COMPLETION_APPROVAL",
+      key: "manager_check",
+      labelKey: "common:ticket_status.waiting_manager_review",
+      phases: ["WAITING_MANAGER_CHECK"],
+    },
+    {
+      key: "customer_check",
+      labelKey: "common:ticket_status.waiting_customer_approval",
       phases: ["WAITING_COMPLETION_APPROVAL"],
     },
   ],
   finished: [
     ALL_CHIP,
+    // B2 — the Finished tab opens on the operator's question ("To
+    // invoice"); the row badge beside it says the ticket's own word
+    // ("Work approved", B1). A question is not a status.
     { key: "to_invoice", labelKey: "tabs.chip_to_invoice", phases: ["DONE"] },
     { key: "invoiced", labelKey: "common:phase.ew.INVOICED", phases: ["INVOICED"] },
   ],
 };
+
+/**
+ * P-10 B2 — the chip a tab opens on: the first thing to do there. The
+ * owner on Approved: "these are the first things to do" — the rows
+ * nobody has planned. Exhaustive over the tabs; every value names a
+ * chip of its own tab (pinned by `extraWorkTabs.test.ts`).
+ */
+export const DEFAULT_CHIP: Readonly<Record<ExtraWorkTab, string>> = {
+  "to-price": ALL_CHIP.key,
+  "with-customer": "waiting",
+  approved: "not_planned",
+  finished: "to_invoice",
+};
+
+/** The chip `raw` names on `tab`, or null when it names none (a
+ *  missing or unknown `?chip=` means the tab's default). */
+export function chipFromParam(tab: ExtraWorkTab, raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return SUB_CHIPS[tab].some((chip) => chip.key === raw) ? raw : null;
+}
 
 /** Does the work start by itself once it is priced? Mirrors the
  *  `AUTO_START_AFTER_PRICING` branch of `display_phase.py`. */
@@ -163,8 +212,8 @@ const STATUS_DEEP_LINK: Readonly<Record<ExtraWorkStatus, DeepLinkTarget>> = {
   REQUESTED: { bucket: "to-price", chip: null },
   UNDER_REVIEW: { bucket: "to-price", chip: null },
   PRICING_PROPOSED: { bucket: "with-customer", chip: "waiting" },
-  CUSTOMER_APPROVED: { bucket: "approved", chip: "to_plan" },
-  IN_PROGRESS: { bucket: "approved", chip: "busy" },
+  CUSTOMER_APPROVED: { bucket: "approved", chip: "not_planned" },
+  IN_PROGRESS: { bucket: "approved", chip: "in_progress" },
   COMPLETED: { bucket: "finished", chip: null },
   CUSTOMER_REJECTED: { bucket: "with-customer", chip: "declined" },
   CANCELLED: { bucket: CANCELLED_VIEW, chip: null },

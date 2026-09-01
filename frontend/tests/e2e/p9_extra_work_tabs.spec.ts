@@ -92,10 +92,47 @@ test("the Extra work tabs add up to the server and each tab says what it is for"
   await expect(page).toHaveURL(/\/extra-work\/finished$/);
   await expect(page.getByTestId("extra-work-cancelled-title")).toHaveCount(0);
 
+  // P-10 B2 — each tab opens on the chip with work to do: Approved on
+  // "Not planned yet", Finished on the DONE chip, With the customer on
+  // Waiting, To price on All. The chosen chip rides in the address, so
+  // a reload lands on it; "All" is one click away.
+  await page.goto("/extra-work/approved");
+  await expect(page.getByTestId("extra-work-chip-not_planned")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  // P-10 B1 — the chip words are the ticket's own status words.
+  await expect(page.getByTestId("extra-work-chip-scheduled")).toBeVisible();
+  await expect(page.getByTestId("extra-work-chip-in_progress")).toBeVisible();
+  await expect(page.getByTestId("extra-work-chip-manager_check")).toBeVisible();
+  await expect(page.getByTestId("extra-work-chip-customer_check")).toBeVisible();
+  await page.getByTestId("extra-work-chip-all").click();
+  await expect(page).toHaveURL(/\/extra-work\/approved\?chip=all/);
+  await expect(page.getByTestId("extra-work-chip-all")).toHaveAttribute("aria-selected", "true");
+  await page.reload();
+  await expect(page.getByTestId("extra-work-chip-all")).toHaveAttribute("aria-selected", "true");
+  await page.goto("/extra-work/approved?chip=nonsense");
+  await expect(page.getByTestId("extra-work-chip-not_planned")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.goto("/extra-work/finished");
+  await expect(page.getByTestId("extra-work-chip-to_invoice")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.goto("/extra-work/with-customer");
+  await expect(page.getByTestId("extra-work-chip-waiting")).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.goto("/extra-work/to-price");
+  await expect(page.getByTestId("extra-work-chip-all")).toHaveAttribute("aria-selected", "true");
+
   // A dashboard deep link lands on the tab that holds the status, with
-  // the matching chip lit.
+  // the matching chip lit — and written to the address (P-10 B2).
   await page.goto("/extra-work?status=CUSTOMER_REJECTED");
-  await expect(page).toHaveURL(/\/extra-work\/with-customer/);
+  await expect(page).toHaveURL(/\/extra-work\/with-customer\?chip=declined/);
   await expect(page.getByTestId("extra-work-chip-declined")).toHaveAttribute(
     "aria-selected",
     "true",

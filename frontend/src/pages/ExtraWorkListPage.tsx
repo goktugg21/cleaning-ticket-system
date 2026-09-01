@@ -11,6 +11,10 @@
 //   step in `components/extra-work/nextStep.ts` (the detail page's own
 //   source). Cancelled is not a tab: it is a link at the foot of
 //   Finished, and the P-8 guard still adds up over it.
+// P-10 B1/B2 — the chips say the ticket's own status words (the table
+//   in `lib/extraWorkTabs.ts`), each tab opens on the chip with work to
+//   do (`DEFAULT_CHIP`), and the chosen chip rides in the address
+//   (`?chip=<key>`) so a reload lands where the person was.
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -67,11 +71,13 @@ import { customerLabelName } from "../lib/customerLabelName";
 import {
   ALL_CHIP,
   CANCELLED_VIEW,
+  DEFAULT_CHIP,
   EXTRA_WORK_TABS,
   SUB_CHIPS,
   TAB_LABEL_KEY,
   TAB_PURPOSE_KEY,
   bucketOf,
+  chipFromParam,
   daysSince,
   deepLinkTarget,
   firstTabWithRows,
@@ -320,17 +326,14 @@ export function ExtraWorkList({
   // `?status=<ExtraWorkStatus|phase>` (dashboard widgets, RF-18) lands
   // on the tab that holds it and preselects the matching chip;
   // `?filter=quote_requests` (the customer page's Quotes shortcut) is
-  // the To price tab. A chip carried across the auto-mode redirect
-  // rides in `location.state`, because the redirect drops the params.
+  // the To price tab. P-10 B2 — the chip a deep link preselects is
+  // WRITTEN to the address (`?chip=`) by the redirect below, so nothing
+  // rides in `location.state` any more.
   const [deepLink] = useState<DeepLinkTarget | null>(() => {
     const byStatus = deepLinkTarget(searchParams.get("status"));
     if (byStatus) return byStatus;
     if (searchParams.get("filter") === "quote_requests") {
       return { bucket: "to-price", chip: null };
-    }
-    const carried = (location.state as { chip?: string; bucket?: ExtraWorkBucket } | null) ?? null;
-    if (carried?.bucket && carried.chip) {
-      return { bucket: carried.bucket, chip: carried.chip };
     }
     return null;
   });
@@ -362,7 +365,9 @@ export function ExtraWorkList({
 
   // Each tab remembers its own sub-chip, so switching tabs and back
   // does not lose a narrowing and a chip of one tab never narrows
-  // another. "all" is the absence of an entry.
+  // another. The address (`?chip=`) is the source for the tab on
+  // screen; this is the memory the tab links carry along. No entry
+  // means the tab's default chip (P-10 B2).
   const [chipByTab, setChipByTab] = useState<Partial<Record<ExtraWorkBucket, string>>>(
     () => (deepLink?.chip ? { [deepLink.bucket]: deepLink.chip } : {}),
   );
@@ -536,7 +541,11 @@ export function ExtraWorkList({
   })();
   const activeTab: ExtraWorkTab = namedTab ?? autoTab;
   const activeBucket: ExtraWorkBucket = viewCancelled ? CANCELLED_VIEW : activeTab;
-  const chipKey = chipByTab[activeBucket] ?? ALL_CHIP.key;
+  // P-10 B2 — the address names the chip; a missing or unknown `?chip=`
+  // falls back to what this tab remembers, then to the tab's default
+  // (the chip with work to do). "All" is one click away on every tab.
+  const urlChip = viewCancelled ? null : chipFromParam(activeTab, searchParams.get("chip"));
+  const chipKey = urlChip ?? chipByTab[activeBucket] ?? DEFAULT_CHIP[activeTab];
   const chips = viewCancelled ? [] : SUB_CHIPS[activeTab];
   const activeChip = chips.find((chip) => chip.key === chipKey) ?? ALL_CHIP;
 
@@ -683,18 +692,29 @@ export function ExtraWorkList({
 
   // ---- navigation helpers ------------------------------------------------
   /** The search string a tab link keeps: the "my work" reads survive,
-   *  the one-shot deep-link params and the cancelled view do not. */
+   *  the one-shot deep-link params, the chip and the cancelled view do
+   *  not (a tab link names its own chip through `linkTo`). */
   const keptSearch = (extra?: Record<string, string>): string => {
     const params = new URLSearchParams(searchParams);
-    for (const key of ["status", "filter", "view", "tab"]) params.delete(key);
+    for (const key of ["status", "filter", "view", "tab", "chip"]) params.delete(key);
     if (extra) for (const [key, value] of Object.entries(extra)) params.set(key, value);
     const text = params.toString();
     return text ? `?${text}` : "";
   };
-  const linkTo = (target: ExtraWorkTab, view?: typeof CANCELLED_VIEW): string => {
+  /** P-10 B2 — `chip` undefined carries the chip `target` remembers (a
+   *  deep link's, or one chosen earlier this visit); a key writes that
+   *  chip; the cancelled view never carries one. No chip in the
+   *  address means the tab's default. */
+  const linkTo = (
+    target: ExtraWorkTab,
+    view?: typeof CANCELLED_VIEW,
+    chip?: string,
+  ): string => {
     const extra: Record<string, string> = {};
     if (embedded) extra.tab = target;
     if (view) extra.view = view;
+    const carried = chip ?? chipByTab[target];
+    if (carried && !view) extra.chip = carried;
     return embedded
       ? `${location.pathname}${keptSearch(extra)}`
       : `/extra-work/${target}${keptSearch(extra)}`;
@@ -704,19 +724,19 @@ export function ExtraWorkList({
 
   // AUTO MODE — the bare `/extra-work`: once the rows are in, go to the
   // first tab that has any (or the deep link's tab), else To price. The
-  // deep link's chip rides along in `state`; the params are dropped.
+  // deep link's chip is written to the address; its params are dropped.
   if (!embedded && namedTab === null && !loading && !error) {
     const target =
       deepLink?.bucket === CANCELLED_VIEW
         ? linkTo("finished", CANCELLED_VIEW)
         : linkTo(autoTab);
-    return (
-      <Navigate
-        to={target}
-        replace
-        state={deepLink?.chip ? { bucket: deepLink.bucket, chip: deepLink.chip } : null}
-      />
-    );
+    return <Navigate to={target} replace />;
+  }
+  // A named tab reached with a one-shot deep-link param: rewrite the
+  // address once so the chip it preselects is the one the address
+  // says (P-10 B2), and the params do not survive into every tab link.
+  if (!embedded && namedTab !== null && (searchParams.has("status") || searchParams.has("filter"))) {
+    return <Navigate to={linkTo(namedTab, viewCancelled ? CANCELLED_VIEW : undefined)} replace />;
   }
 
   // ---- cells ---------------------------------------------------------------
@@ -1241,9 +1261,14 @@ export function ExtraWorkList({
                       role="tab"
                       aria-selected={active}
                       className={`composer-toggle-btn${active ? " active" : ""}`}
-                      onClick={() =>
-                        setChipByTab((prev) => ({ ...prev, [activeBucket]: chip.key }))
-                      }
+                      onClick={() => {
+                        // P-10 B2 — remembered for the tab links, and
+                        // written to the address (replace: a chip is a
+                        // narrowing of this tab, not a place of its own)
+                        // so a reload lands on the same chip.
+                        setChipByTab((prev) => ({ ...prev, [activeBucket]: chip.key }));
+                        navigate(linkTo(activeTab, undefined, chip.key), { replace: true });
+                      }}
                       data-testid={`extra-work-chip-${chip.key}`}
                       data-count={count}
                     >

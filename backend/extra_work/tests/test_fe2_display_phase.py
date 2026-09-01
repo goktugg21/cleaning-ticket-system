@@ -41,6 +41,7 @@ from extra_work.display_phase import (
     PHASE_WAITING_PLANNING,
     PHASE_WAITING_COMPLETION_APPROVAL,
     PHASE_WAITING_CUSTOMER_APPROVAL,
+    PHASE_WAITING_MANAGER_CHECK,
     PHASE_WAITING_PRICE,
     PHASE_WAITING_YOUR_APPROVAL,
     display_phase,
@@ -124,13 +125,23 @@ class DisplayPhaseMappingTests(TestCase):
         self.assertEqual(
             _phase(ExtraWorkStatus.IN_PROGRESS), PHASE_IN_EXECUTION
         )
-        # The internal manager check is execution to the requester.
+        # The internal manager check is execution to the requester...
         self.assertEqual(
             _phase(
                 ExtraWorkStatus.IN_PROGRESS,
                 ticket_status=TicketStatus.WAITING_MANAGER_REVIEW,
             ),
             PHASE_IN_EXECUTION,
+        )
+        # ...and the ticket's own "waiting for the manager" to the
+        # provider (P-10 B1).
+        self.assertEqual(
+            _phase(
+                ExtraWorkStatus.IN_PROGRESS,
+                ticket_status=TicketStatus.WAITING_MANAGER_REVIEW,
+                viewer_is_customer=False,
+            ),
+            PHASE_WAITING_MANAGER_CHECK,
         )
         # The finished work reaching the customer is its own phase.
         self.assertEqual(

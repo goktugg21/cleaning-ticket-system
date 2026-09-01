@@ -254,6 +254,19 @@ export function PlanWorkDialog({
         {t("plan.piece_needed", { what: t(FOCUS_NEEDS[key]) })}
       </p>
     ) : null;
+  // P-10 B5 — the four things pricing needs carry the SAME marker: the
+  // first work day, the people, the responsible manager and the total
+  // planned hours (P-9 C2 marked the hours alone). One sentence under
+  // the group says what it means; the plan itself still saves with
+  // gaps. `testId` keeps the hours marker's P-9 id.
+  const pricingMarker = (key: PlanFocus, testId = `extra-work-plan-${key}-pricing-marker`) => (
+    <>
+      <span className="required-mark" aria-hidden="true"> *</span>{" "}
+      <span className="muted small ew-plan-pricing-marker" data-testid={testId}>
+        {t("plan.budget_required_marker")}
+      </span>
+    </>
+  );
   // P-5 S2.3 — an hours box COMMITS on blur / Enter: the value is
   // normalised and the totals flash "counted" for a moment, so the
   // operator sees the number land instead of wondering whether it did.
@@ -765,7 +778,10 @@ export function PlanWorkDialog({
             </div>
             <div className="ew-plan-dates">
               <label className="field" {...bind("start")}>
-                <span className="field-label">{t("plan.first_day_label")}</span>
+                <span className="field-label">
+                  {t("plan.first_day_label")}
+                  {pricingMarker("start")}
+                </span>
                 <input
                   type="date"
                   className={`field-input${fieldError("start") ? " field-input-invalid" : ""}`}
@@ -889,7 +905,10 @@ export function PlanWorkDialog({
 
             <div className="ew-plan-crew" data-testid="extra-work-plan-crew">
               <div className="ew-plan-crew-group" data-testid="extra-work-plan-people" {...bind("people")}>
-                <span className="field-label">{t("plan.people_label")}</span>
+                <span className="field-label">
+                  {t("plan.people_label")}
+                  {pricingMarker("people")}
+                </span>
                 {focusNotice("people")}
                 <div className="ew-plan-manager-row">
                   {workers.map((a) => (
@@ -938,7 +957,10 @@ export function PlanWorkDialog({
               </div>
 
               <div className="ew-plan-crew-group" data-testid="extra-work-plan-manager" {...bind("manager")}>
-                <span className="field-label">{t("plan.manager_label")}</span>
+                <span className="field-label">
+                  {t("plan.manager_label")}
+                  {pricingMarker("manager")}
+                </span>
                 {focusNotice("manager")}
                 <div className="ew-plan-manager-row">
                   {managers.map((a) => (
@@ -969,7 +991,6 @@ export function PlanWorkDialog({
                     </span>
                   )}
                 </div>
-                <span className="muted small">{t("plan.manager_hint")}</span>
                 {onAssignManagers && (
                   <CrewAdder
                     candidates={managerCandidates}
@@ -1299,20 +1320,14 @@ export function PlanWorkDialog({
                 {/* P-9 C2 — the total planned hours. Needed before the
                     work can be priced; the plan itself saves at 0. The
                     Money tab's "planned hours are missing" door lands
-                    here. */}
+                    here. P-10 B5 — the ONE sentence for all four marked
+                    fields sits under this last one. */}
                 <div {...bind("budget")} data-testid="extra-work-plan-budget-block">
                   {focusNotice("hours")}
                   <label className="field ew-plan-budget">
                     <span className="field-label">
                       {t("plan.budget_total_label")}
-                      <span className="required-mark" aria-hidden="true"> *</span>{" "}
-                      <span
-                        className="muted small"
-                        style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}
-                        data-testid="extra-work-plan-budget-marker"
-                      >
-                        {t("plan.budget_required_marker")}
-                      </span>
+                      {pricingMarker("hours", "extra-work-plan-budget-marker")}
                     </span>
                     <input
                       type="number"
@@ -1337,7 +1352,7 @@ export function PlanWorkDialog({
                     style={{ margin: "4px 0 0" }}
                     data-testid="extra-work-plan-budget-hint"
                   >
-                    {t("plan.budget_hint")}
+                    {t("plan.pricing_needs_sentence")}
                   </p>
                 </div>
                 {overrun && (

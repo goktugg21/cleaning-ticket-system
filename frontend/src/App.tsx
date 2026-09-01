@@ -315,19 +315,13 @@ export default function App() {
             }
           />
           {/* FE-1 (Addendum D §D.2) — "Chargeable work" is dead as a
-              name and as a page. The tickets born from a meerwerk ARE
-              tickets; the work queue shows them behind its own work
-              filter with the type pill saying where each came from. The
-              old deep link keeps working: it lands on the queue with
-              the meerwerk narrowing preselected and no status pin
-              (`status=ALL` parses to "no status filter", which is what
-              the old sub-page showed). Static path, so it must stay
-              above /tickets/:id. */}
+              name and as a page. P-10 B3 — and the Tickets page never
+              shows extra work again, so the old deep link lands where
+              the spawned work IS found: Extra work → Approved. Static
+              path, so it must stay above /tickets/:id. */}
           <Route
             path="/tickets/chargeable"
-            element={
-              <Navigate to="/tickets?work=chargeable&status=ALL&period=all_time" replace />
-            }
+            element={<Navigate to="/extra-work/approved" replace />}
           />
           {/* W11 — ONE DOOR. Asks what happened and picks the record
               type from the answers, then hands off to one of the create

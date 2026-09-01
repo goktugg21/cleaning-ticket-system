@@ -37,7 +37,6 @@ import {
 } from "../auth/permissions";
 import { AssignPeopleDialog } from "../components/AssignPeopleDialog";
 import { EditModeToggle } from "../components/EditModeToggle";
-import { ExtraWorkOriginPill } from "../components/ExtraWorkOriginPill";
 import { FinancialStrip } from "../components/extra-work/FinancialStrip";
 import { SLABadge } from "../components/sla/SLABadge";
 import { StatusTiles } from "../components/StatusTiles";
@@ -89,58 +88,17 @@ const AUTO_REFRESH_INTERVAL_MS = 60_000;
 // compiler instead of quietly vanishing from a screen.
 
 /**
- * Sprint 183 §1 — ONE chip, not three segments and a sub-page.
+ * P-10 B3 — EXTRA WORK NEVER APPEARS ON THE TICKETS PAGE.
  *
- * The owner: "there is no need for both a chargeable-work filter on the
- * tickets page AND a chargeable-work sub-page. Just a chip on tickets to
- * show regular tickets only."
- *
- * So the sub-page, its route and its nav entry are gone, and what is
- * left is exactly what he asked for: the list shows everything by
- * default, and one labelled chip narrows it to ordinary tickets. Off is
- * always one click away, which is the house rule — nothing hidden with
- * no way back.
- *
- * `chargeable` survives as a PARSED value with no control that sets it,
- * so a bookmarked `?work=chargeable` still resolves rather than throwing;
- * it renders as "everything", which is the least surprising fallback for
- * a link to a view that no longer exists.
+ * The owner, twice: "Tickets page: no extra work. Ever. It only creates
+ * confusion." P-9 D2 had put every origin on this queue behind an
+ * Origin column and a `?origin=` filter; both are gone again. The list
+ * and its `/tickets/stats/` call pin `is_extra_work=false`; a spawned
+ * ticket is found from Extra work → Approved and on My schedule, and
+ * its deep link (`/tickets/<id>`) keeps working. Recurring visits stay.
+ * The (unrouted) chargeable variant is the same list pinned to the
+ * other half of the partition (`is_extra_work=true`).
  */
-type WorkTypeFilter = "all" | "melding" | "chargeable" | "recurring" | "tickets";
-
-/**
- * P-9 D2 — ORIGIN, the queue's fourth axis. The Tickets page lists every
- * operational ticket whatever it came from (the owner: twice in a row a
- * started meerwerk could not be found in any list; the Extra work page
- * is the money view, this is the operational view) and prints the
- * origin on the row. The `?work=` token is the URL spelling of the
- * server's `?origin=`; `chargeable` and `tickets` are the tokens old
- * bookmarks carry (Sprint 183 / FE-1), kept as the spelling of
- * "meerwerk" and "ticket". The select's order and its i18n key both
- * derive from this one record, so a fifth origin fails the compiler.
- */
-type OriginKey = "melding" | "meerwerk" | "recurring" | "ticket";
-const WORK_FILTER_SPEC: Record<WorkTypeFilter, { rank: number; origin: OriginKey | null }> = {
-  all: { rank: 0, origin: null },
-  melding: { rank: 10, origin: "melding" },
-  chargeable: { rank: 20, origin: "meerwerk" },
-  recurring: { rank: 30, origin: "recurring" },
-  tickets: { rank: 40, origin: "ticket" },
-};
-const WORK_FILTER_ORDER: readonly WorkTypeFilter[] = (
-  Object.keys(WORK_FILTER_SPEC) as WorkTypeFilter[]
-).sort((a, b) => WORK_FILTER_SPEC[a].rank - WORK_FILTER_SPEC[b].rank);
-function isWorkTypeFilter(raw: string | null): raw is WorkTypeFilter {
-  return raw !== null && Object.prototype.hasOwnProperty.call(WORK_FILTER_SPEC, raw);
-}
-/** A row's origin word: the server's `kind`, with an occurrence ticket
- *  reading "Recurring" (§D.4 — nothing is inferred; both facts are on
- *  the row). */
-function originKeyOf(ticket: TicketList): OriginKey {
-  if (ticket.kind === "MELDING") return "melding";
-  if (ticket.kind === "MEERWERK") return "meerwerk";
-  return ticket.occurrence_origin ? "recurring" : "ticket";
-}
 /** One tab's count from a stats payload — the same sum the tab shows. */
 function tabCount(source: TicketStats, tab: TicketTabKey): number {
   return ticketTabStatuses(tab).reduce(
@@ -224,7 +182,7 @@ const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
  * This is the same lesson W7 learned on the "My work" links; those links
  * are gone and the rule outlived them.
  */
-const QUEUE_WIDE = "work=all&finished_extra_work=1";
+const QUEUE_WIDE = "finished_extra_work=1";
 
 /** The one place a queue's URL is written. Both the dashboard row and
  *  the page's own heading resolve through this key. */
@@ -287,8 +245,6 @@ const STATS_KNOWN_PARAMS = new Set([
   "category",
   "category__isnull",
   "is_extra_work",
-  // P-9 D2 — the Origin axis; `stats` applies the list's own helper.
-  "origin",
   "hide_finished_extra_work",
   // W-H §2/§3 — `/tickets/stats/` learned all three in the same commit
   // that added them to the list, which is the only way the tiles can go
@@ -587,26 +543,6 @@ export function DashboardPage({
     }
     return variant === "tickets-page" ? "open" : "";
   });
-  /**
-   * Sprint 183 §1 — `?work=tickets`, URL-backed so the view survives a
-   * refresh and can be linked to. `?work=chargeable` from an old
-   * bookmark parses to "all": the view it named no longer exists, and
-   * showing everything is friendlier than showing nothing.
-   */
-  const [workTypeFilter, setWorkTypeFilter] = useState<WorkTypeFilter>(() => {
-    if (variant === "chargeable-work") return "chargeable";
-    const raw = new URLSearchParams(window.location.search).get("work");
-    // FE-1 — "chargeable" is a full URL state: the standalone meerwerk
-    // sub-page is gone (§D.2 kills the name) and its old route redirects
-    // here carrying `?work=chargeable`, so the queue itself owns the
-    // meerwerk-only narrowing as a filter (§D.3.4: a saved filter, not
-    // a page). P-9 D2 — the default is EVERYTHING: Sprint 183's
-    // ordinary-tickets default hid every running extra-work job from
-    // the one list an operator opens to find work, and the owner could
-    // not find started meerwerk two rounds in a row. An origin is a
-    // filter the reader chooses, never a default the page imposes.
-    return isWorkTypeFilter(raw) ? raw : "all";
-  });
   const [unassignedFilter, setUnassignedFilter] = useState(
     () => new URLSearchParams(window.location.search).get("unassigned") === "1",
   );
@@ -887,12 +823,13 @@ export function DashboardPage({
     // (where the clear chip is shown).
     // The fixed customer, when this list is mounted inside one.
     if (customerId !== undefined) params.customer = customerId;
-    // P-9 D2 — the Origin axis, server-side (`TicketFilter.origin`, the
-    // same helper `/tickets/stats/` applies — Sprint 183 §2's lesson),
-    // so it survives pagination and the tabs count the rows under them.
+    // P-10 B3 — no extra work on the Tickets page, ever. The same
+    // parameter `/tickets/stats/` applies (`apply_is_extra_work`, one
+    // helper for the rows and the counts — Sprint 183 §2's lesson), so
+    // the tabs count the rows under them. The chargeable variant is
+    // the other half of the same partition.
     if (isTicketsPage) {
-      const origin = WORK_FILTER_SPEC[workTypeFilter].origin;
-      if (origin) params.origin = origin;
+      params.is_extra_work = isChargeableWork ? "true" : "false";
     }
     if (isTicketsPage) {
       // W8 BUG 1 — "mine" is the work this person is RESPONSIBLE for
@@ -923,7 +860,7 @@ export function DashboardPage({
     searchParams,
     mineOnly,
     isTicketsPage,
-    workTypeFilter,
+    isChargeableWork,
   ]);
 
   /**
@@ -960,6 +897,40 @@ export function DashboardPage({
     [queryParams],
   );
 
+  /**
+   * P-9 D1 — THE SAME COUNTS WITH THE PERIOD LIFTED.
+   *
+   * The page opens on this month (W-H §3/§4, an owner ruling), so on
+   * the 1st of a month the Open tab is empty by construction while 30
+   * tickets sit one dropdown away. An empty tab therefore says what the
+   * period is hiding, in ALL-TIME numbers — a second `/tickets/stats/`
+   * call, because `stats` is period-narrowed (the endpoint takes
+   * `date_from` / `date_to`; measured on crmtest: 185 without, 3 with
+   * September). P-10 C4 — asked for only when the narrowed list came
+   * back EMPTY (`loadTickets` triggers it), never on every load;
+   * without a period `stats` already is the all-time answer.
+   */
+  const periodNarrows =
+    isTicketsPage && Object.keys(periodParams(period)).length > 0;
+  const statsAllTimeParamsKey = useMemo(() => {
+    const parsed = JSON.parse(statsParamsKey) as Record<string, string>;
+    delete parsed.date_from;
+    delete parsed.date_to;
+    return JSON.stringify(parsed);
+  }, [statsParamsKey]);
+  const loadStatsAllTime = useCallback(async () => {
+    if (!periodNarrows) return;
+    try {
+      const parsed = JSON.parse(statsAllTimeParamsKey) as Record<string, string>;
+      const response = await api.get<TicketStats>("/tickets/stats/", {
+        params: Object.keys(parsed).length ? parsed : undefined,
+      });
+      setStatsAllTime(response.data);
+    } catch {
+      // The empty state then names no numbers; the tabs still count.
+    }
+  }, [statsAllTimeParamsKey, periodNarrows]);
+
   const loadTickets = useCallback(async () => {
     // RF-16 — the ticket LIST only renders on the Tickets page now.
     if (!isTicketsPage) return;
@@ -975,12 +946,15 @@ export function DashboardPage({
       setNext(response.data.next);
       setPrevious(response.data.previous);
       setLastUpdated(new Date());
+      // P-10 C4 — the number behind "Earlier: N open" is fetched only
+      // when this period's list came back empty.
+      if (response.data.results.length === 0) void loadStatsAllTime();
     } catch (err) {
       setError(getApiError(err));
     } finally {
       setLoading(false);
     }
-  }, [queryParams, isTicketsPage]);
+  }, [queryParams, isTicketsPage, loadStatsAllTime]);
 
   useEffect(() => {
     loadTickets();
@@ -1170,39 +1144,6 @@ export function DashboardPage({
     }
   }, [statsParamsKey]);
 
-  /**
-   * P-9 D1 — THE SAME COUNTS WITH THE PERIOD LIFTED.
-   *
-   * The page opens on this month (W-H §3/§4, an owner ruling), so on
-   * the 1st of a month the Open tab is empty by construction while 30
-   * tickets sit one dropdown away. An empty tab therefore says what the
-   * period is hiding, in ALL-TIME numbers — a second `/tickets/stats/`
-   * call, because `stats` is period-narrowed (the endpoint takes
-   * `date_from` / `date_to`; measured on crmtest: 185 without, 3 with
-   * September). Only fetched while a period narrows; otherwise `stats`
-   * already is the all-time answer.
-   */
-  const periodNarrows =
-    isTicketsPage && Object.keys(periodParams(period)).length > 0;
-  const statsAllTimeParamsKey = useMemo(() => {
-    const parsed = JSON.parse(statsParamsKey) as Record<string, string>;
-    delete parsed.date_from;
-    delete parsed.date_to;
-    return JSON.stringify(parsed);
-  }, [statsParamsKey]);
-  const loadStatsAllTime = useCallback(async () => {
-    if (!periodNarrows) return;
-    try {
-      const parsed = JSON.parse(statsAllTimeParamsKey) as Record<string, string>;
-      const response = await api.get<TicketStats>("/tickets/stats/", {
-        params: Object.keys(parsed).length ? parsed : undefined,
-      });
-      setStatsAllTime(response.data);
-    } catch {
-      // The empty state then names no numbers; the tabs still count.
-    }
-  }, [statsAllTimeParamsKey, periodNarrows]);
-
   const loadExtraWorkStats = useCallback(async () => {
     try {
       const data = await getExtraWorkStats();
@@ -1280,20 +1221,29 @@ export function DashboardPage({
   const loadAttention = useCallback(async () => {
     if (isTicketsPage) return;
     try {
+      // P-10 B3 — each row opens a Tickets-page queue, and that page
+      // never shows extra work; a count that included it would land on
+      // fewer rows than the number that was clicked.
       const [rev, una, stalled] = await Promise.all([
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
-          params: { status: "WAITING_MANAGER_REVIEW", page_size: 1 },
+          params: {
+            status: "WAITING_MANAGER_REVIEW",
+            is_extra_work: "false",
+            page_size: 1,
+          },
         }),
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: {
             status: "OPEN",
             assigned_to__isnull: "true",
+            is_extra_work: "false",
             page_size: 1,
           },
         }),
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: {
             awaiting_customer_approval_days: STALLED_APPROVAL_DAYS,
+            is_extra_work: "false",
             page_size: 1,
           },
         }),
@@ -1333,14 +1283,12 @@ export function DashboardPage({
     // The by-building loader is Tickets-page-gated; the attention
     // loader is dashboard-gated.
     loadStats();
-    loadStatsAllTime();
     loadExtraWorkStats();
     loadAttention();
     loadGuardCounts();
     loadWidgets();
   }, [
     loadStats,
-    loadStatsAllTime,
     loadExtraWorkStats,
     loadAttention,
     loadGuardCounts,
@@ -1351,7 +1299,6 @@ export function DashboardPage({
     const handle = window.setInterval(() => {
       loadTickets();
       loadStats();
-      loadStatsAllTime();
       loadExtraWorkStats();
       loadAttention();
       loadWidgets();
@@ -1362,7 +1309,6 @@ export function DashboardPage({
   }, [
     loadTickets,
     loadStats,
-    loadStatsAllTime,
     loadExtraWorkStats,
     loadAttention,
     loadWidgets,
@@ -1415,10 +1361,6 @@ export function DashboardPage({
     setUnassignedFilter(false);
     setStalledApprovalFilter(false);
     setHideFinishedExtraWork(false);
-    // The Chargeable work page IS this list pinned to chargeable work by
-    // its route. "Show everything" clears the filters a person chose; it
-    // does not turn the page into a different page.
-    if (!isChargeableWork) setWorkTypeFilter("all");
     // Sprint 7 — clearing filters also leaves the bulk-confirm queue.
     setSelectedIds(new Set<number>());
 
@@ -1429,23 +1371,22 @@ export function DashboardPage({
     // apply the second and silently discard the first — the reader
     // would press "Show everything" and watch one filter survive.
     //
-    // The three narrowings that are ON BY DEFAULT have to be written
-    // POSITIVELY rather than deleted: an absent `status` means OPEN, an
-    // absent `work` means ordinary tickets only, and an absent
-    // `finished_extra_work` means finished work is hidden. Deleting them
+    // The narrowings that are ON BY DEFAULT have to be written
+    // POSITIVELY rather than deleted: an absent `status` means OPEN, and
+    // an absent `finished_extra_work` means finished work is hidden
+    // (the chargeable variant). Deleting them
     // would put the page back exactly where it started, and a refresh
     // would undo the click. This is the same lesson as the "My work"
     // link at the top of this file: a URL has to state the whole
     // predicate, because an absent parameter is a default and not an
     // opinion.
     const next = new URLSearchParams(searchParams);
-    for (const key of ["sla", "mine", "stalled", "unassigned", "type", "exclude_type"]) {
+    // P-10 B3 — `work` is a retired parameter (an old bookmark's
+    // origin narrowing); it is dropped with the rest.
+    for (const key of ["sla", "mine", "stalled", "unassigned", "type", "exclude_type", "work"]) {
       next.delete(key);
     }
     next.set("status", "ALL");
-    // P-9 D2 — an absent `work` means every origin now; `all` is kept
-    // as the explicit spelling so the URL still states the predicate.
-    if (!isChargeableWork) next.set("work", "all");
     next.set("finished_extra_work", "1");
     setSearchParams(next, { replace: true });
   }
@@ -1455,13 +1396,10 @@ export function DashboardPage({
   // in the summary line but do not by themselves claim the list is
   // filtered — otherwise "Show everything" would be lit on arrival and
   // pressing it would change what the page means by default.
-  // P-9 D2 — an origin is a narrowing the reader chose (the default is
-  // every origin), so it counts here and clears with the rest.
   const hasActiveFilters = Boolean(
     statusFilter || priorityFilter || categoryFilter !== "" ||
       searchActive || slaFilter ||
-      unassignedFilter || stalledApprovalFilter || mineOnly ||
-      (!isChargeableWork && workTypeFilter !== "all"),
+      unassignedFilter || stalledApprovalFilter || mineOnly,
   );
 
   // W8 BUG 3 — the narrowing SENTENCES are gone with the line that
@@ -1667,8 +1605,6 @@ export function DashboardPage({
     slaFilter ? t("common:sla") : null,
     assignedFilter ? t("filters.assigned") : null,
     showArchive ? t("archive.show") : null,
-    // P-9 D2 — the origin, when one is chosen.
-    !isChargeableWork && workTypeFilter !== "all" ? t("origin.label") : null,
   ].filter((label): label is string => Boolean(label));
   /* P-9 D1/D2 — WHAT AN EMPTY TAB SAYS. Only the working list's tabs
    * with nothing else narrowing them: a queue, a chosen filter and the
@@ -1691,6 +1627,9 @@ export function DashboardPage({
           .map(({ tab, n }) => t(`tabs_empty.part.${tab}`, { n }))
           .join(" · ")
       : "";
+  // P-10 C4 — THIS tab's all-time number, for the one-sentence period
+  // empty state ("Earlier: 28 open").
+  const tabPartHere = t(`tabs_empty.part.${tabHere ?? "all"}`, { n: tabHereAllTime });
   const tabsEmptyKind: "loading" | "period" | "other-tabs" | null = !tabsEmptyEligible
     ? null
     : periodNarrows && statsAllTime === null
@@ -2565,41 +2504,6 @@ export function DashboardPage({
                       </option>
                     </select>
                   </div>
-                  {/* P-9 D2 — WHERE THE ROW CAME FROM, as a filter. The
-                      W8 "what is on this list" control (tickets only /
-                      with extra work / finished shown) is gone with the
-                      narrowing it managed: the queue shows every origin
-                      and the Done tab holds finished work, so the one
-                      question left is the Origin column's, answered in
-                      its own four words. Same parameter name, same
-                      testid, URL-backed (`?work=`). The (unrouted)
-                      chargeable variant stays pinned. */}
-                  <div className="filter-field">
-                    <span className="filter-label">{t("origin.label")}</span>
-                    <select
-                      className="filter-control"
-                      value={workTypeFilter}
-                      data-testid="tickets-work-scope"
-                      disabled={isChargeableWork}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (isChargeableWork || !isWorkTypeFilter(value)) return;
-                        setPage(1);
-                        setSelectedIds(new Set<number>());
-                        setWorkTypeFilter(value);
-                        const next = new URLSearchParams(searchParams);
-                        if (value === "all") next.delete("work");
-                        else next.set("work", value);
-                        setSearchParams(next, { replace: true });
-                      }}
-                    >
-                      {WORK_FILTER_ORDER.map((value) => (
-                        <option key={value} value={value}>
-                          {t(`origin.${WORK_FILTER_SPEC[value].origin ?? "all"}`)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
                     </div>
                   </details>
                   <div className="filter-field search">
@@ -2802,8 +2706,6 @@ export function DashboardPage({
                         )}
                         <th>{t("common:ticket_no")}</th>
                         <th>{t("common:subject")}</th>
-                        {/* P-9 D2 — where the row came from. */}
-                        <th className="td-origin">{t("origin.label")}</th>
                         {/* Chargeable work exists to TRACK the extra works that
                             went operational, so it shows the extra work and how
                             it got here. On the ordinary tickets page neither
@@ -2901,12 +2803,6 @@ export function DashboardPage({
                             >
                               {ticket.ticket_no}
                             </Link>
-                            {/* P-9 D2 — the meerwerk pill moved to the
-                                Origin cell: one statement of the origin
-                                per row, and one door to the parent
-                                (W15 §1's reasoning about that door —
-                                a label, not a link, for STAFF — lives
-                                in the pill itself). */}
                           </td>
                           <td className="td-subject">
                             {/* W15 §1 — the subject goes WHERE THE ROW
@@ -2934,28 +2830,6 @@ export function DashboardPage({
                                   {t("common:tickets.assigned_to_you")}
                                 </span>
                               )}
-                          </td>
-                          {/* P-9 D2 — WHERE IT CAME FROM, from the server's
-                              `kind` (never inferred here, §D.4); an
-                              occurrence ticket reads "Recurring". For a
-                              meerwerk row the cell IS the pill, the row's
-                              one door to the parent extra work. */}
-                          <td className="td-origin">
-                            {ticket.kind === "MEERWERK" && ticket.extra_work_origin ? (
-                              <ExtraWorkOriginPill
-                                ewId={ticket.extra_work_origin.extra_work_request_id}
-                                testId="ticket-row-extra-work-origin"
-                              />
-                            ) : (
-                              <span
-                                className="cell-tag"
-                                data-testid="ticket-row-origin"
-                                data-origin={originKeyOf(ticket)}
-                                title={ticket.occurrence_origin?.recurring_job_title ?? undefined}
-                              >
-                                {t(`origin.${originKeyOf(ticket)}`)}
-                              </span>
-                            )}
                           </td>
                           {!isChargeableWork && (
                             <td>
@@ -3126,19 +3000,6 @@ export function DashboardPage({
                 >
                   {tickets.map((ticket) => (
                     <li key={ticket.id} className="ticket-card">
-                      {/* W15 §1 — same rule as the table above, and this
-                          mirror is "kept in DOM regardless of viewport",
-                          so leaving it unguarded would put the duplicate
-                          door back on the page invisibly. */}
-                      {!isChargeableWork && ticket.extra_work_origin && (
-                        <ExtraWorkOriginPill
-                          ewId={
-                            ticket.extra_work_origin.extra_work_request_id
-                          }
-                          testId="ticket-card-extra-work-origin"
-                          style={{ marginBottom: 8 }}
-                        />
-                      )}
                       <Link
                         to={`/tickets/${ticket.id}`}
                         className="ticket-card-link"
@@ -3202,12 +3063,6 @@ export function DashboardPage({
                             <dt>{t("common:created")}</dt>
                             <dd>{formatDate(ticket.created_at)}</dd>
                           </div>
-                          <div className="ticket-card-meta-row">
-                            <dt>{t("origin.label")}</dt>
-                            <dd data-testid="ticket-card-origin">
-                              {t(`origin.${originKeyOf(ticket)}`)}
-                            </dd>
-                          </div>
                         </dl>
                       </Link>
                     </li>
@@ -3228,24 +3083,30 @@ export function DashboardPage({
                   </div>
                 )}
                 {!loading && tickets.length === 0 && tabsEmptyKind === "period" && (
+                  /* P-10 C4 — ONE line, ONE link, in the owner's words: "No
+                     new tickets created in September yet. Earlier: 28 open
+                     — Show all time." The month is the period's, the
+                     number is this tab's all-time count, the link lifts
+                     the period. */
                   <div className="empty-state" data-testid="tickets-tab-empty" data-empty-kind="period">
-                    <div className="empty-title" data-testid="tickets-tab-empty-title">
-                      {t(`tabs_empty.period_title.${tabHere ?? "all"}`, { period: periodPhrase })}
-                    </div>
-                    <p className="empty-sub" data-testid="tickets-tab-empty-elsewhere">
-                      {t("tabs_empty.earlier", { parts: tabParts(TICKET_TABS) })}
+                    <p className="empty-title tickets-tab-empty-line" data-testid="tickets-tab-empty-title">
+                      {t(`tabs_empty.period_title.${tabHere ?? "all"}`, { period: periodPhrase })}{" "}
+                      <span data-testid="tickets-tab-empty-elsewhere">
+                        {t("tabs_empty.earlier", { parts: tabPartHere })}
+                      </span>
+                      {" — "}
+                      <button
+                        type="button"
+                        className="link-button"
+                        data-testid="tickets-show-all-time"
+                        onClick={() => {
+                          setPeriod(periodState("all_time"));
+                          setPage(1);
+                        }}
+                      >
+                        {t("tabs_empty.show_all_time")}
+                      </button>
                     </p>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      data-testid="tickets-show-all-time"
-                      onClick={() => {
-                        setPeriod(periodState("all_time"));
-                        setPage(1);
-                      }}
-                    >
-                      {t("tabs_empty.show_all_time")}
-                    </button>
                   </div>
                 )}
                 {!loading && tickets.length === 0 && tabsEmptyKind === "other-tabs" && (

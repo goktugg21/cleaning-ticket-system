@@ -41,6 +41,7 @@ from extra_work.display_phase import (
     PHASE_SCHEDULED,
     PHASE_WAITING_COMPLETION_APPROVAL,
     PHASE_WAITING_CUSTOMER_APPROVAL,
+    PHASE_WAITING_MANAGER_CHECK,
     PHASE_WAITING_PLANNING,
     PHASE_WAITING_PRICE,
     PHASE_WAITING_YOUR_APPROVAL,
@@ -85,6 +86,8 @@ TAB_OF_PHASE = {
     PHASE_WAITING_PLANNING: TAB_APPROVED,
     PHASE_SCHEDULED: TAB_APPROVED,
     PHASE_IN_EXECUTION: TAB_APPROVED,
+    # P-10 B1 — the crew reported done, the manager has not checked yet.
+    PHASE_WAITING_MANAGER_CHECK: TAB_APPROVED,
     PHASE_WAITING_COMPLETION_APPROVAL: TAB_APPROVED,
     PHASE_DONE: TAB_FINISHED,
     PHASE_INVOICED: TAB_FINISHED,
@@ -213,6 +216,12 @@ class _TabFixture(TenantFixtureMixin, APITestCase):
         self.spawn_ticket(busy, TicketStatus.IN_PROGRESS)
         rows[PHASE_IN_EXECUTION] = busy
 
+        manager_check = self.make_ew(
+            title="reported done", status=ExtraWorkStatus.IN_PROGRESS
+        )
+        self.spawn_ticket(manager_check, TicketStatus.WAITING_MANAGER_REVIEW)
+        rows[PHASE_WAITING_MANAGER_CHECK] = manager_check
+
         check = self.make_ew(title="check it", status=ExtraWorkStatus.IN_PROGRESS)
         self.spawn_ticket(check, TicketStatus.WAITING_CUSTOMER_APPROVAL)
         rows[PHASE_WAITING_COMPLETION_APPROVAL] = check
@@ -281,7 +290,7 @@ class ExtraWorkTabsCoverTheServerTests(_TabFixture):
         self.assertEqual(sum(totals.values()), response.data["count"])
         self.assertEqual(totals[TAB_TO_PRICE], 1)
         self.assertEqual(totals[TAB_WITH_CUSTOMER], 2)
-        self.assertEqual(totals[TAB_APPROVED], 4)
+        self.assertEqual(totals[TAB_APPROVED], 5)
         self.assertEqual(totals[TAB_FINISHED], 2)
         self.assertEqual(totals[CANCELLED], 1)
 

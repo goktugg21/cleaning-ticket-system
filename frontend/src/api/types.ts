@@ -284,6 +284,10 @@ export type ExtraWorkDisplayPhase =
   | "WAITING_PLANNING"
   | "SCHEDULED"
   | "IN_EXECUTION"
+  /** P-10 B1 — provider viewer only: the crew reported the work done and
+   *  the manager has not checked it yet (the ticket's own
+   *  WAITING_MANAGER_REVIEW word). The customer keeps IN_EXECUTION. */
+  | "WAITING_MANAGER_CHECK"
   | "WAITING_COMPLETION_APPROVAL"
   | "DONE"
   | "INVOICED"

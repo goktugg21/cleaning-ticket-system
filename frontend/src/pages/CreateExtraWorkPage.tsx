@@ -10,8 +10,11 @@
  *                volgt", a note per line. Folder is a filter inside
  *                the picker. Title and notes fold; left empty, they are
  *                derived from the cart like the customer flow does.
- *   Wanneer    — ONE wish date. Planned end, deadline, a multi-day
- *                series and the completion proof live behind "Planning".
+ *   Wanneer    — ONE wish date ("a wish; the plan follows") and the
+ *                multi-day series switch. P-10 B6: the "Planning" fold
+ *                (planned end, deadline) is gone — one plan, one place:
+ *                the plan is made by a person on the request page
+ *                (P-1 provenance); the dates stay editable there.
  *   Urgentie   — Normaal by default, one "spoed" control.
  *   The end    — the cart as it will be created, the sums, and the
  *                SYSTEM's sentence about what happens next (the server's
@@ -91,8 +94,6 @@ interface ParentFormState {
   description: string;
   urgent: boolean;
   preferred_date: string;
-  planned_end_date: string;
-  deadline: string;
 }
 
 const EMPTY_PARENT: ParentFormState = {
@@ -102,8 +103,6 @@ const EMPTY_PARENT: ParentFormState = {
   description: "",
   urgent: false,
   preferred_date: "",
-  planned_end_date: "",
-  deadline: "",
 };
 
 type FactKey = "department" | "work_type" | "billed_to";
@@ -125,23 +124,6 @@ function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate(),
   ).padStart(2, "0")}`;
-}
-
-/** Whole days from today to `iso` (local midnights), or null. */
-function daysUntil(iso: string): number | null {
-  if (!iso) return null;
-  const parts = iso.split("-").map(Number);
-  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
-    return null;
-  }
-  const [y, m, d] = parts;
-  const target = new Date(y, m - 1, d);
-  if (Number.isNaN(target.getTime())) return null;
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round(
-    (target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000),
-  );
 }
 
 /** The server's seeded default: the customer's lowest-id label — the
@@ -190,13 +172,6 @@ export function CreateExtraWorkPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState<ParentFormState>(EMPTY_PARENT);
-
-  /* W-EW1 §1b — the wish date fills planned end and deadline until the
-     user takes one of them over; a taken-over field is never rewritten. */
-  const [dateTakenOver, setDateTakenOver] = useState<{
-    plannedEnd: boolean;
-    deadline: boolean;
-  }>({ plannedEnd: false, deadline: false });
 
   /* W5-B — SINGLE or MULTIPLE (a series: one real meerwerk per chosen
      day, same content). One idempotency key per series submission. */
@@ -568,11 +543,6 @@ export function CreateExtraWorkPage() {
     const key = INTENT_ERROR_KEY[err.code as ExtraWorkIntentErrorCode];
     return key ? t(key) : err.detail;
   };
-  const deadlineDaysLeft = useMemo(
-    () => daysUntil(form.deadline),
-    [form.deadline],
-  );
-
   // ----- handlers --------------------------------------------------
   function update<K extends keyof ParentFormState>(
     name: K,
@@ -678,8 +648,6 @@ export function CreateExtraWorkPage() {
           derivedDescription(cartWithOther, t("common:meerwerk_flow.other_prefix")),
         urgency: form.urgent ? ("URGENT" as const) : ("NORMAL" as const),
         preferred_date: form.preferred_date || null,
-        planned_end_date: form.planned_end_date || null,
-        deadline: form.deadline || null,
         ...(effectiveDepartment ? { department: effectiveDepartment.id } : {}),
         ...(effectiveWorkType ? { work_type: effectiveWorkType.id } : {}),
         billed_to: billedToPayload,
@@ -834,14 +802,6 @@ export function CreateExtraWorkPage() {
   }
 
   // ----- the form ------------------------------------------------------
-  const planningSummary = [
-    form.planned_end_date &&
-      `${t("detail.plannedEnd")} ${form.planned_end_date}`,
-    form.deadline && `${t("detail.deadline")} ${form.deadline}`,
-    entryMode === "MULTIPLE" &&
-      t("create.series_summary", { count: slots.length }),
-  ].filter(Boolean) as string[];
-
   const factValue = (key: FactKey): string => {
     if (key === "department") {
       // P-5 S9.3 (§D.2 dash ban) — a fact not chosen is said in a word.
@@ -1167,133 +1127,56 @@ export function CreateExtraWorkPage() {
                 type="date"
                 data-testid="extra-work-create-preferred-date"
                 value={form.preferred_date}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setForm((current) => ({
-                    ...current,
-                    preferred_date: value,
-                    planned_end_date: dateTakenOver.plannedEnd
-                      ? current.planned_end_date
-                      : value,
-                    deadline: dateTakenOver.deadline ? current.deadline : value,
-                  }));
-                }}
+                onChange={(event) => update("preferred_date", event.target.value)}
               />
               <span className="muted small">{t("create.preferred_date_hint")}</span>
             </div>
 
-            <details className="form-fold" data-testid="extra-work-create-fold-planning">
-              <summary className="form-fold-summary">
-                {t("create.fold_planning")}
-                <span className="form-fold-summary-value">
-                  {planningSummary.length > 0
-                    ? planningSummary.join(" · ")
-                    : t("create.fold_planning_empty")}
+            {/* W5-B — a series: one real meerwerk per chosen day. P-10 B6:
+                out of the former "Planning" fold, beside the wish date —
+                the chosen days are the customer's wished days, one
+                request each, not a plan (the plan is made by a person on
+                the request page). */}
+            <div className="field ew-create-series">
+              <label className="ew-billed-to-option">
+                <input
+                  type="checkbox"
+                  checked={entryMode === "MULTIPLE"}
+                  onChange={(event) =>
+                    setEntryMode(event.target.checked ? "MULTIPLE" : "SINGLE")
+                  }
+                  data-testid="extra-work-entry-mode-multiple"
+                />
+                <span>
+                  <strong>{t("create.series_toggle")}</strong>
+                  <span className="muted small" style={{ display: "block" }}>
+                    {t("create.series_hint")}
+                  </span>
                 </span>
-              </summary>
-              <div className="form-fold-body form-fold-body-planning">
-                <div className="form-2col">
-                  <div className="field">
-                    <label className="field-label" htmlFor="ew-planned-end">
-                      {t("detail.plannedEnd")}
-                    </label>
-                    <input
-                      id="ew-planned-end"
-                      className="field-input"
-                      type="date"
-                      data-testid="extra-work-create-planned-end"
-                      value={form.planned_end_date}
-                      onChange={(event) => {
-                        setDateTakenOver((c) => ({ ...c, plannedEnd: true }));
-                        update("planned_end_date", event.target.value);
-                      }}
-                    />
-                    <span className="muted small">{t("create.plannedEndHint")}</span>
-                  </div>
-                  <div className="field">
-                    <label className="field-label" htmlFor="ew-deadline">
-                      {t("detail.deadline")}
-                    </label>
-                    <div className="ew-deadline-row">
-                      <input
-                        id="ew-deadline"
-                        className="field-input"
-                        type="date"
-                        data-testid="extra-work-create-deadline"
-                        value={form.deadline}
-                        onChange={(event) => {
-                          setDateTakenOver((c) => ({ ...c, deadline: true }));
-                          update("deadline", event.target.value);
-                        }}
-                      />
-                      {deadlineDaysLeft !== null && (
-                        <span
-                          className={`ew-deadline-chip${
-                            deadlineDaysLeft < 0 ? " ew-deadline-chip-late" : ""
-                          }`}
-                          data-testid="extra-work-create-deadline-chip"
-                        >
-                          {deadlineDaysLeft < 0
-                            ? t("create.deadline_chip_overdue", {
-                                count: Math.abs(deadlineDaysLeft),
-                              })
-                            : deadlineDaysLeft === 0
-                              ? t("create.deadline_chip_today")
-                              : t("create.deadline_chip_left", {
-                                  count: deadlineDaysLeft,
-                                })}
-                        </span>
-                      )}
-                    </div>
-                    <span className="muted small">{t("create.deadlineHint")}</span>
-                  </div>
-                </div>
-
-                {/* W5-B — a series: one real meerwerk per chosen day. P-1 §4:
-                    one clear line of air around it. */}
-                <div className="field form-fold-series">
-                  <label className="ew-billed-to-option">
-                    <input
-                      type="checkbox"
-                      checked={entryMode === "MULTIPLE"}
-                      onChange={(event) =>
-                        setEntryMode(event.target.checked ? "MULTIPLE" : "SINGLE")
-                      }
-                      data-testid="extra-work-entry-mode-multiple"
-                    />
-                    <span>
-                      <strong>{t("create.series_toggle")}</strong>
-                      <span className="muted small" style={{ display: "block" }}>
-                        {t("create.series_hint")}
-                      </span>
-                    </span>
-                  </label>
-                  {entryMode === "MULTIPLE" && (
-                    <div style={{ marginTop: 8 }} data-testid="extra-work-series-block">
-                      {/* P-4 (Part A) — one plain sentence, the picker,
-                          the chosen days as chips. */}
-                      <p className="muted small" data-testid="extra-work-series-sentence">
-                        {t("create.series_sentence", { count: slots.length })}
-                      </p>
-                      <SlotPicker slots={slots} onChange={setSlots} />
-                      {slots.length > 0 && (
-                        <div className="meerwerk-day-chips" data-testid="extra-work-series-chips">
-                          {[...slots]
-                            .sort((a, b) => a.date.localeCompare(b.date))
-                            .map((slot) => (
-                              <span key={slot.date} className="meerwerk-day-chip">
-                                {formatDate(slot.date)}
-                                {slot.time ? ` · ${slot.time}` : ""}
-                              </span>
-                            ))}
-                        </div>
-                      )}
+              </label>
+              {entryMode === "MULTIPLE" && (
+                <div style={{ marginTop: 8 }} data-testid="extra-work-series-block">
+                  {/* P-4 (Part A) — one plain sentence, the picker,
+                      the chosen days as chips. */}
+                  <p className="muted small" data-testid="extra-work-series-sentence">
+                    {t("create.series_sentence", { count: slots.length })}
+                  </p>
+                  <SlotPicker slots={slots} onChange={setSlots} />
+                  {slots.length > 0 && (
+                    <div className="meerwerk-day-chips" data-testid="extra-work-series-chips">
+                      {[...slots]
+                        .sort((a, b) => a.date.localeCompare(b.date))
+                        .map((slot) => (
+                          <span key={slot.date} className="meerwerk-day-chip">
+                            {formatDate(slot.date)}
+                            {slot.time ? ` · ${slot.time}` : ""}
+                          </span>
+                        ))}
                     </div>
                   )}
                 </div>
-
-              </div>
-            </details>
+              )}
+            </div>
           </div>
 
           {/* ----- Urgentie ----- */}

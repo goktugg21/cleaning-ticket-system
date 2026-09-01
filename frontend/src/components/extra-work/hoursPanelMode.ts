@@ -20,6 +20,7 @@ export const HOURS_PANEL_MODE: Record<ExtraWorkDisplayPhase, HoursPanelMode> = {
   WAITING_PLANNING: "before",
   SCHEDULED: "before",
   IN_EXECUTION: "edit",
+  WAITING_MANAGER_CHECK: "edit",
   WAITING_COMPLETION_APPROVAL: "edit",
   DONE: "edit",
   INVOICED: "read_only",

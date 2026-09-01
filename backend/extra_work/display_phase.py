@@ -28,6 +28,11 @@ Phase vocabulary (§D.4, presentation enum — NOT a status):
   SCHEDULED                   agreed and planned by a person; nobody has
                               started
   IN_EXECUTION                somebody is doing the work
+  WAITING_MANAGER_CHECK       (provider viewer) the crew reported the work
+                              done and the manager has not checked it yet
+                              (P-10 B1 — the ticket's own WAITING_MANAGER_REVIEW
+                              word; the customer keeps IN_EXECUTION, the
+                              internal check is execution to the requester)
   WAITING_COMPLETION_APPROVAL the finished work waits on the customer
   DONE                        finished and confirmed
   INVOICED                    finished and on an invoice
@@ -50,6 +55,7 @@ PHASE_WAITING_CUSTOMER_APPROVAL = "WAITING_CUSTOMER_APPROVAL"
 PHASE_WAITING_PLANNING = "WAITING_PLANNING"
 PHASE_SCHEDULED = "SCHEDULED"
 PHASE_IN_EXECUTION = "IN_EXECUTION"
+PHASE_WAITING_MANAGER_CHECK = "WAITING_MANAGER_CHECK"
 PHASE_WAITING_COMPLETION_APPROVAL = "WAITING_COMPLETION_APPROVAL"
 PHASE_DONE = "DONE"
 PHASE_INVOICED = "INVOICED"
@@ -66,6 +72,7 @@ EXTRA_WORK_PHASES = frozenset(
         PHASE_WAITING_PLANNING,
         PHASE_SCHEDULED,
         PHASE_IN_EXECUTION,
+        PHASE_WAITING_MANAGER_CHECK,
         PHASE_WAITING_COMPLETION_APPROVAL,
         PHASE_DONE,
         PHASE_INVOICED,
@@ -113,6 +120,14 @@ def display_phase(
         # it is execution as far as the requester is concerned.
         if ticket_status == TicketStatus.WAITING_CUSTOMER_APPROVAL:
             return PHASE_WAITING_COMPLETION_APPROVAL
+        # P-10 B1 — the provider reads the ticket's own word for the
+        # crew's "done, please check" state; the customer does not see
+        # the internal check.
+        if (
+            ticket_status == TicketStatus.WAITING_MANAGER_REVIEW
+            and not viewer_is_customer
+        ):
+            return PHASE_WAITING_MANAGER_CHECK
         return PHASE_IN_EXECUTION
 
     if status == ExtraWorkStatus.CUSTOMER_APPROVED:

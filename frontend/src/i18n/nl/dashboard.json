@@ -103,18 +103,12 @@
   "filters.fold_active_other": "{{count}} actief",
   "attention.show_all": "Toon alle {{count}}",
   "attention.show_less": "Toon de vijf dringendste",
-  "origin.label": "Herkomst",
-  "origin.all": "Alle",
-  "origin.melding": "Melding",
-  "origin.meerwerk": "Meerwerk",
-  "origin.recurring": "Terugkerend",
-  "origin.ticket": "Ticket",
   "tabs_empty.title.open": "Geen open tickets.",
   "tabs_empty.title.busy": "Er is niets in uitvoering.",
   "tabs_empty.title.waiting_customer": "Er wacht niets op de klant.",
   "tabs_empty.title.done": "Nog niets afgehandeld.",
   "tabs_empty.title.all": "Geen tickets.",
-  "tabs_empty.period_title.open": "Nog niets nieuws aangemaakt {{period}}.",
+  "tabs_empty.period_title.open": "Nog geen nieuwe tickets aangemaakt {{period}}.",
   "tabs_empty.period_title.busy": "Niets in uitvoering van wat {{period}} is aangemaakt.",
   "tabs_empty.period_title.waiting_customer": "Niets wacht op de klant van wat {{period}} is aangemaakt.",
   "tabs_empty.period_title.done": "Niets afgehandeld van wat {{period}} is aangemaakt.",
@@ -128,5 +122,6 @@
   "tabs_empty.part.busy": "{{n}} bezig",
   "tabs_empty.part.waiting_customer": "{{n}} wacht op klant",
   "tabs_empty.part.done": "{{n}} afgehandeld",
-  "tabs_empty.show_all_time": "Toon alle tijd"
+  "tabs_empty.part.all": "{{n}} tickets",
+  "tabs_empty.show_all_time": "Toon alles"
 }
