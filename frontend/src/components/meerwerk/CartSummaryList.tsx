@@ -13,11 +13,14 @@ import { lineAmounts, type MeerwerkCartLine } from "./cart";
 export function CartSummaryList({
   lines,
   showAmounts = false,
+  onRemove,
   testIdPrefix,
 }: {
   lines: MeerwerkCartLine[];
   /** Provider surfaces show the line total, not only the unit price. */
   showAmounts?: boolean;
+  /** P-9 C1 — when set, every row carries a remove x. */
+  onRemove?: (line: MeerwerkCartLine) => void;
   testIdPrefix: string;
 }) {
   const { t } = useTranslation("common");
@@ -47,22 +50,36 @@ export function CartSummaryList({
               </span>
               {line.note && <span className="muted small">{line.note}</span>}
             </div>
-            {line.unitPrice ? (
-              amounts && line.quantity > 1 ? (
-                <span style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                  <span className="muted small">{formatMoney(line.unitPrice)}</span>
-                  <span className="meerwerk-line-amount">
-                    {formatMoney(amounts.subtotal)}
+            <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              {line.unitPrice ? (
+                amounts && line.quantity > 1 ? (
+                  <span style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                    <span className="muted small">{formatMoney(line.unitPrice)}</span>
+                    <span className="meerwerk-line-amount">
+                      {formatMoney(amounts.subtotal)}
+                    </span>
                   </span>
-                </span>
+                ) : (
+                  <span className="muted small">{formatMoney(line.unitPrice)}</span>
+                )
               ) : (
-                <span className="muted small">{formatMoney(line.unitPrice)}</span>
-              )
-            ) : (
-              <span className="phase-badge phase-badge-action">
-                {t("meerwerk_flow.price_follows")}
-              </span>
-            )}
+                <span className="phase-badge phase-badge-action">
+                  {t("meerwerk_flow.price_follows")}
+                </span>
+              )}
+              {onRemove && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => onRemove(line)}
+                  aria-label={t("meerwerk_flow.other_remove")}
+                  title={t("meerwerk_flow.other_remove")}
+                  data-testid={`${testIdPrefix}-confirm-remove`}
+                >
+                  ×
+                </button>
+              )}
+            </span>
           </li>
         );
       })}

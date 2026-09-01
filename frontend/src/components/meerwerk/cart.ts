@@ -29,15 +29,22 @@ export interface MeerwerkCartLine {
   unit?: LineUnit;
 }
 
-/** FE-4 — one "iets anders" row while it is being typed. */
+/** FE-4 — one "iets anders" line the reader ADDED. P-9 C1: a line
+ *  exists only once "Add" was pressed; the box it was typed in is not
+ *  a line, so nothing typed-but-not-added is ever sent. */
 export interface OtherLineDraft {
   key: string;
   text: string;
   note: string;
 }
 
-export function emptyOtherLine(index: number): OtherLineDraft {
-  return { key: `other-${index}`, text: "", note: "" };
+/** P-9 C1 — the added line, from the box's text. */
+export function otherLineFromText(text: string, index: number): OtherLineDraft {
+  return {
+    key: `other-${index}-${Date.now().toString(36)}`,
+    text: text.trim(),
+    note: "",
+  };
 }
 
 export function serviceLine(price: CustomerServicePrice): MeerwerkCartLine {

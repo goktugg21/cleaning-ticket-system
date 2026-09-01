@@ -95,6 +95,7 @@ export function ActualHoursPanel({
   previewCoversTotal = false,
   finalSubtotalAmount = null,
   consequence,
+  readOnly = false,
 }: {
   ewId: number;
   hourlyLines: ActualHoursLine[];
@@ -134,8 +135,15 @@ export function ActualHoursPanel({
    *  de factuur van B Amsterdam voor oktober 2026." The caller
    *  composes it from the detail it has. */
   consequence?: string;
+  /** P-9 C5 — after the invoice: the saved hours, no inputs, no Save,
+   *  and no "locked" warning (nothing is being refused; the work is
+   *  simply billed). */
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
+  // The values-only layout serves both the locked case (the backend
+  // would refuse a save) and the read-only case (nothing to save).
+  const frozen = locked || readOnly;
   const { push: pushToast } = useToast();
   const navigate = useNavigate();
   const [draft, setDraft] = useState<Record<number, string>>(() =>
@@ -243,7 +251,7 @@ export function ActualHoursPanel({
           {t("detail.actual_hours_error_locked")}
         </div>
       )}
-      {locked ? (
+      {frozen ? (
         <div className="detail-kv-list">
           {hourlyLines.map((line) => {
             const stored = finiteOrNull(line.actual_hours);
@@ -383,7 +391,7 @@ export function ActualHoursPanel({
             </strong>
           </span>
         )}
-        {!locked && consequence && (
+        {!frozen && consequence && (
           <span
             className="muted small ew-save-consequence"
             data-testid="extra-work-actual-hours-consequence"
@@ -391,7 +399,7 @@ export function ActualHoursPanel({
             {consequence}
           </span>
         )}
-        {!locked && (
+        {!frozen && (
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -423,6 +431,7 @@ export function ActualHoursPanel({
       className="card"
       style={{ marginBottom: 16 }}
       data-testid="extra-work-actual-hours"
+      data-read-only={readOnly ? "true" : undefined}
     >
       <div className="form-section">
         <div className="form-section-title">

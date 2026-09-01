@@ -66,7 +66,7 @@ import {
   cartLineItemsPayload,
   derivedDescription,
   derivedTitle,
-  emptyOtherLine,
+  otherLineFromText,
   lineAmounts,
   otherLinesToCart,
   outcomeKey,
@@ -76,7 +76,10 @@ import {
 } from "../components/meerwerk/cart";
 import { CartSummaryList } from "../components/meerwerk/CartSummaryList";
 import { MeerwerkOutcome } from "../components/meerwerk/MeerwerkOutcome";
-import { OtherLinesEditor } from "../components/meerwerk/OtherLinesEditor";
+import {
+  OtherLinesEditor,
+  UnaddedOtherLineNotice,
+} from "../components/meerwerk/OtherLinesEditor";
 import { PricedServicePicker } from "../components/meerwerk/PricedServicePicker";
 import { formatDate, formatMoney } from "../lib/intl";
 import { customerLabelName } from "../lib/customerLabelName";
@@ -244,7 +247,12 @@ export function CreateExtraWorkPage() {
 
   /* The cart — the FE-2 shape, shared with the customer flow. */
   const [cart, setCart] = useState<MeerwerkCartLine[]>([]);
-  const [others, setOthers] = useState<OtherLineDraft[]>([emptyOtherLine(1)]);
+  /* P-9 C1 — the "iets anders" lines that were ADDED, and the box's
+     own text. Only added lines reach the cart; the box is asked about
+     at submit when it still holds something. */
+  const [others, setOthers] = useState<OtherLineDraft[]>([]);
+  const [otherDraft, setOtherDraft] = useState("");
+  const [unaddedAsk, setUnaddedAsk] = useState(false);
 
   /* The server's preview, tagged with the cart key it answers for. */
   const [selectedIntent, setSelectedIntent] =
@@ -587,27 +595,34 @@ export function CreateExtraWorkPage() {
       ),
     );
   }
-  function setOther(key: string, patch: Partial<Pick<OtherLineDraft, "text" | "note">>) {
-    setOthers((prev) =>
-      prev.map((row) => (row.key === key ? { ...row, ...patch } : row)),
-    );
-  }
+  /** P-9 C1 — Add: the box's text becomes a line; the box clears. */
   function addOther() {
-    setOthers((prev) => [
-      ...prev,
-      { key: `other-${prev.length + 1}-${Date.now().toString(36)}`, text: "", note: "" },
-    ]);
+    const text = otherDraft.trim();
+    if (!text) return;
+    setOthers((prev) => [...prev, otherLineFromText(text, prev.length + 1)]);
+    setOtherDraft("");
+    setUnaddedAsk(false);
   }
   function removeOther(key: string) {
-    setOthers((prev) => {
-      const next = prev.filter((row) => row.key !== key);
-      return next.length === 0 ? [emptyOtherLine(1)] : next;
-    });
+    setOthers((prev) => prev.filter((row) => row.key !== key));
+  }
+  /** The x on a confirm-list row: an added line leaves `others`, a
+   *  picked price leaves the cart (the picker's tick follows). */
+  function removeConfirmLine(line: MeerwerkCartLine) {
+    if (line.kind === "other") removeOther(line.key);
+    else setCart((prev) => prev.filter((row) => row.key !== line.key));
   }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    // P-9 C1 — something typed in the "iets anders" box but never
+    // added is never sent silently: ask, and let the reader press
+    // submit again after choosing.
+    if (otherDraft.trim() !== "") {
+      setUnaddedAsk(true);
+      return;
+    }
     if (!effectiveBuilding || !form.customer) {
       setError(t("create.error_building_customer_required"));
       return;
@@ -1084,7 +1099,11 @@ export function CreateExtraWorkPage() {
                 />
                 <OtherLinesEditor
                   others={others}
-                  onChange={setOther}
+                  draft={otherDraft}
+                  onDraftChange={(text) => {
+                    setOtherDraft(text);
+                    setUnaddedAsk(false);
+                  }}
                   onAdd={addOther}
                   onRemove={removeOther}
                   helper={t("create.other_helper_provider")}
@@ -1317,6 +1336,7 @@ export function CreateExtraWorkPage() {
                 <CartSummaryList
                   lines={confirmLines}
                   showAmounts
+                  onRemove={removeConfirmLine}
                   testIdPrefix="extra-work-create"
                 />
                 {staleCustomPriceLines.length > 0 && (
@@ -1420,6 +1440,19 @@ export function CreateExtraWorkPage() {
             )}
           </div>
 
+          {/* P-9 C1 — the box still holds text at submit: one amber
+              line with Add it / Ignore; the submit is pressed again. */}
+          {unaddedAsk && otherDraft.trim() !== "" && (
+            <UnaddedOtherLineNotice
+              text={otherDraft.trim()}
+              onAddIt={addOther}
+              onIgnore={() => {
+                setOtherDraft("");
+                setUnaddedAsk(false);
+              }}
+              testIdPrefix="extra-work-create"
+            />
+          )}
           {error && (
             <div
               className="alert-error"
@@ -1446,7 +1479,9 @@ export function CreateExtraWorkPage() {
                 submitting ||
                 loadingOptions ||
                 noOptions ||
-                cartWithOther.length === 0 ||
+                // P-9 C1 — text in the box counts as something to ask
+                // about, so the press reaches the ask, not a dead button.
+                (cartWithOther.length === 0 && otherDraft.trim() === "") ||
                 !effectiveBuilding ||
                 !form.customer
               }

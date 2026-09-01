@@ -16,7 +16,8 @@
  *      as chips, an hours box per chosen day, a box for "hours without
  *      a day yet", a visible per-person total and a grand total. Any
  *      day combination (2+3, 1+3, a single day) reads exactly as
- *      chosen. The hours budget is optional and sits under the total.
+ *      chosen. The total planned hours sit under the per-person total:
+ *      needed before the work can be priced (P-9 C2), saveable at 0.
  *   3. DONE MEANS — the two completion switches, one line each.
  *
  * THE DOUBLE-COUNT (the reason this was rebuilt first). The owner typed
@@ -230,8 +231,11 @@ export function PlanWorkDialog({
   // P-5 S2.4 — land on the missing part once, after the first paint.
   useEffect(() => {
     if (!initialFocus) return;
+    // P-9 C2 — "planned hours are missing" lands on the total planned
+    // hours field, not on the per-person rows.
+    const target = initialFocus === "hours" ? "budget" : initialFocus;
     const el = document.querySelector<HTMLElement>(
-      `[data-testid="extra-work-plan-dialog"] [data-plan-field="${initialFocus}"]`,
+      `[data-testid="extra-work-plan-dialog"] [data-plan-field="${target}"]`,
     );
     if (!el) return;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -990,12 +994,6 @@ export function PlanWorkDialog({
               </div>
             ) : (
               <div className="ew-plan-people" {...bind("hours")} data-testid="extra-work-plan-hours">
-                {/* P-8R A5 — label truth: the pricing gate needs hours
-                    above 0, satisfied by the per-person hours below OR
-                    the budget under them. Say so once, honestly. */}
-                <p className="muted small" data-testid="extra-work-plan-hours-caption">
-                  {t("plan.hours_required_caption")}
-                </p>
                 {fieldError("hours") && (
                   <p className="field-error" role="alert" data-testid="extra-work-plan-hours-error">
                     {fieldError("hours")}
@@ -1064,7 +1062,6 @@ export function PlanWorkDialog({
                   </div>
                 )}
 
-                {focusNotice("hours")}
                 {crew.map((a) => {
                   const lines = linesFor(a.user_id);
                   const used = new Set(lines.map((l) => l.hourType).filter((id): id is number => id !== null));
@@ -1294,24 +1291,50 @@ export function PlanWorkDialog({
                   </strong>
                 </div>
 
-                <label className="field ew-plan-budget" {...bind("budget")}>
-                  <span className="muted small">{t("plan.budget_optional_label")}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.25"
-                    inputMode="decimal"
-                    className="field-input"
-                    value={budget}
-                    onChange={(e) => setBudget(e.target.value)}
-                    data-testid="extra-work-plan-budget"
-                  />
-                  {fieldError("budget") && (
-                    <span className="field-error" role="alert">
-                      {fieldError("budget")}
+                {/* P-9 C2 — the total planned hours. Needed before the
+                    work can be priced; the plan itself saves at 0. The
+                    Money tab's "planned hours are missing" door lands
+                    here. */}
+                <div {...bind("budget")} data-testid="extra-work-plan-budget-block">
+                  {focusNotice("hours")}
+                  <label className="field ew-plan-budget">
+                    <span className="field-label">
+                      {t("plan.budget_total_label")}
+                      <span className="required-mark" aria-hidden="true"> *</span>{" "}
+                      <span
+                        className="muted small"
+                        style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}
+                        data-testid="extra-work-plan-budget-marker"
+                      >
+                        {t("plan.budget_required_marker")}
+                      </span>
                     </span>
-                  )}
-                </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.25"
+                      inputMode="decimal"
+                      className="field-input"
+                      value={budget}
+                      onChange={(e) => setBudget(e.target.value)}
+                      aria-describedby="extra-work-plan-budget-hint"
+                      data-testid="extra-work-plan-budget"
+                    />
+                    {fieldError("budget") && (
+                      <span className="field-error" role="alert">
+                        {fieldError("budget")}
+                      </span>
+                    )}
+                  </label>
+                  <p
+                    id="extra-work-plan-budget-hint"
+                    className="field-hint"
+                    style={{ margin: "4px 0 0" }}
+                    data-testid="extra-work-plan-budget-hint"
+                  >
+                    {t("plan.budget_hint")}
+                  </p>
+                </div>
                 {overrun && (
                   <div className="ew-plan-overrun" role="status" data-testid="extra-work-plan-overrun">
                     <AlertTriangle size={18} aria-hidden="true" />

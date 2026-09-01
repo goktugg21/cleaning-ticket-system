@@ -52,6 +52,7 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import axios from "axios";
 
@@ -85,6 +86,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { useOriginBackLink } from "../hooks/useBackLink";
 import { ActualHoursPanel } from "../components/extra-work/ActualHoursPanel";
+import { CoverageNotice } from "../components/extra-work/CoverageNotice";
 import {
   actualHoursPanelKey,
   deriveActiveHourlyLines,
@@ -109,6 +111,7 @@ import {
   isProviderManagementRole,
 } from "../auth/permissions";
 import type {
+  ExtraWorkDisplayPhase,
   AssignmentCandidate,
   Contact,
   CustomerLabel,
@@ -143,10 +146,16 @@ import { customerLabelName } from "../lib/customerLabelName";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { describeExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import type { ExtraWorkRefusal } from "../lib/extraWorkRefusal";
+import {
+  compareCoverage,
+  coverageConfirmLabel,
+  type CoverageLine,
+} from "../lib/extraWorkCoverage";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { extraWorkStatusLabelKey, ticketStatusLabelKey } from "../lib/enumLabels";
 import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
+import { unitSuffix } from "../lib/unitLabel";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 import { Avatar } from "../components/Avatar";
 
@@ -380,6 +389,43 @@ function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
     }
   }
   return "spawn_generic";
+}
+
+/** P-9 C5 — when the "hours to bill" panel shows, per phase. Hours
+ *  worked exist once the work has started: before that the Money tab
+ *  says so in one sentence; after the invoice the saved hours are read
+ *  only. Exhaustive over the phase enum — a new phase fails to
+ *  compile here rather than rendering the panel by accident. */
+const HOURS_PANEL_MODE: Record<
+  ExtraWorkDisplayPhase,
+  "none" | "before" | "edit" | "read_only"
+> = {
+  WAITING_PRICE: "none",
+  WAITING_YOUR_APPROVAL: "none",
+  WAITING_CUSTOMER_APPROVAL: "none",
+  WAITING_PLANNING: "before",
+  SCHEDULED: "before",
+  IN_EXECUTION: "edit",
+  WAITING_COMPLETION_APPROVAL: "edit",
+  DONE: "edit",
+  INVOICED: "read_only",
+  REJECTED: "none",
+  CANCELLED: "none",
+};
+
+/** P-9 C4 — the request's lines in the shape the coverage check reads. */
+function cartCoverageLines(
+  items: ExtraWorkRequestDetail["line_items"],
+  t: TFunction,
+): CoverageLine[] {
+  return items.map((item) => ({
+    id: item.id,
+    service: item.service,
+    label:
+      (item.service_name || item.custom_description || "").trim() || `#${item.id}`,
+    quantity: item.quantity,
+    unit: unitSuffix({ type: item.unit_type, label: "" }, t),
+  }));
 }
 
 // W17 — ActualHoursPanel and its active-set derivation moved to
@@ -1975,6 +2021,25 @@ export function ExtraWorkDetailPage() {
   const finalAmountLocked = spawnedTickets.some(
     (ticket) => ticket.status === "APPROVED" || ticket.status === "CLOSED",
   );
+
+  /* P-9 C4 — starting the work: does the approved price cover what the
+     customer asked for? Only a quote can differ from the cart; on the
+     agreed-price route the cart IS the price (no comparison, calm
+     confirm). While the approved quote's lines are still loading there
+     is nothing to compare yet. */
+  const startCoverage = approvedProposalDetail
+    ? compareCoverage(
+        cartCoverageLines(ew.line_items, t),
+        approvedProposalDetail.lines.map((line) => ({
+          id: line.id,
+          service: line.service,
+          label: (line.service_name || line.description || "").trim(),
+          quantity: line.quantity,
+        })),
+      )
+    : null;
+  /* P-9 C5 — which hours surface the Money tab shows in this phase. */
+  const hoursPanelMode = HOURS_PANEL_MODE[ew.display_phase];
 
   // Sprint 30 Batch 30.1 — retry-spawn button is the recovery path
   // for EWs that landed in CUSTOMER_APPROVED with zero spawned
@@ -3746,6 +3811,8 @@ export function ExtraWorkDetailPage() {
                     `#${item.id}`,
                   quantity: String(item.quantity),
                   unit_type: item.unit_type,
+                  service: item.service,
+                  note: item.customer_note?.trim() || undefined,
                 }))}
               />
             )}
@@ -3765,9 +3832,6 @@ export function ExtraWorkDetailPage() {
                   <div className="form-section-title">
                     {t(noCustomerApproval ? "detail.proposal_builder_title_start" : "detail.proposal_builder_title")}
                   </div>
-                  <p className="muted small" style={{ marginTop: 0 }}>
-                    {t(noCustomerApproval ? "detail.proposal_prepare_helper_start" : "detail.proposal_prepare_helper")}
-                  </p>
                   {/* W-PLAN — the pricing entry point states the
                       plan. Complete: one line ("3 people · 1 manager ·
                       Aug 29\u201331 · 12h"). Incomplete: ONLY the
@@ -3865,8 +3929,41 @@ export function ExtraWorkDetailPage() {
               re-seeds the inputs from refreshed data without a
               prop-derived resync effect; the proposal case also re-fetches
               the approved proposal's detail so entered hours surface. */}
-          {isProvider && activeHourlyLines.length > 0 && (
+          {/* P-9 C5 — hours worked exist once the work has started. Before
+              that: the planned hours and one sentence; after the
+              invoice: the saved hours, read only. */}
+          {isProvider &&
+            activeHourlyLines.length > 0 &&
+            hoursPanelMode === "before" && (
+              <div
+                className="card"
+                style={{ marginBottom: 16 }}
+                data-testid="extra-work-hours-before-start"
+              >
+                <div className="form-section">
+                  <div className="form-section-title">
+                    {t("detail.actual_hours_section_title")}
+                  </div>
+                  {planHoursValue > 0 && (
+                    <p style={{ margin: "0 0 4px" }} data-testid="extra-work-hours-planned">
+                      {t("detail.hours_planned_line", {
+                        hours: t("plan_gate.summary_hours", {
+                          hours: planHoursValue.toFixed(planHoursValue % 1 === 0 ? 0 : 2),
+                        }),
+                      })}
+                    </p>
+                  )}
+                  <p className="muted small" style={{ margin: 0 }}>
+                    {t("detail.hours_before_start")}
+                  </p>
+                </div>
+              </div>
+            )}
+          {isProvider &&
+            activeHourlyLines.length > 0 &&
+            (hoursPanelMode === "edit" || hoursPanelMode === "read_only") && (
             <ActualHoursPanel
+              readOnly={hoursPanelMode === "read_only"}
               key={actualHoursPanelKey(
                 approvedProposal,
                 activeHourlyLines,
@@ -4391,12 +4488,19 @@ export function ExtraWorkDetailPage() {
                 </ul>
               </div>
             )}
+            {/* P-9 C4 — the same coverage block as the send confirm. */}
+            <CoverageNotice coverage={startCoverage} />
             <p className="muted small">
               {t("detail.start_dialog_question", { title: ew.title })}
             </p>
           </div>
         }
-        confirmLabel={t("detail.start_dialog_confirm")}
+        confirmLabel={coverageConfirmLabel(
+          t,
+          startCoverage,
+          "start",
+          t("detail.start_dialog_confirm"),
+        )}
         busy={transitionBusy === "IN_PROGRESS"}
         busyLabel={t("detail.workflow_working")}
         onConfirm={async () => {

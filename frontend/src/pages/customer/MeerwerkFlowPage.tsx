@@ -57,14 +57,17 @@ import {
   cartLineItemsPayload,
   derivedDescription,
   derivedTitle,
-  emptyOtherLine,
+  otherLineFromText,
   otherLinesToCart,
   type MeerwerkCartLine,
   type OtherLineDraft,
 } from "../../components/meerwerk/cart";
 import { CartSummaryList } from "../../components/meerwerk/CartSummaryList";
 import { MeerwerkOutcome } from "../../components/meerwerk/MeerwerkOutcome";
-import { OtherLinesEditor } from "../../components/meerwerk/OtherLinesEditor";
+import {
+  OtherLinesEditor,
+  UnaddedOtherLineNotice,
+} from "../../components/meerwerk/OtherLinesEditor";
 import { PricedServicePicker } from "../../components/meerwerk/PricedServicePicker";
 
 type Step = 0 | 1 | 2 | 3;
@@ -84,8 +87,11 @@ export function MeerwerkFlowPage() {
   const [building, setBuilding] = useState<number | "">("");
   const [cart, setCart] = useState<MeerwerkCartLine[]>([]);
   /** FE-4 (Addendum D §D.12 item 6) — "Iets anders" is a real cart line,
-   *  and there can be several. One empty row is always offered. */
-  const [others, setOthers] = useState<OtherLineDraft[]>([emptyOtherLine(1)]);
+   *  and there can be several. P-9 C1: a line exists once Add was
+   *  pressed; the box's own text is asked about before moving on. */
+  const [others, setOthers] = useState<OtherLineDraft[]>([]);
+  const [otherDraft, setOtherDraft] = useState("");
+  const [unaddedAsk, setUnaddedAsk] = useState(false);
   const [wishDate, setWishDate] = useState("");
   const [autoStart, setAutoStart] = useState(false);
 
@@ -158,22 +164,15 @@ export function MeerwerkFlowPage() {
     [cart, others],
   );
 
-  function setOther(key: string, patch: Partial<Pick<OtherLineDraft, "text" | "note">>) {
-    setOthers((prev) =>
-      prev.map((row) => (row.key === key ? { ...row, ...patch } : row)),
-    );
-  }
   function addOther() {
-    setOthers((prev) => [
-      ...prev,
-      { key: `other-${prev.length + 1}-${Date.now().toString(36)}`, text: "", note: "" },
-    ]);
+    const text = otherDraft.trim();
+    if (!text) return;
+    setOthers((prev) => [...prev, otherLineFromText(text, prev.length + 1)]);
+    setOtherDraft("");
+    setUnaddedAsk(false);
   }
   function removeOther(key: string) {
-    setOthers((prev) => {
-      const next = prev.filter((row) => row.key !== key);
-      return next.length === 0 ? [emptyOtherLine(1)] : next;
-    });
+    setOthers((prev) => prev.filter((row) => row.key !== key));
   }
 
   /** The confirm step's statement comes from the SERVER's preview —
@@ -250,7 +249,7 @@ export function MeerwerkFlowPage() {
     step === 0
       ? effectiveBuilding !== "" && customer !== null
       : step === 1
-        ? cartWithOther.length > 0
+        ? cartWithOther.length > 0 || otherDraft.trim() !== ""
         : true;
 
   const autoStartOffered =
@@ -374,11 +373,26 @@ export function MeerwerkFlowPage() {
             />
             <OtherLinesEditor
               others={others}
-              onChange={setOther}
+              draft={otherDraft}
+              onDraftChange={(text) => {
+                setOtherDraft(text);
+                setUnaddedAsk(false);
+              }}
               onAdd={addOther}
               onRemove={removeOther}
               testIdPrefix="meerwerk"
             />
+            {unaddedAsk && otherDraft.trim() !== "" && (
+              <UnaddedOtherLineNotice
+                text={otherDraft.trim()}
+                onAddIt={addOther}
+                onIgnore={() => {
+                  setOtherDraft("");
+                  setUnaddedAsk(false);
+                }}
+                testIdPrefix="meerwerk"
+              />
+            )}
           </>
         )}
 
@@ -487,6 +501,11 @@ export function MeerwerkFlowPage() {
               className="btn btn-primary btn-sm"
               disabled={!stepValid}
               onClick={() => {
+                // P-9 C1 — the box still holds text: ask before moving on.
+                if (step === 1 && otherDraft.trim() !== "") {
+                  setUnaddedAsk(true);
+                  return;
+                }
                 const next = (step + 1) as Step;
                 setStep(next);
                 if (next === 3) void loadPreview();

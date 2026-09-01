@@ -11,11 +11,16 @@
 // Only `ProposalBuilder` is exported (react-refresh/only-export-
 // components); the row/add-line helpers stay local to this file.
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Plus, RefreshCw, X } from "lucide-react";
 
 import { getApiError } from "../api/client";
+import {
+  compareCoverage,
+  coverageConfirmLabel,
+  type CoverageLine,
+} from "../lib/extraWorkCoverage";
 import { describeExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import type { ExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import {
@@ -28,8 +33,10 @@ import {
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import type { ExtraWorkUnitType, ProposalDetail, ProposalLine } from "../api/types";
-import { formatMoney } from "../lib/intl";
+import { formatMoney, formatNumber } from "../lib/intl";
+import { unitSuffix } from "../lib/unitLabel";
 import { CollapsibleCard } from "./CollapsibleCard";
+import { CoverageNotice } from "./extra-work/CoverageNotice";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { ConfirmDialogHandle } from "./ConfirmDialog";
 import { InvoiceLineRow, InvoiceLineTotalsRow } from "./InvoiceLineRow";
@@ -469,6 +476,129 @@ export interface RequestLineSeed {
   label: string;
   quantity: string;
   unit_type: ExtraWorkUnitType;
+  /** The catalog service behind the line, or null for a free-text one. */
+  service: number | null;
+  /** The customer's note on the line, shown under its name. */
+  note?: string;
+}
+
+/**
+ * P-9 C3 — a requested line the quote does not cover yet, IN the
+ * Pricing table: name, quantity, unit, an empty unit-price box and the
+ * badge "needs a price". The box commits on blur / Enter and creates
+ * the quote line from the request's own words (the same call "Add
+ * line" makes); "Leave it out" only takes the row off the table —
+ * nothing is sent, and the send confirm still counts the line as not
+ * covered.
+ */
+function UnpricedRequestLineRow({
+  line,
+  busy,
+  focused,
+  onPrice,
+  onLeaveOut,
+}: {
+  line: RequestLineSeed;
+  busy: boolean;
+  /** The coverage notice's "Add a price for X" lands here. */
+  focused: boolean;
+  onPrice: (unitPrice: string) => void;
+  onLeaveOut: () => void;
+}) {
+  const { t } = useTranslation("extra_work");
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Enter commits and the input then loses focus: the blur must not
+  // send the same price a second time.
+  const sentRef = useRef(false);
+  useEffect(() => {
+    if (!busy) sentRef.current = false;
+  }, [busy]);
+  useEffect(() => {
+    if (!focused) return;
+    inputRef.current?.focus();
+    inputRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focused]);
+  const commit = () => {
+    if (busy || sentRef.current) return;
+    const raw = draft.trim().replace(",", ".");
+    if (raw === "") return;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) return;
+    sentRef.current = true;
+    onPrice(value.toFixed(2));
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+    }
+  };
+  return (
+    <tr
+      className="invoice-line-row"
+      data-testid="extra-work-proposal-unpriced-row"
+      data-line-id={line.id}
+    >
+      <td className="invoice-line-row-service">
+        <div className="invoice-line-row-service-label">{line.label}</div>
+        {line.note && (
+          <div className="invoice-line-row-service-sub">
+            <span className="muted small">{line.note}</span>
+          </div>
+        )}
+      </td>
+      <td className="invoice-line-row-source">
+        <span
+          className="invoice-line-row-source-tag invoice-line-row-source-needs_proposal"
+          data-testid="invoice-line-row-source-tag"
+        >
+          {t("invoice_row.source.needs_proposal")}
+        </span>
+      </td>
+      <td className="invoice-line-row-num invoice-line-row-qty">
+        {formatNumber(line.quantity, { maximumFractionDigits: 2 })}
+      </td>
+      <td className="invoice-line-row-unit">{t(UNIT_TYPE_KEY[line.unit_type])}</td>
+      <td className="invoice-line-row-num invoice-line-row-money">
+        <input
+          ref={inputRef}
+          type="number"
+          min="0"
+          step="0.01"
+          inputMode="decimal"
+          className="field-input"
+          style={{ minWidth: 84, maxWidth: 120 }}
+          value={draft}
+          disabled={busy}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={onKeyDown}
+          aria-label={t("detail.pricing_unpriced_price_aria", { line: line.label })}
+          data-testid={`extra-work-proposal-unpriced-price-${line.id}`}
+        />
+      </td>
+      <td className="invoice-line-row-num invoice-line-row-vat-pct">
+        <span className="muted small">21%</span>
+      </td>
+      <td className="invoice-line-row-num invoice-line-row-money">—</td>
+      <td className="invoice-line-row-num invoice-line-row-money">—</td>
+      <td className="invoice-line-row-num invoice-line-row-money invoice-line-row-total">—</td>
+      <td className="invoice-line-row-actions">
+        <div className="invoice-line-row-actions-cluster">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            onClick={onLeaveOut}
+            data-testid={`extra-work-proposal-unpriced-leave-out-${line.id}`}
+          >
+            {t("detail.pricing_leave_out")}
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
 }
 
 const EMPTY_LINE_FORM: LineFormState = {
@@ -740,8 +870,9 @@ export function ProposalBuilder({
    *  MECHANICS UNTOUCHED: same handler, same endpoint, same statuses.
    *  The page owns the predicate; this component only words itself. */
   noCustomerApproval?: boolean;
-  /** W-FIX1 A3 — the request's own lines, offered as one-click seeds
-   *  for the composer so the proposal line inherits the requested name. */
+  /** W-FIX1 A3, P-9 C3 — the request's own lines. Every one the quote
+   *  does not cover renders in the Pricing table as an unpriced row;
+   *  the send / start / approve confirms say what the price covers. */
   requestLines?: RequestLineSeed[];
   /** P-8R A4 — who the price goes to; the send confirm names them. */
   customerName?: string | null;
@@ -764,21 +895,37 @@ export function ProposalBuilder({
   // P-8R A4 — sending a price asks once, showing the lines and the total.
   const sendDialogRef = useRef<ConfirmDialogHandle>(null);
   const [addOpen, setAddOpen] = useState(false);
-  /* W-FIX1 A3 — what the add composer opens with; a request-line chip
-     re-seeds it (the key remounts the composer's own form state). */
-  const [addSeed, setAddSeed] = useState<{ key: number; form: LineFormState }>({
-    key: 0,
-    form: EMPTY_LINE_FORM,
-  });
-  const unseededRequestLines = (requestLines ?? []).filter(
-    (line) =>
-      !proposal.lines.some(
-        (saved) =>
-          (saved.description ?? "").trim().toLowerCase() ===
-            line.label.trim().toLowerCase() ||
-          (saved.service_name ?? "").trim().toLowerCase() ===
-            line.label.trim().toLowerCase(),
-      ),
+  /* The add composer opens empty (P-9 C3 retired the request-line
+     chips that used to re-seed it; the request's lines are rows now). */
+  const addSeed = { key: 0, form: EMPTY_LINE_FORM };
+  /* P-9 C3/C4 — what the customer asked for against what the quote
+     prices. The comparison is `lib/extraWorkCoverage`'s; the unpriced
+     rows are the cart lines it finds uncovered, minus the ones the
+     operator chose to leave out (local — nothing is sent). */
+  const cartCoverageLines: CoverageLine[] = (requestLines ?? []).map((line) => ({
+    id: line.id,
+    service: line.service,
+    label: line.label,
+    quantity: line.quantity,
+    unit: unitSuffix({ type: line.unit_type, label: "" }, t),
+  }));
+  const quoteCoverageLines: CoverageLine[] = proposal.lines.map((line) => ({
+    id: line.id,
+    service: line.service,
+    label: (line.service_name || line.description || "").trim(),
+    quantity: line.quantity,
+  }));
+  const coverage = requestLines
+    ? compareCoverage(cartCoverageLines, quoteCoverageLines)
+    : null;
+  const [leftOut, setLeftOut] = useState<ReadonlySet<number>>(() => new Set());
+  const [focusUnpriced, setFocusUnpriced] = useState<number | null>(null);
+  const unpricedRows: RequestLineSeed[] = (coverage?.uncovered ?? [])
+    .map((line) => (requestLines ?? []).find((r) => r.id === line.id))
+    .filter((line): line is RequestLineSeed => line !== undefined)
+    .filter((line) => !leftOut.has(line.id));
+  const hasContractLine = proposal.lines.some(
+    (line) => line.price_source === "CONTRACT",
   );
   // Provider override-decision modal (SENT proposal). A customer decides
   // without a reason; a PROVIDER driving the customer decision is an
@@ -867,6 +1014,37 @@ export function ProposalBuilder({
       await createProposalLine(ewId, proposal.id, payload);
       setAddOpen(false);
     });
+  // P-9 C3 — pricing an unpriced row creates the quote line from the
+  // request's own words, through the SAME call "Add line" makes.
+  const priceRequestLine = (line: RequestLineSeed, unitPrice: string) =>
+    void run(async () => {
+      await createProposalLine(ewId, proposal.id, {
+        service: line.service,
+        description: line.service === null ? line.label : "",
+        quantity: line.quantity,
+        unit_type: line.unit_type,
+        unit_price: unitPrice,
+        vat_pct: "21.00",
+        customer_explanation: "",
+      });
+      setFocusUnpriced((current) => (current === line.id ? null : current));
+    });
+  const leaveOut = (lineId: number) =>
+    setLeftOut((prev) => new Set([...prev, lineId]));
+  // The coverage notice's door: close the confirm, put the row back if
+  // it was left out, and land on its price box (the focus itself runs
+  // in the row's effect — a focus in the handler that closes a
+  // <dialog> does nothing).
+  const addPriceFor = (line: CoverageLine) => {
+    sendDialogRef.current?.close();
+    setLeftOut((prev) => {
+      if (!prev.has(line.id)) return prev;
+      const next = new Set(prev);
+      next.delete(line.id);
+      return next;
+    });
+    setFocusUnpriced(line.id);
+  };
   // Sprint 187 §2c — the PATCH that had no caller. Same `run()` helper
   // as every other mutation here, so it gets the same refetch and the
   // same live-preview refresh rather than a second refresh path.
@@ -1009,14 +1187,24 @@ export function ProposalBuilder({
           </div>
         )}
         {/* W-UX F16 -- the "set a price" instruction is only true while
-            the lines can still be edited. */}
-        {canEdit && (
-          <p className="muted small" style={{ marginTop: 0 }}>
-            {t(
-              noCustomerApproval
-                ? "detail.proposal_builder_helper_start"
-                : "detail.proposal_builder_helper",
-            )}
+            the lines can still be edited. P-9 C7 -- and each sentence
+            only while what it names is on the table: "contract prices
+            are filled in" when a contract line is, "give the other
+            lines a price" when an unpriced row is. */}
+        {canEdit && (hasContractLine || unpricedRows.length > 0) && (
+          <p
+            className="muted small"
+            style={{ marginTop: 0 }}
+            data-testid="extra-work-proposal-helper"
+          >
+            {[
+              hasContractLine ? t("detail.proposal_builder_helper_contract") : null,
+              unpricedRows.length > 0
+                ? t("detail.proposal_builder_helper_unpriced")
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
           </p>
         )}
         {/* Saved proposal lines render read-only in the same table layout
@@ -1024,7 +1212,7 @@ export function ProposalBuilder({
             viewer can edit, each row carries a Remove action — there is no
             inline edit; a line is changed by removing it and re-adding it
             through the composer below (legacy composer behavior). */}
-        {proposal.lines.length === 0 ? (
+        {proposal.lines.length === 0 && unpricedRows.length === 0 ? (
           <p className="muted small">
             {t(
               noCustomerApproval
@@ -1058,8 +1246,21 @@ export function ProposalBuilder({
                     }
                     rowTestId="extra-work-proposal-line-row"
                     subLabel={renderNoteSub(line)}
+                    audience={isProvider ? "provider" : "customer"}
                   />
                 ))}
+                {/* P-9 C3 — every requested line is on the table. */}
+                {canEdit &&
+                  unpricedRows.map((line) => (
+                    <UnpricedRequestLineRow
+                      key={`unpriced-${line.id}`}
+                      line={line}
+                      busy={busy}
+                      focused={focusUnpriced === line.id}
+                      onPrice={(unitPrice) => priceRequestLine(line, unitPrice)}
+                      onLeaveOut={() => leaveOut(line.id)}
+                    />
+                  ))}
                 <InvoiceLineTotalsRow
                   subtotal={proposal.subtotal_amount}
                   vatAmount={proposal.vat_amount}
@@ -1101,45 +1302,10 @@ export function ProposalBuilder({
           <div className="ew-pricing-add-form">
             {addOpen ? (
               <>
-                {/* W-FIX1 A3 (audit F3) — the requested line's NAME
-                    comes across. The server seeds only contract-priced
-                    lines (a custom line has no price to seed and the
-                    line row cannot hold "no price yet"), so the
-                    operator retyped the name — EW 28 went out as "g"
-                    for "Waste removal — small van". One click seeds
-                    the composer with the request's own words, unit and
-                    quantity; the price stays theirs to enter. */}
-                {unseededRequestLines.length > 0 && (
-                  <div
-                    className="proposal-request-lines"
-                    data-testid="proposal-add-from-request"
-                    style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}
-                  >
-                    <span className="muted small">{t("detail.add_from_request")}</span>
-                    {unseededRequestLines.map((line) => (
-                      <button
-                        key={line.id}
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        disabled={busy}
-                        onClick={() =>
-                          setAddSeed({
-                            key: addSeed.key + 1,
-                            form: {
-                              ...EMPTY_LINE_FORM,
-                              description: line.label,
-                              quantity: line.quantity,
-                              unit_type: line.unit_type,
-                            },
-                          })
-                        }
-                        data-testid={`proposal-add-from-request-${line.id}`}
-                      >
-                        {line.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {/* P-9 C3 — the request's own lines no longer seed the
+                    composer from chips: they sit IN the table above as
+                    unpriced rows. The composer is for lines the
+                    customer did not ask for. */}
                 <ProposalLineComposer
                   key={addSeed.key}
                   disabled={busy}
@@ -1371,11 +1537,26 @@ export function ProposalBuilder({
           }
           description={t("detail.proposal_override_desc")}
           placeholder={t("detail.proposal_override_reason_placeholder")}
-          confirmLabel={t("detail.proposal_override_confirm")}
+          confirmLabel={
+            overridePrompt === "CUSTOMER_APPROVED"
+              ? coverageConfirmLabel(
+                  t,
+                  coverage,
+                  "approve",
+                  t("detail.proposal_override_confirm"),
+                )
+              : t("detail.proposal_override_confirm")
+          }
           cancelLabel={t("detail.note_modal_cancel")}
           onCancel={() => setOverridePrompt(null)}
           onConfirm={(reason) => submitOverride(reason)}
-        />
+        >
+          {/* P-9 C4 — the same coverage block on the approve-on-behalf
+              ceremony; approving fewer lines than asked is said here. */}
+          {overridePrompt === "CUSTOMER_APPROVED" && (
+            <CoverageNotice coverage={coverage} />
+          )}
+        </RejectReasonDialog>
         {/* P-8R A4 — Send asks once: the lines, the total, the customer. */}
         <ConfirmDialog
           ref={sendDialogRef}
@@ -1398,6 +1579,9 @@ export function ProposalBuilder({
               <p style={{ fontWeight: 600 }} data-testid="extra-work-proposal-send-dialog-total">
                 {t("detail.pricing_column_total")}: {formatMoney(proposal.total_amount)}
               </p>
+              {/* P-9 C4 — does this price cover what was asked? Amber
+                  when not; a missing line is a door onto its row. */}
+              <CoverageNotice coverage={coverage} onAddPrice={addPriceFor} />
               <p className="muted small">
                 {t(
                   noCustomerApproval
@@ -1408,8 +1592,11 @@ export function ProposalBuilder({
               </p>
             </div>
           }
-          confirmLabel={t(
-            noCustomerApproval ? "detail.proposal_send_start" : "detail.proposal_send",
+          confirmLabel={coverageConfirmLabel(
+            t,
+            coverage,
+            noCustomerApproval ? "start" : "send",
+            t(noCustomerApproval ? "detail.proposal_send_start" : "detail.coverage_send_exact"),
           )}
           busy={busy}
           busyLabel={t(

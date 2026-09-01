@@ -435,6 +435,8 @@ test("FE-2 — Customer submits a line without an agreed price → QUOTE outcome
     const other = page.locator("[data-testid='meerwerk-other']");
     await expect(other).toBeVisible({ timeout: 10_000 });
     await other.fill(title);
+    // P-9 C1 — the box is not a line: the text becomes one on Add.
+    await page.locator("[data-testid='meerwerk-other-add']").click();
 
     await advanceToConfirm(page, todayISO());
     await expect(page.locator("[data-testid='meerwerk-outcome']")).toHaveAttribute(

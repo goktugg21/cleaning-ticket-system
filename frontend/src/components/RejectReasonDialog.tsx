@@ -14,7 +14,7 @@
  * `onCancel`. The reason text is cleared from local state on close
  * so re-opening starts fresh.
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 export interface RejectReasonDialogProps {
@@ -29,6 +29,9 @@ export interface RejectReasonDialogProps {
   /** P-7 S3.1 — "warning": an exceptional act (deciding on the
    *  customer's behalf). Amber band and amber confirm, never red. */
   tone?: "warning";
+  /** P-9 C4 — a block between the description and the reason box
+   *  (the coverage notice on the approve-on-behalf ceremony). */
+  children?: ReactNode;
 }
 
 export function RejectReasonDialog({
@@ -41,6 +44,7 @@ export function RejectReasonDialog({
   confirmLabel,
   cancelLabel,
   tone,
+  children,
 }: RejectReasonDialogProps) {
   const { t } = useTranslation("extra_work");
   const [reason, setReason] = useState("");
@@ -66,6 +70,7 @@ export function RejectReasonDialog({
         <p className="reject-modal-desc">
           {description ?? t("detail.reject_dialog_description")}
         </p>
+        {children}
         <textarea
           data-testid="reject-reason-textarea"
           className="field-textarea reject-modal-textarea"
