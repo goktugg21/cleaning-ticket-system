@@ -27,8 +27,10 @@ The **owner does not write code.** The workflow is:
   verifies the pushed commits from `origin`** — never from CC's self-report —
   and issues a merge verdict. **A CC self-report is never the basis for a merge
   verdict.**
-- The owner performs all GitHub UI actions. CC pushes branches; **CC
-  NEVER opens a PR.** There is no CI gate in the loop: a sprint is
+- The owner performs all GitHub UI actions. CC pushes branches — **pushed
+  before the report is written. A report about commits that are not on
+  `origin` is a report about nothing — web-Claude verifies from `origin`
+  only.** **CC NEVER opens a PR.** There is no CI gate in the loop: a sprint is
   finished when its local gates pass and the branch is DEPLOYED to
   crmtest for the owner to see. **Merging happens only when the owner
   says "merge" — nothing is proposed for merge before that.**
