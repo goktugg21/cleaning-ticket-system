@@ -229,20 +229,25 @@ export function PlanWorkDialog({
 
   // ---- stage 1: when ---------------------------------------------------
   // P-5 S2.4 — land on the missing part once, after the first paint.
+  // P-9 C2 — "planned hours are missing" lands on the total planned
+  // hours field, not on the per-person rows. That field renders inside
+  // the crew block, which arrives a render or two AFTER the dialog
+  // mounts (the crew loads first), so the effect re-checks every render
+  // and acts exactly once, when the element exists — the
+  // `useMissingPieceAnchor` pattern. No dependency list on purpose.
+  const landedRef = useRef<PlanFocus | null>(null);
   useEffect(() => {
-    if (!initialFocus) return;
-    // P-9 C2 — "planned hours are missing" lands on the total planned
-    // hours field, not on the per-person rows.
+    if (!initialFocus || landedRef.current === initialFocus) return;
     const target = initialFocus === "hours" ? "budget" : initialFocus;
     const el = document.querySelector<HTMLElement>(
       `[data-testid="extra-work-plan-dialog"] [data-plan-field="${target}"]`,
     );
     if (!el) return;
+    landedRef.current = initialFocus;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
     el.classList.add("piece-highlight");
-    const timer = window.setTimeout(() => el.classList.remove("piece-highlight"), 4000);
-    return () => window.clearTimeout(timer);
-  }, [initialFocus]);
+    window.setTimeout(() => el.classList.remove("piece-highlight"), 4000);
+  });
   const focusNotice = (key: PlanFocus) =>
     initialFocus === key ? (
       <p className="alert-notice" role="status" data-testid={`extra-work-plan-needs-${key}`}>
