@@ -911,6 +911,12 @@ def _is_priced(obj) -> bool:
     ).exists()
 
 
+# P-9 B — renders the list's own datetimes (finish moment, invoice sent
+# moment) the way every declared DateTimeField does, so the two shapes
+# on one row cannot differ in format or zone.
+_P9_DATETIME = serializers.DateTimeField()
+
+
 class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     is_overdue = serializers.BooleanField(read_only=True)
     started_before_plan = serializers.BooleanField(read_only=True)
@@ -969,6 +975,24 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
         source="price_folder.name", read_only=True, allow_null=True
     )
 
+    # P-9 B — the facts the four-tab list prints per row that the row
+    # did not carry: the cart lines (What), the agreed-price estimate
+    # (To price), who is on it (Approved), the customer's reason for a
+    # no (With the customer), when it finished and which invoice holds
+    # it (Finished). Read-only by construction (method fields), and
+    # NEVER a query per row: the three that need a table are loaded
+    # ONCE PER PAGE through `_p9_per_row` (the `get_group` memo shape),
+    # the rest read relations the list queryset already joins or
+    # prefetches. `ListQueryGrowthTests` pins the growth at zero.
+    line_summary = serializers.SerializerMethodField()
+    contract_estimate_amount = serializers.SerializerMethodField()
+    people_names = serializers.SerializerMethodField()
+    rejection_note = serializers.SerializerMethodField()
+    completed_at = serializers.SerializerMethodField()
+    invoice_ref = serializers.SerializerMethodField()
+    contact_name = serializers.SerializerMethodField()
+    customer_invoice_day = serializers.SerializerMethodField()
+
     class Meta:
         model = ExtraWorkRequest
         fields = [
@@ -992,6 +1016,15 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "urgency",
             "status",
             "display_phase",
+            # P-9 B — see the field declarations above.
+            "line_summary",
+            "contract_estimate_amount",
+            "people_names",
+            "rejection_note",
+            "completed_at",
+            "invoice_ref",
+            "contact_name",
+            "customer_invoice_day",
             # Sprint 173 §4 — the deadline, the planned window's end, and
             # the two derived flags. These were declared on this
             # serializer but only added to the DETAIL serializer's
@@ -1089,6 +1122,13 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
         "is_invoiced",
         "invoiced_at",
         "budget_hours",
+        # P-9 B — who we put on the job, which of OUR invoices holds it
+        # and when the customer is billed are the provider's business,
+        # like the budget above. The cart lines, the contact, the
+        # customer's own reason and the finish date are theirs to see.
+        "people_names",
+        "invoice_ref",
+        "customer_invoice_day",
     )
 
     def get_has_operational_ticket(self, obj) -> bool:
@@ -1136,6 +1176,202 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
 
     def get_spawned_tickets(self, obj):
         return _serialize_spawned_tickets(obj)
+
+    # ---- P-9 B — per-page loaders ------------------------------------
+    #
+    # `many=True` builds ONE child serializer for the whole page, and
+    # DRF hands it the page as `self.instance`, so a table loaded on the
+    # first row serves every row after it. A row outside the page (a
+    # serializer built with no instance, as a unit test may) costs one
+    # query of its own and is cached the same way. Same shape and same
+    # reasoning as `get_group` above.
+
+    def _p9_page_pks(self) -> list[int]:
+        pks = getattr(self, "_p9_page_pks_cache", None)
+        if pks is None:
+            instance = self.instance
+            if instance is None:
+                pks = []
+            elif isinstance(instance, ExtraWorkRequest):
+                pks = [instance.pk]
+            else:
+                pks = [row.pk for row in instance]
+            self._p9_page_pks_cache = pks
+        return pks
+
+    def _p9_per_row(self, name: str, obj, load):
+        """`load(pks) -> {pk: value}`, run once for the page."""
+        cache = getattr(self, "_p9_cache", None)
+        if cache is None:
+            cache = {}
+            self._p9_cache = cache
+        table = cache.get(name)
+        if table is None:
+            page_pks = self._p9_page_pks()
+            table = load(page_pks)
+            # A page row the loader found nothing for is ANSWERED (None),
+            # not unknown: without this every empty row would fall
+            # through to the per-row query below, which is the N+1.
+            for pk in page_pks:
+                table.setdefault(pk, None)
+            cache[name] = table
+        if obj.pk not in table:
+            table.update(load([obj.pk]))
+            table.setdefault(obj.pk, None)
+        return table.get(obj.pk)
+
+    @staticmethod
+    def _p9_load_lines(pks):
+        """The cart lines per request: a count, the first three names,
+        and the agreed-price estimate (excl. VAT) — or None for it when
+        no line carries an agreed price."""
+        out: dict = {}
+        items = (
+            ExtraWorkRequestItem.objects.filter(extra_work_request_id__in=pks)
+            .select_related("service")
+            .order_by("extra_work_request_id", "id")
+        )
+        for item in items:
+            entry = out.setdefault(
+                item.extra_work_request_id,
+                {"count": 0, "names": [], "contract": None},
+            )
+            entry["count"] += 1
+            name = (
+                item.snapshot_service_name
+                or item.custom_description
+                or (item.service.name if item.service_id else "")
+            )
+            if len(entry["names"]) < 3:
+                entry["names"].append(name)
+            if (
+                item.line_price_source
+                == ExtraWorkLinePriceSource.AGREED_CUSTOMER_PRICE
+                and item.snapshot_unit_price is not None
+            ):
+                entry["contract"] = (entry["contract"] or Decimal("0.00")) + (
+                    item.quantity * item.snapshot_unit_price
+                )
+        return out
+
+    @staticmethod
+    def _p9_load_people(pks):
+        from .models import ExtraWorkAssignment
+
+        out: dict = {}
+        assignments = (
+            ExtraWorkAssignment.objects.filter(extra_work_request_id__in=pks)
+            .select_related("user")
+            .order_by("role", "id")
+        )
+        for assignment in assignments:
+            names = out.setdefault(assignment.extra_work_request_id, [])
+            person = assignment.user
+            name = (person.full_name or "").strip() or person.email
+            if name not in names:
+                names.append(name)
+        return out
+
+    @staticmethod
+    def _p9_load_invoice_refs(pks):
+        """The live invoice holding each request — the same claim
+        predicate `invoicing.selectors` uses (not deleted, not
+        reversed). The newest when legacy data holds more than one."""
+        from invoicing.models import InvoiceLine
+
+        out: dict = {}
+        lines = (
+            InvoiceLine.objects.filter(
+                extra_work_id__in=pks,
+                invoice__deleted_at__isnull=True,
+                invoice__reversed_by__isnull=True,
+            )
+            .select_related("invoice")
+            .order_by("extra_work_id", "-invoice_id")
+        )
+        for line in lines:
+            if line.extra_work_id in out:
+                continue
+            invoice = line.invoice
+            out[line.extra_work_id] = {
+                "id": invoice.id,
+                "number": invoice.number,
+                "status": invoice.status,
+                "sent_at": _P9_DATETIME.to_representation(invoice.sent_at)
+                if invoice.sent_at
+                else None,
+            }
+        return out
+
+    def get_line_summary(self, obj):
+        entry = self._p9_per_row("lines", obj, self._p9_load_lines)
+        if entry is None:
+            return {"count": 0, "names": []}
+        return {"count": entry["count"], "names": list(entry["names"])}
+
+    def get_contract_estimate_amount(self, obj):
+        entry = self._p9_per_row("lines", obj, self._p9_load_lines)
+        if entry is None or entry["contract"] is None:
+            return None
+        return f"{entry['contract']:.2f}"
+
+    def get_people_names(self, obj):
+        return list(self._p9_per_row("people", obj, self._p9_load_people) or [])
+
+    def get_invoice_ref(self, obj):
+        return self._p9_per_row("invoice_refs", obj, self._p9_load_invoice_refs)
+
+    @staticmethod
+    def _p9_last_history(obj, new_status):
+        # `.all()` reads the list queryset's prefetch; a `.filter()` here
+        # would be the per-row query `started_before_plan` was cured of.
+        rows = [
+            row for row in obj.status_history.all() if row.new_status == new_status
+        ]
+        if not rows:
+            return None
+        return max(rows, key=lambda row: (row.created_at, row.id))
+
+    def get_rejection_note(self, obj):
+        """The customer's own words, from the history row the reject
+        door wrote them into (`[Reject reason] ...`). Null unless the
+        request is declined; "" when it was declined without words."""
+        if obj.status != ExtraWorkStatus.CUSTOMER_REJECTED:
+            return None
+        row = self._p9_last_history(obj, ExtraWorkStatus.CUSTOMER_REJECTED)
+        if row is None:
+            return ""
+        note = row.note or ""
+        prefix = "[Reject reason] "
+        if note.startswith(prefix):
+            note = note[len(prefix):]
+        return note.split("\n\n", 1)[0].strip()
+
+    def get_completed_at(self, obj):
+        if obj.status != ExtraWorkStatus.COMPLETED:
+            return None
+        row = self._p9_last_history(obj, ExtraWorkStatus.COMPLETED)
+        if row is None:
+            return None
+        return _P9_DATETIME.to_representation(row.created_at)
+
+    def get_contact_name(self, obj) -> str:
+        """Who the price went to: the requester when a customer asked
+        for the work themselves, else the customer's contact address."""
+        author = obj.created_by
+        if author is not None and author.role == UserRole.CUSTOMER_USER:
+            return (author.full_name or "").strip() or author.email
+        return obj.customer.contact_email or ""
+
+    def get_customer_invoice_day(self, obj):
+        customer = obj.customer
+        if customer.invoice_day_of_month:
+            return customer.invoice_day_of_month
+        if customer.invoice_day_rule == Customer.InvoiceDayRule.FIRST_OF_MONTH:
+            return 1
+        if customer.invoice_day_rule == Customer.InvoiceDayRule.LAST_OF_MONTH:
+            return "LAST_OF_MONTH"
+        return None
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

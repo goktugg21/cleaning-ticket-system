@@ -10,8 +10,13 @@ import { loginAs } from "./fixtures/login";
  * 0 and zero rows while `GET /api/extra-work/` returned 16 rows: the page
  * filtered the fetched rows down to one track and counted the chips over
  * what was left. This spec is the guard: the number the page says it
- * loaded, the "All" tile and the sum of the phase tiles must all equal
- * the server's own `count` for the same actor. Read-only.
+ * loaded must equal the server's own `count` for the same actor, and the
+ * page's buckets must add up to it.
+ *
+ * P-9 B — the phase tiles became four tabs plus a cancelled door at the
+ * foot of Finished. The guard is unchanged in meaning: page count ==
+ * server count, and the four tab counts + cancelled == server count.
+ * Read-only.
  */
 test("the Extra work list shows and counts every row the server returns", async ({
   page,
@@ -37,26 +42,21 @@ test("the Extra work list shows and counts every row the server returns", async 
   await expect(loaded).toHaveAttribute("data-count", String(serverCount));
   await expect(page.getByTestId("extra-work-list-guard")).toHaveCount(0);
 
-  // The tiles: "All" equals the server, and the phase tiles add up to it.
-  const readCount = async (testId: string): Promise<number> => {
-    const text = await page
-      .getByTestId(testId)
-      .locator(".status-tile-count")
-      .innerText();
-    return Number(text.replace(/\D/g, "") || "0");
-  };
+  // The bare address lands on the first tab that has rows, so a
+  // non-empty server never shows an empty first screen.
   if (serverCount > 0) {
     await expect(page.getByTestId("extra-work-list-empty")).toHaveCount(0);
-    expect(await page.locator("table tbody tr").count()).toBeGreaterThan(0);
+    expect(await page.getByTestId("extra-work-row").count()).toBeGreaterThan(0);
   }
-  expect(await readCount("extra-work-status-tile-all")).toBe(serverCount);
-  const phaseTiles = page.locator(
-    '[data-testid^="extra-work-status-tile-"]:not([data-testid="extra-work-status-tile-all"])',
-  );
+
+  // The tabs plus the cancelled door add up to the server.
+  const readCount = async (testId: string): Promise<number> =>
+    Number((await page.getByTestId(testId).getAttribute("data-count")) ?? "0");
   let sum = 0;
-  for (let i = 0; i < (await phaseTiles.count()); i++) {
-    const text = await phaseTiles.nth(i).locator(".status-tile-count").innerText();
-    sum += Number(text.replace(/\D/g, "") || "0");
+  for (const tab of ["to-price", "with-customer", "approved", "finished"]) {
+    sum += await readCount(`extra-work-tab-${tab}`);
   }
+  await page.goto("/extra-work/finished");
+  sum += await readCount("extra-work-cancelled-link");
   expect(sum).toBe(serverCount);
 });

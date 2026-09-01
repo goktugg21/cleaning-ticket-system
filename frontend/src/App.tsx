@@ -13,6 +13,7 @@ import { ToastProvider } from "./components/ToastProvider";
 import { AdminRoute } from "./components/AdminRoute";
 import { CustomerReadRoute } from "./components/CustomerReadRoute";
 import { ExtraWorkRoute } from "./components/ExtraWorkRoute";
+import { EXTRA_WORK_TABS } from "./lib/extraWorkTabs";
 import { PlannedWorkRoute } from "./components/PlannedWorkRoute";
 import { BillingRoute } from "./components/BillingRoute";
 import { CustomerRoute } from "./components/CustomerRoute";
@@ -468,6 +469,25 @@ export default function App() {
               </ExtraWorkRoute>
             }
           />
+          {/* P-9 B — the four tabs are STATIC segments beside `/extra-work`,
+              so React Router ranks them above `/extra-work/:id` (the way
+              `/extra-work/new` already relies on). Iterated from the ONE
+              exported tab table, never a second list. A customer on any of
+              them gets the tracker, like the bare address. */}
+          {EXTRA_WORK_TABS.map((tab) => (
+            <Route
+              key={tab}
+              path={`/extra-work/${tab}`}
+              element={
+                <ExtraWorkRoute>
+                  <ByCustomer
+                    customer={<MeerwerkTrackerPage />}
+                    other={<ExtraWorkListPage tab={tab} />}
+                  />
+                </ExtraWorkRoute>
+              }
+            />
+          ))}
           <Route
             path="/extra-work/new"
             element={

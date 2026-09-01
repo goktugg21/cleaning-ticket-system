@@ -2078,6 +2078,47 @@ export interface ExtraWorkRequestList {
   invoice_date?: string | null;
   is_invoiced?: boolean;
   invoiced_at?: string | null;
+  // P-9 B — the customer-facing intent, which the server has sent on
+  // every list row since Sprint 2A. Optional here only because the
+  // detail shape below extends this one and declares it optional; null
+  // on rows older than the field. The To price tab splits on it.
+  request_intent?: ExtraWorkRequestIntent | null;
+  // P-9 B — the provider's committed day and the budget, which the list
+  // serializer has carried since Sprint 182 / W2-D (the Planned column
+  // reads them). Optional: the detail shape declares them so, and
+  // `budget_hours` is provider-only (redacted for CUSTOMER_USER).
+  provider_planned_date?: string | null;
+  provider_planned_end_date?: string | null;
+  budget_hours?: string | null;
+  // P-9 B — LIST-ONLY facts the four-tab list prints per row, computed
+  // once per page on the server (see `ExtraWorkRequestListSerializer`).
+  // Optional because the detail shape extends this type and does not
+  // carry them; a reader prints "—" for an absent one.
+  /** The cart lines: how many, and the first few names. */
+  line_summary?: { count: number; names: string[] };
+  /** Sum of the AGREED-price lines, excl. VAT; null when every line is
+   *  custom (nothing to estimate from). */
+  contract_estimate_amount?: string | null;
+  /** Everyone assigned (managers first), by name. Provider-only. */
+  people_names?: string[];
+  /** The customer's own words when they declined the price; null when
+   *  the request was not declined. */
+  rejection_note?: string | null;
+  /** When the work was finished (the COMPLETED moment); null before. */
+  completed_at?: string | null;
+  /** The live invoice this work is on, or null. Provider-only. */
+  invoice_ref?: {
+    id: number;
+    number: string | null;
+    status: "DRAFT" | "ISSUED" | "SENT";
+    sent_at: string | null;
+  } | null;
+  /** Who the price was sent to: the requester when a customer asked,
+   *  else the customer's contact address. */
+  contact_name?: string;
+  /** The customer's billing day: a day of the month, "LAST_OF_MONTH",
+   *  or null when no schedule is set. Provider-only. */
+  customer_invoice_day?: number | "LAST_OF_MONTH" | null;
 }
 
 // Provider-side pricing line item — full shape with internal note.

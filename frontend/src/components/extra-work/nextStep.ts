@@ -25,7 +25,12 @@
  * that the ball is in the customer's court — so the actor is an input,
  * not an afterthought.
  */
-import type { ExtraWorkStatus, TicketStatus } from "../../api/types";
+import type {
+  ExtraWorkRequestList,
+  ExtraWorkStatus,
+  TicketStatus,
+} from "../../api/types";
+import { daysSince, startsWhenPriced } from "../../lib/extraWorkTabs";
 
 /** What the one button does. `none` pairs with a null label. */
 export type NextStepAction =
@@ -311,5 +316,134 @@ function resolveProposedStep({
 
     case "CANCELLED":
       return { ...WAITING, sentenceKey: "next.cancelled" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P-9 B — THE LIST'S ONE NEXT STEP PER ROW, from the same source as the
+// detail page. The four-tab Extra work list ends every row with one
+// button; the label keys are the `next.button.*` keys the header above
+// already uses where the move is the same (price it, plan it, review
+// again), plus the handful of list-only moves. `to` is the route the
+// button opens: the list never transitions anything itself.
+// ---------------------------------------------------------------------------
+export interface ListNextStep {
+  /** The button label, as an i18n key in the `extra_work` namespace. */
+  buttonKey: string | null;
+  /** The route the button opens. */
+  to: string;
+  tone?: "primary" | "secondary";
+}
+
+export interface ListNextStepContext {
+  isProvider: boolean;
+  /** YYYY-MM-DD, the reader's calendar day (`todayIso()`). */
+  today: string;
+}
+
+/** A price the customer has sat on for this many calendar days earns a
+ *  nudge. There is no reminder endpoint in this system: the button opens
+ *  the request's messages, where the nudge is written. */
+export const REMIND_CUSTOMER_AFTER_DAYS = 3;
+
+export function listNextStep(
+  row: ExtraWorkRequestList,
+  ctx: ListNextStepContext,
+): ListNextStep {
+  const detail = `/extra-work/${row.id}`;
+  const open: ListNextStep = {
+    buttonKey: "next.button.open",
+    to: detail,
+    tone: "secondary",
+  };
+
+  if (!ctx.isProvider) {
+    // A customer acts at exactly one phase (see `customerNextStep`).
+    if (
+      row.display_phase === "WAITING_YOUR_APPROVAL" ||
+      row.display_phase === "WAITING_CUSTOMER_APPROVAL"
+    ) {
+      return {
+        buttonKey: "next.button.open_proposal",
+        to: `${detail}?tab=money`,
+        tone: "primary",
+      };
+    }
+    return open;
+  }
+
+  switch (row.display_phase) {
+    case "WAITING_PRICE":
+      return {
+        buttonKey: startsWhenPriced(row)
+          ? "next.button.price_and_start"
+          : "next.button.prepare_proposal",
+        to: `${detail}?tab=money`,
+        tone: "primary",
+      };
+
+    case "WAITING_YOUR_APPROVAL":
+    case "WAITING_CUSTOMER_APPROVAL": {
+      const waited = daysSince(row.pricing_proposed_at, ctx.today);
+      if (waited !== null && waited >= REMIND_CUSTOMER_AFTER_DAYS) {
+        return {
+          buttonKey: "next.button.remind_customer",
+          to: `${detail}?tab=messages`,
+          tone: "primary",
+        };
+      }
+      return open;
+    }
+
+    case "REJECTED":
+      return {
+        buttonKey: "next.button.review_again",
+        to: detail,
+        tone: "primary",
+      };
+
+    case "WAITING_PLANNING":
+      // The plan dialog lives on the detail page, behind its own
+      // primary button; the list sends the reader there.
+      return { buttonKey: "next.button.plan_work", to: detail, tone: "primary" };
+
+    case "SCHEDULED":
+    case "IN_EXECUTION":
+      return open;
+
+    case "WAITING_COMPLETION_APPROVAL": {
+      // The finished work is checked on the ticket that did it.
+      const ticket = row.spawned_tickets[0];
+      return ticket
+        ? {
+            buttonKey: "next.button.check_work",
+            to: `/tickets/${ticket.id}`,
+            tone: "primary",
+          }
+        : open;
+    }
+
+    case "DONE":
+      return {
+        buttonKey: "next.button.go_to_invoices",
+        to: "/invoices",
+        tone: "primary",
+      };
+
+    case "INVOICED":
+      return row.invoice_ref?.id
+        ? {
+            buttonKey: "next.button.open_invoice",
+            to: `/invoices/${row.invoice_ref.id}`,
+            tone: "secondary",
+          }
+        : {
+            buttonKey: "next.button.go_to_invoices",
+            to: "/invoices",
+            tone: "secondary",
+          };
+
+    case "CANCELLED":
+      return open;
   }
 }
