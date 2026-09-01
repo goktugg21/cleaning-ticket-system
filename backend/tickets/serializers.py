@@ -475,6 +475,18 @@ class TicketListSerializer(
     # Read-only by construction, per-viewer by context; presentation
     # only, never consulted by backend logic.
     display_phase = serializers.SerializerMethodField()
+    # P-9 D2 -- WHERE THE ROW CAME FROM, on the list. The same three
+    # values the detail's fact block shows (`detail_facts.ticket_kind`:
+    # MELDING / MEERWERK / TICKET), computed from the parent FKs and the
+    # author's role -- both already on the row (`created_by` is in the
+    # list queryset's `select_related`), so this costs no query per row.
+    # An occurrence ticket is a TICKET here; the row's `occurrence_origin`
+    # is what makes it "Recurring" on screen.
+    kind = serializers.SerializerMethodField()
+
+    def get_kind(self, obj) -> str:
+        from .detail_facts import ticket_kind
+        return ticket_kind(obj)
 
     def get_display_phase(self, obj) -> str:
         from .display_phase import ticket_display_phase
@@ -501,6 +513,7 @@ class TicketListSerializer(
             "priority",
             "status",
             "display_phase",
+            "kind",
             "company",
             "company_name",
             "building",

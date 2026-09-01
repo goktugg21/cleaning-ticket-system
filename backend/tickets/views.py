@@ -35,8 +35,10 @@ from .filters import (
     TicketFilter,
     apply_archived,
     apply_is_extra_work,
+    apply_origin,
     exclude_finished_extra_work,
     parse_is_extra_work,
+    parse_origin,
 )
 from .attachment_visibility import resolve_upload_visibility
 from .schedule_history import compose_schedule_note
@@ -1581,6 +1583,14 @@ class TicketViewSet(
         )
 
         # The chips must count the rows they sit above. A customer's own
+        # P-9 D2 -- the Origin axis (melding / meerwerk / recurring /
+        # ticket), through the list filter's own helper, so the four tabs
+        # count exactly the rows they sit above under every setting of
+        # the queue's Origin control.
+        scoped = apply_origin(
+            scoped, parse_origin(request.query_params.get("origin"))
+        )
+
         # ticket page pins `?customer=<id>` on the LIST and the chips did
         # not carry it, so every customer's page showed the whole
         # company's totals -- two different customers both reading "25".

@@ -4,6 +4,8 @@ from django.db.models import Q
 from django.utils import timezone
 from django_filters import rest_framework as df
 
+from accounts.models import UserRole
+
 from .models import Ticket, TicketStatus
 
 
@@ -113,6 +115,68 @@ def parse_is_extra_work(raw):
     if raw in {"false", "False", "0"}:
         return False
     return None
+
+
+# P-9 D2 -- WHERE A ROW CAME FROM, as ONE server-side axis.
+#
+# The Tickets queue lists every operational ticket whatever its origin
+# and prints the origin on the row (`TicketListSerializer.kind` plus
+# `occurrence_origin`). A filter on that column has to partition the
+# rows EXACTLY the way the column labels them, or the reader picks
+# "Melding" and gets rows the column calls "Extra work". `?type=REPORT`
+# cannot be that filter: on crmtest every one of the 91 extra-work
+# tickets is typed REPORT too (the spawn copies the request's type), so
+# a type-based "Melding" narrowing returned the whole meerwerk pile.
+#
+# The four values restate `detail_facts.ticket_kind` (the column's
+# rule) in ORM terms, in the same precedence:
+#
+#   meerwerk   has an extra-work parent (any of the three spawn paths)
+#   melding    no parent, and the author is a customer-side user
+#   recurring  no parent, provider author, a planned occurrence behind it
+#   ticket     no parent, provider author, no occurrence
+#
+# Exact partition by construction -- every row lands in exactly one --
+# so the four chips sum to the total, the property Sprint 183's
+# `apply_is_extra_work` established for its two branches. `exclude()`
+# rather than `~Q` for the author test, so a NULL join (a ticket whose
+# author row is gone) counts as provider work here exactly as
+# `ticket_kind` counts an absent author.
+ORIGIN_MELDING = "melding"
+ORIGIN_MEERWERK = "meerwerk"
+ORIGIN_RECURRING = "recurring"
+ORIGIN_TICKET = "ticket"
+ORIGIN_VALUES = frozenset(
+    {ORIGIN_MELDING, ORIGIN_MEERWERK, ORIGIN_RECURRING, ORIGIN_TICKET}
+)
+
+
+def parse_origin(raw):
+    """`?origin=` as an optional enum. `None` when absent OR unrecognised,
+    for the reason `parse_is_extra_work` gives: a typo in a URL must
+    mean "no opinion", never an empty page that looks like lost data."""
+    if raw is None:
+        return None
+    value = str(raw).strip().lower()
+    return value if value in ORIGIN_VALUES else None
+
+
+def apply_origin(queryset, value):
+    """Narrow to one origin; `None` leaves the queryset alone. Shared by
+    `TicketFilter.filter_origin` (the rows) and `TicketViewSet.stats`
+    (the tab counts above them), so the two cannot disagree."""
+    if value is None:
+        return queryset
+    parent = _extra_work_origin_q()
+    if value == ORIGIN_MEERWERK:
+        return queryset.filter(parent)
+    customer_author = Q(created_by__role=UserRole.CUSTOMER_USER)
+    if value == ORIGIN_MELDING:
+        return queryset.exclude(parent).filter(customer_author)
+    provider_work = queryset.exclude(parent).exclude(customer_author)
+    if value == ORIGIN_RECURRING:
+        return provider_work.filter(planned_occurrence__isnull=False)
+    return provider_work.filter(planned_occurrence__isnull=True)
 
 
 def exclude_finished_extra_work(queryset):
@@ -231,6 +295,13 @@ class TicketFilter(df.FilterSet):
     # changes behaviour.
     is_extra_work = df.BooleanFilter(method="filter_is_extra_work")
 
+    # P-9 D2 -- `?origin=melding|meerwerk|recurring|ticket`, the queue's
+    # Origin column as a filter. See `apply_origin` for the partition.
+    # A CharFilter rather than a ChoiceFilter so an unrecognised value
+    # is "no opinion" (200, unfiltered) instead of a 400 -- the same
+    # tolerance `is_extra_work` extends to a mistyped URL.
+    origin = df.CharFilter(method="filter_origin")
+
     # W-H §2 — THE ARCHIVE IS NOT LOADED UNLESS YOU ASK FOR IT.
     #
     # "You don't load the archive all the time." Absent means live work,
@@ -315,6 +386,10 @@ class TicketFilter(df.FilterSet):
         # makes the two branches exact complements, which is what the
         # chip-sum test rests on.
         return apply_is_extra_work(queryset, value)
+
+    def filter_origin(self, queryset, name, value):
+        # P-9 D2 -- the shared helper, so `stats` counts what this lists.
+        return apply_origin(queryset, parse_origin(value))
 
     def filter_hide_finished_extra_work(self, queryset, name, value):
         # Sprint 180 §2. A falsy value leaves the queryset untouched, so

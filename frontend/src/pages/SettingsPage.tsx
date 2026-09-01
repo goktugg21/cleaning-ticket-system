@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ImageUploadField } from "../components/ImageUploadField";
-import { formatDate, formatRelative, useLocaleCode } from "../lib/intl";
+import { formatDate, useLocaleCode } from "../lib/intl";
 import { deleteProfilePhoto, uploadProfilePhoto } from "../api/media";
 import { roleLabelKeyNs } from "../auth/permissions";
 import { Toggle } from "../components/Toggle";
@@ -248,8 +248,9 @@ export function SettingsPage() {
           every width: the avatar (its pencil badge opens the photo
           upload, the remove link sits under it), the name, the email
           and the role on one line, ONE quiet meta row under it (member
-          since · last sign-in · access). The forms fill the width below
-          in a two-column grid. */}
+          since · access — P-9 dropped "last sign-in", which the token
+          door never records). The forms fill the width below in a
+          two-column grid of equal-height cards. */}
       <div className="page-header">
         <div>
           <div className="eyebrow">{t("eyebrow")}</div>
@@ -291,14 +292,10 @@ export function SettingsPage() {
                 <dt>{t("common:account.member_since")}</dt>
                 <dd>{formatDate(me.date_joined, locale)}</dd>
               </div>
-              <div className="account-header-fact">
-                <dt>{t("common:account.last_sign_in")}</dt>
-                <dd>
-                  {me.last_login
-                    ? formatRelative(me.last_login, locale)
-                    : t("common:account.never_signed_in")}
-                </dd>
-              </div>
+              {/* P-9 G (SS D.20 ruling 12(c)) — no "last sign-in" row: the
+                  JWT token door does not record `last_login`
+                  (`SIMPLE_JWT` sets no `UPDATE_LAST_LOGIN`), and a fact
+                  the system does not know is not shown. */}
               <div className="account-header-fact">
                 <dt>{t("common:account.access")}</dt>
                 <dd>{accessSummary || "—"}</dd>

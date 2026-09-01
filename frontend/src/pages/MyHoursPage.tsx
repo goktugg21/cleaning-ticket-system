@@ -14,6 +14,7 @@ import {
   listContractHoursPatterns,
   listHourTypes,
   listTimeEntries,
+  listWeeksWithHours,
   updateTimeEntry,
 } from "../api/timesheets";
 import type {
@@ -43,6 +44,9 @@ import {
   toDateString,
 } from "../lib/isoWeek";
 import type { IsoWeek } from "../lib/isoWeek";
+import type { WeekWithHours } from "../api/timesheets.types";
+import { WeekHoursStrip } from "../components/timesheets/WeekHoursStrip";
+import { formatHours, lastSavedWeekBefore } from "../lib/weeksWithHours";
 import {
   decodeSource,
   encodeSource,
@@ -101,6 +105,8 @@ export function MyHoursPage() {
 
   const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  // P-9 D3 — which weeks of the shown year hold this person's hours.
+  const [weeksWithHours, setWeeksWithHours] = useState<WeekWithHours[]>([]);
   // W12 §2 — the grid is no longer behind a toggle. It WAS the week's
   // one entry surface hidden behind a button labelled "Weekraster",
   // opening onto "0 assignments / no rows for this week yet" — a
@@ -214,16 +220,19 @@ export function MyHoursPage() {
    */
   const refresh = useCallback(async () => {
     try {
-      const [entryPage, status] = await Promise.all([
+      const [entryPage, status, withHours] = await Promise.all([
         listTimeEntries({
           iso_year: week.isoYear,
           iso_week: week.isoWeek,
           page_size: 200,
         }),
         fetchWeekStatus({ iso_year: week.isoYear, iso_week: week.isoWeek }),
+        // P-9 D3 — non-fatal: the strip then shows no marks.
+        listWeeksWithHours({ iso_year: week.isoYear }).catch(() => null),
       ]);
       setEntries(entryPage.results);
       setWeekClosed(status.is_closed);
+      if (withHours) setWeeksWithHours(withHours.weeks);
       setLoadError("");
     } catch (err) {
       setLoadError(getApiError(err));
@@ -277,11 +286,15 @@ export function MyHoursPage() {
         page_size: 200,
       }),
       fetchWeekStatus({ iso_year: week.isoYear, iso_week: week.isoWeek }),
+      // P-9 D3 — the year's weeks with hours, read with the week so a
+      // saved week is marked as soon as the sheet re-reads. Non-fatal.
+      listWeeksWithHours({ iso_year: week.isoYear }).catch(() => null),
     ])
-      .then(([entryPage, status]) => {
+      .then(([entryPage, status, withHours]) => {
         if (cancelled) return;
         setEntries(entryPage.results);
         setWeekClosed(status.is_closed);
+        if (withHours) setWeeksWithHours(withHours.weeks);
         setLoadError("");
         setLoadedWeekKey(weekKey);
       })
@@ -628,6 +641,8 @@ export function MyHoursPage() {
     : !loading && hourTypes.length === 0
       ? t("my_hours.add_disabled_no_types")
       : null;
+  // P-9 D3 — the last week before this one that holds hours.
+  const lastSavedWeek = lastSavedWeekBefore(weeksWithHours, week);
   return (
     <div>
       <PageHeader
@@ -716,6 +731,15 @@ export function MyHoursPage() {
               }}
             />
           </div>
+          {/* P-9 D3 — which weeks of the year hold hours (the same strip
+              the admin Hours page carries); a click moves the sheet. */}
+          <WeekHoursStrip
+            year={week.isoYear}
+            week={week}
+            weeks={weeksWithHours}
+            onPick={requestWeek}
+            testIdPrefix="my-hours-week"
+          />
         </div>
       </div>
 
@@ -774,6 +798,59 @@ export function MyHoursPage() {
             empty employee list the grid says "choose one or more
             employees first", which is a sentence with no meaning on a
             page that has no chooser. */}
+        {/* P-9 D3 — THE EMPTY WEEK SAYS WHERE THE HOURS ARE, in the
+            admin Hours page's words: the week, the last saved week, a
+            button to open it, and the page's own entry action. */}
+        {entries.length === 0 && (
+          <div
+            className="card"
+            style={{ marginBottom: 16, padding: "16px 18px" }}
+            data-testid="my-hours-week-empty"
+          >
+            <strong data-testid="my-hours-empty-title">
+              {t("hours_weeks.empty_week_title", { week: week.isoWeek })}
+            </strong>
+            <p
+              className="muted small"
+              style={{ margin: "4px 0 0" }}
+              data-testid="my-hours-empty-last-saved"
+            >
+              {lastSavedWeek
+                ? t("hours_weeks.last_saved_week", {
+                    week: lastSavedWeek.iso_week,
+                    hours: formatHours(lastSavedWeek.hours, dateLocale),
+                  })
+                : t("hours_weeks.no_saved_weeks", { year: week.isoYear })}
+            </p>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              {lastSavedWeek && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  data-testid="my-hours-empty-open-last-week"
+                  onClick={() =>
+                    requestWeek({
+                      isoYear: lastSavedWeek.iso_year,
+                      isoWeek: lastSavedWeek.iso_week,
+                    })
+                  }
+                >
+                  {t("hours_weeks.open_week", { week: lastSavedWeek.iso_week })}
+                </button>
+              )}
+              {!addDisabledReason && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  data-testid="my-hours-empty-enter"
+                  onClick={() => openCreate()}
+                >
+                  {t("hours_admin.enter_week_button")}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {gridEmployees.length > 0 && (
         <div
           className="card"

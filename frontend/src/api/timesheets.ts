@@ -18,6 +18,7 @@ import type {
   TimesheetSummary,
   WeekLock,
   WeekStatus,
+  WeeksWithHours,
 } from "./timesheets.types";
 
 /**
@@ -282,6 +283,25 @@ export async function listContractHoursPatterns(params: {
     { params: cleanParams(params) },
   );
   return response.data.results ?? [];
+}
+
+/**
+ * P-9 D3 — which weeks of a year hold saved hours, and how many. One
+ * aggregate query server-side, scoped exactly like the entries list
+ * (a manager reads the company, everyone else their own rows), and
+ * `company` narrows only. NOT cached here, deliberately: the pages
+ * refetch it whenever they refetch the entries, so a week is marked the
+ * moment its hours are saved. (No server cache either — see the view.)
+ */
+export async function listWeeksWithHours(params: {
+  iso_year: number;
+  company?: number | "";
+}): Promise<WeeksWithHours> {
+  const response = await api.get<WeeksWithHours>(
+    "/timesheets/weeks/with-hours/",
+    { params: cleanParams(params) },
+  );
+  return response.data;
 }
 
 export async function closeWeek(payload: {

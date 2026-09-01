@@ -36,6 +36,7 @@ from .views_weeks import (
     WeekCloseView,
     WeekLockListView,
     WeekReopenView,
+    WeeksWithHoursView,
     WeekStatusView,
 )
 
@@ -129,6 +130,13 @@ urlpatterns = [
         "entries/<int:entry_id>/",
         TimeEntryDetailView.as_view(),
         name="timesheet-entry-detail",
+    ),
+    # P-9 D3 -- which weeks of a year hold saved hours. A literal
+    # segment beside the other `weeks/` ones, declared before `weeks/`.
+    path(
+        "weeks/with-hours/",
+        WeeksWithHoursView.as_view(),
+        name="timesheet-weeks-with-hours",
     ),
     path(
         "weeks/status/",

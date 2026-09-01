@@ -264,3 +264,18 @@ export interface ContractHoursPattern {
   saturday: string;
   sunday: string;
 }
+
+/** P-9 D3 — one week of a year that holds saved hours
+ *  (`GET /api/timesheets/weeks/with-hours/`). `hours` is the summed
+ *  decimal as a string, the module's convention for every amount. */
+export interface WeekWithHours {
+  iso_year: number;
+  iso_week: number;
+  hours: string;
+  entries: number;
+}
+
+export interface WeeksWithHours {
+  iso_year: number;
+  weeks: WeekWithHours[];
+}

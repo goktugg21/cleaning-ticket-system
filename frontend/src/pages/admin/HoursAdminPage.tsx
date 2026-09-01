@@ -20,6 +20,7 @@ import {
   fetchWeekStatus,
   listHourTypes,
   listTimeEntries,
+  listWeeksWithHours,
   listTimesheetEmployees,
   reopenWeek,
   updateTimeEntry,
@@ -31,6 +32,7 @@ import type {
   TimesheetEmployee,
   TimesheetSummary,
   WeekStatus,
+  WeekWithHours,
 } from "../../api/timesheets.types";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
@@ -49,6 +51,8 @@ import {
 } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { WeekEntryDialog } from "../../components/timesheets/WeekEntryDialog";
+import { WeekHoursStrip } from "../../components/timesheets/WeekHoursStrip";
+import { formatHours, lastSavedWeekBefore } from "../../lib/weeksWithHours";
 import { jobTitleFirst } from "../../components/timesheets/jobTitle";
 import { hourTypeLabel, hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { HoursFilterRow } from "./HoursFilterRow";
@@ -308,6 +312,8 @@ export function HoursAdminPage() {
     [setSearchParams],
   );
   const [weekStatus, setWeekStatus] = useState<WeekStatus | null>(null);
+  // P-9 D3 — which weeks of the shown year hold saved hours.
+  const [weeksWithHours, setWeeksWithHours] = useState<WeekWithHours[]>([]);
   const [lockBusy, setLockBusy] = useState(false);
   const closeWeekRef = useRef<ConfirmDialogHandle>(null);
   const reopenWeekRef = useRef<ConfirmDialogHandle>(null);
@@ -531,6 +537,35 @@ export function HoursAdminPage() {
       cancelled = true;
     };
   }, [tab, queryFilters, page, fetchKey, companyPending]);
+
+  /** P-9 D3 — WHERE THE HOURS ARE: the year's weeks that hold saved
+   *  hours, for the strip on the week bar and the empty week's
+   *  sentence. Keyed on `entries` as well as the year, so it is re-read
+   *  whenever the table is (a save, a delete, a week change) and a week
+   *  is marked the moment its hours land. Non-fatal: without it the
+   *  strip shows no marks and the sentence names no week. */
+  useEffect(() => {
+    if (tab !== "worked" || companyPending) return;
+    let cancelled = false;
+    listWeeksWithHours({ iso_year: week.isoYear, company })
+      .then((data) => {
+        if (!cancelled) setWeeksWithHours(data.weeks);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, companyPending, company, week.isoYear, entries]);
+  const lastSavedWeek = lastSavedWeekBefore(weeksWithHours, week);
+  /** True while the table shows exactly the week on the bar and nothing
+   *  narrower — the state in which "no hours saved for week N" is the
+   *  truth rather than "no hours match these filters". */
+  const weekOnly = useMemo(() => {
+    const base = weekFilters(week);
+    return (Object.keys(base) as (keyof EntryFilterState)[]).every(
+      (key) => (filters[key] ?? "") === (base[key] ?? ""),
+    );
+  }, [filters, week]);
 
   /**
    * W-HR1 §2 — is the week on screen closed?
@@ -1055,6 +1090,17 @@ export function HoursAdminPage() {
                 </button>
               )}
             </div>
+            {/* P-9 D3 — WHICH WEEKS HOLD HOURS, at a glance: one cell per
+                week of the year, filled where hours are saved, outlined
+                on the week shown; the hours in the title. A click moves
+                the table there. */}
+            <WeekHoursStrip
+              year={week.isoYear}
+              week={week}
+              weeks={weeksWithHours}
+              onPick={goToWeek}
+              testIdPrefix="hours-week"
+            />
           </div>
 
           {/* W-HR1 §2 — the filter row WRAPS instead of clipping.
@@ -1752,24 +1798,71 @@ export function HoursAdminPage() {
                 <div
                   style={{ padding: "32px 24px", textAlign: "center" }}
                   data-testid="hours-entries-empty"
+                  data-empty-kind={weekOnly ? "week" : "filters"}
                 >
-                  <h3 className="empty-title" style={{ marginBottom: 8 }}>
-                    {t("hours_admin.empty_title")}
+                  {/* P-9 D3 — THE EMPTY WEEK SAYS WHERE THE HOURS ARE.
+                      The current week opens empty by construction; the
+                      sentence names the week, the last week that holds
+                      hours, and offers to open it. A narrowed table (a
+                      person, a type, a range) keeps the filter words. */}
+                  <h3
+                    className="empty-title"
+                    style={{ marginBottom: 8 }}
+                    data-testid="hours-empty-title"
+                  >
+                    {weekOnly
+                      ? t("hours_weeks.empty_week_title", { week: week.isoWeek })
+                      : t("hours_admin.empty_title")}
                   </h3>
-                  <p className="muted" style={{ margin: 0 }}>
-                    {t("hours_admin.empty_description")}
+                  <p
+                    className="muted"
+                    style={{ margin: 0 }}
+                    data-testid="hours-empty-last-saved"
+                  >
+                    {!weekOnly
+                      ? t("hours_admin.empty_description")
+                      : lastSavedWeek
+                        ? t("hours_weeks.last_saved_week", {
+                            week: lastSavedWeek.iso_week,
+                            hours: formatHours(lastSavedWeek.hours, dateLocale),
+                          })
+                        : t("hours_weeks.no_saved_weeks", { year: week.isoYear })}
                   </p>
-                  {!editing && activeHourTypes.length > 0 && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ marginTop: 14 }}
-                      onClick={() => setWeekModalOpen(true)}
-                      data-testid="hours-empty-enter-week"
-                    >
-                      {t("hours_admin.enter_week_button")}
-                    </button>
-                  )}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      justifyContent: "center",
+                      marginTop: 14,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    {weekOnly && lastSavedWeek && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        data-testid="hours-empty-open-last-week"
+                        onClick={() =>
+                          goToWeek({
+                            isoYear: lastSavedWeek.iso_year,
+                            isoWeek: lastSavedWeek.iso_week,
+                          })
+                        }
+                      >
+                        {t("hours_weeks.open_week", { week: lastSavedWeek.iso_week })}
+                      </button>
+                    )}
+                    {!editing && activeHourTypes.length > 0 && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setWeekModalOpen(true)}
+                        data-testid="hours-empty-enter-week"
+                      >
+                        {t("hours_admin.enter_week_button")}
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 

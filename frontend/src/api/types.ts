@@ -362,6 +362,11 @@ export interface TicketList {
   /** P-5 S7 — an occurrence ticket's origin: its recurring job and,
    *  through the contract line, the contract; which visit of the year. */
   occurrence_origin: TicketOccurrenceOrigin | null;
+  /** P-9 D2 — WHERE THE ROW CAME FROM: the detail's `kind`, on the list
+   *  (server-computed by `tickets/detail_facts.ticket_kind`, never
+   *  inferred here). An occurrence ticket is a TICKET whose
+   *  `occurrence_origin` is set — that is the row's "Recurring". */
+  kind: TicketKind;
 }
 
 export interface TicketStatusHistory {
