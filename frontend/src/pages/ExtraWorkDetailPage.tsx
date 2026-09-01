@@ -100,6 +100,7 @@ import { MeerwerkTimeline } from "../components/extra-work/MeerwerkTimeline";
 import { PhaseBanner } from "../components/customer/PhaseBadge";
 import { DueChipCore } from "../components/workplan/WorkPlanCard";
 import { resolveNextStep } from "../components/extra-work/nextStep";
+import { HOURS_PANEL_MODE } from "../components/extra-work/hoursPanelMode";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import type { PlanFocus } from "../components/extra-work/PlanWorkDialog";
 import { rowAmounts } from "../lib/billing";
@@ -396,22 +397,6 @@ function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
  *  says so in one sentence; after the invoice the saved hours are read
  *  only. Exhaustive over the phase enum — a new phase fails to
  *  compile here rather than rendering the panel by accident. */
-const HOURS_PANEL_MODE: Record<
-  ExtraWorkDisplayPhase,
-  "none" | "before" | "edit" | "read_only"
-> = {
-  WAITING_PRICE: "none",
-  WAITING_YOUR_APPROVAL: "none",
-  WAITING_CUSTOMER_APPROVAL: "none",
-  WAITING_PLANNING: "before",
-  SCHEDULED: "before",
-  IN_EXECUTION: "edit",
-  WAITING_COMPLETION_APPROVAL: "edit",
-  DONE: "edit",
-  INVOICED: "read_only",
-  REJECTED: "none",
-  CANCELLED: "none",
-};
 
 /** P-9 C4 — the request's lines in the shape the coverage check reads. */
 function cartCoverageLines(

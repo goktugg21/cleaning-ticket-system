@@ -55,6 +55,7 @@ import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
 import { StatusBadge } from "../StatusBadge";
 import { useToast } from "../ToastProvider";
 import { ActualHoursPanel } from "./ActualHoursPanel";
+import { HOURS_PANEL_MODE } from "./hoursPanelMode";
 import { useMissingPieceAnchor } from "../../lib/missingPiece";
 import { useCurrentTicketKind } from "../../lib/currentTicketKind";
 import {
@@ -357,6 +358,10 @@ export function TicketExtraWorkCards({
   }
 
   const storedBillingMonth = ew.invoice_date ? ew.invoice_date.slice(0, 7) : "";
+  // P-9 C5 — hours worked are entered only once the work has started;
+  // the same table the request's own page reads.
+  const hoursPanelMode = HOURS_PANEL_MODE[ew.display_phase];
+  const plannedHours = Number(ew.budget_hours ?? 0);
   const billingValue = billingDraft ?? storedBillingMonth;
 
   async function saveBillingMonth() {
@@ -424,9 +429,23 @@ export function TicketExtraWorkCards({
     >
       <div className="form-section">
         <div className="form-section-title">{t("ew_card_title")}</div>
-        {activeHourlyLines.length > 0 && (
+        {activeHourlyLines.length > 0 && hoursPanelMode === "before" && (
+          <div data-testid="extra-work-hours-before-start">
+            {plannedHours > 0 && (
+              <p style={{ margin: "0 0 4px" }} data-testid="extra-work-hours-planned">
+                {t("extra_work:detail.hours_planned_line", { hours: plannedHours })}
+              </p>
+            )}
+            <p className="muted small" style={{ margin: 0 }}>
+              {t("extra_work:detail.hours_before_start")}
+            </p>
+          </div>
+        )}
+        {activeHourlyLines.length > 0 &&
+          (hoursPanelMode === "edit" || hoursPanelMode === "read_only") && (
           <ActualHoursPanel
             variant="embedded"
+            readOnly={hoursPanelMode === "read_only"}
             key={actualHoursPanelKey(
               approvedProposal,
               activeHourlyLines,
