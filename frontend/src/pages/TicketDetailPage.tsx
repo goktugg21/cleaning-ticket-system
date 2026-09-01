@@ -1172,11 +1172,19 @@ export function TicketDetailPage() {
   // (`-> ACKNOWLEDGED` needs a day, `transition_requirements.py`): the
   // walk found a spawned, unplanned ticket offering a live acknowledge
   // button that the server refused with `transition_requirements_unmet`.
-  const startTarget: TicketStatus | null = ticket?.allowed_next_statuses.includes("IN_PROGRESS")
-    ? "IN_PROGRESS"
-    : ticket?.allowed_next_statuses.includes("ACKNOWLEDGED")
-      ? "ACKNOWLEDGED"
-      : null;
+  // The gated move is the one the banner OFFERS as primary — the first
+  // legal entry of `PRIMARY_TRANSITIONS` for this status, when it is a
+  // forward move the server puts requirements on (an OPEN ticket also
+  // allows IN_PROGRESS as a secondary move; its primary is the
+  // acknowledge, and that is the button that must not lie).
+  const startTarget: TicketStatus | null =
+    (ticket
+      ? (PRIMARY_TRANSITIONS[ticket.status] ?? []).find(
+          (status) =>
+            (status === "IN_PROGRESS" || status === "ACKNOWLEDGED") &&
+            ticket.allowed_next_statuses.includes(status),
+        )
+      : undefined) ?? null;
   const startIsLegal = startTarget !== null;
   const startTicketId = ticket?.id ?? null;
   const startStamp = ticket ? `${ticket.status}:${ticket.updated_at}` : "";
@@ -3144,7 +3152,8 @@ export function TicketDetailPage() {
   // P-9 12(b) — the server's answer, read only when it describes THIS
   // ticket in THIS state (the effect that asks lives with the other
   // hooks above the early return).
-  const offersStart = startTarget !== null && primaryButtons.includes(startTarget);
+  const offersStart =
+    startTarget !== null && primaryButtons.some((status) => status === startTarget);
   const startUnmet =
     offersStart &&
     startReqs &&
