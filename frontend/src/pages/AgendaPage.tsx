@@ -59,6 +59,7 @@ import { useAuth } from "../auth/AuthContext";
 import {
   agendaShowsTeamWeek,
   canAccessAgenda,
+  canManageTimesheets,
 } from "../auth/permissions";
 import { BoundedList } from "../components/BoundedList";
 import { ClickableRow } from "../components/ClickableRow";
@@ -872,6 +873,21 @@ function WorkPlanWeek() {
         title={t("agenda.page_title")}
         subtitle={
           teamWeek ? t("agenda.page_subtitle_team") : t("agenda.page_subtitle")
+        }
+        /* P-13 W6 — the standing weekly schedule (Rooster) lost its
+           toggle on the Hours page; its door for the people who manage
+           it lives here, beside the week they are reading. SA / CA
+           only — the same gate the /admin/hours route enforces. */
+        actions={
+          canManageTimesheets(me?.role) ? (
+            <Link
+              to="/admin/hours?tab=schedule"
+              className="btn btn-ghost btn-sm"
+              data-testid="agenda-schedule-link"
+            >
+              {t("common:contract_hours.tab")}
+            </Link>
+          ) : undefined
         }
       />
 

@@ -47,7 +47,6 @@ import {
 import { StartHere } from "../../components/guide/StartHere";
 import { DoneBanner } from "../../components/guide/DoneBanner";
 import { useDoneBanner } from "../../components/guide/useDoneBanner";
-import { RoadTabs } from "../../components/guide/RoadTabs";
 import { TeachEmpty } from "../../components/guide/TeachEmpty";
 import { HIGHLIGHT_CLASS, HIGHLIGHT_MS } from "../../components/guide/highlight";
 import { useToast } from "../../components/ToastProvider";
@@ -70,64 +69,17 @@ import { HoursFilterRow } from "./HoursFilterRow";
 import { ContractHoursTab } from "./ContractHoursTab";
 
 /**
- * W-HR1 §2 — TWO tabs. There were seven, in three named groups.
+ * P-13 W6 — the "Worked hours / Weekly schedule" TOGGLE is gone.
  *
- * The owner's complaint was that the Overview tab "shows everything and
- * explains nothing", and the audit agreed with him about more than that
- * one tab: seven surfaces over one subject, four of which were the same
- * numbers a fourth way round. What is left is the two questions an
- * operator actually arrives with:
- *
- *   worked    what was worked this week, and is the week final
- *   schedule  what each person is scheduled to work, per week
- *
- * ## What was deleted and where it went
- *
- * **Overview** — deleted outright. Every figure on it restated one
- * number the entries table already carried; period charts and
- * breakdowns are Reports' job, and Reports does it properly. What it
- * uniquely OWNED was week close/reopen, and that moved onto Worked,
- * where the week it acts on is the week on screen.
- *
- * **Approval** — deleted. Approving a standing agreement is one row
- * changing state, so it is a ROW ACTION on Schedule now, next to the
- * row it approves, instead of a screen that reproduced the same table
- * three times under three status headings.
- *
- * **Contract work types** and **Hour types** — deleted from here. Both
- * are per-company CATALOGS and both already render, from the same
- * components, on /admin/catalogs. Two entry points to one catalog is
- * how they drift; the catalog page is the one owner now.
- *
- * **Cost per hour** — moved to /admin/employees, onto the employee's
- * own row (`EmployeeRatePanel`). A rate belongs to a person, and the
- * person is already there.
- *
- * ## One constant, iterated by the renderer
- *
- * Renamed from `HOURS_TAB_GROUPS`, because there are no groups any
- * more and a name that says otherwise is the drift CLAUDE.md warns
- * about. A new tab added to `Tab` and not to this list is a
- * compile-time hole, not a silent one, because `key` is typed `Tab`.
- *
- * NOT exported, and that is `react-refresh/only-export-components`
- * rather than a preference: a non-component export from a file that
- * exports a component is a lint error, and the baseline is frozen.
+ * The two views record different systems (what was worked vs the
+ * standing weekly agreement) and sharing one page's toggle made them
+ * read as two modes of one thing. This page is the worked week now.
+ * The schedule VIEW is still served at `?tab=schedule` — that URL is
+ * a standing deep link (the hours-comparison report's "Weekly
+ * schedule" door points at it, and the agenda header links it too),
+ * so the page renders ONLY the schedule when the URL asks for it,
+ * with a back link in the header instead of a toggle.
  */
-type Tab = "worked" | "schedule";
-
-const HOURS_TABS: { key: Tab; labelKey: string; testId: string }[] = [
-  {
-    key: "worked",
-    labelKey: "hours_admin.tab_entries",
-    testId: "hours-tab-worked",
-  },
-  {
-    key: "schedule",
-    labelKey: "contract_hours.tab",
-    testId: "hours-tab-schedule",
-  },
-];
 
 // Sprint 152 — the SUPER_ADMIN's provider company, remembered across
 // visits. Its OWN key, not shared with the catalog's
@@ -218,18 +170,20 @@ function formatDate(value: string, locale: string): string {
 }
 
 /**
- * The "Uren" admin area. W-HR1 §2 cut it from seven tabs to two — see
- * `HOURS_TABS` above for what went where.
+ * The "Uren" admin area. W-HR1 §2 cut it from seven tabs to two; P-13
+ * W6 cut the remaining toggle — the page IS the worked week, and the
+ * schedule renders alone behind its `?tab=schedule` deep link (see the
+ * header comment above).
  *
- * ## What the Worked tab is
+ * ## What the page is
  *
- *   title + ONE primary button (enter a week)
- *   a WEEK BAR: which week, one status chip, one state-dependent
- *     button (Week afsluiten / Heropenen)
- *   one WRAPPING row of filters
- *   ONE table, with an Edit toggle that makes its cells editable and
- *     saves every change at once, and the week's totals as its FOOTER
- *   real prev/next off the endpoint's own pagination
+ *   Start here, the week CARD (which week, one status chip, Enter
+ *     hours, Week afsluiten / Heropenen, the per-person rows),
+ *     Earlier weeks
+ *   then ONE fold, "All entries": the wrapping filter row and the raw
+ *     per-entry table, with an Edit toggle that makes its cells
+ *     editable and saves every change at once, the week's totals as
+ *     its FOOTER, and real prev/next off the endpoint's own pagination
  *
  * No stat tiles, no 420px scroll window over the table, no second copy
  * of the same numbers anywhere on the page.
@@ -272,31 +226,16 @@ export function HoursAdminPage() {
   const { push: pushToast } = useToast();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  /* W-UX F41 — the tab and the week are URL state (`?tab=schedule`,
-   * `?week=2026-W35`), the ticket page's exact rule: absence is the
-   * default, writes replace history, a reload or a shared link lands on
-   * the same view. */
+  /* W-UX F41 — the week is URL state (`?week=2026-W35`), the ticket
+   * page's exact rule: absence is the default, writes replace history,
+   * a reload or a shared link lands on the same view. P-13 W6 — the
+   * schedule view is URL state ONLY (`?tab=schedule`, a standing deep
+   * link); nothing on this page sets it any more, so it is derived,
+   * never stored. */
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab: Tab =
-    searchParams.get("tab") === "schedule" ? "schedule" : "worked";
+  const scheduleView = searchParams.get("tab") === "schedule";
   const initialWeek: IsoWeek =
     parseIsoWeek(searchParams.get("week") ?? "") ?? currentIsoWeek();
-  const [tab, setTabState] = useState<Tab>(initialTab);
-  const setTab = useCallback(
-    (next: Tab) => {
-      setTabState(next);
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next === "worked") params.delete("tab");
-          else params.set("tab", next);
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
 
   /** W-HR1 §2 — the week the lock chip and the one button act on, and
    *  the week the table opens on. Its own state rather than derived
@@ -370,6 +309,11 @@ export function HoursAdminPage() {
   const [weekModalOpen, setWeekModalOpen] = useState(false);
   /** P-11 B1 — who the grid opens on (the week card's Edit). */
   const [weekModalPreselect, setWeekModalPreselect] = useState<number[]>([]);
+  /** P-13 O4 — the one line the grid shows when it was opened FROM
+   *  Start here ("These N have no hours in week W yet."). Captured at
+   *  the click, so a refresh while the dialog is open cannot rewrite
+   *  it; empty for every other door into the dialog. */
+  const [weekModalNote, setWeekModalNote] = useState("");
 
   // The inline table editor. `drafts` holds ONLY the rows the operator
   // has touched, so "what changed" is the map itself and no diffing of
@@ -550,13 +494,13 @@ export function HoursAdminPage() {
 
   // Derived `loading` — see `MyHoursPage` for why it is not stored in
   // state and set from the effect body.
-  const fetchKey = `${tab}|${JSON.stringify(queryFilters)}|${page}`;
+  const fetchKey = `${JSON.stringify(queryFilters)}|${page}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const loading =
-    tab === "worked" && (companyPending || loadedKey !== fetchKey);
+    !scheduleView && (companyPending || loadedKey !== fetchKey);
 
   useEffect(() => {
-    if (tab !== "worked" || companyPending) return;
+    if (scheduleView || companyPending) return;
     let cancelled = false;
     // The table and its footer totals come from the SAME filter object,
     // so the numbers always describe the rows on screen.
@@ -581,7 +525,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [tab, queryFilters, page, fetchKey, companyPending]);
+  }, [scheduleView, queryFilters, page, fetchKey, companyPending]);
 
   /** P-9 D3 — WHERE THE HOURS ARE: the year's weeks that hold saved
    *  hours, for the strip on the week bar and the empty week's
@@ -590,7 +534,7 @@ export function HoursAdminPage() {
    *  is marked the moment its hours land. Non-fatal: without it the
    *  strip shows no marks and the sentence names no week. */
   useEffect(() => {
-    if (tab !== "worked" || companyPending) return;
+    if (scheduleView || companyPending) return;
     let cancelled = false;
     listWeeksWithHours({ iso_year: week.isoYear, company })
       .then((data) => {
@@ -600,7 +544,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [tab, companyPending, company, week.isoYear, entries]);
+  }, [scheduleView, companyPending, company, week.isoYear, entries]);
   const lastSavedWeek = lastSavedWeekBefore(weeksWithHours, week);
   /** True while the table shows exactly the week on the bar and nothing
    *  narrower — the state in which "no hours saved for week N" is the
@@ -631,7 +575,7 @@ export function HoursAdminPage() {
    *  weeks read, so a save or a delete refreshes it. Non-fatal. */
   const [weekCardEntries, setWeekCardEntries] = useState<TimeEntry[]>([]);
   useEffect(() => {
-    if (tab !== "worked" || companyPending) return;
+    if (scheduleView || companyPending) return;
     let cancelled = false;
     (async () => {
       const all: TimeEntry[] = [];
@@ -653,7 +597,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [tab, companyPending, company, week, entries]);
+  }, [scheduleView, companyPending, company, week, entries]);
 
   /** The card's rows: one per person with hours this week, standard
    *  hours and job hours apart, the job refs named. */
@@ -722,6 +666,29 @@ export function HoursAdminPage() {
     maximumFractionDigits: 2,
   });
 
+  /** P-13 O4 — Start here's button SAYS WHO it is for: at most four
+   *  first names, then "and N more". Derived from the same
+   *  `missingPeople` memo that preselects the dialog, so the button
+   *  and the grid can never disagree about who is missing. */
+  const startHereLabel = useMemo(() => {
+    const names = missingPeople
+      .slice(0, 4)
+      .map((p) => (p.full_name.trim() || p.email).split(/\s+/)[0]);
+    if (missingPeople.length > 4) {
+      return t("hours_admin.enter_for_names_more", {
+        names: names.join(", "),
+        count: missingPeople.length - 4,
+      });
+    }
+    const joined =
+      names.length > 1
+        ? `${names.slice(0, -1).join(", ")} ${t("hours_admin.names_and")} ${
+            names[names.length - 1]
+          }`
+        : (names[0] ?? "");
+    return t("hours_admin.enter_for_names", { names: joined });
+  }, [missingPeople, t]);
+
   /** P-11 B1 — the "Earlier weeks" table: every week of the year with
    *  hours except the one on the bar, newest first. */
   const earlierWeeks = useMemo(
@@ -765,7 +732,7 @@ export function HoursAdminPage() {
     null,
   );
   useEffect(() => {
-    if (tab !== "worked" || companyPending) return;
+    if (scheduleView || companyPending) return;
     let cancelled = false;
     fetchWeekStatus({
       iso_year: week.isoYear,
@@ -785,7 +752,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [tab, companyPending, week, company, weekStatusKey]);
+  }, [scheduleView, companyPending, week, company, weekStatusKey]);
 
   const weekRange = weekFilters(week);
   const periodOpen =
@@ -1060,8 +1027,17 @@ export function HoursAdminPage() {
        without touching the global `.page-title` every page shares. */
     <div className="hours-admin-page">
       <PageHeader
-        title={t("hours_admin.title")}
-        subtitle={t("hours_admin.subtitle")}
+        title={scheduleView ? t("contract_hours.title") : t("hours_admin.title")}
+        subtitle={
+          scheduleView ? t("contract_hours.subtitle") : t("hours_admin.subtitle")
+        }
+        /* P-13 W6 — the schedule view is its own surface now (the
+           toggle is gone); the way back is a header back link. */
+        backLink={
+          scheduleView
+            ? { to: "/admin/hours", label: t("contract_hours.back_to_hours") }
+            : undefined
+        }
         actions={
           /* P-12 §D.24.2 — the company, top right; the choice is
              shared with the other Finance pages through the session.
@@ -1090,34 +1066,10 @@ export function HoursAdminPage() {
         </div>
       )}
 
-      {/* W-HR1 §2 — two tabs, the house `composer-toggle` shape every
-          other tabbed admin page uses (CatalogsAdminPage's is the same
-          markup). The grouped bar with its captions and its dividers
-          existed to make seven pills legible; two pills do not need a
-          taxonomy above them.
-          Iterated from `HOURS_TABS`, never a second local array. */}
-      <div
-        className="composer-toggle"
-        role="tablist"
-        aria-label={t("hours_admin.tabs_aria")}
-        style={{ marginBottom: 16 }}
-      >
-        {HOURS_TABS.map((entry) => (
-          <button
-            key={entry.key}
-            type="button"
-            role="tab"
-            aria-selected={tab === entry.key}
-            className={`composer-toggle-btn ${tab === entry.key ? "active" : ""}`}
-            data-testid={entry.testId}
-            onClick={() => setTab(entry.key)}
-          >
-            {t(entry.labelKey)}
-          </button>
-        ))}
-      </div>
-
-      {tab === "schedule" && (
+      {/* P-13 W6 — no toggle. The URL decides: `?tab=schedule` (a
+          standing deep link) renders ONLY the schedule; everything
+          else is the worked week. */}
+      {scheduleView && (
         <ContractHoursTab
           companyId={company}
           buildings={buildings}
@@ -1126,7 +1078,7 @@ export function HoursAdminPage() {
         />
       )}
 
-      {tab === "worked" && (
+      {!scheduleView && (
         <>
           {/* P-12 §D.24 rule 4 — what just happened, what did not,
               and the one next step; survives one reload. */}
@@ -1150,9 +1102,17 @@ export function HoursAdminPage() {
               <StartHere
                 testId="hours-start-here"
                 action={{
-                  label: t("hours_admin.enter_week_button"),
+                  /* P-13 O4 — this button and the week card's both said
+                     "Enter hours"; this one now SAYS WHO it opens on. */
+                  label: startHereLabel,
                   onClick: () => {
                     setWeekModalPreselect(missingPeople.map((e) => e.id));
+                    setWeekModalNote(
+                      t("hours_admin.preselect_note", {
+                        count: missingPeople.length,
+                        week: week.isoWeek,
+                      }),
+                    );
                     setWeekModalOpen(true);
                   },
                 }}
@@ -1294,6 +1254,7 @@ export function HoursAdminPage() {
                     data-testid="hours-enter-week-button"
                     onClick={() => {
                       setWeekModalPreselect([]);
+                      setWeekModalNote("");
                       setWeekModalOpen(true);
                     }}
                     disabled={loading || activeHourTypes.length === 0}
@@ -1331,27 +1292,10 @@ export function HoursAdminPage() {
               </div>
             </div>
 
-            {/* P-12 B3 (§D.24 rule 3) — the week's short road, and the
-                sentence that teaches it. The consequence line rides
-                with the road rather than the button now. */}
-            <RoadTabs
-              variant="progress"
-              steps={[
-                {
-                  key: "open",
-                  step: t("hours_admin.road_open_step"),
-                  label: t("weeks.status_open"),
-                },
-                {
-                  key: "closed",
-                  step: t("hours_admin.road_closed_step"),
-                  label: t("weeks.status_closed"),
-                },
-              ]}
-              activeKey={weekClosed ? "closed" : "open"}
-              ariaLabel={t("hours_admin.week_road_aria")}
-              testIdPrefix="hours-week-road"
-            />
+            {/* P-13 W6 — the "1 · Enter / 2 · Close" road is gone: the
+                week's Open/Closed chip above already says the state.
+                ONE teach sentence stays, with the consequence rider
+                where the Close button is. */}
             <p
               className="muted small"
               style={{ margin: "0 0 12px" }}
@@ -1465,6 +1409,7 @@ export function HoursAdminPage() {
                               className="btn btn-ghost btn-sm"
                               onClick={() => {
                                 setWeekModalPreselect([person.id]);
+                                setWeekModalNote("");
                                 setWeekModalOpen(true);
                               }}
                               disabled={loading || activeHourTypes.length === 0}
@@ -1593,6 +1538,33 @@ export function HoursAdminPage() {
             </div>
           )}
 
+          {/* Load failures stay OUTSIDE the fold: an error inside a
+              closed <details> is an error nobody sees. */}
+          {loadError && (
+            <div
+              className="alert-error"
+              role="alert"
+              style={{ marginBottom: 16 }}
+            >
+              {loadError}
+            </div>
+          )}
+
+          {/* P-13 W6 — the OLD per-entry log, folded away. The week
+              card above is the page; the raw lines are the receipt,
+              behind one door at the bottom. Filters, edit mode,
+              pagination and the empty states all live inside. */}
+          <details className="form-fold" data-testid="hours-all-entries">
+            <summary
+              className="form-fold-summary"
+              data-testid="hours-all-entries-summary"
+            >
+              {t("hours_admin.all_entries_summary", {
+                week: week.isoWeek,
+                count: entryCount,
+              })}
+            </summary>
+
           {/* W-HR1 §2 — the filter row WRAPS instead of clipping.
 
               It was `.hours-filter-line`: `flex-wrap: nowrap` with
@@ -1600,9 +1572,9 @@ export function HoursAdminPage() {
               past the card's right edge and "Filters wissen" 223px past
               it — both reachable only by scrolling a bar nothing said
               was scrollable. This is `.filter-bar`, the house filter
-              shape every other admin list uses (and the Schedule tab
-              beside this one): it wraps to a second line and every
-              control is on screen at every width. */}
+              shape every other admin list uses (and the Schedule view
+              behind `?tab=schedule`): it wraps to a second line and
+              every control is on screen at every width. */}
           <div
             className="card filter-bar"
             data-testid="hours-filters"
@@ -1690,16 +1662,6 @@ export function HoursAdminPage() {
             </div>
           </div>
 
-          {loadError && (
-            <div
-              className="alert-error"
-              role="alert"
-              style={{ marginBottom: 16 }}
-            >
-              {loadError}
-            </div>
-          )}
-
           {loading ? (
             <div
               className="card skeleton-table"
@@ -1725,17 +1687,11 @@ export function HoursAdminPage() {
                   inputs and the row actions appear. What is new is that
                   leaving it is ONE Save for the whole table rather than
                   a modal per row. */}
+              {/* P-13 W6 — no title line in here: the fold's summary
+                  already names this ("All entries for week N"), and
+                  the teach sentence lives on the week card, once. */}
               <div className="section-head" style={{ padding: "14px 16px 0" }}>
                 <div>
-                  <div className="section-head-title">
-                    {t("hours_admin.list_title")}
-                  </div>
-                  {/* Sprint 172 §3 — the two tabs record DIFFERENT
-                      things and the owner could not tell which from the
-                      buttons. Said in one line, in his words. */}
-                  <div className="section-head-sub">
-                    {t("hours_admin.entries_subtitle")}
-                  </div>
                   <div className="section-head-sub">
                     {t("hours_admin.pagination_summary", {
                       shown: entries.length,
@@ -1883,27 +1839,20 @@ export function HoursAdminPage() {
                   The empty state moves out of the wrapper and under the
                   table, where the same copy renders. */}
               <div className="table-wrap">
+                {/* P-13 W6 — SIX read columns: Date · Person · Where /
+                    on what · Type · Hours · Note. Week is the fold's
+                    summary; the source folded into the Where cell (a
+                    job ref for job lines, the building otherwise); the
+                    Hours × factor column went with the log's ceremony —
+                    its TOTAL stays in the footer, where pay is read. */}
                 <table className="data-table">
                   <thead>
                     <tr>
                       <th>{t("hours_admin.col_date")}</th>
-                      <th>{t("hours_admin.col_week")}</th>
                       <th>{t("hours_admin.col_employee")}</th>
-                      <th>{t("hours_admin.col_source")}</th>
+                      <th>{t("hours_admin.col_where")}</th>
                       <th>{t("hours_admin.col_hour_type")}</th>
                       <th>{t("hours_admin.col_hours")}</th>
-                      <th>
-                        {/* P-4 — a plain word and a click-to-teach: what
-                            "weighted" is, in one sentence. */}
-                        <abbr
-                          title={t("hours_admin.col_weighted_teach")}
-                          style={{ textDecoration: "underline dotted", cursor: "help" }}
-                          data-testid="hours-col-weighted"
-                        >
-                          {t("hours_admin.col_weighted")}
-                        </abbr>
-                      </th>
-                      <th>{t("hours_admin.col_building")}</th>
                       <th>{t("hours_admin.col_note")}</th>
                       {/* The actions column EXISTS only inside edit
                           mode, so the read view keeps exactly the
@@ -1944,29 +1893,32 @@ export function HoursAdminPage() {
                                 data-testid={`hours-inline-date-${entry.id}`}
                               />
                             ) : (
-                              formatDate(entry.date, dateLocale)
-                            )}
-                          </td>
-                          <td className="muted small">
-                            {formatIsoWeek({
-                              isoYear: entry.iso_year,
-                              isoWeek: entry.iso_week,
-                            })}
-                            {entry.is_locked && (
-                              <span
-                                className="badge badge-closed"
-                                style={{ marginLeft: 6 }}
-                              >
-                                {t("weeks.status_closed")}
-                              </span>
+                              <>
+                                {formatDate(entry.date, dateLocale)}
+                                {/* P-13 W6 — the Week column is gone
+                                    (the fold's summary names the week);
+                                    the lock badge it carried rides on
+                                    the date now. */}
+                                {entry.is_locked && (
+                                  <span
+                                    className="badge badge-closed"
+                                    style={{ marginLeft: 6 }}
+                                  >
+                                    {t("weeks.status_closed")}
+                                  </span>
+                                )}
+                              </>
                             )}
                           </td>
                           <td>{entry.employee_name}</td>
-                          {/* Sprint 173 §1 — WHERE the hour came from.
-                              Read-only in the table: the source is set
-                              by the flow that logged the hour, not
-                              retyped by hand. */}
-                          <td>
+                          {/* P-13 W6 — WHERE, or ON WHAT: one cell.
+                              A job line (ticket / extra work) shows its
+                              job ref; every other line shows the
+                              building. In edit mode the cell stacks the
+                              two editors it merged, so the source and
+                              the building stay independently
+                              correctable. */}
+                          <td className="muted small">
                             {/* Sprint 178 §4a — EDITABLE now. Sprint 177
                                 put the picker in the week SETUP only, so
                                 a source could be chosen once and never
@@ -1978,6 +1930,7 @@ export function HoursAdminPage() {
                                 (`listHourSources`), so the two paths
                                 cannot drift on what a valid source is. */}
                             {cellsEditable ? (
+                              <div style={{ display: "grid", gap: 4 }}>
                               <select
                                 className="field-select"
                                 value={draft.source}
@@ -2034,8 +1987,36 @@ export function HoursAdminPage() {
                                   </option>
                                 ))}
                               </select>
-                            ) : entry.source_type &&
-                              entry.source_type !== "OTHER" ? (
+                              <select
+                                className="field-input hours-inline-input"
+                                value={
+                                  buildings.some(
+                                    (b) => String(b.id) === draft.building,
+                                  )
+                                    ? draft.building
+                                    : ""
+                                }
+                                onChange={(event) =>
+                                  patchDraft(entry, {
+                                    building: event.target.value,
+                                  })
+                                }
+                                disabled={saveBusy}
+                                aria-label={t("hours_admin.col_building")}
+                                data-testid={`hours-inline-building-${entry.id}`}
+                              >
+                                <option value="">
+                                  {t("my_hours.field_building_empty")}
+                                </option>
+                                {buildings.map((building) => (
+                                  <option key={building.id} value={building.id}>
+                                    {building.name}
+                                  </option>
+                                ))}
+                              </select>
+                              </div>
+                            ) : entry.source_type === "TICKET" ||
+                              entry.source_type === "EXTRA_WORK" ? (
                               /* Sprint 179B §2 — the TITLE, the same one
                                  the select above offers. Reading the row
                                  printed "Ticket #41" while editing the
@@ -2068,6 +2049,8 @@ export function HoursAdminPage() {
                                   ),
                                 )}
                               </span>
+                            ) : entry.building_name ? (
+                              entry.building_name
                             ) : (
                               <span className="muted-empty">—</span>
                             )}
@@ -2141,43 +2124,6 @@ export function HoursAdminPage() {
                               entry.hours
                             )}
                           </td>
-                          {/* Weighted is derived server-side from the
-                              snapshot; it updates on the refresh after
-                              Save, never optimistically. */}
-                          <td className="muted">{entry.weighted_hours}</td>
-                          <td className="muted small">
-                            {cellsEditable ? (
-                              <select
-                                className="field-input hours-inline-input"
-                                value={
-                                  buildings.some(
-                                    (b) => String(b.id) === draft.building,
-                                  )
-                                    ? draft.building
-                                    : ""
-                                }
-                                onChange={(event) =>
-                                  patchDraft(entry, {
-                                    building: event.target.value,
-                                  })
-                                }
-                                disabled={saveBusy}
-                                aria-label={t("hours_admin.col_building")}
-                                data-testid={`hours-inline-building-${entry.id}`}
-                              >
-                                <option value="">
-                                  {t("my_hours.field_building_empty")}
-                                </option>
-                                {buildings.map((building) => (
-                                  <option key={building.id} value={building.id}>
-                                    {building.name}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              (entry.building_name ?? "—")
-                            )}
-                          </td>
                           <td className="muted small">
                             {cellsEditable ? (
                               <input
@@ -2223,14 +2169,17 @@ export function HoursAdminPage() {
                       columns it sums, and does not compete with the
                       week bar for the top of the page.
 
-                      Hours and Weighted sit under their own columns.
-                      Every figure is the SAME summary payload the rows
-                      were filtered with, so the footer can never
-                      describe a different set from the body. */}
+                      Hours sits under its own column. Every figure is
+                      the SAME summary payload the rows were filtered
+                      with, so the footer can never describe a
+                      different set from the body. P-13 W6 — the
+                      Hours × factor COLUMN is gone; its total stays
+                      here (it is the number pay is calculated from,
+                      and this sprint is about money staying visible). */}
                   {summary && entries.length > 0 && (
                     <tfoot data-testid="hours-entries-totals">
                       <tr>
-                        <td colSpan={5}>
+                        <td colSpan={4}>
                           <strong>{t("hours_admin.summary_title")}</strong>{" "}
                           <span className="muted small">
                             {t("hours_admin.pagination_summary", {
@@ -2242,13 +2191,18 @@ export function HoursAdminPage() {
                         <td data-testid="hours-total-hours">
                           <strong>{summary.total_hours}</strong>
                         </td>
-                        <td className="muted" data-testid="hours-total-weighted">
-                          {summary.total_weighted_hours}
-                        </td>
-                        <td colSpan={editing ? 3 : 2} className="muted small">
+                        <td colSpan={editing ? 2 : 1} className="muted small">
                           {t("hours_admin.entries_total", {
                             count: summary.total_entries,
                           })}
+                          {" · "}
+                          <span
+                            title={t("hours_admin.col_weighted_teach")}
+                            data-testid="hours-total-weighted"
+                          >
+                            {t("hours_admin.col_weighted")}{" "}
+                            {summary.total_weighted_hours}
+                          </span>
                         </td>
                       </tr>
                     </tfoot>
@@ -2318,7 +2272,10 @@ export function HoursAdminPage() {
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        onClick={() => setWeekModalOpen(true)}
+                        onClick={() => {
+                          setWeekModalNote("");
+                          setWeekModalOpen(true);
+                        }}
                         data-testid="hours-empty-enter-week"
                       >
                         {t("hours_admin.enter_week_button")}
@@ -2368,6 +2325,7 @@ export function HoursAdminPage() {
               </div>
             </div>
           )}
+          </details>
         </>
       )}
 
@@ -2375,7 +2333,7 @@ export function HoursAdminPage() {
           here. `ConfirmDialog` below stays native and ref-driven; the
           two are deliberately different things (CLAUDE.md §3). */}
       {(weekModalOpen ||
-        (tab === "worked" &&
+        (!scheduleView &&
           !enterConsumed &&
           enterIds.length > 0 &&
           !loading &&
@@ -2392,13 +2350,20 @@ export function HoursAdminPage() {
           initialEmployeeIds={
             weekModalOpen ? weekModalPreselect : enterIds
           }
+          /* P-13 O4 — only the Start-here door sets this; every other
+             opener clears it. */
+          preselectNote={
+            weekModalOpen && weekModalNote ? weekModalNote : undefined
+          }
           onClose={() => {
             setEnterConsumed(true);
             setWeekModalOpen(false);
+            setWeekModalNote("");
           }}
           onSaved={async (changed, saved) => {
             setEnterConsumed(true);
             setWeekModalOpen(false);
+            setWeekModalNote("");
             await refreshEntries();
             // P-12 B4 (§D.24 rule 4) — the page says WHO was saved and
             // the one next step, and highlights those people on the

@@ -118,6 +118,7 @@ export function WeekEntryDialog({
   companyId,
   initialWeek,
   initialEmployeeIds,
+  preselectNote,
   onClose,
   onSaved,
 }: {
@@ -131,6 +132,10 @@ export function WeekEntryDialog({
    *  person: their id arrives pre-selected. Empty (the default) opens
    *  the dialog as before, nobody chosen yet. */
   initialEmployeeIds?: number[];
+  /** P-13 O4 — one sentence under the title saying WHY these people
+   *  arrived pre-selected ("These N have no hours in week W yet.").
+   *  Set only by the Hours page's Start-here door; absent otherwise. */
+  preselectNote?: string;
   onClose: () => void;
   /** The page refreshes its list and closes this. */
   onSaved: (
@@ -592,6 +597,17 @@ export function WeekEntryDialog({
         <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>
           {t("week_setup.subtitle")}
         </p>
+        {/* P-13 O4 — why these people are already chosen. */}
+        {preselectNote && (
+          <p
+            className="muted small"
+            role="status"
+            style={{ marginTop: -8, marginBottom: 16 }}
+            data-testid="week-entry-preselect-note"
+          >
+            {preselectNote}
+          </p>
+        )}
 
         {/* The three choices, SIDE BY SIDE: who, where, and which week. */}
         <div className="week-entry-setup-row" data-testid="week-entry-setup">
