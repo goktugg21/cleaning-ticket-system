@@ -2091,3 +2091,48 @@ SLA. My schedule, Customers, Permissions, People, Services and
 Companies are approved as they are — not touched. Tickets and People
 go to P-13 (they pass §D.22 already). The §D.22.1 P-12 queue for
 Tickets/Recurring/SLA/People is superseded by this section's order.
+
+### D.24.4 As built — the P-12 rulings (2026-09-02)
+
+What the build settled beyond the brief, each the smallest honest
+reading:
+
+1. **The Invoices "All" tab left.** Rule 3 makes the tabs the steps of
+   the road, and All was not a step. Deep links (`?customer=` /
+   `?period=`) land on the road's FIRST step — the customer's unbilled
+   work IS "To invoice" — and the filters narrow every tab, the due
+   table included. The per-row status pill left with it (each tab is
+   one status); credit notes keep their badges on Sent.
+2. **The number-at-SEND is said everywhere.** The mock's Issued rows
+   showed numbers; the system allocates at Send
+   (`invoicing/state_machine.py`), so the Issued tab's rows say
+   "Concept — nummer volgt bij verzenden" and both confirms (rule 7)
+   state it and where you land.
+3. **Contracts' "Ending" is a horizon, not a status.**
+   `ENDING_SOON_DAYS = 60` in `contracts/views_contracts.py` is the one
+   definition; `?status=ENDING` and the Active tab's
+   `?ending=exclude` partition (pinned: no row in both, none dropped),
+   and `/contracts/stats/` serves the tabs' counts, per-bucket money
+   and the Start-here facts.
+4. **Recurring "Paused" IS the archive.** The model keeps
+   `archived_at` (revivable, generation stops — exactly what a person
+   means by pause); the user-facing word is now Pauzeren / Hervatten
+   everywhere on those pages, one name per concept (§D.2). "Ended" is
+   the end date passed, derived.
+5. **The SLA thresholds are per KIND of wait, not per priority** —
+   `sla/models.py` has no priority dimension. The brief's purpose
+   sentence would have lied; the page says the honest one.
+6. **D7 stopped under the zero-migrations law.** The legacy
+   `ExtraWorkPricingLineItem` deliberately has no `actual_hours`
+   column (Sprint 8B; `final_amounts.billable_quantity` documents it).
+   Exposing the panel there needs that column — a migration, queued
+   for P-13 with the owner's sign-off.
+7. **Urgency HIGH is unreachable from the UI** (the create form maps a
+   binary switch to URGENT/NORMAL). The urgent-first sort ranks
+   URGENT, then HIGH, then the rest, so a HIGH row written through the
+   API still floats; only URGENT carries the red badge.
+8. **Banners survive the spawn redirect.** A ceremony on a request
+   that immediately redirects to its spawned ticket (price-and-start,
+   start-the-work) relays its Done banner to the ticket's slot through
+   the same session store — the person always reads what happened
+   where they actually land.

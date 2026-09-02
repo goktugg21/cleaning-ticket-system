@@ -13,10 +13,10 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p11-hours-and-the-rest` — stacked on
-`feat/p10-personal-schedule`, the head of the Addendum D redesign train
+**Branch:** `feat/p12-page-tells-you` — stacked on
+`feat/p11-hours-and-the-rest`, the head of the Addendum D redesign train
 (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -39,6 +39,67 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-12: the page tells you what to do (Addendum D §D.24, 2026-09-02)
+
+The guidance standard, written once (§D.24: purpose line, Start here,
+the road as tabs, the Done banner with move-and-highlight, teaching
+empty states, connections in words, buttons that say what they do) and
+applied in the owner's order. Shipped on `feat/p12-page-tells-you`:
+
+- **A — the standard + the pieces**: §D.24 into Addendum D FIRST;
+  `components/guide/` (StartHere, RoadTabs + TeachHead, DoneBanner over
+  a survive-one-reload store, TeachEmpty, ConnectionLine, the
+  `?highlight=` hook — pure halves vitest-pinned); §D.24.2's
+  one-company-at-a-time selector (session-shared across Invoices,
+  Contracts, Hours, Reports).
+- **B — Hours**: Start here (who has no hours yet, Enter hours
+  pre-selecting exactly them), the week card as the week's home
+  (stepper + Open→Closed road + teach + Close/Enter on the card),
+  Save week answers with WHO was saved (banner + ten-second tint),
+  "+ Add a line" offers the person's bookable buildings, every job
+  line says whose next invoice its hours feed
+  (`reports/week-assignments` carries customer + billing day).
+- **C — Contracts** (freeze holds): the road as tabs (Draft · Active ·
+  Ending ≤60d · Ended; cancelled behind the foot link), stats answers
+  the guidance facts (`test_p12_road`), the detail's progress road,
+  line → recurring-rule connection, Add line / Activate banners, the
+  project→line vocabulary sweep finished.
+- **D — Invoices**: the mockup built — the 4-step road (To invoice →
+  Drafts → Issued → Sent; the All tab was not a step and left), teach +
+  money line per step, Start here from the due row, Make a draft MOVES
+  you to Drafts with the new draft tinted and the banner naming the
+  next step, per-tab row shapes, the at-risk guard as the To-invoice
+  footer, the detail carries the same road and rule-7 confirms
+  (number-at-SEND said everywhere), `?company=` on the invoicing
+  reads. "Save hours to bill" answers with the customer's invoice day.
+- **E — Recurring**: road tabs Active · Paused · Ended (the stored
+  mechanism stays `archived_at`; the person's word is Pause/Resume —
+  one name per concept), Start here = this week's uncrewed visits
+  (stats `no_crew`), create lands ON the new rule with its banner
+  (create now answers the read shape), pause/resume/generate answer
+  with banners, dept/work-type ask-don't-force (empty select, the
+  server stores the seeded "Algemeen" pair — also on the extra-work
+  create page).
+- **F — Extra work**: urgent first in every tab with the red badge and
+  Start here naming the oldest; Price-and-send / Price-and-start /
+  Start-the-work answer with Done banners (relayed onto the spawned
+  ticket across the redirect); the billing sentences carry the
+  customer's invoice day.
+- **G — SLA**: the honest words — the thresholds are per KIND of wait
+  (not per priority; the brief's sentence would have lied), title
+  "SLA-waarschuwingen — wanneer ze afgaan".
+- **H**: hours print short ("5 h"); the completion-routing e2e seeds
+  its own evidence-free ticket.
+- **Not done, and why**: D7 (actual-hours on the legacy pricing-items
+  set) STOPPED under the zero-migrations law — the column deliberately
+  does not exist (Sprint 8B); it needs a migration and the owner's
+  sign-off, queued for P-13.
+
+Queued for P-13: Tickets and People to §D.24 (they pass §D.22);
+notification localization (needs the owner's yes on one migration);
+the Turkish locale; D7's `actual_hours` migration on
+`ExtraWorkPricingLineItem`.
 
 ### Done — P-11: Hours, and everything left (Addendum D §D.21.2 / §D.23, 2026-09-02)
 
