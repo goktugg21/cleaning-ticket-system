@@ -1341,7 +1341,8 @@ export function HoursWeekGrid({
                 </td>
               </tr>
             )}
-            {blocks.length === 0 && (
+            {blocks.length === 0 &&
+              (employees.length === 0 || weekClosed) && (
               <tr>
                 <td colSpan={dayKeys.length + 3} className="muted small">
                   {t("hours_week_grid.empty_block")}
@@ -1529,6 +1530,58 @@ export function HoursWeekGrid({
               </Fragment>
               );
             })}
+            {/* P-12 walk fix (§D.24 rule 2's promise kept) — a person
+                with NO rows still gets their band and the "+ Add a
+                line" door. With no buildings chosen in the setup
+                nothing is seeded, and on the crmtest walk Start here
+                preselected exactly the five people with no hours —
+                whom the grid then offered no way to type for. The
+                add-line's building choice is their own bookable list
+                (B1), so the door is real. */}
+            {!weekClosed &&
+              employees
+                .filter(
+                  (employee) =>
+                    !blocks.some((block) => block.employeeId === employee.id),
+                )
+                .map((employee) => (
+                  <Fragment key={`empty-${employee.id}`}>
+                    <tr
+                      className="hours-week-person"
+                      data-testid={`hours-week-person-${employee.id}`}
+                    >
+                      <td colSpan={dayKeys.length + 2}>{employee.name}</td>
+                      <td
+                        className="hours-week-group-total"
+                        data-testid={`hours-week-person-total-${employee.id}`}
+                      >
+                        {t("hours_week_grid.person_total", {
+                          hours: formatTotal(0, i18n.language),
+                        })}
+                      </td>
+                    </tr>
+                    <tr className="hours-week-add-row">
+                      <td colSpan={dayKeys.length + 3}>
+                        <AddLineControl
+                          employee={employee}
+                          buildings={buildings}
+                          bookableIds={
+                            personBuildingIds?.[employee.id] ??
+                            seedBuildingIds.filter(
+                              (id): id is number => id !== null,
+                            )
+                          }
+                          hourTypes={hourTypes}
+                          typeOptionLabel={typeOptionLabel}
+                          jobPicker={jobPicker}
+                          disabled={busy}
+                          t={t}
+                          onAdd={(choice) => addLine(employee, choice)}
+                        />
+                      </td>
+                    </tr>
+                  </Fragment>
+                ))}
 
           </tbody>
         </table>
