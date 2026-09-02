@@ -17,18 +17,14 @@
  * pairs ("1 skipped: Gökhan × B3 — no access"). "No building" is a
  * legitimate seat (hours not tied to a site) and is valid for everyone.
  *
- * **2. A job is linked PER ROW, optionally.** Under the person's name
- * on each row sits "+ link a job (optional)" (`RowJobPicker`): "This
- * week" lists that person's real planned jobs in THAT building for the
- * selected week; "No job — general hours" is the default; "Search other
- * work…" finds any open job in a building the person may enter — the
- * reference system's freedom, helping on an unassigned job is
- * enterable. A chosen job is a small removable tag on the row; an
- * untagged row saves as General, exactly as before.
- *
- * The top-level job picker and the "Add a row" bar of hours2 Part 3/4
- * are gone: the pairs ARE the rows, and the job is a property of a
- * row, not a third dimension multiplied into the grid.
+ * **2. A job is a LINE UNDER THE PERSON (P-11 B2).** The per-row
+ * "+ link a job (optional)" picker is gone; a job line is ADDED per
+ * person ("+ Add a line for Ahmet" — another hour type on the same
+ * job, another building, or a job, through the same `RowJobPicker`
+ * search). The person's own assignments that week still arrive as
+ * proposed job lines (`seedRowsByEmployee`); the grid renders them as
+ * children under the person's standard lines, tagged Ticket / Extra
+ * work.
  *
  * ## Terminal work
  *
@@ -121,6 +117,7 @@ export function WeekEntryDialog({
   hourTypes,
   companyId,
   initialWeek,
+  initialEmployeeIds,
   onClose,
   onSaved,
 }: {
@@ -130,13 +127,19 @@ export function WeekEntryDialog({
   hourTypes: HourType[];
   companyId?: number | null;
   initialWeek: IsoWeek;
+  /** P-11 B1 — the week card's per-person Edit opens the grid ON that
+   *  person: their id arrives pre-selected. Empty (the default) opens
+   *  the dialog as before, nobody chosen yet. */
+  initialEmployeeIds?: number[];
   onClose: () => void;
   /** The page refreshes its list and closes this. */
   onSaved: (changed: number) => void | Promise<void>;
 }) {
   const { t } = useTranslation("common");
 
-  const [employeeIds, setEmployeeIds] = useState<number[]>([]);
+  const [employeeIds, setEmployeeIds] = useState<number[]>(
+    initialEmployeeIds ?? [],
+  );
   const [buildingIds, setBuildingIds] = useState<number[]>([]);
   const [week, setWeek] = useState<IsoWeek>(initialWeek);
 
@@ -658,27 +661,10 @@ export function WeekEntryDialog({
                 {t("week_setup.week_closed_hint")}
               </p>
             )}
-            {/* The live row count: the pairs about to be rows, said
-                before they are — the one line on this screen that
-                claims to say what is about to happen. */}
-            <p
-              className="week-setup-summary"
-              data-testid="week-setup-summary"
-              role="status"
-              title={t("week_setup.summary_hint")}
-            >
-              {employeeIds.length === 0 || buildingIds.length === 0
-                ? t("week_setup.pairs_none")
-                : !assignmentsReady
-                  ? t("week_setup.pairs_pending")
-                  : /* P-7 S1.1 — no row count here: this line counted
-                       (person, building) pairs and the grid counts rows
-                       (a pair × hour type × job, reconciled with what is
-                       saved), so "4 rows" sat above a grid saying "6
-                       rows". The grid's count is the one count, and its
-                       caption says what a row is. */
-                    t("week_setup.pairs_checked")}
-            </p>
+            {/* P-11 B2 — "Building access checked — the rows are
+                below." is gone: the system talking to itself. The
+                eligibility check still runs (skipped pairs are still
+                named below); it just no longer announces success. */}
             {/* Task 1b — the quiet count line that names the pairs the
                 wall refused. Absent when nothing was skipped. */}
             {skippedPairs.length > 0 && (
@@ -729,7 +715,6 @@ export function WeekEntryDialog({
           seedBuildingIds={NO_SEED_BUILDINGS}
           seedRowsByEmployee={seedRowsByEmployee}
           sourceOptions={jobTitleOptions}
-          showSource
           jobPicker={jobPicker}
           /* P-8R C — the one count line explains itself ("2 people × 2
              buildings = 4 standard rows (+2 job rows)") once the wall

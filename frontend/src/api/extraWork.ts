@@ -494,6 +494,37 @@ export interface ActualHoursLineInput {
   actual_hours: string;
 }
 
+/** P-11 B3 — the job's timesheet: the TimeEntry job lines on this
+ *  request and its spawned tickets, per person, per day, per hour
+ *  type. Read by the Money tab's "Hours worked, to bill" panel to
+ *  pre-fill the billable hours from what the crew already reported.
+ *  Provider-only server-side. */
+export interface ExtraWorkTimesheetEntry {
+  employee: number;
+  employee_name: string;
+  date: string;
+  hours: string;
+  hour_type: number;
+  hour_type_name: string;
+  hour_type_multiplier: string;
+  source_type: string;
+  source_id: number | null;
+}
+
+export interface ExtraWorkTimesheetHours {
+  entries: ExtraWorkTimesheetEntry[];
+  total_hours: string;
+}
+
+export async function getExtraWorkTimesheetHours(
+  id: number,
+): Promise<ExtraWorkTimesheetHours> {
+  const response = await api.get<ExtraWorkTimesheetHours>(
+    `/extra-work/${id}/timesheet-hours/`,
+  );
+  return response.data;
+}
+
 export async function submitActualHours(
   id: number | string,
   lines: ActualHoursLineInput[],

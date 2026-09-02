@@ -881,7 +881,6 @@ export function MyHoursPage() {
                week already holds, and those can be tagged to a job by
                the admin wizard, so the column belongs here too. */
             sourceOptions={sourceOptions}
-            showSource
             /* W12 §2 / §3 — both off for a worker: the head restated
                the week and explained mechanics, and "fill this weekday
                on every row" is an admin verb that needed a paragraph of

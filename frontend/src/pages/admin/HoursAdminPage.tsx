@@ -51,7 +51,7 @@ import {
 } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { WeekEntryDialog } from "../../components/timesheets/WeekEntryDialog";
-import { WeekHoursStrip } from "../../components/timesheets/WeekHoursStrip";
+import { OverflowMenu } from "../../components/OverflowMenu";
 import { formatHours, lastSavedWeekBefore } from "../../lib/weeksWithHours";
 import { jobTitleFirst } from "../../components/timesheets/jobTitle";
 import { hourTypeLabel, hourTypeLabelFrom } from "../../lib/hourTypeLabel";
@@ -291,6 +291,21 @@ export function HoursAdminPage() {
    *  the week the table opens on. Its own state rather than derived
    *  from `date_from`: a lock is a fact about a WEEK, and a hand-typed
    *  range of three months has no lock state to show. */
+  /** P-11 B3 — a deep link may ask the grid to OPEN on people
+   *  ("?enter=3,9" — the ticket page's Enter-hours door lands the
+   *  office user on the grid at the job's week with the crew
+   *  preselected). Consumed on close, so Back does not reopen it;
+   *  never copied into state (derived each render). */
+  const enterIds = useMemo(() => {
+    const raw = searchParams.get("enter");
+    if (!raw) return [] as number[];
+    return raw
+      .split(",")
+      .map((part) => Number(part))
+      .filter((value) => Number.isInteger(value) && value > 0);
+  }, [searchParams]);
+  const [enterConsumed, setEnterConsumed] = useState(false);
+
   const [week, setWeekState] = useState<IsoWeek>(initialWeek);
   const setWeek = useCallback(
     (next: IsoWeek) => {
@@ -342,6 +357,8 @@ export function HoursAdminPage() {
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
 
   const [weekModalOpen, setWeekModalOpen] = useState(false);
+  /** P-11 B1 — who the grid opens on (the week card's Edit). */
+  const [weekModalPreselect, setWeekModalPreselect] = useState<number[]>([]);
 
   // The inline table editor. `drafts` holds ONLY the rows the operator
   // has touched, so "what changed" is the map itself and no diffing of
@@ -560,6 +577,136 @@ export function HoursAdminPage() {
   /** True while the table shows exactly the week on the bar and nothing
    *  narrower — the state in which "no hours saved for week N" is the
    *  truth rather than "no hours match these filters". */
+  /** Sprint 178 §4a — the sources the source column may be corrected to.
+   *
+   *  The SAME endpoint the week-setup picker uses, so the two paths
+   *  cannot disagree about what a valid source is. Non-fatal: an
+   *  unreachable picker must not stop somebody fixing a row's hours. */
+  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    listHourSources()
+      .then((options) => {
+        if (!cancelled) setSourceOptions(options);
+      })
+      .catch(() => {
+        /* non-fatal: the rest of the row is still editable */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** P-11 B1 — the week card's own read: EVERY entry of the week on
+   *  the bar (exhaustive pages, the Sprint 120 pattern), whatever the
+   *  filters narrow the table below to. Keyed on `entries` like the
+   *  weeks read, so a save or a delete refreshes it. Non-fatal. */
+  const [weekCardEntries, setWeekCardEntries] = useState<TimeEntry[]>([]);
+  useEffect(() => {
+    if (tab !== "worked" || companyPending) return;
+    let cancelled = false;
+    (async () => {
+      const all: TimeEntry[] = [];
+      let cardPage = 1;
+      for (;;) {
+        const response = await listTimeEntries({
+          company,
+          iso_year: week.isoYear,
+          iso_week: week.isoWeek,
+          page: cardPage,
+          page_size: 200,
+        });
+        all.push(...response.results);
+        if (!response.next || cardPage >= 10) break;
+        cardPage += 1;
+      }
+      if (!cancelled) setWeekCardEntries(all);
+    })().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, companyPending, company, week, entries]);
+
+  /** The card's rows: one per person with hours this week, standard
+   *  hours and job hours apart, the job refs named. */
+  const weekPeople = useMemo(() => {
+    const byEmployee = new Map<
+      number,
+      {
+        id: number;
+        name: string;
+        buildings: Set<string>;
+        standard: number;
+        jobs: number;
+        jobRefs: Map<string, { label: string; hours: number }>;
+      }
+    >();
+    for (const entry of weekCardEntries) {
+      const bucket = byEmployee.get(entry.employee) ?? {
+        id: entry.employee,
+        name: entry.employee_name,
+        buildings: new Set<string>(),
+        standard: 0,
+        jobs: 0,
+        jobRefs: new Map<string, { label: string; hours: number }>(),
+      };
+      if (entry.building_name) bucket.buildings.add(entry.building_name);
+      const entryHours = Number(entry.hours) || 0;
+      if (
+        entry.source_type === "TICKET" ||
+        entry.source_type === "EXTRA_WORK"
+      ) {
+        bucket.jobs += entryHours;
+        const refKey = `${entry.source_type}:${entry.source_id ?? ""}`;
+        const label = jobTitleFirst(
+          hourSourceLabel(
+            entry.source_type,
+            entry.source_id ?? null,
+            sourceOptions,
+            t,
+            t("hours_week_grid.no_source"),
+          ),
+        );
+        const ref = bucket.jobRefs.get(refKey) ?? { label, hours: 0 };
+        ref.hours += entryHours;
+        bucket.jobRefs.set(refKey, ref);
+      } else {
+        bucket.standard += entryHours;
+      }
+      byEmployee.set(entry.employee, bucket);
+    }
+    return [...byEmployee.values()].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [weekCardEntries, sourceOptions, t]);
+  const weekCardTotal = weekPeople.reduce(
+    (sum, person) => sum + person.standard + person.jobs,
+    0,
+  );
+
+  /** P-11 B1 — the "Earlier weeks" table: every week of the year with
+   *  hours except the one on the bar, newest first. */
+  const earlierWeeks = useMemo(
+    () =>
+      [...weeksWithHours]
+        .filter(
+          (row) =>
+            !(row.iso_year === week.isoYear && row.iso_week === week.isoWeek),
+        )
+        .sort(
+          (a, b) => b.iso_year - a.iso_year || b.iso_week - a.iso_week,
+        ),
+    [weeksWithHours, week],
+  );
+  const weekRangeLabel = useCallback(
+    (isoYear: number, isoWeek: number) => {
+      const days = isoWeekDays({ isoYear, isoWeek });
+      const opts = { day: "numeric", month: "short" } as const;
+      return `${days[0].toLocaleDateString(dateLocale, opts)} \u2013 ${days[6].toLocaleDateString(dateLocale, opts)}`;
+    },
+    [dateLocale],
+  );
+
   const weekOnly = useMemo(() => {
     const base = weekFilters(week);
     return (Object.keys(base) as (keyof EntryFilterState)[]).every(
@@ -668,26 +815,6 @@ export function HoursAdminPage() {
    *  saved values otherwise. Read at the point of USE rather than
    *  seeded into state on entering edit mode — a draft per row for a
    *  page nobody edited is state that can go stale against a refresh. */
-  /** Sprint 178 §4a — the sources the source column may be corrected to.
-   *
-   *  The SAME endpoint the week-setup picker uses, so the two paths
-   *  cannot disagree about what a valid source is. Non-fatal: an
-   *  unreachable picker must not stop somebody fixing a row's hours. */
-  const [sourceOptions, setSourceOptions] = useState<HourSourceOption[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    listHourSources()
-      .then((options) => {
-        if (!cancelled) setSourceOptions(options);
-      })
-      .catch(() => {
-        /* non-fatal: the rest of the row is still editable */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const draftFor = (entry: TimeEntry): EntryDraft =>
     drafts[entry.id] ?? draftOf(entry);
 
@@ -903,7 +1030,10 @@ export function HoursAdminPage() {
               type="button"
               className="btn btn-primary btn-sm"
               data-testid="hours-enter-week-button"
-              onClick={() => setWeekModalOpen(true)}
+              onClick={() => {
+                setWeekModalPreselect([]);
+                setWeekModalOpen(true);
+              }}
               disabled={loading || activeHourTypes.length === 0}
             >
               {t("hours_admin.enter_week_button")}
@@ -1090,18 +1220,227 @@ export function HoursAdminPage() {
                 </button>
               )}
             </div>
-            {/* P-9 D3 — WHICH WEEKS HOLD HOURS, at a glance: one cell per
-                week of the year, filled where hours are saved, outlined
-                on the week shown; the hours in the title. A click moves
-                the table there. */}
-            <WeekHoursStrip
-              year={week.isoYear}
-              week={week}
-              weeks={weeksWithHours}
-              onPick={goToWeek}
-              testIdPrefix="hours-week"
-            />
           </div>
+
+          {/* P-11 B1 — the week card: {n} h across {m} people, one row
+              per person with the standard hours and the job hours
+              apart, the job refs named; Edit opens the grid on that
+              person. Built from its own exhaustive read of the week,
+              so the numbers describe the WEEK, not the filtered page
+              of rows below. */}
+          {weekPeople.length > 0 && (
+            <div
+              className="card"
+              data-testid="hours-week-card"
+              style={{ marginBottom: 16, padding: "14px 16px" }}
+            >
+              <div
+                className="section-head-title"
+                data-testid="hours-week-card-total"
+              >
+                {t("hours_week_grid.grand_total", {
+                  hours: weekCardTotal.toLocaleString(dateLocale, {
+                    maximumFractionDigits: 2,
+                  }),
+                  count: weekPeople.length,
+                })}
+              </div>
+              <p className="muted small" style={{ margin: "2px 0 10px" }}>
+                {t("hours_admin.week_card_sub")}
+              </p>
+              <div className="table-wrap">
+                <table className="data-table data-table-dense">
+                  <thead>
+                    <tr>
+                      <th>{t("hours_admin.week_card_person")}</th>
+                      <th style={{ textAlign: "right" }}>
+                        {t("hours_admin.week_card_standard")}
+                      </th>
+                      <th>{t("hours_admin.week_card_jobs")}</th>
+                      <th style={{ textAlign: "right" }}>
+                        {t("hours_week_grid.week")}
+                      </th>
+                      <th aria-hidden="true" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {weekPeople.map((person) => (
+                      <tr
+                        key={person.id}
+                        data-testid={`hours-week-card-row-${person.id}`}
+                      >
+                        <td className="td-subject">
+                          {person.name}
+                          {person.buildings.size > 0 && (
+                            <span className="hours-week-line-sub">
+                              {[...person.buildings].join(", ")}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {t("hours_week_grid.person_total", {
+                            hours: person.standard.toLocaleString(dateLocale, {
+                              maximumFractionDigits: 2,
+                            }),
+                          })}
+                        </td>
+                        <td data-testid={`hours-week-card-jobs-${person.id}`}>
+                          {person.jobRefs.size === 0 ? (
+                            <span className="muted">{"\u2014"}</span>
+                          ) : (
+                            <>
+                              {t("hours_week_grid.person_total", {
+                                hours: person.jobs.toLocaleString(dateLocale, {
+                                  maximumFractionDigits: 2,
+                                }),
+                              })}
+                              <span className="hours-week-line-sub">
+                                {[...person.jobRefs.values()]
+                                  .map(
+                                    (ref) =>
+                                      `${ref.label} (${ref.hours.toLocaleString(
+                                        dateLocale,
+                                        { maximumFractionDigits: 2 },
+                                      )} ${t("hours_admin.hour_unit")})`,
+                                  )
+                                  .join(" \u00b7 ")}
+                              </span>
+                            </>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>
+                          {t("hours_week_grid.person_total", {
+                            hours: (
+                              person.standard + person.jobs
+                            ).toLocaleString(dateLocale, {
+                              maximumFractionDigits: 2,
+                            }),
+                          })}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              setWeekModalPreselect([person.id]);
+                              setWeekModalOpen(true);
+                            }}
+                            disabled={loading || activeHourTypes.length === 0}
+                            data-testid={`hours-week-card-edit-${person.id}`}
+                          >
+                            {t("hours_admin.week_card_edit")}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* P-11 B1 — Earlier weeks: the year's weeks that hold
+              hours, each with its people, its hours and its lock
+              state; Open moves the bar there. Replaces the P-9 dot
+              strip on this page — the same facts, readable. */}
+          {earlierWeeks.length > 0 && (
+            <div
+              className="card"
+              data-testid="hours-earlier-weeks"
+              style={{ marginBottom: 16, padding: "14px 16px" }}
+            >
+              <div className="section-head-title">
+                {t("hours_admin.earlier_weeks_title")}
+              </div>
+              <p className="muted small" style={{ margin: "2px 0 10px" }}>
+                {t("hours_admin.earlier_weeks_sub")}
+              </p>
+              <div className="table-wrap">
+                <table className="data-table data-table-dense">
+                  <thead>
+                    <tr>
+                      <th>{t("hours_admin.earlier_weeks_week")}</th>
+                      <th style={{ textAlign: "right" }}>
+                        {t("hours_admin.earlier_weeks_people")}
+                      </th>
+                      <th style={{ textAlign: "right" }}>
+                        {t("hours_admin.earlier_weeks_hours")}
+                      </th>
+                      <th>{t("hours_admin.earlier_weeks_status")}</th>
+                      <th aria-hidden="true" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {earlierWeeks.map((row) => (
+                      <tr
+                        key={`${row.iso_year}-${row.iso_week}`}
+                        data-testid={`hours-earlier-week-${row.iso_year}-${row.iso_week}`}
+                      >
+                        <td className="td-subject">
+                          {t("hours_admin.earlier_weeks_label", {
+                            week: row.iso_week,
+                          })}
+                          <span className="hours-week-line-sub">
+                            {weekRangeLabel(row.iso_year, row.iso_week)}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "right" }}>{row.people}</td>
+                        <td style={{ textAlign: "right" }}>
+                          {t("hours_week_grid.person_total", {
+                            hours: formatHours(row.hours, dateLocale),
+                          })}
+                        </td>
+                        <td>
+                          <span
+                            className={
+                              row.is_closed
+                                ? "badge badge-closed"
+                                : "badge badge-approved"
+                            }
+                          >
+                            {row.is_closed
+                              ? t("weeks.status_closed")
+                              : t("weeks.status_open")}
+                          </span>
+                          {row.is_closed && row.closed_by_name && (
+                            <span
+                              className="muted small"
+                              style={{ marginLeft: 8 }}
+                            >
+                              {t("weeks.closed_by", {
+                                name: row.closed_by_name,
+                                when: row.closed_at
+                                  ? new Date(row.closed_at).toLocaleDateString(
+                                      dateLocale,
+                                      { day: "2-digit", month: "short" },
+                                    )
+                                  : "",
+                              })}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() =>
+                              goToWeek({
+                                isoYear: row.iso_year,
+                                isoWeek: row.iso_week,
+                              })
+                            }
+                            data-testid={`hours-earlier-week-open-${row.iso_year}-${row.iso_week}`}
+                          >
+                            {t("hours_admin.earlier_weeks_open")}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* W-HR1 §2 — the filter row WRAPS instead of clipping.
 
@@ -1215,17 +1554,9 @@ export function HoursAdminPage() {
             )}
 
             <div className="filter-actions">
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                data-testid="hours-filters-period-toggle"
-                aria-expanded={periodOpen}
-                onClick={() => setPeriodToggle((v) => !v)}
-              >
-                {periodOpen
-                  ? t("hours_admin.period_toggle_close")
-                  : t("hours_admin.period_toggle_open")}
-              </button>
+              {/* P-11 B1 — the period toggle moved into the More menu
+                  beside Export CSV; the date inputs still unfold here
+                  when it is on. */}
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -1353,20 +1684,38 @@ export function HoursAdminPage() {
                     </>
                   ) : (
                     <>
-                      {/* Export describes exactly the rows below it, so
-                          it sits with them. It used to head the tile
-                          strip that is now this table's footer. */}
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        data-testid="hours-export-csv"
-                        onClick={() => void handleExport()}
-                        disabled={exportBusy || loading}
-                      >
-                        {exportBusy
-                          ? t("hours_admin.export_busy")
-                          : t("hours_admin.export_csv")}
-                      </button>
+                      {/* P-11 B1 — Export CSV and the "Other period"
+                          fold live behind ONE More menu: two quiet
+                          verbs, one door. */}
+                      <OverflowMenu
+                        label={t("hours_admin.more_menu")}
+                        testIdPrefix="hours-more"
+                        items={[
+                          {
+                            key: "export",
+                            label: exportBusy
+                              ? t("hours_admin.export_busy")
+                              : t("hours_admin.export_csv"),
+                            onClick: () => void handleExport(),
+                            disabled: exportBusy || loading,
+                          },
+                          {
+                            key: "period",
+                            label: periodOpen
+                              ? t("hours_admin.period_toggle_close")
+                              : t("hours_admin.period_toggle_open"),
+                            onClick: () => {
+                              if (periodOpen) {
+                                setPeriodToggle(false);
+                                setFilters(weekFilters(week));
+                              } else {
+                                setPeriodToggle(true);
+                              }
+                            },
+                            pressed: periodOpen,
+                          },
+                        ]}
+                      />
                       {exportError && (
                         <span
                           className="alert-error"
@@ -1912,7 +2261,12 @@ export function HoursAdminPage() {
       {/* Conditionally mounted overlay, like every other editing modal
           here. `ConfirmDialog` below stays native and ref-driven; the
           two are deliberately different things (CLAUDE.md §3). */}
-      {weekModalOpen && (
+      {(weekModalOpen ||
+        (tab === "worked" &&
+          !enterConsumed &&
+          enterIds.length > 0 &&
+          !loading &&
+          activeHourTypes.length > 0)) && (
         <WeekEntryDialog
           employees={employees}
           buildings={buildings}
@@ -1922,8 +2276,15 @@ export function HoursAdminPage() {
              operator who paged back to week 33 to enter a missing day
              means week 33. */
           initialWeek={week}
-          onClose={() => setWeekModalOpen(false)}
+          initialEmployeeIds={
+            weekModalOpen ? weekModalPreselect : enterIds
+          }
+          onClose={() => {
+            setEnterConsumed(true);
+            setWeekModalOpen(false);
+          }}
           onSaved={async (changed) => {
+            setEnterConsumed(true);
             setWeekModalOpen(false);
             await refreshEntries();
             pushToast({

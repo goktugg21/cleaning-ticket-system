@@ -66,7 +66,7 @@
  * lands in the wrong day, sometimes the wrong week.
  */
 import { Fragment, useMemo, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import type { HourSourceOption } from "../../api/reports";
@@ -78,6 +78,7 @@ import { isoWeekDays, toDateString } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 import { RowJobPicker } from "./RowJobPicker";
 import type { RowJobSource } from "./RowJobPicker";
+import { acceptsHoursInput, isFillTarget, parseHours } from "./gridRules";
 import { jobTitleFirst } from "./jobTitle";
 
 /** One person the grid writes for. */
@@ -137,11 +138,15 @@ export interface GridJobPicker {
   onOpenChange?: (listBottom: number | null) => void;
 }
 
-/** The untagged pair row, in the grid's own vocabulary. */
-const UNTAGGED: RowJobSource = { source_type: "", source_id: null };
-
-function pairKey(employeeId: number, seat: number | "") {
-  return `${employeeId}:${seat === "" ? "none" : seat}`;
+/** P-11 B2 — one seeded line's identity, the key `seedTypeChoice`
+ *  remembers the chosen hour type under. */
+function seedSeatKey(
+  employeeId: number,
+  seat: number | "",
+  sourceType: string,
+  sourceId: number | null,
+) {
+  return `${employeeId}:${seat === "" ? "none" : seat}:${sourceType}:${sourceId ?? ""}`;
 }
 
 /**
@@ -230,78 +235,13 @@ function rowId(employeeId: number, key: string) {
   return `${employeeId}|${key}`;
 }
 
-/** W-HOURS4 Task 1c — is there an untagged pair seed for this
- *  (person, building)? Only such a pair carries the picker. */
-function pairSeedExists(
-  seedRowsByEmployee: Record<number, GridSeedRow[]>,
-  employeeId: number,
-  seat: number | "",
-): boolean {
-  return (seedRowsByEmployee[employeeId] ?? []).some(
-    (seed) => (seed.building ?? "") === seat && seed.source_type === "",
-  );
-}
-
-/** Is this block the person's OWN pair row at that building — the
- *  seeded (person, building) row, carrying whatever job the operator
- *  linked on it? Such a block keeps its picker and stays a standard
- *  row; a job-linked block that is not the pair is a child (P-8R C).
- *  Module-level and pure, so the `blocks` memo can call it with the
- *  two records it already depends on. */
-function isPairBlock(
-  pairTags: Record<string, RowJobSource>,
-  seedRowsByEmployee: Record<number, GridSeedRow[]>,
-  block: {
-    employeeId: number;
-    buildingId: number | "";
-    sourceType: string;
-    sourceId: number | null;
-  },
-): boolean {
-  const seat = block.buildingId;
-  const current = pairTags[pairKey(block.employeeId, seat)] ?? UNTAGGED;
-  return (
-    pairSeedExists(seedRowsByEmployee, block.employeeId, seat) &&
-    block.sourceType === current.source_type &&
-    (block.sourceId ?? null) === current.source_id
-  );
-}
-
 function cellKey(rowIdValue: string, day: string) {
   return `${rowIdValue}|${day}`;
 }
 
-/**
- * W12 §4 — is this something a person could have typed while typing a
- * NUMBER OF HOURS?
- *
- * The cells are `type="text"` because `type="number"` refuses a comma
- * on a Dutch keyboard and silently reports an empty string for
- * anything it dislikes, which loses a half-typed value. The price of
- * that choice was that the box accepted anything at all: the owner's
- * screenshot has the letter "g" sitting in an hours cell, saved-looking
- * and counted as zero by `parseHours` below.
- *
- * So the field rejects the KEYSTROKE instead. Rejecting means the state
- * is not updated, so the character never appears — no error message to
- * read, no value to go back and correct. Two integer digits (a day has
- * 24 hours), one separator of either kind, two decimals.
- */
-const HOURS_INPUT = /^\d{0,2}([.,]\d{0,2})?$/;
-
-function acceptsHoursInput(raw: string): boolean {
-  return HOURS_INPUT.test(raw);
-}
-
-function parseHours(raw: string): number {
-  // Accept both "7,5" and "7.5": the Dutch keyboard produces a comma and
-  // an operator typing their own decimal separator is not making a
-  // mistake.
-  const cleaned = raw.trim().replace(",", ".");
-  if (cleaned === "") return 0;
-  const value = Number(cleaned);
-  return Number.isFinite(value) && value > 0 ? value : 0;
-}
+// W12 §4 / P-11 B2 — the keystroke rule, the parse rule and the fill
+// predicate are PURE and live in `gridRules.ts`, where vitest pins
+// them.
 
 function formatTotal(value: number, locale: string): string {
   return new Intl.NumberFormat(locale, {
@@ -321,7 +261,6 @@ export function HoursWeekGrid({
   seedSources = [],
   seedRowsByEmployee = NO_SEED_ROWS,
   sourceOptions = NO_SOURCE_OPTIONS,
-  showSource = false,
   showHead = true,
   showApplyRow = true,
   quietDays = NO_QUIET_DAYS,
@@ -377,13 +316,6 @@ export function HoursWeekGrid({
    *  back to the backend's own shape for an id that no longer resolves,
    *  "Ticket #41". */
   sourceOptions?: HourSourceOption[];
-  /** Sprint 179B §2 — whether these rows can belong to a job at all.
-   *
-   *  Time entries can; contract hours cannot (a contract-hours row is a
-   *  weekly pattern with a work type, and has no source column), so the
-   *  bulk dialog leaves this off rather than render a column that is
-   *  "—" on every row for a concept that does not apply to it. */
-  showSource?: boolean;
   /** W12 §2 — whether the grid prints its own title, row count and
    *  hints above the table.
    *
@@ -473,13 +405,15 @@ export function HoursWeekGrid({
    *  display echo and never a second source of truth for the hours. */
   const [applyRow, setApplyRow] = useState<Record<string, string>>({});
 
-  /** W-HOURS4 Task 1c — the job linked to each seeded (person,
-   *  building) pair, keyed by `pairKey`. Absent = general hours. The
-   *  seed the caller hands over is always untagged; this is where the
-   *  operator's choice on the row is kept, and `rows` below applies it
-   *  when it derives the pair's row — so a retag is a different row
-   *  key, and `setPairTag` moves the typed cells along with it. */
-  const [pairTags, setPairTags] = useState<Record<string, RowJobSource>>({});
+  /** P-11 B2 — the hour type a SEEDED row currently shows, keyed by
+   *  the seed's identity (`seedSeatKey`). The type is a select ON the
+   *  line now; a seeded row is re-derived every render, so the choice
+   *  must live beside the seeds or the change would evaporate. Absent
+   *  = the default type. `setRowType` moves any typed cells along with
+   *  the change, exactly as the old job retag did. */
+  const [seedTypeChoice, setSeedTypeChoice] = useState<Record<string, number>>(
+    {},
+  );
 
   // The hour type a SEEDED row opens on: the first active type, which
   // for every company that has run the standard set is "Normale uren".
@@ -497,10 +431,25 @@ export function HoursWeekGrid({
    * — and so no effect has to sync props into state (CLAUDE.md §3).
    */
   const rows: GridRow[] = useMemo(() => {
-    // Sprint 162 §1c — a block opens with ONE default hour-type row and
-    // the operator reaches any other through `+ Add type`. The setup's
-    // hour-type choice is gone, so there is nothing else to seed from.
-    const seedTypes = defaultHourType ? [defaultHourType] : [];
+    // Sprint 162 §1c — a seeded line opens on ONE hour type. P-11 B2 —
+    // the type is a SELECT on the line now, so the seed reads the
+    // operator's choice (`seedTypeChoice`) and falls back to the
+    // default; a second type on the same line's job or building is a
+    // second line, added per person.
+    const seededType = (
+      employeeId: number,
+      seat: number | "",
+      sourceType: string,
+      sourceId: number | null,
+    ): HourType | undefined => {
+      const chosen =
+        seedTypeChoice[seedSeatKey(employeeId, seat, sourceType, sourceId)];
+      return (
+        (chosen !== undefined
+          ? hourTypes.find((hourType) => hourType.id === chosen)
+          : undefined) ?? defaultHourType
+      );
+    };
 
     const out: GridRow[] = [];
     for (const employee of employees) {
@@ -568,58 +517,24 @@ export function HoursWeekGrid({
       // of it.
       for (const buildingId of seedBuildingIds) {
         const seat = buildingId ?? "";
-        for (const hourType of seedTypes) {
-          // Sprint 177 §7 — one seeded row per JOB the setup named, and
-          // one untagged row when it named none. An operator who picked
-          // two jobs gets a line for each, so the hours land already
-          // attributed instead of needing a source typed afterwards.
-          const seats: { type: string; id: number | null }[] =
-            seedSources.length > 0
-              ? seedSources.map((source) => ({
-                  type: source.source_type,
-                  id: source.source_id,
-                }))
-              : [{ type: "", id: null }];
-          for (const source of seats) {
-            if (source.type === "" && savedPairs.has(`${hourType.id}|${seat}`)) {
-              continue;
-            }
-            const key = rowKey(hourType.id, seat, source.type, source.id);
-            put({
-              id: rowId(employee.id, key),
-              employeeId: employee.id,
-              employeeName: employee.name,
-              key,
-              hourTypeId: hourType.id,
-              buildingId: seat,
-              sourceType: source.type,
-              sourceId: source.id,
-              cells: {},
-              added: true,
-            });
-          }
-        }
-      }
-
-      // hours2 Part 3 — this person's own proposals, one row per
-      // (building, job) on the default hour type. `put()` keeps the
-      // saved row when one exists for the same key.
-      for (const seed of seedRowsByEmployee[employee.id] ?? []) {
-        const seat = seed.building ?? "";
-        // W-HOURS4 Task 1c — an untagged pair seed takes the job the
-        // operator linked on the row, if any. A seed the caller tagged
-        // itself is left exactly as handed over.
-        const linked =
-          seed.source_type === ""
-            ? pairTags[pairKey(employee.id, seat)]
-            : undefined;
-        const sourceType = linked ? linked.source_type : seed.source_type;
-        const sourceId = linked ? linked.source_id : seed.source_id;
-        for (const hourType of seedTypes) {
-          if (sourceType === "" && savedPairs.has(`${hourType.id}|${seat}`)) {
+        // Sprint 177 §7 — one seeded row per JOB the setup named, and
+        // one untagged row when it named none. An operator who picked
+        // two jobs gets a line for each, so the hours land already
+        // attributed instead of needing a source typed afterwards.
+        const seats: { type: string; id: number | null }[] =
+          seedSources.length > 0
+            ? seedSources.map((source) => ({
+                type: source.source_type,
+                id: source.source_id,
+              }))
+            : [{ type: "", id: null }];
+        for (const source of seats) {
+          const hourType = seededType(employee.id, seat, source.type, source.id);
+          if (!hourType) continue;
+          if (source.type === "" && savedPairs.has(`${hourType.id}|${seat}`)) {
             continue;
           }
-          const key = rowKey(hourType.id, seat, sourceType, sourceId);
+          const key = rowKey(hourType.id, seat, source.type, source.id);
           put({
             id: rowId(employee.id, key),
             employeeId: employee.id,
@@ -627,12 +542,39 @@ export function HoursWeekGrid({
             key,
             hourTypeId: hourType.id,
             buildingId: seat,
-            sourceType,
-            sourceId,
+            sourceType: source.type,
+            sourceId: source.id,
             cells: {},
             added: true,
           });
         }
+      }
+
+      // hours2 Part 3 — this person's own proposals, one row per
+      // (building, job). `put()` keeps the saved row when one exists
+      // for the same key.
+      for (const seed of seedRowsByEmployee[employee.id] ?? []) {
+        const seat = seed.building ?? "";
+        const sourceType = seed.source_type;
+        const sourceId = seed.source_id;
+        const hourType = seededType(employee.id, seat, sourceType, sourceId);
+        if (!hourType) continue;
+        if (sourceType === "" && savedPairs.has(`${hourType.id}|${seat}`)) {
+          continue;
+        }
+        const key = rowKey(hourType.id, seat, sourceType, sourceId);
+        put({
+          id: rowId(employee.id, key),
+          employeeId: employee.id,
+          employeeName: employee.name,
+          key,
+          hourTypeId: hourType.id,
+          buildingId: seat,
+          sourceType,
+          sourceId,
+          cells: {},
+          added: true,
+        });
       }
 
       for (const extra of extraRows[employee.id] ?? []) put(extra);
@@ -646,10 +588,8 @@ export function HoursWeekGrid({
     seedBuildingIds,
     seedSources,
     seedRowsByEmployee,
-    pairTags,
-    // `hourTypes` is no longer read here: the seed is `defaultHourType`,
-    // which is derived from it and is its own dependency. It went with
-    // the wizard's hour-type step (§1c).
+    seedTypeChoice,
+    hourTypes,
     defaultHourType,
   ]);
 
@@ -671,6 +611,49 @@ export function HoursWeekGrid({
     dayKeys.reduce((sum, key) => sum + parseHours(cellValue(row, key)), 0);
 
   const grandTotal = rows.reduce((sum, row) => sum + rowTotal(row), 0);
+
+  // P-11 B2 — the footer's count ("4 standard lines empty — not
+  // saved.") and the fill row's own ("it lands on the 4 standard
+  // lines below"). A standard line is a seeded or saved line with no
+  // job on it — exactly the set the fill writes.
+  const standardLineCount = rows.filter(isFillTarget).length;
+  const emptyStandardCount = rows.filter(
+    (row) => isFillTarget(row) && rowTotal(row) === 0,
+  ).length;
+
+  const personTotal = (employeeId: number) =>
+    rows.reduce(
+      (sum, row) => (row.employeeId === employeeId ? sum + rowTotal(row) : sum),
+      0,
+    );
+
+  /** The type option's words: the catalogue name, with the multiplier
+   *  shown when it weighs anything ("Weekend uren ×1.5"). The
+   *  multiplier weighs the person's hours for the reports; it prices
+   *  nothing — the one sentence about that is on the dialog. */
+  const typeOptionLabel = (hourType: HourType) => {
+    const multiplier = Number(hourType.multiplier);
+    if (!Number.isFinite(multiplier) || multiplier === 1) return hourType.name;
+    return `${hourType.name} ×${String(Number(multiplier.toFixed(2)))}`;
+  };
+
+  /** P-11 B2 — a timesheet is typed, not clicked: Enter moves DOWN the
+   *  column (Tab already moves along the row). The next row in render
+   *  order; the fill row hands off to the first data row. */
+  function focusCellBelow(fromRowId: string | null, dayKey: string) {
+    const ordered = blocks.flatMap((block) => block.rows);
+    const index =
+      fromRowId === null
+        ? -1
+        : ordered.findIndex((row) => row.id === fromRowId);
+    const next = ordered[index + 1];
+    if (!next) return;
+    const el = document.querySelector<HTMLInputElement>(
+      `[data-testid="hours-week-cell-${CSS.escape(next.id)}-${dayKey}"]`,
+    );
+    el?.focus();
+    el?.select();
+  }
 
   const hourTypeName = (id: number | "") =>
     hourTypes.find((h) => h.id === id)?.name ??
@@ -694,11 +677,6 @@ export function HoursWeekGrid({
       t("hours_week_grid.no_source"),
     );
 
-  /** W-HOURS4 Task 1c — the Job column exists only where the job is
-   *  NOT already said on the row. With a picker, the tag under the
-   *  name is the one place. */
-  const jobColumn = showSource && !jobPicker;
-
   /**
    * Sprint 162 §1 — the grid as BLOCKS, one per (worker, building).
    *
@@ -712,7 +690,11 @@ export function HoursWeekGrid({
    * Derived from `rows`, so nothing here is a second copy of the grid's
    * data; the blocks are a grouping of it.
    */
-  const blocks = useMemo(() => {
+  // Plain derivation, deliberately not `useMemo`: the React-compiler
+  // lint (`preserve-manual-memoization`) cannot keep a manual memo
+  // over this shape (the ExtraWorkListPage precedent), and grouping a
+  // few hundred rows costs nothing per render.
+  const blocks = (() => {
     const byBlock = new Map<string, GridBlock>();
     for (const row of rows) {
       // Sprint 179B §2 — the JOB is part of the block, not just of the
@@ -756,14 +738,13 @@ export function HoursWeekGrid({
     // children to the end of their person; the third key keeps the
     // original order inside each half.
     const order = new Map(employees.map((employee, index) => [employee.id, index]));
+    // P-11 B2 — EVERY job-linked block is a child now: the mockup's
+    // shape is standard lines first, job lines indented under them
+    // with a tag. The per-row job picker went with the pair concept —
+    // a job line is ADDED per person, never linked onto a standard row.
     return [...byBlock.values()]
       .map((block, index) => ({
-        block: {
-          ...block,
-          child:
-            block.sourceType !== "" &&
-            !isPairBlock(pairTags, seedRowsByEmployee, block),
-        },
+        block: { ...block, child: block.sourceType !== "" },
         index,
       }))
       .sort(
@@ -774,7 +755,7 @@ export function HoursWeekGrid({
           a.index - b.index,
       )
       .map(({ block }) => block);
-  }, [rows, employees, pairTags, seedRowsByEmployee]);
+  })();
 
   /** P-8R C — the two halves of the one count line. A block, not a
    *  row: "+ Add type" adds a LINE to a block and must not turn
@@ -838,11 +819,9 @@ export function HoursWeekGrid({
     setEdits((current) => {
       const next = { ...current };
       for (const row of rows) {
-        // Sprint 166 §1 — a row the operator added with `+ Add type` is
-        // NEVER filled. Not the ones added afterwards, and not the ones
-        // added beforehand: timing is irrelevant, which is what both
-        // earlier attempts got wrong.
-        if (row.manual) continue;
+        // Sprint 166 §1 + P-11 B2 — the standard lines only; the
+        // same predicate the fill row's sentence counts with.
+        if (!isFillTarget(row)) continue;
         next[cellKey(row.id, dayKey)] = value;
       }
       return next;
@@ -852,56 +831,44 @@ export function HoursWeekGrid({
     onDirtyChange?.(true);
   }
 
-  /** Add one hour-type row to a block. The block already fixes the
-   *  employee and the building, so the type is the only choice left —
-   *  which is the whole point of the shape. */
-  function addTypeToBlock(
-    block: {
-      employeeId: number;
-      employeeName: string;
+  /** P-11 B2 — add one LINE for one person: a building or a job, on an
+   *  hour type. The one add affordance the grid has ("+ Add a line for
+   *  Ahmet — another hour type on the same job, another building, or a
+   *  job"), replacing the per-block "+ Add type" pseudo-rows. */
+  function addLine(
+    employee: GridEmployee,
+    choice: {
       buildingId: number | "";
-      /** Sprint 177 §7 — an hour type added to a job-tagged block belongs
-       *  to that job. Without this the new row would be untagged and the
-       *  operator would have to say so again, which is the exact thing
-       *  this section exists to stop. */
-      sourceType?: string;
-      sourceId?: number | null;
+      sourceType: string;
+      sourceId: number | null;
+      hourTypeId: number;
     },
-    hourTypeId: number,
   ) {
-    const blockSourceType = block.sourceType ?? "";
-    const blockSourceId = block.sourceId ?? null;
     const key = rowKey(
-      hourTypeId,
-      block.buildingId,
-      blockSourceType,
-      blockSourceId,
+      choice.hourTypeId,
+      choice.buildingId,
+      choice.sourceType,
+      choice.sourceId,
     );
-    if (
-      rows.some((r) => r.employeeId === block.employeeId && r.key === key)
-    ) {
+    if (rows.some((r) => r.employeeId === employee.id && r.key === key)) {
       setError(t("hours_week_grid.row_exists"));
       return;
     }
     setError("");
-    // Sprint 165 §3 — a row added AFTER the fill starts empty. Sprint
-    // 164 had it inherit; the owner has asked three times for the other
-    // behaviour, and the contradiction that inheritance was solving is
-    // handled in the display instead (the all-rows inputs clear).
-    const newRowId = rowId(block.employeeId, key);
+    // Sprint 165 §3 — a row added AFTER the fill starts empty.
     setExtraRows((current) => ({
       ...current,
-      [block.employeeId]: [
-        ...(current[block.employeeId] ?? []),
+      [employee.id]: [
+        ...(current[employee.id] ?? []),
         {
-          id: newRowId,
-          employeeId: block.employeeId,
-          employeeName: block.employeeName,
+          id: rowId(employee.id, key),
+          employeeId: employee.id,
+          employeeName: employee.name,
           key,
-          hourTypeId,
-          buildingId: block.buildingId,
-          sourceType: blockSourceType,
-          sourceId: blockSourceId,
+          hourTypeId: choice.hourTypeId,
+          buildingId: choice.buildingId,
+          sourceType: choice.sourceType,
+          sourceId: choice.sourceId,
           cells: {},
           added: true,
           // Sprint 166 §1 — the mark that keeps this row out of the
@@ -922,161 +889,116 @@ export function HoursWeekGrid({
   }
 
   /**
-   * W-HOURS4 Task 1c — link (or unlink) a job on one pair row.
+   * P-11 B2 — change the hour type ON a line.
    *
-   * The job is part of a row's KEY (`rowKey`), so retagging turns the
-   * pair's rows into different rows. Everything the operator has
-   * already typed into them — the `edits` of every hour-type row of the
-   * pair, and any `+ Add type` rows they added — is moved onto the new
-   * keys in the same handler, so no hour vanishes because a job was
-   * named after it was typed. Where the retagged row already exists as
-   * a SAVED row (the person already has hours on that job at that
-   * building this week), the moved cells land on that saved row, which
-   * is the reconciliation rule every seed follows.
+   * The type is part of a row's KEY (`rowKey`), so a change turns the
+   * line into a different row. Everything already typed — and, on a
+   * SAVED row, the saved days — moves onto the new key in the same
+   * handler (the old cells clear to "0", which deletes server-side),
+   * exactly the mechanics the old job retag used: no hour vanishes
+   * because the type was corrected after it was typed.
    */
-  function setPairTag(
-    employeeId: number,
-    seat: number | "",
-    next: RowJobSource | null,
-  ) {
-    const key = pairKey(employeeId, seat);
-    const previous = pairTags[key] ?? UNTAGGED;
-    const target = next ?? UNTAGGED;
+  function setRowType(row: GridRow, nextTypeId: number) {
+    if (nextTypeId === row.hourTypeId) return;
+    const newKey = rowKey(nextTypeId, row.buildingId, row.sourceType, row.sourceId);
+    const newId = rowId(row.employeeId, newKey);
     if (
-      previous.source_type === target.source_type &&
-      previous.source_id === target.source_id
+      rows.some((r) => r.employeeId === row.employeeId && r.key === newKey)
     ) {
+      setError(t("hours_week_grid.row_exists"));
       return;
     }
-    const affected = rows.filter(
-      (row) =>
-        row.employeeId === employeeId &&
-        row.buildingId === seat &&
-        row.sourceType === previous.source_type &&
-        (row.sourceId ?? null) === previous.source_id,
-    );
+    setError("");
     setEdits((current) => {
       const moved = { ...current };
-      for (const row of affected) {
-        const newId = rowId(
-          employeeId,
-          rowKey(row.hourTypeId, seat, target.source_type, target.source_id),
-        );
-        for (const dayKey of dayKeys) {
-          const from = cellKey(row.id, dayKey);
-          const saved = row.added ? undefined : row.cells[dayKey];
-          const hasEdit = from in moved;
-          if (!hasEdit && saved === undefined) continue;
-          // W-FIX1 D9 (audit F30) — the WHOLE row moves. Only the
-          // unsaved edit used to travel, so a saved 8 stayed general
-          // while the retyped 6 landed on the job: 14 h, no warning.
-          // A saved day now goes with the tag and the old cell is
-          // cleared ("0" deletes it server-side), so the day reads once.
-          const value = hasEdit ? moved[from] : (saved as string);
-          if (hasEdit) delete moved[from];
-          if (saved !== undefined) moved[from] = "0";
-          moved[cellKey(newId, dayKey)] = value;
-        }
+      for (const dayKey of dayKeys) {
+        const from = cellKey(row.id, dayKey);
+        const saved = row.added ? undefined : row.cells[dayKey];
+        const hasEdit = from in moved;
+        if (!hasEdit && saved === undefined) continue;
+        const value = hasEdit ? moved[from] : (saved as string);
+        if (hasEdit) delete moved[from];
+        if (saved !== undefined) moved[from] = "0";
+        moved[cellKey(newId, dayKey)] = value;
       }
       return moved;
     });
-    setExtraRows((current) => ({
-      ...current,
-      [employeeId]: (current[employeeId] ?? []).map((row) => {
-        if (
-          row.buildingId !== seat ||
-          row.sourceType !== previous.source_type ||
-          (row.sourceId ?? null) !== previous.source_id
-        ) {
-          return row;
-        }
-        const newKey = rowKey(
-          row.hourTypeId,
-          seat,
-          target.source_type,
-          target.source_id,
-        );
-        return {
-          ...row,
-          key: newKey,
-          id: rowId(employeeId, newKey),
-          sourceType: target.source_type,
-          sourceId: target.source_id,
-        };
-      }),
-    }));
-    setPairTags((current) => {
-      const out = { ...current };
-      if (next === null) delete out[key];
-      else out[key] = next;
-      return out;
-    });
-  }
-
-  /** W-HOURS4 Task 1c — what sits under the person's name on a standard
-   *  block's first row: the picker on the pair's own row (a removable
-   *  tag once a job is linked), nothing on a saved general block. A
-   *  job-linked block that is not the pair is a CHILD and prints its
-   *  own label in the row itself (P-8R C). */
-  function renderJobTag(block: GridBlock) {
-    if (!jobPicker) return null;
-    const seat = block.buildingId;
-    if (isPairBlock(pairTags, seedRowsByEmployee, block)) {
-      const buildingId = seat === "" ? null : seat;
-      return (
-        <RowJobPicker
-          tag={
-            block.sourceType
-              ? { source_type: block.sourceType, source_id: block.sourceId }
-              : null
-          }
-          /* W-HOURS6 — the name first ("final test · TCK-373"), the
-             full label as the tooltip. */
-          tagLabel={jobTitleFirst(sourceName(block.sourceType, block.sourceId))}
-          tagTooltip={sourceName(block.sourceType, block.sourceId)}
-          thisWeek={jobPicker.thisWeek(block.employeeId, buildingId)}
-          search={(query) => jobPicker.search(block.employeeId, buildingId, query)}
-          onChange={(next) => setPairTag(block.employeeId, seat, next)}
-          onOpenChange={jobPicker.onOpenChange}
-          disabled={busy || weekClosed}
-          ariaLabel={t("hours_week_grid.job_picker_label", {
-            person: block.employeeName,
-            building: buildingName(seat),
-          })}
-          testId={`hours-week-job-${block.id}`}
-        />
-      );
+    if (row.manual) {
+      setExtraRows((current) => ({
+        ...current,
+        [row.employeeId]: (current[row.employeeId] ?? []).map((extra) =>
+          extra.key === row.key
+            ? { ...extra, key: newKey, id: newId, hourTypeId: nextTypeId }
+            : extra,
+        ),
+      }));
+    } else if (row.added) {
+      // A seeded line: remember the choice beside the seeds, so the
+      // re-derivation lands on the same key the cells moved to.
+      setSeedTypeChoice((current) => ({
+        ...current,
+        [seedSeatKey(row.employeeId, row.buildingId, row.sourceType, row.sourceId)]:
+          nextTypeId,
+      }));
+    } else {
+      // A SAVED row: its entry-derived line stays (zeroed — "0"
+      // deletes on save); the moved cells need a line to live on.
+      setExtraRows((current) => ({
+        ...current,
+        [row.employeeId]: [
+          ...(current[row.employeeId] ?? []),
+          {
+            id: newId,
+            employeeId: row.employeeId,
+            employeeName: row.employeeName,
+            key: newKey,
+            hourTypeId: nextTypeId,
+            buildingId: row.buildingId,
+            sourceType: row.sourceType,
+            sourceId: row.sourceId,
+            cells: {},
+            added: true,
+            manual: true,
+          },
+        ],
+      }));
     }
-    return null;
+    onDirtyChange?.(true);
   }
 
-  /** P-8R C — the child label: "on <job>", the job as the same muted
-   *  tag the base rendered on a saved job block (the tag is the
-   *  coloured label; the preposition makes it a child of the person's
-   *  standard rows rather than a look-alike). Wraps inside the person
-   *  cell — a fixed column must never let it spill into the building
-   *  column — with the full label as the tooltip. */
+  /** P-11 B2 — a JOB line's identity, the mockup's child shape: a
+   *  coloured kind tag ("Ticket" / "Extra work"), the job's name, and
+   *  a sub-line with the building — plus, on an extra-work line, the
+   *  one sentence linking the two hour concepts: these hours are also
+   *  what the customer is billed for (B3). */
   function renderChildLabel(block: GridBlock) {
     const label = sourceName(block.sourceType, block.sourceId);
+    const isExtraWork = block.sourceType === "EXTRA_WORK";
     return (
       <span
         className="hours-week-child"
         data-testid={`hours-week-part-${block.id}`}
       >
-        <Trans
-          t={t}
-          i18nKey="hours_week_grid.part_on_job"
-          values={{ job: jobTitleFirst(label) }}
-          components={{
-            tag: (
-              <span
-                className="cell-tag cell-tag-muted hours-week-job-saved"
-                title={label}
-                data-testid={`hours-week-job-${block.id}-saved`}
-              />
-            ),
-          }}
-        />
+        <span
+          className={`hours-week-kind-tag${isExtraWork ? " hours-week-kind-tag-ew" : ""}`}
+        >
+          {t(isExtraWork ? "hour_source.EXTRA_WORK" : "hour_source.TICKET")}
+        </span>
+        <span
+          className="hours-week-child-title"
+          title={label}
+          data-testid={`hours-week-job-${block.id}-saved`}
+        >
+          {jobTitleFirst(label)}
+        </span>
+        <span className="hours-week-line-sub">
+          {[
+            block.buildingId === "" ? null : buildingName(block.buildingId),
+            isExtraWork ? t("hours_week_grid.ew_billed_sub") : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
       </span>
     );
   }
@@ -1254,100 +1176,32 @@ export function HoursWeekGrid({
                     : "",
               }).trim()}
         </span>
-        <span className="muted small hours-week-table-hint">
-          {/* P-7 S1.2 — the "unsaved hours are cleared when you switch
-              week" sentence is gone: every caller now ASKS at the
-              moment of switching (WeekEntryDialog, MyHoursPage), so a
-              standing warning about silent loss would describe a loss
-              that no longer happens. */}
-          {t("hours_week_grid.empty_hint")}
-        </span>
+        {/* P-11 B2 — "Rows without hours are not saved" moved to the
+            footer, with the count ("4 standard lines empty — not
+            saved."), where the Save it talks about is. */}
       </div>
-      )}
-
-      {/* P-8R C — the fill tool is a normal TOOLBAR ROW above the grid.
-          It used to be a row inside the table's head, whose first cell
-          spanned three columns and was sticky like every first cell —
-          so whenever the table scrolled sideways that wide sticky cell
-          slid over the day inputs. Out here it is in normal flow: it
-          can neither overlap a cell nor be overlapped, and each box
-          carries its own day name because it no longer sits under a
-          column header. Same rule as before (Sprint 166 §1): it writes
-          the standard rows, never a row the operator added. */}
-      {showApplyRow && (
-        <div className="hours-week-fill-bar" data-testid="hours-week-apply-row">
-          <div className="hours-week-fill-text">
-            <span className="hours-week-apply-label">
-              {t("hours_week_grid.apply_all_label")}
-            </span>
-            {/* Sprint 179B §3 — the rule, where the control is. */}
-            <span className="hours-week-apply-hint">
-              {t("hours_week_grid.apply_all_hint")}
-            </span>
-          </div>
-          <div className="hours-week-fill-days">
-            {dayKeys.map((dayKey, dayIndex) => (
-              <label
-                key={dayKey}
-                className={
-                  quiet.has(dayKey)
-                    ? "hours-week-fill-day hours-week-day-quiet"
-                    : "hours-week-fill-day"
-                }
-              >
-                <span className="hours-week-fill-day-label">
-                  {dayLabel(days[dayIndex])}
-                </span>
-                <input
-                  className="field-input hours-week-grid-cell"
-                  type="text"
-                  inputMode="decimal"
-                  value={applyRow[dayKey] ?? ""}
-                  onChange={(event) =>
-                    applyToAllDay(dayKey, event.target.value)
-                  }
-                  onKeyDown={(event) => {
-                    // Enter must not submit the surrounding form; the
-                    // value is already applied as it is typed.
-                    if (event.key === "Enter") event.preventDefault();
-                  }}
-                  disabled={busy || weekClosed}
-                  aria-label={t("hours_week_grid.apply_all_day", {
-                    day: dayLabel(days[dayIndex]),
-                  })}
-                  data-testid={`hours-week-apply-${dayKey}`}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
       )}
 
       <div className="table-wrap hours-week-table-wrap">
         <table className="data-table data-table-dense hours-week-grid-table">
-          {/* P-8R C — named columns, so the modal can fix their widths
-              (`.week-entry-modal .hours-week-col-*`): seven day columns
-              and a label column that fit the dialog's own width, with
-              no sideways scroll. Elsewhere the table lays itself out
-              as before. */}
+          {/* P-11 B2 — ONE table, and every row is a row OF it, so the
+              columns line up by construction: Line · Hour type · seven
+              days · Week. The fill row is the first body row (the
+              owner's alignment complaint was structural, not CSS); the
+              old Worker/Building/Job columns folded into the Line cell
+              under a person band. Named columns so the modal can fix
+              their widths (`.week-entry-modal .hours-week-col-*`). */}
           <colgroup>
-            <col className="hours-week-col-worker" />
-            <col className="hours-week-col-building" />
-            {jobColumn && <col className="hours-week-col-job" />}
+            <col className="hours-week-col-what" />
             <col className="hours-week-col-type" />
             {dayKeys.map((dayKey) => (
               <col key={dayKey} className="hours-week-col-day" />
             ))}
             <col className="hours-week-col-total" />
-            <col className="hours-week-col-remove" />
           </colgroup>
           <thead>
             <tr>
-              <th>{t("hours_week_grid.worker")}</th>
-              <th>{t("hours_week_grid.building")}</th>
-              {/* Sprint 179B §2 — WHICH JOB. Without it, one row per job
-                  is one row per job that looks identical to the next. */}
-              {jobColumn && <th>{t("hours_week_grid.job")}</th>}
+              <th>{t("hours_week_grid.line")}</th>
               <th>{t("hours_week_grid.hour_type")}</th>
               {days.map((day, index) => (
                 <th
@@ -1367,38 +1221,113 @@ export function HoursWeekGrid({
                 </th>
               ))}
               <th style={{ textAlign: "right" }}>
-                {t("hours_week_grid.total")}
+                {t("hours_week_grid.week")}
               </th>
-              <th aria-label={t("hours_week_grid.remove_row")} />
             </tr>
           </thead>
           <tbody>
+            {/* P-11 B2 — the fill row is the FIRST BODY ROW of the one
+                table: its inputs sit in the day columns because they
+                ARE the day columns. It lands on the standard lines
+                only — never on job lines, never on a line the operator
+                added (Sprint 166 §1). */}
+            {showApplyRow && (
+              <tr
+                className="hours-week-fill-row"
+                data-testid="hours-week-apply-row"
+              >
+                <td className="hours-week-fill-what">
+                  <span className="hours-week-apply-label">
+                    {t("hours_week_grid.apply_all_label")}
+                  </span>
+                  <span className="hours-week-apply-hint">
+                    {t("hours_week_grid.apply_all_hint", {
+                      count: standardLineCount,
+                    })}
+                  </span>
+                </td>
+                <td className="hours-week-fill-dash">—</td>
+                {dayKeys.map((dayKey, dayIndex) => (
+                  <td
+                    key={dayKey}
+                    style={{ textAlign: "right" }}
+                    className={
+                      quiet.has(dayKey) ? "hours-week-day-quiet" : undefined
+                    }
+                  >
+                    <input
+                      className="field-input hours-week-grid-cell"
+                      type="text"
+                      inputMode="decimal"
+                      value={applyRow[dayKey] ?? ""}
+                      onChange={(event) =>
+                        applyToAllDay(dayKey, event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        // Enter must not submit the surrounding form;
+                        // it hands off DOWN the column instead.
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          focusCellBelow(null, dayKey);
+                        }
+                      }}
+                      disabled={busy || weekClosed}
+                      aria-label={t("hours_week_grid.apply_all_day", {
+                        day: dayLabel(days[dayIndex]),
+                      })}
+                      data-testid={`hours-week-apply-${dayKey}`}
+                    />
+                  </td>
+                ))}
+                <td className="hours-week-fill-dash" style={{ textAlign: "right" }}>
+                  —
+                </td>
+              </tr>
+            )}
             {blocks.length === 0 && (
               <tr>
-                <td
-                  colSpan={dayKeys.length + (jobColumn ? 6 : 5)}
-                  className="muted small"
-                >
+                <td colSpan={dayKeys.length + 3} className="muted small">
                   {t("hours_week_grid.empty_block")}
                 </td>
               </tr>
             )}
             {blocks.map((block, blockIndex) => {
-              // P-8R C — the base's backbone: every STANDARD block
-              // prints its person and building on its first row (two
-              // people at two buildings are four such rows). A CHILD
-              // block (job-linked, not the person's pair row) sits
-              // under its person's standard rows, indented, labelled
-              // "on <job>" in place of the name — the name repeats only
-              // when the child is the first thing the person has. Where
-              // the Job COLUMN says the job (My hours), the child prints
-              // as a plain row: the column is the label there.
+              // P-11 B2 — ONE GROUP PER PERSON: a band with the name
+              // and the person's week total, their standard lines
+              // under it, then their job lines as children (indent +
+              // kind tag), then ONE "+ Add a line for {person}" row.
               const firstOfPerson =
                 blockIndex === 0 ||
                 blocks[blockIndex - 1].employeeId !== block.employeeId;
-              const child = block.child && !jobColumn;
+              const lastOfPerson =
+                blockIndex === blocks.length - 1 ||
+                blocks[blockIndex + 1].employeeId !== block.employeeId;
+              const child = block.child;
+              const employee: GridEmployee = {
+                id: block.employeeId,
+                name: block.employeeName,
+              };
               return (
               <Fragment key={block.id}>
+                {firstOfPerson && (
+                  <tr
+                    className="hours-week-person"
+                    data-testid={`hours-week-person-${block.employeeId}`}
+                  >
+                    <td colSpan={dayKeys.length + 2}>{block.employeeName}</td>
+                    <td
+                      className="hours-week-group-total"
+                      data-testid={`hours-week-person-total-${block.employeeId}`}
+                    >
+                      {t("hours_week_grid.person_total", {
+                        hours: formatTotal(
+                          personTotal(block.employeeId),
+                          i18n.language,
+                        ),
+                      })}
+                    </td>
+                  </tr>
+                )}
                 {block.rows.map((row, dayRowIndex) => (
                   <tr
                     key={row.id}
@@ -1412,76 +1341,94 @@ export function HoursWeekGrid({
                         : undefined
                     }
                   >
-                    {/* Sprint 163 §1 — worker and building are COLUMNS,
-                        printed on the group's first row and left blank
-                        on its continuation rows. They used to be a
-                        block-header banner, which meant nothing lined
-                        up and the eye had to re-anchor at every group. */}
+                    {/* The LINE: a building (standard hours) or a job
+                        (kind tag + name + building), printed on the
+                        block's first row; a second hour type on the
+                        same line continues it quietly below. */}
                     <td
                       className={
                         child
                           ? "td-subject hours-week-identity hours-week-child-cell"
-                          : "td-subject hours-week-identity"
+                          : "td-subject hours-week-identity hours-week-std-cell"
                       }
                     >
-                      {dayRowIndex === 0 && (!child || firstOfPerson)
-                        ? block.employeeName
-                        : ""}
                       {dayRowIndex === 0 && child && renderChildLabel(block)}
-                      {/* W-HOURS4 Task 1c — the job, ON the row, under
-                          the name: a quiet link until one is linked, a
-                          removable tag after. */}
-                      {dayRowIndex === 0 && !child && renderJobTag(block)}
+                      {dayRowIndex === 0 && !child && (
+                        <span className="hours-week-std">
+                          {buildingName(block.buildingId)}
+                          <span className="hours-week-line-sub">
+                            {t("hours_week_grid.standard_sub")}
+                          </span>
+                        </span>
+                      )}
+                      {/* A line the operator added and has not saved
+                          can be taken away again; a saved line is
+                          cleared by emptying its hours. */}
+                      {row.manual && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm hours-week-remove"
+                          onClick={() => removeRow(row)}
+                          disabled={busy}
+                          aria-label={t("hours_week_grid.remove_type", {
+                            hourType: hourTypeName(row.hourTypeId),
+                          })}
+                          data-testid={`hours-week-remove-row-${row.id}`}
+                        >
+                          ×
+                        </button>
+                      )}
                     </td>
-                    <td className="hours-week-identity">
-                      {dayRowIndex === 0 ? buildingName(block.buildingId) : ""}
-                    </td>
-                    {jobColumn && (
-                      <td
-                        className="hours-week-identity hours-week-job"
-                        /* W-HOURS6 — the name first; the cell's own
-                           22ch ellipsis stays, the full label is the
-                           tooltip. */
-                        title={
-                          dayRowIndex === 0
-                            ? sourceName(block.sourceType, block.sourceId)
-                            : undefined
+                    <td className="hours-week-type-cell">
+                      {/* P-11 B2 — the hour type is a SELECT on every
+                          line, from the company's own catalogue with
+                          the multiplier shown. Changing it moves the
+                          line's hours with it (`setRowType`). */}
+                      <select
+                        className="field-input hours-week-type-select"
+                        value={row.hourTypeId === "" ? "" : String(row.hourTypeId)}
+                        onChange={(event) =>
+                          setRowType(row, Number(event.target.value))
                         }
-                        data-testid={`hours-week-row-job-${row.id}`}
-                      >
-                        {dayRowIndex === 0
-                          ? jobTitleFirst(
-                              sourceName(block.sourceType, block.sourceId),
-                            )
-                          : ""}
-                      </td>
-                    )}
-                    <td className="td-subject">
-                      {/* A chip, not a dropdown. The dropdown only ever
-                          existed on rows added in this session, so the
-                          rows the wizard produced rendered plain text and
-                          the control the owner clicked was not there. */}
-                      <span
-                        className="cell-tag cell-tag-normal"
+                        disabled={busy || weekClosed}
+                        aria-label={t("hours_week_grid.cell_type_label", {
+                          person: row.employeeName,
+                        })}
                         data-testid={`hours-week-row-type-${row.id}`}
                       >
-                        {hourTypeName(row.hourTypeId)}
-                      </span>
+                        {hourTypes.map((hourType) => (
+                          <option key={hourType.id} value={String(hourType.id)}>
+                            {typeOptionLabel(hourType)}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     {dayKeys.map((dayKey, dayIndex) => (
                       <td key={dayKey} style={{ textAlign: "right" }}>
                         <input
-                          className={
-                            quiet.has(dayKey)
-                              ? "field-input hours-week-grid-cell hours-week-cell-quiet"
-                              : "field-input hours-week-grid-cell"
-                          }
+                          className={[
+                            "field-input hours-week-grid-cell",
+                            quiet.has(dayKey) ? "hours-week-cell-quiet" : "",
+                            cellValue(row, dayKey).trim() !== ""
+                              ? "hours-week-cell-set"
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
                           type="text"
                           inputMode="decimal"
                           value={cellValue(row, dayKey)}
                           onChange={(event) =>
                             setCell(row, dayKey, event.target.value)
                           }
+                          onKeyDown={(event) => {
+                            // P-11 B2 — a timesheet is typed: Enter
+                            // moves down the column, Tab along the row.
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              focusCellBelow(row.id, dayKey);
+                            }
+                          }}
                           disabled={busy || weekClosed}
                           aria-label={t("hours_week_grid.cell_label_person", {
                             person: row.employeeName,
@@ -1498,68 +1445,25 @@ export function HoursWeekGrid({
                     >
                       {formatTotal(rowTotal(row), i18n.language)}
                     </td>
-                    <td>
-                      {/* An added-but-unsaved row can be dropped; a row
-                          that exists on the server is cleared by zeroing
-                          its cells, not by removing it from the grid —
-                          removing it here would look like a delete that
-                          never happened.
-
-                          W12 — `manual`, not `added`. `removeRow` drops
-                          a row out of `extraRows`, and only a row from
-                          `+ Add type` is ever IN `extraRows`: a SEEDED
-                          row is derived from `seedBuildingIds` on every
-                          render, so its Remove button removed nothing
-                          and re-rendered the same row. A dead control,
-                          and on My hours it would have sat on the one
-                          row an empty week has. */}
-                      {row.manual && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => removeRow(row)}
-                          disabled={busy}
-                          aria-label={t("hours_week_grid.remove_type", {
-                            hourType: hourTypeName(row.hourTypeId),
-                          })}
-                          data-testid={`hours-week-remove-row-${row.id}`}
-                        >
-                          {t("hours_week_grid.remove_row")}
-                        </button>
-                      )}
-                    </td>
                   </tr>
                 ))}
-                <tr className="hours-week-add-type-row">
-                  <td colSpan={dayKeys.length + (jobColumn ? 4 : 3)}>
-                    {/* The ONLY way an hour type is chosen, which is how
-                        the reference does it — and why the wizard no
-                        longer asks for types up front. */}
-                    <AddTypeControl
-                      blockId={block.id}
-                      options={hourTypes.filter(
-                        (hourType) =>
-                          !block.rows.some((r) => r.hourTypeId === hourType.id),
-                      )}
-                      disabled={busy || weekClosed}
-                      addLabel={t("hours_week_grid.add_type")}
-                      chooseLabel={t("hours_week_grid.hour_type")}
-                      onAdd={(hourTypeId) =>
-                        addTypeToBlock(block, hourTypeId)
-                      }
-                    />
-                  </td>
-                  <td
-                    className="hours-week-group-total"
-                    data-testid={`hours-week-block-total-${block.id}`}
-                  >
-                    {formatTotal(
-                      block.rows.reduce((sum, row) => sum + rowTotal(row), 0),
-                      i18n.language,
-                    )}
-                  </td>
-                  <td />
-                </tr>
+                {lastOfPerson && !weekClosed && (
+                  <tr className="hours-week-add-row">
+                    <td colSpan={dayKeys.length + 3}>
+                      <AddLineControl
+                        employee={employee}
+                        buildings={buildings}
+                        seedBuildingIds={seedBuildingIds}
+                        hourTypes={hourTypes}
+                        typeOptionLabel={typeOptionLabel}
+                        jobPicker={jobPicker}
+                        disabled={busy}
+                        t={t}
+                        onAdd={(choice) => addLine(employee, choice)}
+                      />
+                    </td>
+                  </tr>
+                )}
               </Fragment>
               );
             })}
@@ -1584,6 +1488,18 @@ export function HoursWeekGrid({
             count: employees.length,
           })}
         </span>
+        {/* P-11 B2 — "rows without hours are not saved", said with the
+            count, beside the Save it is about. */}
+        {emptyStandardCount > 0 && (
+          <span
+            className="muted small"
+            data-testid="hours-week-empty-standard"
+          >
+            {t("hours_week_grid.empty_standard", {
+              count: emptyStandardCount,
+            })}
+          </span>
+        )}
         <div style={{ display: "flex", gap: 8 }}>
           {onCancel && (
             <button
@@ -1622,74 +1538,161 @@ export function HoursWeekGrid({
 
 
 /**
- * Sprint 162 §1 — `+ Add type`, the only place an hour type is chosen.
+ * P-11 B2 — "+ Add a line for {person}", the grid's ONE add
+ * affordance, replacing the per-block "+ Add type" pseudo-rows and the
+ * per-row "+ link a job (optional)" picker.
  *
- * A button that becomes a select on click rather than a select that is
- * always sitting there: the block already knows the employee and the
- * building, so this is a one-field decision and a permanently-open
- * dropdown per block would put back exactly the control-per-row noise
- * this sprint removed.
- *
- * Its own component so each block owns its open state; one shared
- * "which block is open" flag in the parent would be a second thing to
- * keep in step with the blocks themselves.
+ * A link that unfolds into a small inline form: a building (the
+ * setup's buildings plus "no building"), an optional job (the caller's
+ * own picker, where one is supplied — the admin dialog; My hours and
+ * the contract-hours dialog add building lines only), and the hour
+ * type. Its own component so each person owns their open state.
  */
-function AddTypeControl({
-  blockId,
-  options,
+function AddLineControl({
+  employee,
+  buildings,
+  seedBuildingIds,
+  hourTypes,
+  typeOptionLabel,
+  jobPicker,
   disabled,
-  addLabel,
-  chooseLabel,
+  t,
   onAdd,
 }: {
-  blockId: string;
-  options: { id: number; name: string }[];
+  employee: GridEmployee;
+  buildings: BuildingAdmin[];
+  seedBuildingIds: (number | null)[];
+  hourTypes: HourType[];
+  typeOptionLabel: (hourType: HourType) => string;
+  jobPicker?: GridJobPicker;
   disabled?: boolean;
-  addLabel: string;
-  chooseLabel: string;
-  onAdd: (hourTypeId: number) => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
+  onAdd: (choice: {
+    buildingId: number | "";
+    sourceType: string;
+    sourceId: number | null;
+    hourTypeId: number;
+  }) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [buildingId, setBuildingId] = useState<string>("none");
+  const [job, setJob] = useState<RowJobSource | null>(null);
+  const [hourTypeId, setHourTypeId] = useState<string>(
+    hourTypes[0] ? String(hourTypes[0].id) : "",
+  );
 
-  // Every type is already on the block: there is nothing to add, and a
-  // button that opens an empty list is worse than no button.
-  if (options.length === 0) return null;
+  // The buildings offered: the setup's own (the person's standard
+  // seats), resolved to names; "no building" is always a choice.
+  const seats: { value: string; label: string }[] = [
+    { value: "none", label: t("hours_week_grid.no_building") },
+    ...seedBuildingIds
+      .filter((id): id is number => id !== null)
+      .map((id) => ({
+        value: String(id),
+        label:
+          buildings.find((building) => building.id === id)?.name ?? String(id),
+      })),
+  ];
 
   if (!open) {
     return (
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-        data-testid={`hours-week-add-type-${blockId}`}
-      >
-        {addLabel}
-      </button>
+      <span className="hours-week-add-line">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setOpen(true)}
+          disabled={disabled}
+          data-testid={`hours-week-add-line-${employee.id}`}
+        >
+          {t("hours_week_grid.add_line", { person: employee.name })}
+        </button>
+        <span className="muted small">{t("hours_week_grid.add_line_hint")}</span>
+      </span>
     );
   }
 
   return (
-    <select
-      className="field-input hours-week-add-type-select"
-      defaultValue=""
-      autoFocus
-      disabled={disabled}
-      aria-label={chooseLabel}
-      onChange={(event) => {
-        if (event.target.value === "") return;
-        onAdd(Number(event.target.value));
-        setOpen(false);
-      }}
-      onBlur={() => setOpen(false)}
-      data-testid={`hours-week-add-type-select-${blockId}`}
-    >
-      <option value="">{chooseLabel}</option>
-      {options.map((option) => (
-        <option key={option.id} value={option.id}>
-          {option.name}
-        </option>
-      ))}
-    </select>
+    <span className="hours-week-add-line-form" data-testid={`hours-week-add-line-form-${employee.id}`}>
+      <select
+        className="field-input hours-week-type-select"
+        value={buildingId}
+        onChange={(event) => setBuildingId(event.target.value)}
+        aria-label={t("hours_week_grid.building")}
+        data-testid={`hours-week-add-line-building-${employee.id}`}
+      >
+        {seats.map((seat) => (
+          <option key={seat.value} value={seat.value}>
+            {seat.label}
+          </option>
+        ))}
+      </select>
+      {jobPicker && (
+        <RowJobPicker
+          tag={job}
+          tagLabel={job ? t("hours_week_grid.add_line_job_chosen") : ""}
+          tagTooltip=""
+          thisWeek={jobPicker.thisWeek(
+            employee.id,
+            buildingId === "none" ? null : Number(buildingId),
+          )}
+          search={(query) =>
+            jobPicker.search(
+              employee.id,
+              buildingId === "none" ? null : Number(buildingId),
+              query,
+            )
+          }
+          onChange={(next) => setJob(next)}
+          onOpenChange={jobPicker.onOpenChange}
+          disabled={disabled}
+          ariaLabel={t("hours_week_grid.add_line_job", {
+            person: employee.name,
+          })}
+          testId={`hours-week-add-line-job-${employee.id}`}
+        />
+      )}
+      <select
+        className="field-input hours-week-type-select"
+        value={hourTypeId}
+        onChange={(event) => setHourTypeId(event.target.value)}
+        aria-label={t("hours_week_grid.hour_type")}
+        data-testid={`hours-week-add-line-type-${employee.id}`}
+      >
+        {hourTypes.map((hourType) => (
+          <option key={hourType.id} value={String(hourType.id)}>
+            {typeOptionLabel(hourType)}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={disabled || hourTypeId === ""}
+        onClick={() => {
+          onAdd({
+            buildingId: buildingId === "none" ? "" : Number(buildingId),
+            sourceType: job?.source_type ?? "",
+            sourceId: job?.source_id ?? null,
+            hourTypeId: Number(hourTypeId),
+          });
+          setOpen(false);
+          setJob(null);
+        }}
+        data-testid={`hours-week-add-line-confirm-${employee.id}`}
+      >
+        {t("hours_week_grid.add_line_confirm")}
+      </button>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={() => {
+          setOpen(false);
+          setJob(null);
+        }}
+        data-testid={`hours-week-add-line-cancel-${employee.id}`}
+      >
+        {t("cancel")}
+      </button>
+    </span>
   );
 }

@@ -273,6 +273,13 @@ export interface WeekWithHours {
   iso_week: number;
   hours: string;
   entries: number;
+  /** P-11 B1 — the "Earlier weeks" table's three extra facts: how many
+   *  people hold hours in the week, and the lock (by whom, when; the
+   *  lock facts are null when the read spans more than one company). */
+  people: number;
+  is_closed: boolean;
+  closed_by_name: string | null;
+  closed_at: string | null;
 }
 
 export interface WeeksWithHours {

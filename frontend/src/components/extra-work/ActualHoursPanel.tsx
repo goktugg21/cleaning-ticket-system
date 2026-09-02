@@ -11,13 +11,17 @@
  * file may export only components — react-refresh rule); both mounts
  * derive their line set there.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
-import { submitActualHours } from "../../api/extraWork";
+import {
+  getExtraWorkTimesheetHours,
+  submitActualHours,
+} from "../../api/extraWork";
+import type { ExtraWorkTimesheetHours } from "../../api/extraWork";
 import type { ExtraWorkRequestDetail } from "../../api/types";
 import { formatMoney } from "../../lib/intl";
 import { useToast } from "../ToastProvider";
@@ -52,6 +56,11 @@ function actualHoursErrorCode(err: unknown): string | null {
 // answer do not disagree over a half cent.
 function twoPlaces(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/** P-11 B3 — an hours number for a sentence: "4", "2.5". */
+function fmtHours(value: number): string {
+  return String(Number(value.toFixed(2)));
 }
 
 // W25 — what the backend will bill this line for: the entered hours if
@@ -96,6 +105,7 @@ export function ActualHoursPanel({
   finalSubtotalAmount = null,
   consequence,
   readOnly = false,
+  onAddLine,
 }: {
   ewId: number;
   hourlyLines: ActualHoursLine[];
@@ -139,6 +149,10 @@ export function ActualHoursPanel({
    *  and no "locked" warning (nothing is being refused; the work is
    *  simply billed). */
   readOnly?: boolean;
+  /** P-11 B3 — the door beside "the quote has no matching line": the
+   *  caller lands the reader on its own Add-line surface. Absent, the
+   *  sentence renders without a dead button (the A7 lesson). */
+  onAddLine?: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   // The values-only layout serves both the locked case (the backend
@@ -152,6 +166,108 @@ export function ActualHoursPanel({
     ),
   );
   const [saving, setSaving] = useState(false);
+
+  /* P-11 B3 — the timesheet's answer for this job: what the crew
+     already reported (TimeEntry job lines on this request and its
+     spawned tickets). Two hour concepts stay two things — payroll is
+     not invoicing — but the bill is PRE-FILLED from the report, so the
+     operator confirms instead of restating. Non-fatal read. */
+  const [timesheet, setTimesheet] = useState<ExtraWorkTimesheetHours | null>(
+    null,
+  );
+  useEffect(() => {
+    if (frozen) return;
+    let cancelled = false;
+    getExtraWorkTimesheetHours(ewId)
+      .then((data) => {
+        if (!cancelled) setTimesheet(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId, frozen]);
+
+  const timesheetTotal = timesheet ? Number(timesheet.total_hours) || 0 : 0;
+  /** Per person, for the one-line proposal sentence. */
+  const timesheetPeople: { name: string; hours: number }[] = (() => {
+    const byPerson = new Map<string, number>();
+    for (const entry of timesheet?.entries ?? []) {
+      const name = entry.employee_name;
+      byPerson.set(name, (byPerson.get(name) ?? 0) + (Number(entry.hours) || 0));
+    }
+    return [...byPerson.entries()].map(([name, hours]) => ({ name, hours }));
+  })();
+  /** Per hour type, for the line mapping. */
+  const timesheetTypes: {
+    name: string;
+    multiplier: number;
+    hours: number;
+  }[] = (() => {
+    const byType = new Map<string, { multiplier: number; hours: number }>();
+    for (const entry of timesheet?.entries ?? []) {
+      const bucket = byType.get(entry.hour_type_name) ?? {
+        multiplier: Number(entry.hour_type_multiplier) || 1,
+        hours: 0,
+      };
+      bucket.hours += Number(entry.hours) || 0;
+      byType.set(entry.hour_type_name, bucket);
+    }
+    return [...byType.entries()].map(([name, bucket]) => ({
+      name,
+      ...bucket,
+    }));
+  })();
+  /** The mapping: a type lands on the quote line whose label carries
+     one of its distinguishing words ("Weekend uren" -> "Regie uren
+     weekend"); ordinary hours land on the regular hourly line (the
+     first line no special type claimed); with ONE hourly line
+     everything lands there. What maps nowhere becomes the
+     "no matching line" sentence below. The hour type never prices —
+     it weighs the reports; only the HOURS travel here. */
+  const GENERIC_WORDS = new Set(["uren", "hours", "normale", "normal", "regie"]);
+  const typeTokens = (name: string) =>
+    name
+      .toLowerCase()
+      .split(/[^a-z\u00e0-\u00ff]+/)
+      .filter((word) => word.length >= 4 && !GENERIC_WORDS.has(word));
+  const proposals: Record<number, number> = {};
+  const unmatchedTypes: { name: string; hours: number }[] = [];
+  if (timesheetTotal > 0) {
+    if (hourlyLines.length === 1) {
+      proposals[hourlyLines[0].id] = timesheetTotal;
+    } else if (hourlyLines.length > 1) {
+      const claimed = new Set<number>();
+      const ordinary: { name: string; hours: number }[] = [];
+      for (const bucket of timesheetTypes) {
+        const tokens = typeTokens(bucket.name);
+        const line =
+          tokens.length > 0
+            ? hourlyLines.find((candidate) =>
+                tokens.some((token) =>
+                  candidate.label.toLowerCase().includes(token),
+                ),
+              )
+            : undefined;
+        if (line) {
+          proposals[line.id] = (proposals[line.id] ?? 0) + bucket.hours;
+          claimed.add(line.id);
+        } else if (bucket.multiplier === 1) {
+          ordinary.push(bucket);
+        } else {
+          unmatchedTypes.push({ name: bucket.name, hours: bucket.hours });
+        }
+      }
+      if (ordinary.length > 0) {
+        const regular =
+          hourlyLines.find((candidate) => !claimed.has(candidate.id)) ??
+          hourlyLines[0];
+        for (const bucket of ordinary) {
+          proposals[regular.id] = (proposals[regular.id] ?? 0) + bucket.hours;
+        }
+      }
+    }
+  }
 
   // W25 — per-line preview: hours x rate, two-placed exactly as the
   // backend does it. `null` means "no claim" (no rate, or no number in
@@ -249,6 +365,26 @@ export function ActualHoursPanel({
           data-testid="extra-work-actual-hours-locked"
         >
           {t("detail.actual_hours_error_locked")}
+        </div>
+      )}
+      {/* P-11 B3 — the timesheet's proposal, said once above the
+          lines: who reported what, and the sum the bill would carry. */}
+      {!frozen && timesheetTotal > 0 && (
+        <div
+          className="alert-info"
+          data-testid="extra-work-timesheet-prefill"
+        >
+          {t("detail.timesheet_prefill", {
+            people: timesheetPeople
+              .map((person) =>
+                t("detail.timesheet_person", {
+                  name: person.name,
+                  hours: fmtHours(person.hours),
+                }),
+              )
+              .join(" \u00b7 "),
+            total: fmtHours(timesheetTotal),
+          })}
         </div>
       )}
       {frozen ? (
@@ -354,10 +490,81 @@ export function ActualHoursPanel({
                   </span>
                 )}
               </div>
+              {/* P-11 B3 — the timesheet's number for THIS line: a
+                  "Use N h" door while the box is empty, a quiet
+                  "differs from the timesheet" once the operator wrote
+                  something else. Agreement renders nothing. */}
+              {(() => {
+                const proposal = proposals[line.id];
+                if (proposal === undefined) return null;
+                const typed = finiteOrNull((draft[line.id] ?? "").trim());
+                if (typed !== null && Math.abs(typed - proposal) < 0.005) {
+                  return null;
+                }
+                const useButton = (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        [line.id]: fmtHours(proposal),
+                      }))
+                    }
+                    data-testid={`extra-work-timesheet-use-${line.id}`}
+                  >
+                    {t("detail.timesheet_use", { hours: fmtHours(proposal) })}
+                  </button>
+                );
+                return (
+                  <span
+                    className="muted small"
+                    data-testid={`extra-work-timesheet-line-${line.id}`}
+                    style={{ display: "block", marginTop: 2 }}
+                  >
+                    {typed !== null && (
+                      <>
+                        {t("detail.timesheet_differs", {
+                          hours: fmtHours(proposal),
+                        })}{" "}
+                      </>
+                    )}
+                    {useButton}
+                  </span>
+                );
+              })()}
             </div>
           );
         })
       )}
+      {/* P-11 B3 — timesheet hours with no line to land on: say so,
+          with the caller's Add-line door where one exists. */}
+      {!frozen &&
+        unmatchedTypes.map((bucket) => (
+          <div
+            key={bucket.name}
+            className="alert-warning"
+            data-testid="extra-work-timesheet-missing-line"
+            style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+          >
+            <span>
+              {t("detail.timesheet_missing_line", {
+                hours: fmtHours(bucket.hours),
+                type: bucket.name,
+              })}
+            </span>
+            {onAddLine && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={onAddLine}
+                data-testid="extra-work-timesheet-add-line"
+              >
+                {t("detail.timesheet_add_line")}
+              </button>
+            )}
+          </div>
+        ))}
       {anyRate && (
         <span className="muted small" data-testid="extra-work-actual-hours-note">
           {t("detail.actual_hours_math_note")}
