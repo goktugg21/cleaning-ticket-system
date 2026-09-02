@@ -54,9 +54,22 @@ export function PlanManyDialog({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [applyToSlots, setApplyToSlots] = useState(true);
   const [busy, setBusy] = useState(false);
+  // P-11 A2 — one day for all, or a day each. "Same day" fills every
+  // row from the shared pair; the rows stay visible and editable under
+  // either mode (an edited row simply diverges), and one Save writes
+  // whatever the rows hold.
+  const [mode, setMode] = useState<"same" | "each">("same");
+  const [shared, setShared] = useState<RowDraft>({ day: todayIso, time: "" });
 
   const setDraft = (key: string, patch: Partial<RowDraft>) =>
     setDrafts((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+
+  const applyShared = (next: RowDraft) => {
+    setShared(next);
+    setDrafts((prev) =>
+      Object.fromEntries(Object.keys(prev).map((key) => [key, { ...next }])),
+    );
+  };
 
   async function save() {
     if (busy) return;
@@ -114,6 +127,60 @@ export function PlanManyDialog({
           }}
         >
           <h3 className="plan-modal-title">{t("agenda.plan_many_title", { count: rows.length })}</h3>
+          {/* P-11 A2 — the switch. */}
+          <div className="composer-toggle" role="group" data-testid="agenda-plan-many-mode">
+            <button
+              type="button"
+              className={`composer-toggle-btn ${mode === "same" ? "active" : ""}`}
+              aria-pressed={mode === "same"}
+              onClick={() => {
+                setMode("same");
+                applyShared(shared);
+              }}
+              disabled={busy}
+              data-testid="agenda-plan-many-mode-same"
+            >
+              {t("agenda.plan_many_mode_same")}
+            </button>
+            <button
+              type="button"
+              className={`composer-toggle-btn ${mode === "each" ? "active" : ""}`}
+              aria-pressed={mode === "each"}
+              onClick={() => setMode("each")}
+              disabled={busy}
+              data-testid="agenda-plan-many-mode-each"
+            >
+              {t("agenda.plan_many_mode_each")}
+            </button>
+          </div>
+          {mode === "same" && (
+            <div className="wp-plan-many-shared" data-testid="agenda-plan-many-shared">
+              <label className="field wp-plan-many-field">
+                <span className="field-label">{t("agenda.plan_many_day")}</span>
+                <input
+                  className="field-input"
+                  type="date"
+                  value={shared.day}
+                  onChange={(event) => applyShared({ ...shared, day: event.target.value })}
+                  disabled={busy}
+                  data-testid="agenda-plan-many-shared-day"
+                />
+              </label>
+              {rows.some((entry) => entry.ticket_id !== null) && (
+                <label className="field wp-plan-many-field">
+                  <span className="field-label">{t("agenda.plan_many_time")}</span>
+                  <input
+                    className="field-input"
+                    type="time"
+                    value={shared.time}
+                    onChange={(event) => applyShared({ ...shared, time: event.target.value })}
+                    disabled={busy}
+                    data-testid="agenda-plan-many-shared-time"
+                  />
+                </label>
+              )}
+            </div>
+          )}
           <ul className="wp-plan-many" data-testid="agenda-plan-many-rows">
             {rows.map((entry) => {
               const draft = drafts[entry.key] ?? { day: todayIso, time: "" };

@@ -32,6 +32,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import type { Role } from "../api/types";
+import { EXTRA_WORK_TABS } from "../lib/extraWorkTabs";
 import { previousPath, samePage } from "../lib/navHistory";
 
 export interface BackLinkProps {
@@ -82,7 +83,17 @@ const ORIGINS: { test: RegExp; labelKey: string }[] = [
   { test: /^\/agenda(?:[/?#]|$)/, labelKey: "back_to.schedule" },
   { test: /^\/my\/meldingen(?:[/?#]|$)/, labelKey: "back_to.my_meldingen" },
   { test: /^\/tickets(?:[?#]|$)/, labelKey: "back_to.tickets" },
-  { test: /^\/extra-work(?:[?#]|$)/, labelKey: "back_to.extra_work" },
+  // P-11 A6 — since P-9 the Extra work list ALWAYS lives on a tab path
+  // (the bare /extra-work redirects to one), so the test is built from
+  // the tab table itself: a new tab joins the back link the moment it
+  // exists, and /extra-work/<id> (a detail, not a list) still does not
+  // match.
+  {
+    test: new RegExp(
+      `^/extra-work(?:/(?:${EXTRA_WORK_TABS.join("|")}))?(?:[?#]|$)`,
+    ),
+    labelKey: "back_to.extra_work",
+  },
   { test: /^\/start(?:[/?#]|$)/, labelKey: "back_to.start" },
   { test: /^\/inbox(?:[/?#]|$)/, labelKey: "back_to.inbox" },
   { test: /^\/admin\/customers\/\d+/, labelKey: "back_to.customer" },
@@ -113,15 +124,21 @@ export function useOriginBackLink(
      *  home (a meerwerk detail defaults to the meerwerk list). */
     fallbackTo?: string;
     fallbackLabelKey?: string;
+    /** An origin the caller refuses even when recorded (P-11 A6: a
+     *  ticket born from extra work is never "from Tickets" — extra
+     *  work is not on that page). A refused origin falls through to
+     *  the fallback. */
+    notFrom?: RegExp;
   } = {},
 ): OriginBackLink {
   const { t } = useTranslation("common");
   // Read once, at mount: the origin is where the reader CAME from.
   const [origin] = useState<string | null>(() => options.override ?? previousPath());
-  const known = origin ? ORIGINS.find((o) => o.test.test(origin)) : undefined;
+  const accepted = origin && !options.notFrom?.test(origin) ? origin : null;
+  const known = accepted ? ORIGINS.find((o) => o.test.test(accepted)) : undefined;
   const home = roleHome(role);
-  const target = known && origin
-    ? { to: origin, labelKey: known.labelKey }
+  const target = known && accepted
+    ? { to: accepted, labelKey: known.labelKey }
     : options.fallbackTo
       ? { to: options.fallbackTo, labelKey: options.fallbackLabelKey ?? home.labelKey }
       : home;

@@ -16,15 +16,21 @@ import enCommon from "../i18n/en/common.json";
 import nlCommon from "../i18n/nl/common.json";
 import enStaffSlots from "../i18n/en/staff_slots.json";
 import nlStaffSlots from "../i18n/nl/staff_slots.json";
-import type { ExtraWorkDisplayPhase } from "../api/types";
+import enExtraWork from "../i18n/en/extra_work.json";
+import nlExtraWork from "../i18n/nl/extra_work.json";
+import type { ExtraWorkDisplayPhase, ExtraWorkRequestList } from "../api/types";
 import {
   ALL_CHIP,
+  BUCKET_LABEL_KEY,
   DEFAULT_CHIP,
   EXTRA_WORK_TABS,
   SUB_CHIPS,
   TAB_OF_PHASE,
+  bucketOf,
   chipFromParam,
   deepLinkTarget,
+  otherTabMatches,
+  searchMatches,
 } from "./extraWorkTabs";
 
 // The bundles are flat `{ "dotted.key": "word" }` files; their inferred
@@ -196,5 +202,66 @@ describe("each tab opens on the chip with work to do (P-10 B2)", () => {
     expect(deepLinkTarget("IN_PROGRESS")).toEqual({ bucket: "approved", chip: "in_progress" });
     expect(deepLinkTarget("CANCELLED")).toEqual({ bucket: "cancelled", chip: null });
     expect(deepLinkTarget("nonsense")).toBeNull();
+  });
+});
+
+describe("search searches the tab you are in (P-11 A5)", () => {
+  const extraWork: Record<"en" | "nl", Bundle> = {
+    en: enExtraWork as unknown as Bundle,
+    nl: nlExtraWork as unknown as Bundle,
+  };
+  const row = (over: {
+    title: string;
+    display_phase: ExtraWorkDisplayPhase;
+    building?: string | null;
+    customer?: string | null;
+  }) =>
+    ({
+      title: over.title,
+      display_phase: over.display_phase,
+      building_name: over.building === undefined ? "B1 Amsterdam" : over.building,
+      customer_name: over.customer === undefined ? "B Amsterdam" : over.customer,
+    }) as unknown as ExtraWorkRequestList;
+
+  it("the pin: a title that exists in two phases — the in-tab filter keeps its own, the other-tab line names the rest", () => {
+    const rows = [
+      row({ title: "Opleverschoonmaak kantoor 2", display_phase: "WAITING_PRICE" }),
+      row({ title: "Opleverschoonmaak kantoor 2", display_phase: "IN_EXECUTION" }),
+      row({ title: "Glasbewassing binnen", display_phase: "WAITING_PRICE" }),
+    ];
+    const needle = "opleverschoonmaak";
+    const inTab = rows.filter(
+      (r) => bucketOf(r) === "to-price" && searchMatches(r, needle),
+    );
+    expect(inTab).toHaveLength(1);
+    expect(inTab[0].display_phase).toBe("WAITING_PRICE");
+    const elsewhere = otherTabMatches(rows, "to-price", needle);
+    expect(elsewhere).toHaveLength(1);
+    expect(elsewhere[0].bucket).toBe("approved");
+    expect(elsewhere[0].row.display_phase).toBe("IN_EXECUTION");
+  });
+
+  it("an empty or blank needle reports nothing elsewhere", () => {
+    const rows = [row({ title: "Anything", display_phase: "DONE" })];
+    expect(otherTabMatches(rows, "to-price", "")).toEqual([]);
+    expect(otherTabMatches(rows, "to-price", "   ")).toEqual([]);
+  });
+
+  it("the cross-tab line reads the SAME hay as the in-tab filter: title, building, customer", () => {
+    const rows = [
+      row({ title: "x", display_phase: "DONE", building: "R2 Rotterdam", customer: null }),
+      row({ title: "y", display_phase: "DONE", building: null, customer: "City Office" }),
+    ];
+    expect(otherTabMatches(rows, "to-price", "rotterdam")).toHaveLength(1);
+    expect(otherTabMatches(rows, "to-price", "city office")).toHaveLength(1);
+    expect(otherTabMatches(rows, "to-price", "nowhere")).toHaveLength(0);
+  });
+
+  it("every bucket the line can name has a label in both locales", () => {
+    for (const key of Object.values(BUCKET_LABEL_KEY)) {
+      for (const locale of ["en", "nl"] as const) {
+        expect(extraWork[locale][key], `${locale}:${key}`).toBeTruthy();
+      }
+    }
   });
 });

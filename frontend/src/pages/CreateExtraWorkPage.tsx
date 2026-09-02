@@ -94,6 +94,10 @@ interface ParentFormState {
   description: string;
   urgent: boolean;
   preferred_date: string;
+  // P-11 A3 — the hard date, back on create. P-10 B6 cut the Planning
+  // fold and took this input with it; the fold was the over-cut, the
+  // deadline was not. Optional; the wish stays a wish.
+  deadline: string;
 }
 
 const EMPTY_PARENT: ParentFormState = {
@@ -103,6 +107,7 @@ const EMPTY_PARENT: ParentFormState = {
   description: "",
   urgent: false,
   preferred_date: "",
+  deadline: "",
 };
 
 type FactKey = "department" | "work_type" | "billed_to";
@@ -648,6 +653,8 @@ export function CreateExtraWorkPage() {
           derivedDescription(cartWithOther, t("common:meerwerk_flow.other_prefix")),
         urgency: form.urgent ? ("URGENT" as const) : ("NORMAL" as const),
         preferred_date: form.preferred_date || null,
+        // P-11 A3 — the hard date; the wire and the type never left.
+        deadline: form.deadline || null,
         ...(effectiveDepartment ? { department: effectiveDepartment.id } : {}),
         ...(effectiveWorkType ? { work_type: effectiveWorkType.id } : {}),
         billed_to: billedToPayload,
@@ -1130,6 +1137,24 @@ export function CreateExtraWorkPage() {
                 onChange={(event) => update("preferred_date", event.target.value)}
               />
               <span className="muted small">{t("create.preferred_date_hint")}</span>
+            </div>
+
+            {/* P-11 A3 — the deadline, under the wish. The wish says
+                when the customer would like it; this says when it MUST
+                be done. Optional, and empty means no hard date. */}
+            <div className="field">
+              <label className="field-label" htmlFor="ew-deadline">
+                {t("create.field_deadline")}
+              </label>
+              <input
+                id="ew-deadline"
+                className="field-input"
+                type="date"
+                data-testid="extra-work-create-deadline"
+                value={form.deadline}
+                onChange={(event) => update("deadline", event.target.value)}
+              />
+              <span className="muted small">{t("create.deadline_hint")}</span>
             </div>
 
             {/* W5-B — a series: one real meerwerk per chosen day. P-10 B6:

@@ -298,7 +298,21 @@ export function PlanWorkDialog({
   const isPastDay = (day: string) => day !== "" && day < todayStr;
 
   // ---- stage 2: who and how much ------------------------------------
-  const [budget, setBudget] = useState(ew.budget_hours ?? "");
+  // P-11 A9 — the total FOLLOWS the people's hours until the operator
+  // overrides it (the server has counted the per-person hours as the
+  // plan's hours all along; P-10 B5's marker on this field was a label
+  // lie). `budget` holds ONLY the override — "" means "follow the sum".
+  // A stored budget equal to the stored sum IS the sum, not an
+  // override; clearing the field returns it to following the sum.
+  const [budget, setBudget] = useState(() => {
+    const stored = ew.budget_hours ?? "";
+    if (stored.trim() === "") return "";
+    const storedSum = (ew.planned_hours ?? []).reduce(
+      (sum, row) => sum + toHours(row.hours),
+      0,
+    );
+    return Math.abs(toHours(stored) - storedSum) < 0.005 ? "" : stored;
+  });
   /** What the server holds right now, keyed like the cells. Unchanged
    *  values on days outside the window are allowed through the save
    *  (the server keeps them); anything else outside is refused. */
@@ -586,6 +600,23 @@ export function PlanWorkDialog({
   const hasBudget = budget.trim() !== "";
   const overrun = hasBudget && distributed > budgetHours;
   const overBy = (distributed - budgetHours).toFixed(2);
+  // P-11 A9 — what the field SHOWS: the override when one is typed,
+  // else the live sum of the people's hours. The trailing-zero trim
+  // keeps "5" editable as "5", not "5.00".
+  const budgetShown = hasBudget
+    ? budget
+    : distributed > 0
+      ? String(Number(distributed.toFixed(2)))
+      : "";
+  // The small line under the field: an override that says something
+  // other than the people's hours. The overrun warning below already
+  // covers the "less than the people's hours" direction with the
+  // stronger words, so this renders only for the quiet direction.
+  const budgetDiffers =
+    hasBudget &&
+    distributed > 0 &&
+    !overrun &&
+    Math.abs(budgetHours - distributed) >= 0.005;
   const fmtHours = (n: number) => n.toFixed(2).replace(".", locale.startsWith("nl") ? "," : ".");
 
   // ---- stage 3: done means ------------------------------------------------
@@ -708,7 +739,12 @@ export function PlanWorkDialog({
       return;
     }
     const payload: ExtraWorkPlanPayload = {};
+    // P-11 A9 — only an OVERRIDE is stored. Following the sum stores
+    // nothing (the server counts the people's hours itself), and
+    // clearing a previously stored override clears it server-side too
+    // (`apply_plan` reads key-presence; null empties the field).
     if (budget.trim() !== "") payload.budget_hours = budget.trim();
+    else if ((ew.budget_hours ?? "").trim() !== "") payload.budget_hours = null;
     payload.provider_planned_date = start;
     payload.provider_planned_end_date = end !== "" ? end : start;
     if (assignments.length > 0) {
@@ -1327,7 +1363,13 @@ export function PlanWorkDialog({
                   <label className="field ew-plan-budget">
                     <span className="field-label">
                       {t("plan.budget_total_label")}
-                      {pricingMarker("hours", "extra-work-plan-budget-marker")}
+                      {/* P-11 A9 — "required for pricing" only while
+                          NOTHING supplies hours: the sum is 0 and no
+                          override is typed. The server has never
+                          required this field while the people have
+                          hours. */}
+                      {budgetShown.trim() === "" &&
+                        pricingMarker("hours", "extra-work-plan-budget-marker")}
                     </span>
                     <input
                       type="number"
@@ -1335,11 +1377,19 @@ export function PlanWorkDialog({
                       step="0.25"
                       inputMode="decimal"
                       className="field-input"
-                      value={budget}
+                      value={budgetShown}
                       onChange={(e) => setBudget(e.target.value)}
                       aria-describedby="extra-work-plan-budget-hint"
                       data-testid="extra-work-plan-budget"
                     />
+                    {budgetDiffers && (
+                      <span
+                        className="field-hint"
+                        data-testid="extra-work-plan-budget-differs"
+                      >
+                        {t("plan.budget_differs", { sum: fmtHours(distributed) })}
+                      </span>
+                    )}
                     {fieldError("budget") && (
                       <span className="field-error" role="alert">
                         {fieldError("budget")}

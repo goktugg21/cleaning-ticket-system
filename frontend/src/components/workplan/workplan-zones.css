@@ -244,3 +244,21 @@
 }
 /* The on-hold fold sits under the board now. */
 .agenda-parked { margin-top: 14px; }
+/* P-11 A1 — the status word under a card's / a strip row's title. The
+   badge is the existing palette (cell-tag / phase-badge); these only
+   place it. */
+.wp-card-badge {
+  display: block;
+  margin: 1px 0 3px;
+}
+.wp-row-badge {
+  display: inline-flex;
+  align-self: flex-start;
+  margin: 1px 0 2px;
+}
+/* P-11 A2 — the Plan-N shared day/time pair, shown in "same day" mode. */
+.wp-plan-many-shared {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0 10px;
+}

@@ -863,6 +863,58 @@ export function DashboardPage({
     isChargeableWork,
   ]);
 
+  /* P-11 A5 — search searches the tab you are in (`status__in` above
+   * narrows it); what matches in OTHER tabs is ONE extra ask with the
+   * complement statuses and the same filters, rendered as one line
+   * under the results. Keyed so a stale answer for a different needle
+   * or tab is never shown — no state is cleared synchronously in an
+   * effect, it simply stops matching. */
+  const elsewhereAsk = useMemo(() => {
+    if (!isTicketsPage || showArchive || isChargeableWork || !statusTab) {
+      return null;
+    }
+    const needle = searchActive.trim();
+    if (!needle) return null;
+    const tabStatuses = new Set(ticketTabStatuses(statusTab));
+    const others = TICKET_LIST_STATUSES.filter((s) => !tabStatuses.has(s));
+    if (others.length === 0) return null;
+    const params = { ...queryParams, page: 1, status__in: others.join(",") };
+    return { params, key: JSON.stringify(params) };
+  }, [isTicketsPage, showArchive, isChargeableWork, statusTab, searchActive, queryParams]);
+  const [elsewhereTickets, setElsewhereTickets] = useState<{
+    key: string;
+    count: number;
+    rows: TicketList[];
+  } | null>(null);
+  const [elsewhereOpen, setElsewhereOpen] = useState(false);
+  useEffect(() => {
+    if (!elsewhereAsk) return;
+    let cancelled = false;
+    api
+      .get<PaginatedResponse<TicketList>>("/tickets/", { params: elsewhereAsk.params })
+      .then((response) => {
+        if (cancelled) return;
+        setElsewhereTickets({
+          key: elsewhereAsk.key,
+          count: response.data.count,
+          rows: response.data.results,
+        });
+      })
+      // The line simply does not render; the in-tab list already said
+      // what the search found here.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [elsewhereAsk]);
+  const elsewhereShown =
+    elsewhereAsk !== null &&
+    elsewhereTickets !== null &&
+    elsewhereTickets.key === elsewhereAsk.key &&
+    elsewhereTickets.count > 0
+      ? elsewhereTickets
+      : null;
+
   /**
    * W7 BUG 1 — the SAME object, split in two: what the count endpoint can
    * be told, and what it cannot.
@@ -3154,6 +3206,62 @@ export function DashboardPage({
                       <Link className="btn btn-primary btn-sm" to="/tickets/new">
                         {t("create_ticket_cta")}
                       </Link>
+                    )}
+                  </div>
+                )}
+
+                {/* P-11 A5 — matches outside this tab, one line, opened
+                    on demand, each row named with its tab. */}
+                {elsewhereShown && (
+                  <div className="ew-elsewhere" data-testid="tickets-search-elsewhere">
+                    <p className="muted small">
+                      {t("search_elsewhere", { count: elsewhereShown.count })}{" "}
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => setElsewhereOpen((open) => !open)}
+                        data-testid="tickets-search-elsewhere-toggle"
+                      >
+                        {elsewhereOpen
+                          ? t("search_elsewhere_hide")
+                          : t("search_elsewhere_show")}
+                      </button>
+                    </p>
+                    {elsewhereOpen && (
+                      <ul
+                        className="ew-elsewhere-list"
+                        data-testid="tickets-search-elsewhere-list"
+                      >
+                        {elsewhereShown.rows.map((row) => {
+                          const tabKey = ticketTabOf(row.status);
+                          return (
+                            <li key={row.id} className="ew-elsewhere-row">
+                              <Link
+                                to={`/tickets/${row.id}`}
+                                data-testid={`tickets-elsewhere-row-${row.id}`}
+                              >
+                                {row.ticket_no} · {row.title}
+                              </Link>
+                              {row.customer_name && (
+                                <span className="muted small">{row.customer_name}</span>
+                              )}
+                              <span className="ew-elsewhere-tab">
+                                {tabKey
+                                  ? t(`tickets_tabs.${tabKey}`)
+                                  : t("tickets_tabs.all")}
+                              </span>
+                            </li>
+                          );
+                        })}
+                        {elsewhereShown.count > elsewhereShown.rows.length && (
+                          <li className="ew-elsewhere-row muted small">
+                            {t("search_elsewhere_truncated", {
+                              shown: elsewhereShown.rows.length,
+                              count: elsewhereShown.count,
+                            })}
+                          </li>
+                        )}
+                      </ul>
                     )}
                   </div>
                 )}

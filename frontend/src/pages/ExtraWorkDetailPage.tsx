@@ -86,6 +86,10 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { useOriginBackLink } from "../hooks/useBackLink";
 import { ActualHoursPanel } from "../components/extra-work/ActualHoursPanel";
+import {
+  pointAtMissingPiece,
+  useMissingPieceAnchor,
+} from "../lib/missingPiece";
 import { CoverageNotice } from "../components/extra-work/CoverageNotice";
 import {
   actualHoursPanelKey,
@@ -949,6 +953,9 @@ export function ExtraWorkDetailPage() {
   const messageLocale = useLocaleCode();
   // FE-4 (Addendum D §D.12 item 1) — back goes where the reader came
   // from; the meerwerk list when there is no in-app origin.
+  // P-11 B3 — where "add a line" lands: the Money tab's line-items
+  // card. The anchor mounts with the tab, so the door is never dead.
+  const pricingLinesAnchor = useMissingPieceAnchor<HTMLDivElement>("pricing-lines");
   const originBack = useOriginBackLink(me?.role, {
     fallbackTo: "/extra-work",
     fallbackLabelKey: "back_to.extra_work",
@@ -2658,7 +2665,11 @@ export function ExtraWorkDetailPage() {
      does exactly what it did. */
   const NEXT_STEP_START_KEYS: Record<string, string> = {
     "next.under_review": "next.under_review_start",
-    "next.button.prepare_proposal": "next.button.prepare_proposal_start",
+    // P-11 A4 — the instant route says the SAME words the list row
+    // says: "Price and start". (The quote route's button now reads
+    // "Price and send" everywhere — the price's destination is on the
+    // button.)
+    "next.button.prepare_proposal": "next.button.price_and_start",
     "next.pricing_proposed": "next.pricing_proposed_start",
     "next.customer.pricing_proposed": "next.customer.pricing_proposed_start",
     "next.button.open_proposal": "next.button.open_proposal_start",
@@ -3669,7 +3680,11 @@ export function ExtraWorkDetailPage() {
               tab opened with its priced lines hidden. The count and
               total that justified the collapsed header are the table's
               own first and last figures. */}
-          <div className="card" data-testid="extra-work-detail-line-items">
+          <div
+            className="card"
+            data-testid="extra-work-detail-line-items"
+            ref={pricingLinesAnchor}
+          >
             <div className="form-section">
               <div className="form-section-title">
                 {t("detail.line_items_section_title")}
@@ -3981,6 +3996,9 @@ export function ExtraWorkDetailPage() {
                   void reloadApprovedProposalDetail();
                 }
               }}
+              // P-11 B3 — the "no matching line" sentence's door: land
+              // on the line-items card, lit for a moment.
+              onAddLine={() => pointAtMissingPiece("pricing-lines")}
             />
           )}
             </>

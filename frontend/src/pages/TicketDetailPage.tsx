@@ -27,6 +27,9 @@ import axios from "axios";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { pointAtMissingPiece, useMissingPieceAnchor } from "../lib/missingPiece";
+import { createTimeEntry, listHourTypes } from "../api/timesheets";
+import { isoWeekOf, toDateString } from "../lib/isoWeek";
+import { planDoorAction } from "../lib/planDoor";
 import { describeTransitionRefusal } from "../lib/transitionRefusal";
 // W-UX1-B — reuse, not redesign: the same viewer the invoice preview
 // opens, with its download button switched off.
@@ -685,21 +688,11 @@ export function TicketDetailPage() {
     );
   };
   const { me } = useAuth();
-  // FE-4 (Addendum D §D.12 item 1) — back goes where the reader came
-  // from: My Schedule (week and filters intact), Mijn meldingen, Tickets
-  // with its query; the role's home list when there is no in-app origin.
-  const backToTickets = useOriginBackLink(me?.role, { override: chargeableFrom });
   // W-VIEWER §8 — `staff_slots` joins the list because the worker's own
   // parts card now sits on THIS page's overview tab and its title and
   // count line are that bundle's strings. Adding the namespace rather
   // than copying two keys into `ticket_detail`: one string, one owner.
   const { t } = useTranslation(["ticket_detail", "common", "staff_slots"]);
-  // The label never lies about the destination: it names the chargeable
-  // list exactly when the link goes there. Key reused from the bundle
-  // that already owns the phrase.
-  const backToTicketsLabel = chargeableFrom
-    ? t("extra_work:back_to_chargeable_work")
-    : backToTickets.label;
   // M2 P5 — type / customer-facing labels for the resolver-gated
   // credential summaries on assigned-staff entries (reuses the P4
   // namespace; keys are NOT duplicated here).
@@ -733,6 +726,32 @@ export function TicketDetailPage() {
   };
 
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
+  // FE-4 (Addendum D §D.12 item 1) — back goes where the reader came
+  // from: My Schedule (week and filters intact), Mijn meldingen, Tickets
+  // with its query; the role's home list when there is no in-app origin.
+  // P-11 A6 — a ticket born from extra work is found under Extra work,
+  // never on the Tickets page (P-10 B3), so its back link never reads
+  // "Back to Tickets": the fallback is the Approved tab and a recorded
+  // /tickets origin is refused. `canAccessExtraWork` gates the provider
+  // list — STAFF and customers keep their own homes.
+  const spawnedBack =
+    Boolean(ticket?.extra_work_origin) && canAccessExtraWork(me?.role);
+  const backToTickets = useOriginBackLink(me?.role, {
+    override: chargeableFrom,
+    ...(spawnedBack
+      ? {
+          fallbackTo: "/extra-work/approved",
+          fallbackLabelKey: "back_to.extra_work",
+          notFrom: /^\/tickets(?:[?#]|$)/,
+        }
+      : {}),
+  });
+  // The label never lies about the destination: it names the chargeable
+  // list exactly when the link goes there. Key reused from the bundle
+  // that already owns the phrase.
+  const backToTicketsLabel = chargeableFrom
+    ? t("extra_work:back_to_chargeable_work")
+    : backToTickets.label;
   // P-4 (Part D) — tell the sidebar what kind of record this is, so a
   // MEERWERK-kind ticket lights "Extra work" and not "Tickets".
   const currentTicketId = ticket?.id ?? null;
@@ -878,6 +897,18 @@ export function TicketDetailPage() {
   // `staff_completion_route_mismatch` on submit, which means the
   // BSV flag changed between open and submit.
   const [completeModalOpen, setCompleteModalOpen] = useState(false);
+  /* P-11 B3 — "Report done" asks per-person hours for THIS job: one
+     number per visible crew member, the day is the report day, written
+     as timesheet job lines (`TimeEntry`, source TICKET) after the
+     transition lands. The hour type is the company's default; the
+     office corrects a type on the Hours page's grid. */
+  const [completeHours, setCompleteHours] = useState<Record<number, string>>({});
+  const [completeHourType, setCompleteHourType] = useState<number | null>(null);
+  const completionCrew = (ticket?.assigned_staff ?? []).flatMap((entry) =>
+    entry.anonymous
+      ? []
+      : [{ id: entry.id, name: entry.full_name || entry.email || `#${entry.id}` }],
+  );
   const [completeNote, setCompleteNote] = useState("");
   const [completeRoute, setCompleteRoute] =
     useState<StaffCompletionRoute | null>(null);
@@ -2532,6 +2563,7 @@ export function TicketDetailPage() {
     setCompleteNote("");
     setCompleteError(null);
     setCompleteRoute(null);
+    setCompleteHours({});
     setCompleteModalOpen(true);
     setCompleteRouteLoading(true);
     try {
@@ -2541,6 +2573,20 @@ export function TicketDetailPage() {
       setCompleteError(getApiError(err));
     } finally {
       setCompleteRouteLoading(false);
+    }
+    // P-11 B3 — the default hour type for the hours ask. Non-fatal:
+    // without one the hours fields simply do not render.
+    if (ticket) {
+      try {
+        const types = await listHourTypes({
+          company: ticket.company,
+          is_active: true,
+        });
+        const active = types.filter((hourType) => hourType.is_active);
+        setCompleteHourType(active[0]?.id ?? null);
+      } catch {
+        setCompleteHourType(null);
+      }
     }
   }
 
@@ -2588,6 +2634,36 @@ export function TicketDetailPage() {
         note: completeNote.trim(),
       };
       await api.post<TicketDetail>(`/tickets/${id}/status/`, payload);
+      // P-11 B3 — the per-person hours land as timesheet JOB lines,
+      // after the report stood. A failed hours write never unwinds the
+      // completion: the report is the fact, the hours are said again
+      // on the Hours page if need be.
+      if (ticket && completeHourType !== null) {
+        const today = toDateString(new Date());
+        for (const person of completionCrew) {
+          const raw = (completeHours[person.id] ?? "").trim().replace(",", ".");
+          const hoursValue = Number(raw);
+          if (!Number.isFinite(hoursValue) || hoursValue <= 0) continue;
+          try {
+            await createTimeEntry({
+              company: ticket.company,
+              employee: person.id,
+              date: today,
+              hour_type: completeHourType,
+              hours: hoursValue.toFixed(2),
+              building: ticket.building,
+              source_type: "TICKET",
+              source_id: ticket.id,
+            });
+          } catch (hoursErr) {
+            toast.push({
+              variant: "error",
+              title: getApiError(hoursErr),
+            });
+            break;
+          }
+        }
+      }
       await loadTicket();
       closeCompleteModal();
     } catch (err) {
@@ -3210,6 +3286,14 @@ export function TicketDetailPage() {
   // in "Andere stappen" with the other doors.
   const archiveIsPrimary =
     canArchive && primaryButtons.length === 0 && !canShowCompleteWorkButton;
+  // Declared above the banner because the "Plan it" door reads it too
+  // (P-11 A7): the door and the Actions card must agree on who may
+  // open the extra-work plan modal.
+  const canOpenPlan =
+    !!ticket.extra_work_origin &&
+    isProviderManagementRole(me?.role) &&
+    canAccessExtraWork(me?.role) &&
+    !TERMINAL_UI_STATUSES.has(ticket.status);
   const primaryActionNode: ReactNode = canShowCompleteWorkButton ? (
     <button
       type="button"
@@ -3235,7 +3319,23 @@ export function TicketDetailPage() {
           <button
             type="button"
             className="btn btn-ghost btn-sm"
-            onClick={() => pointAtMissingPiece("schedule")}
+            onClick={() => {
+              // P-11 A7 — the door was dead: it pointed at the
+              // schedule anchor without mounting it (the anchor lives
+              // on the Plan tab), so the click did nothing. The door
+              // now lands somewhere real: the plan modal for a
+              // spawned ticket, else the Plan tab's schedule card.
+              const action = planDoorAction({
+                hasExtraWorkOrigin: !!ticket.extra_work_origin,
+                canOpenEwPlan: canOpenPlan,
+              });
+              if (action.kind === "ew-plan-modal") {
+                void openEwPlan();
+              } else {
+                setTicketTab(action.tab);
+                pointAtMissingPiece("schedule");
+              }
+            }}
             data-testid="ticket-start-blocked-plan"
           >
             {t("workflow.start_blocked_link")}
@@ -3255,11 +3355,6 @@ export function TicketDetailPage() {
     </button>
   ) : null;
 
-  const canOpenPlan =
-    !!ticket.extra_work_origin &&
-    isProviderManagementRole(me?.role) &&
-    canAccessExtraWork(me?.role) &&
-    !TERMINAL_UI_STATUSES.has(ticket.status);
   const otherStepNodes: ReactNode[] = [
     ...sidewaysForRender.map((status) =>
       renderTransitionButton(status, "secondary"),
@@ -5603,7 +5698,23 @@ export function TicketDetailPage() {
                 canManageTimesheets(me?.role) &&
                 !TERMINAL_UI_STATUSES.has(ticket.status)
               }
-              onBook={() => setBookHoursOpen(true)}
+              /* P-11 B3 — the office's door is THE GRID: the Hours
+                 page, opened on the job's week with the crew
+                 preselected. The worker's door is Report done, which
+                 now asks the hours itself. (The in-page Book-hours
+                 dialog lost its opener on purpose: one record, two
+                 doors, not three.) */
+              onBook={() => {
+                const day = ticket.scheduled_start_at
+                  ? new Date(ticket.scheduled_start_at)
+                  : new Date();
+                const jobWeek = isoWeekOf(day);
+                const weekParam = `${jobWeek.isoYear}-W${String(jobWeek.isoWeek).padStart(2, "0")}`;
+                const enter = completionCrew.map((person) => person.id).join(",");
+                navigate(
+                  `/admin/hours?week=${weekParam}${enter ? `&enter=${enter}` : ""}`,
+                );
+              }}
               /* W-HOURS5 Task 4 — the Plan door, in the same header,
                  same weight. Same predicate as the page header's. */
               canPlan={
@@ -5722,6 +5833,61 @@ export function TicketDetailPage() {
                     {t("common:ticket_staff_complete.note_or_photo_hint")}
                   </p>
                 </div>
+                {/* P-11 B3 — the hours, asked where the work is
+                    reported: one number per person on the job, the day
+                    is the report day. They land on the timesheet (the
+                    Hours page) and, on extra work, pre-fill the hours
+                    to bill. */}
+                {completeHourType !== null && completionCrew.length > 0 && (
+                  <div
+                    className="field"
+                    data-testid="ticket-staff-complete-hours"
+                  >
+                    <span className="field-label">
+                      {t("common:ticket_staff_complete.hours_title")}
+                    </span>
+                    <p className="muted small" style={{ margin: "0 0 6px" }}>
+                      {t("common:ticket_staff_complete.hours_hint")}
+                    </p>
+                    {completionCrew.map((person) => (
+                      <label
+                        key={person.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span style={{ minWidth: 160 }}>{person.name}</span>
+                        <input
+                          className="field-input"
+                          style={{ maxWidth: 90, textAlign: "right" }}
+                          type="text"
+                          inputMode="decimal"
+                          value={completeHours[person.id] ?? ""}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            if (!/^\d{0,2}([.,]\d{0,2})?$/.test(raw)) return;
+                            setCompleteHours((current) => ({
+                              ...current,
+                              [person.id]: raw,
+                            }));
+                          }}
+                          placeholder="0"
+                          aria-label={t(
+                            "common:ticket_staff_complete.hours_for",
+                            { person: person.name },
+                          )}
+                          data-testid={`ticket-staff-complete-hours-${person.id}`}
+                        />
+                        <span className="muted small">
+                          {t("hours_admin.hour_unit")}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
                 <p className="muted small" style={{ marginTop: 4 }}>
                   {hasImageAttachment
                     ? t("common:ticket_staff_complete.attachment_hint_satisfied")

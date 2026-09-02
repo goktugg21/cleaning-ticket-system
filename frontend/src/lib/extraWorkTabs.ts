@@ -192,6 +192,53 @@ export function bucketOf(row: ExtraWorkRequestList): ExtraWorkBucket | null {
   return (TAB_OF_PHASE as Record<string, ExtraWorkBucket | undefined>)[row.display_phase] ?? null;
 }
 
+/** P-11 A5 — the bucket's name for the cross-tab search line: a tab's
+ *  own label, the cancelled view's title for the view that is not a
+ *  tab. */
+export const BUCKET_LABEL_KEY: Readonly<Record<ExtraWorkBucket, string>> = {
+  ...TAB_LABEL_KEY,
+  [CANCELLED_VIEW]: "tabs.cancelled_title",
+};
+
+/**
+ * P-11 A5 — search searches the tab you are in: the tab is the
+ * question, and a search inside it stays inside it. This is the ONE
+ * search predicate (title, building, customer — the hay the page
+ * always used), shared by the in-tab filter and the cross-tab line so
+ * the two can never disagree about what "matches" means.
+ */
+export function searchMatches(row: ExtraWorkRequestList, needle: string): boolean {
+  const trimmed = needle.trim().toLowerCase();
+  if (!trimmed) return true;
+  const hay = `${row.title} ${row.building_name ?? ""} ${row.customer_name ?? ""}`.toLowerCase();
+  return hay.includes(trimmed);
+}
+
+export interface OtherTabMatch {
+  bucket: ExtraWorkBucket;
+  row: ExtraWorkRequestList;
+}
+
+/** The rows the needle matches OUTSIDE the active bucket, each named
+ *  with its own bucket — the "Also N matches in other tabs" line.
+ *  Pinned by `extraWorkTabs.test.ts` with a title that exists in two
+ *  phases. Rows with a phase this build does not know are dropped here
+ *  (they have no tab to point at); the page's guard counts them. */
+export function otherTabMatches(
+  rows: ReadonlyArray<ExtraWorkRequestList>,
+  activeBucket: ExtraWorkBucket,
+  needle: string,
+): OtherTabMatch[] {
+  if (!needle.trim()) return [];
+  const out: OtherTabMatch[] = [];
+  for (const row of rows) {
+    const bucket = bucketOf(row);
+    if (bucket === null || bucket === activeBucket) continue;
+    if (searchMatches(row, needle)) out.push({ bucket, row });
+  }
+  return out;
+}
+
 export function isExtraWorkTab(value: string | null | undefined): value is ExtraWorkTab {
   return EXTRA_WORK_TABS.includes(value as ExtraWorkTab);
 }

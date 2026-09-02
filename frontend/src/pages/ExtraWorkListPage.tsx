@@ -76,12 +76,15 @@ import {
   SUB_CHIPS,
   TAB_LABEL_KEY,
   TAB_PURPOSE_KEY,
+  BUCKET_LABEL_KEY,
   bucketOf,
   chipFromParam,
   daysSince,
   deepLinkTarget,
   firstTabWithRows,
   isExtraWorkTab,
+  otherTabMatches,
+  searchMatches,
   startsWhenPriced,
   subChipMatches,
   todayIso,
@@ -376,6 +379,10 @@ export function ExtraWorkList({
   // SERVER-side (they compose in `ExtraWorkRequestFilter`); planned and
   // search narrow the loaded rows on the client.
   const [searchInput, setSearchInput] = useState("");
+  // P-11 A5 — the cross-tab result list, opened from the one line
+  // under the results. Folded again when the search is cleared (the
+  // line renders only while a needle is typed).
+  const [elsewhereOpen, setElsewhereOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
   const [categoryOptions, setCategoryOptions] =
     useState<ExtraWorkCategoryOptions>({ live: [], historical: [] });
@@ -562,14 +569,17 @@ export function ExtraWorkList({
       const planned = Boolean(row.provider_planned_date);
       if (plannedFilter === "PLANNED" ? !planned : planned) return false;
     }
-    if (needle) {
-      const hay = `${row.title} ${row.building_name ?? ""} ${
-        row.customer_name ?? ""
-      }`.toLowerCase();
-      if (!hay.includes(needle)) return false;
-    }
+    // P-11 A5 — the ONE search predicate, shared with the cross-tab
+    // line below so the two cannot disagree.
+    if (needle && !searchMatches(row, needle)) return false;
     return true;
   });
+
+  // P-11 A5 — search searches the tab you are in; matches elsewhere are
+  // one line under the results, opened on demand. The rows are already
+  // all in memory (`listAllExtraWork` pages everything), so this costs
+  // no request.
+  const elsewhereMatches = otherTabMatches(rows, activeBucket, needle);
 
   // ---- money line ------------------------------------------------------
   // ONE line per tab, from the loaded rows of that tab, through
@@ -1611,6 +1621,60 @@ export function ExtraWorkList({
                   );
                 })}
               </ul>
+            </div>
+          )}
+
+          {/* P-11 A5 — search searches the tab you are in; what matches
+              ELSEWHERE is one line under the results, opened on demand,
+              each row named with its own tab. */}
+          {!viewCancelled && needle.length > 0 && elsewhereMatches.length > 0 && (
+            <div className="ew-elsewhere" data-testid="extra-work-search-elsewhere">
+              <p className="muted small">
+                {t("list.search_elsewhere", { count: elsewhereMatches.length })}{" "}
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => setElsewhereOpen((open) => !open)}
+                  data-testid="extra-work-search-elsewhere-toggle"
+                >
+                  {elsewhereOpen
+                    ? t("list.search_elsewhere_hide")
+                    : t("list.search_elsewhere_show")}
+                </button>
+              </p>
+              {elsewhereOpen && (
+                <ul
+                  className="ew-elsewhere-list"
+                  data-testid="extra-work-search-elsewhere-list"
+                >
+                  {elsewhereMatches.map(({ bucket, row }) => (
+                    <li key={row.id} className="ew-elsewhere-row">
+                      <Link
+                        to={`/extra-work/${row.id}`}
+                        data-testid={`extra-work-elsewhere-row-${row.id}`}
+                      >
+                        {row.title}
+                      </Link>
+                      <span className="muted small">
+                        {[row.building_name, row.customer_name]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                      <Link
+                        className="ew-elsewhere-tab"
+                        to={
+                          bucket === CANCELLED_VIEW
+                            ? linkTo("finished", CANCELLED_VIEW)
+                            : linkTo(bucket)
+                        }
+                        data-testid={`extra-work-elsewhere-tab-${row.id}`}
+                      >
+                        {t(BUCKET_LABEL_KEY[bucket])}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 

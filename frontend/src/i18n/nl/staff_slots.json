@@ -400,6 +400,8 @@
   "agenda.plan_many_title_other": "{{count}} klussen inplannen",
   "agenda.plan_many_day": "Dag",
   "agenda.plan_many_time": "Tijd (niet verplicht)",
+  "agenda.plan_many_mode_same": "Zelfde dag voor iedereen",
+  "agenda.plan_many_mode_each": "Een dag per klus",
   "agenda.plan_many_save": "Opslaan",
   "agenda.plan_many_no_day": "Kies een dag",
   "agenda.plan_many_saved_one": "{{count}} klus ingepland — staat op het bord",

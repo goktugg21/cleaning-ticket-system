@@ -69,7 +69,11 @@ import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 // the placement marker and two modals; the card and the column are the
 // two the sprint rebuilds, and they are easier to reason about with a
 // file each than as two of six things in one.
-import { FactsList, WorkPlanCard } from "../components/workplan/WorkPlanCard";
+import {
+  EntryStatusBadge,
+  FactsList,
+  WorkPlanCard,
+} from "../components/workplan/WorkPlanCard";
 import { cardFacts } from "../components/workplan/cardFacts";
 import {
   dedupeByJob,
@@ -1677,6 +1681,13 @@ function ZoneRow({
       )}
       <div className="wp-undated-row-main">
         {to ? <Link to={to}>{heading}</Link> : <span>{heading}</span>}
+        {/* P-11 A1 — where the job stands, under the title, on strip
+            rows exactly as on cards. */}
+        <EntryStatusBadge
+          entry={entry}
+          testId={`${testPrefix}-badge-${entry.key}`}
+          className="wp-row-badge"
+        />
         {where && <span className="muted small">{where}</span>}
         {lines.length > 0 && <FactsList lines={lines} testId={`${testPrefix}-facts-${entry.key}`} />}
       </div>
@@ -1859,12 +1870,12 @@ function EntryTableModal({
                     <td>
                       {/* W-VIEWER — three kinds, three status
                           vocabularies. A JOB row carries the TICKET's
-                          status; a SLOT row the slot's. */}
+                          status; a SLOT row the slot's. P-11 A1 — the
+                          extra-work row's word is the list's phase, not
+                          the old machine status ("Busy" and friends are
+                          banned since P-10 B1). */}
                       {entry.kind === "EXTRA_WORK" ? (
-                        <StatusBadge
-                          status={{ kind: "extra-work", value: entry.status }}
-                          variant="cell"
-                        />
+                        <EntryStatusBadge entry={entry} />
                       ) : entry.kind === "TICKET" ? (
                         <StatusBadge
                           status={{ kind: "ticket", value: entry.status }}

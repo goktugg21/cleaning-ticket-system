@@ -400,6 +400,8 @@
   "agenda.plan_many_title_other": "Plan {{count}} jobs",
   "agenda.plan_many_day": "Day",
   "agenda.plan_many_time": "Time (optional)",
+  "agenda.plan_many_mode_same": "Same day for everyone",
+  "agenda.plan_many_mode_each": "A day per job",
   "agenda.plan_many_save": "Save",
   "agenda.plan_many_no_day": "Pick a day",
   "agenda.plan_many_saved_one": "Planned {{count}} job — it's on the board",

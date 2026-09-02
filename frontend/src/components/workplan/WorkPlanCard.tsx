@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import type { Role } from "../../api/types";
 import type { WorkPlanEntry, WorkPlanPart } from "../../api/workPlan";
 import { toDateString } from "../../lib/isoWeek";
+import { PhaseBadge } from "../customer/PhaseBadge";
+import { StatusBadge } from "../StatusBadge";
 import { cardFacts } from "./cardFacts";
 import type { CardFactLine } from "./cardFacts";
 import { detailPath, formatDay } from "./entryHelpers";
@@ -255,6 +257,41 @@ function CardDetails({
   );
 }
 
+/**
+ * P-11 A1 — the job's status, under the title, on every card and strip
+ * row. The owner: "I see the deadline, I don't see where the job is."
+ * One word, one colour, from the vocabularies the rest of the app
+ * already uses: the ticket's own `ticket_status.*` for ticket and slot
+ * rows, the Extra work list's `display_phase` for an extra-work row —
+ * both server-decided, never inferred here.
+ */
+export function EntryStatusBadge({
+  entry,
+  testId,
+  className,
+}: {
+  entry: WorkPlanEntry;
+  testId?: string;
+  /** Wrapper class; the wrapper renders only when the badge does. */
+  className?: string;
+}) {
+  const badge =
+    entry.kind === "EXTRA_WORK" ? (
+      entry.display_phase ? (
+        <PhaseBadge kind="ew" phase={entry.display_phase} testId={testId} />
+      ) : null
+    ) : entry.ticket_status ? (
+      <StatusBadge
+        status={{ kind: "ticket", value: entry.ticket_status }}
+        variant="cell"
+        testId={testId}
+      />
+    ) : null;
+  if (badge === null) return null;
+  if (!className) return badge;
+  return <span className={className}>{badge}</span>;
+}
+
 export function WorkPlanCard({
   entry,
   role,
@@ -347,6 +384,13 @@ export function WorkPlanCard({
       ) : (
         <span className="wp-card-title">{heading}</span>
       )}
+
+      {/* P-11 A1 — where the job stands, under the title. */}
+      <EntryStatusBadge
+        entry={entry}
+        testId="agenda-card-badge"
+        className="wp-card-badge"
+      />
 
       {where && <span className="wp-card-where">{where}</span>}
 

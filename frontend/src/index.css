@@ -16757,44 +16757,108 @@ form.card + .form-fold { margin-top: 16px; }
    with no sideways scroll; elsewhere (My hours) the table lays itself
    out as before and `.hours-week-table-wrap` keeps its fallback scroll.
    ------------------------------------------------------------------ */
-.hours-week-fill-bar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px 16px;
-  flex-wrap: wrap;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-sm);
-  background: var(--surface-2);
+/* P-11 B2 — the fill row is a ROW OF THE TABLE again (the first body
+   row), so its inputs share the day columns by construction. The
+   P-8R sticky-overlap problem cannot recur: its first cell spans ONE
+   column, like every data row's. Amber, per the mockup. */
+.hours-week-fill-row td {
+  background: var(--amber-soft, #fff8ec);
 }
-.hours-week-fill-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1 1 240px;
-  min-width: 0;
+.hours-week-fill-what {
+  white-space: normal;
 }
-.hours-week-fill-days {
-  display: flex;
-  gap: 6px;
-  flex: 0 0 auto;
+.hours-week-fill-dash {
+  color: var(--text-faint);
 }
-.hours-week-fill-day {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+.hours-week-apply-label {
+  display: block;
+  font-weight: 600;
 }
-.hours-week-fill-day-label {
-  font-size: 11px;
+.hours-week-apply-hint {
+  display: block;
+  font-size: 11.5px;
   color: var(--text-muted);
-  white-space: nowrap;
+}
+
+/* The person band: one green row per person, the name left, the week
+   total right. */
+.hours-week-person td {
+  background: var(--green-faint, #f0faf4);
+  font-weight: 700;
+  border-top: 2px solid var(--border-soft);
+}
+.hours-week-person td.hours-week-group-total {
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.hours-week-fill-day.hours-week-day-quiet .hours-week-fill-day-label {
-  color: var(--text-faint);
+.hours-week-std {
+  display: block;
+}
+.hours-week-line-sub {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.hours-week-grid-table tbody td.hours-week-std-cell:first-child {
+  padding-left: calc(var(--cell-x-edge) + 8px);
+}
+.hours-week-kind-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--teal-soft, #e8f5f3);
+  color: var(--teal, #0f6b5e);
+}
+.hours-week-kind-tag-ew {
+  background: var(--amber-soft, #fff8ec);
+  color: var(--amber, #9a5a00);
+}
+.hours-week-child-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.hours-week-type-select {
+  max-width: 100%;
+  font-size: 12.5px;
+  padding: 4px 6px;
+  height: auto;
+}
+.hours-week-cell-set {
+  background: var(--teal-soft, #e8f5f3);
+  border-color: var(--teal-border, #bfe3dc);
+  font-weight: 600;
+}
+.hours-week-add-row td {
+  border-bottom: 2px solid var(--border-soft);
+  padding-top: 4px;
+  padding-bottom: 8px;
+}
+.hours-week-add-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hours-week-add-line-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hours-week-remove {
+  margin-left: 6px;
+  padding: 0 6px;
+  min-height: 0;
+  line-height: 1.2;
 }
 
 .hours-week-child-first td {
@@ -16841,14 +16905,12 @@ form.card + .form-fold { margin-top: 16px; }
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.week-entry-modal .hours-week-col-worker,
-.week-entry-modal .hours-week-col-building,
-.week-entry-modal .hours-week-col-job {
-  /* The label columns share whatever the fixed columns leave. */
+.week-entry-modal .hours-week-col-what {
+  /* The Line column takes what the fixed columns leave. */
   width: auto;
 }
 .week-entry-modal .hours-week-col-type {
-  width: 120px;
+  width: 150px;
 }
 .week-entry-modal .hours-week-col-day {
   /* 54px box + 6px padding each side, plus room for the widest
@@ -16857,9 +16919,6 @@ form.card + .form-fold { margin-top: 16px; }
 }
 .week-entry-modal .hours-week-col-total {
   width: 72px;
-}
-.week-entry-modal .hours-week-col-remove {
-  width: 110px;
 }
 .week-entry-modal .hours-week-identity {
   white-space: normal;
@@ -16947,6 +17006,26 @@ form.card + .form-fold { margin-top: 16px; }
 }
 .ew-tab-table .td-next { text-align: right; white-space: nowrap; }
 .ew-list-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+/* P-11 A5 — the cross-tab search line and its fold. */
+.ew-elsewhere { margin-top: 10px; }
+.ew-elsewhere-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+.ew-elsewhere-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  min-width: 0;
+}
+.ew-elsewhere-row:last-child { border-bottom: 0; }
+.ew-elsewhere-row > a:first-child { font-weight: 600; overflow-wrap: anywhere; }
+.ew-elsewhere-tab { margin-left: auto; white-space: nowrap; font-size: 13px; }
 .ew-cancelled-link {
   width: fit-content;
   font-size: 13px;

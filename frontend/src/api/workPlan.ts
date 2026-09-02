@@ -14,6 +14,7 @@
 // stays right even when `entries` hits its bound — which the response
 // says out loud through `truncated`.
 import { api } from "./client";
+import type { ExtraWorkDisplayPhase } from "./types";
 
 /** Why a card is in the week it is in. §12B: a card shown outside its
  *  planned week must say why. */
@@ -128,6 +129,10 @@ export interface WorkPlanEntry {
   status: string;
   state: WorkPlanState;
   ticket_status: string | null;
+  /** P-11 A1 — the extra-work row's status word: the same
+   *  `display_phase` the Extra work list shows, server-decided; null
+   *  on ticket and slot rows (those carry `ticket_status`). */
+  display_phase: ExtraWorkDisplayPhase | null;
   ticket_type: string | null;
   urgency: string | null;
   customer_name: string | null;

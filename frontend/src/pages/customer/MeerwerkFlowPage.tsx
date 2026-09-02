@@ -93,6 +93,8 @@ export function MeerwerkFlowPage() {
   const [otherDraft, setOtherDraft] = useState("");
   const [unaddedAsk, setUnaddedAsk] = useState(false);
   const [wishDate, setWishDate] = useState("");
+  // P-11 A3 — the hard date, asked under the wish. Optional.
+  const [deadline, setDeadline] = useState("");
   const [autoStart, setAutoStart] = useState(false);
 
   const [preview, setPreview] = useState<ExtraWorkPreviewResponse | null>(null);
@@ -231,6 +233,8 @@ export function MeerwerkFlowPage() {
           t("meerwerk_flow.other_prefix"),
         ),
         preferred_date: wishDate || null,
+        // P-11 A3 — the hard date rides along when one was given.
+        deadline: deadline || null,
         billed_to: null,
         // §D.5.2 — urgentie is not asked; the server default stands.
         urgency: "NORMAL",
@@ -411,6 +415,26 @@ export function MeerwerkFlowPage() {
             />
             <p className="muted small" style={{ marginTop: 6 }}>
               {t("meerwerk_flow.q_when_helper")}
+            </p>
+            {/* P-11 A3 — the deadline, under the wish, optional. */}
+            <label
+              className="field-label"
+              htmlFor="meerwerk-deadline"
+              style={{ marginTop: 12 }}
+            >
+              <Calendar size={14} strokeWidth={2} />{" "}
+              {t("extra_work:create.field_deadline")}
+            </label>
+            <input
+              id="meerwerk-deadline"
+              type="date"
+              className="field-input"
+              value={deadline}
+              onChange={(event) => setDeadline(event.target.value)}
+              data-testid="meerwerk-deadline"
+            />
+            <p className="muted small" style={{ marginTop: 6 }}>
+              {t("extra_work:create.deadline_hint")}
             </p>
           </div>
         )}
