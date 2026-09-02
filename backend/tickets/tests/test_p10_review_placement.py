@@ -72,6 +72,15 @@ class _ReviewFixture(WorkPlanFixture):
         # holds a BuildingManagerAssignment on `self.building`.
         self.bystander = self.make_user("manager-c@example.com", UserRole.BUILDING_MANAGER)
         BuildingManagerAssignment.objects.create(user=self.bystander, building=self.building)
+        # P-11 F — the OTHER in-scope not-responsible case, noted rather
+        # than tested (the owner's call): a manager like sophie-admin
+        # (bright-facilities) is a COMPANY_ADMIN whose scope admits the
+        # ticket but who sits in no responsibility tier — named, legacy
+        # or building ring. She reads the strip, exactly as `bystander`
+        # does here when another manager is named; the predicate
+        # (`_ticket_responsible_q`) never asks about her at all, so a
+        # test would re-prove the bystander rows above with a different
+        # role string.
 
     def week_of(self, day):
         iso = day.isocalendar()

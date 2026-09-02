@@ -262,3 +262,14 @@
   gap: 10px;
   margin: 8px 0 10px;
 }
+/* P-11 F — a strip expanded to the zone's whole list stays bounded:
+   it scrolls inside itself instead of pushing the board off screen. */
+.wp-strip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wp-strip-list-all {
+  max-height: 420px;
+  overflow-y: auto;
+}

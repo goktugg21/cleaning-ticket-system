@@ -76,7 +76,6 @@
   "list.deadline_today": "deadline vandaag",
   "list.days_late_one": "{{count}} dag te laat",
   "list.days_late_other": "{{count}} dagen te laat",
-  "list.not_planned": "Nog niet gepland",
   "list.nobody_yet": "Nog niemand",
   "list.not_invoiced_yet": "Nog niet gefactureerd",
   "list.bills_on_day": "factureert op dag {{day}}",

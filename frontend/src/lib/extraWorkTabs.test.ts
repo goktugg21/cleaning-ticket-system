@@ -90,13 +90,13 @@ describe("the Approved tab's chips are the ticket's own status words", () => {
     ]);
   });
 
-  it("the Not planned yet chip is the schedule's zone word, through the shared phase key", () => {
+  it("the Not planned yet words live in ONE key (P-11 F)", () => {
     const chip = approvedChips.find((c) => c.key === "not_planned");
     expect(chip?.labelKey).toBe("common:phase.ew.WAITING_PLANNING");
     for (const locale of LOCALES) {
-      expect(common[locale]["phase.ew.WAITING_PLANNING"]).toBe(
-        staffSlots[locale]["agenda.undated_title"],
-      );
+      expect(common[locale]["phase.ew.WAITING_PLANNING"]).toBeTruthy();
+      // The parallel copies are GONE, not merely equal.
+      expect(staffSlots[locale]["agenda.undated_title"]).toBeUndefined();
     }
   });
 

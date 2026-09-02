@@ -123,8 +123,9 @@ export const SUB_CHIPS: Readonly<Record<ExtraWorkTab, ReadonlyArray<ExtraWorkSub
   ],
   // P-10 B1 — the ticket's own words, in the order the work moves.
   // "Not planned yet" is the schedule's zone word (My schedule's
-  // `staff_slots:agenda.undated_title`), kept identical in the shared
-  // `common:phase.ew.WAITING_PLANNING` every badge reads.
+  // P-11 F — ONE key: `common:phase.ew.WAITING_PLANNING` is the only
+  // home of the words; the strip title, the list cell and this chip
+  // all read it.
   approved: [
     ALL_CHIP,
     { key: "not_planned", labelKey: "common:phase.ew.WAITING_PLANNING", phases: ["WAITING_PLANNING"] },

@@ -409,12 +409,13 @@ function WorkPlanWeek() {
   const [planError, setPlanError] = useState("");
   /* P-10 A5 — "Plan N": the selected rows the one dialog plans. */
   const [planMany, setPlanMany] = useState<WorkPlanEntry[] | null>(null);
-  /* P-10 A3 — "Show all N": a strip's whole list, in the table modal. */
-  const [showAll, setShowAll] = useState<{
-    title: string;
-    rows: WorkPlanEntry[];
-    testId: string;
-  } | null>(null);
+  /* P-11 F — "Show all N" opens the zone's OWN list: the strip
+     expands to every row (bounded by scroll), never the old table
+     modal. The modal stays for the day and Overdue doors, which are a
+     different question. */
+  const [stripAll, setStripAll] = useState<Record<string, boolean>>({});
+  const toggleStripAll = (id: string) =>
+    setStripAll((current) => ({ ...current, [id]: !current[id] }));
   /* P-6 V4 — stale-work triage. Select rows in the "Not planned yet"
      drawer, then park or close them with ONE reason, through the
      existing transitions (`/tickets/bulk-triage/` walks the machine's
@@ -898,7 +899,7 @@ function WorkPlanWeek() {
           id="unplanned"
           tone="amber"
           count={undatedShown}
-          title={t("agenda.undated_title")}
+          title={t("common:phase.ew.WAITING_PLANNING")}
           summary={
             undatedOldest !== null && undatedOldest > 0
               ? t("agenda.strip_unplanned_summary", { count: undatedOldest })
@@ -922,16 +923,12 @@ function WorkPlanWeek() {
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  onClick={() =>
-                    setShowAll({
-                      title: t("agenda.undated_title"),
-                      rows: undatedJobs,
-                      testId: "agenda-undated-all",
-                    })
-                  }
+                  onClick={() => toggleStripAll("unplanned")}
                   data-testid="agenda-undated-show-all"
                 >
-                  {t("agenda.strip_show_all", { count: undatedShown })}
+                  {stripAll.unplanned
+                    ? t("agenda.strip_show_fewer")
+                    : t("agenda.strip_show_all", { count: undatedShown })}
                 </button>
               )}
             </>
@@ -1006,7 +1003,10 @@ function WorkPlanWeek() {
             </div>
           )}
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }} data-testid="agenda-undated-rows">
-            {(triageMode ? undatedJobs : undatedJobs.slice(0, STRIP_ROWS)).map((entry) => (
+            {(triageMode || stripAll.unplanned
+              ? undatedJobs
+              : undatedJobs.slice(0, STRIP_ROWS)
+            ).map((entry) => (
               <ZoneRow
                 key={entry.key}
                 entry={entry}
@@ -1061,22 +1061,18 @@ function WorkPlanWeek() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() =>
-                  setShowAll({
-                    title: teamWeek ? t("agenda.strip_review_title") : t("agenda.strip_review_worker_title"),
-                    rows: reviewJobs,
-                    testId: "agenda-review-all",
-                  })
-                }
+                onClick={() => toggleStripAll("review")}
                 data-testid="agenda-review-show-all"
               >
-                {t("agenda.strip_show_all", { count: reviewShown })}
+                {stripAll.review
+                  ? t("agenda.strip_show_fewer")
+                  : t("agenda.strip_show_all", { count: reviewShown })}
               </button>
             ) : undefined
           }
         >
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {reviewJobs.slice(0, STRIP_ROWS).map((entry) => (
+          <ul className={`wp-strip-list${stripAll.review ? " wp-strip-list-all" : ""}`}>
+            {(stripAll.review ? reviewJobs : reviewJobs.slice(0, STRIP_ROWS)).map((entry) => (
               <ZoneRow key={entry.key} entry={entry} today={todayKey} role={role} testPrefix="agenda-review" />
             ))}
           </ul>
@@ -1104,22 +1100,18 @@ function WorkPlanWeek() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() =>
-                  setShowAll({
-                    title: t("agenda.strip_customer_title"),
-                    rows: waitingJobs,
-                    testId: "agenda-waiting-all",
-                  })
-                }
+                onClick={() => toggleStripAll("customer")}
                 data-testid="agenda-waiting-show-all"
               >
-                {t("agenda.strip_show_all", { count: waitingShown })}
+                {stripAll.customer
+                  ? t("agenda.strip_show_fewer")
+                  : t("agenda.strip_show_all", { count: waitingShown })}
               </button>
             ) : undefined
           }
         >
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {waitingJobs.slice(0, STRIP_ROWS).map((entry) => (
+          <ul className={`wp-strip-list${stripAll.customer ? " wp-strip-list-all" : ""}`}>
+            {(stripAll.customer ? waitingJobs : waitingJobs.slice(0, STRIP_ROWS)).map((entry) => (
               <ZoneRow key={entry.key} entry={entry} today={todayKey} role={role} testPrefix="agenda-waiting" />
             ))}
           </ul>
@@ -1514,23 +1506,6 @@ function WorkPlanWeek() {
           // late half — the LAW says late work sits on today, not on the
           // day it was planned.
           lateRows={dayModal === todayKey ? lateEntries : undefined}
-        />
-      )}
-
-      {/* P-10 A3 — "Show all N": the zone's list view, the same table. */}
-      {showAll && (
-        <EntryTableModal
-          title={showAll.title}
-          description={t("agenda.day_count", { count: showAll.rows.length })}
-          rows={showAll.rows}
-          truncated={false}
-          limit={0}
-          emptyLabel={t("agenda.day_empty")}
-          dateColumnLabel={t("agenda.col_planned")}
-          showOverdueBy={false}
-          role={role}
-          onClose={() => setShowAll(null)}
-          testId={showAll.testId}
         />
       )}
 

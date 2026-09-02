@@ -822,7 +822,7 @@ export function ExtraWorkList({
       const left = -(daysSince(row.deadline, today) ?? 0);
       return (
         <td key="planned" className="td-date">
-          <span className="muted">{t("list.not_planned")}</span>
+          <span className="muted">{t("common:phase.ew.WAITING_PLANNING")}</span>
           <div className={`small ew-cell-sub${row.is_overdue ? " ew-late" : " muted"}`}>
             {row.is_overdue
               ? t("list.days_late", { count: Math.max(1, -left) })
@@ -835,7 +835,7 @@ export function ExtraWorkList({
     }
     return (
       <td key="planned" className="td-date">
-        <span className="muted">{t("list.not_planned")}</span>
+        <span className="muted">{t("common:phase.ew.WAITING_PLANNING")}</span>
       </td>
     );
   };

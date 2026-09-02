@@ -76,7 +76,6 @@
   "list.deadline_today": "deadline today",
   "list.days_late_one": "{{count}} day late",
   "list.days_late_other": "{{count}} days late",
-  "list.not_planned": "Not planned yet",
   "list.nobody_yet": "Nobody yet",
   "list.not_invoiced_yet": "Not invoiced yet",
   "list.bills_on_day": "bills on day {{day}}",
