@@ -731,7 +731,7 @@
   "detail.complete_toast": "“{{title}}” is completed. No ticket was changed.",
   "detail.agreement_col_service": "Service",
   "detail.agreement_col_qty": "Qty",
-  "detail.agreement_col_amount": "Amount",
+  "detail.agreement_col_amount": "Amount (ex VAT)",
   "create.field_description_placeholder": "What the team needs to know: room, access, particulars.",
   "thread_continues_on_job": "This conversation continues on the job.",
   "plan.add_people": "Add",

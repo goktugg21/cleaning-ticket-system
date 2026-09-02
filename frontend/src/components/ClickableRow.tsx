@@ -1,24 +1,22 @@
 /**
  * Sprint 28 Batch 15.1 — unified clickable table row.
  *
- * Today four patterns coexist:
- *   1. Whole-row clickable    (BuildingsAdmin, CustomersAdmin, …)
- *   2. Title-cell clickable   (ExtraWorkList, StaffRequests)
- *   3. Plain non-interactive  (CustomerBuildings, CustomerUsers, …)
- *   4. Bespoke onClick on tr  (Dashboard tickets)
- *
- * Going forward, pages use this component for #1 and pass
- * `inert=true` for #3. The `clickable-row` class is the successor
- * to `admin-row-clickable`; both are applied during the
- * transition so legacy tables still get pointer + focus styling.
+ * P-13 D (O3, §D.22 rule 9) — the row semantics moved into
+ * `lib/useRowLink.ts` (the ONE hook: inner-control guard, Enter/Space,
+ * link role); this component is its `<tr>` packaging. Rows are links
+ * everywhere: every list/table row whose object has a page uses this
+ * (or, where a `<tr>` is impossible, the hook directly), the name
+ * stays a real link inside for middle-click, and the row's buttons
+ * stop the click via the shared inner-control selector.
  *
  * `to` and `onActivate` are mutually independent: prefer `to` for
  * navigation; use `onActivate` for in-place actions (modal open,
  * sheet expansion). When both are missing the row renders as
  * non-interactive, matching `inert=true`.
  */
-import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import type { ReactNode } from "react";
+
+import { useRowLink } from "../lib/useRowLink";
 
 export interface ClickableRowProps {
   to?: string;
@@ -32,6 +30,9 @@ export interface ClickableRowProps {
   testId?: string;
   /** Optional `data-role` attribute on the row (some listings/e2e key on it). */
   dataRole?: string;
+  /** Extra `data-*` attributes (P-13 — the due row's `data-ready`,
+   *  highlight markers). Keys WITHOUT the `data-` prefix. */
+  dataAttrs?: Record<string, string | number | boolean | undefined>;
   children: ReactNode;
 }
 
@@ -43,42 +44,15 @@ export function ClickableRow({
   ariaLabel,
   testId,
   dataRole,
+  dataAttrs,
   children,
 }: ClickableRowProps) {
-  const navigate = useNavigate();
-
-  const interactive = !inert && (Boolean(to) || Boolean(onActivate));
-
-  const handleActivate = () => {
-    if (onActivate) {
-      onActivate();
-    } else if (to) {
-      navigate(to);
-    }
-  };
-
-  const handleClick = (event: MouseEvent<HTMLTableRowElement>) => {
-    if (!interactive) return;
-    // Allow nested links/buttons to keep their own behaviour by
-    // checking whether the click came from one of them. Without
-    // this, clicking an inline action button inside the row would
-    // also trigger the row navigation.
-    if (event.target instanceof HTMLElement) {
-      const inner = event.target.closest("a,button,input,select,textarea,label");
-      if (inner && inner !== event.currentTarget) {
-        return;
-      }
-    }
-    handleActivate();
-  };
-
-  const handleKey = (event: KeyboardEvent<HTMLTableRowElement>) => {
-    if (!interactive) return;
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      handleActivate();
-    }
-  };
+  const { interactive, rowProps } = useRowLink({
+    to,
+    onActivate,
+    inert,
+    ariaLabel,
+  });
 
   const classes = ["", className]
     .concat(interactive ? ["clickable-row", "admin-row-clickable"] : [])
@@ -86,19 +60,22 @@ export function ClickableRow({
     .join(" ")
     .trim();
 
+  const extra: Record<string, string | number | boolean> = {};
+  if (dataAttrs) {
+    for (const [key, value] of Object.entries(dataAttrs)) {
+      if (value !== undefined) extra[`data-${key}`] = value;
+    }
+  }
+
   return (
     <tr
       className={classes || undefined}
-      role={interactive ? "link" : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      aria-label={interactive ? ariaLabel : undefined}
-      onClick={interactive ? handleClick : undefined}
-      onKeyDown={interactive ? handleKey : undefined}
       data-testid={testId}
       data-role={dataRole}
+      {...extra}
+      {...rowProps}
     >
       {children}
     </tr>
   );
 }
-

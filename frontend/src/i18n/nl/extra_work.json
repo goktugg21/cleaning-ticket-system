@@ -731,7 +731,7 @@
   "detail.complete_toast": "“{{title}}” is afgerond. Er is geen ticket gewijzigd.",
   "detail.agreement_col_service": "Dienst",
   "detail.agreement_col_qty": "Aantal",
-  "detail.agreement_col_amount": "Bedrag",
+  "detail.agreement_col_amount": "Bedrag (excl. btw)",
   "create.field_description_placeholder": "Wat het team moet weten: ruimte, toegang, bijzonderheden.",
   "thread_continues_on_job": "Dit gesprek gaat verder bij het werk.",
   "plan.add_people": "Toevoegen",

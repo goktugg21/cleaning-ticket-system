@@ -71,6 +71,26 @@ STAGE_WAITING_REVIEW = "WAITING_REVIEW"
 STAGE_SLOT_DONE = "SLOT_DONE"
 STAGE_BLOCKED = "BLOCKED"
 STAGE_PAST_DEADLINE = "PAST_DEADLINE"
+# P-13 A (O1) — two states the fold was blind to. An ON_HOLD job with
+# a billable amount sat outside every stage (nothing here fired unless
+# its slots were done), and a job whose promised day passed without
+# anyone even planning it was invisible until somebody started it.
+STAGE_ON_HOLD = "ON_HOLD"
+STAGE_NOT_PLANNED = "NOT_PLANNED"
+
+# P-13 A (O1) — the per-row REASON, finer than the stage: the screen
+# must say the state the job is in ("On hold since 12 Aug"), never a
+# category word — the owner met a row reading "Stuck at: stuck". The
+# stage stays for the digest and existing consumers; the reason is what
+# the sentence is built from.
+REASON_REVIEW_WAIT = "REVIEW_WAIT"
+REASON_DONE_UNMOVED = "DONE_UNMOVED"
+REASON_REJECTED = "REJECTED"
+REASON_CONVERTED = "CONVERTED"
+REASON_CREW_UNABLE = "CREW_UNABLE"
+REASON_ON_HOLD = "ON_HOLD"
+REASON_PAST_DEADLINE = "PAST_DEADLINE"
+REASON_NOT_PLANNED = "NOT_PLANNED"
 
 #: The ticket ended without the work being done.
 _BLOCKED_TICKET_STATUSES = frozenset(
@@ -215,37 +235,141 @@ def _blocked_since(ticket, today: datetime.date) -> datetime.date:
     return _local_date(stamp) or today
 
 
-def _stage_for(ew, ticket, slots, today, now):
-    """`(stage, age_days)` or None when the chain is not visibly broken."""
+def _hold_since(ticket_ids, today) -> dict:
+    """ticket_id -> the local date of the LATEST transition onto
+    ON_HOLD, from the status history the state machine always writes.
+    Missing history (imported data) falls back to today — present,
+    honestly unknown, age 0."""
+    out: dict = {}
+    if not ticket_ids:
+        return out
+    from tickets.models import TicketStatusHistory
+
+    rows = (
+        TicketStatusHistory.objects.filter(
+            ticket_id__in=list(ticket_ids),
+            new_status=TicketStatus.ON_HOLD,
+        )
+        .order_by("ticket_id", "-created_at")
+        .values("ticket_id", "created_at")
+    )
+    for row in rows:
+        out.setdefault(row["ticket_id"], _local_date(row["created_at"]))
+    return out
+
+
+def _manager_names(ew_ids) -> dict:
+    """ew_id -> the MANAGER-role assignment names, for the review-wait
+    sentence ("waiting for Gökhan's check"). One batch query."""
+    out: dict[int, list] = {}
+    if not ew_ids:
+        return out
+    from extra_work.models import ExtraWorkAssignment, ExtraWorkAssignmentRole
+
+    rows = (
+        ExtraWorkAssignment.objects.filter(
+            extra_work_request_id__in=list(ew_ids),
+            role=ExtraWorkAssignmentRole.MANAGER,
+        )
+        .select_related("user")
+        .order_by("id")
+    )
+    for row in rows:
+        name = row.user.full_name or row.user.email
+        out.setdefault(row.extra_work_request_id, []).append(name)
+    return out
+
+
+def _stage_for(ew, ticket, slots, holds, today, now):
+    """`(stage, age_days, reason, since)` or None when the chain is not
+    visibly broken. `reason` refines the stage into the job's real
+    state (P-13 O1 — the row renders a sentence from it, never a
+    category word); `since` is the local date that state began, where
+    one is knowable."""
     if ticket is not None:
         if ticket.status == TicketStatus.WAITING_MANAGER_REVIEW:
             if ticket.manager_review_at is None:
                 return None
             days = (now - ticket.manager_review_at).days
             if days >= REVIEW_STALL_DAYS:
-                return STAGE_WAITING_REVIEW, days
+                return (
+                    STAGE_WAITING_REVIEW,
+                    days,
+                    REASON_REVIEW_WAIT,
+                    _local_date(ticket.manager_review_at),
+                )
             return None
         if ticket.status in _BLOCKED_TICKET_STATUSES:
+            since = _blocked_since(ticket, today)
+            reason = (
+                REASON_REJECTED
+                if ticket.status == TicketStatus.REJECTED
+                else REASON_CONVERTED
+            )
             return (
                 STAGE_BLOCKED,
-                max((today - _blocked_since(ticket, today)).days, 0),
+                max((today - since).days, 0),
+                reason,
+                since,
+            )
+        # P-13 A (O1) — on hold IS the state, whatever the slots say:
+        # a held job will not reach this month's invoice while held,
+        # and its honest sentence is "On hold since {date}".
+        if ticket.status == TicketStatus.ON_HOLD:
+            since = holds.get(ticket.id) or today
+            return (
+                STAGE_ON_HOLD,
+                max((today - since).days, 0),
+                REASON_ON_HOLD,
+                since,
             )
         facts = slots.get(ticket.id)
         if facts is not None and ticket.status in _ACTIVE_TICKET_STATUSES:
             if facts["unable"] and not facts["assigned"]:
+                since = _blocked_since(ticket, today)
                 return (
                     STAGE_BLOCKED,
-                    max((today - _blocked_since(ticket, today)).days, 0),
+                    max((today - since).days, 0),
+                    REASON_CREW_UNABLE,
+                    since,
                 )
             if facts["all_done"]:
                 since = _local_date(facts["latest_done"]) or today
-                return STAGE_SLOT_DONE, max((today - since).days, 0)
+                return (
+                    STAGE_SLOT_DONE,
+                    max((today - since).days, 0),
+                    REASON_DONE_UNMOVED,
+                    since,
+                )
+        # P-13 A (O1) — the promised day passed and nobody even planned
+        # the job: no live slots, no scheduled start, ticket still at
+        # the door. Bounded to a PAST relevant date so the fold does not
+        # flood with every freshly-spawned ticket of the month.
+        if (
+            facts is None
+            and ticket.status
+            in {TicketStatus.OPEN, TicketStatus.ACKNOWLEDGED}
+            and ticket.scheduled_start_at is None
+        ):
+            relevant = _relevant_date(ew, ticket)
+            if relevant is not None and relevant < today:
+                return (
+                    STAGE_NOT_PLANNED,
+                    (today - relevant).days,
+                    REASON_NOT_PLANNED,
+                    relevant,
+                )
     if (
         ew.status == ExtraWorkStatus.IN_PROGRESS
         and ew.deadline is not None
         and ew.deadline < today
     ):
-        return STAGE_PAST_DEADLINE, (today - ew.deadline).days
+        return (
+            STAGE_PAST_DEADLINE,
+            (today - ew.deadline).days,
+            REASON_PAST_DEADLINE,
+            ew.deadline,
+        )
     return None
 
 
@@ -270,6 +394,15 @@ def at_risk_groups(customers, *, today=None, now=None) -> dict:
     )
     tickets = _spawned_tickets([ew.id for ew in ews])
     slots = _slot_facts([t.id for t in tickets.values()])
+    holds = _hold_since(
+        [
+            t.id
+            for t in tickets.values()
+            if t.status == TicketStatus.ON_HOLD
+        ],
+        today,
+    )
+    managers = _manager_names([ew.id for ew in ews])
 
     by_customer: dict[int, dict] = {}
     total = 0
@@ -280,10 +413,10 @@ def at_risk_groups(customers, *, today=None, now=None) -> dict:
         relevant = _relevant_date(ew, ticket)
         if relevant is None or relevant > month_end:
             continue
-        staged = _stage_for(ew, ticket, slots, today, now)
+        staged = _stage_for(ew, ticket, slots, holds, today, now)
         if staged is None:
             continue
-        stage, age = staged
+        stage, age, reason, since = staged
         group = by_customer.setdefault(
             ew.customer_id,
             {
@@ -312,6 +445,12 @@ def at_risk_groups(customers, *, today=None, now=None) -> dict:
                 "stage": stage,
                 "age_days": age,
                 "date": relevant.isoformat(),
+                # P-13 A (O1) — the sentence's raw material: the job's
+                # real state, when it began, and (for the review wait)
+                # whose check it waits on.
+                "reason": reason,
+                "since": since.isoformat() if since is not None else None,
+                "manager_names": managers.get(ew.id, []),
             }
         )
 

@@ -83,7 +83,22 @@ export type AtRiskStage =
   | "WAITING_REVIEW"
   | "SLOT_DONE"
   | "BLOCKED"
-  | "PAST_DEADLINE";
+  | "PAST_DEADLINE"
+  | "ON_HOLD"
+  | "NOT_PLANNED";
+
+/** P-13 A (O1) — the job's real state, finer than the stage. The row
+ *  renders a SENTENCE from this, never a category word ("stuck" is
+ *  banned on screen). */
+export type AtRiskReason =
+  | "REVIEW_WAIT"
+  | "DONE_UNMOVED"
+  | "REJECTED"
+  | "CONVERTED"
+  | "CREW_UNABLE"
+  | "ON_HOLD"
+  | "PAST_DEADLINE"
+  | "NOT_PLANNED";
 
 export interface AtRiskRow {
   kind: "EXTRA_WORK";
@@ -97,6 +112,11 @@ export interface AtRiskRow {
   age_days: number;
   /** The planned day / deadline that ties this work to the month. */
   date: string;
+  /** P-13 A (O1) — the sentence's raw material. `reason` may be
+   *  absent from an older server; the stage words are the fallback. */
+  reason?: AtRiskReason;
+  since?: string | null;
+  manager_names?: string[];
 }
 
 export interface AtRiskGroup {

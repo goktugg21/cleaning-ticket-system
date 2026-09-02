@@ -45,6 +45,34 @@ export function rememberScopeCompany(id: number): void {
   }
 }
 
+/**
+ * P-13 A (W2) — the page's seed, as ONE explicit chain: the company
+ * with something DUE, else the one with something waiting, else the
+ * first due row's, else the first company by name. The session's
+ * stored choice wins before this is ever consulted (the hook applies
+ * it itself); the last arm means the selector can never read "…"
+ * forever — a page with no due rows at all still resolves.
+ * Pure so vitest pins the chain.
+ */
+export function pickSeedCompany(
+  dueRows: {
+    company: number;
+    is_due: boolean;
+    unbilled_count: number;
+  }[],
+  companies: { id: number; name: string }[],
+): number | null {
+  const waiting =
+    dueRows.find((row) => row.is_due) ??
+    dueRows.find((row) => row.unbilled_count > 0) ??
+    dueRows[0];
+  if (waiting) return waiting.company;
+  const first = [...companies].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )[0];
+  return first ? first.id : null;
+}
+
 export function useCompanyScope(enabled: boolean): {
   companies: CompanyAdmin[];
   companyId: number | "";

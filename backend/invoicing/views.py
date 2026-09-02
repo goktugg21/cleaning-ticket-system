@@ -43,7 +43,7 @@ from .line_services import (
 from .models import Invoice, InvoiceLine
 from .preview import plan_invoices
 from .preview_pdf import render_preview_pdf
-from .schedule import billing_day_reached, scheduled_customers
+from .schedule import billing_day_reached
 from .why_nothing import diagnose_nothing_to_invoice
 from .selectors import (
     scope_customer_invoices_for,
@@ -387,9 +387,23 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         # exactly the rule this panel reports. They were inline here; the
         # job would have been a second copy, and the two drifting apart
         # reads to an operator as "the panel said due, no invoice came".
-        customers = scheduled_customers(
-            scope_customers_for(request.user).filter(is_active=True)
-        ).order_by("name")
+        #
+        # P-13 A (W1) — the list is no longer narrowed to
+        # `scheduled_customers`. A customer whose billing day was never
+        # set used to disappear from this panel entirely, taking every
+        # finished, unbilled job with them — the quiet way money misses
+        # month-end. Now: a SCHEDULED customer keeps their row
+        # unconditionally (a zero-count row carries its nothing_reason);
+        # an UNSCHEDULED customer gets a row exactly when they have
+        # finished unbilled work (rule "" + day None on the wire is the
+        # panel's "no billing day set" fact). The daily job still
+        # triggers on `is_billing_day`, so an unscheduled customer is
+        # never invoiced automatically — this only makes them visible.
+        customers = (
+            scope_customers_for(request.user)
+            .filter(is_active=True)
+            .order_by("name")
+        )
         # P-12 §D.24.2 — `?company=` narrows WITHIN scope (an id outside
         # it matches nothing); the page shows one company at a time.
         company_param = request.query_params.get("company")
@@ -401,6 +415,12 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                 request.user, customer.company_id, customer.id, year, month
             )
             count = len(unbilled)
+            scheduled = (
+                customer.invoice_day_of_month is not None
+                or customer.invoice_day_rule != ""
+            )
+            if not scheduled and count == 0:
+                continue
             total = sum(
                 (_earned_amounts(e)[2] for e in unbilled), Decimal("0.00")
             )

@@ -61,9 +61,9 @@ import { useCurrentTicketKind } from "../../lib/currentTicketKind";
 import {
   actualHoursPanelKey,
   deriveActiveHourlyLines,
-  finiteOrNull,
   selectApprovedProposal,
 } from "./activeHourlyLines";
+import { agreedLines } from "./agreedLines";
 
 // W-PLANTRUTH §4b — THE AGREEMENT CARD IS A REAL TABLE.
 //
@@ -262,48 +262,17 @@ export function TicketExtraWorkCards({
   // W22 §3a — the Agreed table follows the SAME precedence walk the
   // money totals follow (approved proposal > INSTANT cart > legacy
   // pricing rows), so "Agreed" can never name a different set than the
-  // amounts under it. Proposal and legacy lines carry their own
-  // computed totals; a cart line's agreed amount is its contract unit
-  // price × quantity, and a NEEDS_PROPOSAL cart line has no price yet
-  // — an em dash, never a zero (zero is a legal price).
-  // W22.2 — a parsed amount is a finite number or null: a missing/
-  // blank/unparseable source value becomes null and the cell renders
-  // the em dash explicitly. The formatters are never handed null and
-  // asked to be graceful. W25 moved `finiteOrNull` into
-  // `activeHourlyLines` so the hours panel's arithmetic and these
-  // tables read a source string exactly one way.
-  const agreedRows: {
-    id: number;
-    label: string;
-    quantity: string | null;
-    amount: number | null;
-  }[] = approvedProposal
-    ? (approvedProposalDetail?.lines ?? [])
-        .filter((line) => line.is_approved_for_spawn)
-        .map((line) => ({
-          id: line.id,
-          label: line.service_name ?? line.description,
-          quantity: line.quantity ?? null,
-          amount: finiteOrNull(line.line_total),
-        }))
-    : ew.routing_decision === "INSTANT"
-      ? ew.line_items.map((line) => ({
-          id: line.id,
-          label: line.service_name || line.custom_description,
-          quantity: line.quantity ?? null,
-          amount:
-            finiteOrNull(line.contract_unit_price) !== null &&
-            finiteOrNull(line.quantity) !== null
-              ? (finiteOrNull(line.contract_unit_price) as number) *
-                (finiteOrNull(line.quantity) as number)
-              : null,
-        }))
-      : ew.pricing_line_items.map((line) => ({
-          id: line.id,
-          label: line.description,
-          quantity: line.quantity ?? null,
-          amount: finiteOrNull(line.total),
-        }));
+  // amounts under it.
+  // P-13 A (W3) — the derivation moved to `agreedLines.ts` (pure,
+  // vitest-pinned on all three paths) and the Amount column is EX VAT
+  // on every path now: the proposal branch showed `line_total` (incl)
+  // beside the cart branch's `price × qty` (ex), so €31.48 quoted read
+  // €38.09. One pair of totals (ex + incl) renders under the table.
+  const { rows: agreedRows, totals: agreedTotals } = agreedLines(
+    ew,
+    approvedProposal,
+    approvedProposalDetail,
+  );
   // W22 §3b — nothing asks twice: the Requested table exists to show
   // what the customer asked BEFORE a proposal re-priced it. With no
   // approved proposal, Agreed IS the requested cart — one table.
@@ -747,6 +716,21 @@ export function TicketExtraWorkCards({
                   </tbody>
                 </table>
               </div>
+              {/* P-13 A (W3) — one basis, said once: the column is ex
+                  VAT; the incl-VAT figure lives HERE, under the table,
+                  never mixed into the lines. */}
+              {agreedTotals && (
+                <p
+                  className="muted small ew-agreement-num"
+                  style={{ margin: "4px 0 0", textAlign: "right" }}
+                  data-testid="ticket-ew-agreed-total"
+                >
+                  {t("ew_agreement_total", {
+                    ex: formatMoney(agreedTotals.ex),
+                    incl: formatMoney(agreedTotals.incl),
+                  })}
+                </p>
+              )}
             </>
           )}
           {approvedProposalId !== null && canViewProposalPdf && (

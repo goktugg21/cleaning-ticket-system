@@ -146,6 +146,12 @@ class WhyNothingOnBothScreensTests(InvoicingFixture):
         )
 
     def test_a_customer_with_billable_work_has_nothing_to_explain(self):
+        # P-13 — the class default (day 15) made the is_due assertion
+        # below DATE-DEPENDENT: `billing_day_reached` compares the real
+        # `today.day >= 15`, so this test was red on the first fourteen
+        # days of every month. Day 1 is reached all month.
+        self.customer.invoice_day_of_month = 1
+        self.customer.save(update_fields=["invoice_day_of_month"])
         self.make_ew(closed_at=dt(2026, 5, 31))
         response = self.client.get(DUE_URL)
         row = next(

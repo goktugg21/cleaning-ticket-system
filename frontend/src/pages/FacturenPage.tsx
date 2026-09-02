@@ -50,6 +50,7 @@ import {
   listAllInvoices,
   pairForGranularity,
   type AtRiskGroup,
+  type AtRiskRow,
   type AtRiskStage,
   type InvoiceBillingTarget,
   type InvoicePreview,
@@ -69,7 +70,9 @@ import { DoneBanner } from "../components/guide/DoneBanner";
 import { useDoneBanner } from "../components/guide/useDoneBanner";
 import { HIGHLIGHT_CLASS, HIGHLIGHT_MS } from "../components/guide/highlight";
 import { CompanyScopeSelect } from "../components/guide/CompanyScopeSelect";
-import { useCompanyScope } from "../lib/useCompanyScope";
+import { BillingDayDialog } from "../components/invoices/BillingDayDialog";
+import { pickSeedCompany, useCompanyScope } from "../lib/useCompanyScope";
+import { atRiskRowHref, dueRowHref } from "../lib/rowLink";
 import { BoundedList } from "../components/BoundedList";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
@@ -128,13 +131,54 @@ function parseFacturenTab(value: string | null): FacturenTab | null {
     : null;
 }
 
-// WP-1 G4 — human words for the guard's machine stages.
+// WP-1 G4 — human words for the guard's machine stages. Since P-13 A
+// these are the FALLBACK for a payload without `reason` — the cell
+// renders `atRiskSentence` below.
 const AT_RISK_STAGE_KEYS: Record<AtRiskStage, string> = {
   WAITING_REVIEW: "facturen.at_risk_stage_waiting_review",
   SLOT_DONE: "facturen.at_risk_stage_slot_done",
   BLOCKED: "facturen.at_risk_stage_blocked",
   PAST_DEADLINE: "facturen.at_risk_stage_past_deadline",
+  ON_HOLD: "facturen.at_risk_stage_on_hold",
+  NOT_PLANNED: "facturen.at_risk_stage_not_planned",
 };
+
+/** P-13 A (O1) — the reason cell is a sentence from the job's REAL
+ *  state, never a category word (the owner met "Stuck at: stuck").
+ *  Falls back to the stage words for an older payload. */
+function atRiskSentence(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  row: AtRiskRow,
+): string {
+  const since = row.since ? formatDate(`${row.since}T00:00:00`) : "";
+  switch (row.reason) {
+    case "REVIEW_WAIT":
+      return row.manager_names && row.manager_names.length > 0
+        ? t("invoices:road.at_risk_review_named", {
+            names: row.manager_names.join(", "),
+            count: row.age_days,
+          })
+        : t("invoices:road.at_risk_review", { count: row.age_days });
+    case "DONE_UNMOVED":
+      return t("invoices:road.at_risk_done_unmoved", { count: row.age_days });
+    case "REJECTED":
+      return t("invoices:road.at_risk_rejected", { date: since });
+    case "CONVERTED":
+      return t("invoices:road.at_risk_converted", { date: since });
+    case "CREW_UNABLE":
+      return t("invoices:road.at_risk_crew_unable", { date: since });
+    case "ON_HOLD":
+      return t("invoices:road.at_risk_on_hold", { date: since });
+    case "PAST_DEADLINE":
+      return t("invoices:road.at_risk_past_deadline", { count: row.age_days });
+    case "NOT_PLANNED":
+      return t("invoices:road.at_risk_not_planned", {
+        date: formatDate(`${row.date}T00:00:00`),
+      });
+    default:
+      return t(AT_RISK_STAGE_KEYS[row.stage]);
+  }
+}
 
 /** The one sentence, from the one diagnosis (Sprint 183 §2). Shared by
  *  the Due panel and the preview so they cannot word it differently. */
@@ -360,6 +404,9 @@ export function FacturenPage({
   const [genSplit, setGenSplit] = useState<InvoiceSplit>("NONE");
   const [genBusy, setGenBusy] = useState(false);
 
+  // P-13 A (W1) — "Set a billing day", from the row that shows the gap.
+  const [dayRow, setDayRow] = useState<InvoiceDueRow | null>(null);
+
   // Sprint 182 §2 — the preview. NOTHING IS STORED server-side.
   const [previewRow, setPreviewRow] = useState<InvoiceDueRow | null>(null);
   const [preview, setPreview] = useState<InvoicePreview | null>(null);
@@ -412,18 +459,19 @@ export function FacturenPage({
     };
   }, [customerId, refreshKey, scopedCompany]);
 
-  // §D.24.2 — the "company with something waiting" seeds the scope
-  // when the session holds no choice yet: the first due-now customer's
-  // company, else the first scheduled one's.
+  // §D.24.2 + P-13 A (W2) — the seed chain, explicit and pinned
+  // (`pickSeedCompany`): session choice (the hook applies it) → the
+  // company with something waiting → the first company by name. The
+  // last arm is the W2 fix: with nothing due anywhere the selector
+  // read "…" forever. Waits for the due rows so an empty first render
+  // cannot jump the queue.
   useEffect(() => {
     if (!companyScope.ready || companyScope.companyId !== "") return;
     if (companyScope.companies.length <= 1) return;
-    const waiting =
-      dueRows.find((row) => row.is_due) ??
-      dueRows.find((row) => row.unbilled_count > 0) ??
-      dueRows[0];
-    if (waiting) companyScope.seedCompany(waiting.company);
-  }, [companyScope, dueRows]);
+    if (dueLoading) return;
+    const seed = pickSeedCompany(dueRows, companyScope.companies);
+    if (seed !== null) companyScope.seedCompany(seed);
+  }, [companyScope, dueRows, dueLoading]);
 
   // WP-1 G4 — the at-risk rows. A failed fetch keeps its silence.
   useEffect(() => {
@@ -621,6 +669,13 @@ export function FacturenPage({
 
   // §D.24 rule 2 — the ONE thing waiting, first step first: a due-now
   // customer, else drafts to check, else issued waiting to be sent.
+  // P-13 A (W1) — a customer with finished money and NO billing day
+  // comes before all of those: nothing will ever pick their work up
+  // until somebody sets the day (or makes the draft by hand).
+  const startNoDayRow =
+    dueNowRows.find(
+      (row) => row.invoice_day_of_month == null && !row.invoice_day_rule,
+    ) ?? null;
   const startDueRow = dueNowRows.find((row) => row.is_due) ?? null;
   const oldestDraft =
     [...baseVisible].filter((inv) => inv.status === "DRAFT").sort((a, b) => a.id - b.id)[0] ??
@@ -783,7 +838,25 @@ export function FacturenPage({
 
       {/* P-12 §D.24 rule 2 — the ONE thing waiting, first step first. */}
       {!dueLoading && !loading && !genRow && (
-        startDueRow ? (
+        startNoDayRow ? (
+          <StartHere
+            testId="facturen-start-here"
+            action={{
+              label: t("invoices:road.start_no_day_action", {
+                name: startNoDayRow.customer_name,
+              }),
+              onClick: () => {
+                selectTab("due");
+                setDayRow(startNoDayRow);
+              },
+            }}
+          >
+            {t("invoices:road.start_no_day", {
+              name: startNoDayRow.customer_name,
+              total: formatMoney(startNoDayRow.unbilled_total),
+            })}
+          </StartHere>
+        ) : startDueRow ? (
           <StartHere
             testId="facturen-start-here"
             action={{
@@ -909,6 +982,11 @@ export function FacturenPage({
               <tbody>
                 {visibleDueRows.map((row) => {
                   const ready = row.unbilled_count > 0;
+                  // P-13 A (W1) — no day AND no rule: the row that used
+                  // to be invisible. Its schedule cell says the fact and
+                  // its actions offer the two ways out.
+                  const noDay =
+                    row.invoice_day_of_month == null && !row.invoice_day_rule;
                   const dayWords =
                     row.invoice_day_of_month != null
                       ? t("facturatie.day_of_month", { day: row.invoice_day_of_month })
@@ -916,9 +994,16 @@ export function FacturenPage({
                         ? t("facturatie.day_first")
                         : row.invoice_day_rule === "LAST_OF_MONTH"
                           ? t("facturatie.day_last")
-                          : t("facturen.no_schedule");
+                          : t("invoices:road.no_day_set");
                   return (
-                    <tr key={row.customer} data-testid="facturen-due-row" data-ready={ready}>
+                    <ClickableRow
+                      key={row.customer}
+                      to={dueRowHref(row)}
+                      inert={embedded || customerScoped}
+                      testId="facturen-due-row"
+                      dataAttrs={{ ready }}
+                      ariaLabel={row.customer_name}
+                    >
                       <td>
                         {row.customer_name}
                         {row.is_due && (
@@ -984,8 +1069,31 @@ export function FacturenPage({
                         {/* D5 — the due row keeps its pair (Preview +
                             Make a draft): the one-button rule is the
                             LIST tabs'. A row with nothing carries its
-                            reason in words instead of dead buttons. */}
-                        {ready ? (
+                            reason in words instead of dead buttons.
+                            P-13 A (W1) — a no-day row's pair is "Set a
+                            billing day" + "Make a draft now": fix the
+                            schedule, or bill by hand right here. */}
+                        {ready && noDay ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => setDayRow(row)}
+                              data-testid="facturen-set-day-open"
+                              style={{ marginRight: 8 }}
+                            >
+                              {t("invoices:road.set_day")}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => openGenerate(row)}
+                              data-testid="facturen-generate-open"
+                            >
+                              {t("invoices:road.make_draft_now")}
+                            </button>
+                          </>
+                        ) : ready ? (
                           <>
                             <button
                               type="button"
@@ -1011,7 +1119,7 @@ export function FacturenPage({
                           </span>
                         )}
                       </td>
-                    </tr>
+                    </ClickableRow>
                   );
                 })}
               </tbody>
@@ -1052,21 +1160,27 @@ export function FacturenPage({
                   <tbody>
                     {atRiskGroups.flatMap((group) =>
                       group.rows.map((row) => (
-                        <tr key={`${group.customer}-${row.extra_work_id}`} data-testid="facturen-at-risk-row">
+                        // P-13 A (O1a) / \u00a7D.22 rule 9 \u2014 the WHOLE row
+                        // opens the job; the name stays a real link for
+                        // middle-click.
+                        <ClickableRow
+                          key={`${group.customer}-${row.extra_work_id}`}
+                          to={atRiskRowHref(row)}
+                          testId="facturen-at-risk-row"
+                          ariaLabel={row.title}
+                        >
                           {!customerScoped && <td>{group.customer_name}</td>}
                           <td>
-                            <Link
-                              to={row.ticket_id !== null ? `/tickets/${row.ticket_id}` : `/extra-work/${row.extra_work_id}`}
-                            >
+                            <Link to={atRiskRowHref(row)}>
                               {row.ticket_no ? `${row.ticket_no} \u00b7 ` : ""}
                               {row.title}
                             </Link>
                             {row.building_name && <div className="muted small">{row.building_name}</div>}
                           </td>
-                          <td>{t(AT_RISK_STAGE_KEYS[row.stage])}</td>
+                          <td>{atRiskSentence(t, row)}</td>
                           <td>{t("facturen.at_risk_age", { count: row.age_days })}</td>
                           <td>{formatDate(`${row.date}T00:00:00`)}</td>
-                        </tr>
+                        </ClickableRow>
                       )),
                     )}
                   </tbody>
@@ -1479,6 +1593,30 @@ export function FacturenPage({
 
       {/* W17 — always mounted, opened through the ref only. */}
       <PdfPreviewDialog ref={previewPdfRef} withDownload={false} />
+
+      {/* P-13 A (W1) — the billing-day dialog, from the no-day row and
+          its Start-here card. A non-native overlay (ChoiceDialog's
+          pattern), so conditional mounting is safe. */}
+      {dayRow && (
+        <BillingDayDialog
+          customerId={dayRow.customer}
+          customerName={dayRow.customer_name}
+          current={{
+            invoice_day_of_month: dayRow.invoice_day_of_month,
+            invoice_day_rule: dayRow.invoice_day_rule,
+          }}
+          onCancel={() => setDayRow(null)}
+          onSaved={() => {
+            const name = dayRow.customer_name;
+            setDayRow(null);
+            setRefreshKey((k) => k + 1);
+            facDone.announce({
+              title: t("invoices:road.day_set_title", { name }),
+              body: t("invoices:road.day_set_body"),
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -315,6 +315,7 @@
   "ew_agreement_title": "Afspraken",
   "ew_agreement_requested": "Aangevraagd",
   "ew_agreement_agreed": "Afgesproken prijs",
+  "ew_agreement_total": "Totaal {{ex}} · {{incl}} incl. btw",
   "ew_agreement_days": "Dagen",
   "ew_billing_saved": "Wordt gefactureerd in {{month}}.",
   "ew_billing_cleared": "Volgt weer de maand van afronden.",
