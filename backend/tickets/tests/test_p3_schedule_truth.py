@@ -448,9 +448,12 @@ class FullMatrixTests(_P3Fixture, APITestCase):
         TicketStatus.ACKNOWLEDGED: ("rolled", "planned_fri", "undated"),
         TicketStatus.IN_PROGRESS: ("rolled", "planned_fri", "undated"),
         # P-7 S8 (owner ruling) — parked work leaves the "Not planned
-        # yet" nag: undated ON_HOLD is in the parked list, with its
-        # reason; a parked job WITH a day keeps its board placement.
-        TicketStatus.ON_HOLD: ("rolled", "planned_fri", "parked"),
+        # yet" nag. P-11 A10 (owner ruling, over ticket 460 rolling
+        # onto his today as late): an on-hold job lives ONLY in the On
+        # hold fold, dated or not, until someone takes it off hold —
+        # reverses this matrix's earlier "a parked job WITH a day keeps
+        # its board placement".
+        TicketStatus.ON_HOLD: ("parked", "parked", "parked"),
         TicketStatus.REOPENED_BY_ADMIN: ("rolled", "planned_fri", "undated"),
         # P-10 A1/A2 — reported done is not finished: in no column of
         # any week. A COMPANY_ADMIN is responsible for nothing by role,

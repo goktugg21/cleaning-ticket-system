@@ -132,3 +132,50 @@ class PlanManyIsOneDoorPerRowTests(WorkPlanFixture, APITestCase):
         # The people moved with the job (ruling 12(e), the default).
         slot = first.staff_assignments.get()
         self.assertEqual(timezone.localtime(slot.scheduled_start_at).date(), self.today)
+
+
+class LatenessReadsTheProviderPlanTests(WorkPlanFixture, APITestCase):
+    """P-11 A11 — the LADDER reads the provider's plan too.
+
+    The P-10 leftover: A6 moved every board predicate onto
+    `provider_planned_date`, but `lateness_index` still assessed the
+    customer's wish — a provider-planned-and-missed job was never late,
+    and a wish-dated one was measured against a date nobody promised.
+    """
+
+    def test_a_provider_planned_extra_work_past_its_day_is_late(self):
+        extra_work = self.make_extra_work(
+            "promised last week", assignee=self.worker
+        )
+        extra_work.provider_planned_date = self.today - 3 * DAY
+        extra_work.save(update_fields=["provider_planned_date"])
+        payload = self.get_plan(self.company_admin, scope="company")
+        rows = [
+            r
+            for r in payload["late_entries"]
+            if r["extra_work_id"] == extra_work.id
+        ]
+        self.assertEqual(len(rows), 1, payload["late_entries"])
+        self.assertEqual(rows[0]["lateness"]["level"], 1)
+        self.assertEqual(rows[0]["lateness"]["planned_days_late"], 3)
+
+    def test_a_future_provider_plan_clears_a_past_wish(self):
+        # The plan wins over the wish in the ladder exactly as it does
+        # on the board: a job promised for the day after tomorrow is
+        # not late, however old the customer's original wish.
+        extra_work = self.make_extra_work(
+            "old wish, fresh promise",
+            preferred=self.today - 30 * DAY,
+            assignee=self.worker,
+        )
+        extra_work.provider_planned_date = self.today + 2 * DAY
+        extra_work.save(update_fields=["provider_planned_date"])
+        payload = self.get_plan(self.company_admin, scope="company")
+        self.assertEqual(
+            [
+                r
+                for r in payload["late_entries"]
+                if r["extra_work_id"] == extra_work.id
+            ],
+            [],
+        )

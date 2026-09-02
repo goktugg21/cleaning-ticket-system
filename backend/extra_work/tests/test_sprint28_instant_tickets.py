@@ -183,7 +183,6 @@ class InstantSpawnFixtureMixin:
                 {
                     "service": service.id,
                     "quantity": "2.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "first line note",
                 }
             ],
@@ -202,19 +201,16 @@ class InstantSpawnFixtureMixin:
                 {
                     "service": self.service_a.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 },
                 {
                     "service": self.service_b.id,
                     "quantity": "2.00",
-                    "requested_date": "2026-06-16",
                     "customer_note": "",
                 },
                 {
                     "service": self.service_c.id,
                     "quantity": "3.00",
-                    "requested_date": "2026-06-17",
                     "customer_note": "",
                 },
             ],
@@ -364,7 +360,6 @@ class InstantSpawnAtomicRollbackTests(InstantSpawnFixtureMixin, TestCase):
                 {
                     "service": self.service_a.id,
                     "quantity": "1.00",
-                    "requested_date": "2026-06-15",
                     "customer_note": "",
                 }
             ],

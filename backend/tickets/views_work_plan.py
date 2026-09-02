@@ -127,6 +127,7 @@ from extra_work.models import (
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
 )
+from extra_work.display_phase import display_phase as ew_display_phase
 from extra_work.scoping import scope_extra_work_for
 
 from . import lateness as late_rules
@@ -276,6 +277,15 @@ _TICKET_LIVE_Q = Q(
 #: PENDING — somebody is still expected to do this: an ASSIGNED slot on
 #: a ticket whose work is still open. The predicate rule 5 rolls on.
 _SLOT_PENDING_Q = _SLOT_LIVE_Q & _TICKET_LIVE_Q
+
+#: P-11 A10 — ACTIVE: pending AND not on hold. An on-hold job is off
+#: the board entirely: it lives ONLY in the On hold fold until someone
+#: takes it off hold (the owner, over ticket 460 rolling onto today as
+#: late; reverses the P-3 matrix's "a parked job WITH a day keeps its
+#: place"). Pending still means "the work is undone" — the escalation
+#: sweep and the lateness INDEX keep reading it — but every board and
+#: strip surface reads ACTIVE.
+_SLOT_ACTIVE_Q = _SLOT_PENDING_Q & ~Q(ticket__status=TicketStatus.ON_HOLD)
 
 #: A ticket that ended without the work being done: the slot on it is
 #: BLOCKED rather than DONE.
@@ -510,9 +520,10 @@ def _slot_due_q(lookup: str, value: datetime.date) -> Q:
 
 
 def _slot_overdue_q(today: datetime.date) -> Q:
-    # `_SLOT_PENDING_Q`, not `_SLOT_LIVE_Q`: the Python twin `is_overdue`
+    # `_SLOT_ACTIVE_Q`, not `_SLOT_LIVE_Q`: the Python twin `is_overdue`
     # reads "state not closed", and a slot on a finished ticket is DONE.
-    return _SLOT_PENDING_Q & _slot_due_q("lt", today)
+    # P-11 A10 — and not on hold: a paused job does not nag.
+    return _SLOT_ACTIVE_Q & _slot_due_q("lt", today)
 
 
 # ---------------------------------------------------------------------
@@ -568,8 +579,9 @@ def _ew_window_end_q(lookup: str, value: datetime.date) -> Q:
 
 def _slot_rolled_q(today: datetime.date) -> Q:
     """W-PLANTRUTH §1b — SQL twin of `work_plan.rolls_forward` for a
-    slot: pending, and its last planned day has passed."""
-    return _SLOT_PENDING_Q & _slot_window_end_q("lt", today)
+    slot: active, and its last planned day has passed (P-11 A10 —
+    ACTIVE: an on-hold job never rolls)."""
+    return _SLOT_ACTIVE_Q & _slot_window_end_q("lt", today)
 
 
 def _ew_rolled_q(today: datetime.date) -> Q:
@@ -612,7 +624,14 @@ def _slot_board_q(
         board = board | _slot_rolled_q(today)
     # Rule 9 (customer) and P-10 A2 (manager's check): both waits are
     # outside the dates for the worker — strips, never columns.
-    return board & ~_slot_waiting_customer_q() & ~_slot_review_q()
+    # P-11 A10 — and an on-hold job is in the fold, never a column
+    # (its dated window would otherwise still overlap rule 1's week).
+    return (
+        board
+        & ~_slot_waiting_customer_q()
+        & ~_slot_review_q()
+        & ~Q(ticket__status=TicketStatus.ON_HOLD)
+    )
 
 
 def _ew_board_q(
@@ -736,7 +755,12 @@ def _slot_upcoming_q(week_end: datetime.date) -> Q:
     # START after this week cannot also be past a due date that is on or
     # before today, because today is inside or before this week. The
     # parity test pins that reasoning rather than trusting it.
-    return Q(scheduled_start_at__date__gt=week_end) & _SLOT_STATE_Q[STATE_OPEN]
+    # P-11 A10 — an on-hold job is not "coming up" either.
+    return (
+        Q(scheduled_start_at__date__gt=week_end)
+        & _SLOT_STATE_Q[STATE_OPEN]
+        & ~Q(ticket__status=TicketStatus.ON_HOLD)
+    )
 
 
 def _ew_upcoming_q(week_end: datetime.date) -> Q:
@@ -784,12 +808,9 @@ def _slot_undated_q() -> Q:
 
 
 def _slot_parked_q() -> Q:
-    """P-7 S8 — the slot twin of `_ticket_parked_q`."""
-    return (
-        _SLOT_PENDING_Q
-        & Q(scheduled_start_at__isnull=True)
-        & Q(ticket__status=TicketStatus.ON_HOLD)
-    )
+    """P-7 S8 — the slot twin of `_ticket_parked_q`. P-11 A10 — dated
+    or not; the fold is the on-hold job's only place."""
+    return _SLOT_PENDING_Q & Q(ticket__status=TicketStatus.ON_HOLD)
 
 
 def _ew_undated_q() -> Q:
@@ -836,7 +857,7 @@ def _assigned_slots(ticket_ref: str):
 def _ticket_stuck_q() -> Q:
     """A stuck JOB: live, at least one unable slot, nobody assigned."""
     return (
-        _TICKET_PENDING_Q
+        _TICKET_ACTIVE_Q
         & Exists(_unable_slots("id"))
         & ~Exists(_assigned_slots("id"))
     )
@@ -850,6 +871,8 @@ def _slot_stuck_q() -> Q:
     return (
         Q(slot_status=StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE)
         & _TICKET_LIVE_Q
+        # P-11 A10 — a paused job is not stuck; it is in the fold.
+        & ~Q(ticket__status=TicketStatus.ON_HOLD)
         & ~Exists(_assigned_slots("ticket_id"))
     )
 
@@ -887,6 +910,10 @@ _TICKET_PENDING_Q = Q(
     status__in=LATE_LIVE_TICKET_STATUSES, archived_at__isnull=True
 )
 
+#: P-11 A10 — the job twin of `_SLOT_ACTIVE_Q`: pending AND not on
+#: hold. See that constant for the ruling.
+_TICKET_ACTIVE_Q = _TICKET_PENDING_Q & ~Q(status=TicketStatus.ON_HOLD)
+
 _TICKET_STATE_Q = {
     STATE_DONE: ~_TICKET_PENDING_Q
     & ~Q(status__in=list(_TICKET_BLOCKED_STATUSES)),
@@ -919,8 +946,9 @@ def _ticket_week_q(week_start: datetime.date, week_end: datetime.date) -> Q:
 
 
 def _ticket_rolled_q(today: datetime.date) -> Q:
-    """Rule 5 for a job: pending, and its last planned day has passed."""
-    return _TICKET_PENDING_Q & Q(**{f"{JOB_WINDOW_END}__lt": today})
+    """Rule 5 for a job: active, and its last planned day has passed.
+    P-11 A10 — ACTIVE, not PENDING: an on-hold job never rolls."""
+    return _TICKET_ACTIVE_Q & Q(**{f"{JOB_WINDOW_END}__lt": today})
 
 
 def _ticket_review_q() -> Q:
@@ -1003,30 +1031,39 @@ def _ticket_board_q(
             board = board | (_ticket_review_q() & _ticket_responsible_q(user))
     # Rule 9 (P-9 §A.2a: in EVERY week) — waiting rows sit nowhere on
     # the board; they are zone 2, outside the dates.
-    return board & ~_ticket_waiting_customer_q()
+    # P-11 A10 — and an on-hold job is in the fold, never a column.
+    return (
+        board
+        & ~_ticket_waiting_customer_q()
+        & ~Q(status=TicketStatus.ON_HOLD)
+    )
 
 
 def _ticket_overdue_q(today: datetime.date) -> Q:
-    return _TICKET_PENDING_Q & job_due_q("lt", today)
+    return _TICKET_ACTIVE_Q & job_due_q("lt", today)
 
 
 def _ticket_upcoming_q(week_end: datetime.date) -> Q:
-    return Q(**{f"{JOB_START}__gt": week_end}) & _TICKET_STATE_Q[STATE_OPEN]
+    # P-11 A10 — an on-hold job is not "coming up" either.
+    return (
+        Q(**{f"{JOB_START}__gt": week_end})
+        & _TICKET_STATE_Q[STATE_OPEN]
+        & ~Q(status=TicketStatus.ON_HOLD)
+    )
 
 
 def _ticket_parked_q() -> Q:
     """P-7 S8 — parked (ON_HOLD through triage) and without a day.
 
     The owner's ruling: parked work leaves the "Not planned yet" nag.
-    It is still pending and still undated, so it is its own quiet list
-    ("Geparkeerd (N)") behind the same drawer, with the reason it was
-    parked for. A parked job WITH a day keeps its place on the board
-    (the P-3 matrix's rolled / planned rows for ON_HOLD stand)."""
-    return (
-        _TICKET_PENDING_Q
-        & Q(**{f"{JOB_START}__isnull": True})
-        & Q(status=TicketStatus.ON_HOLD)
-    )
+    It is its own quiet list ("Geparkeerd (N)") behind the same drawer,
+    with the reason it was parked for.
+
+    P-11 A10 — dated or not: an on-hold job lives ONLY here until
+    someone takes it off hold (reverses the P-3 matrix's "a parked job
+    WITH a day keeps its place" — ticket 460 rolled onto the owner's
+    today as late while deliberately paused)."""
+    return _TICKET_PENDING_Q & Q(status=TicketStatus.ON_HOLD)
 
 
 def _ticket_undated_q() -> Q:
@@ -1133,7 +1170,8 @@ def _extra_work_source(user, team: bool):
     return _with_ew_dates(
         _with_ew_settled_day(
             queryset.select_related("building", "customer", "created_by")
-            .prefetch_related("status_history__changed_by")
+            # P-11 A1 — `_ew_phase` reads the spawned ticket's status.
+            .prefetch_related("status_history__changed_by", "operational_tickets")
         )
     )
 
@@ -1155,7 +1193,10 @@ def _stuck_extra_work_source(user, team: bool):
             id__in=assigned_ids.filter(user=user),
         )
     return _with_ew_dates(
-        queryset.filter(_ew_stuck_q()).select_related("building", "customer")
+        queryset.filter(_ew_stuck_q())
+        .select_related("building", "customer")
+        # P-11 A1 — `_ew_phase` reads the spawned ticket's status.
+        .prefetch_related("operational_tickets")
     )
 
 
@@ -1580,6 +1621,33 @@ def _extra_work_job(extra_work) -> Job:
     )
 
 
+def _ew_phase(extra_work, provenance) -> str:
+    """P-11 A1 — the extra-work row's status word, server-decided.
+
+    The board's extra-work rows carry the same `display_phase` the
+    Extra work list reads (`extra_work/display_phase.py`), so the badge
+    on a schedule card and the badge on the list row can never
+    disagree. `viewer_is_customer` is False by construction: the board
+    403s customer-side callers at the door. The spawned-ticket
+    resolution mirrors `serializers._display_phase_for` (lowest id,
+    deleted excluded); the sources prefetch `operational_tickets`, so a
+    board is one query, not one per row.
+    """
+    tickets = [
+        t for t in extra_work.operational_tickets.all() if t.deleted_at is None
+    ]
+    ticket_status = min(tickets, key=lambda t: t.id).status if tickets else None
+    return ew_display_phase(
+        status=extra_work.status,
+        routing_decision=extra_work.routing_decision,
+        request_intent=extra_work.request_intent,
+        ticket_status=ticket_status,
+        is_invoiced=bool(extra_work.is_invoiced),
+        viewer_is_customer=False,
+        has_real_plan=provenance.has_real_plan,
+    )
+
+
 def _iso(value: datetime.date | None) -> str | None:
     return value.isoformat() if value is not None else None
 
@@ -1992,6 +2060,8 @@ def _entry_from_slot(
         "status": slot.slot_status,
         "state": job.state,
         "ticket_status": slot.ticket.status,
+        # P-11 A1 — extra-work rows carry the phase word instead.
+        "display_phase": None,
         "ticket_type": slot.ticket.type,
         "urgency": None,
         "customer_name": (
@@ -2085,6 +2155,8 @@ def _entry_from_extra_work(
     accident.
     """
     names = [_person_label(user) for user in assignees]
+    # Hoisted so the phase and the facts read ONE provenance answer.
+    provenance = extra_work_plan_provenance(extra_work)
     return {
         **_fe4_facts(
             job,
@@ -2101,7 +2173,7 @@ def _entry_from_extra_work(
                 if extra_work.provider_planned_date is not None
                 else PLAN_SOURCE_CUSTOMER_WISH
             ),
-            provenance=extra_work_plan_provenance(extra_work),
+            provenance=provenance,
             created_by=extra_work.created_by,
             planned_hours=planned_hours,
             today=today,
@@ -2123,6 +2195,9 @@ def _entry_from_extra_work(
         "status": extra_work.status,
         "state": job.state,
         "ticket_status": None,
+        # P-11 A1 — the badge word: the same phase the Extra work list
+        # shows for this row. Ticket rows carry `ticket_status` instead.
+        "display_phase": _ew_phase(extra_work, provenance),
         "ticket_type": None,
         "urgency": extra_work.urgency,
         "customer_name": (
@@ -2233,6 +2308,8 @@ def _entry_from_ticket(
         "status": ticket.status,
         "state": job.state,
         "ticket_status": ticket.status,
+        # P-11 A1 — extra-work rows carry the phase word instead.
+        "display_phase": None,
         "ticket_type": ticket.type,
         "urgency": None,
         "customer_name": (
@@ -3209,7 +3286,9 @@ class WorkPlanView(APIView):
         # this ruling's first pass broke). `.distinct()` because those
         # two branches are multi-valued joins.
         candidates = list(
-            tickets.filter(_TICKET_PENDING_Q)
+            # P-11 A10 — ACTIVE: an on-hold job is not on the late
+            # strip; the fold is its only place on this page.
+            tickets.filter(_TICKET_ACTIVE_Q)
             .filter(
                 Q(**{f"{JOB_WINDOW_END}__lt": today})
                 | Q(extra_work_request__deadline__lt=today)
@@ -3228,8 +3307,15 @@ class WorkPlanView(APIView):
         ew_rows = list(
             extra_work.filter(_EW_LIVE_Q)
             .filter(
+                # P-11 A11 — the provider's plan can be late too; the
+                # ladder (`LatenessIndex`) reads it first, so the
+                # candidate set must not hide a provider-planned row
+                # behind a future wish. Over-selection is harmless: the
+                # `is_late` re-check below drops what the ladder clears.
                 Q(preferred_date__lt=today)
                 | Q(planned_end_date__lt=today)
+                | Q(provider_planned_date__lt=today)
+                | Q(provider_planned_end_date__lt=today)
                 | Q(deadline__lt=today)
             )
             .order_by("id")
@@ -3297,14 +3383,23 @@ class WorkPlanView(APIView):
                 archived_at__isnull=True,
                 deleted_at__isnull=True,
             )
+            # P-11 A10 — an on-hold job is off this strip too.
+            .exclude(status=TicketStatus.ON_HOLD)
             .values_list("id", flat=True)
             .distinct()
         )
         ew_rows = list(
             extra_work.filter(_EW_LIVE_Q)
             .filter(
+                # P-11 A11 — the provider's plan can be late too; the
+                # ladder (`LatenessIndex`) reads it first, so the
+                # candidate set must not hide a provider-planned row
+                # behind a future wish. Over-selection is harmless: the
+                # `is_late` re-check below drops what the ladder clears.
                 Q(preferred_date__lt=today)
                 | Q(planned_end_date__lt=today)
+                | Q(provider_planned_date__lt=today)
+                | Q(provider_planned_end_date__lt=today)
                 | Q(deadline__lt=today)
             )
             .order_by("id")

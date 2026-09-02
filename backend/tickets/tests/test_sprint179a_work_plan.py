@@ -460,6 +460,9 @@ ENTRY_KEYS = {
     "status",
     "state",
     "ticket_status",
+    # P-11 A1 — the extra-work row's status word (the list's
+    # display_phase); None on ticket and slot rows.
+    "display_phase",
     "ticket_type",
     "urgency",
     "customer_name",

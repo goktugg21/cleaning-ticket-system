@@ -404,7 +404,9 @@ class ProposalOneTicketTests(OneTicketFixtureMixin, TestCase):
 
         resp = self._api(self.cust_user).post(
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/transition/",
-            {"to_status": ProposalStatus.CUSTOMER_REJECTED},
+            # P-5 — a refusal names its reason (`rejection_note_required`);
+            # brought up to that contract in P-11, the first run since.
+            {"to_status": ProposalStatus.CUSTOMER_REJECTED, "note": "too dear"},
             format="json",
         )
         self.assertEqual(resp.status_code, 200, resp.data)

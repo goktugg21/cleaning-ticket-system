@@ -54,7 +54,7 @@ from tickets.models import (
     TicketStatusHistory,
 )
 
-from .instant_tickets import _UNPLANNED
+from .instant_tickets import plan_seed
 
 from .models import (
     ExtraWorkRequest,
@@ -163,13 +163,11 @@ def spawn_tickets_for_proposal(
     # Back-compat legacy link: FIRST approved-for-spawn line.
     first_line = spawn_lines[0]
 
-    # P-1 — a spawned ticket is born UNPLANNED. Sprint 9B seeded
-    # `scheduled_start_at` from the cart's `requested_date` here, which
-    # the create serializer defaults to the day of entry; the board then
-    # read a creation date as a plan (TCK-2026-000209, "87 days late").
-    # The wish stays readable through `extra_work_origin`; the plan is
-    # made in the plan dialog, by a person. See `instant_tickets._UNPLANNED`.
-    seed_start, seed_schedule_status = _UNPLANNED
+    # P-11 A8 — born on the provider's plan when the request holds
+    # one (a person made it before the customer's yes); else unplanned
+    # (P-1: a creation date is not a plan — TCK-2026-000209, "87 days
+    # late"). See `instant_tickets.plan_seed`.
+    seed_start, seed_end, seed_schedule_status = plan_seed(request)
 
     ticket = Ticket.objects.create(
         company=request.company,
@@ -183,6 +181,7 @@ def spawn_tickets_for_proposal(
         extra_work_request=request,
         proposal_line=first_line,
         scheduled_start_at=seed_start,
+        scheduled_end_at=seed_end,
         schedule_status=seed_schedule_status,
     )
 
@@ -309,8 +308,9 @@ def spawn_tickets_for_extra_work_request(
     # Back-compat legacy link: FIRST cart line.
     first_item = items[0] if items else None
 
-    # P-1 — born UNPLANNED; see the proposal path above.
-    seed_start, seed_schedule_status = _UNPLANNED
+    # P-11 A8 — the provider's plan when one exists; see the
+    # proposal path above.
+    seed_start, seed_end, seed_schedule_status = plan_seed(ew)
 
     ticket = Ticket.objects.create(
         company=ew.company,
@@ -324,6 +324,7 @@ def spawn_tickets_for_extra_work_request(
         extra_work_request=ew,
         extra_work_request_item=first_item,
         scheduled_start_at=seed_start,
+        scheduled_end_at=seed_end,
         schedule_status=seed_schedule_status,
     )
 

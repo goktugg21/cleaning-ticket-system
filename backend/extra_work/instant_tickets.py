@@ -84,6 +84,40 @@ from .state_machine import TransitionError
 _UNPLANNED = (None, TicketScheduleStatus.UNSCHEDULED)
 
 
+def plan_seed(request: "ExtraWorkRequest"):
+    """P-11 A8 — `(scheduled_start_at, scheduled_end_at, schedule_status)`
+    for a spawned ticket.
+
+    The owner planned the REQUEST (days, people, hours), priced it,
+    started it — and the spawned ticket said "Not planned yet". Since
+    P-1 every spawn path seeded `_UNPLANNED`; nothing read the plan a
+    person had already made. So: born on the PROVIDER's plan when one
+    exists (`provider_planned_date` — a person set it, and provenance
+    holds: with no schedule-set history row `ticket_plan_provenance`
+    falls through to the request's committed window), else `_UNPLANNED`
+    exactly as before — P-1's ruling stands, the customer's wish is
+    still not a plan.
+
+    The end travels only when it is AFTER the start, and both land at
+    local midnight — mirroring `planned_date.apply_planned_date_to_
+    tickets` branch for branch, so a ticket born planned and one moved
+    later are indistinguishable.
+    """
+    from .planned_date import _local_midnight
+
+    if request.provider_planned_date is not None:
+        start = _local_midnight(request.provider_planned_date)
+        end = (
+            _local_midnight(request.provider_planned_end_date)
+            if request.provider_planned_end_date is not None
+            and request.provider_planned_end_date > request.provider_planned_date
+            else None
+        )
+        return start, end, TicketScheduleStatus.SCHEDULED
+    seed_start, seed_status = _UNPLANNED
+    return seed_start, None, seed_status
+
+
 def earliest_requested_start(ew: ExtraWorkRequest) -> Optional[datetime.datetime]:
     """
     Sprint 9B — seed a spawned ticket's `scheduled_start_at` from the
@@ -233,8 +267,9 @@ def spawn_tickets_for_request(
         # the origin payload's representative service name.
         first_item = items[0] if items else None
 
-        # P-1 — born UNPLANNED. See `_UNPLANNED`.
-        seed_start, seed_schedule_status = _UNPLANNED
+        # P-11 A8 — born on the provider's plan when the request holds
+        # one; else unplanned (P-1). See `plan_seed`.
+        seed_start, seed_end, seed_schedule_status = plan_seed(request)
 
         ticket = Ticket.objects.create(
             company=request.company,
@@ -248,6 +283,7 @@ def spawn_tickets_for_request(
             extra_work_request=request,
             extra_work_request_item=first_item,
             scheduled_start_at=seed_start,
+            scheduled_end_at=seed_end,
             schedule_status=seed_schedule_status,
         )
 

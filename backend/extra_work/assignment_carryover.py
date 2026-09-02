@@ -36,6 +36,13 @@ Where the ticket has no schedule (the line carried no requested date, so
 state — it matches what the ticket says about itself — and it is not
 papered over with today's date.
 
+**P-11 A8 — the request's PLAN travels too.** A person who planned the
+request (days per person in `ExtraWorkPlannedHours`, the window in
+`provider_planned_date`) made a real plan; the spawned ticket is born on
+it (`instant_tickets.plan_seed`) and each worker's slot is dated from
+their OWN planned days, falling back to the ticket's schedule for a
+person planned without days.
+
 An extra-work worker who is no longer ELIGIBLE at the ticket's building
 is skipped rather than carried. `buildings.assignment_eligibility` is
 the authority, the same one the assign endpoint uses, so the carry-over
@@ -49,12 +56,28 @@ duplicate and no error.
 """
 from __future__ import annotations
 
+import datetime
 import logging
 
-from .models import ExtraWorkAssignment, ExtraWorkAssignmentRole
+from django.utils import timezone
+
+from .models import (
+    ExtraWorkAssignment,
+    ExtraWorkAssignmentRole,
+    ExtraWorkPlannedHours,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+def _at(day: datetime.date, hour: int):
+    """A plan DAY as an aware instant — 09:00/17:00, the same clocks
+    `planning._sync_slot_windows` writes, so a slot dated at spawn and
+    one moved by a later plan edit are indistinguishable."""
+    return timezone.make_aware(
+        datetime.datetime.combine(day, datetime.time(hour, 0))
+    )
 
 
 def carry_managers_to_ticket(extra_work_request, ticket, *, actor=None) -> int:
@@ -138,6 +161,21 @@ def carry_workers_to_ticket(extra_work_request, ticket, *, actor=None) -> int:
             ).values_list("id", flat=True)
         )
 
+        # P-11 A8 — the request's plan travels onto the crew's slots.
+        # Each person's `ExtraWorkPlannedHours` days become their slot's
+        # window (first..last day, 09:00/17:00 — `_sync_slot_windows`'s
+        # own reading, so the post-spawn plan edit and the spawn write
+        # the same shape); a person planned WITHOUT days keeps the
+        # ticket's own schedule, which `plan_seed` has already set from
+        # `provider_planned_date` when the request holds a plan. The
+        # hours themselves stay in the one plan store the ticket's Plan
+        # tab already reads — nothing is copied.
+        days_by_user: dict[int, list[datetime.date]] = {}
+        for user_id, on_date in ExtraWorkPlannedHours.objects.filter(
+            extra_work_request=extra_work_request, date__isnull=False
+        ).values_list("user_id", "date"):
+            days_by_user.setdefault(user_id, []).append(on_date)
+
         for assignment in workers:
             if assignment.user_id not in eligible_ids:
                 logger.info(
@@ -148,6 +186,15 @@ def carry_workers_to_ticket(extra_work_request, ticket, *, actor=None) -> int:
                     ticket.building_id,
                 )
                 continue
+            # P-11 A8 — this person's slot window: their own planned
+            # days when the plan names any, else the ticket's schedule.
+            days = sorted(days_by_user.get(assignment.user_id, []))
+            if days:
+                slot_start = _at(days[0], 9)
+                slot_end = _at(days[-1], 17) if days[-1] > days[0] else None
+            else:
+                slot_start = ticket.scheduled_start_at
+                slot_end = ticket.scheduled_end_at
             # `get_or_create` rather than `bulk_create`: the audit rows
             # for TicketStaffAssignment come from post_save receivers,
             # and a bulk insert fires none of them (H-10). Keyed on
@@ -158,10 +205,10 @@ def carry_workers_to_ticket(extra_work_request, ticket, *, actor=None) -> int:
             _, was_created = TicketStaffAssignment.objects.get_or_create(
                 ticket=ticket,
                 user=assignment.user,
-                scheduled_start_at=ticket.scheduled_start_at,
+                scheduled_start_at=slot_start,
                 defaults={
                     "assigned_by": actor,
-                    "scheduled_end_at": ticket.scheduled_end_at,
+                    "scheduled_end_at": slot_end,
                 },
             )
             if was_created:

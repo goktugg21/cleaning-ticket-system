@@ -241,9 +241,20 @@ class LatenessIndex:
                 today=today,
             )
         for row in ew_rows:
+            # P-11 A11 — the ladder reads the PROVIDER's plan when one
+            # exists (the row's Plan-it button writes it; P-10 A6 moved
+            # every board predicate onto it and left this one on the
+            # customer's wish), else the wish — the same branch
+            # `views_work_plan._ew_planned_window` takes.
+            if row.provider_planned_date is not None:
+                ew_start = row.provider_planned_date
+                ew_end = row.provider_planned_end_date
+            else:
+                ew_start = row.preferred_date
+                ew_end = row.planned_end_date
             self._extra_work[row.id] = late_rules.assess(
-                planned_start=row.preferred_date,
-                planned_end=row.planned_end_date,
+                planned_start=ew_start,
+                planned_end=ew_end,
                 deadline=row.deadline,
                 done=row.status in _EW_DONE_STATUSES,
                 hours_booked=hours_for(HourSource.EXTRA_WORK, row.id),
