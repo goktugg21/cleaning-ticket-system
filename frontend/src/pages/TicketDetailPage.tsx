@@ -904,8 +904,14 @@ export function TicketDetailPage() {
      office corrects a type on the Hours page's grid. */
   const [completeHours, setCompleteHours] = useState<Record<number, string>>({});
   const [completeHourType, setCompleteHourType] = useState<number | null>(null);
+  // Only the people this VIEWER may write hours for: the timesheets
+  // privacy floor lets a worker write their OWN entries only, so a
+  // STAFF reporter is asked about themselves — a field for a colleague
+  // would be a door the server slams (found on the P-11 crmtest walk:
+  // Ahmet's 3 h landed, Noah's write was refused).
   const completionCrew = (ticket?.assigned_staff ?? []).flatMap((entry) =>
-    entry.anonymous
+    entry.anonymous ||
+    (!canManageTimesheets(me?.role) && entry.id !== me?.id)
       ? []
       : [{ id: entry.id, name: entry.full_name || entry.email || `#${entry.id}` }],
   );
