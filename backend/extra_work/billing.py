@@ -201,6 +201,40 @@ def is_billable(ew, ticket) -> bool:
     return is_earned(ticket)
 
 
+def unbilled_billable_total(ew):
+    """P-13 C — the earned-but-unbilled amount on this request, or None.
+
+    ONE answer for the three doors that must say it: the cancel guard
+    (a silent cancel of unbilled money is refused), the spawned
+    ticket's archive confirm ("the money stays on the Invoices page")
+    and the finished job's Done banner. None when the work is not
+    billable, already claimed by a live invoice (the pool's own
+    predicate: not deleted, not reversed), or carries no positive
+    amount. Final-with-quoted fallback — the ONE billing-total rule.
+    """
+    # Function-local: `invoicing` imports `extra_work` at module scope.
+    from invoicing.models import InvoiceLine
+
+    ticket = build_ticket_map([ew.id]).get(ew.id)
+    if not is_billable(ew, ticket):
+        return None
+    claimed = InvoiceLine.objects.filter(
+        extra_work=ew,
+        invoice__deleted_at__isnull=True,
+        invoice__reversed_by__isnull=True,
+    ).exists()
+    if claimed:
+        return None
+    total = (
+        ew.final_total_amount
+        if ew.final_total_amount is not None
+        else ew.total_amount
+    )
+    if total is None or total <= 0:
+        return None
+    return total
+
+
 def billing_month(ew, ticket):
     """(year, month) the EW bills in, or None if unresolvable.
 

@@ -815,6 +815,49 @@ class TicketDetailSerializer(
             status=obj.status, viewer_is_customer=viewer_is_customer
         )
 
+    # P-13 C/D — the finished job's MONEY fact, for the Done banner and
+    # the archive confirm: the earned-but-unbilled amount on the parent
+    # extra work, with the customer's billing day. Null unless the
+    # viewer is provider management, the ticket is EW-born (canonical
+    # FK), and `extra_work.billing.unbilled_billable_total` says money
+    # actually waits (billable, unclaimed, positive). Read-only,
+    # backend-computed — the screen never infers billing state itself.
+    extra_work_billing = serializers.SerializerMethodField()
+
+    def get_extra_work_billing(self, obj):
+        request = self.context.get("request") if self.context else None
+        user = getattr(request, "user", None) if request else None
+        if getattr(user, "role", None) not in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }:
+            return None
+        ew = obj.extra_work_request
+        if ew is None:
+            return None
+        from extra_work.billing import unbilled_billable_total
+
+        total = unbilled_billable_total(ew)
+        if total is None:
+            return None
+        from customers.models import Customer
+
+        customer = ew.customer
+        day = None
+        if customer is not None:
+            if customer.invoice_day_of_month:
+                day = customer.invoice_day_of_month
+            elif customer.invoice_day_rule == Customer.InvoiceDayRule.FIRST_OF_MONTH:
+                day = 1
+            elif customer.invoice_day_rule == Customer.InvoiceDayRule.LAST_OF_MONTH:
+                day = "LAST_OF_MONTH"
+        return {
+            "unbilled_total": f"{total:.2f}",
+            "customer_name": customer.name if customer is not None else "",
+            "customer_invoice_day": day,
+        }
+
     # FE-3 (Addendum D SS D.4 / SS D.11) -- the fact block's two missing
     # facts: what KIND of work this is, and how it stands against its
     # due date. Pure functions in `detail_facts.py`; read-only,
@@ -1091,6 +1134,7 @@ class TicketDetailSerializer(
             "sla_remaining_business_seconds",
             "sla_display_state",
             "extra_work_origin",
+            "extra_work_billing",
             "occurrence_origin",
             # Sprint 9B — operational scheduling (read-only here; mutated
             # via the dedicated POST/DELETE schedule endpoint). These are

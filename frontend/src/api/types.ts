@@ -645,6 +645,16 @@ export interface TicketOccurrenceOrigin {
 export interface TicketDetail extends TicketList {
   description: string;
   kind: TicketKind;
+  /** P-13 C/D — the finished job's MONEY fact: the parent extra
+   *  work's earned-but-unbilled amount plus the customer's billing
+   *  day. Null unless the viewer is provider management, the ticket is
+   *  EW-born, and money actually waits (billable, unclaimed,
+   *  positive). Feeds the Done banner and the archive confirm. */
+  extra_work_billing?: {
+    unbilled_total: string;
+    customer_name: string;
+    customer_invoice_day: number | "LAST_OF_MONTH" | null;
+  } | null;
   /** The date that decides late (`tickets/job_dates.py::job_due`): the
    *  extra work's deadline, else the last planned day. Null when nobody
    *  stated one. */

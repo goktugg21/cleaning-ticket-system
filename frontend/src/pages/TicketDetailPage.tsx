@@ -58,7 +58,7 @@ import {
   removeManagerAssignment,
 } from "../api/managerAssignments";
 import { getMessageRecipients } from "../api/notifications";
-import { formatDate as formatDay, formatDateTime } from "../lib/intl";
+import { formatDate as formatDay, formatDateTime, formatMoney } from "../lib/intl";
 import { MyPartsPanel } from "./tickets/MyPartsPanel";
 import type { OpenPart } from "./tickets/TicketTransitionModal";
 import { StaffAssignmentSection } from "./tickets/StaffAssignmentSection";
@@ -6054,6 +6054,17 @@ export function TicketDetailPage() {
         <TicketArchiveDialog
           ticketId={ticket.id}
           mode={archiveMode}
+          // P-13 C2 — an unbilled finished job's archive confirm says
+          // the money fact: the ticket hides, the money stays.
+          moneyNotice={
+            ticket.extra_work_billing
+              ? t("common:archive.money_notice", {
+                  amount: formatMoney(
+                    ticket.extra_work_billing.unbilled_total,
+                  ),
+                })
+              : undefined
+          }
           onCancel={() => setArchiveMode(null)}
           onDone={(updated, mode) => {
             setTicket(updated);

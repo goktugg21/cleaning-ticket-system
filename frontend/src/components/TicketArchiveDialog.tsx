@@ -30,11 +30,17 @@ export function TicketArchiveDialog({
   mode,
   onCancel,
   onDone,
+  moneyNotice,
 }: {
   ticketId: number | string;
   mode: "archive" | "unarchive";
   onCancel: () => void;
   onDone: (ticket: TicketDetail, mode: "archive" | "unarchive") => void;
+  /** P-13 C2 — the money fact on an unbilled job's archive confirm:
+   *  archiving hides the ticket, never the money. Composed by the
+   *  page from `ticket.extra_work_billing`; absent when nothing
+   *  waits. */
+  moneyNotice?: string;
 }) {
   const { t } = useTranslation("common");
   const [text, setText] = useState("");
@@ -76,6 +82,16 @@ export function TicketArchiveDialog({
         {error && (
           <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
             {error}
+          </div>
+        )}
+
+        {mode === "archive" && moneyNotice && (
+          <div
+            className="alert-warning"
+            style={{ marginBottom: 12 }}
+            data-testid="ticket-archive-money-notice"
+          >
+            {moneyNotice}
           </div>
         )}
 

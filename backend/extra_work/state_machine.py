@@ -555,6 +555,31 @@ def apply_transition(
     if (extra_work.status, to_status) in operational_override_pairs:
         is_override = True
 
+    # P-13 C2 — a request with a billable amount not yet on an invoice
+    # can be neither deleted (no such door exists) nor cancelled
+    # SILENTLY, whatever the from-status: money that vanishes from Due
+    # now with no trace is the quiet way it misses month-end. A reason
+    # is the only way out; the refusal names the amount so the operator
+    # knows what they are about to lose. With a reason, the cancel is
+    # coerced onto the override surface so `override_by/reason/at` and
+    # the history row log it (H-10/H-11 — the history row IS the audit
+    # trail). Archiving the spawned ticket stays allowed — it hides the
+    # ticket, never the money (`invoicing/selectors` reads no
+    # `archived_at`).
+    if to_status == ExtraWorkStatus.CANCELLED:
+        from .billing import unbilled_billable_total
+
+        unbilled = unbilled_billable_total(extra_work)
+        if unbilled is not None:
+            if not override_reason.strip():
+                raise TransitionError(
+                    f"This work has EUR {unbilled} not yet invoiced. "
+                    "Bill it first, or cancel it with a reason - a "
+                    "cancelled request leaves the invoice.",
+                    code="cancel_unbilled_requires_reason",
+                )
+            is_override = True
+
     if is_override:
         if not override_reason.strip():
             raise TransitionError(
