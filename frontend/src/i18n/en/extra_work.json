@@ -936,7 +936,7 @@
   "list.start_urgent_other": "{{count}} urgent requests waiting in this tab — “{{title}}” is the oldest, {{days}} days already.",
   "list.start_urgent_action": "Open the urgent request",
   "proposal.banner_sent_title": "Sent to the customer.",
-  "proposal.banner_sent_body": "The customer now sees the proposal and decides. Nothing is planned and nothing is invoiced. You will find this under Extra work → With the customer.",
+  "proposal.banner_sent_body": "The customer now sees the proposal and decides. Nothing is invoiced yet. You will find this under Extra work → With the customer.",
   "proposal.banner_sent_action": "To With the customer",
   "proposal.banner_started_title": "Priced and started — this is now a job in the planning.",
   "proposal.banner_started_body": "This customer does not need to approve first, so nothing was sent for approval. Next: plan the day and the people if that has not happened yet.",

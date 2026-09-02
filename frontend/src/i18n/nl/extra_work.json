@@ -936,7 +936,7 @@
   "list.start_urgent_other": "{{count}} spoedaanvragen wachten in dit tabblad — “{{title}}” is de oudste, al {{days}} dagen.",
   "list.start_urgent_action": "Open de spoedaanvraag",
   "proposal.banner_sent_title": "Naar de klant gestuurd.",
-  "proposal.banner_sent_body": "De klant ziet het voorstel nu en beslist. Er is niets gepland en niets gefactureerd. U vindt dit terug onder Extra werk → Bij de klant.",
+  "proposal.banner_sent_body": "De klant ziet het voorstel nu en beslist. Er is nog niets gefactureerd. U vindt dit terug onder Extra werk → Bij de klant.",
   "proposal.banner_sent_action": "Naar Bij de klant",
   "proposal.banner_started_title": "Geprijsd en gestart — dit is nu een klus in de planning.",
   "proposal.banner_started_body": "Deze klant hoeft niet eerst goed te keuren, dus er is niets ter goedkeuring gestuurd. Volgende: plan de dag en de mensen als dat nog niet is gebeurd.",
