@@ -36,7 +36,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { BadgeEuro, CheckCircle2, Search, SlidersHorizontal } from "lucide-react";
+import { BadgeEuro, Search, SlidersHorizontal } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -62,6 +62,14 @@ import type {
   InvoiceStatus,
 } from "../api/types";
 import { BillingTargetFields } from "../components/BillingTargetFields";
+import { RoadTabs, TeachHead } from "../components/guide/RoadTabs";
+import { StartHere } from "../components/guide/StartHere";
+import { TeachEmpty } from "../components/guide/TeachEmpty";
+import { DoneBanner } from "../components/guide/DoneBanner";
+import { useDoneBanner } from "../components/guide/useDoneBanner";
+import { HIGHLIGHT_CLASS, HIGHLIGHT_MS } from "../components/guide/highlight";
+import { CompanyScopeSelect } from "../components/guide/CompanyScopeSelect";
+import { useCompanyScope } from "../lib/useCompanyScope";
 import { BoundedList } from "../components/BoundedList";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
@@ -70,21 +78,15 @@ import {
   PdfPreviewDialog,
   type PdfPreviewDialogHandle,
 } from "../components/PdfPreviewDialog";
-import { useToast } from "../components/ToastProvider";
 import { monthName } from "../lib/billingSentence";
-import { customerLabelName } from "../lib/customerLabelName";
-import {
-  formatDate,
-  formatDateTime,
-  formatInvoiceGroupLabel,
-  formatMoney,
-} from "../lib/intl";
+import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
 
-// P-11 D (§D.22 item 2) — the ONE ordered tab list; every consumer
-// (the strip, the labels, the purposes, the counts) iterates or
-// indexes it, so a new tab fails compilation instead of landing in no
-// strip (the Sprint 126/130 lesson).
-const FACTUREN_TABS = ["due", "drafts", "issued", "sent", "all"] as const;
+// P-12 D1 (§D.24 rule 3) — the tabs ARE the steps of the road, in
+// the order things happen, numbered: finished work becomes a draft,
+// you check it, you issue it, you send it. The "All" tab is gone — it
+// was not a step. ONE ordered constant; every consumer iterates it
+// (the Sprint 126/130 lesson).
+const FACTUREN_TABS = ["due", "drafts", "issued", "sent"] as const;
 type FacturenTab = (typeof FACTUREN_TABS)[number];
 
 const TAB_LABEL_KEY: Record<FacturenTab, string> = {
@@ -92,26 +94,23 @@ const TAB_LABEL_KEY: Record<FacturenTab, string> = {
   drafts: "invoices:tabs.drafts",
   issued: "invoices:tabs.issued",
   sent: "invoices:tabs.sent",
-  all: "invoices:tabs.all",
 };
 
-const TAB_PURPOSE_KEY: Record<FacturenTab, string> = {
-  due: "invoices:tabs.due_purpose",
-  drafts: "invoices:tabs.drafts_purpose",
-  issued: "invoices:tabs.issued_purpose",
-  sent: "invoices:tabs.sent_purpose",
-  all: "invoices:tabs.all_purpose",
+/** The numbered eyebrow word per step ("1 · Afgerond werk"). */
+const TAB_STEP_KEY: Record<FacturenTab, string> = {
+  due: "invoices:road.due_step",
+  drafts: "invoices:road.drafts_step",
+  issued: "invoices:road.issued_step",
+  sent: "invoices:road.sent_step",
 };
 
-/** The invoice status one tab narrows the list to; null narrows
- *  nothing ("all" shows every status, "due" shows the due table
- *  instead of the list). */
+/** The invoice status one tab narrows the list to; the Due tab shows
+ *  the per-customer due table instead of the list. */
 const TAB_STATUS: Record<FacturenTab, InvoiceStatus | null> = {
   due: null,
   drafts: "DRAFT",
   issued: "ISSUED",
   sent: "SENT",
-  all: null,
 };
 
 // P-11 D (§D.22 item 7) — ONE next-step button per row, the invoice's
@@ -135,12 +134,6 @@ const AT_RISK_STAGE_KEYS: Record<AtRiskStage, string> = {
   SLOT_DONE: "facturen.at_risk_stage_slot_done",
   BLOCKED: "facturen.at_risk_stage_blocked",
   PAST_DEADLINE: "facturen.at_risk_stage_past_deadline",
-};
-
-const STATUS_LABEL_KEY: Record<InvoiceStatus, string> = {
-  DRAFT: "facturen.status_draft",
-  ISSUED: "facturen.status_issued",
-  SENT: "facturen.status_sent",
 };
 
 /** The one sentence, from the one diagnosis (Sprint 183 §2). Shared by
@@ -180,12 +173,6 @@ function parseMonth(value: string): { year: number; month: number } | null {
 function formatPeriod(year: number | null, month: number | null): string {
   if (!year || !month) return "";
   return monthName(`${year}-${String(month).padStart(2, "0")}`);
-}
-
-/** "Augustus 2026" — the month as a word, capitalised for a heading. */
-function periodHeading(year: number, month: number): string {
-  const words = monthName(`${year}-${String(month).padStart(2, "0")}`);
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function sumAmounts(values: string[]): string {
@@ -282,11 +269,32 @@ function periodListLabel(resolved: UnbilledPeriods | undefined): string | null {
     .join(", ");
 }
 
-interface InvoiceGroup {
-  key: string;
-  label: string;
-  rows: Invoice[];
-  total: string;
+/** P-12 D5 (§D.24 rule 6) — the draft row says what its lines came
+ *  from: "Contract CNT-2026-0002 · augustus + 2 meerwerkregels". A
+ *  contract-generated draft's non-EW lines belong to the contract;
+ *  a hand-made draft's are hand lines. */
+function draftLinesSummary(
+  inv: Invoice,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  const ewCount = inv.lines.filter((line) => line.extra_work !== null).length;
+  const parts: string[] = [];
+  if (inv.contract) {
+    parts.push(
+      t("invoices:road.lines_contract", {
+        no: inv.contract.contract_no,
+        period: monthName(inv.contract.period_start.slice(0, 7)),
+      }),
+    );
+  }
+  if (ewCount > 0) {
+    parts.push(t("invoices:road.lines_ew", { count: ewCount }));
+  }
+  const rest = inv.lines.length - ewCount;
+  if (!inv.contract && rest > 0) {
+    parts.push(t("invoices:road.lines_hand", { count: rest }));
+  }
+  return parts.length > 0 ? parts.join(" + ") : t("invoices:road.lines_none");
 }
 
 export function FacturenPage({
@@ -297,7 +305,6 @@ export function FacturenPage({
   embedded?: boolean;
 } = {}) {
   const { t } = useTranslation(["common", "invoices"]);
-  const { push: pushToast } = useToast();
   const { me } = useAuth();
   const customerScoped = customerId !== undefined;
   // P-8R F — the row's customer link goes to the customer detail, whose
@@ -333,15 +340,12 @@ export function FacturenPage({
   const [buildingFilter, setBuildingFilter] = useState("ALL");
   const [search, setSearch] = useState("");
 
-  // P-11 D — the tab, the Extra work way: the address is the source
-  // (?tab=, read at mount and on every change) so a reload and "Back"
-  // land where the person was. The meerwerk deep links (?customer= /
-  // ?period=) point at the LIST, so without a named tab they open on
-  // All; everyone else opens on Due now, the tab with work to do.
+  // P-12 D1 — the tab, in the address (?tab=). Without one the page
+  // opens on the road's first step; a meerwerk deep link (?customer= /
+  // ?period=) lands there too — the customer's unbilled work IS the
+  // To-invoice tab, and the filters narrow every tab including it.
   const urlTab = parseFacturenTab(searchParams.get("tab"));
-  const deepLinkedToList =
-    !embedded && (searchParams.has("customer") || searchParams.has("period"));
-  const activeTab: FacturenTab = urlTab ?? (deepLinkedToList ? "all" : "due");
+  const activeTab: FacturenTab = urlTab ?? "due";
 
   function selectTab(next: FacturenTab) {
     const params = new URLSearchParams(searchParams);
@@ -362,12 +366,33 @@ export function FacturenPage({
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewPdfRef = useRef<PdfPreviewDialogHandle>(null);
 
+  // P-12 D3 (§D.24 rule 4) — the after-action banner and the fresh
+  // drafts' ten-second tint on the Drafts tab.
+  const facDone = useDoneBanner("invoices");
+  const [newDraftIds, setNewDraftIds] = useState<number[]>([]);
+  useEffect(() => {
+    if (newDraftIds.length === 0) return;
+    const timer = window.setTimeout(() => setNewDraftIds([]), HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [newDraftIds]);
+
+  // P-12 §D.24.2 — one company at a time (SUPER_ADMIN, standalone
+  // page only). The session's shared choice wins; else the company
+  // with something waiting seeds it once the due rows arrive.
+  const companyScope = useCompanyScope(
+    !embedded && !customerScoped && me?.role === "SUPER_ADMIN",
+  );
+  const scopedCompany =
+    companyScope.companyId === "" ? undefined : companyScope.companyId;
+
   // Due panel — loaded in BOTH modes, narrowed to the pinned customer.
   useEffect(() => {
     let cancelled = false;
     async function loadDue() {
       try {
-        const rows = await getInvoiceDueList();
+        const rows = await getInvoiceDueList(
+          scopedCompany === undefined ? {} : { company: scopedCompany },
+        );
         if (!cancelled) {
           setDueRows(
             customerId === undefined
@@ -385,14 +410,29 @@ export function FacturenPage({
     return () => {
       cancelled = true;
     };
-  }, [customerId, refreshKey]);
+  }, [customerId, refreshKey, scopedCompany]);
+
+  // §D.24.2 — the "company with something waiting" seeds the scope
+  // when the session holds no choice yet: the first due-now customer's
+  // company, else the first scheduled one's.
+  useEffect(() => {
+    if (!companyScope.ready || companyScope.companyId !== "") return;
+    if (companyScope.companies.length <= 1) return;
+    const waiting =
+      dueRows.find((row) => row.is_due) ??
+      dueRows.find((row) => row.unbilled_count > 0) ??
+      dueRows[0];
+    if (waiting) companyScope.seedCompany(waiting.company);
+  }, [companyScope, dueRows]);
 
   // WP-1 G4 — the at-risk rows. A failed fetch keeps its silence.
   useEffect(() => {
     let cancelled = false;
     async function loadAtRisk() {
       try {
-        const data = await getBillingMonthAtRisk();
+        const data = await getBillingMonthAtRisk(
+          scopedCompany === undefined ? {} : { company: scopedCompany },
+        );
         if (cancelled) return;
         setAtRiskGroups(
           customerId === undefined
@@ -408,7 +448,7 @@ export function FacturenPage({
     return () => {
       cancelled = true;
     };
-  }, [customerId, refreshKey]);
+  }, [customerId, refreshKey, scopedCompany]);
 
   // W5 fix 4 — resolve WHICH periods each due row's unbilled work sits in.
   useEffect(() => {
@@ -446,6 +486,7 @@ export function FacturenPage({
       try {
         const allInvoices = await listAllInvoices({
           customer: customerId,
+          company: scopedCompany,
           period_year: period?.year,
           period_month: period?.month,
         });
@@ -460,7 +501,7 @@ export function FacturenPage({
     return () => {
       cancelled = true;
     };
-  }, [customerId, period, refreshKey]);
+  }, [customerId, period, refreshKey, scopedCompany]);
 
   const customerOptions = useMemo(() => {
     const map = new Map<number, string>();
@@ -516,42 +557,6 @@ export function FacturenPage({
     [baseVisible, tabStatus],
   );
 
-  // Grouped by billing month, newest first; invoices without a period
-  // close the list under their own heading.
-  const groups = useMemo<InvoiceGroup[]>(() => {
-    const byKey = new Map<string, Invoice[]>();
-    for (const inv of visibleInvoices) {
-      const key = inv.period_year && inv.period_month
-        ? `${inv.period_year}-${String(inv.period_month).padStart(2, "0")}`
-        : "none";
-      const bucket = byKey.get(key);
-      if (bucket) bucket.push(inv);
-      else byKey.set(key, [inv]);
-    }
-    const keys = [...byKey.keys()].sort((a, b) => {
-      if (a === "none") return 1;
-      if (b === "none") return -1;
-      return b.localeCompare(a);
-    });
-    return keys.map((key) => {
-      const rows = [...(byKey.get(key) ?? [])].sort(
-        (a, b) => a.customer_name.localeCompare(b.customer_name) || b.id - a.id,
-      );
-      const parsed = key === "none" ? null : parseMonth(key);
-      return {
-        key,
-        label: parsed ? periodHeading(parsed.year, parsed.month) : t("facturen.group_no_period"),
-        rows,
-        total: sumAmounts(rows.map((row) => row.total_amount)),
-      };
-    });
-  }, [visibleInvoices, t]);
-
-  // Rule 13 — a column whose every value would be empty is absent.
-  const showGroupLabelColumn = visibleInvoices.some(
-    (inv) => inv.department_name || inv.work_type_name,
-  );
-  const showBuildingColumn = visibleInvoices.some((inv) => inv.building !== null);
 
   const activeFilterChips = useMemo(() => {
     const chips: string[] = [];
@@ -579,15 +584,50 @@ export function FacturenPage({
   // P-11 D — the tab counts, client-side over the loaded sets: the
   // list is exhaustive (Sprint 120), and the due count is today's
   // "ready for a draft" fact from the due rows.
-  const dueNowRows = dueRows.filter((row) => row.unbilled_count > 0);
+  // The due table narrows with the customer filter too, so a meerwerk
+  // deep link (?customer=) lands on To invoice showing THAT customer.
+  const visibleDueRows = useMemo(
+    () =>
+      customerFilter === "ALL"
+        ? dueRows
+        : dueRows.filter((row) => String(row.customer) === customerFilter),
+    [dueRows, customerFilter],
+  );
+  const dueNowRows = visibleDueRows.filter((row) => row.unbilled_count > 0);
   const atRiskCount = atRiskGroups.reduce((total, group) => total + group.rows.length, 0);
   const tabCounts: Record<FacturenTab, number> = {
     due: dueNowRows.length,
     drafts: statusCounts.DRAFT,
     issued: statusCounts.ISSUED,
     sent: statusCounts.SENT,
-    all: baseVisible.length,
   };
+
+  // §D.22 rule 4 — one money line per step, over the loaded rows.
+  const thisYear = String(new Date().getFullYear());
+  const tabMoney: Record<FacturenTab, string> = {
+    due: sumAmounts(dueNowRows.map((row) => row.unbilled_total)),
+    drafts: sumAmounts(
+      baseVisible.filter((inv) => inv.status === "DRAFT").map((inv) => inv.total_amount),
+    ),
+    issued: sumAmounts(
+      baseVisible.filter((inv) => inv.status === "ISSUED").map((inv) => inv.total_amount),
+    ),
+    sent: sumAmounts(
+      baseVisible
+        .filter((inv) => inv.status === "SENT" && (inv.sent_at ?? "").startsWith(thisYear))
+        .map((inv) => inv.total_amount),
+    ),
+  };
+
+  // §D.24 rule 2 — the ONE thing waiting, first step first: a due-now
+  // customer, else drafts to check, else issued waiting to be sent.
+  const startDueRow = dueNowRows.find((row) => row.is_due) ?? null;
+  const oldestDraft =
+    [...baseVisible].filter((inv) => inv.status === "DRAFT").sort((a, b) => a.id - b.id)[0] ??
+    null;
+  const oldestIssued =
+    [...baseVisible].filter((inv) => inv.status === "ISSUED").sort((a, b) => a.id - b.id)[0] ??
+    null;
 
   function openGenerate(row: InvoiceDueRow) {
     setGenRow(row);
@@ -664,15 +704,33 @@ export function FacturenPage({
         granularity: granularityFor(genTarget, genSplit),
       });
       if (created.length > 0) {
-        pushToast({
-          variant: "success",
-          title: t("facturen.gen_toast", { count: created.length }),
+        // P-12 D3 (§D.24 rule 4) — the page MOVES you to where the
+        // thing went: the Drafts tab, the new drafts tinted, and the
+        // banner says what happened, what did NOT, and the next step.
+        const ewLineCount = created.reduce(
+          (total, inv) => total + inv.lines.filter((line) => line.extra_work !== null).length,
+          0,
+        );
+        facDone.announce({
+          title: t("invoices:road.made_title", {
+            count: created.length,
+            name: genRow.customer_name,
+            amount: formatMoney(sumAmounts(created.map((inv) => inv.total_amount))),
+            period: formatPeriod(parsed.year, parsed.month),
+            lines: ewLineCount,
+          }),
+          body: t("invoices:road.made_body"),
+          actionLabel: t("invoices:road.made_action", { count: created.length }),
+          actionTo: `/invoices/${created[0].id}`,
         });
+        setNewDraftIds(created.map((inv) => inv.id));
+        selectTab("drafts");
       } else {
         const attempted = formatPeriod(parsed.year, parsed.month);
         const elsewhere = periodListLabel(duePeriods[genRow.customer]);
-        pushToast({
-          variant: "info",
+        // Zero created: the same surface, the P-11 sentence — a banner
+        // on the tab the person is on, never only a toast.
+        facDone.announce({
           title: elsewhere
             ? t("facturen.gen_zero_elsewhere", { attempted, actual: elsewhere })
             : t("facturen.gen_zero", { attempted }),
@@ -688,8 +746,6 @@ export function FacturenPage({
   }
 
   const genParsed = parseMonth(genMonth);
-  const columnCount =
-    2 + (customerScoped ? 0 : 1) + (showBuildingColumn ? 1 : 0) + (showGroupLabelColumn ? 1 : 0) + 1;
 
   return (
     <div data-testid="facturen-page">
@@ -699,6 +755,14 @@ export function FacturenPage({
           title={t("facturen.title")}
           subtitle={t("facturen.subtitle")}
           testId="facturen-header"
+          actions={
+            <CompanyScopeSelect
+              companies={companyScope.companies}
+              companyId={companyScope.companyId}
+              onChange={(id) => companyScope.chooseCompany(id)}
+              testId="facturen-company-scope"
+            />
+          }
         />
       )}
 
@@ -708,42 +772,102 @@ export function FacturenPage({
         </div>
       )}
 
-      {/* P-11 D (§D.22 items 2-3) — ONE tab strip with counts, the tab
-          in the address; one purpose sentence per tab under it. */}
-      <div
-        className="customer-tabs ew-tabs facturen-tabs"
-        role="tablist"
-        aria-label={t("facturen.title")}
-        data-testid="facturen-tabs"
-      >
-        {FACTUREN_TABS.map((key) => {
-          const active = key === activeTab;
-          const counting = key === "due" ? dueLoading : loading;
-          return (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              className={`customer-tab${active ? " active" : ""}`}
-              onClick={() => selectTab(key)}
-              data-testid={`facturen-tab-${key}`}
-              data-count={tabCounts[key]}
-            >
-              {t(TAB_LABEL_KEY[key])}
-              <span className="ew-tab-count" data-testid={`facturen-tab-count-${key}`}>
-                {counting ? "…" : tabCounts[key]}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {/* P-12 §D.24 rule 4 — what just happened, in place. */}
+      {facDone.done && (
+        <DoneBanner
+          done={facDone.done}
+          onDismiss={facDone.dismiss}
+          testId="facturen-done"
+        />
+      )}
 
-      <div className="ew-tab-head">
-        <p className="section-head-sub ew-tab-purpose" data-testid="facturen-tab-purpose">
-          {t(TAB_PURPOSE_KEY[activeTab])}
-        </p>
-      </div>
+      {/* P-12 §D.24 rule 2 — the ONE thing waiting, first step first. */}
+      {!dueLoading && !loading && !genRow && (
+        startDueRow ? (
+          <StartHere
+            testId="facturen-start-here"
+            action={{
+              label: t("invoices:road.start_due_action", {
+                name: startDueRow.customer_name,
+              }),
+              onClick: () => {
+                selectTab("due");
+                openGenerate(startDueRow);
+              },
+            }}
+          >
+            {t("invoices:road.start_due", {
+              count: dueNowRows.length,
+              total: formatMoney(tabMoney.due),
+              name: startDueRow.customer_name,
+              day:
+                startDueRow.invoice_day_of_month != null
+                  ? t("facturatie.day_of_month", { day: startDueRow.invoice_day_of_month })
+                  : startDueRow.invoice_day_rule === "LAST_OF_MONTH"
+                    ? t("facturatie.day_last")
+                    : t("facturatie.day_first"),
+            })}
+          </StartHere>
+        ) : oldestDraft ? (
+          <StartHere
+            testId="facturen-start-here"
+            action={{
+              label: t("invoices:road.start_drafts_action"),
+              to: `/invoices/${oldestDraft.id}`,
+            }}
+          >
+            {t("invoices:road.start_drafts", {
+              count: tabCounts.drafts,
+              total: formatMoney(tabMoney.drafts),
+            })}
+          </StartHere>
+        ) : oldestIssued ? (
+          <StartHere
+            testId="facturen-start-here"
+            action={{
+              label: t("invoices:road.start_issued_action"),
+              to: `/invoices/${oldestIssued.id}`,
+            }}
+          >
+            {t("invoices:road.start_issued", { count: tabCounts.issued })}
+          </StartHere>
+        ) : null
+      )}
+
+      {/* P-12 D1 (§D.24 rule 3) — the road: numbered steps, in the
+          order things happen, each with its count. */}
+      <RoadTabs
+        steps={FACTUREN_TABS.map((key) => ({
+          key,
+          step: t(TAB_STEP_KEY[key]),
+          label: t(TAB_LABEL_KEY[key]),
+          count:
+            (key === "due" ? dueLoading : loading) ? null : tabCounts[key],
+        }))}
+        activeKey={activeTab}
+        onSelect={(key) => selectTab(key)}
+        ariaLabel={t("facturen.title")}
+        testIdPrefix="facturen-tab"
+      />
+
+      {/* Rule 3's second half — the step teaches itself, with the one
+          money line (§D.22 rule 4). */}
+      <TeachHead
+        testId="facturen-teach"
+        title={t(`invoices:road.${activeTab}_title`)}
+        body={t(`invoices:road.${activeTab}_body`)}
+        money={
+          (activeTab === "due" ? dueLoading : loading)
+            ? undefined
+            : {
+                value:
+                  activeTab === "due" || activeTab === "drafts" || activeTab === "issued" || activeTab === "sent"
+                    ? formatMoney(tabMoney[activeTab])
+                    : "",
+                label: t(`invoices:road.${activeTab}_money_label`),
+              }
+        }
+      />
 
       {/* ---- Due panel — the Due now tab ---- */}
       {activeTab === "due" && (
@@ -752,19 +876,11 @@ export function FacturenPage({
         style={{ padding: 16, marginBottom: 16 }}
         data-testid="facturen-due-panel"
       >
-        <div className="section-head" style={{ marginBottom: 10 }}>
-          <div>
-            <div className="section-head-title">{t("facturen.due_title")}</div>
-            <div className="section-head-sub">
-              {customerScoped ? t("facturen.due_sub_customer") : t("facturen.due_sub")}
-            </div>
-          </div>
-        </div>
         {dueLoading ? (
           <div className="loading-bar">
             <div className="loading-bar-fill" />
           </div>
-        ) : dueRows.length === 0 ? (
+        ) : visibleDueRows.length === 0 ? (
           <p className="muted small" data-testid="facturen-due-empty">
             {customerScoped ? (
               t("facturen.due_empty_customer")
@@ -785,14 +901,22 @@ export function FacturenPage({
                 <tr>
                   <th>{t("facturen.col_customer")}</th>
                   <th>{t("facturen.due_col_schedule")}</th>
-                  <th>{t("facturen.due_col_unbilled")}</th>
+                  <th>{t("invoices:road.due_col_waiting")}</th>
                   <th style={{ textAlign: "right" }}>{t("facturen.col_total")}</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {dueRows.map((row) => {
+                {visibleDueRows.map((row) => {
                   const ready = row.unbilled_count > 0;
+                  const dayWords =
+                    row.invoice_day_of_month != null
+                      ? t("facturatie.day_of_month", { day: row.invoice_day_of_month })
+                      : row.invoice_day_rule === "FIRST_OF_MONTH"
+                        ? t("facturatie.day_first")
+                        : row.invoice_day_rule === "LAST_OF_MONTH"
+                          ? t("facturatie.day_last")
+                          : t("facturen.no_schedule");
                   return (
                     <tr key={row.customer} data-testid="facturen-due-row" data-ready={ready}>
                       <td>
@@ -807,20 +931,33 @@ export function FacturenPage({
                             {t("facturen.due_now")}
                           </span>
                         )}
+                        {/* Rule 1's "today is the 2nd" sub — why Due
+                            now is (or is not) on this row. */}
+                        {row.is_due && (
+                          <span className="muted small" style={{ display: "block" }}>
+                            {t("invoices:road.due_today_sub", {
+                              day: dayWords,
+                              today: new Date().getDate(),
+                            })}
+                          </span>
+                        )}
                       </td>
                       {/* W-HK1 §2 — the backend's order: a fixed day wins
                           over the FIRST/LAST rule. */}
-                      <td className="muted small">
-                        {row.invoice_day_of_month != null
-                          ? t("facturatie.day_of_month", { day: row.invoice_day_of_month })
-                          : row.invoice_day_rule === "FIRST_OF_MONTH"
-                            ? t("facturatie.day_first")
-                            : row.invoice_day_rule === "LAST_OF_MONTH"
-                              ? t("facturatie.day_last")
-                              : t("facturen.no_schedule")}
-                      </td>
+                      <td className="muted small">{dayWords}</td>
                       <td>
-                        <strong>{row.unbilled_count}</strong>
+                        {ready ? (
+                          <strong>
+                            {t("invoices:road.due_waiting_jobs", {
+                              count: row.unbilled_count,
+                            })}
+                          </strong>
+                        ) : (
+                          <span className="cell-tag cell-tag-closed">
+                            <i />
+                            {t("invoices:road.due_nothing_yet")}
+                          </span>
+                        )}
                         {nothingSentence(t, row.nothing_reason) && (
                           <span
                             className="muted small"
@@ -841,12 +978,13 @@ export function FacturenPage({
                         )}
                       </td>
                       <td style={{ textAlign: "right" }}>
-                        {ready ? <strong>{formatMoney(row.unbilled_total)}</strong> : ""}
+                        {ready ? <strong>{formatMoney(row.unbilled_total)}</strong> : "\u2014"}
                       </td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        {/* One primary per row; a row with nothing to
-                            generate carries its reason in words instead
-                            of two dead buttons (rules 3 and 14). */}
+                        {/* D5 — the due row keeps its pair (Preview +
+                            Make a draft): the one-button rule is the
+                            LIST tabs'. A row with nothing carries its
+                            reason in words instead of dead buttons. */}
                         {ready ? (
                           <>
                             <button
@@ -885,6 +1023,62 @@ export function FacturenPage({
           </p>
           </>
         )}
+
+        {/* P-12 D1 — the at-risk guard is the To-invoice tab's FOOTER
+            line: "N running jobs will not reach this month's
+            invoices — see which". Nothing renders when it is clear
+            (a card celebrating zero is what §D.24 rule 2 bans). */}
+        {atRiskGroups.length > 0 && (
+          <details className="form-fold" style={{ marginTop: 12 }} data-testid="facturen-at-risk-panel">
+            <summary className="form-fold-summary">
+              {t("invoices:road.at_risk_foot", { count: atRiskCount })}
+              <span className="form-fold-summary-value">
+                {t("facturen.at_risk_see_which")}
+              </span>
+            </summary>
+            <div className="form-fold-body">
+              <p className="muted small" style={{ marginTop: 4 }}>{t("facturen.at_risk_sub")}</p>
+              <div style={{ overflowX: "auto" }}>
+                <table className="data-table data-table-dense" data-testid="facturen-at-risk-table">
+                  <thead>
+                    <tr>
+                      {!customerScoped && <th>{t("facturen.col_customer")}</th>}
+                      <th>{t("facturen.at_risk_col_item")}</th>
+                      <th>{t("facturen.at_risk_col_stage")}</th>
+                      <th>{t("facturen.at_risk_col_age")}</th>
+                      <th>{t("facturen.at_risk_col_date")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {atRiskGroups.flatMap((group) =>
+                      group.rows.map((row) => (
+                        <tr key={`${group.customer}-${row.extra_work_id}`} data-testid="facturen-at-risk-row">
+                          {!customerScoped && <td>{group.customer_name}</td>}
+                          <td>
+                            <Link
+                              to={row.ticket_id !== null ? `/tickets/${row.ticket_id}` : `/extra-work/${row.extra_work_id}`}
+                            >
+                              {row.ticket_no ? `${row.ticket_no} \u00b7 ` : ""}
+                              {row.title}
+                            </Link>
+                            {row.building_name && <div className="muted small">{row.building_name}</div>}
+                          </td>
+                          <td>{t(AT_RISK_STAGE_KEYS[row.stage])}</td>
+                          <td>{t("facturen.at_risk_age", { count: row.age_days })}</td>
+                          <td>{formatDate(`${row.date}T00:00:00`)}</td>
+                        </tr>
+                      )),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {atRiskTruncated && (
+                <p className="muted small" role="status">{t("facturen.at_risk_truncated")}</p>
+              )}
+            </div>
+          </details>
+        )}
+
 
         {/* Sprint 182 §2 — the preview panel. Creates nothing. */}
         {previewRow && (
@@ -1047,81 +1241,10 @@ export function FacturenPage({
       </section>
       )}
 
-      {/* ---- WP-1 G4: the billing-month guard, folded with its count ---- */}
-      {atRiskGroups.length === 0 ? (
-        <p className="facturen-clear" data-testid="facturen-at-risk-clear">
-          <CheckCircle2 size={16} strokeWidth={2.4} aria-hidden="true" />
-          <span>
-            <strong>{t("facturen.at_risk_clear_title")}</strong>{" "}
-            <span className="muted">{t("facturen.at_risk_clear_sub")}</span>
-          </span>
-        </p>
-      ) : (
-        <details className="form-fold" data-testid="facturen-at-risk-panel">
-          <summary className="form-fold-summary">
-            {t("facturen.at_risk_title")}
-            <span className="form-fold-summary-value">
-              {t("facturen.fact_risk_value", { count: atRiskCount })}
-            </span>
-          </summary>
-          <div className="form-fold-body">
-            <p className="muted small" style={{ marginTop: 4 }}>{t("facturen.at_risk_sub")}</p>
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table data-table-dense" data-testid="facturen-at-risk-table">
-                <thead>
-                  <tr>
-                    {!customerScoped && <th>{t("facturen.col_customer")}</th>}
-                    <th>{t("facturen.at_risk_col_item")}</th>
-                    <th>{t("facturen.at_risk_col_stage")}</th>
-                    <th>{t("facturen.at_risk_col_age")}</th>
-                    <th>{t("facturen.at_risk_col_date")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {atRiskGroups.flatMap((group) =>
-                    group.rows.map((row) => (
-                      <tr key={`${group.customer}-${row.extra_work_id}`} data-testid="facturen-at-risk-row">
-                        {!customerScoped && <td>{group.customer_name}</td>}
-                        <td>
-                          <Link
-                            to={row.ticket_id !== null ? `/tickets/${row.ticket_id}` : `/extra-work/${row.extra_work_id}`}
-                          >
-                            {row.ticket_no ? `${row.ticket_no} · ` : ""}
-                            {row.title}
-                          </Link>
-                          {row.building_name && <div className="muted small">{row.building_name}</div>}
-                        </td>
-                        <td>{t(AT_RISK_STAGE_KEYS[row.stage])}</td>
-                        <td>{t("facturen.at_risk_age", { count: row.age_days })}</td>
-                        <td>{formatDate(`${row.date}T00:00:00`)}</td>
-                      </tr>
-                    )),
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {atRiskTruncated && (
-              <p className="muted small" role="status">{t("facturen.at_risk_truncated")}</p>
-            )}
-          </div>
-        </details>
-      )}
-
-      {/* ---- Invoice list — the status tabs and All ---- */}
+      {/* ---- The three list steps: Drafts, Issued, Sent ---- */}
       {activeTab !== "due" && (
       <section className="card" style={{ padding: 16 }} data-testid="facturen-list-card">
-        <div className="section-head" style={{ marginBottom: 10 }}>
-          <div>
-            <div className="section-head-title">
-              {activeTab === "all" ? t("facturen.list_title") : t(TAB_LABEL_KEY[activeTab])}
-            </div>
-            <div className="section-head-sub">
-              {loading ? "" : t("facturen.list_count", { count: visibleInvoices.length })}
-            </div>
-          </div>
-        </div>
-
-        <div className="ew-list-filters" style={{ marginTop: 12 }} data-testid="facturen-filters">
+        <div className="ew-list-filters" data-testid="facturen-filters">
           <div className="filter-field search">
             <Search size={14} strokeWidth={2.2} aria-hidden="true" />
             <input
@@ -1201,21 +1324,12 @@ export function FacturenPage({
           <div className="loading-bar" style={{ marginTop: 12 }}>
             <div className="loading-bar-fill" />
           </div>
-        ) : invoices.length === 0 && !anyFilter ? (
-          <EmptyState
-            icon={BadgeEuro}
-            title={t("facturen.list_empty_title")}
-            description={t("facturen.list_empty_desc")}
-            testId="facturen-list-empty"
-          />
         ) : visibleInvoices.length === 0 && !anyFilter ? (
-          /* P-11 D — a tab with no rows and no filters says so plainly;
-             a "change the filters" hint would be false here. */
-          <EmptyState
-            icon={BadgeEuro}
-            title={t("invoices:tabs.empty_title")}
-            compact
-            testId="facturen-tab-empty"
+          /* §D.24 rule 5 — the empty step teaches how a row gets here. */
+          <TeachEmpty
+            testId={`facturen-road-empty-${activeTab}`}
+            title={t(`invoices:road.${activeTab}_empty_title`)}
+            body={t(`invoices:road.${activeTab}_empty_body`)}
           />
         ) : visibleInvoices.length === 0 ? (
           <EmptyState
@@ -1241,28 +1355,121 @@ export function FacturenPage({
             <table className="data-table" data-testid="facturen-list-table" style={{ marginTop: 12 }}>
               <thead>
                 <tr>
-                  <th>{t("facturen.col_number")}</th>
-                  <th style={{ textAlign: "right" }}>{t("facturen.col_total")}</th>
+                  <th>
+                    {activeTab === "drafts"
+                      ? t("invoices:road.col_draft")
+                      : t("facturen.col_number")}
+                  </th>
                   {!customerScoped && <th>{t("facturen.col_customer")}</th>}
-                  {showBuildingColumn && <th>{t("facturen.col_building")}</th>}
-                  {showGroupLabelColumn && <th>{t("facturen.col_department_work_type")}</th>}
+                  {activeTab === "drafts" && <th>{t("invoices:road.col_lines")}</th>}
+                  {activeTab === "issued" && <th>{t("invoices:road.col_issued")}</th>}
+                  {activeTab === "sent" && <th>{t("invoices:road.col_sent")}</th>}
+                  <th style={{ textAlign: "right" }}>{t("facturen.col_total")}</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {groups.map((group) => (
-                  <GroupRows
-                    key={group.key}
-                    group={group}
-                    columnCount={columnCount}
-                    customerScoped={customerScoped}
-                    canOpenCustomer={canOpenCustomer}
-                    showBuildingColumn={showBuildingColumn}
-                    showGroupLabelColumn={showGroupLabelColumn}
-                    showStatus={activeTab === "all"}
-                    t={t}
-                  />
-                ))}
+                {[...visibleInvoices]
+                  .sort((a, b) => b.id - a.id)
+                  .map((inv) => {
+                    const unsentCredit = inv.is_reversal && inv.status === "ISSUED";
+                    const isNew = newDraftIds.includes(inv.id);
+                    return (
+                      <ClickableRow
+                        key={inv.id}
+                        to={`/invoices/${inv.id}`}
+                        testId="facturen-list-row"
+                        className={isNew ? HIGHLIGHT_CLASS : undefined}
+                      >
+                        <td>
+                          <Link to={`/invoices/${inv.id}`} className="link" onClick={(e) => e.stopPropagation()}>
+                            {activeTab === "drafts"
+                              ? formatPeriod(inv.period_year, inv.period_month) ||
+                                t("facturen.concept")
+                              : (inv.number ?? t("facturen.concept"))}
+                          </Link>
+                          {isNew && (
+                            <span className="cell-tag cell-tag-open" style={{ marginLeft: 8 }} data-testid="facturen-row-new">
+                              <i />
+                              {t("invoices:road.row_new")}
+                            </span>
+                          )}
+                          {unsentCredit && (
+                            <span className="cell-tag cell-tag-warn" style={{ marginLeft: 8 }}>
+                              <i />
+                              {t("facturen.credit_note_unsent")}
+                            </span>
+                          )}
+                          {inv.is_reversal && !unsentCredit && (
+                            <span className="muted small" style={{ marginLeft: 6 }}>({t("facturen.credit_note")})</span>
+                          )}
+                          {inv.credited_by_number && (
+                            <span className="muted small" style={{ marginLeft: 6 }}>
+                              ({t("facturen.credited_by", { number: inv.credited_by_number })})
+                            </span>
+                          )}
+                          <div className="muted small">
+                            {activeTab === "drafts"
+                              ? t("invoices:road.made_when", {
+                                  when: formatDate(inv.created_at),
+                                })
+                              : activeTab === "issued"
+                                ? `${t("facturen.concept_number_hint")} \u00b7 ${formatPeriod(inv.period_year, inv.period_month)}`
+                                : formatPeriod(inv.period_year, inv.period_month)}
+                            {" \u00b7 "}
+                            {inv.company_name}
+                          </div>
+                        </td>
+                        {!customerScoped && (
+                          <td>
+                            {canOpenCustomer ? (
+                              <Link
+                                to={`/admin/customers/${inv.customer}`}
+                                className="row-fact-link"
+                                data-testid="facturen-row-customer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {inv.customer_name}
+                              </Link>
+                            ) : (
+                              inv.customer_name
+                            )}
+                          </td>
+                        )}
+                        {activeTab === "drafts" && (
+                          <td className="muted small" data-testid="facturen-row-lines">
+                            {draftLinesSummary(inv, t)}
+                          </td>
+                        )}
+                        {activeTab === "issued" && (
+                          <td className="muted small">
+                            {inv.issued_at ? formatDate(inv.issued_at) : "\u2014"}
+                          </td>
+                        )}
+                        {activeTab === "sent" && (
+                          <td className="muted small">
+                            {inv.sent_at ? formatDate(inv.sent_at) : "\u2014"}
+                          </td>
+                        )}
+                        <td style={{ textAlign: "right" }}>
+                          <strong>{formatMoney(inv.total_amount)}</strong>
+                        </td>
+                        {/* §D.22 item 7 — ONE next-step button, the
+                            detail banner's words; it opens the detail,
+                            where the real action (issue, send) lives. */}
+                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                          <Link
+                            to={`/invoices/${inv.id}`}
+                            className="btn btn-secondary btn-sm"
+                            onClick={(e) => e.stopPropagation()}
+                            data-testid="facturen-row-next"
+                          >
+                            {t(NEXT_STEP_KEY[inv.status])}
+                          </Link>
+                        </td>
+                      </ClickableRow>
+                    );
+                  })}
               </tbody>
             </table>
           </BoundedList>
@@ -1273,132 +1480,5 @@ export function FacturenPage({
       {/* W17 — always mounted, opened through the ref only. */}
       <PdfPreviewDialog ref={previewPdfRef} withDownload={false} />
     </div>
-  );
-}
-
-function GroupRows({
-  group,
-  columnCount,
-  customerScoped,
-  canOpenCustomer,
-  showBuildingColumn,
-  showGroupLabelColumn,
-  showStatus,
-  t,
-}: {
-  group: InvoiceGroup;
-  columnCount: number;
-  customerScoped: boolean;
-  canOpenCustomer: boolean;
-  showBuildingColumn: boolean;
-  showGroupLabelColumn: boolean;
-  /** P-11 D — only the All tab mixes statuses; on a status tab the tab
-   *  itself is the status, so the pill would repeat the strip. */
-  showStatus: boolean;
-  t: (key: string, opts?: Record<string, unknown>) => string;
-}) {
-  return (
-    <>
-      <tr className="invoice-group-row" data-testid="facturen-group-row" data-group={group.key}>
-        <td colSpan={columnCount}>
-          <span className="invoice-group-label">{group.label}</span>
-          <span className="invoice-group-meta">
-            {t("facturen.list_count", { count: group.rows.length })} · {formatMoney(group.total)}
-          </span>
-        </td>
-      </tr>
-      {group.rows.map((inv) => {
-        const unsentCredit = inv.is_reversal && inv.status === "ISSUED";
-        return (
-          <ClickableRow key={inv.id} to={`/invoices/${inv.id}`} testId="facturen-list-row">
-            <td>
-              <Link to={`/invoices/${inv.id}`} className="link" onClick={(e) => e.stopPropagation()}>
-                {inv.number ?? t("facturen.concept")}
-              </Link>
-              {/* P-11 D — the All tab is the one place statuses mix, so
-                  the status word rides beside the number there (a
-                  status tab already says it in the strip). */}
-              {showStatus && (
-                <span
-                  className={
-                    unsentCredit
-                      ? "cell-tag cell-tag-warn"
-                      : inv.status === "SENT"
-                        ? "cell-tag cell-tag-open"
-                        : "cell-tag cell-tag-closed"
-                  }
-                  style={{ marginLeft: 8 }}
-                  data-testid="facturen-list-status"
-                >
-                  <i />
-                  {unsentCredit ? t("facturen.credit_note_unsent") : t(STATUS_LABEL_KEY[inv.status])}
-                </span>
-              )}
-              {inv.is_reversal && (
-                <span className="muted small" style={{ marginLeft: 6 }}>({t("facturen.credit_note")})</span>
-              )}
-              {inv.credited_by_number && (
-                <span className="muted small" style={{ marginLeft: 6 }}>
-                  ({t("facturen.credited_by", { number: inv.credited_by_number })})
-                </span>
-              )}
-              {/* P-11 D item 3 — the creator e-mail left the list row
-                  (dev noise); the detail page keeps its created-by line. */}
-              <div className="muted small">
-                {inv.number === null ? `${t("facturen.concept_number_hint")} · ` : ""}
-                {inv.company_name}
-              </div>
-            </td>
-            <td style={{ textAlign: "right" }}>
-              <strong>{formatMoney(inv.total_amount)}</strong>
-            </td>
-            {/* P-8R F — the connected fact: this invoice's customer. The
-                row itself opens the invoice; the link opens the customer,
-                and `ClickableRow` already ignores clicks that start on an
-                inner anchor. */}
-            {!customerScoped && (
-              <td>
-                {canOpenCustomer ? (
-                  <Link
-                    to={`/admin/customers/${inv.customer}`}
-                    className="row-fact-link"
-                    data-testid="facturen-row-customer"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {inv.customer_name}
-                  </Link>
-                ) : (
-                  inv.customer_name
-                )}
-              </td>
-            )}
-            {showBuildingColumn && (
-              <td className="muted small">{inv.building_name ?? t("facturen.all_buildings")}</td>
-            )}
-            {showGroupLabelColumn && (
-              <td className="muted small">
-                {formatInvoiceGroupLabel(
-                  customerLabelName(inv.department_name, t),
-                  customerLabelName(inv.work_type_name, t),
-                )}
-              </td>
-            )}
-            {/* P-11 D (§D.22 item 7) — ONE next-step button, the
-                detail banner's words; it opens the detail, where the
-                real action (issue, send) lives. Never sends here. */}
-            <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-              <Link
-                to={`/invoices/${inv.id}`}
-                className="btn btn-secondary btn-sm"
-                onClick={(e) => e.stopPropagation()}
-                data-testid="facturen-row-next"
-              >
-                {t(NEXT_STEP_KEY[inv.status])}
-              </Link>
-            </td>
-          </ClickableRow>
-        );
-      })}
-    </>
   );
 }

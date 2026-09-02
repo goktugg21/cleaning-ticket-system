@@ -390,6 +390,11 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         customers = scheduled_customers(
             scope_customers_for(request.user).filter(is_active=True)
         ).order_by("name")
+        # P-12 §D.24.2 — `?company=` narrows WITHIN scope (an id outside
+        # it matches nothing); the page shows one company at a time.
+        company_param = request.query_params.get("company")
+        if company_param and str(company_param).isdigit():
+            customers = customers.filter(company_id=int(company_param))
         payload = []
         for customer in customers:
             unbilled = unbilled_extra_work_through(

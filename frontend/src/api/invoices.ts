@@ -17,6 +17,8 @@ import type {
 } from "./types";
 
 export interface ListInvoicesParams {
+  /** P-12 §D.24.2 — narrows within scope; never widens (server rule). */
+  company?: number;
   customer?: number;
   building?: number;
   status?: InvoiceStatus;
@@ -64,8 +66,10 @@ export async function getInvoice(id: number | string): Promise<Invoice> {
 
 // GET /api/invoices/due/ — the informational "who's due" list (flat array,
 // NOT paginated).
-export async function getInvoiceDueList(): Promise<InvoiceDueRow[]> {
-  const response = await api.get<InvoiceDueRow[]>("/invoices/due/");
+export async function getInvoiceDueList(
+  params: { company?: number } = {},
+): Promise<InvoiceDueRow[]> {
+  const response = await api.get<InvoiceDueRow[]>("/invoices/due/", { params });
   return response.data;
 }
 
@@ -112,8 +116,12 @@ export interface AtRiskResponse {
   groups: AtRiskGroup[];
 }
 
-export async function getBillingMonthAtRisk(): Promise<AtRiskResponse> {
-  const response = await api.get<AtRiskResponse>("/invoices/at-risk/");
+export async function getBillingMonthAtRisk(
+  params: { company?: number } = {},
+): Promise<AtRiskResponse> {
+  const response = await api.get<AtRiskResponse>("/invoices/at-risk/", {
+    params,
+  });
   return response.data;
 }
 

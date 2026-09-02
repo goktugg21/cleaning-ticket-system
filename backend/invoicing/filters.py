@@ -18,6 +18,10 @@ class InvoiceFilter(df.FilterSet):
     class Meta:
         model = Invoice
         fields = {
+            # P-12 §D.24.2 — one company at a time on the Finance pages.
+            # Narrows WITHIN the scoped queryset only: an out-of-scope id
+            # simply matches nothing (the reports/?company= stance).
+            "company": ["exact"],
             "customer": ["exact"],
             "building": ["exact"],
             "status": ["exact"],

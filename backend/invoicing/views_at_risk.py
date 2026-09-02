@@ -39,4 +39,8 @@ class BillingMonthAtRiskView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         customers = scope_customers_for(request.user).filter(is_active=True)
+        # P-12 §D.24.2 — same narrowing as /due/: within scope only.
+        company_param = request.query_params.get("company")
+        if company_param and str(company_param).isdigit():
+            customers = customers.filter(company_id=int(company_param))
         return Response(at_risk_groups(customers), status=status.HTTP_200_OK)

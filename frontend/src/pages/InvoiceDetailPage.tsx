@@ -34,6 +34,7 @@ import type { Invoice, InvoiceLine, InvoiceStatus } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
+import { RoadTabs } from "../components/guide/RoadTabs";
 import { useToast } from "../components/ToastProvider";
 import { formatDate, formatInvoiceGroupLabel, formatMoney } from "../lib/intl";
 import { monthName } from "../lib/billingSentence";
@@ -492,6 +493,30 @@ export function InvoiceDetailPage() {
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
           {error}
         </div>
+      )}
+
+      {/* P-12 D4 (§D.24 rule 3) — the same road the list shows, the
+          current step marked. A credit note is born issued WITH its
+          number, so the road's sentences would lie on it — no road. */}
+      {!invoice.is_reversal && (
+        <RoadTabs
+          variant="progress"
+          steps={[
+            { key: "due", step: t("invoices:road.due_step"), label: t("invoices:tabs.due") },
+            { key: "drafts", step: t("invoices:road.drafts_step"), label: t("invoices:tabs.drafts") },
+            { key: "issued", step: t("invoices:road.issued_step"), label: t("invoices:tabs.issued") },
+            { key: "sent", step: t("invoices:road.sent_step"), label: t("invoices:tabs.sent") },
+          ]}
+          activeKey={
+            invoice.status === "DRAFT"
+              ? "drafts"
+              : invoice.status === "ISSUED"
+                ? "issued"
+                : "sent"
+          }
+          ariaLabel={t("facturen.title")}
+          testIdPrefix="invoice-road"
+        />
       )}
 
       <div

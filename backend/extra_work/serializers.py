@@ -1410,6 +1410,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
 
     # FE-2 (§D.4) — read-only by construction, per-viewer by context.
     display_phase = serializers.SerializerMethodField()
+    customer_invoice_day = serializers.SerializerMethodField()
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -1513,6 +1514,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            "customer_invoice_day",
             "department",
             "department_name",
             "work_type",
@@ -1689,6 +1691,8 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         "invoice_date",
         "is_invoiced",
         "invoiced_at",
+        # P-12 D6 — the customer's billing day is billing-internal.
+        "customer_invoice_day",
         # P-1 — which employee planned it is internal, like the crew.
         "planned_by_name",
         # W2-D — planning is a provider action end to end. A customer
@@ -1711,6 +1715,13 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         request = self.context.get("request") if self.context else None
         user = getattr(request, "user", None) if request else None
         return _display_phase_for(obj, user)
+
+    def get_customer_invoice_day(self, obj):
+        # P-12 D6 — one impl, the list serializer's: the resolved
+        # billing day (int, "LAST_OF_MONTH", or null).
+        return ExtraWorkRequestListSerializer.get_customer_invoice_day(
+            self, obj
+        )
 
     def get_is_priced(self, obj) -> bool:
         return _is_priced(obj)

@@ -40,8 +40,74 @@ export function billingMonthWords(
 export function invoicesDestination(
   detail: Pick<ExtraWorkRequestDetail, "invoice_date" | "customer">,
 ): string {
+  // P-12 D6 — the landing is the road's FIRST step: To invoice, where
+  // unbilled work sits, narrowed to this customer (the due table reads
+  // the filter too).
   const period = detail.invoice_date ? detail.invoice_date.slice(0, 7) : "";
   return period
-    ? `/invoices?customer=${detail.customer}&period=${period}`
-    : `/invoices?customer=${detail.customer}`;
+    ? `/invoices?tab=due&customer=${detail.customer}&period=${period}`
+    : `/invoices?tab=due&customer=${detail.customer}`;
+}
+
+/** P-12 D6 — days until the customer's next billing day. 0 = today. */
+export function daysUntilBillingDay(
+  day: number | "LAST_OF_MONTH",
+  today: Date = new Date(),
+): number {
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const lastOfThisMonth = new Date(
+    base.getFullYear(),
+    base.getMonth() + 1,
+    0,
+  ).getDate();
+  let target: Date;
+  if (day === "LAST_OF_MONTH") {
+    target =
+      base.getDate() <= lastOfThisMonth
+        ? new Date(base.getFullYear(), base.getMonth(), lastOfThisMonth)
+        : new Date(base.getFullYear(), base.getMonth() + 2, 0);
+  } else {
+    target =
+      base.getDate() <= day
+        ? new Date(base.getFullYear(), base.getMonth(), day)
+        : new Date(base.getFullYear(), base.getMonth() + 1, day);
+  }
+  return Math.round((target.getTime() - base.getTime()) / 86400000);
+}
+
+/** P-12 D6 (§D.24 rules 4+6) — what "Save hours to bill" ANSWERS: the
+ *  amount, whose next invoice it feeds and on which day (with how far
+ *  away that is), and where to see it. One owner for both mounts of
+ *  the panel. Falls back to the P-4 sentence when the customer has no
+ *  billing day. */
+export function hoursSavedMessage(
+  detail: Pick<
+    ExtraWorkRequestDetail,
+    "invoice_date" | "customer" | "customer_name" | "customer_invoice_day"
+  >,
+  amount: string,
+  t: TFunction,
+): string {
+  const day = detail.customer_invoice_day;
+  if (day == null) {
+    return t("extra_work:billing.hours_saved_where", {
+      amount,
+      customer: detail.customer_name,
+      month: billingMonthWords(detail, t),
+    });
+  }
+  const dayWords =
+    day === "LAST_OF_MONTH"
+      ? t("common:facturatie.day_last")
+      : t("common:facturatie.day_of_month", { day });
+  const inDays = daysUntilBillingDay(day);
+  return t("extra_work:billing.hours_saved_invoice_day", {
+    amount,
+    customer: detail.customer_name,
+    day: dayWords,
+    when:
+      inDays === 0
+        ? t("extra_work:billing.hours_saved_today")
+        : t("extra_work:billing.hours_saved_in_days", { count: inDays }),
+  });
 }
