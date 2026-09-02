@@ -15421,6 +15421,10 @@ table.assign-table { min-width: 0; width: 100%; }
 }
 .ew-agreement-col-qty { width: 54px; }
 .ew-agreement-col-amount { width: 86px; }
+/* P-13 B — the Money story's "qty × price" column carries a whole
+   expression ("6 × €42.00"); the 54px rail width made its header
+   print over the amount's. */
+.ew-agreement-col-qtyprice { width: 140px; }
 .ew-agreement-table th,
 .ew-agreement-table td {
   padding: 4px 0;

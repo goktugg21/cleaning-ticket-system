@@ -162,7 +162,7 @@ export function MoneyStory({
           <table className="ew-agreement-table">
             <colgroup>
               <col />
-              <col className="ew-agreement-col-qty" />
+              <col className="ew-agreement-col-qtyprice" />
               <col className="ew-agreement-col-amount" />
             </colgroup>
             <thead>
