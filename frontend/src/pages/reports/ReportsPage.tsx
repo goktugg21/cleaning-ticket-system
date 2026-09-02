@@ -13,10 +13,12 @@ import {
   TicketReportView,
 } from "./EmployeeHoursViews";
 import { WorkerHoursCardTiles } from "./charts/WorkerHoursCardTiles";
-import { listAllBuildings, listAllCompanies } from "../../api/admin";
+import { listAllBuildings } from "../../api/admin";
+import { useCompanyScope } from "../../lib/useCompanyScope";
+import { CompanyScopeSelect } from "../../components/guide/CompanyScopeSelect";
 import { api } from "../../api/client";
 import type { ReportFilters } from "../../api/reports";
-import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
+import type { BuildingAdmin } from "../../api/types";
 import { formatDate } from "../../lib/intl";
 import { useAuth } from "../../auth/AuthContext";
 import { useReportsFilters } from "../../hooks/useReportsFilters";
@@ -270,7 +272,6 @@ export function ReportsPage() {
     document.getElementById(id)?.scrollIntoView({ block: "start" });
   }, []);
 
-  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [buildingsLoaded, setBuildingsLoaded] = useState(false);
 
@@ -278,18 +279,39 @@ export function ReportsPage() {
   const isCompanyAdmin = me?.role === "COMPANY_ADMIN";
   const isBuildingManager = me?.role === "BUILDING_MANAGER";
 
-  // Companies dropdown is only meaningful for SUPER_ADMIN. Fetch lazily.
+  // P-12 §D.24.2 — one company at a time. The selector sits top right,
+  // the session remembers the choice across the Finance pages, and
+  // there is no "all companies" mix any more. The URL stays the truth
+  // (a deep link's ?company= wins and is adopted into the session);
+  // when the URL says nothing, the session's company — else the lowest
+  // id — is written into it.
+  const companyScope = useCompanyScope(isSuperAdmin);
+  const { companies, companyId: scopedCompanyId, chooseCompany } = companyScope;
   useEffect(() => {
-    if (!isSuperAdmin) return;
-    let cancelled = false;
-    listAllCompanies().then((response) => {
-      if (cancelled) return;
-      setCompanies(response);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isSuperAdmin]);
+    if (!isSuperAdmin || !companyScope.ready) return;
+    if (filters.company !== undefined) {
+      if (
+        scopedCompanyId !== filters.company &&
+        companies.some((c) => c.id === filters.company)
+      ) {
+        chooseCompany(filters.company);
+      }
+      return;
+    }
+    const fallback =
+      scopedCompanyId !== ""
+        ? scopedCompanyId
+        : [...companies].sort((a, b) => a.id - b.id)[0]?.id;
+    if (fallback != null) setFilter("company", fallback);
+  }, [
+    isSuperAdmin,
+    companyScope.ready,
+    filters.company,
+    scopedCompanyId,
+    companies,
+    chooseCompany,
+    setFilter,
+  ]);
 
   // Buildings dropdown:
   //   SUPER_ADMIN: only when a specific company is selected.
@@ -395,6 +417,17 @@ export function ReportsPage() {
           <p className="page-sub">{t("subtitle")}</p>
         </div>
         <div className="page-header-actions">
+          {isSuperAdmin && (
+            <CompanyScopeSelect
+              companies={companies}
+              companyId={filters.company ?? ""}
+              onChange={(id) => {
+                chooseCompany(id);
+                setFilter("company", id);
+              }}
+              testId="filter-company"
+            />
+          )}
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -471,28 +504,6 @@ export function ReportsPage() {
             />
           </div>
           </>
-          )}
-
-          {isSuperAdmin && (
-            <div className="filter-field">
-              <span className="filter-label">{t("filter_company")}</span>
-              <select
-                className="filter-control"
-                data-testid="filter-company"
-                value={filters.company === undefined ? "" : String(filters.company)}
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setFilter("company", v === "" ? undefined : Number(v));
-                }}
-              >
-                <option value="">{t("filter_all_companies")}</option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
           )}
 
           {(isSuperAdmin && filters.company !== undefined) || isCompanyAdmin || isBuildingManager ? (

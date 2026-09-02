@@ -2931,5 +2931,9 @@
   "hours_weeks.open_week": "Open week {{week}}",
   "hours_weeks.strip_aria": "Weeks of {{year}} with saved hours",
   "hours_weeks.strip_title_hours": "Week {{week}} · {{hours}} h",
-  "hours_weeks.strip_title_empty": "Week {{week}} · no hours"
+  "hours_weeks.strip_title_empty": "Week {{week}} · no hours",
+  "guide.start_here": "Start here",
+  "guide.done": "Done",
+  "guide.dismiss": "Dismiss",
+  "guide.company": "Company"
 }

@@ -1847,7 +1847,7 @@ What the owner hit on the P-10 walk, decided and shipped in
     `_ew_planned_window` takes), and both late-strip candidate filters
     admit provider-planned rows. Pins in `test_p10_bulk_plan`.
 
-## D.22 List pages## D.22 List pages — the standard (P-10, 2026-09-01)
+## D.22 List pages — the standard (P-10, 2026-09-01)
 
 Written from the Extra work page as built in P-9 and polished in P-10,
 which the owner approved with the words "this should be the standard
@@ -2011,3 +2011,83 @@ doors; the in-page book-hours dialog lost its opener. The grid shows
 lines written from the ticket exactly like typed ones. Prefill pin:
 `extra_work/tests/test_p11_billable_prefill.py`.
 
+## D.24 The page tells you what to do — the guidance standard (P-12, 2026-09-02)
+
+The owner's verdict on the P-11 pages: professional, and they still
+fail the person who knows nothing — "you look at Hours or Contracts
+and you sigh; the customer's melding flow guides you and the admin
+pages don't." §D.22 made the list pages honest; §D.24 makes them
+TEACH. Reference mock: `invoices-redesign.html` (received with the
+P-12 prompt), which shows all seven rules on one page. A page meets
+§D.24 when all seven are true; §D.22 keeps applying underneath.
+
+1. **Purpose line.** One sentence under the title: what this page is,
+   in the order things happen, and what the customer sees or doesn't.
+   *Rationale: the first question is always "what is this?" — answer
+   it before showing anything.*
+2. **Start here.** A green card under the purpose line naming the ONE
+   thing waiting and its button ("2 customers have finished work
+   waiting for an invoice — Make B Amsterdam's draft"). Computed from
+   the page's own counts; hidden when nothing waits (§D.6 rule 13
+   spirit: no card celebrating zero). Never two things — the second is
+   on its tab. *Rationale: a person who doesn't know the page needs
+   ONE next action, not a dashboard.*
+3. **Tabs are the steps of the road**, in the order things happen,
+   numbered ("1 · Finished work → 2 · Check → 3 · Checked → 4 ·
+   Numbered, with the customer"), each with its count, and the tab's
+   first line teaches the step: what it means, what the button does,
+   what can still change. *Rationale: §D.22 gave the tabs; the order
+   and the sentence turn a filter bar into a workflow you can read.*
+4. **After every action, the page moves you to where the thing went**,
+   highlights it, and a teal "Done" banner says what happened, what
+   did NOT happen, and the one next step, with its button. A bare
+   toast is never the only feedback. The banner has a dismiss and
+   survives one reload. *Rationale: the owner's "one draft created, I
+   saw nothing" — the thing moved tabs and nobody followed it.*
+5. **Empty states teach.** "No drafts. A draft appears when you press
+   Make a draft on finished work." — the thing, and how it gets here.
+   *Rationale: an empty table that just says "empty" teaches nothing;
+   the empty moment is when the person is most ready to learn.*
+6. **Connections in words**, on every object, both directions: a
+   recurring rule says which contract line it runs for and how it is
+   invoiced; an invoice line says which extra work or contract period
+   it came from; a contract line says which recurring work runs it; a
+   timesheet job line says which job and whose next invoice it feeds.
+   *Rationale: the objects form a triangle (contract ↔ recurring ↔
+   invoice, with hours feeding in) that only the code knew; P-5's
+   connections layer, finished.*
+7. **Buttons say what they do; confirms say what happens next.**
+   "Make a draft", not "Generate"; the confirm ends with where you
+   will land. *Rationale: a button is a promise — name the promise,
+   and say where the person goes so the move (rule 4) is never a
+   surprise.*
+
+### D.24.1 The shared pieces
+
+Built once in `components/guide/`, each vitest-pinned: **StartHere**
+(rule 2's card), **RoadTabs** (rule 3's numbered tabs + the teach
+line), **DoneBanner** (rule 4's banner with the move-and-highlight
+helper: navigate to the tab/row, `?highlight=<id>`, a 10 s row tint;
+dismiss; survives one reload via sessionStorage), **TeachEmpty**
+(rule 5), **ConnectionLine** (rule 6's sentence with its one link).
+Pages compose these; no page builds its own variant.
+
+### D.24.2 One company at a time on Finance pages
+
+Invoices, Contracts, Hours and Reports carry a **Company** selector
+(top right, SUPER_ADMIN only), defaulting to the company with
+something waiting, remembered per session. Provider admins see their
+own company, as today. The counts, Start here and the tabs are per
+company. *The owner: "why see everything at once? each company's on
+its own."* This is presentation scoping, not permission — the SA
+still may see everything; the page just stops mixing tenants in one
+table.
+
+### D.24.3 Where it applies
+
+P-12 applies §D.24 in the owner's order: Hours and Contracts first,
+then Invoices (the mock, built) and Recurring, then Extra work and
+SLA. My schedule, Customers, Permissions, People, Services and
+Companies are approved as they are — not touched. Tickets and People
+go to P-13 (they pass §D.22 already). The §D.22.1 P-12 queue for
+Tickets/Recurring/SLA/People is superseded by this section's order.
