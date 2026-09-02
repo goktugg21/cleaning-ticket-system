@@ -42,6 +42,7 @@ from .views_groups import (
     ExtraWorkGroupMembersView,
 )
 from .views_planning import ExtraWorkBulkPlanView
+from .views_timesheet_hours import ExtraWorkTimesheetHoursView
 
 urlpatterns = [
     # Sprint 143 §6 — MUST precede the router: the DefaultRouter is
@@ -106,6 +107,12 @@ urlpatterns = [
         "<int:pk>/assignments/",
         ExtraWorkAssignmentListView.as_view(),
         name="extra-work-assignments",
+    ),
+    # P-11 B3 — the job's timesheet, for the Money tab's prefill.
+    path(
+        "<int:pk>/timesheet-hours/",
+        ExtraWorkTimesheetHoursView.as_view(),
+        name="extra-work-timesheet-hours",
     ),
     path(
         "<int:pk>/assignments/candidates/",
