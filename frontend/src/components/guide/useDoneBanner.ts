@@ -1,6 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
+  DONE_EVENT,
   announceDone,
   clearDone,
   safeSessionStorage,
@@ -37,6 +38,22 @@ export function useDoneBanner(pageKey: string): {
   const [done, setDone] = useState<DoneAnnouncement | null>(() =>
     takeOncePerPageLoad(pageKey),
   );
+
+  // A raw-store announce from ANOTHER component (a ceremony inside the
+  // page) reaches this mounted hook through the event — setState in an
+  // event callback, the sanctioned shape.
+  useEffect(() => {
+    const onDone = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { pageKey?: string; announcement?: DoneAnnouncement }
+        | undefined;
+      if (!detail || detail.pageKey !== pageKey || !detail.announcement) return;
+      consumedThisPageLoad.set(pageKey, detail.announcement);
+      setDone(detail.announcement);
+    };
+    window.addEventListener(DONE_EVENT, onDone);
+    return () => window.removeEventListener(DONE_EVENT, onDone);
+  }, [pageKey]);
 
   const announce = useCallback(
     (a: DoneAnnouncement) => {

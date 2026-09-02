@@ -53,6 +53,22 @@ describe("doneBannerStore", () => {
     expect(takeDone(s, "invoices")).toEqual(a);
   });
 
+  it("dispatches the DONE_EVENT for mounted hooks when a window exists", () => {
+    const events: unknown[] = [];
+    (globalThis as { window?: unknown }).window = {
+      dispatchEvent: (event: unknown) => {
+        events.push(event);
+        return true;
+      },
+    };
+    try {
+      announceDone(fakeStorage(), "invoices", a);
+      expect(events.length).toBe(1);
+    } finally {
+      delete (globalThis as { window?: unknown }).window;
+    }
+  });
+
   it("tolerates a missing storage and garbage content", () => {
     expect(takeDone(null, "invoices")).toBeNull();
     announceDone(null, "invoices", a); // no throw

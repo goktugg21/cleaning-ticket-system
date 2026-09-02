@@ -40,18 +40,33 @@ export function safeSessionStorage(): Storage | null {
   }
 }
 
-/** Record an announcement so the page can re-show it across ONE reload. */
+/** The event a raw-store announce rides to any MOUNTED banner hook.
+ *  Found on the P-12 crmtest walk: the pricing ceremony announced
+ *  through the store while the request page was already mounted — the
+ *  hook's state stayed null and the banner never showed until a full
+ *  reload. The event closes that gap; useDoneBanner subscribes. */
+export const DONE_EVENT = "guide:done";
+
+/** Record an announcement so the page can re-show it across ONE
+ *  reload, and tell any mounted hook about it NOW. */
 export function announceDone(
   storage: Storage | null,
   pageKey: string,
   a: DoneAnnouncement,
 ): void {
-  if (!storage) return;
-  try {
-    const stored: StoredDone = { a, reloadsLeft: 1 };
-    storage.setItem(storageKey(pageKey), JSON.stringify(stored));
-  } catch {
-    // Storage full or blocked — the in-memory banner still shows.
+  if (storage) {
+    try {
+      const stored: StoredDone = { a, reloadsLeft: 1 };
+      storage.setItem(storageKey(pageKey), JSON.stringify(stored));
+    } catch {
+      // Storage full or blocked — the event below still shows it.
+    }
+  }
+  // Guarded: the store is vitest-pinned in a node environment.
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(DONE_EVENT, { detail: { pageKey, announcement: a } }),
+    );
   }
 }
 
