@@ -22,6 +22,7 @@ import type {
 import { ContractTermDialog, Term } from "../../../components/contracts/ContractTerms";
 import { contractSentence } from "../../../components/contracts/contractSentence";
 import { RoadTabs } from "../../../components/guide/RoadTabs";
+import { StartHere } from "../../../components/guide/StartHere";
 import { DoneBanner } from "../../../components/guide/DoneBanner";
 import { useDoneBanner } from "../../../components/guide/useDoneBanner";
 import { ConnectionLine } from "../../../components/guide/ConnectionLine";
@@ -290,6 +291,53 @@ export function ContractDetailPage() {
      with no lines ANYWHERE shows the one teaching card instead. */
   const hasLines = (contract?.line_count ?? 0) > 0 || lines.length > 0;
 
+  /* P-13 F (E2) — the detail's Start here names the ONE missing thing,
+     the list's P-12 C1 precedence brought onto the contract itself:
+     no lines beats an unactivated draft beats a nearing end. Ended and
+     cancelled contracts are read-only history — nothing is missing
+     there, so nothing renders; likewise an active contract with lines
+     and a far-off (or no) end. A reader who cannot use a door does not
+     get the button (W16), but the sentence still tells the truth. */
+  const startHere = (() => {
+    if (!contract || !roadKey || roadKey === "ended") return null;
+    if (!hasLines) {
+      return {
+        sentence: t("detail.start_no_lines"),
+        action: {
+          label: t("detail.addFirstLine"),
+          onClick: () => setTab("projects"),
+        },
+      };
+    }
+    if (roadKey === "draft") {
+      return {
+        sentence: t("detail.start_draft"),
+        action: canManage
+          ? {
+              label: activating ? t("actions.activating") : t("actions.activate"),
+              onClick: () => {
+                if (!activating) void activate();
+              },
+            }
+          : undefined,
+      };
+    }
+    if (roadKey === "ending") {
+      return {
+        sentence: t("detail.start_ending", {
+          date: contract.end_date ? formatDate(contract.end_date, locale) : "",
+        }),
+        action: canManage
+          ? {
+              label: t("detail.start_ending_action"),
+              onClick: () => setEditOpen(true),
+            }
+          : undefined,
+      };
+    }
+    return null;
+  })();
+
   /* P-11 C — the ONE card a line-less contract shows on the General and
      Billing tabs, replacing the two old alert-info notices: what a line
      IS (the owner's sentence), and the one door to adding the first one
@@ -496,6 +544,14 @@ export function ContractDetailPage() {
             {t(`road.step_teach_${roadKey}`)}
           </p>
         </>
+      )}
+
+      {/* P-13 F (E2) — between the road's teach line and the banner:
+          the one missing thing on THIS contract, with its one door. */}
+      {startHere && (
+        <StartHere testId="contract-start-here" action={startHere.action}>
+          {startHere.sentence}
+        </StartHere>
       )}
 
       {contractDone.done && (
