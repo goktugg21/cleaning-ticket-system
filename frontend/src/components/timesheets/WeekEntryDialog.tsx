@@ -133,7 +133,10 @@ export function WeekEntryDialog({
   initialEmployeeIds?: number[];
   onClose: () => void;
   /** The page refreshes its list and closes this. */
-  onSaved: (changed: number) => void | Promise<void>;
+  onSaved: (
+    changed: number,
+    saved?: { employee: number; hours: number }[],
+  ) => void | Promise<void>;
 }) {
   const { t } = useTranslation("common");
 
@@ -376,6 +379,35 @@ export function WeekEntryDialog({
   /** True once every selected person has an answer for this week. A
    *  pair row never materialises before the wall has been read. */
   const assignmentsReady = employeeIds.every((id) => personById.has(id));
+
+  /** P-12 B1 — each person's bookable buildings for "+ Add a line",
+   *  straight from the wall. */
+  const personBookableBuildingIds = useMemo(() => {
+    const out: Record<number, number[]> = {};
+    for (const [id, person] of personById) out[id] = person.building_ids;
+    return out;
+  }, [personById]);
+
+  /** P-12 B5 — where each job's hours go (customer + billing day),
+   *  keyed the way the grid looks them up. */
+  const jobBillingFacts = useMemo(() => {
+    const out: Record<
+      string,
+      { customer_name: string | null; invoice_day: number | "LAST_OF_MONTH" | null }
+    > = {};
+    for (const person of personById.values()) {
+      for (const job of [...person.assignments, ...person.jobs]) {
+        if (job.customer_name === undefined && job.invoice_day === undefined) {
+          continue;
+        }
+        out[`${job.source_type}:${job.source_id}`] = {
+          customer_name: job.customer_name ?? null,
+          invoice_day: job.invoice_day ?? null,
+        };
+      }
+    }
+    return out;
+  }, [personById]);
 
   /** The blocks the grid renders, DERIVED from the selection and the
    *  employee list — so a selected employee who disappears (company
@@ -713,6 +745,13 @@ export function WeekEntryDialog({
           buildings={buildings}
           entriesByEmployee={entriesByEmployee}
           seedBuildingIds={NO_SEED_BUILDINGS}
+          /* P-12 B1 — "+ Add a line"'s building choice reads each
+             person's GRANT list (the wall the assignments read
+             returned), not the header's picks — those are empty
+             whenever the dialog opens from the week card's Edit, and
+             the select then offered only "No building". */
+          personBuildingIds={personBookableBuildingIds}
+          jobBillingFacts={jobBillingFacts}
           seedRowsByEmployee={seedRowsByEmployee}
           sourceOptions={jobTitleOptions}
           jobPicker={jobPicker}

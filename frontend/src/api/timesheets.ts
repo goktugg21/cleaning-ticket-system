@@ -393,6 +393,11 @@ export interface WeekAssignmentJob {
   source_id: number;
   title: string;
   building: number | null;
+  /** P-12 B5 (§D.24 rule 6) — where the job's hours GO: the customer
+   *  whose next invoice they feed, and that customer's billing day
+   *  (1..28, "LAST_OF_MONTH", or null when no schedule is set). */
+  customer_name?: string | null;
+  invoice_day?: number | "LAST_OF_MONTH" | null;
 }
 
 export interface WeekAssignmentPerson {

@@ -39,6 +39,17 @@ import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
+import { CompanyScopeSelect } from "../../components/guide/CompanyScopeSelect";
+import {
+  readScopeCompany,
+  rememberScopeCompany,
+} from "../../lib/useCompanyScope";
+import { StartHere } from "../../components/guide/StartHere";
+import { DoneBanner } from "../../components/guide/DoneBanner";
+import { useDoneBanner } from "../../components/guide/useDoneBanner";
+import { RoadTabs } from "../../components/guide/RoadTabs";
+import { TeachEmpty } from "../../components/guide/TeachEmpty";
+import { HIGHLIGHT_CLASS, HIGHLIGHT_MS } from "../../components/guide/highlight";
 import { useToast } from "../../components/ToastProvider";
 import {
   currentIsoWeek,
@@ -385,6 +396,16 @@ export function HoursAdminPage() {
   const [deleteTarget, setDeleteTarget] = useState<TimeEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
+  // P-12 B4 — the after-save banner (rule 4) and the saved people's
+  // ten-second tint on the week card.
+  const hoursDone = useDoneBanner("hours-admin");
+  const [savedHighlight, setSavedHighlight] = useState<number[]>([]);
+  useEffect(() => {
+    if (savedHighlight.length === 0) return;
+    const timer = window.setTimeout(() => setSavedHighlight([]), HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [savedHighlight]);
+
   const showCompanySelector = isSuperAdmin && companies.length > 1;
   /** True while a SUPER_ADMIN's company is still unknown. Every read
    *  waits on it — see the class docstring. */
@@ -400,12 +421,19 @@ export function HoursAdminPage() {
         if (cancelled) return;
         setCompanies(response);
         if (response.length > 1) {
-          const stored = Number(
+          // P-12 §D.24.2 — the SESSION's shared Finance-pages choice
+          // wins; the page's old per-browser key is read as a fallback
+          // so an existing operator's pick survives the switch once.
+          const sessionStored = readScopeCompany();
+          const legacy = Number(
             window.localStorage.getItem(HOURS_COMPANY_STORAGE_KEY),
           );
-          const remembered = response.some((c) => c.id === stored)
-            ? stored
-            : null;
+          const remembered =
+            sessionStored != null && response.some((c) => c.id === sessionStored)
+              ? sessionStored
+              : response.some((c) => c.id === legacy)
+                ? legacy
+                : null;
           const primary = response.reduce(
             (lowest, c) => (c.id < lowest.id ? c : lowest),
             response[0],
@@ -683,6 +711,16 @@ export function HoursAdminPage() {
     (sum, person) => sum + person.standard + person.jobs,
     0,
   );
+
+  // P-12 B2 — who has NO hours yet this week (drives Start here); the
+  // printed total for the sentences.
+  const missingPeople = useMemo(
+    () => employees.filter((e) => !weekPeople.some((p) => p.id === e.id)),
+    [employees, weekPeople],
+  );
+  const weekHoursLabel = weekCardTotal.toLocaleString(dateLocale, {
+    maximumFractionDigits: 2,
+  });
 
   /** P-11 B1 — the "Earlier weeks" table: every week of the year with
    *  hours except the one on the bar, newest first. */
@@ -1025,19 +1063,23 @@ export function HoursAdminPage() {
         title={t("hours_admin.title")}
         subtitle={t("hours_admin.subtitle")}
         actions={
-          tab === "worked" && !editing ? (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              data-testid="hours-enter-week-button"
-              onClick={() => {
-                setWeekModalPreselect([]);
-                setWeekModalOpen(true);
+          /* P-12 §D.24.2 — the company, top right; the choice is
+             shared with the other Finance pages through the session.
+             Enter hours moved onto the week card (B2): the card is the
+             week's home, the header only says whose hours these are. */
+          showCompanySelector ? (
+            <CompanyScopeSelect
+              companies={companies}
+              companyId={company}
+              onChange={(id) => {
+                setCompany(id);
+                setPage(1);
+                setEditing(false);
+                setDrafts({});
+                rememberScopeCompany(id);
               }}
-              disabled={loading || activeHourTypes.length === 0}
-            >
-              {t("hours_admin.enter_week_button")}
-            </button>
+              testId="hours-company-selector"
+            />
           ) : undefined
         }
       />
@@ -1086,258 +1128,367 @@ export function HoursAdminPage() {
 
       {tab === "worked" && (
         <>
-          {/* W-HR1 §2 — THE WEEK BAR: which week, is it final, and the
-              one button that changes that.
+          {/* P-12 §D.24 rule 4 — what just happened, what did not,
+              and the one next step; survives one reload. */}
+          {hoursDone.done && (
+            <DoneBanner
+              done={hoursDone.done}
+              onDismiss={hoursDone.dismiss}
+              testId="hours-done"
+            />
+          )}
 
-              Everything about a week lock used to live on the deleted
-              Overview tab, two clicks from the hours it governs. The
-              chip and the button are here, above the rows they act on,
-              and the arrows move the table with them (`goToWeek`).
+          {/* P-12 §D.24 rule 2 — the ONE thing waiting: people whose
+              week is still empty, else (everyone in) the close. Hidden
+              when the week is closed or nothing waits. */}
+          {!companyPending &&
+            !loading &&
+            !weekStatusLoading &&
+            !weekClosed &&
+            employees.length > 0 &&
+            (missingPeople.length > 0 ? (
+              <StartHere
+                testId="hours-start-here"
+                action={{
+                  label: t("hours_admin.enter_week_button"),
+                  onClick: () => {
+                    setWeekModalPreselect(missingPeople.map((e) => e.id));
+                    setWeekModalOpen(true);
+                  },
+                }}
+              >
+                {weekPeople.length === 0
+                  ? t("hours_admin.start_here_empty", {
+                      week: week.isoWeek,
+                      count: missingPeople.length,
+                    })
+                  : t("hours_admin.start_here_missing", {
+                      hours: weekHoursLabel,
+                      people: weekPeople.length,
+                      count: missingPeople.length,
+                    })}
+              </StartHere>
+            ) : weekPeople.length > 0 ? (
+              <StartHere
+                testId="hours-start-here"
+                action={{
+                  label: t("weeks.close_button"),
+                  onClick: () => {
+                    setConfirmError("");
+                    closeWeekRef.current?.open();
+                  },
+                }}
+              >
+                {t("hours_admin.start_here_close", {
+                  hours: weekHoursLabel,
+                  people: weekPeople.length,
+                })}
+              </StartHere>
+            ) : null)}
 
-              ONE state-dependent button, never two: a week is open or
-              closed, and offering both verbs at once asks the operator
-              to work out which one is live. */}
+          {/* P-12 B2/B3 — the week card is the week's HOME: the
+              stepper, the Open→Closed road, the teach line, Enter
+              hours and Close/Reopen all sit on the card, above the
+              per-person rows they act on. (The separate week bar and
+              the header button folded in here.) */}
           <div
             className="card"
-            data-testid="hours-week-bar"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: 10,
-              padding: "12px 16px",
-              marginBottom: 16,
-            }}
+            data-testid="hours-week-card"
+            style={{ marginBottom: 16, padding: "14px 16px" }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm icon-only"
-                data-testid="hours-week-prev"
-                aria-label={t("contract_hours.prev_week")}
-                title={t("contract_hours.prev_week")}
-                onClick={() => goToWeek(shiftIsoWeek(week, -1))}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 10,
+                marginBottom: 10,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm icon-only"
+                  data-testid="hours-week-prev"
+                  aria-label={t("contract_hours.prev_week")}
+                  title={t("contract_hours.prev_week")}
+                  onClick={() => goToWeek(shiftIsoWeek(week, -1))}
+                >
+                  <ChevronLeft size={15} strokeWidth={2.2} />
+                </button>
+                <strong data-testid="hours-week-label">
+                  {formatIsoWeek(week)}
+                </strong>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm icon-only"
+                  data-testid="hours-week-next"
+                  aria-label={t("contract_hours.next_week")}
+                  title={t("contract_hours.next_week")}
+                  onClick={() => goToWeek(shiftIsoWeek(week, 1))}
+                >
+                  <ChevronRight size={15} strokeWidth={2.2} />
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  data-testid="hours-week-this"
+                  onClick={() => goToWeek(currentIsoWeek())}
+                >
+                  {t("my_hours.this_week")}
+                </button>
+              </div>
+
+              {/* ONE chip. The state, said once. */}
+              <span
+                className={
+                  weekClosed ? "badge badge-closed" : "badge badge-approved"
+                }
+                data-testid="hours-week-status"
+                data-closed={weekClosed ? "true" : "false"}
               >
-                <ChevronLeft size={15} strokeWidth={2.2} />
-              </button>
-              <strong data-testid="hours-week-label">
-                {formatIsoWeek(week)}
-              </strong>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm icon-only"
-                data-testid="hours-week-next"
-                aria-label={t("contract_hours.next_week")}
-                title={t("contract_hours.next_week")}
-                onClick={() => goToWeek(shiftIsoWeek(week, 1))}
+                {weekStatusLoading ? (
+                  <span
+                    className="skeleton-line"
+                    style={{ width: 54, height: 10, display: "inline-block" }}
+                    aria-hidden="true"
+                  />
+                ) : weekClosed ? (
+                  t("weeks.status_closed")
+                ) : (
+                  t("weeks.status_open")
+                )}
+              </span>
+              {weekClosed && weekStatus?.lock && (
+                <span className="muted small" data-testid="hours-week-closed-by">
+                  {t("weeks.closed_by", {
+                    name: weekStatus.lock.closed_by_name,
+                    when: new Date(weekStatus.lock.closed_at).toLocaleString(
+                      dateLocale,
+                      {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      },
+                    ),
+                  })}
+                </span>
+              )}
+
+              <div
+                style={{
+                  marginLeft: "auto",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+                className="hours-week-lock-actions"
               >
-                <ChevronRight size={15} strokeWidth={2.2} />
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                data-testid="hours-week-this"
-                onClick={() => goToWeek(currentIsoWeek())}
-              >
-                {t("my_hours.this_week")}
-              </button>
+                {!editing && (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    data-testid="hours-enter-week-button"
+                    onClick={() => {
+                      setWeekModalPreselect([]);
+                      setWeekModalOpen(true);
+                    }}
+                    disabled={loading || activeHourTypes.length === 0}
+                  >
+                    {t("hours_admin.enter_week_button")}
+                  </button>
+                )}
+                {weekClosed ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    data-testid="hours-week-reopen"
+                    onClick={() => {
+                      setConfirmError("");
+                      reopenWeekRef.current?.open();
+                    }}
+                    disabled={weekStatusLoading || lockBusy || companyPending}
+                  >
+                    {t("weeks.reopen_button")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    data-testid="hours-week-close"
+                    onClick={() => {
+                      setConfirmError("");
+                      closeWeekRef.current?.open();
+                    }}
+                    disabled={weekStatusLoading || lockBusy || companyPending}
+                  >
+                    {t("weeks.close_button")}
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* ONE chip. The state, said once. */}
-            <span
-              className={
-                weekClosed ? "badge badge-closed" : "badge badge-approved"
-              }
-              data-testid="hours-week-status"
-              data-closed={weekClosed ? "true" : "false"}
+            {/* P-12 B3 (§D.24 rule 3) — the week's short road, and the
+                sentence that teaches it. The consequence line rides
+                with the road rather than the button now. */}
+            <RoadTabs
+              variant="progress"
+              steps={[
+                {
+                  key: "open",
+                  step: t("hours_admin.road_open_step"),
+                  label: t("weeks.status_open"),
+                },
+                {
+                  key: "closed",
+                  step: t("hours_admin.road_closed_step"),
+                  label: t("weeks.status_closed"),
+                },
+              ]}
+              activeKey={weekClosed ? "closed" : "open"}
+              ariaLabel={t("hours_admin.week_road_aria")}
+              testIdPrefix="hours-week-road"
+            />
+            <p
+              className="muted small"
+              style={{ margin: "0 0 12px" }}
+              data-testid="hours-week-teach"
             >
-              {weekStatusLoading ? (
-                <span
-                  className="skeleton-line"
-                  style={{ width: 54, height: 10, display: "inline-block" }}
-                  aria-hidden="true"
-                />
-              ) : weekClosed ? (
-                t("weeks.status_closed")
-              ) : (
-                t("weeks.status_open")
-              )}
-            </span>
-            {weekClosed && weekStatus?.lock && (
-              <span className="muted small" data-testid="hours-week-closed-by">
-                {t("weeks.closed_by", {
-                  name: weekStatus.lock.closed_by_name,
-                  when: new Date(weekStatus.lock.closed_at).toLocaleString(
-                    dateLocale,
-                    {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    },
-                  ),
-                })}
-              </span>
-            )}
-
-            <div style={{ marginLeft: "auto" }} className="hours-week-lock-actions">
-              {/* P-7 S4.2 — the consequence in one line BEFORE the press;
-                  the confirm dialog carries the long form. */}
+              {t("hours_admin.week_teach")}
               {!weekClosed && (
                 <span
-                  className="muted small hours-week-close-consequence"
+                  className="hours-week-close-consequence"
                   data-testid="hours-week-close-consequence"
                 >
+                  {" "}
                   {t("weeks.close_consequence", { week: week.isoWeek })}
                 </span>
               )}
-              {weekClosed ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  data-testid="hours-week-reopen"
-                  onClick={() => {
-                    setConfirmError("");
-                    reopenWeekRef.current?.open();
-                  }}
-                  disabled={weekStatusLoading || lockBusy || companyPending}
-                >
-                  {t("weeks.reopen_button")}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  data-testid="hours-week-close"
-                  onClick={() => {
-                    setConfirmError("");
-                    closeWeekRef.current?.open();
-                  }}
-                  disabled={weekStatusLoading || lockBusy || companyPending}
-                >
-                  {t("weeks.close_button")}
-                </button>
-              )}
-            </div>
-          </div>
+            </p>
 
-          {/* P-11 B1 — the week card: {n} h across {m} people, one row
-              per person with the standard hours and the job hours
-              apart, the job refs named; Edit opens the grid on that
-              person. Built from its own exhaustive read of the week,
-              so the numbers describe the WEEK, not the filtered page
-              of rows below. */}
-          {weekPeople.length > 0 && (
-            <div
-              className="card"
-              data-testid="hours-week-card"
-              style={{ marginBottom: 16, padding: "14px 16px" }}
-            >
-              <div
-                className="section-head-title"
-                data-testid="hours-week-card-total"
-              >
-                {t("hours_week_grid.grand_total", {
-                  hours: weekCardTotal.toLocaleString(dateLocale, {
-                    maximumFractionDigits: 2,
-                  }),
-                  count: weekPeople.length,
-                })}
-              </div>
-              <p className="muted small" style={{ margin: "2px 0 10px" }}>
-                {t("hours_admin.week_card_sub")}
-              </p>
-              <div className="table-wrap">
-                <table className="data-table data-table-dense">
-                  <thead>
-                    <tr>
-                      <th>{t("hours_admin.week_card_person")}</th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("hours_admin.week_card_standard")}
-                      </th>
-                      <th>{t("hours_admin.week_card_jobs")}</th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("hours_week_grid.week")}
-                      </th>
-                      <th aria-hidden="true" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {weekPeople.map((person) => (
-                      <tr
-                        key={person.id}
-                        data-testid={`hours-week-card-row-${person.id}`}
-                      >
-                        <td className="td-subject">
-                          {person.name}
-                          {person.buildings.size > 0 && (
-                            <span className="hours-week-line-sub">
-                              {[...person.buildings].join(", ")}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {t("hours_week_grid.person_total", {
-                            hours: person.standard.toLocaleString(dateLocale, {
-                              maximumFractionDigits: 2,
-                            }),
-                          })}
-                        </td>
-                        <td data-testid={`hours-week-card-jobs-${person.id}`}>
-                          {person.jobRefs.size === 0 ? (
-                            <span className="muted">{"\u2014"}</span>
-                          ) : (
-                            <>
-                              {t("hours_week_grid.person_total", {
-                                hours: person.jobs.toLocaleString(dateLocale, {
-                                  maximumFractionDigits: 2,
-                                }),
-                              })}
-                              <span className="hours-week-line-sub">
-                                {[...person.jobRefs.values()]
-                                  .map(
-                                    (ref) =>
-                                      `${ref.label} (${ref.hours.toLocaleString(
-                                        dateLocale,
-                                        { maximumFractionDigits: 2 },
-                                      )} ${t("hours_admin.hour_unit")})`,
-                                  )
-                                  .join(" \u00b7 ")}
-                              </span>
-                            </>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right", fontWeight: 700 }}>
-                          {t("hours_week_grid.person_total", {
-                            hours: (
-                              person.standard + person.jobs
-                            ).toLocaleString(dateLocale, {
-                              maximumFractionDigits: 2,
-                            }),
-                          })}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => {
-                              setWeekModalPreselect([person.id]);
-                              setWeekModalOpen(true);
-                            }}
-                            disabled={loading || activeHourTypes.length === 0}
-                            data-testid={`hours-week-card-edit-${person.id}`}
-                          >
-                            {t("hours_admin.week_card_edit")}
-                          </button>
-                        </td>
+            {weekPeople.length > 0 ? (
+              <>
+                <div
+                  className="section-head-title"
+                  data-testid="hours-week-card-total"
+                >
+                  {t("hours_week_grid.grand_total", {
+                    hours: weekCardTotal.toLocaleString(dateLocale, {
+                      maximumFractionDigits: 2,
+                    }),
+                    count: weekPeople.length,
+                  })}
+                </div>
+                <p className="muted small" style={{ margin: "2px 0 10px" }}>
+                  {t("hours_admin.week_card_sub")}
+                </p>
+                <div className="table-wrap">
+                  <table className="data-table data-table-dense">
+                    <thead>
+                      <tr>
+                        <th>{t("hours_admin.week_card_person")}</th>
+                        <th style={{ textAlign: "right" }}>
+                          {t("hours_admin.week_card_standard")}
+                        </th>
+                        <th>{t("hours_admin.week_card_jobs")}</th>
+                        <th style={{ textAlign: "right" }}>
+                          {t("hours_week_grid.week")}
+                        </th>
+                        <th aria-hidden="true" />
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+                    </thead>
+                    <tbody>
+                      {weekPeople.map((person) => (
+                        <tr
+                          key={person.id}
+                          className={
+                            savedHighlight.includes(person.id)
+                              ? HIGHLIGHT_CLASS
+                              : undefined
+                          }
+                          data-testid={`hours-week-card-row-${person.id}`}
+                        >
+                          <td className="td-subject">
+                            {person.name}
+                            {person.buildings.size > 0 && (
+                              <span className="hours-week-line-sub">
+                                {[...person.buildings].join(", ")}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            {t("hours_week_grid.person_total", {
+                              hours: person.standard.toLocaleString(dateLocale, {
+                                maximumFractionDigits: 2,
+                              }),
+                            })}
+                          </td>
+                          <td data-testid={`hours-week-card-jobs-${person.id}`}>
+                            {person.jobRefs.size === 0 ? (
+                              <span className="muted">{"\u2014"}</span>
+                            ) : (
+                              <>
+                                {t("hours_week_grid.person_total", {
+                                  hours: person.jobs.toLocaleString(dateLocale, {
+                                    maximumFractionDigits: 2,
+                                  }),
+                                })}
+                                <span className="hours-week-line-sub">
+                                  {[...person.jobRefs.values()]
+                                    .map(
+                                      (ref) =>
+                                        `${ref.label} (${ref.hours.toLocaleString(
+                                          dateLocale,
+                                          { maximumFractionDigits: 2 },
+                                        )} ${t("hours_admin.hour_unit")})`,
+                                    )
+                                    .join(" \u00b7 ")}
+                                </span>
+                              </>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right", fontWeight: 700 }}>
+                            {t("hours_week_grid.person_total", {
+                              hours: (
+                                person.standard + person.jobs
+                              ).toLocaleString(dateLocale, {
+                                maximumFractionDigits: 2,
+                              }),
+                            })}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => {
+                                setWeekModalPreselect([person.id]);
+                                setWeekModalOpen(true);
+                              }}
+                              disabled={loading || activeHourTypes.length === 0}
+                              data-testid={`hours-week-card-edit-${person.id}`}
+                            >
+                              {t("hours_admin.week_card_edit")}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              /* P-12 §D.24 rule 5 — the empty week teaches how hours
+                 get here. */
+              <TeachEmpty
+                testId="hours-week-empty"
+                title={t("hours_admin.week_empty_title", { week: week.isoWeek })}
+                body={t("hours_admin.week_empty_body")}
+              />
+            )}
+          </div>
 
           {/* P-11 B1 — Earlier weeks: the year's weeks that hold
               hours, each with its people, its hours and its lock
@@ -1457,44 +1608,6 @@ export function HoursAdminPage() {
             data-testid="hours-filters"
             style={{ marginBottom: 16, borderBottom: "1px solid var(--border)" }}
           >
-            {showCompanySelector && (
-              <div className="filter-field">
-                <span className="filter-label">
-                  {t("catalog.company_selector_label")}
-                </span>
-                <select
-                  id="hours-company-selector"
-                  className="filter-control"
-                  value={company === "" ? "" : String(company)}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setCompany(value === "" ? "" : Number(value));
-                    setPage(1);
-                    setEditing(false);
-                    setDrafts({});
-                    if (value !== "") {
-                      window.localStorage.setItem(
-                        HOURS_COMPANY_STORAGE_KEY,
-                        value,
-                      );
-                    }
-                  }}
-                  data-testid="hours-company-selector"
-                >
-                  {/* Disabled placeholder: there is no "all companies"
-                      state. It renders only before the list resolves. */}
-                  <option value="" disabled>
-                    {t("catalog.company_selector_placeholder")}
-                  </option>
-                  {companies.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
             {/* The four shared pickers. `HoursFilterRow` is now this
                 page's only caller (the Overview tab that shared it is
                 gone), and it moved to the `.filter-field` shape with
@@ -2283,14 +2396,38 @@ export function HoursAdminPage() {
             setEnterConsumed(true);
             setWeekModalOpen(false);
           }}
-          onSaved={async (changed) => {
+          onSaved={async (changed, saved) => {
             setEnterConsumed(true);
             setWeekModalOpen(false);
             await refreshEntries();
-            pushToast({
-              variant: "success",
-              title: t("hours_week_grid.saved", { count: changed }),
-            });
+            // P-12 B4 (§D.24 rule 4) — the page says WHO was saved and
+            // the one next step, and highlights those people on the
+            // week card; a bare toast is never the only feedback.
+            if (changed > 0 && saved && saved.length > 0) {
+              const details = saved
+                .map((s) => {
+                  const person = employees.find((e) => e.id === s.employee);
+                  const name =
+                    person?.full_name?.trim() || person?.email || String(s.employee);
+                  return `${name} ${s.hours.toLocaleString(dateLocale, {
+                    maximumFractionDigits: 2,
+                  })} ${t("hours_admin.hour_unit")}`;
+                })
+                .join(", ");
+              hoursDone.announce({
+                title: t("hours_admin.saved_banner_title", {
+                  details,
+                  week: week.isoWeek,
+                }),
+                body: t("hours_admin.saved_banner_body"),
+              });
+              setSavedHighlight(saved.map((s) => s.employee));
+            } else {
+              pushToast({
+                variant: "success",
+                title: t("hours_week_grid.saved", { count: changed }),
+              });
+            }
           }}
         />
       )}

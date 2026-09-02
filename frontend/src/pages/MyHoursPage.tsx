@@ -507,6 +507,17 @@ export function MyHoursPage() {
     [entries.length],
   );
 
+  /** P-12 B1 — the one person's bookable buildings, for the grid's
+   *  "+ Add a line" choice. The scoped buildings read above is exactly
+   *  "their own access". */
+  const myBookableBuildingIds = useMemo<Record<number, number[]>>(
+    () =>
+      myEmployeeId === null
+        ? {}
+        : { [myEmployeeId]: buildings.map((building) => building.id) },
+    [myEmployeeId, buildings],
+  );
+
   /**
    * W12 §3 — every route to another week runs through here.
    *
@@ -877,6 +888,10 @@ export function MyHoursPage() {
                row to type in and `+ Add type` is always reachable. See
                `gridSeed`. */
             seedBuildingIds={gridSeed}
+            /* P-12 B1 — "+ Add a line"'s building choice: this
+               person's own scoped building list (the same one the
+               entry form's picker shows). */
+            personBuildingIds={myBookableBuildingIds}
             /* Sprint 179B §2 — this page's rows come from whatever the
                week already holds, and those can be tagged to a job by
                the admin wizard, so the column belongs here too. */

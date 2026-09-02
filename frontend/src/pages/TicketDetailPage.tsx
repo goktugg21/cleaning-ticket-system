@@ -136,6 +136,8 @@ import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
 import { useToast } from "../components/ToastProvider";
 import { PhaseBanner } from "../components/customer/PhaseBadge";
+import { DoneBanner } from "../components/guide/DoneBanner";
+import { useDoneBanner } from "../components/guide/useDoneBanner";
 import { DueChipCore } from "../components/workplan/WorkPlanCard";
 import { RouteBadge } from "../components/RouteBadge";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
@@ -692,7 +694,7 @@ export function TicketDetailPage() {
   // parts card now sits on THIS page's overview tab and its title and
   // count line are that bundle's strings. Adding the namespace rather
   // than copying two keys into `ticket_detail`: one string, one owner.
-  const { t } = useTranslation(["ticket_detail", "common", "staff_slots"]);
+  const { t, i18n } = useTranslation(["ticket_detail", "common", "staff_slots"]);
   // M2 P5 — type / customer-facing labels for the resolver-gated
   // credential summaries on assigned-staff entries (reuses the P4
   // namespace; keys are NOT duplicated here).
@@ -903,6 +905,10 @@ export function TicketDetailPage() {
      transition lands. The hour type is the company's default; the
      office corrects a type on the Hours page's grid. */
   const [completeHours, setCompleteHours] = useState<Record<number, string>>({});
+  // P-12 B4 (§D.24 rule 6, both ways) — after a report-done that wrote
+  // hours, the ticket says where they went and opens the door to the
+  // Hours side, routed per viewer.
+  const hoursDone = useDoneBanner(`ticket-hours-${id}`);
   const [completeHourType, setCompleteHourType] = useState<number | null>(null);
   // Only the people this VIEWER may write hours for: the timesheets
   // privacy floor lets a worker write their OWN entries only, so a
@@ -2646,6 +2652,7 @@ export function TicketDetailPage() {
       // on the Hours page if need be.
       if (ticket && completeHourType !== null) {
         const today = toDateString(new Date());
+        const written: { name: string; hours: number }[] = [];
         for (const person of completionCrew) {
           const raw = (completeHours[person.id] ?? "").trim().replace(",", ".");
           const hoursValue = Number(raw);
@@ -2661,6 +2668,7 @@ export function TicketDetailPage() {
               source_type: "TICKET",
               source_id: ticket.id,
             });
+            written.push({ name: person.name, hours: hoursValue });
           } catch (hoursErr) {
             toast.push({
               variant: "error",
@@ -2668,6 +2676,36 @@ export function TicketDetailPage() {
             });
             break;
           }
+        }
+        // P-12 B4 — say where the hours went, with the door to the
+        // Hours side (the manager's grid, or the worker's own page).
+        if (written.length > 0) {
+          const week = isoWeekOf(new Date());
+          const details = written
+            .map(
+              (w) =>
+                `${w.name} ${String(Number(w.hours.toFixed(2))).replace(
+                  ".",
+                  i18n.language.startsWith("nl") ? "," : ".",
+                )} ${t("common:hours_admin.hour_unit")}`,
+            )
+            .join(", ");
+          const manages = canManageTimesheets(me?.role);
+          hoursDone.announce({
+            title: t("common:ticket_staff_complete.hours_written_title", {
+              details,
+              week: week.isoWeek,
+            }),
+            body: t("common:ticket_staff_complete.hours_written_body"),
+            actionLabel: t(
+              manages
+                ? "common:ticket_staff_complete.hours_written_see_admin"
+                : "common:ticket_staff_complete.hours_written_see_mine",
+            ),
+            actionTo: manages
+              ? `/admin/hours?week=${week.isoYear}-W${String(week.isoWeek).padStart(2, "0")}`
+              : "/my-hours",
+          });
         }
       }
       await loadTicket();
@@ -3640,6 +3678,14 @@ export function TicketDetailPage() {
             }
             action={primaryActionNode}
           />
+          {/* P-12 B4 — the hours the report wrote, and where they went. */}
+          {hoursDone.done && (
+            <DoneBanner
+              done={hoursDone.done}
+              onDismiss={hoursDone.dismiss}
+              testId="ticket-hours-done"
+            />
+          )}
           {/* Why a provider who would normally decide has no button on a
               WCA ticket — said where the button would be. */}
           {!isCustomerUser(me?.role) &&

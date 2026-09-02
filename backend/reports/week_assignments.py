@@ -92,14 +92,40 @@ def _local_date(value) -> datetime.date | None:
     return timezone.localtime(value).date()
 
 
+def _invoice_day(customer):
+    """The customer's billing day, the shape the extra-work list
+    serializer already speaks (`get_customer_invoice_day`): an int, the
+    string "LAST_OF_MONTH", or None when no schedule is set."""
+    from customers.models import Customer
+
+    if customer is None:
+        return None
+    if customer.invoice_day_of_month:
+        return customer.invoice_day_of_month
+    if customer.invoice_day_rule == Customer.InvoiceDayRule.FIRST_OF_MONTH:
+        return 1
+    if customer.invoice_day_rule == Customer.InvoiceDayRule.LAST_OF_MONTH:
+        return "LAST_OF_MONTH"
+    return None
+
+
 def _job(ticket) -> dict:
     """One offerable job, in the shape `hour_sources.available_sources`
-    returns — so the grid's Job column and the picker read one shape."""
+    returns — so the grid's Job column and the picker read one shape.
+
+    P-12 B5 (§D.24 rule 6) adds where the hours GO next: every job here
+    is chargeable extra work (`_open_tickets` filters on it), so its
+    hours feed the customer's next invoice — the grid says whose and on
+    which day.
+    """
+    customer = ticket.customer if ticket.customer_id else None
     return {
         "source_type": HourSource.TICKET,
         "source_id": ticket.id,
         "title": f"{ticket.ticket_no} — {ticket.title}",
         "building": ticket.building_id,
+        "customer_name": customer.name if customer else None,
+        "invoice_day": _invoice_day(customer),
     }
 
 
@@ -212,7 +238,7 @@ def week_assignments(user, company, employees, iso_year: int, iso_week: int) -> 
             user_id__in=employee_ids, ticket__in=tickets
         )
         .exclude(slot_status=StaffAssignmentSlotStatus.CANCELLED)
-        .select_related("ticket")
+        .select_related("ticket", "ticket__customer")
         .order_by("-ticket_id", "-id")
     )
 
@@ -254,7 +280,17 @@ def week_assignments(user, company, employees, iso_year: int, iso_week: int) -> 
         spawned_by_ew: dict[int, list] = {}
         for ticket in tickets.filter(
             extra_work_request_id__in=planned_ews
-        ).only("id", "ticket_no", "title", "building_id", "extra_work_request_id"):
+        ).select_related("customer").only(
+            "id",
+            "ticket_no",
+            "title",
+            "building_id",
+            "extra_work_request_id",
+            "customer__id",
+            "customer__name",
+            "customer__invoice_day_of_month",
+            "customer__invoice_day_rule",
+        ):
             spawned_by_ew.setdefault(ticket.extra_work_request_id, []).append(
                 ticket
             )

@@ -258,9 +258,11 @@ export function HoursWeekGrid({
   buildings,
   entriesByEmployee,
   seedBuildingIds,
+  personBuildingIds,
   seedSources = [],
   seedRowsByEmployee = NO_SEED_ROWS,
   sourceOptions = NO_SOURCE_OPTIONS,
+  jobBillingFacts,
   showHead = true,
   showApplyRow = true,
   quietDays = NO_QUIET_DAYS,
@@ -287,6 +289,14 @@ export function HoursWeekGrid({
    *  that ALREADY have entries this week are reconciled rather than
    *  duplicated. */
   seedBuildingIds: (number | null)[];
+  /** P-12 B1 — the buildings each person can be BOOKED at, keyed by
+   *  employee id: the grant wall for the admin dialog (the
+   *  week-assignments read), the person's own scoped building list on
+   *  My hours. It feeds "+ Add a line"'s building choice — the header's
+   *  picks (`seedBuildingIds`) were empty whenever the grid opened from
+   *  the week card's Edit, so the select offered only "No building".
+   *  A person with no entry here falls back to the seed list. */
+  personBuildingIds?: Record<number, number[]>;
   /** Sprint 177 §7 — the JOBS chosen in the setup, if any. Each becomes
    *  its own seeded row so the hours land already attributed. Empty (the
    *  default, and what every pre-177 caller passes) seeds one untagged
@@ -316,6 +326,13 @@ export function HoursWeekGrid({
    *  back to the backend's own shape for an id that no longer resolves,
    *  "Ticket #41". */
   sourceOptions?: HourSourceOption[];
+  /** P-12 B5 (§D.24 rule 6) — where a job line's hours GO, keyed
+   *  `SOURCE_TYPE:id`: the customer whose next invoice they feed and
+   *  that customer's billing day. Read on the job child's sub-line. */
+  jobBillingFacts?: Record<
+    string,
+    { customer_name: string | null; invoice_day: number | "LAST_OF_MONTH" | null }
+  >;
   /** W12 §2 — whether the grid prints its own title, row count and
    *  hints above the table.
    *
@@ -349,7 +366,14 @@ export function HoursWeekGrid({
   /** W-FIX1 B1 — a reason Save is refused that is not the week lock
    *  (an invalid setup field). Rendered beside the button. */
   saveBlockedReason?: string | null;
-  onSaved: (changed: number) => void | Promise<void>;
+  /** P-12 B4 — beside the count, WHO was saved and how many hours were
+   *  written for each (the sum of the changed cells' new values), so
+   *  the page's Done banner can say "Saved: Ahmet 5 h, Gökhan 2 h" and
+   *  highlight those people. Optional for callers that only count. */
+  onSaved: (
+    changed: number,
+    saved?: { employee: number; hours: number }[],
+  ) => void | Promise<void>;
   /** Sprint 168 §1 — where the collected cells GO.
    *
    *  Left out, they go to `saveWeekGrid` and become TimeEntry rows,
@@ -974,6 +998,26 @@ export function HoursWeekGrid({
   function renderChildLabel(block: GridBlock) {
     const label = sourceName(block.sourceType, block.sourceId);
     const isExtraWork = block.sourceType === "EXTRA_WORK";
+    // P-12 B5 — where these hours go next, in words: the customer's
+    // next invoice and its day. Falls back to the P-11 sentence when
+    // the caller has no billing facts for the job.
+    const facts = jobBillingFacts?.[`${block.sourceType}:${block.sourceId}`];
+    const invoiceSub = facts?.customer_name
+      ? facts.invoice_day === "LAST_OF_MONTH"
+        ? t("hours_week_grid.job_invoice_sub_last", {
+            customer: facts.customer_name,
+          })
+        : typeof facts.invoice_day === "number"
+          ? t("hours_week_grid.job_invoice_sub", {
+              customer: facts.customer_name,
+              day: facts.invoice_day,
+            })
+          : t("hours_week_grid.job_invoice_sub_noday", {
+              customer: facts.customer_name,
+            })
+      : isExtraWork
+        ? t("hours_week_grid.ew_billed_sub")
+        : null;
     return (
       <span
         className="hours-week-child"
@@ -994,7 +1038,7 @@ export function HoursWeekGrid({
         <span className="hours-week-line-sub">
           {[
             block.buildingId === "" ? null : buildingName(block.buildingId),
-            isExtraWork ? t("hours_week_grid.ew_billed_sub") : null,
+            invoiceSub,
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -1068,7 +1112,20 @@ export function HoursWeekGrid({
       // Sprint 180 §2 — saved is clean: Escape may close again.
       onDirtyChange?.(false);
       setBanner(t("hours_week_grid.saved", { count: changed }));
-      await onSaved(changed);
+      // P-12 B4 — who was saved, with the hours the save wrote (the
+      // changed cells' new values; a cleared cell contributes 0 but
+      // still lists the person, so "removed their hours" is sayable).
+      const savedByEmployee = new Map<number, number>();
+      for (const cell of cells) {
+        savedByEmployee.set(
+          cell.employee,
+          (savedByEmployee.get(cell.employee) ?? 0) + parseHours(cell.hours),
+        );
+      }
+      await onSaved(
+        changed,
+        [...savedByEmployee].map(([employee, hours]) => ({ employee, hours })),
+      );
     } catch (err) {
       // Verbatim — including the server's own `week_closed` wording.
       setError(getApiError(err));
@@ -1453,7 +1510,12 @@ export function HoursWeekGrid({
                       <AddLineControl
                         employee={employee}
                         buildings={buildings}
-                        seedBuildingIds={seedBuildingIds}
+                        bookableIds={
+                          personBuildingIds?.[employee.id] ??
+                          seedBuildingIds.filter(
+                            (id): id is number => id !== null,
+                          )
+                        }
                         hourTypes={hourTypes}
                         typeOptionLabel={typeOptionLabel}
                         jobPicker={jobPicker}
@@ -1551,7 +1613,7 @@ export function HoursWeekGrid({
 function AddLineControl({
   employee,
   buildings,
-  seedBuildingIds,
+  bookableIds,
   hourTypes,
   typeOptionLabel,
   jobPicker,
@@ -1561,7 +1623,9 @@ function AddLineControl({
 }: {
   employee: GridEmployee;
   buildings: BuildingAdmin[];
-  seedBuildingIds: (number | null)[];
+  /** P-12 B1 — the buildings this PERSON can be booked at (the grant
+   *  wall / the person's own scoped list), not the header's picks. */
+  bookableIds: number[];
   hourTypes: HourType[];
   typeOptionLabel: (hourType: HourType) => string;
   jobPicker?: GridJobPicker;
@@ -1581,18 +1645,17 @@ function AddLineControl({
     hourTypes[0] ? String(hourTypes[0].id) : "",
   );
 
-  // The buildings offered: the setup's own (the person's standard
-  // seats), resolved to names; "no building" is always a choice.
+  // P-12 B1 — the buildings offered are the ones the person can be
+  // booked at, by name; "No building" is a real seat and comes LAST.
+  // With exactly one choice there is no select: the line takes it and
+  // the label says which.
+  const buildingName = (id: number) =>
+    buildings.find((building) => building.id === id)?.name ?? String(id);
   const seats: { value: string; label: string }[] = [
+    ...bookableIds.map((id) => ({ value: String(id), label: buildingName(id) })),
     { value: "none", label: t("hours_week_grid.no_building") },
-    ...seedBuildingIds
-      .filter((id): id is number => id !== null)
-      .map((id) => ({
-        value: String(id),
-        label:
-          buildings.find((building) => building.id === id)?.name ?? String(id),
-      })),
   ];
+  const onlySeat = bookableIds.length === 0 ? seats[0] : bookableIds.length === 1 ? seats[0] : null;
 
   if (!open) {
     return (
@@ -1600,7 +1663,12 @@ function AddLineControl({
         <button
           type="button"
           className="btn btn-ghost btn-sm"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            // Default to the person's first bookable building (the seat
+            // the standard lines are seeded from), not to "none".
+            setBuildingId(seats[0].value);
+            setOpen(true);
+          }}
           disabled={disabled}
           data-testid={`hours-week-add-line-${employee.id}`}
         >
@@ -1613,19 +1681,29 @@ function AddLineControl({
 
   return (
     <span className="hours-week-add-line-form" data-testid={`hours-week-add-line-form-${employee.id}`}>
-      <select
-        className="field-input hours-week-type-select"
-        value={buildingId}
-        onChange={(event) => setBuildingId(event.target.value)}
-        aria-label={t("hours_week_grid.building")}
-        data-testid={`hours-week-add-line-building-${employee.id}`}
-      >
-        {seats.map((seat) => (
-          <option key={seat.value} value={seat.value}>
-            {seat.label}
-          </option>
-        ))}
-      </select>
+      {onlySeat ? (
+        <span
+          className="hours-week-add-line-only muted small"
+          data-testid={`hours-week-add-line-building-${employee.id}`}
+          data-only-seat={onlySeat.value}
+        >
+          {t("hours_week_grid.add_line_one_building", { building: onlySeat.label })}
+        </span>
+      ) : (
+        <select
+          className="field-input hours-week-type-select"
+          value={buildingId}
+          onChange={(event) => setBuildingId(event.target.value)}
+          aria-label={t("hours_week_grid.building")}
+          data-testid={`hours-week-add-line-building-${employee.id}`}
+        >
+          {seats.map((seat) => (
+            <option key={seat.value} value={seat.value}>
+              {seat.label}
+            </option>
+          ))}
+        </select>
+      )}
       {jobPicker && (
         <RowJobPicker
           tag={job}

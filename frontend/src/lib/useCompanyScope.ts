@@ -23,7 +23,10 @@ import type { CompanyAdmin } from "../api/types";
  */
 const SCOPE_KEY = "guide.company";
 
-function readStored(): number | null {
+/** The session's shared Finance-pages company, or null. Exported for a
+ *  page (Hours) that manages its own company state but must share the
+ *  memory. */
+export function readScopeCompany(): number | null {
   try {
     const raw = window.sessionStorage.getItem(SCOPE_KEY);
     const id = raw == null ? NaN : Number(raw);
@@ -33,7 +36,8 @@ function readStored(): number | null {
   }
 }
 
-function writeStored(id: number): void {
+/** Remember a company for the session — the shared key. */
+export function rememberScopeCompany(id: number): void {
   try {
     window.sessionStorage.setItem(SCOPE_KEY, String(id));
   } catch {
@@ -64,7 +68,7 @@ export function useCompanyScope(enabled: boolean): {
         setCompanies(all);
         setCompanyId((current) => {
           if (current !== "") return current;
-          const stored = readStored();
+          const stored = readScopeCompany();
           if (stored != null && all.some((c) => c.id === stored)) return stored;
           // One company: there is no choice to make (and no selector).
           if (all.length === 1) return all[0].id;
@@ -85,7 +89,7 @@ export function useCompanyScope(enabled: boolean): {
 
   const chooseCompany = useCallback((id: number) => {
     setCompanyId(id);
-    writeStored(id);
+    rememberScopeCompany(id);
   }, []);
 
   const seedCompany = useCallback((id: number) => {
