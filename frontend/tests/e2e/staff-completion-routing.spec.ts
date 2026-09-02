@@ -67,19 +67,6 @@ interface UserSearchRow {
   id: number;
   email: string;
 }
-interface TicketListItem {
-  id: number;
-  status: string;
-  building_name?: string;
-}
-interface TicketDetailBody {
-  id: number;
-  status: string;
-  is_assigned_staff: boolean;
-  building: number;
-  assigned_staff: Array<{ id?: number; anonymous?: boolean }>;
-}
-
 async function resolveUserId(
   api: APIRequestContext,
   email: string,
@@ -95,56 +82,91 @@ async function resolveUserId(
 }
 
 /**
- * Find (or freshly prepare) an Osius IN_PROGRESS ticket that Ahmet
- * (staffOsius) is directly assigned to. Strategy:
- *   1. List Osius tickets, look for an IN_PROGRESS ticket whose
- *      assigned_staff already contains Ahmet.
- *   2. If none — pick the first IN_PROGRESS ticket, POST a direct
- *      staff-assignment for Ahmet via the admin endpoint, then
- *      return that ticket id.
- *
- * The spec does NOT clean up the assignment; subsequent runs will
- * find the existing assigned row at step 1 and reuse it.
+ * P-12 H — seed a FRESH IN_PROGRESS ticket for Ahmet instead of
+ * borrowing one from the database. The old find-or-prepare picked the
+ * first IN_PROGRESS seed row, and on dev that is a ticket spawned from
+ * an extra work with `file_upload_required=True`: the server (rightly)
+ * refused the note-only completion with "requires a file". A plain
+ * ticket (no extra-work origin) is completable with a note alone
+ * (`tickets/completion_requirements.py`), so the spec creates its own:
+ *   1. pick an Amsterdam building and a customer linked to it,
+ *   2. POST /api/tickets/ (a plain melding — no evidence flags),
+ *   3. assign Ahmet, and move it OPEN -> IN_PROGRESS with the
+ *      `scheduled_start_at` answer the transition-requirements gate
+ *      asks for (WHO is the assignment, WHEN is the answer field).
+ * Each run seeds its own ticket; nothing in the seed data is mutated.
  */
-async function findOrPrepareInProgressTicketForAhmet(
+async function seedInProgressTicketForAhmet(
   sa: APIRequestContext,
 ): Promise<number> {
-  const listResponse = await sa.get("/api/tickets/?page_size=100");
-  expect(listResponse.status()).toBe(200);
-  const list = (await listResponse.json()) as { results: TicketListItem[] };
-  const osiusTickets = list.results.filter((t) =>
-    /Amsterdam/i.test(t.building_name ?? ""),
-  );
-  expect(
-    osiusTickets.length,
-    "expected at least one Osius ticket in the seed",
-  ).toBeGreaterThan(0);
-
-  const inProgress = osiusTickets.filter((t) => t.status === "IN_PROGRESS");
   const ahmetId = await resolveUserId(sa, DEMO_USERS.staffOsius.email);
 
-  for (const t of inProgress) {
-    const detail = await sa.get(`/api/tickets/${t.id}/`);
-    if (detail.status() !== 200) continue;
-    const body = (await detail.json()) as TicketDetailBody;
-    const isAhmetAssigned = (body.assigned_staff ?? []).some(
-      (entry) => "id" in entry && entry.id === ahmetId,
-    );
-    if (isAhmetAssigned) return t.id;
-  }
-
-  // None pre-assigned — grab the first IN_PROGRESS and add Ahmet.
-  expect(
-    inProgress.length,
-    "expected at least one IN_PROGRESS Osius ticket in the seed",
-  ).toBeGreaterThan(0);
-  const target = inProgress[0];
-  const assign = await sa.post(
-    `/api/tickets/${target.id}/staff-assignments/`,
-    { data: { user_id: ahmetId } },
+  const buildingsResponse = await sa.get(
+    "/api/buildings/?search=Amsterdam&page_size=50",
   );
+  expect(buildingsResponse.status()).toBe(200);
+  const buildings = (await buildingsResponse.json()) as {
+    results: Array<{ id: number; name: string }>;
+  };
+  expect(
+    buildings.results.length,
+    "expected an Amsterdam building in the seed",
+  ).toBeGreaterThan(0);
+
+  // A customer linked to the building (the M:N membership; the legacy
+  // single-building anchor still mirrors it on old rows).
+  const customersResponse = await sa.get("/api/customers/?page_size=100");
+  expect(customersResponse.status()).toBe(200);
+  const customers = (await customersResponse.json()) as {
+    results: Array<{
+      id: number;
+      building?: number | null;
+      linked_building_ids?: number[];
+    }>;
+  };
+  let buildingId: number | null = null;
+  let customerId: number | null = null;
+  for (const b of buildings.results) {
+    const match = customers.results.find(
+      (c) => (c.linked_building_ids ?? []).includes(b.id) || c.building === b.id,
+    );
+    if (match) {
+      buildingId = b.id;
+      customerId = match.id;
+      break;
+    }
+  }
+  expect(customerId, "a customer linked to an Amsterdam building").toBeTruthy();
+
+  const create = await sa.post("/api/tickets/", {
+    data: {
+      title: "P-12 e2e completion seed",
+      description:
+        "Seeded by staff-completion-routing.spec.ts — a plain ticket with no evidence requirements.",
+      building: buildingId,
+      customer: customerId,
+      priority: "MEDIUM",
+    },
+  });
+  expect(create.status(), await create.text()).toBe(201);
+  const ticket = (await create.json()) as { id: number };
+
+  const assign = await sa.post(`/api/tickets/${ticket.id}/staff-assignments/`, {
+    data: { user_id: ahmetId },
+  });
   expect([200, 201]).toContain(assign.status());
-  return target.id;
+
+  // OPEN -> IN_PROGRESS is a legal move; the gate wants WHO (assigned
+  // above) and WHEN (answered inline).
+  const start = await sa.post(`/api/tickets/${ticket.id}/status/`, {
+    data: {
+      to_status: "IN_PROGRESS",
+      note: "P-12 e2e seed: started for the completion-routing walk",
+      scheduled_start_at: new Date().toISOString(),
+    },
+  });
+  expect(start.status(), await start.text()).toBe(200);
+  return ticket.id;
 }
 
 test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
@@ -155,7 +177,7 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
     test.setTimeout(180_000);
 
     const sa = await apiAs(baseURL!, DEMO_USERS.super.email);
-    const ticketId = await findOrPrepareInProgressTicketForAhmet(sa);
+    const ticketId = await seedInProgressTicketForAhmet(sa);
     await sa.dispose();
 
     await loginAs(page, DEMO_USERS.staffOsius);

@@ -599,7 +599,6 @@ export function PlanWorkDialog({
   const budgetHours = toHours(budget);
   const hasBudget = budget.trim() !== "";
   const overrun = hasBudget && distributed > budgetHours;
-  const overBy = (distributed - budgetHours).toFixed(2);
   // P-11 A9 — what the field SHOWS: the override when one is typed,
   // else the live sum of the people's hours. The trailing-zero trim
   // keeps "5" editable as "5", not "5.00".
@@ -617,7 +616,9 @@ export function PlanWorkDialog({
     distributed > 0 &&
     !overrun &&
     Math.abs(budgetHours - distributed) >= 0.005;
-  const fmtHours = (n: number) => n.toFixed(2).replace(".", locale.startsWith("nl") ? "," : ".");
+  // P-12 H: short hours — "5", "5.5", never "5.00".
+  const fmtHours = (n: number) =>
+    String(Number(n.toFixed(2))).replace(".", locale.startsWith("nl") ? "," : ".");
 
   // ---- stage 3: done means ------------------------------------------------
   const [photoRequired, setPhotoRequired] = useState(ew.file_upload_required ?? false);
@@ -1409,11 +1410,13 @@ export function PlanWorkDialog({
                   <div className="ew-plan-overrun" role="status" data-testid="extra-work-plan-overrun">
                     <AlertTriangle size={18} aria-hidden="true" />
                     <div>
-                      <div className="ew-plan-overrun-title">{t("plan.overrun_title", { over: overBy })}</div>
+                      <div className="ew-plan-overrun-title">
+                        {t("plan.overrun_title", { over: fmtHours(distributed - budgetHours) })}
+                      </div>
                       <div className="muted small">
                         {t("plan.overrun_hint", {
-                          distributed: distributed.toFixed(2),
-                          budget: budgetHours.toFixed(2),
+                          distributed: fmtHours(distributed),
+                          budget: fmtHours(budgetHours),
                         })}
                       </div>
                     </div>
