@@ -485,6 +485,14 @@ class Command(BaseCommand):
         # relative to today on every run (see the helper's docstring).
         self._seed_work_plan_demo(User, super_admin)
 
+        # P-13 G — the finance pages' own fixture: billing schedules,
+        # the required no-billing-day customer with visible unbilled
+        # money (W1), two contracts, real invoices in every lifecycle
+        # state, unbilled work across two months, and one ON_HOLD job
+        # for the at-risk fold. Idempotent (marker titles / marker
+        # descriptions).
+        self._seed_finance_demo(User, super_admin)
+
         self._print_summary(prune_summary=prune_summary)
 
     # -----------------------------------------------------------------
@@ -2227,6 +2235,722 @@ class Command(BaseCommand):
         self._work_plan_summary = summary
 
     # -----------------------------------------------------------------
+    # P-13 G — the finance pages' fixture
+    # -----------------------------------------------------------------
+    def _seed_finance_demo(self, User, super_admin):
+        """
+        Make a fresh seed SHOW the finance pages instead of leaving
+        them empty (P-13 "money is never invisible"). For the PRIMARY
+        demo company (COMPANIES[0]):
+
+          * Billing schedules — `invoice_day_of_month` 1 / 15 / 1 on up
+            to three EXISTING customers of the company. No new
+            customers are ever created here: with fewer customers the
+            plan degrades gracefully, and the W1 fixture below always
+            outranks a schedule (with a single customer, that one
+            customer stays unscheduled and nobody gets a billing day).
+          * THE W1 FIXTURE (required): one customer with NO billing day
+            (`invoice_day_of_month` NULL + `invoice_day_rule` "") that
+            nevertheless holds finished, priced, UNBILLED extra work —
+            the "money invisible" case `/api/invoices/due/` now shows
+            (rule "" on the wire, unbilled_count > 0; P-13 A).
+          * Two STANDARD contracts: one ACTIVE whose first revision has
+            lines (so the list/stats show real monthly money), one
+            DRAFT whose first revision has NO lines.
+          * Real invoices in every lifecycle state — one DRAFT, one
+            ISSUED (shows CONCEPT: numbering is at SEND), two SENT, and
+            a credit note reversing one of the SENT ones — driven
+            through the REAL services (`generate_draft_invoices`,
+            `issue_invoice`, `send_invoice`, `reverse_invoice`), so
+            gapless numbering and the frozen PDF are real. This
+            deliberately BURNS numbers from the demo company's gapless
+            per-year invoice sequence — acceptable on a dev/demo
+            database (the DEBUG guard in handle() refuses prod-shaped
+            stacks); it is exactly the side effect the Sprint 184 §4
+            note above avoided, and P-13 accepts it so the pages show
+            real documents.
+          * Three finished, priced, unbilled extra works across two
+            months (last month + this month), so the due panel carries
+            money in more than one period.
+          * One ON-HOLD job with a billable amount, held ~5 days, with
+            a deadline inside the current month — the at-risk fold's
+            STAGE_ON_HOLD row (`/api/invoices/at-risk/`).
+
+        Idempotent at the aggregate level: every extra-work / ticket /
+        invoice fixture is guarded by a stable marker title, and the
+        contract fixtures by a marker `description` (the contract_no
+        cannot be the key — it is allocated). A second run creates
+        nothing; the schedule/address writes re-assert the same values
+        and skip the save when nothing changed.
+
+        The four invoice fixtures bill in one deliberately EMPTY month
+        (searched backwards from three months ago until a month with a
+        zero unbilled pool is found) so `generate_draft_invoices` —
+        which sweeps the customer's whole unbilled pool for the asked
+        period — can never claim a real record that happens to be
+        unbilled on a long-lived dev database.
+        """
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        from contracts.models import (
+            BillingPeriod,
+            BillingType,
+            Contract,
+            ContractBuilding,
+            ContractKind,
+            ContractLifecycle,
+            ContractLine,
+            ContractRevision,
+            ContractType,
+        )
+        from contracts.numbering import allocate_contract_number
+        from extra_work.classification import classify_line
+        from extra_work.instant_tickets import spawn_tickets_for_request
+        from extra_work.models import (
+            CustomerServicePrice,
+            ExtraWorkCategory,
+            ExtraWorkRequest,
+            ExtraWorkRequestItem,
+            ExtraWorkRoutingDecision,
+            ExtraWorkStatus,
+            Service,
+        )
+        from invoicing.selectors import unbilled_extra_work
+        from invoicing.services import generate_draft_invoices
+        from invoicing.state_machine import (
+            issue_invoice,
+            reverse_invoice,
+            send_invoice,
+        )
+        from tickets.models import TicketStatusHistory
+
+        summary = {
+            "scheduled": [],
+            "no_day_customer": None,
+            "contracts": [],
+            "invoices": [],
+            "at_risk_ew": None,
+            "extra_work": 0,
+            "skipped": [],
+            "notes": [],
+        }
+        self._finance_summary = summary
+
+        primary_slug = COMPANIES[0]["slug"]
+        company = Company.objects.filter(slug=primary_slug).first()
+        if company is None:
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping the P-13 finance fixture — "
+                f"primary demo company '{primary_slug}' not found."
+            ))
+            return
+
+        customers = list(
+            Customer.objects.filter(company=company, is_active=True)
+            .order_by("id")
+        )
+        if not customers:
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping the P-13 finance fixture — "
+                f"'{primary_slug}' has no active customers."
+            ))
+            return
+
+        tom = (
+            User.objects.filter(
+                email="tom-customer-b-amsterdam@b-amsterdam.demo"
+            ).first()
+            or super_admin
+        )
+        today = timezone.localdate()
+
+        def _shift_month(base, months_back):
+            y, m = base.year, base.month - months_back
+            while m <= 0:
+                y -= 1
+                m += 12
+            return y, m
+
+        # ---- (1) Billing schedules + the no-day W1 customer ----------
+        # P-13 G wants BOTH kinds of row on a fresh stack's Invoices
+        # page: three SCHEDULED customers (days 1, 15, 1) and the W1
+        # star — a customer with NO billing day but finished, unbilled
+        # money. The company's own original customer (lowest id — the
+        # one every earlier fixture hangs its money on) is ALWAYS the
+        # no-day one, so the star and the money can never drift apart;
+        # the three scheduled seats are P-13 marker customers, created
+        # here when missing (get_or_create by name — idempotent).
+        no_day = customers[0]
+        building = Building.objects.filter(company=company).order_by("id").first()
+        day_plan = [
+            ("[DEMO] P-13 C Rotterdam", 1),
+            ("[DEMO] P-13 D Utrecht", 15),
+            ("[DEMO] P-13 E Eindhoven", 1),
+        ]
+        scheduled = []
+        for cust_name, day in day_plan:
+            cust, created = Customer.objects.get_or_create(
+                company=company,
+                name=cust_name,
+                defaults={
+                    "building": building,
+                    "address": "Demostraat 1",
+                    "city": "Rotterdam",
+                },
+            )
+            if created and building is not None:
+                CustomerBuildingMembership.objects.get_or_create(
+                    customer=cust, building=building
+                )
+            if created:
+                summary["notes"].append(f"created customer {cust.name}")
+            if cust.invoice_day_of_month != day or cust.invoice_day_rule != "":
+                cust.invoice_day_of_month = day
+                cust.invoice_day_rule = ""
+                cust.save(
+                    update_fields=["invoice_day_of_month", "invoice_day_rule"]
+                )
+            scheduled.append(cust)
+            summary["scheduled"].append((cust.name, day))
+        # The W1 shape is BOTH fields empty — re-asserted every run so
+        # the fixture survives a hand-set day on the demo DB.
+        if no_day.invoice_day_of_month is not None or no_day.invoice_day_rule != "":
+            no_day.invoice_day_of_month = None
+            no_day.invoice_day_rule = ""
+            no_day.save(
+                update_fields=["invoice_day_of_month", "invoice_day_rule"]
+            )
+        summary["no_day_customer"] = no_day.name
+
+        # A scheduled customer with their own finished, unbilled job,
+        # so the due table shows a DUE-NOW row beside the no-day one
+        # (day 1 is "reached" all month). Direct ORM shape — quoted
+        # totals + a CLOSED spawned ticket last month is exactly what
+        # `is_earned` reads; the realistic walk lives on the
+        # invoice_customer fixtures below.
+        due_title = "[DEMO] P-13 Te factureren — trapreiniging C Rotterdam"
+        if not ExtraWorkRequest.objects.filter(
+            company=company, title=due_title
+        ).exists():
+            rotterdam = scheduled[0]
+            last_y, last_m = _shift_month(today.replace(day=1), 1)
+            closed_on = timezone.now().replace(
+                year=last_y, month=last_m, day=26
+            )
+            due_ew = ExtraWorkRequest.objects.create(
+                company=company,
+                building=building,
+                customer=rotterdam,
+                created_by=super_admin,
+                title=due_title,
+                description="P-13 G — de geplande klant met te factureren werk.",
+                status=ExtraWorkStatus.CUSTOMER_APPROVED,
+                subtotal_amount=Decimal("180.00"),
+                vat_amount=Decimal("37.80"),
+                total_amount=Decimal("217.80"),
+            )
+            Ticket.objects.create(
+                company=company,
+                building=building,
+                customer=rotterdam,
+                created_by=super_admin,
+                title=f"Spawned: {due_title}",
+                description="x",
+                type=TicketType.REQUEST,
+                status=TicketStatus.CLOSED,
+                closed_at=closed_on,
+                extra_work_request=due_ew,
+            )
+            summary["extra_work"] += 1
+        else:
+            summary["skipped"].append(due_title)
+
+        # The customer the invoice/contract/pool fixtures hang on: the
+        # first scheduled customer when one exists, else the no-day one
+        # (single-customer demo DBs — everything lands on that one).
+        invoice_customer = scheduled[0] if scheduled else no_day
+
+        # ---- (2) Billing address (SEND refuses a blank addressee) ----
+        # Only filled when blank, so an operator's own edit survives.
+        addr_fields = []
+        if not (invoice_customer.address or "").strip():
+            invoice_customer.address = "Maroastraat 3"
+            addr_fields.append("address")
+        if not (invoice_customer.city or "").strip():
+            invoice_customer.city = "Amsterdam"
+            addr_fields.append("city")
+        if addr_fields:
+            invoice_customer.save(update_fields=addr_fields)
+
+        # ---- (3) Shared finished-priced-EW builder -------------------
+        svc = (
+            Service.objects.filter(name="Deep cleaning").first()
+            or Service.objects.order_by("id").first()
+        )
+        if svc is None:
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping the P-13 finance fixture — no "
+                "catalog service available (run _seed_service_catalog "
+                "first)."
+            ))
+            return
+
+        def _ensure_price(cust):
+            # A contract-price row valid from a FIXED past date (never a
+            # today-relative one — that would create a new row every
+            # day) so classify_line/resolve_price succeed for any
+            # customer this fixture touches. resolve_price picks the
+            # LATEST valid_from at-or-before the date, so this old row
+            # never shadows a newer one that already exists.
+            CustomerServicePrice.objects.update_or_create(
+                service=svc,
+                customer=cust,
+                valid_from=date(2024, 1, 1),
+                defaults={
+                    "unit_price": Decimal("42.00"),
+                    "vat_pct": Decimal("21.00"),
+                    "valid_to": None,
+                    "is_active": True,
+                },
+            )
+
+        def _building_for(cust):
+            link = (
+                CustomerBuildingMembership.objects.filter(customer=cust)
+                .select_related("building")
+                .order_by("building_id")
+                .first()
+            )
+            if link is not None:
+                return link.building
+            return (
+                Building.objects.filter(company=company, is_active=True)
+                .order_by("id")
+                .first()
+            )
+
+        def _stamp(cust, requested_date):
+            # Snapshot stamping via the REAL classifier — identical to
+            # the batch-2 helper above, parametrised by customer.
+            c = classify_line(
+                service=svc,
+                customer=cust,
+                requested_date=requested_date,
+                custom_description="",
+            )
+            return {
+                "line_price_source": c.source,
+                "snapshot_unit_price": c.snapshot_unit_price,
+                "snapshot_vat_pct": c.snapshot_vat_pct,
+                "snapshot_service_name": c.snapshot_service_name,
+                "snapshot_service_category_name": (
+                    c.snapshot_service_category_name
+                ),
+                "snapshot_customer_service_price": c.contract,
+            }
+
+        def _finished_priced_ew(cust, title, bill_day, *, hours):
+            """ONE finished (spawned ticket CLOSED), priced (final_*
+            recomputed from actual hours), UNBILLED extra work whose
+            billing month is pinned to `bill_day`'s month via
+            invoice_date. Returns None when the marker title already
+            exists (idempotent re-run) or the customer has no building.
+            """
+            if ExtraWorkRequest.objects.filter(
+                company=company, title=title
+            ).exists():
+                summary["skipped"].append(title)
+                return None
+            building = _building_for(cust)
+            if building is None:
+                summary["skipped"].append(title)
+                self.stdout.write(self.style.WARNING(
+                    f"seed_demo_data: P-13 fixture '{title}' skipped — "
+                    f"no building available for {cust.name}."
+                ))
+                return None
+            _ensure_price(cust)
+            ew = ExtraWorkRequest.objects.create(
+                company=company,
+                building=building,
+                customer=cust,
+                created_by=tom,
+                title=title,
+                description=(
+                    "Seeded by seed_demo_data (P-13 G) — finance fixture."
+                ),
+                category=ExtraWorkCategory.DEEP_CLEANING,
+                status=ExtraWorkStatus.REQUESTED,
+                routing_decision=ExtraWorkRoutingDecision.INSTANT,
+            )
+            item = ExtraWorkRequestItem.objects.create(
+                extra_work_request=ew,
+                service=svc,
+                quantity=hours,
+                unit_type=svc.unit_type,
+                requested_date=today,
+                customer_note="",
+                **_stamp(cust, today),
+            )
+            spawned = spawn_tickets_for_request(ew, actor=tom)
+            # Actual hours BEFORE the ticket walk — the Sprint 8B
+            # completion gate blocks IN_PROGRESS ->
+            # WAITING_CUSTOMER_APPROVAL while an hourly line lacks them.
+            item.actual_hours = hours
+            item.actual_hours_entered_by = super_admin
+            item.actual_hours_entered_at = timezone.now()
+            item.save(update_fields=[
+                "actual_hours",
+                "actual_hours_entered_by",
+                "actual_hours_entered_at",
+            ])
+            ew.refresh_from_db()
+            ew.recompute_final_amounts()
+            # EARNED = spawned ticket CLOSED. Same skip-if-already-there
+            # loop as the batch-2 billing fixture (the APPROVED hop
+            # auto-closes since Sprint 180).
+            for spawned_ticket in spawned:
+                t = spawned_ticket
+                for stop in (
+                    TicketStatus.IN_PROGRESS,
+                    TicketStatus.WAITING_CUSTOMER_APPROVAL,
+                    TicketStatus.APPROVED,
+                    TicketStatus.CLOSED,
+                ):
+                    if str(t.status) == str(stop):
+                        continue
+                    t = apply_transition(
+                        t,
+                        super_admin,
+                        stop,
+                        note="seed P-13 G — finance fixture",
+                        override_reason="seed P-13 G finance fixture",
+                    )
+            ew.refresh_from_db()
+            ew.invoice_date = bill_day
+            ew.save(update_fields=["invoice_date", "updated_at"])
+            summary["extra_work"] += 1
+            return ew
+
+        # ---- (4) Contracts: one ACTIVE with lines, one DRAFT without -
+        ctype = ContractType.objects.filter(
+            company=company, name__iexact="Schoonmaak"
+        ).first()
+        if ctype is None:
+            ctype = ContractType.objects.create(
+                company=company, name="Schoonmaak", sort_order=10
+            )
+        active_marker = "[DEMO] P-13 Actief contract — dagelijkse schoonmaak"
+        draft_marker = "[DEMO] P-13 Concept contract — nog zonder projectregels"
+        jan1 = date(today.year, 1, 1)
+        if Contract.objects.filter(
+            company=company, description=active_marker
+        ).exists():
+            summary["skipped"].append(active_marker)
+        else:
+            number, _seq = allocate_contract_number(company.id, jan1.year)
+            contract = Contract.objects.create(
+                company=company,
+                customer=invoice_customer,
+                contract_type=ctype,
+                contract_no=number,
+                kind=ContractKind.STANDARD,
+                start_date=jan1,
+                end_date=None,
+                lifecycle=ContractLifecycle.ACTIVE,
+                billing_period=BillingPeriod.MONTHLY,
+                billing_day=1,
+                billing_type=BillingType.ADVANCE,
+                payment_terms_days=30,
+                description=active_marker,
+            )
+            for link in CustomerBuildingMembership.objects.filter(
+                customer=invoice_customer
+            ).order_by("building_id")[:2]:
+                ContractBuilding.objects.create(
+                    contract=contract, building=link.building
+                )
+            revision = ContractRevision.objects.create(
+                contract=contract,
+                label="Oorspronkelijk contract",
+                effective_from=jan1,
+                created_by=super_admin,
+            )
+            ContractLine.objects.create(
+                revision=revision,
+                name="Dagelijkse schoonmaak kantoren",
+                amount=Decimal("1250.00"),
+                vat_pct=Decimal("21.00"),
+                hours=Decimal("40.00"),
+                sort_order=10,
+            )
+            ContractLine.objects.create(
+                revision=revision,
+                name="Glasbewassing binnenzijde",
+                amount=Decimal("450.00"),
+                vat_pct=Decimal("21.00"),
+                hours=Decimal("8.00"),
+                sort_order=20,
+            )
+            summary["contracts"].append(
+                f"{number} ACTIVE, 2 lines ({invoice_customer.name})"
+            )
+        if Contract.objects.filter(
+            company=company, description=draft_marker
+        ).exists():
+            summary["skipped"].append(draft_marker)
+        else:
+            number, _seq = allocate_contract_number(company.id, jan1.year)
+            contract = Contract.objects.create(
+                company=company,
+                customer=no_day,
+                contract_type=ctype,
+                contract_no=number,
+                kind=ContractKind.STANDARD,
+                start_date=date(today.year, today.month, 1),
+                end_date=None,
+                lifecycle=ContractLifecycle.DRAFT,
+                billing_period=BillingPeriod.MONTHLY,
+                billing_day=1,
+                billing_type=BillingType.ADVANCE,
+                payment_terms_days=30,
+                description=draft_marker,
+            )
+            link = (
+                CustomerBuildingMembership.objects.filter(customer=no_day)
+                .order_by("building_id")
+                .first()
+            )
+            if link is not None:
+                ContractBuilding.objects.create(
+                    contract=contract, building=link.building
+                )
+            # First revision mirrors what the create endpoint always
+            # writes — deliberately with NO lines: the draft-without-
+            # projects shape the contracts page must render honestly.
+            ContractRevision.objects.create(
+                contract=contract,
+                label="Oorspronkelijk contract",
+                effective_from=contract.start_date,
+                created_by=super_admin,
+            )
+            summary["contracts"].append(
+                f"{number} DRAFT, no lines ({no_day.name})"
+            )
+
+        # ---- (5) Invoices in every lifecycle state -------------------
+        # Each spec is one EW consumed by one invoice. Sequential
+        # create-then-generate pairs in ONE empty month give one draft
+        # per EW (the previous pair's rows are already claimed when the
+        # next generate runs).
+        invoice_specs = [
+            (
+                f"{DEMO_TICKET_PREFIX} P-13 Factuur concept — "
+                "dieptereiniging archiefruimte",
+                "DRAFT",
+                Decimal("6.50"),
+            ),
+            (
+                f"{DEMO_TICKET_PREFIX} P-13 Factuur geboekt — "
+                "dieptereiniging serverruimte",
+                "ISSUED",
+                Decimal("8.00"),
+            ),
+            (
+                f"{DEMO_TICKET_PREFIX} P-13 Factuur verzonden — "
+                "dieptereiniging bedrijfskantine",
+                "SENT",
+                Decimal("5.00"),
+            ),
+            (
+                f"{DEMO_TICKET_PREFIX} P-13 Factuur gecrediteerd — "
+                "dieptereiniging fietsenstalling",
+                "REVERSED",
+                Decimal("4.00"),
+            ),
+        ]
+        if ExtraWorkRequest.objects.filter(
+            company=company,
+            title__in=[spec[0] for spec in invoice_specs],
+        ).exists():
+            # All four are created in one atomic run, so any of them
+            # present means the whole block already ran.
+            summary["skipped"].extend(spec[0] for spec in invoice_specs)
+        else:
+            bill_year = bill_month = None
+            for back in range(3, 28):
+                y, m = _shift_month(today, back)
+                if not unbilled_extra_work(
+                    super_admin, company.id, invoice_customer.id, y, m
+                ):
+                    bill_year, bill_month = y, m
+                    break
+            if bill_year is None:
+                self.stdout.write(self.style.WARNING(
+                    "seed_demo_data: P-13 invoice fixtures skipped — no "
+                    "empty billing month found in the last 27 months for "
+                    f"{invoice_customer.name}."
+                ))
+            else:
+                bill_day = date(bill_year, bill_month, 15)
+                for title, target, hours in invoice_specs:
+                    ew = _finished_priced_ew(
+                        invoice_customer, title, bill_day, hours=hours
+                    )
+                    if ew is None:
+                        break
+                    created = generate_draft_invoices(
+                        super_admin,
+                        company.id,
+                        invoice_customer.id,
+                        bill_year,
+                        bill_month,
+                    )
+                    if len(created) != 1:
+                        self.stdout.write(self.style.WARNING(
+                            "seed_demo_data: P-13 invoice fixture "
+                            f"'{title}' expected 1 draft, got "
+                            f"{len(created)} — stopping the invoice "
+                            "block."
+                        ))
+                        break
+                    invoice = created[0]
+                    if target == "DRAFT":
+                        summary["invoices"].append(f"#{invoice.id} DRAFT")
+                        continue
+                    invoice = issue_invoice(super_admin, invoice)
+                    if target == "ISSUED":
+                        summary["invoices"].append(
+                            f"#{invoice.id} ISSUED (CONCEPT — number "
+                            "comes at send)"
+                        )
+                        continue
+                    invoice = send_invoice(super_admin, invoice)
+                    if target == "SENT":
+                        summary["invoices"].append(
+                            f"#{invoice.id} SENT {invoice.number}"
+                        )
+                        continue
+                    reversal = reverse_invoice(super_admin, invoice)
+                    summary["invoices"].append(
+                        f"#{invoice.id} SENT {invoice.number} reversed "
+                        f"by #{reversal.id} {reversal.number}"
+                    )
+
+        # ---- (6) Unbilled money across two months (+ the W1 money) ---
+        # Three finished, priced, unbilled extra works: two on the
+        # invoice customer (last month + this month) and ONE on the
+        # no-day customer — the W1 fixture's own money, so /due/ shows
+        # a rule-"" row with unbilled_count > 0 even when the no-day
+        # customer is not the canonical one. (On a single-customer
+        # demo DB all three land on that customer.)
+        last_y, last_m = _shift_month(today, 1)
+        pool_specs = [
+            (
+                invoice_customer,
+                f"{DEMO_TICKET_PREFIX} P-13 Ongefactureerd vorige maand — "
+                "glasbewassing binnenzijde",
+                date(last_y, last_m, 12),
+                Decimal("7.00"),
+            ),
+            (
+                invoice_customer,
+                f"{DEMO_TICKET_PREFIX} P-13 Ongefactureerd deze maand — "
+                "tapijtreiniging entree",
+                date(today.year, today.month, 1),
+                Decimal("6.00"),
+            ),
+            (
+                no_day,
+                f"{DEMO_TICKET_PREFIX} P-13 Geld zonder factuurdag — "
+                "sanitair dieptereiniging",
+                date(today.year, today.month, 1),
+                Decimal("9.00"),
+            ),
+        ]
+        for cust, title, bill_day, hours in pool_specs:
+            _finished_priced_ew(cust, title, bill_day, hours=hours)
+
+        # ---- (7) The ON_HOLD at-risk fixture -------------------------
+        onhold_title = (
+            f"{DEMO_TICKET_PREFIX} P-13 In de wacht — vloercoating magazijn"
+        )
+        if ExtraWorkRequest.objects.filter(
+            company=company, title=onhold_title
+        ).exists():
+            summary["skipped"].append(onhold_title)
+        else:
+            building = _building_for(invoice_customer)
+            if building is not None:
+                _ensure_price(invoice_customer)
+                ew = ExtraWorkRequest.objects.create(
+                    company=company,
+                    building=building,
+                    customer=invoice_customer,
+                    created_by=tom,
+                    title=onhold_title,
+                    description=(
+                        "Seeded by seed_demo_data (P-13 G) — the at-risk "
+                        "ON_HOLD fixture."
+                    ),
+                    category=ExtraWorkCategory.DEEP_CLEANING,
+                    status=ExtraWorkStatus.REQUESTED,
+                    routing_decision=ExtraWorkRoutingDecision.INSTANT,
+                    # Ties the row to the OPEN billing month —
+                    # at_risk._relevant_date needs a date at or before
+                    # month end.
+                    deadline=today,
+                )
+                ExtraWorkRequestItem.objects.create(
+                    extra_work_request=ew,
+                    service=svc,
+                    quantity=Decimal("12.00"),
+                    unit_type=svc.unit_type,
+                    requested_date=today,
+                    customer_note="",
+                    **_stamp(invoice_customer, today),
+                )
+                spawned = spawn_tickets_for_request(ew, actor=tom)
+                if spawned:
+                    t = spawned[0]
+                    t = apply_transition(
+                        t,
+                        super_admin,
+                        TicketStatus.IN_PROGRESS,
+                        note="seed P-13 G — at-risk fixture",
+                    )
+                    apply_transition(
+                        t,
+                        super_admin,
+                        TicketStatus.ON_HOLD,
+                        note=(
+                            "seed P-13 G — wacht op levering van de "
+                            "coating"
+                        ),
+                    )
+                    # `created_at` is auto_now_add, so a queryset UPDATE
+                    # is the only way to backdate the hold — ~5 days is
+                    # the age the at-risk fold shows.
+                    TicketStatusHistory.objects.filter(
+                        ticket=t, new_status=TicketStatus.ON_HOLD
+                    ).update(created_at=timezone.now() - timedelta(days=5))
+                # The billable amount: the quote/cache columns, the same
+                # money a proposal would carry (12h x EUR 42 + 21% VAT).
+                ew.refresh_from_db()
+                ew.subtotal_amount = Decimal("504.00")
+                ew.vat_amount = Decimal("105.84")
+                ew.total_amount = Decimal("609.84")
+                ew.save(update_fields=[
+                    "subtotal_amount",
+                    "vat_amount",
+                    "total_amount",
+                    "updated_at",
+                ])
+                summary["at_risk_ew"] = ew.id
+                summary["extra_work"] += 1
+
+    # -----------------------------------------------------------------
     # Output
     # -----------------------------------------------------------------
     def _print_summary(self, *, prune_summary=None):
@@ -2271,6 +2995,30 @@ class Command(BaseCommand):
                 "Zeroes on a re-run mean the rows were already there — "
                 "their dates are re-stamped relative to today either way."
             )
+        finance = getattr(self, "_finance_summary", None)
+        if finance:
+            out("")
+            sched = ", ".join(
+                f"{name} (day {day})" for name, day in finance["scheduled"]
+            ) or "(none)"
+            out(
+                "P-13 finance fixtures: "
+                f"schedules: {sched}; "
+                f"no-billing-day customer: "
+                f"{finance['no_day_customer'] or '(none)'}; "
+                f"contracts: {', '.join(finance['contracts']) or '(existing)'}; "
+                f"invoices: {', '.join(finance['invoices']) or '(existing)'}; "
+                "at-risk ON_HOLD extra work: "
+                f"{finance['at_risk_ew'] or '(existing)'}; "
+                f"{finance['extra_work']} extra-work fixtures created."
+            )
+            for note in finance["notes"]:
+                out(f"  note: {note}")
+            if finance["skipped"]:
+                out(
+                    f"  already present (skipped): {len(finance['skipped'])} "
+                    "P-13 marker rows."
+                )
         demo_ew = getattr(self, "_demo_extra_work_summary", None)
         if demo_ew:
             out("")
