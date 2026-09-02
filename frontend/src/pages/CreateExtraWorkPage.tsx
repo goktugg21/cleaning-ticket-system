@@ -131,14 +131,6 @@ function todayISO(): string {
   ).padStart(2, "0")}`;
 }
 
-/** The server's seeded default: the customer's lowest-id label — the
- *  same row `ExtraWorkRequestCreateSerializer.validate` fills in when a
- *  caller omits the field, so the fact on screen is the fact stored. */
-function defaultLabel(rows: CustomerLabel[]): CustomerLabel | null {
-  if (rows.length === 0) return null;
-  return rows.reduce((low, row) => (row.id < low.id ? row : low), rows[0]);
-}
-
 const PREVIEW_DEBOUNCE_MS = 350;
 
 const INTENT_OUTCOME: Record<ExtraWorkRequestIntent, MeerwerkOutcomeKind> = {
@@ -349,12 +341,15 @@ export function CreateExtraWorkPage() {
     labelLists && String(labelLists.customerId) === form.customer
       ? labelLists.workTypes
       : [];
+  // P-12 E3 — ask, don't force: nothing is preselected. A fact left
+  // unchosen is OMITTED from the payload and the server stores the
+  // seeded "Algemeen" pair (`ExtraWorkRequestCreateSerializer.
+  // validate`), so the screen says what will happen instead of
+  // pre-answering the question.
   const effectiveDepartment =
-    currentDepartments.find((d) => String(d.id) === departmentId) ??
-    defaultLabel(currentDepartments);
+    currentDepartments.find((d) => String(d.id) === departmentId) ?? null;
   const effectiveWorkType =
-    currentWorkTypes.find((w) => String(w.id) === workTypeId) ??
-    defaultLabel(currentWorkTypes);
+    currentWorkTypes.find((w) => String(w.id) === workTypeId) ?? null;
 
   // ----- derived: what ------------------------------------------------
   /** The date the cart is priced on: the wish date, else today — the
@@ -811,15 +806,16 @@ export function CreateExtraWorkPage() {
   // ----- the form ------------------------------------------------------
   const factValue = (key: FactKey): string => {
     if (key === "department") {
-      // P-5 S9.3 (§D.2 dash ban) — a fact not chosen is said in a word.
+      // P-12 E3 — a fact not chosen says what WILL happen: it
+      // becomes the seeded "Algemeen", changeable afterwards.
       return effectiveDepartment
         ? customerLabelName(effectiveDepartment.name, t)
-        : t("create.fact_not_chosen");
+        : t("create.fact_becomes_general");
     }
     if (key === "work_type") {
       return effectiveWorkType
         ? customerLabelName(effectiveWorkType.name, t)
-        : t("create.fact_not_chosen");
+        : t("create.fact_becomes_general");
     }
     return selectedBilledTo === "BUILDING"
       ? t("create.fact_billed_building", {
@@ -960,12 +956,16 @@ export function CreateExtraWorkPage() {
                       onChange={(event) => setDepartmentId(event.target.value)}
                       disabled={currentDepartments.length === 0}
                     >
+                      <option value="">{t("create.fact_unchosen_option")}</option>
                       {currentDepartments.map((d) => (
                         <option key={d.id} value={d.id}>
                           {customerLabelName(d.name, t)}
                         </option>
                       ))}
                     </select>
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("create.fact_or_general")}
+                    </div>
                   </div>
                 )}
                 {editingFact === "work_type" && (
@@ -981,12 +981,16 @@ export function CreateExtraWorkPage() {
                       onChange={(event) => setWorkTypeId(event.target.value)}
                       disabled={currentWorkTypes.length === 0}
                     >
+                      <option value="">{t("create.fact_unchosen_option")}</option>
                       {currentWorkTypes.map((w) => (
                         <option key={w.id} value={w.id}>
                           {customerLabelName(w.name, t)}
                         </option>
                       ))}
                     </select>
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("create.fact_or_general")}
+                    </div>
                   </div>
                 )}
                 {editingFact === "billed_to" && (

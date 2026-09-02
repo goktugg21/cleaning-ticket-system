@@ -55,6 +55,8 @@ import { PageHeader } from "../../components/PageHeader";
 import { RejectReasonDialog } from "../../components/RejectReasonDialog";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useToast } from "../../components/ToastProvider";
+import { DoneBanner } from "../../components/guide/DoneBanner";
+import { useDoneBanner } from "../../components/guide/useDoneBanner";
 import { formatDate } from "../../lib/intl";
 import { OccurrenceStatusBadge } from "./OccurrenceStatusBadge";
 import { OccurrenceOverrideDialog } from "./OccurrenceOverrideDialog";
@@ -104,6 +106,10 @@ export function RecurringJobDetailPage() {
   const locale = useLocaleCode();
 
   const [job, setJob] = useState<RecurringJob | null>(null);
+  // P-12 E2 (§D.24 rule 4) — the page's Done banner: the create's
+  // announcement (written by the form under this rule's key) surfaces
+  // here, and pause/resume/generate announce into the same slot.
+  const jobDone = useDoneBanner(`recurring-${id}`);
   const [occurrences, setOccurrences] = useState<PlannedOccurrence[]>([]);
   const [occCount, setOccCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -287,7 +293,10 @@ export function RecurringJobDetailPage() {
       const updated = await archiveRecurringJob(job.id);
       setJob(updated);
       archiveRef.current?.close();
-      push({ variant: "success", title: t("archive.toast_archived") });
+      jobDone.announce({
+        title: t("archive.banner_paused_title", { title: job.title }),
+        body: t("archive.banner_paused_body"),
+      });
     } catch (err) {
       // Treatment 1 — stays open, reports in place.
       setArchiveError(getApiError(err));
@@ -303,7 +312,10 @@ export function RecurringJobDetailPage() {
     try {
       const updated = await unarchiveRecurringJob(job.id);
       setJob(updated);
-      push({ variant: "success", title: t("archive.toast_unarchived") });
+      jobDone.announce({
+        title: t("archive.banner_resumed_title", { title: job.title }),
+        body: t("archive.banner_resumed_body"),
+      });
     } catch (err) {
       // Treatment 1 — the only action here with no modal to fall back
       // on, so its failure renders in the header's actions node, beside
@@ -323,13 +335,12 @@ export function RecurringJobDetailPage() {
     try {
       const result = await generateOccurrences(job.id, value);
       generateRef.current?.close();
-      push({
-        variant: "success",
-        title: t("generate.result_toast_title"),
-        description: t("generate.result_toast_desc", {
+      jobDone.announce({
+        title: t("generate.banner_title", {
           occurrences: result.occurrences_created,
           tickets: result.tickets_created,
         }),
+        body: t("generate.banner_body"),
       });
       // Refresh both the occurrence list and the job (count changed).
       const [jobData] = await Promise.all([
@@ -583,6 +594,14 @@ export function RecurringJobDetailPage() {
         subtitle={`${job.building_name} · ${job.customer_name}`}
       />
 
+      {jobDone.done && (
+        <DoneBanner
+          done={jobDone.done}
+          onDismiss={jobDone.dismiss}
+          testId="recurring-job-done"
+        />
+      )}
+
       <div
         className={`phase-banner ${job.is_active ? "phase-banner-progress" : "phase-banner-bad"}`}
         role="status"
@@ -777,6 +796,19 @@ export function RecurringJobDetailPage() {
                 {linkedLine.label}
               </strong>
             )}
+            {/* P-12 E1 (§D.24 rule 6) — HOW it is invoiced, in words:
+                with the contract per period, or per visit. */}
+            <span
+              className="muted small"
+              style={{ display: "block" }}
+              data-testid="recurring-job-money-mode"
+            >
+              {t(
+                job.pricing_mode === "FIXED"
+                  ? "money.mode_per_visit"
+                  : "money.mode_with_contract",
+              )}
+            </span>
             {job.is_active && (
               <button
                 type="button"

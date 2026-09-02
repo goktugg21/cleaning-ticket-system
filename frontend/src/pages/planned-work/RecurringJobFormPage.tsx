@@ -51,6 +51,10 @@ import type {
   ServiceCategory,
 } from "../../api/types";
 import { useToast } from "../../components/ToastProvider";
+import {
+  announceDone,
+  safeSessionStorage,
+} from "../../components/guide/doneBannerStore";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { customerLabelName } from "../../lib/customerLabelName";
 // This page wears seven `pw-*` classes (`pw-form-group*`, `pw-window*`)
@@ -774,13 +778,22 @@ export function RecurringJobFormPage() {
         // fields validate() guards, plus `pricing_mode` from the branch in
         // buildPayload); the cast is what tells TypeScript that the
         // create-only branch has been taken.
-        await createRecurringJob(payload as RecurringJobWritePayload);
-        push({
-          variant: "success",
-          title: t("form.created_toast_title"),
-          description: t("form.created_toast_desc"),
+        const created = await createRecurringJob(
+          payload as RecurringJobWritePayload,
+        );
+        // P-12 E2 (§D.24 rule 4) — land ON the new rule with the Done
+        // banner: what exists now, what does NOT (no visits yet), and
+        // the one next step. The banner survives the navigation via
+        // its session store.
+        announceDone(safeSessionStorage(), `recurring-${created.id}`, {
+          title: t("form.created_banner_title", { title: created.title }),
+          body: t(
+            departmentId === ""
+              ? "form.created_banner_body_default_labels"
+              : "form.created_banner_body",
+          ),
         });
-        navigate("/planned-work");
+        navigate(`/planned-work/${created.id}`);
         return;
       }
       if (id === undefined) return;
@@ -1022,16 +1035,20 @@ export function RecurringJobFormPage() {
                       onChange={(event) => setDepartmentId(event.target.value)}
                       disabled={customer === "" || currentDepartments.length === 0}
                     >
-                      <option value="">{t("form.field_label_none")}</option>
+                      <option value="">{t("form.field_label_unchosen")}</option>
                       {currentDepartments.map((d) => (
                         <option key={d.id} value={String(d.id)}>
                           {customerLabelName(d.name, t)}
                         </option>
                       ))}
                     </select>
-                    {customer !== "" && currentDepartments.length === 0 && (
+                    {customer !== "" && currentDepartments.length === 0 ? (
                       <div className="muted small" style={{ marginTop: 4 }}>
                         {t("form.field_department_none")}
+                      </div>
+                    ) : (
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        {t("form.field_label_or_general")}
                       </div>
                     )}
                   </div>
@@ -1048,16 +1065,20 @@ export function RecurringJobFormPage() {
                       onChange={(event) => setWorkTypeId(event.target.value)}
                       disabled={customer === "" || currentWorkTypes.length === 0}
                     >
-                      <option value="">{t("form.field_label_none")}</option>
+                      <option value="">{t("form.field_label_unchosen")}</option>
                       {currentWorkTypes.map((w) => (
                         <option key={w.id} value={String(w.id)}>
                           {customerLabelName(w.name, t)}
                         </option>
                       ))}
                     </select>
-                    {customer !== "" && currentWorkTypes.length === 0 && (
+                    {customer !== "" && currentWorkTypes.length === 0 ? (
                       <div className="muted small" style={{ marginTop: 4 }}>
                         {t("form.field_work_type_none")}
+                      </div>
+                    ) : (
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        {t("form.field_label_or_general")}
                       </div>
                     )}
                   </div>

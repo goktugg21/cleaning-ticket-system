@@ -76,10 +76,38 @@ export async function getRecurringJob(
 // POST create. The backend serializes the response with the WRITE
 // serializer (no `id`), so this returns void — callers navigate to the
 // list and let it re-fetch the full read rows.
+// P-12 E2 — the create answers with the READ shape (the id above
+// all), so the page can move the person to the rule they just made.
 export async function createRecurringJob(
   payload: RecurringJobWritePayload,
-): Promise<void> {
-  await api.post(JOBS_URL, payload);
+): Promise<RecurringJob> {
+  const { data } = await api.post<RecurringJob>(JOBS_URL, payload);
+  return data;
+}
+
+/** P-12 E1 — the occurrence rollup, with the window's no-crew count
+ *  and the soonest uncrewed visit as the Start-here door. */
+export interface PlannedOccurrenceStats {
+  total: number;
+  by_status: Record<string, number>;
+  no_crew: number;
+  no_crew_first: {
+    occurrence: number;
+    recurring_job: number;
+    recurring_job_title: string;
+    planned_date: string;
+  } | null;
+}
+
+export async function getPlannedOccurrenceStats(params: {
+  date_from?: string;
+  date_to?: string;
+}): Promise<PlannedOccurrenceStats> {
+  const { data } = await api.get<PlannedOccurrenceStats>(
+    "/planned-work/planned-occurrences/stats/",
+    { params },
+  );
+  return data;
 }
 
 // PATCH update, then GET so the caller always receives a full read object

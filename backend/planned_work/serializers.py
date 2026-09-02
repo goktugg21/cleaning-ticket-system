@@ -307,6 +307,28 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
                     }
                 )
 
+        # P-12 E3 — ask, don't force, never leave a hole: a rule saved
+        # without a department / work type stores the customer's seeded
+        # "Algemeen" pair (the extra-work create rule; one definition,
+        # `customers.signals.ensure_default_labels`). On CREATE an
+        # absent field fills; on PATCH only an explicit null does — a
+        # PATCH that does not mention the field never overwrites a
+        # choice. "None" is not an option in the data.
+        fill_department = ("department" in attrs and attrs["department"] is None) or (
+            instance is None and attrs.get("department") is None
+        )
+        fill_work_type = ("work_type" in attrs and attrs["work_type"] is None) or (
+            instance is None and attrs.get("work_type") is None
+        )
+        if fill_department or fill_work_type:
+            from customers.signals import ensure_default_labels
+
+            default_department, default_work_type = ensure_default_labels(customer)
+            if fill_department:
+                attrs["department"] = default_department
+            if fill_work_type:
+                attrs["work_type"] = default_work_type
+
         # W23 — the contract-line link (tenant law, P0 class). Validated
         # on the EFFECTIVE line — the incoming value, or on PATCH the
         # stored one — so changing the job's customer/building can never
