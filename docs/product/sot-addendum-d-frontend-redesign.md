@@ -1982,8 +1982,14 @@ week, not the filtered page below. **Earlier weeks** is a table
 (week + dates · people · hours · Closed by {who}, {date} · Open) fed
 by `weeks/with-hours/`'s new facts; it replaces the P-9 dot strip on
 this page (My hours keeps the strip). Export CSV and the Other-period
-fold live behind one **More** menu. The entries table below stays as
-the week's detail view.
+fold live behind one **More** menu. ~~The entries table below stays as
+the week's detail view.~~ *P-13 E superseded this last sentence: the
+per-entry log is the "All entries for week N — n lines" fold at the
+BOTTOM of the page (six read columns: Date · Person · Building/job ·
+Type · Hours · Note; filters inside the fold), the Enter/Close road
+and the Weekly-schedule toggle left the page, and the schedule view
+stays reachable at `?tab=schedule`, linked from My schedule. See
+§D.24.5 item 9.*
 
 ### D.23.3 The grid (B2)
 
@@ -2170,3 +2176,98 @@ reading:
    start-the-work) relays its Done banner to the ticket's slot through
    the same session store — the person always reads what happened
    where they actually land.
+
+### D.24.5 The money is never invisible — the P-13 rulings (2026-09-02)
+
+What P-13 settled, each the smallest honest reading. The sprint's law
+in one line: **a euro the system knows about is a euro some screen
+states, with the way to act on it beside it.**
+
+1. **The due list shows every customer with finished unbilled work,
+   schedule or not.** `scheduled_customers` narrowed `/due/` to
+   customers WITH a billing day; an unset day hid every finished job —
+   the quiet way money misses month-end (W1, seen on a fresh seed:
+   €330.33 finished, "€0.00 finished, not invoiced" on screen). Now: a
+   scheduled customer keeps their row at zero count; an unscheduled
+   one appears exactly when money waits, their row says "No billing
+   day set — bills when you say" with **Set a billing day** (the same
+   `lib/billingDay` value model the settings page uses) and **Make a
+   draft now**, and Start here names them before everything else.
+   Visible is not auto-billed: `is_billing_day` still refuses them, so
+   the daily run never invoices a customer nobody scheduled.
+2. **The Money tab is ONE story: Agreed → Worked → Goes on the
+   invoice** (`MoneyStory`, one component on the request page and the
+   spawned ticket). Block 1 is read-only: qty × unit price = amount,
+   one ex+incl total pair, who agreed when. Block 2 is the P-11 panel
+   plus the agreed FIXED lines read-only ("fixed price") — every line
+   the customer approved appears, none missing (the owner's "ff" €34).
+   Block 3 is the final-with-quoted-fallback sum, the customer's
+   billing fact, and WHERE the money is — the detail now serves
+   `invoice_ref` through the same P-9 loader the list uses ("On draft
+   #17" / CONCEPT at issued / "Sent on invoice 2026-0003"),
+   provider-only.
+3. **The over-quote policy is WARN ONLY — the owner's ruling
+   (2026-09-02).** The amber line renders ALWAYS when billed differs
+   from agreed ("6.5 h worked against 6 h agreed — €21.00 more than
+   the customer approved"); above 25% of the agreed total or €100
+   more, the Save-hours confirm repeats it and asks ONCE. The save
+   never blocks and no new quote is ever required — a later sprint
+   must not "harden" this into a block without a new owner ruling.
+4. **ONE VAT basis on the Agreement: ex VAT per line, one incl-VAT
+   total under the table** (W3). The proposal path showed `line_total`
+   (incl) beside the cart path's price × qty (ex) — €31.48 quoted read
+   €38.09. `agreedLines.ts` is the pinned derivation for all three
+   pricing paths.
+5. **The owner's ONE migration: `actual_hours` on
+   `ExtraWorkPricingLineItem`** (0038, additive, nullable, null = bill
+   the agreed quantity; approved 2026-09-02). This closes P-12's D7:
+   the legacy path now carries the timesheet prefill and "Save hours
+   to bill", and the completion gate arms on legacy hourly lines
+   exactly like the twins.
+6. **Archive never hides money; silent cancel is gone** (C). The
+   probe: EW has no delete door at all (`deleted_at` has no writer —
+   crmtest: 0 of 152 rows), the ticket API refuses deleting an EW-born
+   ticket, and no billing code reads `archived_at` (pinned). The one
+   real exit — cancel — now refuses an earned-but-unbilled amount
+   without a reason, naming the money; with a reason it is coerced
+   onto the override surface and logged (H-10/H-11). The archive
+   confirm on an unbilled job says the fact: the ticket hides, the
+   money stays on the Invoices page. The C3 "removed without being
+   invoiced" listing was NOT built: the state it would list is
+   unreachable.
+7. **The at-risk fold says the state the job is in, never a category
+   word** (O1 — the owner met "Stuck at: stuck"). Rows carry
+   `reason`/`since`/`manager_names` and render sentences ("On hold
+   since 28 Aug", "Reported done, waiting for Gökhan's check — 6
+   days"); "stuck" left both locales. Two blind spots joined the
+   stages: ON_HOLD (a held job with money was in no bucket) and
+   NOT_PLANNED (a past-day job nobody ever planned).
+8. **A finished job's facts are past-tense facts** (W5). WHEN reads
+   "Finished {date}" with "Planned {date}" or "Never planned"; WHO
+   reads "No crew recorded"; the department select freezes to text;
+   the Instant/Quote chip left the header (it is block 1's provenance
+   sentence); the kind pill dropped "— uitvoering" ("Meerwerk" /
+   "Extra work" — on a finished job "execution" was a lie; §D.2's
+   phase name stays for phase contexts). The Done banner on a
+   finished UNBILLED job says the money fact from the ticket's
+   `extra_work_billing` and its one green door is **Go to invoices**;
+   Archive lives behind Advanced with the money confirm.
+9. **The Hours page is one page again** (E — amends §D.23.2): the
+   old per-entry log is the "All entries for week N" fold at the
+   bottom (six read columns, filters inside), the Enter/Close road
+   left (the Open/Closed chip says it), the Weekly-schedule toggle
+   left the page (`?tab=schedule` still serves the standing
+   agreement, linked from My schedule — investigated: no overlap,
+   different objects), and Start here's button names WHO it opens on.
+10. **The seed shows the finance pages** (G): three scheduled marker
+    customers (days 1/15/1, one with due-now work), the original
+    customer always the no-day W1 star with unbilled money, contracts
+    active+draft, invoices in every state through the REAL services,
+    and an ON_HOLD job the at-risk fold lists. Idempotent; web-Claude
+    audits a fresh stack from it.
+
+The honest limit, restated: **Contracts cannot be fully
+self-explanatory while its model is frozen** — the rule-8 fold
+describes what exists; the owner's meeting with his father decides the
+rest. And the P-13 brief's "§D.22 rule 9" (row-click) landed as §D.22
+rule 11 — the number was taken; the rule is the same.

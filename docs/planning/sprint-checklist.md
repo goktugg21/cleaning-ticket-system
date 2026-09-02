@@ -13,10 +13,10 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p12-page-tells-you` — stacked on
-`feat/p11-hours-and-the-rest`, the head of the Addendum D redesign train
+**Branch:** `feat/p13-money-never-invisible` — stacked on
+`feat/p12-page-tells-you`, the head of the Addendum D redesign train
 (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -39,6 +39,69 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### Done — P-13: the money is never invisible (Addendum D §D.24.5, 2026-09-02)
+
+The full rulings live in §D.24.5; the sprint in one line: a euro the
+system knows about is a euro some screen states, with the way to act
+on it beside it. Shipped on `feat/p13-money-never-invisible`:
+
+- **I — the owner's ONE migration** (his yes, 2026-09-02):
+  `actual_hours` on `ExtraWorkPricingLineItem`
+  (`0038_extraworkpricinglineitem_actual_hours_and_more`, additive,
+  nullable, null = bill the agreed quantity) — closes P-12's D7; the
+  legacy path gets the prefill, Save-hours and the completion gate.
+  The over-quote policy is settled WARN ONLY (amber line always;
+  confirm over 25% / €100 more; never block, never a new quote).
+- **A — Invoices**: `/due/` shows unscheduled customers with finished
+  unbilled work (row: "No billing day set — bills when you say" + Set
+  a billing day + Make a draft now; Start here names them first;
+  never auto-billed); the company selector's seed chain pinned
+  (session → waiting → first by name); the at-risk rows say the
+  job's real state (reason/since/manager names; "stuck" gone;
+  ON_HOLD + NOT_PLANNED join the stages); the Agreement's Amount is
+  ex VAT on all three paths with one ex+incl pair (agreedLines.ts).
+- **B — the Money story**: `MoneyStory` (Agreed → Worked → Goes on
+  the invoice), one component on request + spawned ticket; fixed
+  lines in Worked; `invoice_ref` on the detail (P-9's loader);
+  the amber difference always; the teach line under Save.
+- **C — archive never hides money**: no delete door exists (and
+  `deleted_at` has no writer — crmtest 0/152); cancel of
+  earned-unbilled money requires a reason (refusal names the
+  amount; the reason is logged on the override surface); the archive
+  confirm says the ticket hides, the money stays; pinned in
+  `test_p13_archive_never_hides_money`.
+- **D — finished jobs + rows**: past-tense facts on DONE (Finished
+  {date} / never planned / no crew recorded; read-only department;
+  chip and "— uitvoering" gone); the Done banner says the money fact
+  with Go to invoices; Archive behind Advanced; rows are links
+  everywhere (§D.22 rule 11: `useRowLink` + `ClickableRow`; the two
+  hand-rolled copies folded in; schedule cards whole-card).
+- **E — Hours is one page**: the per-entry log is the bottom
+  "All entries" fold (six columns, filters inside); the road and the
+  schedule toggle left; Start here names WHO it opens on.
+- **F — Contracts**: the sentence a stranger reads on every row and
+  the detail header ("{Customer} pays €{monthly} a month for {n}
+  lines at {buildings}, from {start} to {end}, invoiced on day {n} in
+  advance/afterwards", truthful per branch); the detail's Start here
+  names the one missing thing. The freeze holds — the meeting with
+  the owner's father is the real fix.
+- **G — the seed shows the finance pages** (idempotent; three
+  scheduled marker customers + the no-day star with money; invoices
+  in every state via the real services; an ON_HOLD at-risk job).
+- **H — §D.24 rule 8**: HowThisWorks + WhatHappens in
+  `components/guide/`, the five folds live (Invoices, Contracts,
+  Hours, Recurring, SLA), pre-read lines under the primaries.
+- **J**: pg_backup.sh path fixed and run; EN/NL ordinals; Done banner
+  suppresses Start here; `?tab=money` survives the spawn redirect.
+- **Repairs en passant**: test_line_source_fields +
+  test_sprint182_money_rules (red since W-EW1, 2026-08-24) and
+  test_sprint183_clarity's date-dependent is_due pin.
+
+Queued for P-14: Tickets and People to §D.24; notification
+localization (needs the owner's yes on one migration); the Turkish
+locale. The over-quote question is ANSWERED (warn only) and off the
+owner queue.
 
 ### Done — P-12: the page tells you what to do (Addendum D §D.24, 2026-09-02)
 
