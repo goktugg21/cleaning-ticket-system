@@ -391,6 +391,11 @@ class WorkPlanFixture(TenantFixtureMixin):
         *,
         preferred=None,
         planned_end=None,
+        # P-14 A5 — the PROVIDER's committed window. Placement reads
+        # this and nothing else now (a wish is not a plan); a test that
+        # wants a row placed passes these, `preferred` stays the wish.
+        provider_planned=None,
+        provider_planned_end=None,
         deadline=None,
         ew_status=ExtraWorkStatus.CUSTOMER_APPROVED,
         assignee=None,
@@ -406,6 +411,8 @@ class WorkPlanFixture(TenantFixtureMixin):
             description="x",
             preferred_date=preferred,
             planned_end_date=planned_end,
+            provider_planned_date=provider_planned,
+            provider_planned_end_date=provider_planned_end,
             deadline=deadline,
             status=ew_status,
         )
@@ -589,7 +596,7 @@ class WorkPlanResponseShapeTests(WorkPlanFixture, APITestCase):
         self.slot = self.make_slot(self.ticket, start=self.today)
         self.extra_work = self.make_extra_work(
             "Window frames",
-            preferred=self.today,
+            provider_planned=self.today,
             assignee=self.worker,
         )
 
@@ -778,7 +785,7 @@ class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
         """
         late = self.make_extra_work(
             "Gutter clearing",
-            preferred=self.today - datetime.timedelta(days=14),
+            provider_planned=self.today - datetime.timedelta(days=14),
             deadline=self.today - datetime.timedelta(days=3),
             assignee=self.worker,
         )
@@ -852,7 +859,7 @@ class WorkPlanPlacementTests(WorkPlanFixture, APITestCase):
     def test_untouched_future_work_is_upcoming_not_in_this_week(self):
         future = self.make_extra_work(
             "Autumn window round",
-            preferred=self.today + datetime.timedelta(days=30),
+            provider_planned=self.today + datetime.timedelta(days=30),
             assignee=self.worker,
         )
         payload = self.get_plan(self.worker)
@@ -895,7 +902,7 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
         self.mine_ticket = self.make_ticket("Mine", scheduled=self.today)
         self.mine_slot = self.make_slot(self.mine_ticket, start=self.today)
         self.mine_ew = self.make_extra_work(
-            "My extra work", preferred=self.today, assignee=self.worker
+            "My extra work", provider_planned=self.today, assignee=self.worker
         )
         # Same company, somebody else's work.
         self.colleague = self.make_user("colleague-179@example.com", UserRole.STAFF)
@@ -904,7 +911,7 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
             self.their_ticket, user=self.colleague, start=self.today
         )
         self.their_ew = self.make_extra_work(
-            "Their extra work", preferred=self.today, assignee=self.colleague
+            "Their extra work", provider_planned=self.today, assignee=self.colleague
         )
         # A different tenant entirely.
         self.foreign_ticket = self.make_ticket(
@@ -915,7 +922,7 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
         )
         self.foreign_ew = self.make_extra_work(
             "Foreign extra work",
-            preferred=self.today,
+            provider_planned=self.today,
             assignee=self.foreign_worker,
             foreign=True,
         )
@@ -1034,7 +1041,7 @@ class WorkPlanScopeTests(WorkPlanFixture, APITestCase):
 
     def test_extra_work_with_nobody_on_it_is_not_anybodys_work(self):
         unassigned = self.make_extra_work(
-            "Nobody is doing this", preferred=self.today
+            "Nobody is doing this", provider_planned=self.today
         )
         payload = self.get_plan(self.company_admin, scope="company")
         self.assertNotIn(f"ew-{unassigned.id}", self.all_keys(payload))
@@ -1441,8 +1448,8 @@ class Wp1CarryForwardEndpointTests(WorkPlanFixture, APITestCase):
         week_end = week_start + datetime.timedelta(days=6)
         late = self.make_extra_work(
             "Facade wash",
-            preferred=week_start,
-            planned_end=week_end,
+            provider_planned=week_start,
+            provider_planned_end=week_end,
             deadline=self.today - datetime.timedelta(days=1),
             assignee=self.worker,
         )
@@ -1465,8 +1472,8 @@ class Wp1CarryForwardEndpointTests(WorkPlanFixture, APITestCase):
         prev_sunday = prev_monday + datetime.timedelta(days=6)
         late = self.make_extra_work(
             "Old week work",
-            preferred=prev_monday,
-            planned_end=prev_sunday,
+            provider_planned=prev_monday,
+            provider_planned_end=prev_sunday,
             deadline=prev_monday,
             assignee=self.worker,
         )
@@ -1604,7 +1611,7 @@ class Wp1DateChipTests(WorkPlanFixture, APITestCase):
     def test_3_a_future_deadline_counts_down(self):
         ew = self.make_extra_work(
             "Window wax",
-            preferred=self.today,
+            provider_planned=self.today,
             deadline=self.today + datetime.timedelta(days=10),
             assignee=self.worker,
         )
@@ -1650,7 +1657,7 @@ class Wp1DateChipTests(WorkPlanFixture, APITestCase):
     def test_g2_unplanned_age_counts_only_dateless_work(self):
         undated = self.make_extra_work("No date", assignee=self.worker)
         dated = self.make_extra_work(
-            "Dated", preferred=self.today, assignee=self.worker
+            "Dated", provider_planned=self.today, assignee=self.worker
         )
         payload = self.get_plan(self.worker)
         row = self.entry(payload, f"ew-{undated.id}", "undated_entries")

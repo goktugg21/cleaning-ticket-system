@@ -209,6 +209,6 @@
   "worker_hours.columns_reference": "Reference layout",
   "worker_hours.columns_compact": "Compact layout",
   "worker_hours.empty_title": "No hours in this period",
-  "hours_comparison.open_schedule": "Open the schedule",
+  "hours_comparison.open_schedule": "Open Agreed hours",
   "hours_comparison.empty_title": "Nothing to compare this month"
 }

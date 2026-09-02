@@ -61,6 +61,7 @@
   "agenda.stuck_age_other": "Stuck for {{count}} days",
   "agenda.stuck_age_today": "Stuck since today",
   "agenda.stuck_desc": "Stopped before it was finished. Reschedule, reassign or cancel it to clear it.",
+  "agenda.stuck_desc_worker": "Stopped before it was finished — your manager decides what happens next.",
   "agenda.stuck_reason": "Reason: {{reason}}",
   "agenda.stuck_title": "Stuck — action needed",
   "agenda.this_week": "This week",

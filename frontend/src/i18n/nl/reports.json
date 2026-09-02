@@ -209,6 +209,6 @@
   "worker_hours.columns_reference": "Referentie-indeling",
   "worker_hours.columns_compact": "Compacte indeling",
   "worker_hours.empty_title": "Geen uren in deze periode",
-  "hours_comparison.open_schedule": "Naar het rooster",
+  "hours_comparison.open_schedule": "Naar Afgesproken uren",
   "hours_comparison.empty_title": "Niets te vergelijken deze maand"
 }

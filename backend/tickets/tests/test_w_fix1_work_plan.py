@@ -198,7 +198,7 @@ class TodayHoldsTodayTests(WorkPlanFixture, APITestCase):
         """
         late = self.make_extra_work(
             "Gutter clearing",
-            preferred=self.today - datetime.timedelta(days=14),
+            provider_planned=self.today - datetime.timedelta(days=14),
             deadline=self.today - datetime.timedelta(days=3),
             assignee=self.worker,
         )
@@ -258,7 +258,7 @@ class TodayHoldsTodayTests(WorkPlanFixture, APITestCase):
         from WP-1 to P-2."""
         late = self.make_extra_work(
             "Planned and late",
-            preferred=self.today,
+            provider_planned=self.today,
             deadline=self.today - datetime.timedelta(days=1),
             assignee=self.worker,
         )
@@ -274,7 +274,7 @@ class TodayHoldsTodayTests(WorkPlanFixture, APITestCase):
         """The entry shape did not change — only who is placed where."""
         ticket = self.make_ticket("A")
         slot = self.make_slot(ticket, start=self.today)
-        ew = self.make_extra_work("B", preferred=self.today, assignee=self.worker)
+        ew = self.make_extra_work("B", provider_planned=self.today, assignee=self.worker)
         payload = self.get_plan(self.worker)
         slot_entry = self.entry(payload, f"slot-{slot.id}")
         ew_entry = self.entry(payload, f"ew-{ew.id}")

@@ -727,17 +727,35 @@ function WorkPlanWeek() {
 
   // P-2 §1 — TODAY IS ON SCREEN. The grid is 1530px wide and scrolls
   // inside its wrap; on a Saturday the viewport showed Mon-Fri and every
-  // carried late job hung on the invisible Saturday column. After each
-  // load of the current week the wrap scrolls so today's column is in
-  // view (centred when the wrap is narrower than the week).
+  // carried late job hung on the invisible Saturday column.
+  //
+  // P-14 A5 — and on a COLUMN BOUNDARY. Centring today cut Monday on
+  // the left AND Sunday on the right at 1440: half a column on each
+  // edge at first paint, which reads as a rendering fault (rule 7).
+  // The wrap now opens at the EARLIEST column start that still shows
+  // today in full — the left edge is always a whole column, today is
+  // always visible, as much of the earlier week as fits is shown, and
+  // the real scrollbar + edge shadows (W24-FX1) declare the rest.
+  // `scroll-snap` in the CSS keeps hand scrolls on boundaries too.
   const weekScrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const wrap = weekScrollRef.current;
     if (!wrap || !data) return;
     const today = wrap.querySelector<HTMLElement>('[data-testid="agenda-day-today"]');
     if (!today) return;
-    const left = today.offsetLeft - Math.max(0, (wrap.clientWidth - today.offsetWidth) / 2);
-    wrap.scrollTo({ left: Math.max(0, left), behavior: "auto" });
+    const columns = Array.from(wrap.querySelectorAll<HTMLElement>(".wp-day"));
+    if (columns.length === 0) return;
+    const todayRight = today.offsetLeft + today.offsetWidth;
+    const start =
+      columns.find(
+        (column) => todayRight - column.offsetLeft <= wrap.clientWidth,
+      ) ?? today;
+    // Relative to the first column, so a padding offset cannot bias a
+    // board that needs no scrolling at all.
+    wrap.scrollTo({
+      left: Math.max(0, start.offsetLeft - columns[0].offsetLeft),
+      behavior: "auto",
+    });
   }, [data, todayKey]);
 
   const filtered = useMemo(
@@ -874,14 +892,15 @@ function WorkPlanWeek() {
         subtitle={
           teamWeek ? t("agenda.page_subtitle_team") : t("agenda.page_subtitle")
         }
-        /* P-13 W6 — the standing weekly schedule (Rooster) lost its
-           toggle on the Hours page; its door for the people who manage
-           it lives here, beside the week they are reading. SA / CA
-           only — the same gate the /admin/hours route enforces. */
+        /* P-13 W6 — the standing weekly pattern lost its toggle on the
+           Hours page; its door for the people who manage it lives
+           here, beside the week they are reading. P-14 A1 — it is the
+           Agreed hours tab now. SA / CA only — the same gate the
+           /admin/hours route enforces. */
         actions={
           canManageTimesheets(me?.role) ? (
             <Link
-              to="/admin/hours?tab=schedule"
+              to="/admin/hours/agreed"
               className="btn btn-ghost btn-sm"
               data-testid="agenda-schedule-link"
             >
@@ -1142,14 +1161,21 @@ function WorkPlanWeek() {
       {/* WP-1 G1 — "Stuck — action needed", as a strip. Work that stopped
           without being done; a row leaves only when a human reschedules,
           reassigns or cancels through the existing actions on the record
-          the title opens. Renders only when it holds something. */}
+          the title opens. Renders only when it holds something.
+          P-14 A5 — the sentence is per VIEWER (the P-10 A2 rule): a
+          worker can replan, reassign or cancel nothing, so their strip
+          says who decides instead of listing verbs they do not have. */}
       {data && stuckJobs.length > 0 && (
         <ZoneStrip
           id="stuck"
           tone="red"
           count={data.counts.stuck}
           title={t("agenda.stuck_title")}
-          summary={t("agenda.stuck_desc")}
+          summary={
+            role === "STAFF"
+              ? t("agenda.stuck_desc_worker")
+              : t("agenda.stuck_desc")
+          }
           testId="agenda-stuck-list"
         >
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>

@@ -18,8 +18,15 @@ import type { CatalogRow } from "../../../components/CatalogTab";
  * because two copies of a list were left to drift for six sprints.
  * What stays here is what genuinely differs: the endpoints and the
  * words.
+ *
+ * P-14 (findings list) — `canManage`: a BUILDING_MANAGER reaches this
+ * tab through the Contracts page as a READER (`IsContractManager`
+ * refuses every write server-side, `backend/contracts/permissions.py`),
+ * and the tab used to render add/rename/archive controls that 403 on
+ * press — the "control that lies" defect class. The Catalogs mount is
+ * admin-gated and keeps the default.
  */
-export function ContractTypesTab() {
+export function ContractTypesTab({ canManage = true }: { canManage?: boolean }) {
   const { t } = useTranslation(["contracts", "common"]);
 
   const mapRow = useCallback(
@@ -45,6 +52,7 @@ export function ContractTypesTab() {
       detailUrl={(id) => `/contracts/types/${id}/`}
       standardSetUrl="/contracts/types/standard-set/"
       testIdPrefix="contract-types"
+      canManage={canManage}
       mapRow={mapRow}
       labels={{
         title: t("types.title"),

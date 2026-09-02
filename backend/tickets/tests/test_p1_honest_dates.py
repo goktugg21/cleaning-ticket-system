@@ -42,6 +42,7 @@ from tickets.models import (
     TicketScheduleStatus,
     TicketStaffAssignment,
     TicketStatus,
+    TicketStatusHistory,
     TicketType,
 )
 from tickets.schedule import set_schedule
@@ -376,32 +377,54 @@ class ReviewCarryTests(_Fixture):
         ticket.status = TicketStatus.WAITING_MANAGER_REVIEW
         ticket.manager_review_at = self._at(-waiting_days, 15)
         ticket.save(update_fields=["status", "manager_review_at", "updated_at"])
+        # P-14 — the strip's `waiting_days` reads the HISTORY leg into
+        # the review state (P-8R E), which a bare `.save()` never
+        # writes; `created_at` is auto_now_add, so backdate with
+        # update() (the `test_p10_review_placement` fixture's recipe).
+        TicketStatusHistory.objects.create(
+            ticket=ticket,
+            old_status=TicketStatus.IN_PROGRESS,
+            new_status=TicketStatus.WAITING_MANAGER_REVIEW,
+            changed_by=self.worker,
+        )
+        TicketStatusHistory.objects.filter(
+            ticket=ticket, new_status=TicketStatus.WAITING_MANAGER_REVIEW
+        ).update(created_at=self._at(-waiting_days, 15))
         return ticket
 
     def test_a_manager_sees_it_on_today_with_its_waiting_age(self):
+        # P-14 repaired a stale pin: P-10 A2 made review placement
+        # PERSONAL after this test was written (red from P-10 to P-14,
+        # found by the P-14 sweep). A company admin who is not the
+        # job's named manager reads the review STRIP with the waiting
+        # age; the named manager's today-card is pinned in
+        # `test_p10_review_placement`.
         ticket = self._reviewed(planned_days_ago=10, waiting_days=5)
         payload = self.board()
-        card, bucket = self.find(payload, f"ticket-{ticket.id}")
-        self.assertEqual(bucket, "entries")
-        self.assertEqual(card["placement"], PLACEMENT_REVIEW)
-        self.assertEqual(card["day"], self.today.isoformat())
-        self.assertEqual(card["stuck_age_days"], 5)
-        self.assertFalse(card["viewer_settled"])
-        # Not late: nobody is expected to work it, somebody must confirm.
-        self.assertFalse(card["is_overdue"])
-        self.assertIsNone(card["days_until_due"])
-        # The chips describe the board, and the board holds it.
-        self.assertEqual(payload["counts"]["total"], 1)
+        self.assertEqual(payload["counts"]["review"], 1)
+        self.assertEqual(payload["counts"]["total"], 0)
+        rows = [
+            e
+            for e in payload.get("review_entries", [])
+            if e["key"] == f"ticket-{ticket.id}"
+        ]
+        self.assertEqual(len(rows), 1, payload.get("review_entries"))
+        self.assertEqual(rows[0]["waiting_days"], 5)
 
     def test_it_hangs_on_the_day_it_was_reported_done_not_its_planned_day(self):
-        # P-9 §A.2b (rule 10) — the past shows only what was finished, on
-        # the day it was finished: planned 20 days ago, reported done 12
-        # days ago, the card is in the week of day -12 on day -12, and
-        # absent from the week it was planned in. (Both days are outside
-        # the current week whatever weekday the suite runs on.)
+        # P-9 §A.2b (rule 10), amended by P-10 A1 (the stale pin was
+        # red from P-10 to P-14): while the check is PENDING the past
+        # shows nothing — reported done is not finished. Once approved,
+        # the card settles on the day it was REPORTED done (day -12),
+        # not the day it was planned (day -20).
         ticket = self._reviewed(planned_days_ago=20, waiting_days=12)
         planned_week = self.board(week=self.week_of(-20))
         self.assertIsNone(self.find(planned_week, f"ticket-{ticket.id}")[0])
+        report_week = self.board(week=self.week_of(-12))
+        self.assertIsNone(self.find(report_week, f"ticket-{ticket.id}")[0])
+        ticket.status = TicketStatus.APPROVED
+        ticket.approved_at = timezone.now()
+        ticket.save(update_fields=["status", "approved_at", "updated_at"])
         payload = self.board(week=self.week_of(-12))
         card, bucket = self.find(payload, f"ticket-{ticket.id}")
         self.assertEqual(bucket, "entries")
@@ -411,16 +434,25 @@ class ReviewCarryTests(_Fixture):
         self.assertIsNone(card["stuck_age_days"])
 
     def test_the_workers_completed_slot_stays_on_its_own_day(self):
+        # P-10 A2 (repaired stale pin, red P-10 → P-14): for the worker
+        # a reported-done job is the review STRIP, never a column — not
+        # their day any more, not finished either. It returns to a
+        # column (the report day's) only once the check is over.
         ticket = self._reviewed(planned_days_ago=10, waiting_days=5)
         this_week = self.board(user=self.worker, scope=None)
         self.assertEqual(
             [e for e in this_week["entries"] if e["ticket_id"] == ticket.id], []
         )
         home = self.board(user=self.worker, scope=None, week=self.week_of(-10))
-        slots = [e for e in home["entries"] if e["ticket_id"] == ticket.id]
-        self.assertEqual(len(slots), 1)
-        self.assertEqual(slots[0]["placement"], PLACEMENT_PLANNED)
-        self.assertTrue(slots[0]["viewer_settled"])
+        self.assertEqual(
+            [e for e in home["entries"] if e["ticket_id"] == ticket.id], []
+        )
+        strip = [
+            e
+            for e in this_week.get("review_entries", [])
+            if e["ticket_id"] == ticket.id
+        ]
+        self.assertEqual(len(strip), 1, this_week.get("review_entries"))
 
     def test_confirming_takes_it_off_today(self):
         ticket = self._reviewed(planned_days_ago=10, waiting_days=5)

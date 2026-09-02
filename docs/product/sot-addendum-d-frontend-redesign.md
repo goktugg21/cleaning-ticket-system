@@ -2271,3 +2271,69 @@ self-explanatory while its model is frozen** — the rule-8 fold
 describes what exists; the owner's meeting with his father decides the
 rest. And the P-13 brief's "§D.22 rule 9" (row-click) landed as §D.22
 rule 11 — the number was taken; the rule is the same.
+
+### D.24.6 Everything, end to end — the P-14 Part A rulings (2026-09-02)
+
+P-14 is the test sprint ("test the system end to end, everything,
+every capability, visually, as a person who knows nothing, as
+different users"); its findings live in `docs/testing/p14-findings.md`
+and its checklist in `docs/testing/capability-inventory.md`. Part A
+shipped fixes; the rulings:
+
+1. **Agreed hours are a Hours tab, not planning** (A1 — amends the
+   P-13 ruling 9 above). The standing weekly pattern per person per
+   building (`timesheets.ContractHours`) seeds the standard lines in
+   Enter hours: a Hours concept, where the owner wants it. The page
+   is the People-style pair of URL-backed tabs — **Hours worked**
+   (`/admin/hours`) | **Agreed hours** (`/admin/hours/agreed`,
+   nl *Gewerkte uren | Afgesproken uren*) — the table pinned in
+   `hoursTabs.ts`; `?tab=schedule` redirects onto the Agreed tab so
+   the standing deep links survive. The concept's ONE name is
+   **Agreed hours / Afgesproken uren** ("Weekly schedule" / "Rooster"
+   left both locales — "rooster" was colliding with the entry grid's
+   "raster"); the page header says "Hours" once and each tab's own
+   section title names the tab (the doubled header left). The tab
+   carries its rule-8 fold and its road as a teach line (Draft →
+   Submitted → Agreed).
+   **Drift found while writing the fold** (the fold tells the truth
+   of the code, per the hierarchy rule): `timesheets/fill.py` seeds
+   from `auto_fill=True` alone — a DRAFT pattern with the flag on
+   fills the grid; approval gates nothing in the fill. On the P-15
+   list for a ruling; the fold says "Fills the sheet" decides, not
+   the status.
+2. **The week card's two buttons share one baseline** (A2); the
+   rule-8 pre-read is ONE line under the pair ("Enter hours opens the
+   grid; nothing is saved until Save. Close week locks the week; you
+   can reopen it."). Enter hours is a normal secondary button — the
+   page's one primary door is Start here — and it no longer greys out
+   during routine table refreshes (A4).
+3. **"How this page works" starts closed, everywhere, always** (A3 —
+   owner: "your call"; the call: closed). Opening it is remembered
+   open per page per browser; the summary line beside the title keeps
+   it one click away. `howStore` inverted and re-pinned.
+4. **The small A4 fixes**: "1 running job" pluralises via i18n
+   plurals (`road.at_risk_foot_one/_other`); the week card says the
+   closing consequence ONCE (the teach sentence keeps the money fact,
+   the pre-read keeps the lock mechanics; `weeks.close_consequence`
+   left both locales); the All-entries fold names the ACTIVE period,
+   not the week bar's week, when "Other period" is on.
+5. **A wish date is not a plan — placement is provider-only** (A5;
+   P-1 reopened by P-10 A6's fallback, closed for good). No
+   `provider_planned_date` → the "Not planned yet" strip, in no
+   column of ANY week; the customer's `preferred_date` may seed a
+   card's details, never its column. `_with_ew_dates` /
+   `_ew_planned_window` read the provider's plan and nothing else
+   (pinned in `test_p14_wish_not_plan`); the lateness ladder still
+   reads the wish deliberately — a wished day passing unplanned is
+   exactly what it must surface.
+6. **The board opens on a column boundary** (A5). Centring today cut
+   Monday AND Sunday in half at 1440; the wrap now opens at the
+   earliest column start that shows today in full (left edge always a
+   whole column), `scroll-snap` keeps hand scrolls on boundaries, and
+   the W24-FX1 scrollbar + edge shadows stay the affordance. The
+   seven columns keep their 210px floor — the owner rejected
+   squeezing them twice (Sprint 183).
+7. **The stuck strip speaks per viewer** (A5, the P-10 A2 rule): a
+   worker reads "Stopped before it was finished — your manager
+   decides what happens next."; the manager keeps the verbs
+   (replan / reassign / cancel) because they have them.

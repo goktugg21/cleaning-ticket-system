@@ -262,7 +262,8 @@ class TheRollForwardMatrixTests(_Fixture):
         self.assertIsNone(card["rolled_from"])
 
     def test_an_extra_work_rolls_the_same_way(self):
-        """Both sources answer to one rule."""
+        """Both sources answer to one rule. P-14 A5 — the rule reads
+        the PROVIDER's committed day; a wish alone places nothing."""
         request = ExtraWorkRequest.objects.create(
             company=self.company,
             building=self.building,
@@ -270,7 +271,7 @@ class TheRollForwardMatrixTests(_Fixture):
             created_by=self.super_admin,
             title="Gutters, still not cleared",
             description="x",
-            preferred_date=self.today - datetime.timedelta(days=3),
+            provider_planned_date=self.today - datetime.timedelta(days=3),
             status=ExtraWorkStatus.CUSTOMER_APPROVED,
         )
         ExtraWorkAssignment.objects.create(

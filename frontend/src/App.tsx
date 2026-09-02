@@ -921,6 +921,16 @@ export default function App() {
               </TimesheetsRoute>
             }
           />
+          {/* P-14 A1 — the Agreed hours tab, URL-backed like People's
+              tabs; the same guard as the page it is a tab of. */}
+          <Route
+            path="/admin/hours/agreed"
+            element={
+              <TimesheetsRoute manager>
+                <HoursAdminPage />
+              </TimesheetsRoute>
+            }
+          />
           {/* Sprint W4-Q §2 — the SLA warning thresholds. */}
           <Route
             path="/admin/sla-warnings"

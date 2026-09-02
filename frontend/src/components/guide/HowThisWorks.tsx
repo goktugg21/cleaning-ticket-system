@@ -4,8 +4,8 @@
  * capability, verb first, in the order things happen, each naming
  * what it does and what it does NOT do.
  *
- * Open by default the first time a user sees the page, then
- * remembered closed (`howStore`, localStorage). The summary line IS
+ * P-14 A3 — CLOSED by default, everywhere; a person who opens it is
+ * remembered open (`howStore`, localStorage). The summary line IS
  * the "How this page works" link beside the title — collapsed, it
  * stays one click away. The lines come from the page's locale files,
  * both languages, in the Permissions voice.
@@ -13,7 +13,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { howClosed, rememberHow, safeLocalStorage } from "./howStore";
+import { howOpen, rememberHow, safeLocalStorage } from "./howStore";
 
 export function HowThisWorks({
   pageKey,
@@ -28,7 +28,7 @@ export function HowThisWorks({
 }) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(
-    () => !howClosed(safeLocalStorage(), pageKey),
+    () => howOpen(safeLocalStorage(), pageKey),
   );
 
   if (lines.length === 0) return null;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { howClosed, rememberHow } from "./howStore";
+import { howOpen, rememberHow } from "./howStore";
 import type { StorageLike } from "./howStore";
 
 function fakeStorage(): StorageLike & { data: Record<string, string> } {
@@ -14,30 +14,35 @@ function fakeStorage(): StorageLike & { data: Record<string, string> } {
   };
 }
 
-describe("howStore — the fold's memory (P-13 §D.24 rule 8)", () => {
-  it("opens by default the first time", () => {
-    expect(howClosed(fakeStorage(), "invoices")).toBe(false);
+describe("howStore — the fold's memory (P-14 A3: closed by default)", () => {
+  it("starts closed the first time", () => {
+    expect(howOpen(fakeStorage(), "invoices")).toBe(false);
   });
-  it("closed stays closed, per page", () => {
+  it("open is remembered, per page", () => {
     const storage = fakeStorage();
-    rememberHow(storage, "invoices", false);
-    expect(howClosed(storage, "invoices")).toBe(true);
-    expect(howClosed(storage, "hours")).toBe(false);
-  });
-  it("re-opening deliberately forgets closed", () => {
-    const storage = fakeStorage();
-    rememberHow(storage, "invoices", false);
     rememberHow(storage, "invoices", true);
-    expect(howClosed(storage, "invoices")).toBe(false);
+    expect(howOpen(storage, "invoices")).toBe(true);
+    expect(howOpen(storage, "hours")).toBe(false);
+  });
+  it("closing deliberately forgets open", () => {
+    const storage = fakeStorage();
+    rememberHow(storage, "invoices", true);
+    rememberHow(storage, "invoices", false);
+    expect(howOpen(storage, "invoices")).toBe(false);
+  });
+  it("the pre-A3 stored 'closed' still reads as closed", () => {
+    const storage = fakeStorage();
+    storage.data["guide.how.invoices"] = "closed";
+    expect(howOpen(storage, "invoices")).toBe(false);
   });
   it("tolerates a missing storage and garbage content", () => {
-    expect(howClosed(null, "invoices")).toBe(false);
-    rememberHow(null, "invoices", false); // must not throw
+    expect(howOpen(null, "invoices")).toBe(false);
+    rememberHow(null, "invoices", true); // must not throw
     const storage = fakeStorage();
     storage.data["guide.how.invoices"] = "garbage";
-    expect(howClosed(storage, "invoices")).toBe(false);
+    expect(howOpen(storage, "invoices")).toBe(false);
   });
-  it("a throwing storage reads as never-closed", () => {
+  it("a throwing storage reads as closed", () => {
     const storage: StorageLike = {
       getItem: () => {
         throw new Error("blocked");
@@ -46,7 +51,7 @@ describe("howStore — the fold's memory (P-13 §D.24 rule 8)", () => {
         throw new Error("blocked");
       },
     };
-    expect(howClosed(storage, "invoices")).toBe(false);
-    rememberHow(storage, "invoices", false); // must not throw
+    expect(howOpen(storage, "invoices")).toBe(false);
+    rememberHow(storage, "invoices", true); // must not throw
   });
 });

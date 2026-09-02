@@ -309,7 +309,7 @@ export function HoursComparisonView() {
                       </div>
                       <p className="empty-sub">{t("hours_comparison.empty")}</p>
                       <Link
-                        to="/admin/hours?tab=schedule"
+                        to="/admin/hours/agreed"
                         className="btn btn-secondary btn-sm"
                       >
                         {t("hours_comparison.open_schedule")}

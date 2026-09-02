@@ -13,10 +13,11 @@ update was left for a later docs-only pass.
 
 ## NOW
 
-**Branch:** `feat/p13-money-never-invisible` — stacked on
-`feat/p12-page-tells-you`, the head of the Addendum D redesign train
+**Branch:** `feat/p14-everything-end-to-end` — stacked on
+`feat/p13-money-never-invisible` (origin tip `47d9998`, verified by
+web-Claude), the head of the Addendum D redesign train
 (WP-1 → FE-1 → … → FE-7 → P-1
-→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13), each sprint stacked on the previous one and deployed to crmtest;
+→ P-2 → P-3 → P-4 → P-5 → P-6 → P-7 → P-8R → P-9 → P-10 → P-11 → P-12 → P-13 → P-14), each sprint stacked on the previous one and deployed to crmtest;
 nothing is merged into `main` until the owner says "merge". Below it, `feat/ew-gap-closing` still
 holds Sprints 153–189 as ONE PR into `main` — a fast-forward, and the
 first time CI runs on any of it. The owner opens and merges both.
@@ -39,6 +40,43 @@ chain with zero conflicts. 188 is the owner's closing round.
      Sprint 188 §docs: brought to the head of the chain again, and the
      NEXT queue below was re-verified item by item against the code
      rather than carried forward on trust. -->
+
+### P-14 — "Everything, end to end" (the TEST sprint, 2026-09-02, in flight)
+
+The owner's words: "Test the system end to end, everything, every
+capability, visually, as a person who knows nothing, as different
+users. Don't trust the tests we have. Backend, frontend, and between
+them." The deliverable is a FINDINGS LIST with evidence
+(`docs/testing/p14-findings.md`), checked off against the capability
+inventory (`docs/testing/capability-inventory.md`); fixes only where
+small and certain, everything else prioritised for P-15. Zero
+migrations. Rulings in Addendum D §D.24.6.
+
+**Part A — shipped** (the owner's two Hours findings + web-Claude's
+certain fixes):
+- A1: Agreed hours back as the Hours page's second tab
+  (`/admin/hours/agreed`, People-style, `hoursTabs.ts` pinned;
+  `?tab=schedule` redirects; ONE name: Agreed hours / Afgesproken
+  uren; the doubled header gone). Drift found: `fill.py` seeds from
+  `auto_fill` alone — approval gates nothing (P-15 ruling needed).
+- A2: the week card's Enter hours + Close week on one baseline, ONE
+  pre-read line under the pair.
+- A3: "How this page works" starts CLOSED everywhere; opening is
+  remembered per page (howStore inverted + re-pinned).
+- A4: at_risk_foot pluralised; the closing sentence said once;
+  Enter hours a normal secondary button that stops greying out on
+  refresh; the All-entries fold names the active period.
+- A5: a wish date is not a plan — EW board placement is
+  provider-plan-only (`test_p14_wish_not_plan`); the staff board
+  opens on a column boundary (no half columns at first paint) with
+  scroll-snap; the stuck strip speaks per viewer (worker: "your
+  manager decides what happens next").
+
+**Part B — the audit, in flight**: capability inventory → nine-role
+walks (owner's page order, cold reads, severities S1–S4) → the seven
+cross-role chains → the RBAC probe + state-machine sweep + money
+checks → the findings list, S1→S4, as P-15's input. Web-Claude runs
+the same audit independently; the two lists are compared.
 
 ### Done — P-13: the money is never invisible (Addendum D §D.24.5, 2026-09-02)
 

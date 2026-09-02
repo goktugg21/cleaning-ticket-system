@@ -61,6 +61,7 @@
   "agenda.stuck_age_other": "{{count}} dagen vastgelopen",
   "agenda.stuck_age_today": "Vandaag vastgelopen",
   "agenda.stuck_desc": "Gestopt voordat het af was. Herplan, wijs opnieuw toe of annuleer om het hier weg te halen.",
+  "agenda.stuck_desc_worker": "Gestopt voordat het af was — uw beheerder beslist wat er nu gebeurt.",
   "agenda.stuck_reason": "Reden: {{reason}}",
   "agenda.stuck_title": "Vastgelopen — actie nodig",
   "agenda.this_week": "Deze week",

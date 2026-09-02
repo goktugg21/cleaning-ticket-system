@@ -11868,6 +11868,16 @@ details[open] > .ew-department-tree-summary::before {
     scrollbar-width: auto;
   }
 }
+/* P-14 A5 — hand scrolls settle on column boundaries too (the first
+   paint already lands on one, see AgendaPage's scroll effect): no half
+   column at the left edge, ever. `proximity`, not `mandatory` — a
+   deliberate mid-drag position must stay reachable. */
+.agenda-week-scroll {
+  scroll-snap-type: x proximity;
+}
+.agenda-week-scroll .wp-day {
+  scroll-snap-align: start;
+}
 .agenda-week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(210px, 1fr));

@@ -468,7 +468,9 @@ export function ContractsAdminPage() {
         </button>
       </div>
 
-      {pageTab === "types" && <ContractTypesTab />}
+      {/* P-14 — a BM is a reader here; the tab hides the writes the
+          server would refuse (`IsContractManager`). */}
+      {pageTab === "types" && <ContractTypesTab canManage={canManage} />}
 
       {/* P-12 C1 (§D.24 rule 2) — the ONE thing waiting: a draft
           without lines beats the contract ending soonest. */}

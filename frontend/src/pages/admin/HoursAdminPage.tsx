@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
@@ -70,18 +70,20 @@ import { jobTitleFirst } from "../../components/timesheets/jobTitle";
 import { hourTypeLabel, hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { HoursFilterRow } from "./HoursFilterRow";
 import { ContractHoursTab } from "./ContractHoursTab";
+import { HOURS_TABS, hoursTabOf } from "./hoursTabs";
 
 /**
- * P-13 W6 — the "Worked hours / Weekly schedule" TOGGLE is gone.
+ * P-14 A1 — Agreed hours come back as a TAB.
  *
- * The two views record different systems (what was worked vs the
- * standing weekly agreement) and sharing one page's toggle made them
- * read as two modes of one thing. This page is the worked week now.
- * The schedule VIEW is still served at `?tab=schedule` — that URL is
- * a standing deep link (the hours-comparison report's "Weekly
- * schedule" door points at it, and the agenda header links it too),
- * so the page renders ONLY the schedule when the URL asks for it,
- * with a back link in the header instead of a toggle.
+ * P-13 W6 took the "Weekly schedule" view off this page, calling it
+ * planning. It is not: it is each person's standing weekly pattern
+ * per building (`timesheets.ContractHours`, Draft → Submitted →
+ * Agreed), the thing that seeds the standard lines in Enter hours —
+ * a Hours concept, and the owner wants it where it was. The page is
+ * now the People-style pair of URL-backed tabs: **Hours worked**
+ * (`/admin/hours`) | **Agreed hours** (`/admin/hours/agreed`), the
+ * table in `hoursTabs.ts` (vitest-pinned). The P-13 `?tab=schedule`
+ * deep link redirects onto the Agreed tab so no saved link goes dead.
  */
 
 // Sprint 152 — the SUPER_ADMIN's provider company, remembered across
@@ -174,9 +176,9 @@ function formatDate(value: string, locale: string): string {
 
 /**
  * The "Uren" admin area. W-HR1 §2 cut it from seven tabs to two; P-13
- * W6 cut the remaining toggle — the page IS the worked week, and the
- * schedule renders alone behind its `?tab=schedule` deep link (see the
- * header comment above).
+ * W6 cut the remaining toggle; P-14 A1 brought Agreed hours back as
+ * the second URL-backed tab (see the header comment above). What
+ * follows describes the WORKED tab.
  *
  * ## What the page is
  *
@@ -231,12 +233,13 @@ export function HoursAdminPage() {
 
   /* W-UX F41 — the week is URL state (`?week=2026-W35`), the ticket
    * page's exact rule: absence is the default, writes replace history,
-   * a reload or a shared link lands on the same view. P-13 W6 — the
-   * schedule view is URL state ONLY (`?tab=schedule`, a standing deep
-   * link); nothing on this page sets it any more, so it is derived,
-   * never stored. */
+   * a reload or a shared link lands on the same view. P-14 A1 — the
+   * tab is URL state too (the PATH: `/admin/hours/agreed`), derived
+   * each render, never stored. */
   const [searchParams, setSearchParams] = useSearchParams();
-  const scheduleView = searchParams.get("tab") === "schedule";
+  const location = useLocation();
+  const activeTab = hoursTabOf(location.pathname, searchParams.get("tab"));
+  const agreedView = activeTab === "agreed";
   const initialWeek: IsoWeek =
     parseIsoWeek(searchParams.get("week") ?? "") ?? currentIsoWeek();
 
@@ -500,10 +503,10 @@ export function HoursAdminPage() {
   const fetchKey = `${JSON.stringify(queryFilters)}|${page}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const loading =
-    !scheduleView && (companyPending || loadedKey !== fetchKey);
+    !agreedView && (companyPending || loadedKey !== fetchKey);
 
   useEffect(() => {
-    if (scheduleView || companyPending) return;
+    if (agreedView || companyPending) return;
     let cancelled = false;
     // The table and its footer totals come from the SAME filter object,
     // so the numbers always describe the rows on screen.
@@ -528,7 +531,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [scheduleView, queryFilters, page, fetchKey, companyPending]);
+  }, [agreedView, queryFilters, page, fetchKey, companyPending]);
 
   /** P-9 D3 — WHERE THE HOURS ARE: the year's weeks that hold saved
    *  hours, for the strip on the week bar and the empty week's
@@ -537,7 +540,7 @@ export function HoursAdminPage() {
    *  is marked the moment its hours land. Non-fatal: without it the
    *  strip shows no marks and the sentence names no week. */
   useEffect(() => {
-    if (scheduleView || companyPending) return;
+    if (agreedView || companyPending) return;
     let cancelled = false;
     listWeeksWithHours({ iso_year: week.isoYear, company })
       .then((data) => {
@@ -547,7 +550,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [scheduleView, companyPending, company, week.isoYear, entries]);
+  }, [agreedView, companyPending, company, week.isoYear, entries]);
   const lastSavedWeek = lastSavedWeekBefore(weeksWithHours, week);
   /** True while the table shows exactly the week on the bar and nothing
    *  narrower — the state in which "no hours saved for week N" is the
@@ -578,7 +581,7 @@ export function HoursAdminPage() {
    *  weeks read, so a save or a delete refreshes it. Non-fatal. */
   const [weekCardEntries, setWeekCardEntries] = useState<TimeEntry[]>([]);
   useEffect(() => {
-    if (scheduleView || companyPending) return;
+    if (agreedView || companyPending) return;
     let cancelled = false;
     (async () => {
       const all: TimeEntry[] = [];
@@ -600,7 +603,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [scheduleView, companyPending, company, week, entries]);
+  }, [agreedView, companyPending, company, week, entries]);
 
   /** The card's rows: one per person with hours this week, standard
    *  hours and job hours apart, the job refs named. */
@@ -735,7 +738,7 @@ export function HoursAdminPage() {
     null,
   );
   useEffect(() => {
-    if (scheduleView || companyPending) return;
+    if (agreedView || companyPending) return;
     let cancelled = false;
     fetchWeekStatus({
       iso_year: week.isoYear,
@@ -755,7 +758,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [scheduleView, companyPending, week, company, weekStatusKey]);
+  }, [agreedView, companyPending, week, company, weekStatusKey]);
 
   const weekRange = weekFilters(week);
   const periodOpen =
@@ -1021,6 +1024,12 @@ export function HoursAdminPage() {
    *  payload, same filter object as the rows, so they always describe
    *  what is on screen. */
 
+  // P-14 A1 — the P-13 `?tab=schedule` deep link lands on the Agreed
+  // tab's real address (below every hook; a redirect is a render).
+  if (agreedView && !location.pathname.includes("/agreed")) {
+    return <Navigate to="/admin/hours/agreed" replace />;
+  }
+
   // Sprint 164 — the wrapper used to carry a class with no rule behind
   // it, the same hole the gate found on MyHoursPage last sprint. A JS
   // comment, not a JSX one: a JSX comment cannot sit between `return (`
@@ -1030,17 +1039,11 @@ export function HoursAdminPage() {
        without touching the global `.page-title` every page shares. */
     <div className="hours-admin-page">
       <PageHeader
-        title={scheduleView ? t("contract_hours.title") : t("hours_admin.title")}
-        subtitle={
-          scheduleView ? t("contract_hours.subtitle") : t("hours_admin.subtitle")
-        }
-        /* P-13 W6 — the schedule view is its own surface now (the
-           toggle is gone); the way back is a header back link. */
-        backLink={
-          scheduleView
-            ? { to: "/admin/hours", label: t("contract_hours.back_to_hours") }
-            : undefined
-        }
+        /* P-14 A1 — ONE page title ("Hours"); each tab's own section
+           title names the tab (the P-13 report flagged the doubled
+           header on the schedule view). */
+        title={t("hours_admin.title")}
+        subtitle={agreedView ? undefined : t("hours_admin.subtitle")}
         actions={
           /* P-12 §D.24.2 — the company, top right; the choice is
              shared with the other Finance pages through the session.
@@ -1063,25 +1066,66 @@ export function HoursAdminPage() {
         }
       />
 
+      {/* P-14 A1 — the People-style tab strip; the URL is the state. */}
+      <div
+        className="customer-tabs"
+        role="tablist"
+        aria-label={t("hours_admin.title")}
+        style={{ marginBottom: 16 }}
+        data-testid="hours-tabs"
+      >
+        {HOURS_TABS.map((spec) => (
+          <Link
+            key={spec.key}
+            to={spec.path}
+            role="tab"
+            aria-selected={spec.key === activeTab}
+            className={`customer-tab${spec.key === activeTab ? " active" : ""}`}
+            data-testid={`hours-tab-${spec.key}`}
+          >
+            {t(spec.labelKey)}
+          </Link>
+        ))}
+      </div>
+
       {companyLoadError && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
           {companyLoadError}
         </div>
       )}
 
-      {/* P-13 W6 — no toggle. The URL decides: `?tab=schedule` (a
-          standing deep link) renders ONLY the schedule; everything
-          else is the worked week. */}
-      {scheduleView && (
-        <ContractHoursTab
-          companyId={company}
-          buildings={buildings}
-          employees={employees}
-          hourTypes={hourTypes}
-        />
+      {agreedView && (
+        <>
+          {/* P-13 §D.24 rule 8 — what THIS tab can do. Every line
+              verified against `timesheets/fill.py` and the
+              `ContractHours` model before it was written. */}
+          <HowThisWorks
+            pageKey="hours-agreed"
+            testId="hours-agreed-how"
+            lines={[
+              t("contract_hours.how_1"),
+              t("contract_hours.how_2"),
+              t("contract_hours.how_3"),
+            ]}
+          />
+          {/* P-14 A1 — the road, as ONE teach sentence. */}
+          <p
+            className="muted small"
+            style={{ margin: "0 0 12px" }}
+            data-testid="hours-agreed-road"
+          >
+            {t("contract_hours.road_teach")}
+          </p>
+          <ContractHoursTab
+            companyId={company}
+            buildings={buildings}
+            employees={employees}
+            hourTypes={hourTypes}
+          />
+        </>
       )}
 
-      {!scheduleView && (
+      {!agreedView && (
         <>
           {/* P-13 §D.24 rule 8 — what this page CAN do. */}
           <HowThisWorks
@@ -1254,86 +1298,93 @@ export function HoursAdminPage() {
                 </span>
               )}
 
+              {/* P-14 A2 — the two buttons share ONE baseline; the
+                  rule-8 pre-read is ONE line under the pair (it used
+                  to sit under Enter hours alone and pushed it up).
+                  P-14 A4 — Enter hours is a normal secondary button
+                  (the page's one primary door is Start here), and it
+                  no longer greys out on every routine table refresh:
+                  the only real block is having no active hour types. */}
               <div
                 style={{
                   marginLeft: "auto",
                   display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  flexWrap: "wrap",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: 4,
                 }}
                 className="hours-week-lock-actions"
               >
-                {!editing && (
-                  <span style={{ textAlign: "right" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {!editing && (
                     <button
                       type="button"
-                      className="btn btn-primary btn-sm"
+                      className="btn btn-secondary btn-sm"
                       data-testid="hours-enter-week-button"
                       onClick={() => {
                         setWeekModalPreselect([]);
                         setWeekModalNote("");
                         setWeekModalOpen(true);
                       }}
-                      disabled={loading || activeHourTypes.length === 0}
+                      disabled={activeHourTypes.length === 0}
                     >
                       {t("hours_admin.enter_week_button")}
                     </button>
-                    {/* P-13 §D.24 rule 8 — the pre-read. */}
-                    <WhatHappens testId="hours-enter-what">
-                      {t("hours_admin.what_enter")}
-                    </WhatHappens>
-                  </span>
-                )}
-                {weekClosed ? (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    data-testid="hours-week-reopen"
-                    onClick={() => {
-                      setConfirmError("");
-                      reopenWeekRef.current?.open();
-                    }}
-                    disabled={weekStatusLoading || lockBusy || companyPending}
-                  >
-                    {t("weeks.reopen_button")}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    data-testid="hours-week-close"
-                    onClick={() => {
-                      setConfirmError("");
-                      closeWeekRef.current?.open();
-                    }}
-                    disabled={weekStatusLoading || lockBusy || companyPending}
-                  >
-                    {t("weeks.close_button")}
-                  </button>
+                  )}
+                  {weekClosed ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      data-testid="hours-week-reopen"
+                      onClick={() => {
+                        setConfirmError("");
+                        reopenWeekRef.current?.open();
+                      }}
+                      disabled={weekStatusLoading || lockBusy || companyPending}
+                    >
+                      {t("weeks.reopen_button")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      data-testid="hours-week-close"
+                      onClick={() => {
+                        setConfirmError("");
+                        closeWeekRef.current?.open();
+                      }}
+                      disabled={weekStatusLoading || lockBusy || companyPending}
+                    >
+                      {t("weeks.close_button")}
+                    </button>
+                  )}
+                </div>
+                {!editing && !weekClosed && (
+                  <WhatHappens testId="hours-week-what">
+                    {t("hours_admin.what_week_buttons")}
+                  </WhatHappens>
                 )}
               </div>
             </div>
 
             {/* P-13 W6 — the "1 · Enter / 2 · Close" road is gone: the
                 week's Open/Closed chip above already says the state.
-                ONE teach sentence stays, with the consequence rider
-                where the Close button is. */}
+                P-14 A4 — the closing consequence is said ONCE: this
+                sentence carries the money fact; the lock mechanics are
+                the one-liner under the buttons. */}
             <p
               className="muted small"
               style={{ margin: "0 0 12px" }}
               data-testid="hours-week-teach"
             >
               {t("hours_admin.week_teach")}
-              {!weekClosed && (
-                <span
-                  className="hours-week-close-consequence"
-                  data-testid="hours-week-close-consequence"
-                >
-                  {" "}
-                  {t("weeks.close_consequence", { week: week.isoWeek })}
-                </span>
-              )}
             </p>
 
             {weekPeople.length > 0 ? (
@@ -1599,10 +1650,21 @@ export function HoursAdminPage() {
               className="form-fold-summary"
               data-testid="hours-all-entries-summary"
             >
-              {t("hours_admin.all_entries_summary", {
-                week: week.isoWeek,
-                count: entryCount,
-              })}
+              {/* P-14 A4 — with "Other period" on, the fold names the
+                  ACTIVE period, not the week bar's week: the rows
+                  inside describe the range, and the summary must not
+                  claim a week they no longer match. */}
+              {filters.date_from !== weekRange.date_from ||
+              filters.date_to !== weekRange.date_to
+                ? t("hours_admin.all_entries_summary_period", {
+                    from: formatDate(filters.date_from, dateLocale),
+                    to: formatDate(filters.date_to, dateLocale),
+                    count: entryCount,
+                  })
+                : t("hours_admin.all_entries_summary", {
+                    week: week.isoWeek,
+                    count: entryCount,
+                  })}
             </summary>
 
           {/* W-HR1 §2 — the filter row WRAPS instead of clipping.
@@ -2373,7 +2435,7 @@ export function HoursAdminPage() {
           here. `ConfirmDialog` below stays native and ref-driven; the
           two are deliberately different things (CLAUDE.md §3). */}
       {(weekModalOpen ||
-        (!scheduleView &&
+        (!agreedView &&
           !enterConsumed &&
           enterIds.length > 0 &&
           !loading &&

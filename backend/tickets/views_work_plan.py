@@ -527,18 +527,23 @@ def _slot_overdue_q(today: datetime.date) -> Q:
 
 
 # ---------------------------------------------------------------------
-# P-10 A6 — THE EXTRA WORK'S WINDOW IS THE PROVIDER'S PLAN FIRST.
+# P-10 A6 / P-14 A5 — THE EXTRA WORK'S WINDOW IS THE PROVIDER'S PLAN,
+# FULL STOP.
 #
 # The "Not planned yet" row's one button writes `provider_planned_date`
 # (`POST /extra-work/bulk-dates/`, Sprint 182 §3), which is what
 # `tickets/job_dates.py` reads as the job's window for a spawned
-# ticket — but this board read the request's `preferred_date` (the
-# customer's WISH) and nothing else, so a request the operator had just
-# planned stayed in "Not planned yet" with the count unmoved (the owner's
-# A6). Two annotations carry the same reading `job_window` has for a
-# ticket: the provider's committed window when one exists, else the
-# wish. Every EW predicate and the Python twin `_extra_work_job` read
-# these and nothing else.
+# ticket. P-10 A6 made that plan win over the request's `preferred_date`
+# (the customer's WISH) but kept the wish as a fallback — and a wish is
+# not a plan: a request with only a wished day sat in today's column
+# with the badge "Not planned yet" beside it (web-Claude's P-14 pass;
+# the P-1 defect reopened). P-14 A5 undoes the fallback for PLACEMENT:
+# no provider plan means NO window — the row belongs to the "Not
+# planned yet" strip, in no column of any week. The wish may seed a
+# card's details, never its column. Every EW predicate and the Python
+# twin `_extra_work_job` read these and nothing else. (The lateness
+# ladder in `lateness_index.py` still reads the wish deliberately: a
+# wished day that passes unplanned is exactly what it must surface.)
 # ---------------------------------------------------------------------
 EW_START = "ew_start"
 EW_END = "ew_end"
@@ -550,25 +555,24 @@ def _with_ew_dates(queryset):
     # cannot know to be nullable would otherwise turn every `~Q(ew_end
     # < today)` into SQL NULL and drop the row from the board — the
     # three-valued trap a real nullable column is guarded against.
-    start = Coalesce("provider_planned_date", "preferred_date", output_field=DateField())
-    end = Case(
-        When(provider_planned_date__isnull=False, then=F("provider_planned_end_date")),
-        default=F("planned_end_date"),
-        output_field=DateField(),
-    )
     return queryset.annotate(
         **{
-            EW_START: start,
-            EW_END: Coalesce(end, start, output_field=DateField()),
+            EW_START: F("provider_planned_date"),
+            EW_END: Coalesce(
+                "provider_planned_end_date",
+                "provider_planned_date",
+                output_field=DateField(),
+            ),
         }
     )
 
 
 def _ew_planned_window(extra_work):
-    """Python twin of `_with_ew_dates`: `(start, end)`."""
+    """Python twin of `_with_ew_dates`: `(start, end)` — the provider's
+    committed window, or nothing (P-14 A5: the wish is not a plan)."""
     if extra_work.provider_planned_date is not None:
         return extra_work.provider_planned_date, extra_work.provider_planned_end_date
-    return extra_work.preferred_date, extra_work.planned_end_date
+    return None, None
 
 
 def _ew_window_end_q(lookup: str, value: datetime.date) -> Q:
@@ -814,8 +818,9 @@ def _slot_parked_q() -> Q:
 
 
 def _ew_undated_q() -> Q:
-    # P-10 A6 — no window from either source: neither the provider's
-    # plan nor the customer's wish.
+    # P-14 A5 — no provider plan. The customer's wish alone is not a
+    # window (a wish is not a plan), so a wished-but-unplanned request
+    # sits HERE, not in a column.
     return _EW_LIVE_Q & Q(**{f"{EW_START}__isnull": True})
 
 
@@ -2089,6 +2094,12 @@ def _entry_from_slot(
         "assignment_note": slot.assignment_note,
         "completion_note": slot.completion_note,
         "unable_to_complete_reason": slot.unable_to_complete_reason,
+        # P-14 — the ONE key the slot shape lacked (red in
+        # `test_both_kinds_answer_the_same_key_set` since P-7 added it
+        # to the other two builders only). Filled by
+        # `_stamp_parked_reasons` on the parked list, keyed on
+        # `ticket_id`, so a worker's parked row now says why too.
+        "parked_reason": None,
         "day": _iso(day),
         "placement": placement,
         # W-PLANTRUTH §1b — set only on a ROLLED card: the day this card
@@ -2162,10 +2173,11 @@ def _entry_from_extra_work(
             job,
             created=extra_work.requested_at,
             deadline=extra_work.deadline,
-            # P-10 A6 — placed by the PROVIDER's plan when one exists
-            # (the row's Plan-it button writes it), else by the
-            # customer's preferred date, which is a wish and is captioned
-            # as one. The same branch `job_plan_source` takes for a ticket.
+            # P-14 A5 — placed by the PROVIDER's plan or not at all
+            # (the wish no longer places; `_ew_planned_window`). The
+            # CUSTOMER_WISH leg survives for the day the details show
+            # the wish again, but with the window provider-only it can
+            # no longer fire.
             plan_source=(
                 None
                 if job.planned_start is None

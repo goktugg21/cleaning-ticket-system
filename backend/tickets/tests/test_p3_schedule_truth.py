@@ -573,8 +573,12 @@ class FullMatrixTests(_P3Fixture, APITestCase):
         self.assertTrue(all(f"slot-{s.id}" in stuck_keys for s in unable))
 
     # An extra work with a crew and no spawned slot, on the manager's
-    # board, per extra-work status. Placed by the customer's WISH date
-    # (`preferred_date`) — a wish is captioned as one on the card.
+    # board, per extra-work status. P-14 A5 — placed by the PROVIDER's
+    # committed day (`provider_planned_date`) and nothing else: a wish
+    # is not a plan, and a wish-only request sits in the "Not planned
+    # yet" strip whatever its status (pinned in
+    # `test_p14_wish_not_plan`; the third fixture of each row below —
+    # no plan at all — pins the undated/absent branch here).
     EW_MATRIX = {
         ExtraWorkStatus.REQUESTED: ("rolled", "planned_fri", "undated"),
         ExtraWorkStatus.UNDER_REVIEW: ("rolled", "planned_fri", "undated"),
@@ -595,7 +599,7 @@ class FullMatrixTests(_P3Fixture, APITestCase):
             made[ew_status] = [
                 self.make_extra_work(
                     f"ew {ew_status} {planned}",
-                    preferred=planned,
+                    provider_planned=planned,
                     ew_status=ew_status,
                     assignee=self.worker,
                 )
@@ -607,7 +611,8 @@ class FullMatrixTests(_P3Fixture, APITestCase):
                 card, bucket = self.find(payload, f"ew-{ew.id}")
                 with self.subTest(ew_status=ew_status, shape=shape):
                     self._assert_shape(shape, card, bucket, f"{ew_status}/{shape}")
-                    # Placed by the customer's WISH, and captioned as one;
-                    # an undated request has no wish to caption.
+                    # P-14 A5 — placed by the PROVIDER's plan and
+                    # captioned as one; an unplanned request has no
+                    # window at all.
                     if card is not None and card["planned_start"]:
-                        self.assertEqual(card["plan_source"], "CUSTOMER_WISH")
+                        self.assertEqual(card["plan_source"], "PROVIDER_PLAN")
