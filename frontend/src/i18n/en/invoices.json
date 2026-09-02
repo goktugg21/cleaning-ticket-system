@@ -18,5 +18,18 @@
   "nothing.not_in_period": "{{count}} finished, but their invoice date falls in a later period.",
   "nothing.heading": "Nothing to invoice",
   "created_by.system": "System",
-  "created_by.label": "Created by"
+  "created_by.label": "Created by",
+  "tabs.due": "Due now",
+  "tabs.drafts": "Drafts",
+  "tabs.issued": "Issued",
+  "tabs.sent": "Sent",
+  "tabs.all": "All",
+  "tabs.due_purpose": "Finished work and fixed periods that are ready for a draft.",
+  "tabs.drafts_purpose": "Drafts you can still change — check them and issue them.",
+  "tabs.issued_purpose": "Issued, not yet sent — the customer does not see these yet.",
+  "tabs.sent_purpose": "Sent to the customer — these no longer change.",
+  "tabs.all_purpose": "Every invoice together, from draft to sent.",
+  "tabs.empty_title": "Nothing here right now",
+  "due.draft_hint": "A draft can still be changed. The invoice number is given when you send.",
+  "list.open": "Open"
 }

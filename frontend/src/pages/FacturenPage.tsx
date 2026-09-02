@@ -1,11 +1,20 @@
 // Invoicing Phase 4b — the provider "Facturen" page.
 //
 // P-6 V1 (Addendum D §D.6 rule 12, rules 13–15) — the page reads top to
-// bottom as one story: where you stand (four facts), what is due now
-// (one primary action per row), what will not reach the invoice (the
-// billing-month guard, folded with its count), and every invoice made
-// so far, grouped by month so the "Invoices → customer → month"
-// sentence from the meerwerk pages lands somewhere literal.
+// bottom as one story: where you stand, what is due now (one primary
+// action per row), what will not reach the invoice (the billing-month
+// guard, folded with its count), and every invoice made so far,
+// grouped by month so the "Invoices → customer → month" sentence from
+// the meerwerk pages lands somewhere literal.
+//
+// P-11 D (§D.22 items 1-3, 6-7) — the four fact tiles and the status
+// tile row became ONE tab strip with counts (Due now · Drafts ·
+// Issued · Sent · All), the tab in the address (?tab=) like the Extra
+// work page, one purpose sentence per tab. Due now shows the due
+// table; every other tab shows the invoice list narrowed to that
+// status (a reversal is a flag on a row, not a status — no Reversed
+// tab). One next-step button per row, sharing the detail banner's
+// words; the list never sends — every button opens the detail.
 //
 // Driven by the Phase-4a invoice REST surface:
 //   * GET /api/invoices/due/      the due rows (one per scheduled customer)
@@ -61,7 +70,6 @@ import {
   PdfPreviewDialog,
   type PdfPreviewDialogHandle,
 } from "../components/PdfPreviewDialog";
-import { StatusTiles } from "../components/StatusTiles";
 import { useToast } from "../components/ToastProvider";
 import { monthName } from "../lib/billingSentence";
 import { customerLabelName } from "../lib/customerLabelName";
@@ -72,7 +80,54 @@ import {
   formatMoney,
 } from "../lib/intl";
 
-type StatusFilter = InvoiceStatus | "";
+// P-11 D (§D.22 item 2) — the ONE ordered tab list; every consumer
+// (the strip, the labels, the purposes, the counts) iterates or
+// indexes it, so a new tab fails compilation instead of landing in no
+// strip (the Sprint 126/130 lesson).
+const FACTUREN_TABS = ["due", "drafts", "issued", "sent", "all"] as const;
+type FacturenTab = (typeof FACTUREN_TABS)[number];
+
+const TAB_LABEL_KEY: Record<FacturenTab, string> = {
+  due: "invoices:tabs.due",
+  drafts: "invoices:tabs.drafts",
+  issued: "invoices:tabs.issued",
+  sent: "invoices:tabs.sent",
+  all: "invoices:tabs.all",
+};
+
+const TAB_PURPOSE_KEY: Record<FacturenTab, string> = {
+  due: "invoices:tabs.due_purpose",
+  drafts: "invoices:tabs.drafts_purpose",
+  issued: "invoices:tabs.issued_purpose",
+  sent: "invoices:tabs.sent_purpose",
+  all: "invoices:tabs.all_purpose",
+};
+
+/** The invoice status one tab narrows the list to; null narrows
+ *  nothing ("all" shows every status, "due" shows the due table
+ *  instead of the list). */
+const TAB_STATUS: Record<FacturenTab, InvoiceStatus | null> = {
+  due: null,
+  drafts: "DRAFT",
+  issued: "ISSUED",
+  sent: "SENT",
+  all: null,
+};
+
+// P-11 D (§D.22 item 7) — ONE next-step button per row, the invoice's
+// own next move, sharing the detail banner's words. The list never
+// sends: every button opens the detail, where the real action lives.
+const NEXT_STEP_KEY: Record<InvoiceStatus, string> = {
+  DRAFT: "invoice_detail.action_issue",
+  ISSUED: "invoice_detail.action_send",
+  SENT: "invoices:list.open",
+};
+
+function parseFacturenTab(value: string | null): FacturenTab | null {
+  return value !== null && (FACTUREN_TABS as readonly string[]).includes(value)
+    ? (value as FacturenTab)
+    : null;
+}
 
 // WP-1 G4 — human words for the guard's machine stages.
 const AT_RISK_STAGE_KEYS: Record<AtRiskStage, string> = {
@@ -253,7 +308,7 @@ export function FacturenPage({
   // P-6 V1 — the "Invoices → customer → month" sentence on the meerwerk
   // pages links here with `?customer=<id>&period=YYYY-MM`; the page opens
   // on exactly that customer and month.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [dueRows, setDueRows] = useState<InvoiceDueRow[]>([]);
   const [dueLoading, setDueLoading] = useState(true);
@@ -265,9 +320,8 @@ export function FacturenPage({
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // List filters. customer (pinned) + period narrow server-side; status,
+  // List filters. customer (pinned) + period narrow server-side;
   // building and the search narrow client-side over the loaded set.
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("");
   const [periodMonth, setPeriodMonth] = useState(() => {
     const fromUrl = embedded ? null : searchParams.get("period");
     return fromUrl && parseMonth(fromUrl) ? fromUrl : "";
@@ -278,6 +332,22 @@ export function FacturenPage({
   });
   const [buildingFilter, setBuildingFilter] = useState("ALL");
   const [search, setSearch] = useState("");
+
+  // P-11 D — the tab, the Extra work way: the address is the source
+  // (?tab=, read at mount and on every change) so a reload and "Back"
+  // land where the person was. The meerwerk deep links (?customer= /
+  // ?period=) point at the LIST, so without a named tab they open on
+  // All; everyone else opens on Due now, the tab with work to do.
+  const urlTab = parseFacturenTab(searchParams.get("tab"));
+  const deepLinkedToList =
+    !embedded && (searchParams.has("customer") || searchParams.has("period"));
+  const activeTab: FacturenTab = urlTab ?? (deepLinkedToList ? "all" : "due");
+
+  function selectTab(next: FacturenTab) {
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", next);
+    setSearchParams(params);
+  }
 
   // Generate control — opened from a due row; a single inline panel.
   const [genRow, setGenRow] = useState<InvoiceDueRow | null>(null);
@@ -407,7 +477,7 @@ export function FacturenPage({
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [invoices]);
 
-  // Everything but the status tile — the tiles count within this set.
+  // Everything but the status tab — the tabs count within this set.
   const baseVisible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return invoices.filter((inv) => {
@@ -438,9 +508,12 @@ export function FacturenPage({
     return counts;
   }, [baseVisible]);
 
+  // P-11 D — the tab IS the status narrowing (the All and Due now tabs
+  // narrow nothing; Due now renders the due table, not this list).
+  const tabStatus = TAB_STATUS[activeTab];
   const visibleInvoices = useMemo(
-    () => (statusFilter === "" ? baseVisible : baseVisible.filter((inv) => inv.status === statusFilter)),
-    [baseVisible, statusFilter],
+    () => (tabStatus === null ? baseVisible : baseVisible.filter((inv) => inv.status === tabStatus)),
+    [baseVisible, tabStatus],
   );
 
   // Grouped by billing month, newest first; invoices without a period
@@ -494,22 +567,27 @@ export function FacturenPage({
     return chips;
   }, [period, customerScoped, customerFilter, customerOptions, buildingFilter, buildingOptions, t]);
 
-  const anyFilter = activeFilterChips.length > 0 || search.trim() !== "" || statusFilter !== "";
+  const anyFilter = activeFilterChips.length > 0 || search.trim() !== "";
 
   function clearFilters() {
     setPeriodMonth("");
     setCustomerFilter("ALL");
     setBuildingFilter("ALL");
     setSearch("");
-    setStatusFilter("");
   }
 
-  // The four facts.
+  // P-11 D — the tab counts, client-side over the loaded sets: the
+  // list is exhaustive (Sprint 120), and the due count is today's
+  // "ready for a draft" fact from the due rows.
   const dueNowRows = dueRows.filter((row) => row.unbilled_count > 0);
-  const dueNowTotal = sumAmounts(dueNowRows.map((row) => row.unbilled_total));
-  const draftRows = invoices.filter((inv) => inv.status === "DRAFT");
-  const issuedRows = invoices.filter((inv) => inv.status === "ISSUED");
   const atRiskCount = atRiskGroups.reduce((total, group) => total + group.rows.length, 0);
+  const tabCounts: Record<FacturenTab, number> = {
+    due: dueNowRows.length,
+    drafts: statusCounts.DRAFT,
+    issued: statusCounts.ISSUED,
+    sent: statusCounts.SENT,
+    all: baseVisible.length,
+  };
 
   function openGenerate(row: InvoiceDueRow) {
     setGenRow(row);
@@ -630,73 +708,45 @@ export function FacturenPage({
         </div>
       )}
 
-      {/* ---- Where you stand: four facts ---- */}
-      <div className="facts" data-testid="facturen-facts">
-        <div className="ew-ctx-block" data-testid="facturen-fact-due">
-          <div className="ew-ctx-label">{t("facturen.fact_due_label")}</div>
-          <div className="ew-ctx-body">
-            <div className={dueNowRows.length > 0 ? "ew-ctx-strong ew-ctx-money" : "ew-ctx-strong"}>
-              {dueLoading
-                ? "…"
-                : dueNowRows.length > 0
-                  ? t("facturen.fact_due_value", { count: dueNowRows.length })
-                  : t("facturen.fact_due_none")}
-            </div>
-            <div className="ew-ctx-sub">
-              {dueLoading
-                ? ""
-                : dueNowRows.length > 0
-                  ? t("facturen.fact_due_sub", { amount: formatMoney(dueNowTotal) })
-                  : t("facturen.fact_due_sub_none")}
-            </div>
-          </div>
-        </div>
-        <div className="ew-ctx-block" data-testid="facturen-fact-drafts">
-          <div className="ew-ctx-label">{t("facturen.fact_drafts_label")}</div>
-          <div className="ew-ctx-body">
-            <div className="ew-ctx-strong">
-              {loading
-                ? "…"
-                : draftRows.length > 0
-                  ? t("facturen.fact_drafts_value", { count: draftRows.length })
-                  : t("facturen.fact_drafts_none")}
-            </div>
-            <div className="ew-ctx-sub">
-              {!loading && draftRows.length > 0
-                ? `${formatMoney(sumAmounts(draftRows.map((row) => row.total_amount)))} · ${t("facturen.fact_drafts_sub")}`
-                : ""}
-            </div>
-          </div>
-        </div>
-        <div className="ew-ctx-block" data-testid="facturen-fact-issued">
-          <div className="ew-ctx-label">{t("facturen.fact_issued_label")}</div>
-          <div className="ew-ctx-body">
-            <div className="ew-ctx-strong">
-              {loading
-                ? "…"
-                : issuedRows.length > 0
-                  ? t("facturen.fact_issued_value", { count: issuedRows.length })
-                  : t("facturen.fact_issued_none")}
-            </div>
-            <div className="ew-ctx-sub">
-              {!loading && issuedRows.length > 0 ? t("facturen.fact_issued_sub") : ""}
-            </div>
-          </div>
-        </div>
-        <div className="ew-ctx-block" data-testid="facturen-fact-risk">
-          <div className="ew-ctx-label">{t("facturen.fact_risk_label")}</div>
-          <div className="ew-ctx-body">
-            <div className={atRiskCount > 0 ? "ew-ctx-strong ew-ctx-unpriced" : "ew-ctx-strong"}>
-              {atRiskCount > 0
-                ? t("facturen.fact_risk_value", { count: atRiskCount })
-                : t("facturen.fact_risk_none")}
-            </div>
-            <div className="ew-ctx-sub">{atRiskCount > 0 ? t("facturen.fact_risk_sub") : ""}</div>
-          </div>
-        </div>
+      {/* P-11 D (§D.22 items 2-3) — ONE tab strip with counts, the tab
+          in the address; one purpose sentence per tab under it. */}
+      <div
+        className="customer-tabs ew-tabs facturen-tabs"
+        role="tablist"
+        aria-label={t("facturen.title")}
+        data-testid="facturen-tabs"
+      >
+        {FACTUREN_TABS.map((key) => {
+          const active = key === activeTab;
+          const counting = key === "due" ? dueLoading : loading;
+          return (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className={`customer-tab${active ? " active" : ""}`}
+              onClick={() => selectTab(key)}
+              data-testid={`facturen-tab-${key}`}
+              data-count={tabCounts[key]}
+            >
+              {t(TAB_LABEL_KEY[key])}
+              <span className="ew-tab-count" data-testid={`facturen-tab-count-${key}`}>
+                {counting ? "…" : tabCounts[key]}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* ---- Due panel ---- */}
+      <div className="ew-tab-head">
+        <p className="section-head-sub ew-tab-purpose" data-testid="facturen-tab-purpose">
+          {t(TAB_PURPOSE_KEY[activeTab])}
+        </p>
+      </div>
+
+      {/* ---- Due panel — the Due now tab ---- */}
+      {activeTab === "due" && (
       <section
         className="card"
         style={{ padding: 16, marginBottom: 16 }}
@@ -728,6 +778,7 @@ export function FacturenPage({
             )}
           </p>
         ) : (
+          <>
           <div style={{ overflowX: "auto" }}>
             <table className="data-table" data-testid="facturen-due-table">
               <thead>
@@ -828,6 +879,11 @@ export function FacturenPage({
               </tbody>
             </table>
           </div>
+          {/* P-11 D item 3 — what a draft is, said once under the table. */}
+          <p className="muted small" style={{ margin: "8px 0 0" }} data-testid="facturen-draft-hint">
+            {t("invoices:due.draft_hint")}
+          </p>
+          </>
         )}
 
         {/* Sprint 182 §2 — the preview panel. Creates nothing. */}
@@ -989,6 +1045,7 @@ export function FacturenPage({
           </div>
         )}
       </section>
+      )}
 
       {/* ---- WP-1 G4: the billing-month guard, folded with its count ---- */}
       {atRiskGroups.length === 0 ? (
@@ -1050,28 +1107,19 @@ export function FacturenPage({
         </details>
       )}
 
-      {/* ---- Invoice list ---- */}
+      {/* ---- Invoice list — the status tabs and All ---- */}
+      {activeTab !== "due" && (
       <section className="card" style={{ padding: 16 }} data-testid="facturen-list-card">
         <div className="section-head" style={{ marginBottom: 10 }}>
           <div>
-            <div className="section-head-title">{t("facturen.list_title")}</div>
+            <div className="section-head-title">
+              {activeTab === "all" ? t("facturen.list_title") : t(TAB_LABEL_KEY[activeTab])}
+            </div>
             <div className="section-head-sub">
               {loading ? "" : t("facturen.list_count", { count: visibleInvoices.length })}
             </div>
           </div>
         </div>
-
-        <StatusTiles
-          tiles={(["DRAFT", "ISSUED", "SENT"] as InvoiceStatus[]).map((status) => ({
-            value: status,
-            label: t(STATUS_LABEL_KEY[status]),
-            count: statusCounts[status],
-          }))}
-          active={statusFilter}
-          onChange={(value) => setStatusFilter(value as StatusFilter)}
-          totalCount={baseVisible.length}
-          testIdPrefix="facturen-status"
-        />
 
         <div className="ew-list-filters" style={{ marginTop: 12 }} data-testid="facturen-filters">
           <div className="filter-field search">
@@ -1160,6 +1208,15 @@ export function FacturenPage({
             description={t("facturen.list_empty_desc")}
             testId="facturen-list-empty"
           />
+        ) : visibleInvoices.length === 0 && !anyFilter ? (
+          /* P-11 D — a tab with no rows and no filters says so plainly;
+             a "change the filters" hint would be false here. */
+          <EmptyState
+            icon={BadgeEuro}
+            title={t("invoices:tabs.empty_title")}
+            compact
+            testId="facturen-tab-empty"
+          />
         ) : visibleInvoices.length === 0 ? (
           <EmptyState
             icon={BadgeEuro}
@@ -1189,7 +1246,7 @@ export function FacturenPage({
                   {!customerScoped && <th>{t("facturen.col_customer")}</th>}
                   {showBuildingColumn && <th>{t("facturen.col_building")}</th>}
                   {showGroupLabelColumn && <th>{t("facturen.col_department_work_type")}</th>}
-                  <th>{t("facturen.col_status")}</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -1202,6 +1259,7 @@ export function FacturenPage({
                     canOpenCustomer={canOpenCustomer}
                     showBuildingColumn={showBuildingColumn}
                     showGroupLabelColumn={showGroupLabelColumn}
+                    showStatus={activeTab === "all"}
                     t={t}
                   />
                 ))}
@@ -1210,6 +1268,7 @@ export function FacturenPage({
           </BoundedList>
         )}
       </section>
+      )}
 
       {/* W17 — always mounted, opened through the ref only. */}
       <PdfPreviewDialog ref={previewPdfRef} withDownload={false} />
@@ -1224,6 +1283,7 @@ function GroupRows({
   canOpenCustomer,
   showBuildingColumn,
   showGroupLabelColumn,
+  showStatus,
   t,
 }: {
   group: InvoiceGroup;
@@ -1232,6 +1292,9 @@ function GroupRows({
   canOpenCustomer: boolean;
   showBuildingColumn: boolean;
   showGroupLabelColumn: boolean;
+  /** P-11 D — only the All tab mixes statuses; on a status tab the tab
+   *  itself is the status, so the pill would repeat the strip. */
+  showStatus: boolean;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
   return (
@@ -1252,6 +1315,25 @@ function GroupRows({
               <Link to={`/invoices/${inv.id}`} className="link" onClick={(e) => e.stopPropagation()}>
                 {inv.number ?? t("facturen.concept")}
               </Link>
+              {/* P-11 D — the All tab is the one place statuses mix, so
+                  the status word rides beside the number there (a
+                  status tab already says it in the strip). */}
+              {showStatus && (
+                <span
+                  className={
+                    unsentCredit
+                      ? "cell-tag cell-tag-warn"
+                      : inv.status === "SENT"
+                        ? "cell-tag cell-tag-open"
+                        : "cell-tag cell-tag-closed"
+                  }
+                  style={{ marginLeft: 8 }}
+                  data-testid="facturen-list-status"
+                >
+                  <i />
+                  {unsentCredit ? t("facturen.credit_note_unsent") : t(STATUS_LABEL_KEY[inv.status])}
+                </span>
+              )}
               {inv.is_reversal && (
                 <span className="muted small" style={{ marginLeft: 6 }}>({t("facturen.credit_note")})</span>
               )}
@@ -1260,9 +1342,11 @@ function GroupRows({
                   ({t("facturen.credited_by", { number: inv.credited_by_number })})
                 </span>
               )}
+              {/* P-11 D item 3 — the creator e-mail left the list row
+                  (dev noise); the detail page keeps its created-by line. */}
               <div className="muted small">
                 {inv.number === null ? `${t("facturen.concept_number_hint")} · ` : ""}
-                {inv.company_name} · {inv.created_by_label || t("invoices:created_by.system")}
+                {inv.company_name}
               </div>
             </td>
             <td style={{ textAlign: "right" }}>
@@ -1299,20 +1383,18 @@ function GroupRows({
                 )}
               </td>
             )}
-            <td>
-              <span
-                className={
-                  unsentCredit
-                    ? "cell-tag cell-tag-warn"
-                    : inv.status === "SENT"
-                      ? "cell-tag cell-tag-open"
-                      : "cell-tag cell-tag-closed"
-                }
-                data-testid="facturen-list-status"
+            {/* P-11 D (§D.22 item 7) — ONE next-step button, the
+                detail banner's words; it opens the detail, where the
+                real action (issue, send) lives. Never sends here. */}
+            <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+              <Link
+                to={`/invoices/${inv.id}`}
+                className="btn btn-secondary btn-sm"
+                onClick={(e) => e.stopPropagation()}
+                data-testid="facturen-row-next"
               >
-                <i />
-                {unsentCredit ? t("facturen.credit_note_unsent") : t(STATUS_LABEL_KEY[inv.status])}
-              </span>
+                {t(NEXT_STEP_KEY[inv.status])}
+              </Link>
             </td>
           </ClickableRow>
         );

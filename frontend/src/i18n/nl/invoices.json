@@ -18,5 +18,18 @@
   "nothing.not_in_period": "{{count}} afgerond, maar hun factuurdatum valt in een latere periode.",
   "nothing.heading": "Niets te factureren",
   "created_by.system": "Systeem",
-  "created_by.label": "Aangemaakt door"
+  "created_by.label": "Aangemaakt door",
+  "tabs.due": "Nu te factureren",
+  "tabs.drafts": "Concepten",
+  "tabs.issued": "Uitgegeven",
+  "tabs.sent": "Verzonden",
+  "tabs.all": "Alle",
+  "tabs.due_purpose": "Afgerond werk en vaste periodes die klaarstaan voor een concept.",
+  "tabs.drafts_purpose": "Concepten die u nog kunt veranderen — controleer ze en geef ze uit.",
+  "tabs.issued_purpose": "Uitgegeven, nog niet verzonden — de klant ziet deze nog niet.",
+  "tabs.sent_purpose": "Verzonden naar de klant — deze veranderen niet meer.",
+  "tabs.all_purpose": "Alle facturen bij elkaar, van concept tot verzonden.",
+  "tabs.empty_title": "Hier staat nu niets",
+  "due.draft_hint": "Een concept kan nog veranderen. Het factuurnummer wordt gegeven bij het versturen.",
+  "list.open": "Openen"
 }

@@ -17085,3 +17085,17 @@ form.card + .form-fold { margin-top: 16px; }
 .pricing-row-why { margin: 0 0 0 auto; color: var(--amber); font-size: 13px; font-weight: 600; }
 /* P-10 C4 — the period empty state is one line with one link in it. */
 .tickets-tab-empty-line { margin: 0; }
+
+/* P-11 D — the Facturen tab strip: the People page's `.customer-tabs`
+   row rendered as buttons (the tab is `?tab=` page state, not a
+   route), the Extra work page's count pill beside each label. The
+   reset undoes the browser's button chrome; the active underline is
+   restated because this later rule ties `.customer-tab.active` on
+   specificity and would otherwise win by file order. */
+.facturen-tabs .customer-tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.facturen-tabs .customer-tab.active { border-bottom-color: var(--green); }
