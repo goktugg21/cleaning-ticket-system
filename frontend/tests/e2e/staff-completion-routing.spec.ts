@@ -145,7 +145,7 @@ async function seedInProgressTicketForAhmet(
         "Seeded by staff-completion-routing.spec.ts — a plain ticket with no evidence requirements.",
       building: buildingId,
       customer: customerId,
-      priority: "MEDIUM",
+      priority: "NORMAL",
     },
   });
   expect(create.status(), await create.text()).toBe(201);
