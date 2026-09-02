@@ -19,6 +19,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  announceDone,
+  safeSessionStorage,
+} from "./guide/doneBannerStore";
 import { FileText, Plus, RefreshCw, X } from "lucide-react";
 
 import { getApiError } from "../api/client";
@@ -763,6 +767,25 @@ export function ProposalBuilder({
     void run(async () => {
       await transitionProposal(ewId, proposal.id, { to_status: "SENT" });
       sendDialogRef.current?.close();
+      // P-12 F2 (§D.24 rule 4) — the ceremony ANSWERS: what happened,
+      // what did not, and the next step. Written to the request's
+      // banner slot; when the send auto-starts and the page redirects
+      // to the spawned ticket, the detail page relays it there.
+      announceDone(
+        safeSessionStorage(),
+        `ew-${ewId}`,
+        noCustomerApproval
+          ? {
+              title: t("extra_work:proposal.banner_started_title"),
+              body: t("extra_work:proposal.banner_started_body"),
+            }
+          : {
+              title: t("extra_work:proposal.banner_sent_title"),
+              body: t("extra_work:proposal.banner_sent_body"),
+              actionLabel: t("extra_work:proposal.banner_sent_action"),
+              actionTo: "/extra-work/with-customer",
+            },
+      );
     });
   const approve = () => {
     if (isProvider) {

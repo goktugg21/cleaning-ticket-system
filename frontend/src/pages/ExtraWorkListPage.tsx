@@ -52,6 +52,7 @@ import { getApiError } from "../api/client";
 import { describeExtraWorkRefusal } from "../lib/extraWorkRefusal";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
+import { StartHere } from "../components/guide/StartHere";
 import { ChoiceDialog } from "../components/ChoiceDialog";
 import { EditModeToggle } from "../components/EditModeToggle";
 import { BulkPlanDialog } from "../components/extra-work/BulkPlanDialog";
@@ -563,23 +564,39 @@ export function ExtraWorkList({
   const tabRows = rows.filter((row) => bucketOf(row) === activeBucket);
 
   const needle = searchInput.trim().toLowerCase();
-  const visibleRows = tabRows.filter((row) => {
-    if (!subChipMatches(activeChip, row)) return false;
-    if (plannedFilter !== "ALL") {
-      const planned = Boolean(row.provider_planned_date);
-      if (plannedFilter === "PLANNED" ? !planned : planned) return false;
-    }
-    // P-11 A5 — the ONE search predicate, shared with the cross-tab
-    // line below so the two cannot disagree.
-    if (needle && !searchMatches(row, needle)) return false;
-    return true;
-  });
+  const urgencyRank = (row: ExtraWorkRequestList) =>
+    row.urgency === "URGENT" ? 0 : row.urgency === "HIGH" ? 1 : 2;
+  // P-12 F1 — urgent work sorts to the TOP of every tab; inside each
+  // urgency group the order stays as it was (a stable sort over the
+  // server's newest-first). The red badge on the title says why a row
+  // jumped the queue.
+  const visibleRows = tabRows
+    .filter((row) => {
+      if (!subChipMatches(activeChip, row)) return false;
+      if (plannedFilter !== "ALL") {
+        const planned = Boolean(row.provider_planned_date);
+        if (plannedFilter === "PLANNED" ? !planned : planned) return false;
+      }
+      // P-11 A5 — the ONE search predicate, shared with the cross-tab
+      // line below so the two cannot disagree.
+      if (needle && !searchMatches(row, needle)) return false;
+      return true;
+    })
+    .sort((a, b) => urgencyRank(a) - urgencyRank(b));
 
   // P-11 A5 — search searches the tab you are in; matches elsewhere are
   // one line under the results, opened on demand. The rows are already
   // all in memory (`listAllExtraWork` pages everything), so this costs
   // no request.
   const elsewhereMatches = otherTabMatches(rows, activeBucket, needle);
+
+  // P-12 F1 (§D.24 rule 2) — the tab's ONE thing waiting: its urgent
+  // rows, the oldest named with how long it has waited.
+  const urgentRows = tabRows
+    .filter((row) => row.urgency === "URGENT")
+    .sort((a, b) => (a.requested_at < b.requested_at ? -1 : 1));
+  const urgentOldest = urgentRows[0] ?? null;
+  const urgentAge = urgentOldest ? daysSince(urgentOldest.requested_at, today) : null;
 
   // ---- money line ------------------------------------------------------
   // ONE line per tab, from the loaded rows of that tab, through
@@ -770,6 +787,17 @@ export function ExtraWorkList({
   const cellWhat = (row: ExtraWorkRequestList, sub: ReactNode) => (
     <td className="td-subject" key="what">
       <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
+      {/* P-12 F1 — why this row sits on top. */}
+      {row.urgency === "URGENT" && (
+        <span
+          className="cell-tag cell-tag-rejected"
+          style={{ marginLeft: 8 }}
+          data-testid={`extra-work-urgent-${row.id}`}
+        >
+          <i />
+          {t("list.urgent_badge")}
+        </span>
+      )}
       <div className="muted small ew-cell-sub">{sub}</div>
     </td>
   );
@@ -1174,6 +1202,23 @@ export function ExtraWorkList({
             },
           ]}
         />
+      )}
+
+      {/* P-12 F1 (§D.24 rule 2) — the urgent work first, named. */}
+      {!viewCancelled && !loading && urgentOldest && (
+        <StartHere
+          testId="extra-work-start-here"
+          action={{
+            label: t("list.start_urgent_action"),
+            to: `/extra-work/${urgentOldest.id}`,
+          }}
+        >
+          {t("list.start_urgent", {
+            count: urgentRows.length,
+            title: urgentOldest.title,
+            days: urgentAge ?? 0,
+          })}
+        </StartHere>
       )}
 
       {/* The tab strip: the People page's `.customer-tabs`, one count

@@ -102,13 +102,20 @@ import { PlanSummary } from "../components/extra-work/PlanSummary";
 import { ExtraWorkContextHeader } from "../components/extra-work/ExtraWorkContextHeader";
 import { MeerwerkTimeline } from "../components/extra-work/MeerwerkTimeline";
 import { PhaseBanner } from "../components/customer/PhaseBadge";
+import { DoneBanner } from "../components/guide/DoneBanner";
+import { useDoneBanner } from "../components/guide/useDoneBanner";
+import {
+  announceDone,
+  safeSessionStorage,
+  takeDone,
+} from "../components/guide/doneBannerStore";
 import { DueChipCore } from "../components/workplan/WorkPlanCard";
 import { resolveNextStep } from "../components/extra-work/nextStep";
 import { HOURS_PANEL_MODE } from "../components/extra-work/hoursPanelMode";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import type { PlanFocus } from "../components/extra-work/PlanWorkDialog";
 import { rowAmounts } from "../lib/billing";
-import { billingMonthWords, invoicesDestination, monthName } from "../lib/billingSentence";
+import { billingMonthWords, invoicesDestination, monthName, hoursSavedMessage } from "../lib/billingSentence";
 import {
   canSeeExtraWorkStaffing,
   isCustomerUser,
@@ -1028,6 +1035,7 @@ export function ExtraWorkDetailPage() {
   // A failed ACTION on a record that is right here. Renders as an
   // alert above the content; the record stays on screen.
   const [actionError, setActionError] = useState("");
+  const ewDone = useDoneBanner(`ew-${id}`);
   // P-8R A3 — the refusal's KIND and where it was pressed, so the
   // sentence renders AT the acting control, with its door (complete the
   // plan / give a reason), and scrolls into view.
@@ -1794,12 +1802,21 @@ export function ExtraWorkDetailPage() {
   // card on the job page holds what this page was reopened for.
   // Customers are never redirected — their surfaces stay the request.
   if (isProvider && ew.spawned_tickets.length >= 1) {
+    const bd_of = (row: { scheduled_start_at: string | null }) =>
+      row.scheduled_start_at ?? "9999-12-31T23:59:59Z";
     const earliest = [...ew.spawned_tickets].sort((a, b) => {
-      const ad = a.scheduled_start_at ?? "9999-12-31T23:59:59Z";
-      const bd = b.scheduled_start_at ?? "9999-12-31T23:59:59Z";
+      const ad = bd_of(a);
+      const bd = bd_of(b);
       if (ad !== bd) return ad < bd ? -1 : 1;
       return a.id - b.id;
     })[0];
+    // P-12 F2 — a Done banner announced on THIS request (price-and-
+    // start, start-the-work) would never be seen here: the page
+    // redirects. Relay it to the ticket the person lands on.
+    const pending = takeDone(safeSessionStorage(), `ew-${ew.id}`);
+    if (pending) {
+      announceDone(safeSessionStorage(), `ticket-${earliest.id}`, pending);
+    }
     return <Navigate replace to={`/tickets/${earliest.id}`} />;
   }
 
@@ -2166,6 +2183,9 @@ export function ExtraWorkDetailPage() {
     }
   }
 
+  // P-12 F2 — the request's Done banner slot (§D.24 rule 4).
+  // Announced by the pricing ceremonies and the transitions below;
+  // the spawned-redirect branch above relays it to the ticket.
   async function handleTransition(
     target: ExtraWorkStatus,
     at: "banner" | "actions" = "banner",
@@ -2189,6 +2209,22 @@ export function ExtraWorkDetailPage() {
         pushToast({
           variant: "success",
           title: t("detail.complete_toast", { title: updated.title }),
+        });
+      }
+      // P-12 F2 — starting the work answers with the banner (on this
+      // page, or relayed onto the spawned ticket by the redirect).
+      if (target === "IN_PROGRESS" || target === "CUSTOMER_APPROVED") {
+        announceDone(safeSessionStorage(), `ew-${updated.id}`, {
+          title: t(
+            target === "IN_PROGRESS"
+              ? "detail.banner_started_title"
+              : "detail.banner_approved_title",
+          ),
+          body: t(
+            target === "IN_PROGRESS"
+              ? "detail.banner_started_body"
+              : "detail.banner_approved_body",
+          ),
         });
       }
     } catch (err) {
@@ -3034,6 +3070,13 @@ export function ExtraWorkDetailPage() {
           that stood in the context header — request status, ticket
           status, urgency, labels at equal weight — is gone; the raw
           values live behind Geavanceerd. */}
+      {ewDone.done && (
+        <DoneBanner
+          done={ewDone.done}
+          onDismiss={ewDone.dismiss}
+          testId="extra-work-done"
+        />
+      )}
       <PhaseBanner
         kind="ew"
         phase={ew.display_phase}
@@ -3540,6 +3583,20 @@ export function ExtraWorkDetailPage() {
                                 customer: ew.customer_name,
                               },
                             )}
+                          {ew.customer_invoice_day != null && (
+                              <span data-testid="extra-work-invoice-day">
+                                {" "}
+                                {t("billing.customer_invoice_day", {
+                                  customer: ew.customer_name,
+                                  day:
+                                    ew.customer_invoice_day === "LAST_OF_MONTH"
+                                      ? t("common:facturatie.day_last")
+                                      : t("common:facturatie.day_of_month", {
+                                          day: ew.customer_invoice_day,
+                                        }),
+                                })}
+                              </span>
+                            )}
                           </p>
                           {billingError && (
                             <div className="alert-error" style={{ marginTop: 8 }}>
@@ -3980,15 +4037,10 @@ export function ExtraWorkDetailPage() {
                   : "billing.save_consequence_completion",
                 { customer: ew.customer_name, month: billingMonthWords(ew, t) },
               )}
-              // P-4 (Part C) — the save answers with the amount and the
-              // destination: "€424 saved. You will find it under
-              // Invoices → B Amsterdam → December, as unbilled work."
+              // P-12 D6 — the save answers with the amount, whose next
+              // invoice it feeds and on which day, and where to see it.
               successMessage={(detail) =>
-                t("billing.hours_saved_where", {
-                  amount: formatMoney(rowAmounts(detail).total),
-                  customer: detail.customer_name,
-                  month: billingMonthWords(detail, t),
-                })
+                hoursSavedMessage(detail, formatMoney(rowAmounts(detail).total), t)
               }
               onUpdated={(detail) => {
                 setEw(detail);

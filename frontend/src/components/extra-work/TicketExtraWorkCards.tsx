@@ -48,7 +48,7 @@ import type {
 } from "../../api/types";
 import { isPriced, rowAmounts } from "../../lib/billing";
 import { formatDate, formatMoney, formatNumber } from "../../lib/intl";
-import { billingMonthWords, invoicesDestination, monthName } from "../../lib/billingSentence";
+import { billingMonthWords, invoicesDestination, monthName, hoursSavedMessage } from "../../lib/billingSentence";
 import { CollapsibleCard } from "../CollapsibleCard";
 import { PdfPreviewDialog } from "../PdfPreviewDialog";
 import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
@@ -459,13 +459,9 @@ export function TicketExtraWorkCards({
             // the ONE rule, over the refreshed detail) and the month it
             // bills in. No new fetch — everything is in the response.
             successMessage={(detail) =>
-              // P-4 (Part C) — the amount and where it will be found,
-              // the same sentence the meerwerk page gives.
-              t("extra_work:billing.hours_saved_where", {
-                amount: formatMoney(rowAmounts(detail).total),
-                customer: detail.customer_name,
-                month: billingMonthWords(detail, t),
-              })
+              // P-12 D6 — the amount, whose next invoice it feeds and
+              // on which day, and where to see it (one shared owner).
+              hoursSavedMessage(detail, formatMoney(rowAmounts(detail).total), t)
             }
             successPath={(detail) => invoicesDestination(detail)}
             // P-7 S4.2 — the consequence BEFORE the press, in one line.
@@ -585,6 +581,22 @@ export function TicketExtraWorkCards({
                 ? "extra_work:billing.consequence_month"
                 : "extra_work:billing.consequence_completion",
               { customer: ew.customer_name, month: billingMonthWords(ew, t) },
+            )}
+            {/* P-12 F3 (§D.24 rule 6) — the customer's own invoice
+                day, so "the next invoice" has a date on it. */}
+            {ew.customer_invoice_day != null && (
+              <span data-testid="ticket-ew-invoice-day">
+                {" "}
+                {t("extra_work:billing.customer_invoice_day", {
+                  customer: ew.customer_name,
+                  day:
+                    ew.customer_invoice_day === "LAST_OF_MONTH"
+                      ? t("common:facturatie.day_last")
+                      : t("common:facturatie.day_of_month", {
+                          day: ew.customer_invoice_day,
+                        }),
+                })}
+              </span>
             )}
           </p>
           <div className="detail-kv-row">

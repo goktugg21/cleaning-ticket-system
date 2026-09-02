@@ -908,7 +908,7 @@ export function TicketDetailPage() {
   // P-12 B4 (§D.24 rule 6, both ways) — after a report-done that wrote
   // hours, the ticket says where they went and opens the door to the
   // Hours side, routed per viewer.
-  const hoursDone = useDoneBanner(`ticket-hours-${id}`);
+  const hoursDone = useDoneBanner(`ticket-${id}`);
   const [completeHourType, setCompleteHourType] = useState<number | null>(null);
   // Only the people this VIEWER may write hours for: the timesheets
   // privacy floor lets a worker write their OWN entries only, so a
