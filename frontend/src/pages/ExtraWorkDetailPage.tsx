@@ -85,14 +85,13 @@ import {
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import { useOriginBackLink } from "../hooks/useBackLink";
-import { ActualHoursPanel } from "../components/extra-work/ActualHoursPanel";
+import { MoneyStory } from "../components/extra-work/MoneyStory";
 import {
   pointAtMissingPiece,
   useMissingPieceAnchor,
 } from "../lib/missingPiece";
 import { CoverageNotice } from "../components/extra-work/CoverageNotice";
 import {
-  actualHoursPanelKey,
   deriveActiveHourlyLines,
   selectApprovedProposal,
   type ActualHoursLine,
@@ -114,8 +113,7 @@ import { resolveNextStep } from "../components/extra-work/nextStep";
 import { HOURS_PANEL_MODE } from "../components/extra-work/hoursPanelMode";
 import { PlanWorkDialog } from "../components/extra-work/PlanWorkDialog";
 import type { PlanFocus } from "../components/extra-work/PlanWorkDialog";
-import { rowAmounts } from "../lib/billing";
-import { billingMonthWords, invoicesDestination, monthName, hoursSavedMessage } from "../lib/billingSentence";
+import { billingMonthWords, monthName } from "../lib/billingSentence";
 import {
   canSeeExtraWorkStaffing,
   isCustomerUser,
@@ -165,7 +163,7 @@ import {
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { extraWorkStatusLabelKey, ticketStatusLabelKey } from "../lib/enumLabels";
-import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
+import { formatDate, formatDateTime, formatRelative, useLocaleCode } from "../lib/intl";
 import { unitSuffix } from "../lib/unitLabel";
 import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 import { Avatar } from "../components/Avatar";
@@ -4015,43 +4013,36 @@ export function ExtraWorkDetailPage() {
                 </div>
               </div>
             )}
+          {/* P-13 B — the three-block Money story (Agreed → Worked →
+              On the invoice), the ONE component this page shares with
+              the spawned ticket's Money tab. It carries the hours
+              panel (block 2) inside, so the old standalone panel mount
+              is gone. */}
           {isProvider &&
-            activeHourlyLines.length > 0 &&
             (hoursPanelMode === "edit" || hoursPanelMode === "read_only") && (
-            <ActualHoursPanel
-              readOnly={hoursPanelMode === "read_only"}
-              key={actualHoursPanelKey(
-                approvedProposal,
-                activeHourlyLines,
-                ew.updated_at,
-              )}
-              ewId={ew.id}
-              hourlyLines={activeHourlyLines}
-              finalTotalAmount={ew.final_total_amount}
-              locked={finalAmountLocked}
-              successPath={(detail) => invoicesDestination(detail)}
-              // P-7 S4.2 — the consequence BEFORE the press, in one line.
-              consequence={t(
-                ew.invoice_date
-                  ? "billing.save_consequence_month"
-                  : "billing.save_consequence_completion",
-                { customer: ew.customer_name, month: billingMonthWords(ew, t) },
-              )}
-              // P-12 D6 — the save answers with the amount, whose next
-              // invoice it feeds and on which day, and where to see it.
-              successMessage={(detail) =>
-                hoursSavedMessage(detail, formatMoney(rowAmounts(detail).total), t)
-              }
-              onUpdated={(detail) => {
-                setEw(detail);
-                if (approvedProposalId !== null) {
-                  void reloadApprovedProposalDetail();
-                }
-              }}
-              // P-11 B3 — the "no matching line" sentence's door: land
-              // on the line-items card, lit for a moment.
-              onAddLine={() => pointAtMissingPiece("pricing-lines")}
-            />
+            <div
+              className="card"
+              style={{ marginBottom: 16 }}
+              data-testid="extra-work-money-story"
+            >
+              <div className="form-section">
+                <MoneyStory
+                  ew={ew}
+                  approvedProposal={approvedProposal}
+                  approvedProposalDetail={approvedProposalDetail}
+                  locked={finalAmountLocked}
+                  onUpdated={(detail) => {
+                    setEw(detail);
+                    if (approvedProposalId !== null) {
+                      void reloadApprovedProposalDetail();
+                    }
+                  }}
+                  // P-11 B3 — the "no matching line" sentence's door:
+                  // land on the line-items card, lit for a moment.
+                  onAddLine={() => pointAtMissingPiece("pricing-lines")}
+                />
+              </div>
+            </div>
           )}
             </>
           )}

@@ -46,24 +46,17 @@ import type {
   Proposal,
   ProposalDetail,
 } from "../../api/types";
-import { isPriced, rowAmounts } from "../../lib/billing";
-import { formatDate, formatMoney, formatNumber } from "../../lib/intl";
-import { billingMonthWords, invoicesDestination, monthName, hoursSavedMessage } from "../../lib/billingSentence";
+import { formatDate, formatNumber } from "../../lib/intl";
+import { monthName } from "../../lib/billingSentence";
 import { CollapsibleCard } from "../CollapsibleCard";
 import { PdfPreviewDialog } from "../PdfPreviewDialog";
 import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
 import { StatusBadge } from "../StatusBadge";
 import { useToast } from "../ToastProvider";
-import { ActualHoursPanel } from "./ActualHoursPanel";
-import { HOURS_PANEL_MODE } from "./hoursPanelMode";
 import { useMissingPieceAnchor } from "../../lib/missingPiece";
 import { useCurrentTicketKind } from "../../lib/currentTicketKind";
-import {
-  actualHoursPanelKey,
-  deriveActiveHourlyLines,
-  selectApprovedProposal,
-} from "./activeHourlyLines";
-import { agreedLines } from "./agreedLines";
+import { selectApprovedProposal } from "./activeHourlyLines";
+import { MoneyStory } from "./MoneyStory";
 
 // W-PLANTRUTH §4b — THE AGREEMENT CARD IS A REAL TABLE.
 //
@@ -203,45 +196,9 @@ export function TicketExtraWorkCards({
     ) : null;
   }
 
-  const amounts = rowAmounts(ew);
-  const priced = isPriced(ew);
-  const activeHourlyLines = deriveActiveHourlyLines(
-    ew,
-    approvedProposal,
-    approvedProposalDetail,
-  );
-  // W18 — hourly lines with no final amount yet: the quoted numbers are
-  // a projection. Em dash + state label, never a EUR 0,00 that reads
-  // as "costs nothing".
-  const awaitingHours =
-    activeHourlyLines.length > 0 && ew.final_total_amount === null;
-  // W21 — the THIRD money state. Same active-set precedence the backend
-  // `is_priced_expression` walks (approved proposal > INSTANT cart >
-  // legacy pricing rows), WITHOUT the hourly filter: zero lines in the
-  // whole active set means nothing was ever agreed, which is a
-  // different fact from "the agreed lines sum to zero" (a legal price)
-  // and from "hourly lines await their hours". `null` while the
-  // approved proposal's lines are still loading, so the state cannot
-  // flash on before the data that decides it.
-  const activePricedCount = approvedProposal
-    ? approvedProposalDetail
-      ? approvedProposalDetail.lines.filter((l) => l.is_approved_for_spawn)
-          .length
-      : null
-    : ew.routing_decision === "INSTANT"
-      ? ew.line_items.length
-      : ew.pricing_line_items.length;
-  const noPriceAgreed = activePricedCount === 0;
-  // P-5 (§D.2 dash ban) — an amount that cannot be stated yet is said
-  // in a word: what it is waiting for.
-  const money = (value: number) =>
-    priced && !awaitingHours && !noPriceAgreed
-      ? formatMoney(value)
-      : awaitingHours
-        ? t("ew_card_awaiting_hours_short")
-        : noPriceAgreed
-          ? t("ew_card_no_price")
-          : t("ew_card_not_priced_yet");
+  // P-13 B — the money states (awaiting hours / no price / the
+  // amounts) moved into MoneyStory, which derives them itself from the
+  // same three props this card holds.
   // Same lock the Extra Work page derives: the backend freezes the final
   // amount once any spawned operational ticket is APPROVED or CLOSED.
   const finalAmountLocked = ew.spawned_tickets.some(
@@ -259,23 +216,10 @@ export function TicketExtraWorkCards({
   // the approved proposal's agreed lines, and the day-by-day spawned
   // tickets ordered the way the redirect orders them (scheduled date,
   // undated last, id as tiebreak).
-  // W22 §3a — the Agreed table follows the SAME precedence walk the
-  // money totals follow (approved proposal > INSTANT cart > legacy
-  // pricing rows), so "Agreed" can never name a different set than the
-  // amounts under it.
-  // P-13 A (W3) — the derivation moved to `agreedLines.ts` (pure,
-  // vitest-pinned on all three paths) and the Amount column is EX VAT
-  // on every path now: the proposal branch showed `line_total` (incl)
-  // beside the cart branch's `price × qty` (ex), so €31.48 quoted read
-  // €38.09. One pair of totals (ex + incl) renders under the table.
-  const { rows: agreedRows, totals: agreedTotals } = agreedLines(
-    ew,
-    approvedProposal,
-    approvedProposalDetail,
-  );
   // W22 §3b — nothing asks twice: the Requested table exists to show
   // what the customer asked BEFORE a proposal re-priced it. With no
   // approved proposal, Agreed IS the requested cart — one table.
+  // (P-13 B — the Agreed table itself lives in MoneyStory's block 1.)
   const showRequested = approvedProposal !== null && ew.line_items.length > 0;
   const sortedSpawned = [...ew.spawned_tickets].sort((a, b) => {
     const ad = a.scheduled_start_at ?? "9999-12-31T23:59:59Z";
@@ -285,7 +229,6 @@ export function TicketExtraWorkCards({
   });
   const hasAgreement =
     showRequested ||
-    agreedRows.length > 0 ||
     (approvedProposalId !== null && canViewProposalPdf) ||
     isSeries;
   // W22 §2 — rule 6: the action renders only when the server's own list
@@ -327,10 +270,6 @@ export function TicketExtraWorkCards({
   }
 
   const storedBillingMonth = ew.invoice_date ? ew.invoice_date.slice(0, 7) : "";
-  // P-9 C5 — hours worked are entered only once the work has started;
-  // the same table the request's own page reads.
-  const hoursPanelMode = HOURS_PANEL_MODE[ew.display_phase];
-  const plannedHours = Number(ew.budget_hours ?? 0);
   const billingValue = billingDraft ?? storedBillingMonth;
 
   async function saveBillingMonth() {
@@ -398,187 +337,61 @@ export function TicketExtraWorkCards({
     >
       <div className="form-section">
         <div className="form-section-title">{t("ew_card_title")}</div>
-        {activeHourlyLines.length > 0 && hoursPanelMode === "before" && (
-          <div data-testid="extra-work-hours-before-start">
-            {plannedHours > 0 && (
-              <p style={{ margin: "0 0 4px" }} data-testid="extra-work-hours-planned">
-                {t("extra_work:detail.hours_planned_line", { hours: plannedHours })}
-              </p>
-            )}
-            <p className="muted small" style={{ margin: 0 }}>
-              {t("extra_work:detail.hours_before_start")}
-            </p>
-          </div>
-        )}
-        {activeHourlyLines.length > 0 &&
-          (hoursPanelMode === "edit" || hoursPanelMode === "read_only") && (
-          <ActualHoursPanel
-            variant="embedded"
-            readOnly={hoursPanelMode === "read_only"}
-            key={actualHoursPanelKey(
-              approvedProposal,
-              activeHourlyLines,
-              ew.updated_at,
-            )}
-            ewId={ew.id}
-            hourlyLines={activeHourlyLines}
-            finalTotalAmount={ew.final_total_amount}
-            // W22 §4 — the save answers with the card's own facts: the
-            // hours just written, the total they produced (rowAmounts,
-            // the ONE rule, over the refreshed detail) and the month it
-            // bills in. No new fetch — everything is in the response.
-            successMessage={(detail) =>
-              // P-12 D6 — the amount, whose next invoice it feeds and
-              // on which day, and where to see it (one shared owner).
-              hoursSavedMessage(detail, formatMoney(rowAmounts(detail).total), t)
+        {/* P-13 B — the three-block Money story (Agreed → Worked → On
+            the invoice), ONE component shared with the request page.
+            The billing-month editor rides in as this mount's slot. */}
+        <MoneyStory
+          ew={ew}
+          approvedProposal={approvedProposal}
+          approvedProposalDetail={approvedProposalDetail}
+          locked={finalAmountLocked}
+          onUpdated={(detail) => {
+            setEw(detail);
+            if (approvedProposalId !== null) {
+              getProposalDetail(extraWorkId, approvedProposalId)
+                .then(setApprovedProposalDetail)
+                .catch(() => {
+                  // Keep the prior detail; a transient refresh failure
+                  // must not blank the fields mid-edit.
+                });
             }
-            successPath={(detail) => invoicesDestination(detail)}
-            // P-7 S4.2 — the consequence BEFORE the press, in one line.
-            consequence={t(
-              ew.invoice_date
-                ? "extra_work:billing.save_consequence_month"
-                : "extra_work:billing.save_consequence_completion",
-              { customer: ew.customer_name, month: billingMonthWords(ew, t) },
-            )}
-            locked={finalAmountLocked}
-            // W25 — the client-side math per line is a PREVIEW. The
-            // saved subtotal comparison is only offered when these
-            // hourly lines ARE the whole active priced set, because the
-            // PATCH response carries no per-line amounts and a partial
-            // sum cannot be compared to a whole one.
-            previewCoversTotal={
-              activePricedCount !== null &&
-              activeHourlyLines.length === activePricedCount
-            }
-            finalSubtotalAmount={ew.final_subtotal_amount}
-            onUpdated={(detail) => {
-              setEw(detail);
-              if (approvedProposalId !== null) {
-                getProposalDetail(extraWorkId, approvedProposalId)
-                  .then(setApprovedProposalDetail)
-                  .catch(() => {
-                    // Keep the prior detail; a transient refresh failure
-                    // must not blank the fields mid-edit.
-                  });
-              }
-            }}
-          />
-        )}
-        <div className="detail-kv-list">
-          <div className="detail-kv-row">
-            <span className="detail-kv-label">{t("ew_card_subtotal")}</span>
-            <span className="detail-kv-val" data-testid="ticket-ew-subtotal">
-              {money(amounts.subtotal)}
-            </span>
-          </div>
-          <div className="detail-kv-row">
-            <span className="detail-kv-label">{t("ew_card_vat")}</span>
-            <span className="detail-kv-val">{money(amounts.vat)}</span>
-          </div>
-          <div className="detail-kv-row">
-            <span className="detail-kv-label">{t("ew_card_total")}</span>
-            <span className="detail-kv-val" data-testid="ticket-ew-total">
-              {/* Three states, never conflated: an agreed zero renders
-                  as EUR 0,00 with no label; an empty active set says
-                  nothing was agreed; hourly lines say what they wait
-                  for. `noPriceAgreed` wins — an empty set has no hours
-                  to await. P-6 V5.1 — the waiting state is said ONCE:
-                  the value slot carries the full sentence, not a short
-                  word beside a long one ("awaiting hours · Awaiting
-                  worked hours"). */}
-              {!noPriceAgreed && awaitingHours ? (
-                <strong className="muted" data-testid="ticket-ew-awaiting-hours">
-                  {t("ew_card_awaiting_hours")}
-                </strong>
-              ) : (
-                <strong>{money(amounts.total)}</strong>
-              )}
-              {noPriceAgreed && (
-                <span
-                  className="muted small"
-                  style={{ marginLeft: 8 }}
-                  data-testid="ticket-ew-no-price"
-                >
-                  {t("ew_card_no_price")}
-                </span>
-              )}
-            </span>
-          </div>
-          <div className="detail-kv-row">
-            <span className="detail-kv-label">
-              {t("ew_card_billing_month")}
-            </span>
-            {/* W22 §1 — the value IS the control (the request page's
-                editor, rebuilt here since the redirect closed that page
-                for providers). Empty + save = follows the completion
-                month again (invoice_date null). */}
-            <span
-              className="detail-kv-val"
-              data-testid="ticket-ew-billing-month"
-              style={{ display: "flex", gap: 8, alignItems: "center" }}
-            >
-              <input
-                type="month"
-                className="field-input"
-                style={{ minWidth: 0, flex: 1 }}
-                value={billingValue}
-                onChange={(event) => setBillingDraft(event.target.value)}
-                aria-label={t("extra_work:detail.billing_month_input_label")}
-                data-testid="ticket-ew-billing-month-input"
-              />
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                disabled={billingBusy || billingValue === storedBillingMonth}
-                onClick={() => void saveBillingMonth()}
-                data-testid="ticket-ew-billing-save"
-              >
-                {t("extra_work:detail.billing_save")}
-              </button>
-            </span>
-          </div>
-          {/* P-7 S4.1 — the sentence that names the customer and the month
-              in WORDS, here too: a spawned meerwerk's request page
-              redirects to this ticket, so this card is where the owner
-              reads it. Same keys as the request page. */}
-          <p
-            className="muted small ticket-ew-billing-sentence"
-            data-testid="ticket-ew-billing-sentence"
-          >
-            {t(
-              ew.invoice_date
-                ? "extra_work:billing.consequence_month"
-                : "extra_work:billing.consequence_completion",
-              { customer: ew.customer_name, month: billingMonthWords(ew, t) },
-            )}
-            {/* P-12 F3 (§D.24 rule 6) — the customer's own invoice
-                day, so "the next invoice" has a date on it. */}
-            {ew.customer_invoice_day != null && (
-              <span data-testid="ticket-ew-invoice-day">
-                {" "}
-                {t("extra_work:billing.customer_invoice_day", {
-                  customer: ew.customer_name,
-                  day:
-                    ew.customer_invoice_day === "LAST_OF_MONTH"
-                      ? t("common:facturatie.day_last")
-                      : t("common:facturatie.day_of_month", {
-                          day: ew.customer_invoice_day,
-                        }),
-                })}
+          }}
+          billingEditor={
+            <div className="detail-kv-row">
+              <span className="detail-kv-label">
+                {t("ew_card_billing_month")}
               </span>
-            )}
-          </p>
-          <div className="detail-kv-row">
-            <span className="detail-kv-label">{t("ew_card_invoiced")}</span>
-            <span className="detail-kv-val" data-testid="ticket-ew-invoiced">
-              {ew.is_invoiced
-                ? t("extra_work:detail.billing_invoiced_on", {
-                    date: ew.invoiced_at ? formatDate(ew.invoiced_at) : "—",
-                  })
-                : t("extra_work:detail.billing_not_invoiced")}
-            </span>
-          </div>
-        </div>
+              {/* W22 §1 — the value IS the control (the request page's
+                  editor, rebuilt here since the redirect closed that
+                  page for providers). Empty + save = follows the
+                  completion month again (invoice_date null). */}
+              <span
+                className="detail-kv-val"
+                data-testid="ticket-ew-billing-month"
+                style={{ display: "flex", gap: 8, alignItems: "center" }}
+              >
+                <input
+                  type="month"
+                  className="field-input"
+                  style={{ minWidth: 0, flex: 1 }}
+                  value={billingValue}
+                  onChange={(event) => setBillingDraft(event.target.value)}
+                  aria-label={t("extra_work:detail.billing_month_input_label")}
+                  data-testid="ticket-ew-billing-month-input"
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={billingBusy || billingValue === storedBillingMonth}
+                  onClick={() => void saveBillingMonth()}
+                  data-testid="ticket-ew-billing-save"
+                >
+                  {t("extra_work:detail.billing_save")}
+                </button>
+              </span>
+            </div>
+          }
+        />
         {/* W22 §2 — the cancel, home from the closed request page. A
             secondary action, rendered only when `allowed_next_statuses`
             offers CANCELLED to THIS viewer (rule 6). */}
@@ -671,68 +484,9 @@ export function TicketExtraWorkCards({
               </div>
             </>
           )}
-          {agreedRows.length > 0 && (
-            <>
-              <div
-                className="detail-kv-label"
-                style={showRequested ? { marginTop: 12 } : undefined}
-              >
-                {t("ew_agreement_agreed")}
-              </div>
-              <div data-testid="ticket-ew-agreed-lines">
-                <table className="ew-agreement-table">
-                  <colgroup>
-                    <col />
-                    <col className="ew-agreement-col-qty" />
-                    <col className="ew-agreement-col-amount" />
-                  </colgroup>
-                  <thead>
-                    <tr data-testid="ticket-ew-agreed-head">
-                      <th className="detail-kv-label">
-                        {t("extra_work:detail.agreement_col_service")}
-                      </th>
-                      <th className="detail-kv-label ew-agreement-num">
-                        {t("extra_work:detail.agreement_col_qty")}
-                      </th>
-                      <th className="detail-kv-label ew-agreement-num">
-                        {t("extra_work:detail.agreement_col_amount")}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {agreedRows.map((row) => (
-                      <tr key={row.id}>
-                        <td className="ew-agreement-name">{row.label}</td>
-                        <td className="ew-agreement-num">
-                          {row.quantity !== null && row.quantity !== ""
-                            ? formatNumber(row.quantity)
-                            : "—"}
-                        </td>
-                        <td className="ew-agreement-num ew-agreement-amount">
-                          {row.amount !== null ? formatMoney(row.amount) : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {/* P-13 A (W3) — one basis, said once: the column is ex
-                  VAT; the incl-VAT figure lives HERE, under the table,
-                  never mixed into the lines. */}
-              {agreedTotals && (
-                <p
-                  className="muted small ew-agreement-num"
-                  style={{ margin: "4px 0 0", textAlign: "right" }}
-                  data-testid="ticket-ew-agreed-total"
-                >
-                  {t("ew_agreement_total", {
-                    ex: formatMoney(agreedTotals.ex),
-                    incl: formatMoney(agreedTotals.incl),
-                  })}
-                </p>
-              )}
-            </>
-          )}
+          {/* P-13 B — the Agreed table moved into the Money story's
+              first block ("Agreed with the customer"); this fold keeps
+              the paper trail: the original ask, the PDF, the days. */}
           {approvedProposalId !== null && canViewProposalPdf && (
             /* W-HOURS5 Task 9 — an eye before Preview, a download glyph
                before Download, and the row pulled left by the ghost

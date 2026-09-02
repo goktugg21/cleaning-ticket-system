@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from invoicing.models import Invoice, InvoiceLine
+
 from extra_work.final_amounts import ew_has_unfinalized_hourly_lines
 from extra_work.models import (
     ExtraWorkPricingLineItem,
@@ -125,6 +127,73 @@ class LegacyActualHoursTests(_InvoiceRunFixture):
         hourly.actual_hours = Decimal("6.50")
         hourly.save(update_fields=["actual_hours", "updated_at"])
         self.assertFalse(ew_has_unfinalized_hourly_lines(ew))
+
+    def _claim_with_invoice(self, ew, *, status_value, number=None):
+        if number is None and status_value != Invoice.Status.DRAFT:
+            number = f"2026-{Invoice.objects.count() + 1:04d}"
+        invoice = Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            created_by=self.admin,
+            status=status_value,
+            number=number,
+        )
+        InvoiceLine.objects.create(
+            invoice=invoice,
+            ordering=0,
+            description=ew.title,
+            extra_work=ew,
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("100.00"),
+            vat_pct=Decimal("21.00"),
+            line_subtotal=Decimal("100.00"),
+            line_vat=Decimal("21.00"),
+            line_total=Decimal("121.00"),
+            period_year=2026,
+            period_month=8,
+        )
+        return invoice
+
+    def test_invoice_ref_says_where_the_money_is(self):
+        """P-13 B — the Money tab's third block reads {id, status,
+        number}, provider-only; a reversed claim releases it back to
+        null; a customer never receives the field at all."""
+        ew, _hourly, _fixed = self._legacy_ew()
+
+        # No claim yet.
+        resp = self._api(self.super_admin).get(DETAIL_URL.format(id=ew.id))
+        self.assertIsNone(resp.data["invoice_ref"])
+
+        draft = self._claim_with_invoice(
+            ew, status_value=Invoice.Status.DRAFT
+        )
+        resp = self._api(self.super_admin).get(DETAIL_URL.format(id=ew.id))
+        self.assertEqual(
+            resp.data["invoice_ref"],
+            {
+                "id": draft.id,
+                "status": "DRAFT",
+                "number": None,
+                "sent_at": None,
+            },
+        )
+
+        # Provider-only: the customer's payload has no such key.
+        resp = self._api(self.customer_user).get(DETAIL_URL.format(id=ew.id))
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertNotIn("invoice_ref", resp.data)
+
+        # A reversed original releases the claim.
+        Invoice.objects.create(
+            company=self.company,
+            customer=self.customer,
+            created_by=self.admin,
+            status=Invoice.Status.SENT,
+            number="2026-9999",
+            reverses=draft,
+        )
+        resp = self._api(self.super_admin).get(DETAIL_URL.format(id=ew.id))
+        self.assertIsNone(resp.data["invoice_ref"])
 
     def test_actual_hours_visible_on_both_detail_serializers(self):
         ew, hourly, _fixed = self._legacy_ew()

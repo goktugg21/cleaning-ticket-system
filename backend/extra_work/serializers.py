@@ -1418,6 +1418,19 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     # FE-2 (§D.4) — read-only by construction, per-viewer by context.
     display_phase = serializers.SerializerMethodField()
     customer_invoice_day = serializers.SerializerMethodField()
+    # P-13 B — WHERE this work's money is, on the DETAIL too: the
+    # Money tab's third block says "On draft #17" / "Sent on invoice
+    # 2026-0003" instead of the bare is_invoiced flag. The LIST has
+    # carried this since P-9 (`_p9_load_invoice_refs`); the detail
+    # reuses that loader for one row so the two shapes cannot drift.
+    # Provider-only, like the list's (the draft/issued window is
+    # billing-internal; customers meet the invoice when it is SENT, in
+    # their own invoices area).
+    invoice_ref = serializers.SerializerMethodField()
+
+    def get_invoice_ref(self, obj):
+        refs = ExtraWorkRequestListSerializer._p9_load_invoice_refs([obj.pk])
+        return refs.get(obj.pk)
     company_name = serializers.CharField(source="company.name", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -1522,6 +1535,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "customer",
             "customer_name",
             "customer_invoice_day",
+            "invoice_ref",
             "department",
             "department_name",
             "work_type",
@@ -1700,6 +1714,8 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         "invoiced_at",
         # P-12 D6 — the customer's billing day is billing-internal.
         "customer_invoice_day",
+        # P-13 B — the draft/issued window is billing-internal too.
+        "invoice_ref",
         # P-1 — which employee planned it is internal, like the crew.
         "planned_by_name",
         # W2-D — planning is a provider action end to end. A customer

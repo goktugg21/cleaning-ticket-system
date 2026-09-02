@@ -27,6 +27,8 @@ import { formatMoney } from "../../lib/intl";
 import { useToast } from "../ToastProvider";
 import type { ActualHoursLine } from "./activeHourlyLines";
 import { finiteOrNull } from "./activeHourlyLines";
+import type { OverQuoteFacts } from "./overQuote";
+import { overQuoteFacts, overQuoteNeedsConfirm } from "./overQuote";
 
 // Sprint 8A — map the actual-hours endpoint's stable 4xx `code` to an
 // i18n key. Anything unrecognised falls back to the axios-derived
@@ -106,6 +108,8 @@ export function ActualHoursPanel({
   consequence,
   readOnly = false,
   onAddLine,
+  fixedLines = [],
+  agreedExTotal = null,
 }: {
   ewId: number;
   hourlyLines: ActualHoursLine[];
@@ -153,6 +157,14 @@ export function ActualHoursPanel({
    *  caller lands the reader on its own Add-line surface. Absent, the
    *  sentence renders without a dead button (the A7 lesson). */
   onAddLine?: () => void;
+  /** P-13 B (O2) — the agreed FIXED lines, listed read-only in the
+   *  Worked block so every line the customer approved appears here,
+   *  none missing (the owner's "ff €34" was in the Agreement and
+   *  absent from the card). */
+  fixedLines?: { id: number; label: string; amount: number | null }[];
+  /** P-13 B — the agreed ex-VAT total of the WHOLE active set, the
+   *  base for the over-quote confirm's 25% threshold. */
+  agreedExTotal?: number | null;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   // The values-only layout serves both the locked case (the backend
@@ -166,6 +178,13 @@ export function ActualHoursPanel({
     ),
   );
   const [saving, setSaving] = useState(false);
+  // P-13 B — the over-quote confirm's facts, set when a save would
+  // bill notably more than the customer approved (WARN ONLY — the
+  // owner's ruling: never block, never require a new quote). Cleared
+  // by any edit; a second Save press is the confirmation.
+  const [overConfirm, setOverConfirm] = useState<OverQuoteFacts | null>(
+    null,
+  );
 
   /* P-11 B3 — the timesheet's answer for this job: what the crew
      already reported (TimeEntry job lines on this request and its
@@ -328,6 +347,26 @@ export function ActualHoursPanel({
       });
       return;
     }
+    // P-13 B — over 25% of the agreed total or over €100 MORE than
+    // the customer approved: say it and ask once. The second press
+    // saves; nothing is ever blocked.
+    if (overConfirm === null) {
+      const facts = overQuoteFacts(
+        hourlyLines.map((line) => ({
+          rate: line.rate,
+          quantity: line.quantity,
+          worked: billableQuantity(line, draft[line.id]),
+        })),
+      );
+      if (
+        facts !== null &&
+        overQuoteNeedsConfirm(facts.deltaAmount, agreedExTotal)
+      ) {
+        setOverConfirm(facts);
+        return;
+      }
+    }
+    setOverConfirm(null);
     setSaving(true);
     try {
       const detail = await submitActualHours(ewId, lines);
@@ -466,12 +505,13 @@ export function ActualHoursPanel({
                     line: line.label,
                   })}
                   value={draft[line.id] ?? ""}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    setOverConfirm(null);
                     setDraft((prev) => ({
                       ...prev,
                       [line.id]: event.target.value,
-                    }))
-                  }
+                    }));
+                  }}
                 />
                 {line.rate !== null && (
                   <span
@@ -537,6 +577,24 @@ export function ActualHoursPanel({
           );
         })
       )}
+      {/* P-13 B (O2) — the agreed FIXED lines, read-only, so the
+          Worked block lists every line the customer approved. A fixed
+          line has no hours to enter; its price is its price. */}
+      {fixedLines.length > 0 && (
+        <div className="detail-kv-list" data-testid="extra-work-fixed-lines">
+          {fixedLines.map((line) => (
+            <div key={line.id} className="detail-kv-row">
+              <span className="detail-kv-label">{line.label}</span>
+              <span className="detail-kv-val">
+                <span className="muted small" style={{ marginRight: 6 }}>
+                  {t("detail.fixed_price_tag")}
+                </span>
+                {line.amount !== null ? formatMoney(line.amount) : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {/* P-11 B3 — timesheet hours with no line to land on: say so,
           with the caller's Add-line door where one exists. */}
       {!frozen &&
@@ -581,6 +639,20 @@ export function ActualHoursPanel({
           })}
         </span>
       )}
+      {/* P-13 B — the over-quote confirm: said in full, saved on the
+          second press. Warn only — the owner's ruling. */}
+      {overConfirm !== null && (
+        <div
+          className="alert-warning"
+          data-testid="extra-work-over-quote-confirm"
+        >
+          {t("detail.over_quote_confirm", {
+            worked: fmtHours(overConfirm.workedHours),
+            agreed: fmtHours(overConfirm.agreedHours),
+            diff: formatMoney(overConfirm.deltaAmount),
+          })}
+        </div>
+      )}
       <div
         style={{
           display: "flex",
@@ -616,10 +688,24 @@ export function ActualHoursPanel({
           >
             {saving
               ? t("detail.actual_hours_saving")
-              : t("detail.actual_hours_save")}
+              : overConfirm !== null
+                ? t("detail.over_quote_save")
+                : t("detail.actual_hours_save")}
           </button>
         )}
       </div>
+      {/* P-13 B — what saving DOES, under the button, always: the
+          name stays "Save hours to bill"; this sentence is its
+          contract. */}
+      {!frozen && (
+        <p
+          className="muted small"
+          style={{ margin: "2px 0 0" }}
+          data-testid="extra-work-actual-hours-teach"
+        >
+          {t("detail.actual_hours_teach")}
+        </p>
+      )}
     </>
   );
 

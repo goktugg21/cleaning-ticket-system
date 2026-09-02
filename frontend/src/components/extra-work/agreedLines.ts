@@ -28,6 +28,12 @@ export interface AgreedLine {
   id: number;
   label: string;
   quantity: string | null;
+  /** The per-unit price the line bills at (ex VAT), or null when the
+   *  source carries none. P-13 B — block 1 renders qty × unit = amount. */
+  unitPrice: number | null;
+  /** The line's unit type ("HOURS", "FIXED", …) so the Worked block
+   *  can split hourly from fixed lines. */
+  unitType: string;
   /** EX-VAT line amount, or null when the line has no price yet (an
    *  em dash, never a zero — zero is a legal price). */
   amount: number | null;
@@ -53,6 +59,8 @@ export function agreedLines(
       id: line.id,
       label: line.service_name ?? line.description,
       quantity: line.quantity ?? null,
+      unitPrice: finiteOrNull(line.unit_price),
+      unitType: String(line.unit_type),
       // The stored EX-VAT subtotal — the backend's own rounding.
       amount: finiteOrNull(line.line_subtotal),
     }));
@@ -67,6 +75,8 @@ export function agreedLines(
         id: line.id,
         label: line.service_name || line.custom_description,
         quantity: line.quantity ?? null,
+        unitPrice: price,
+        unitType: String(line.unit_type),
         amount: price !== null && qty !== null ? round2(price * qty) : null,
       };
     });
@@ -95,6 +105,8 @@ export function agreedLines(
     id: line.id,
     label: line.description,
     quantity: line.quantity ?? null,
+    unitPrice: finiteOrNull(line.unit_price),
+    unitType: String(line.unit_type),
     // The stored EX-VAT subtotal (was `total`, incl VAT — the W3 bug).
     amount: finiteOrNull(line.subtotal),
   }));

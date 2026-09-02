@@ -314,8 +314,6 @@
   "ew_card_no_price": "No price agreed",
   "ew_agreement_title": "Agreement",
   "ew_agreement_requested": "Requested",
-  "ew_agreement_agreed": "Agreed price",
-  "ew_agreement_total": "Total {{ex}} · {{incl}} incl. VAT",
   "ew_agreement_days": "Days",
   "ew_billing_saved": "Bills in {{month}}.",
   "ew_billing_cleared": "Follows the completion month again.",

@@ -2304,6 +2304,9 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   is_invoiced: boolean;
   invoiced_at: string | null;
   pricing_line_items: ExtraWorkPricingLineItem[];
+  // P-13 B — `invoice_ref` (inherited from the list shape, P-9) is
+  // served on the DETAIL as well now; the Money tab's third block
+  // renders "On draft #17" / "Sent on invoice 2026-0003" from it.
   // Sprint 28 Batch 6 — cart line items + routing decision.
   // `line_items` is always present on responses (empty array for
   // legacy single-line requests that pre-date the cart shape).
