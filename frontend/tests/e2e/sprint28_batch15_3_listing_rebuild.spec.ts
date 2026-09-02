@@ -41,7 +41,10 @@ test.describe("Sprint 28 Batch 15.3 — Extra Work list", () => {
 
   test("money is formatted with a currency symbol", async ({ page }) => {
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/extra-work");
+    // P-11 F1 — per P-9's tabs (§D.22 pt 4) each tab has ONE line and
+    // To price's is deliberately a COUNT sentence, not money. The €
+    // pin belongs on a tab whose line IS money: Approved.
+    await page.goto("/extra-work/approved");
     // Wait for at least one row or the empty state to render.
     await page.waitForSelector(
       '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
@@ -49,7 +52,7 @@ test.describe("Sprint 28 Batch 15.3 — Extra Work list", () => {
     );
     test.skip(
       (await page.getByTestId("extra-work-row").count()) === 0,
-      "the landing tab has no rows, so it draws no money line",
+      "the Approved tab has no rows, so it draws no money line",
     );
     const money = page.getByTestId("extra-work-tab-money");
     await expect(money).toBeVisible({ timeout: 10_000 });
@@ -95,7 +98,9 @@ test.describe("Sprint 28 Batch 15.3 — Extra Work list", () => {
       "aria-selected",
       "true",
     );
-    await expect(page.getByTestId("extra-work-chip-to_plan")).toHaveAttribute(
+    // P-11 F1 — the chip key has been `not_planned` since P-10 B1/B2
+    // (the ticket's own words); this line was the rewrite's one miss.
+    await expect(page.getByTestId("extra-work-chip-not_planned")).toHaveAttribute(
       "aria-selected",
       "true",
     );

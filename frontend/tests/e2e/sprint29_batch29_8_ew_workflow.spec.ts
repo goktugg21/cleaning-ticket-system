@@ -67,7 +67,14 @@ async function expectLandingOnSpawnedJob(
   });
   const origin = page.locator('[data-testid="ticket-extra-work-origin"]');
   await expect(origin).toBeVisible({ timeout: 10_000 });
-  await expect(origin.locator(`a[href="/extra-work/${ewId}"]`)).toBeVisible();
+  // P-11 F1 — REPINNED: the origin block has carried the route word
+  // (`RouteBadge`), never a raw /extra-work/<id> anchor — the block is
+  // byte-identical back to PR #61, so the old assertion described a
+  // door that does not exist (and for STAFF must not: a direct
+  // /extra-work link is a 404 for them). The landing pin is the
+  // redirect + the origin block; the road back is the page's own back
+  // link (P-11 A6) and the Money tab.
+  await expect(origin).toHaveAttribute("data-origin", /.+/);
   await expect(page.locator('[data-testid="extra-work-detail-page"]')).toHaveCount(0);
   return landedId;
 }
@@ -372,7 +379,19 @@ test.describe("Sprint 29 Batch 29.8 — Extra Work operational segment", () => {
       }
     };
     const { status: statusAfter, spawned } = await readBack();
-    expect(["IN_PROGRESS", "COMPLETED"]).toContain(statusAfter);
+    // P-11 F1 — REPINNED to P-8R's rule: once a ticket exists the
+    // OPERATIONAL status follows the TICKET, and the request-level
+    // transition answers 400 (`operational_status_follows_ticket`) —
+    // the request legitimately still reads CUSTOMER_APPROVED while its
+    // spawned ticket carries the work. A legacy row with no ticket
+    // must still move.
+    if (spawned.length > 0) {
+      expect(["IN_PROGRESS", "COMPLETED", "CUSTOMER_APPROVED"]).toContain(
+        statusAfter,
+      );
+    } else {
+      expect(["IN_PROGRESS", "COMPLETED"]).toContain(statusAfter);
+    }
 
     await loginAs(page, DEMO_USERS.super);
     if (spawned.length > 0) {

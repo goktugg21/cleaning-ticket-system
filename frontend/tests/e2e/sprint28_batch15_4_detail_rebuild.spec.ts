@@ -145,26 +145,14 @@ test.describe("Sprint 28 Batch 15.4 — Route badge on list", () => {
       .count();
     test.skip(rowCount === 0, "No Extra Work rows in seed.");
 
-    // One badge per row in the desktop table (the mobile card list
-    // may also render badges, but the table is the assertion source
-    // because it's the desktop-default layout for Playwright).
-    const tableRows = page.locator(
-      'table.data-table [data-testid="extra-work-row"]',
-    );
-    const tableRowCount = await tableRows.count();
-    if (tableRowCount > 0) {
-      const tableBadges = await page
-        .locator(
-          'table.data-table [data-testid="extra-work-list-route-badge"]',
-        )
-        .count();
-      expect(tableBadges).toBe(tableRowCount);
-    }
-
-    // The Route column header is rendered.
-    await expect(
-      page.locator('table.data-table thead th', { hasText: /Route/i }),
-    ).toBeVisible();
+    // P-11 F1 — REPINNED to the P-9 ruling (§D.22 pt 6): the Route
+    // column LEFT the list ("what the tab does not ask is not a
+    // column"); the route lives on To price's After-pricing column and
+    // chips. A route badge in a list row would be the regression now.
+    const badges = await page
+      .locator('[data-testid="extra-work-row"] [data-testid="extra-work-list-route-badge"]')
+      .count();
+    expect(badges).toBe(0);
   });
 });
 

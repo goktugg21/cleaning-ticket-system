@@ -106,14 +106,18 @@ test("Iris cannot reach Amanda's B3 waiting ticket", async ({ page }) => {
 // existing tests cover.
 // ---------------------------------------------------------------------------
 
-test("Building manager sees no Approve/Reject on a WAITING_CUSTOMER_APPROVAL ticket", async ({
+test("Building manager with the override key gets the ON-BEHALF door, never a silent approve, on a WAITING_CUSTOMER_APPROVAL ticket", async ({
   page,
 }) => {
-  // Gokhan (manager B1+B2+B3) can REACH the B3 ticket but the state
-  // machine does not let a building manager approve/reject — those
-  // are SCOPE_CUSTOMER_LINKED transitions reserved for customer-users
-  // (with admin override available to SA / COMPANY_ADMIN only). The
-  // button set, folds included, must not contain APPROVED or REJECTED.
+  // P-11 F1 — REPINNED to P-4's ruling (`tickets/override_authority`):
+  // the customer's decision can be answered ON BEHALF by SA, a company
+  // admin in the ticket's company, or a BUILDING MANAGER assigned to
+  // the building who holds the override permission — which Gokhan
+  // (manager B1+B2+B3) does in the demo seed. The door is the OVERRIDE
+  // door: pressing it opens the reason dialog (sprint27f's), and the
+  // history row carries is_override (H-11). H-5 still stands — STAFF
+  // never see these buttons; the pre-P-4 expectation that a BM never
+  // does described the world before the on-behalf feature existed.
   await loginAs(page, DEMO_USERS.managerAll);
   const ticketId = await resolveDemoTicketId(
     page,
@@ -125,12 +129,21 @@ test("Building manager sees no Approve/Reject on a WAITING_CUSTOMER_APPROVAL tic
   });
   await openWorkflowFolds(page);
 
-  await expect(
-    page.locator('[data-testid="workflow-move-APPROVED"]'),
-  ).toHaveCount(0);
+  const approve = page.locator('[data-testid="workflow-move-APPROVED"]');
+  await expect(approve).toHaveCount(1);
   await expect(
     page.locator('[data-testid="workflow-move-REJECTED"]'),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
+
+  // The door asks for the reason — it is never a one-click approve.
+  await approve.click();
+  const modal = page.locator("[data-testid='ticket-override-modal']");
+  await expect(modal).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.locator("[data-testid='ticket-override-reason']"),
+  ).toBeVisible();
+  await page.locator("[data-testid='ticket-override-cancel']").click();
+  await expect(modal).toBeHidden({ timeout: 10_000 });
 });
 
 test("ticket detail timeline does NOT leak seed_demo_data internal note", async ({
