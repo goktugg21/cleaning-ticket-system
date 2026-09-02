@@ -65,8 +65,14 @@ test.describe("Sprint 28 Batch 15.5 — Visual audit", () => {
   }
 
   test("money values always carry the euro symbol", async ({ page }) => {
+    // P-11 F1 — REPINNED to the P-9 tabs (§D.22 pt 6): the eight-column
+    // table this test indexed into (route, category, … total at
+    // td.nth(6)) is gone; each tab now shows at most six columns tuned
+    // to its question, and the money column is the Finished tab's
+    // Amount. The pin's INTENT survives: every non-empty money cell
+    // carries the euro symbol.
     await loginAs(page, DEMO_USERS.super);
-    await page.goto("/extra-work");
+    await page.goto("/extra-work/finished");
     await page.waitForSelector(
       '[data-testid="extra-work-row"], [data-testid="extra-work-list-empty"]',
       { timeout: 10_000 },
@@ -74,23 +80,19 @@ test.describe("Sprint 28 Batch 15.5 — Visual audit", () => {
     const rowCount = await page
       .locator('[data-testid="extra-work-row"]')
       .count();
-    test.skip(rowCount === 0, "No EW rows in seed.");
-    // Total column. Per ExtraWorkListPage.tsx the column order is
-    // title (0), status (1), route (2), category (3), building (4),
-    // customer (5), total (6), requested (7). Iterate per row and
-    // pull the 7th td (nth(6)) — using a single flat .td().nth(6)
-    // would only inspect one row's worth of cells, not the total
-    // column across every row.
+    test.skip(rowCount === 0, "No finished EW rows in seed.");
+    // The Amount column is the 4th on Finished (what, where, finished,
+    // amount, invoice, next) — read it per row by header position.
     const rows = page.locator('[data-testid="extra-work-row"]');
     const rowsCount = await rows.count();
     const totals: string[] = [];
     for (let i = 0; i < rowsCount; i++) {
-      const t = await rows.nth(i).locator("td").nth(6).textContent();
+      const t = await rows.nth(i).locator("td").nth(3).textContent();
       if (t !== null) totals.push(t);
     }
     for (const t of totals) {
       if (t.trim() === "" || t.trim() === "—") continue;
-      expect(t, `Total cell missing currency symbol: "${t}"`).toMatch(/€/);
+      expect(t, `Amount cell missing currency symbol: "${t}"`).toMatch(/€/);
     }
   });
 
